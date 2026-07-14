@@ -142,6 +142,7 @@ Project inspection:
 
 Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
+  audit-cache       Maintain reusable audit base-snapshot caches
   recommend         Recommend a project-tailored config for an agent to author
   migrate           Migrate knip, jscpd, or stylelint config to fallow
   config            Show the resolved config and loaded config file
@@ -1351,6 +1352,12 @@ enum Command {
         show_deprioritized: bool,
     },
 
+    /// Maintain reusable audit base-snapshot caches.
+    AuditCache {
+        #[command(subcommand)]
+        subcommand: AuditCacheCli,
+    },
+
     /// Surface the consequential structural DECISIONS a change embeds (the apex
     /// of the review brief), each framed as a judgment question with the routed
     /// expert to ask.
@@ -1606,6 +1613,12 @@ enum SecuritySubcommand {
         #[arg(long, value_name = "PATH")]
         file: Vec<PathBuf>,
     },
+}
+
+#[derive(clap::Subcommand)]
+enum AuditCacheCli {
+    /// Remove reusable audit caches owned by an explicit project root.
+    Remove,
 }
 
 #[derive(clap::Subcommand)]
@@ -2874,6 +2887,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             explain::run_explain(&issue_type.join(" "), output, dispatch.json_style)
         }
         audit @ Command::Audit { .. } => dispatch_audit_command(audit, dispatch),
+        Command::AuditCache { subcommand } => dispatch_audit_cache_command(dispatch, subcommand),
         Command::DecisionSurface { max_decisions } => {
             dispatch_decision_surface(dispatch, max_decisions)
         }
@@ -3698,6 +3712,25 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             show_deprioritized,
         },
     )
+}
+
+fn dispatch_audit_cache_command(
+    dispatch: &DispatchContext<'_>,
+    subcommand: AuditCacheCli,
+) -> ExitCode {
+    match subcommand {
+        AuditCacheCli::Remove => match base_worktree::remove_reusable_audit_caches(dispatch.root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => emit_error(
+                &format!(
+                    "failed to remove audit caches for {}: {error}",
+                    dispatch.root.display()
+                ),
+                2,
+                dispatch.output,
+            ),
+        },
+    }
 }
 
 fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) -> ExitCode {
@@ -5040,6 +5073,10 @@ mod tests {
                 telemetry::Workflow::Setup,
             ),
             (vec!["fallow", "setup-hooks"], telemetry::Workflow::Setup),
+            (
+                vec!["fallow", "audit-cache", "remove", "--root", "."],
+                telemetry::Workflow::Setup,
+            ),
             (
                 vec!["fallow", "license", "status"],
                 telemetry::Workflow::License,

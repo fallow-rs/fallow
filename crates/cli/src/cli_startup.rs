@@ -81,6 +81,12 @@ fn validate_input_flags(
         )
     };
 
+    if matches!(&cli.command, Some(Command::AuditCache { .. })) && cli.root.is_none() {
+        return Err(validation_failure(
+            "`fallow audit-cache remove` requires an explicit `--root <path>`.",
+        ));
+    }
+
     if matches!(&cli.command, Some(Command::Security { .. }))
         && let Some(flag) = crate::unsupported_security_global(cli)
     {
@@ -498,6 +504,7 @@ fn command_rejects_output_gate(command: Option<&Command>) -> bool {
                 | Command::Coverage { .. }
                 | Command::Hooks { .. }
                 | Command::SetupHooks { .. }
+                | Command::AuditCache { .. }
         )
     )
 }

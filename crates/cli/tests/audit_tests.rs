@@ -232,6 +232,87 @@ fn run_fallow_raw_with_env(
     }
 }
 
+fn audit_cache_paths(root: &Path, base_sha: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let canonical_root = root.canonicalize().expect("root should canonicalize");
+    let root_hash = xxhash_rust::xxh3::xxh3_64(canonical_root.to_string_lossy().as_bytes());
+    let new_path = std::env::temp_dir().join(format!("fallow-audit-base-cache-{root_hash:016x}"));
+    let legacy_path = std::env::temp_dir().join(format!(
+        "fallow-audit-base-cache-{root_hash:016x}-{}",
+        &base_sha[..16]
+    ));
+    (new_path, legacy_path)
+}
+
+fn cache_sidecar(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut name = path
+        .file_name()
+        .expect("cache path should have a name")
+        .to_os_string();
+    name.push(suffix);
+    path.parent()
+        .expect("cache path should have a parent")
+        .join(name)
+}
+
+#[test]
+fn audit_cache_remove_requires_explicit_root_and_removes_sidecars_but_keeps_locks() {
+    let fixture = create_audit_fixture("cache-remove");
+    let root = fixture.path();
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (new_path, legacy_path) = audit_cache_paths(root, base_sha);
+    for path in [&new_path, &legacy_path] {
+        fs::create_dir_all(path).expect("cache directory should be created");
+        fs::write(cache_sidecar(path, ".sha"), format!("{base_sha}\n"))
+            .expect("readiness sidecar should be written");
+        fs::write(cache_sidecar(path, ".last-used"), "")
+            .expect("last-used sidecar should be written");
+        fs::write(cache_sidecar(path, ".lock"), "").expect("lock sidecar should be written");
+    }
+
+    let missing_root = Command::new(fallow_bin())
+        .current_dir(root)
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["audit-cache", "remove", "--quiet"])
+        .output()
+        .expect("fallow should run");
+    assert_eq!(missing_root.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&missing_root.stderr).contains("explicit `--root <path>`")
+            || String::from_utf8_lossy(&missing_root.stdout).contains("explicit `--root <path>`"),
+        "missing-root error should explain the explicit root requirement",
+    );
+    assert!(
+        new_path.is_dir(),
+        "validation failure must not remove caches"
+    );
+    assert!(
+        legacy_path.is_dir(),
+        "validation failure must not remove legacy caches"
+    );
+
+    let output = run_fallow_raw(&[
+        "audit-cache",
+        "remove",
+        "--root",
+        root.to_str().expect("root should be utf-8"),
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "audit-cache remove should succeed: {}{}",
+        output.stdout, output.stderr
+    );
+    for path in [&new_path, &legacy_path] {
+        assert!(!path.exists(), "cache directory should be removed");
+        assert!(!cache_sidecar(path, ".sha").exists());
+        assert!(!cache_sidecar(path, ".last-used").exists());
+        assert!(cache_sidecar(path, ".lock").exists());
+        fs::remove_file(cache_sidecar(path, ".lock"))
+            .expect("test lock sidecar should be removable");
+    }
+}
+
 #[test]
 fn audit_json_has_verdict_and_schema() {
     let dir = create_audit_fixture("verdict");

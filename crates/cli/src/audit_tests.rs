@@ -1,4 +1,5 @@
 use super::*;
+use crate::base_worktree::{legacy_reusable_audit_worktree_path, remove_reusable_audit_caches};
 use std::{fs, process::Command};
 
 fn git(dir: &std::path::Path, args: &[&str]) {
@@ -468,7 +469,7 @@ const TEST_BASE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 /// post-#1815 on-disk layout (a directory, an invalid `.git` stub, and a
 /// `.sha` sidecar). Returns the cache path.
 fn create_unregistered_reusable_cache(repo: &Path) -> PathBuf {
-    let path = reusable_audit_worktree_path(repo, TEST_BASE_SHA);
+    let path = reusable_audit_worktree_path(repo);
     fs::create_dir_all(&path).expect("reusable cache dir should be created");
     fs::write(path.join(".git"), "gitdir: fallow-audit-unregistered\n")
         .expect("stub .git should be written");
@@ -520,6 +521,39 @@ fn cleanup_reusable_worktree(repo: &Path, path: &Path) {
     let _ = fs::remove_file(reusable_worktree_last_used_path(path));
     let _ = fs::remove_file(reusable_worktree_sha_path(path));
     let _ = fs::remove_file(reusable_worktree_lock_path(path));
+}
+
+#[test]
+fn reusable_cache_identity_is_canonical_root_owned_and_sha_independent() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-root-identity");
+    let first_root = repo.join("packages/first");
+    let sibling_root = repo.join("packages/second");
+    fs::create_dir_all(&first_root).expect("first analysis root should be created");
+    fs::create_dir_all(&sibling_root).expect("sibling analysis root should be created");
+    let alias = first_root.join("../first");
+
+    let first_path = reusable_audit_worktree_path(&first_root);
+    let canonical = first_root
+        .canonicalize()
+        .expect("analysis root should canonicalize");
+    let expected_hash = xxhash_rust::xxh3::xxh3_64(canonical.to_string_lossy().as_bytes());
+    let expected_name = format!("fallow-audit-base-cache-{expected_hash:016x}");
+    assert_eq!(
+        first_path.file_name().and_then(|name| name.to_str()),
+        Some(expected_name.as_str()),
+        "identity must be the canonical requested root hash with no SHA suffix",
+    );
+    assert_eq!(
+        first_path,
+        reusable_audit_worktree_path(&alias),
+        "canonical aliases must share one cache identity",
+    );
+    assert_ne!(
+        first_path,
+        reusable_audit_worktree_path(&sibling_root),
+        "sibling analysis roots inside one git repo must stay isolated",
+    );
 }
 
 #[test]
@@ -593,7 +627,7 @@ fn reusable_cache_gc_grace_when_sidecar_absent() {
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-grace");
     // Bare directory with no `.last-used` sidecar, modelling a pre-upgrade
     // warm cache the sweep sees for the first time.
-    let worktree_path = reusable_audit_worktree_path(&repo, TEST_BASE_SHA);
+    let worktree_path = reusable_audit_worktree_path(&repo);
     fs::create_dir_all(&worktree_path).expect("cache dir should be created");
     let sidecar = reusable_worktree_last_used_path(&worktree_path);
     assert!(
@@ -910,6 +944,154 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
     cleanup_reusable_worktree(&repo, &cache_path);
 }
 
+#[test]
+fn reusable_cache_rebuilds_same_path_for_a_new_sha_and_publishes_new_content() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-root-cache-rebuild");
+    let first_sha = git_rev_parse(&repo, "HEAD").expect("initial HEAD should resolve");
+
+    let first = BaseWorktree::reuse_or_create(&repo, &first_sha)
+        .expect("first reusable worktree should materialize");
+    let cache_path = first.path().to_path_buf();
+    assert_eq!(
+        fs::read_to_string(cache_path.join("README.md")).expect("base content should read"),
+        "seed\n",
+    );
+    drop(first);
+
+    let second_sha = commit_file(&repo, "README.md", "second snapshot\n");
+    let second = BaseWorktree::reuse_or_create(&repo, &second_sha)
+        .expect("second reusable worktree should rebuild");
+    assert_eq!(second.path(), cache_path, "both SHAs must share one path");
+    assert_eq!(
+        fs::read_to_string(cache_path.join("README.md")).expect("rebuilt content should read"),
+        "second snapshot\n",
+    );
+    assert_eq!(
+        fs::read_to_string(reusable_worktree_sha_path(&cache_path))
+            .expect("readiness should exist")
+            .trim(),
+        second_sha,
+        "readiness must publish the full replacement SHA",
+    );
+    drop(second);
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+#[test]
+fn failed_reusable_cache_rebuild_leaves_no_matching_readiness() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-failed-cache-rebuild");
+    let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+    let initial = BaseWorktree::reuse_or_create(&repo, &base_sha)
+        .expect("initial reusable worktree should materialize");
+    let cache_path = initial.path().to_path_buf();
+    let sha_path = reusable_worktree_sha_path(&cache_path);
+    drop(initial);
+
+    let missing_sha = "0000000000000000000000000000000000000000";
+    assert!(
+        BaseWorktree::reuse_or_create(&repo, missing_sha).is_none(),
+        "a missing git object must fail materialization",
+    );
+    assert!(
+        !sha_path.exists(),
+        "failed rebuild must not leave readiness for the old or requested SHA",
+    );
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+#[test]
+fn retained_reusable_lock_makes_remove_skip_then_succeed_and_preserve_lock() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-remove-retained-lock");
+    let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+    let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha)
+        .expect("reusable worktree should materialize");
+    let cache_path = worktree.path().to_path_buf();
+    let lock_path = reusable_worktree_lock_path(&cache_path);
+
+    remove_reusable_audit_caches(&repo).expect("contended removal should succeed by skipping");
+    assert!(cache_path.is_dir(), "held cache must be skipped");
+    assert!(
+        reusable_worktree_sha_path(&cache_path).is_file(),
+        "held cache readiness must remain",
+    );
+
+    drop(worktree);
+    remove_reusable_audit_caches(&repo).expect("unlocked removal should succeed");
+    assert!(
+        !cache_path.exists(),
+        "unlocked cache directory must be removed"
+    );
+    assert!(!reusable_worktree_sha_path(&cache_path).exists());
+    assert!(!reusable_worktree_last_used_path(&cache_path).exists());
+    assert!(
+        lock_path.exists(),
+        "cache removal must preserve the lock file"
+    );
+    fs::remove_file(lock_path).expect("test lock file should be removable");
+}
+
+#[test]
+fn root_removal_reclaims_legacy_sha_siblings_without_touching_unrelated_root() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-remove-legacy");
+    let unrelated_repo = init_throwaway_repo(tmp.path(), "repo-remove-unrelated");
+    let second_sha = "fedcba9876543210fedcba9876543210fedcba98";
+    let first = legacy_reusable_audit_worktree_path(&repo, TEST_BASE_SHA)
+        .expect("legacy path should resolve");
+    let second = legacy_reusable_audit_worktree_path(&repo, second_sha)
+        .expect("second legacy path should resolve");
+    let unrelated = legacy_reusable_audit_worktree_path(&unrelated_repo, TEST_BASE_SHA)
+        .expect("unrelated legacy path should resolve");
+    for path in [&first, &second, &unrelated] {
+        fs::create_dir_all(path).expect("legacy cache directory should be created");
+        fs::write(
+            reusable_worktree_sha_path(path),
+            format!("{TEST_BASE_SHA}\n"),
+        )
+        .expect("legacy readiness should be written");
+        fs::write(reusable_worktree_last_used_path(path), "").expect("last-used should be written");
+    }
+    let held_lock = ReusableWorktreeLock::try_acquire(&first).expect("first legacy lock acquired");
+    let first_lock_path = reusable_worktree_lock_path(&first);
+    let second_lock_path = reusable_worktree_lock_path(&second);
+
+    remove_reusable_audit_caches(&repo).expect("legacy removal should skip only contention");
+    assert!(first.is_dir(), "contended legacy sibling must remain");
+    assert!(
+        !second.exists(),
+        "uncontended legacy sibling must be removed"
+    );
+    assert!(
+        second_lock_path.exists(),
+        "legacy lock file must be preserved"
+    );
+    assert!(
+        unrelated.is_dir(),
+        "unrelated root cache must remain untouched"
+    );
+
+    drop(held_lock);
+    remove_reusable_audit_caches(&repo).expect("remaining legacy sibling should remove");
+    assert!(!first.exists());
+    assert!(!reusable_worktree_sha_path(&first).exists());
+    assert!(!reusable_worktree_last_used_path(&first).exists());
+    assert!(
+        first_lock_path.exists(),
+        "held legacy lock file must be preserved"
+    );
+    assert!(
+        unrelated.is_dir(),
+        "unrelated root must still remain untouched"
+    );
+
+    cleanup_reusable_worktree(&repo, &first);
+    cleanup_reusable_worktree(&repo, &second);
+    cleanup_reusable_worktree(&unrelated_repo, &unrelated);
+}
+
 /// A cache hit whose `.git` stub was lost out-of-band must be repaired, so
 /// gitignore parity holds on the next base pass.
 #[test]
@@ -998,7 +1180,7 @@ fn base_snapshot_discovery_honors_gitignore_via_stub_git() {
 fn unregister_worktree_targets_only_its_own_admin_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-unregister-targeted");
-    let fallow_path = reusable_audit_worktree_path(&repo, TEST_BASE_SHA);
+    let fallow_path = reusable_audit_worktree_path(&repo);
     register_reusable_worktree(&repo, &fallow_path);
     let user_path = tmp.path().join("user-feature-worktree");
     git(
@@ -1042,7 +1224,7 @@ fn legacy_registered_reusable_cache_is_deregistered_and_reused_warm() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-legacy-migrate");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
-    let cache_path = reusable_audit_worktree_path(&repo, &base_sha);
+    let cache_path = reusable_audit_worktree_path(&repo);
     // Materialize via the engine (registers + writes the raw-materialization
     // marker), mirroring the pre-#1815 on-disk shape.
     fallow_engine::repo_refs::create_detached_base_worktree(&repo, &cache_path, &base_sha)
