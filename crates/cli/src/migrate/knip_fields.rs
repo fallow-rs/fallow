@@ -593,6 +593,26 @@ mod tests {
         assert!(project_warning.suggestion.is_none());
     }
 
+    fn concrete_suppression_kind(suggestion: &str) -> Option<&str> {
+        ["fallow-ignore-next-line ", "fallow-ignore-file "]
+            .into_iter()
+            .find_map(|directive| suggestion.split_once(directive).map(|(_, tail)| tail))
+            .and_then(|tail| tail.split_whitespace().next())
+            .filter(|kind| !kind.starts_with('['))
+    }
+
+    #[test]
+    fn suppression_suggestion_guard_understands_file_directives() {
+        assert_eq!(
+            concrete_suppression_kind("Use // fallow-ignore-file unused-export"),
+            Some("unused-export")
+        );
+        assert_eq!(
+            concrete_suppression_kind("Use // fallow-ignore-file [issue-type]"),
+            None
+        );
+    }
+
     #[test]
     fn suppression_suggestions_use_recognized_issue_kinds() {
         use fallow_types::suppress::{IssueKind, parse_suppression_target};
@@ -601,13 +621,9 @@ mod tests {
             let Some(suggestion) = suggestion else {
                 continue;
             };
-            let Some((_, tail)) = suggestion.split_once("fallow-ignore-next-line ") else {
+            let Some(issue_kind) = concrete_suppression_kind(suggestion) else {
                 continue;
             };
-            let issue_kind = tail
-                .split_whitespace()
-                .next()
-                .expect("suppression suggestion should include an issue kind");
 
             assert!(
                 parse_suppression_target(issue_kind).is_some(),
