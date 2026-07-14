@@ -391,7 +391,9 @@ struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     regression_baseline: Option<PathBuf>,
 
-    /// Save the current issue counts as a regression baseline.
+    /// Save the current issue counts as a regression baseline. Omit PATH to
+    /// update regression.baseline in the discovered fallow config; provide
+    /// PATH to write a standalone baseline file.
     #[expect(
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=flag only (write to config), Some(Some(path))=write to file"
@@ -4895,6 +4897,15 @@ mod tests {
     fn cli_definition_has_no_flag_collisions() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn regression_baseline_help_explains_the_default_destination() {
+        use clap::CommandFactory;
+        let help = Cli::command().render_long_help().to_string();
+
+        assert!(help.contains("Omit PATH to update regression.baseline"));
+        assert!(help.contains("discovered fallow config"));
     }
 
     /// The root `--help` cheat sheet is a static const that cannot call the

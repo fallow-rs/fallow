@@ -362,6 +362,8 @@ fallow dead-code --format json --quiet --baseline .fallow/snapshot.json
 
 With no path, `--save-regression-baseline` updates `regression.baseline` in the discovered fallow config, or creates `.fallowrc.json` when none exists. Pass a path only when a standalone baseline file is preferred.
 
+With no path, `--save-regression-baseline` updates `regression.baseline` in the discovered fallow config. Pass a path only when a standalone baseline file is preferred.
+
 ### Explain an issue type without running analysis
 ```bash
 fallow explain unused-export --format json

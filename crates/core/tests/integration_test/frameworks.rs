@@ -117,6 +117,12 @@ fn nextjs_special_file_exports_are_not_flagged() {
         ("global-not-found.tsx", "default"),
         ("global-not-found.tsx", "metadata"),
         ("mdx-components.tsx", "useMDXComponents"),
+        ("sitemap.ts", "dynamic"),
+        ("sitemap.ts", "revalidate"),
+        ("sitemap.ts", "fetchCache"),
+        ("sitemap.ts", "runtime"),
+        ("sitemap.ts", "preferredRegion"),
+        ("sitemap.ts", "maxDuration"),
     ] {
         assert!(
             !unused_exports
@@ -133,6 +139,8 @@ fn nextjs_special_file_exports_are_not_flagged() {
         ("instrumentation-client.ts", "unusedClientHelper"),
         ("mdx-components.tsx", "unusedMdxHelper"),
         ("global-not-found.tsx", "unusedGlobalNotFoundHelper"),
+        ("sitemap.ts", "dynamicParams"),
+        ("sitemap.ts", "unusedSitemapHelper"),
     ] {
         assert!(
             unused_exports

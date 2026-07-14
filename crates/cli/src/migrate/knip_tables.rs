@@ -38,7 +38,7 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     (
         "ignoreUnresolved",
         "Unresolved import filtering is not configurable in fallow",
-        Some("use inline suppression comments: // fallow-ignore-next-line unresolved-imports"),
+        Some("use inline suppression comments: // fallow-ignore-next-line unresolved-import"),
     ),
     (
         "ignoreWorkspaces",

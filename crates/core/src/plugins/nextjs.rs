@@ -73,17 +73,33 @@ const PROXY_EXPORTS: &[&str] = &["default", "proxy", "config"];
 const INSTRUMENTATION_EXPORTS: &[&str] = &["register", "onRequestError"];
 const INSTRUMENTATION_CLIENT_EXPORTS: &[&str] = &["onRouterTransitionStart"];
 const MDX_COMPONENT_EXPORTS: &[&str] = &["useMDXComponents"];
-const ICON_EXPORTS: &[&str] = &["default", "size", "contentType", "generateImageMetadata"];
-const OG_IMAGE_EXPORTS: &[&str] = &[
+
+macro_rules! metadata_route_exports {
+    ($($export:literal),* $(,)?) => {
+        &[
+            $($export,)*
+            "dynamic",
+            "revalidate",
+            "fetchCache",
+            "runtime",
+            "preferredRegion",
+            "maxDuration",
+        ]
+    };
+}
+
+const ICON_EXPORTS: &[&str] =
+    metadata_route_exports!("default", "size", "contentType", "generateImageMetadata",);
+const OG_IMAGE_EXPORTS: &[&str] = metadata_route_exports!(
     "default",
     "size",
     "contentType",
     "generateImageMetadata",
     "alt",
-];
-const MANIFEST_EXPORTS: &[&str] = &["default"];
-const SITEMAP_EXPORTS: &[&str] = &["default", "generateSitemaps"];
-const ROBOTS_EXPORTS: &[&str] = &["default"];
+);
+const MANIFEST_EXPORTS: &[&str] = metadata_route_exports!("default");
+const SITEMAP_EXPORTS: &[&str] = metadata_route_exports!("default", "generateSitemaps");
+const ROBOTS_EXPORTS: &[&str] = metadata_route_exports!("default");
 const GLOBAL_NOT_FOUND_EXPORTS: &[&str] = &["default", "metadata", "generateMetadata"];
 
 define_plugin!(
@@ -410,6 +426,53 @@ mod tests {
             .find(|(pat, _)| *pat == "mdx-components.{ts,tsx,js,jsx}")
             .expect("should have mdx-components used exports");
         assert!(mdx_entry.1.contains(&"useMDXComponents"));
+    }
+
+    #[test]
+    fn metadata_routes_include_supported_segment_config_exports() {
+        let plugin = NextJsPlugin;
+        let exports = plugin.used_exports();
+        let metadata_route_patterns = [
+            "app/**/opengraph-image.{ts,tsx,js,jsx}",
+            "app/**/twitter-image.{ts,tsx,js,jsx}",
+            "app/**/icon.{ts,tsx,js,jsx}",
+            "app/**/apple-icon.{ts,tsx,js,jsx}",
+            "app/**/manifest.{ts,tsx,js,jsx}",
+            "app/**/sitemap.{ts,tsx,js,jsx}",
+            "app/**/robots.{ts,tsx,js,jsx}",
+            "src/app/**/opengraph-image.{ts,tsx,js,jsx}",
+            "src/app/**/twitter-image.{ts,tsx,js,jsx}",
+            "src/app/**/icon.{ts,tsx,js,jsx}",
+            "src/app/**/apple-icon.{ts,tsx,js,jsx}",
+            "src/app/**/manifest.{ts,tsx,js,jsx}",
+            "src/app/**/sitemap.{ts,tsx,js,jsx}",
+            "src/app/**/robots.{ts,tsx,js,jsx}",
+        ];
+
+        for pattern in metadata_route_patterns {
+            let (_, used) = exports
+                .iter()
+                .find(|(candidate, _)| *candidate == pattern)
+                .unwrap_or_else(|| panic!("missing metadata route pattern {pattern}"));
+
+            for config_export in [
+                "dynamic",
+                "revalidate",
+                "fetchCache",
+                "runtime",
+                "preferredRegion",
+                "maxDuration",
+            ] {
+                assert!(
+                    used.contains(&config_export),
+                    "{pattern} should credit {config_export}"
+                );
+            }
+            assert!(
+                !used.contains(&"dynamicParams"),
+                "{pattern} should not credit dynamicParams"
+            );
+        }
     }
 
     #[test]

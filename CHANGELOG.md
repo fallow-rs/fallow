@@ -9,7 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Next.js metadata route config exports are no longer reported as unused.**
+  App Router `sitemap`, `robots`, `manifest`, icon, and social image route files
+  now credit the framework-consumed `dynamic`, `revalidate`, `fetchCache`,
+  `runtime`, `preferredRegion`, and `maxDuration` exports. `dynamicParams` and
+  arbitrary helper exports remain reportable because Next.js does not re-export
+  them from generated metadata route handlers.
+
+- **Knip migration suggestions use recognized suppression issue kinds.** The
+  `ignoreUnresolved` warning now suggests the singular `unresolved-import`
+  token, and a regression test validates every concrete suppression token in
+  the migration table against fallow's parser.
+
+- **Regression baseline help explains the existing config update flow.**
+  Running `--save-regression-baseline` without a path updates
+  `regression.baseline` in the discovered fallow config. Supplying a path still
+  writes a standalone baseline file.
+
 - **`unused-class-members` no longer false-flags a method dispatched through an interface-typed property (ports-and-adapters / hexagonal DI).** A method reached through a property whose declared type is an interface, on a class that `implements` that interface (`useIt(deps: Deps) { deps.greeter.greet() }` where `Deps.greeter: GreeterPort` and `class GreeterAdapter implements GreeterPort`), now credits `GreeterAdapter.greet`. The interface dispatch already worked through a direct parameter or variable (`useIt(g: GreeterPort) { g.greet() }`); this closes the remaining gap where the receiver is reached via an interface property hop, which dominates hexagonal-architecture findings. A genuinely-unused method on the implementing class still reports. Thanks [@lukeramsden](https://github.com/lukeramsden) for the clean minimal reduction. (Closes [#1863](https://github.com/fallow-rs/fallow/issues/1863))
+
 - **`unused-class-members` no longer false-flags a method reached through a factory that returns an object literal.** A factory function returning an inferred object literal whose property values are class instances (`export function createUi() { const factory = new InvokerFactory(); return { orders: factory.ordersPage } }`), consumed cross-module as `const ui = createUi(); ui.orders.placeOrder()`, now credits `OrdersPage.placeOrder`. Every property-value shape resolves: a direct `new Class()`, a local `const` alias to one, and a member read of a separately-constructed instance (`factory.ordersPage`, whether a typed field or a getter). Nested object literals (`ui.invoke.dashboard.method()`), the assigned-then-returned form (`const ui = {...}; return ui`), and same-file consumption are all covered. A genuinely-unused method on the returned class still reports. This is the general root cause behind the Playwright page-object-factory pattern; it is not Playwright-specific. Thanks [@committedpazz](https://github.com/committedpazz) for the precise bisection. (Closes [#1858](https://github.com/fallow-rs/fallow/issues/1858))
 
 - **Star re-exports no longer make a source module's default export appear
