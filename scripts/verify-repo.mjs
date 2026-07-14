@@ -41,6 +41,11 @@ const FAST_COMMANDS = [
 
 const FULL_ONLY_COMMANDS = [
   {
+    label: "Repository script tests",
+    command: "node",
+    args: ["--test", "scripts/*.test.mjs"],
+  },
+  {
     label: "Workspace tests",
     command: "cargo",
     args: ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"],
@@ -118,8 +123,8 @@ export const helpText = () => `Usage: node scripts/verify-repo.mjs [--fast | --f
 
 Canonical local repository verification:
   --fast  Formatting, linting, generated contracts, and crate boundaries (default)
-  --full  Fast checks plus workspace tests, benchmark compilation, rustdoc,
-          and the local NAPI build and tests
+  --full  Fast checks plus repository script tests, workspace tests, benchmark
+          compilation, rustdoc, and the local NAPI build and tests
 
 Prerequisites:
   - Node.js 22 or newer and root dependencies installed with npm install

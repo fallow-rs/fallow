@@ -161,10 +161,9 @@ suspicious_operation_groupings = "warn" # Catch visually ambiguous arithmetic/bi
 unused_peekable = "warn"               # Catch Peekable iterators that never peek
 
 # Process-spawn ban (method list lives in .clippy.toml). Allowed workspace-wide
-# so the CLI / MCP crates can spawn git worktrees, the coverage sidecar, and
-# subprocesses off the analysis path; fallow-core/extract/graph re-deny it at
-# their crate root to enforce that the analysis path spawns only `git` via
-# fallow_core::spawn.
+# so CLI and MCP can spawn worktrees, sidecars, and subprocesses off the core
+# analysis path. Core, extract, graph, and engine re-deny it at their crate
+# roots; engine-owned Git wrappers carry narrow expectations at their call sites.
 disallowed_methods = "allow"
 
 # Allow common pedantic false positives

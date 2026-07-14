@@ -12,7 +12,7 @@ Concrete work scoped to the next one or two minor releases.
 
 ### Richer MCP responses
 
-In progress: agents already query fallow via MCP, but the responses lack context agents need to make confident removal decisions: re-export chains, who imports this symbol, recent churn, duplicate siblings. The work expands existing tool responses before adding new tools, and is partially landed.
+The `inspect_target` tool already combines re-export chains, importers, duplicate siblings, and optional recent churn into one evidence bundle. The remaining work is to bring the same decision-ready context to broader MCP analysis flows where agents currently have to follow up with a separate inspection call.
 
 ### Coverage sidecar ergonomics
 
@@ -22,13 +22,11 @@ The coverage setup state machine works end to end, but the install handoff still
 
 `fallow fix` leaves Prettier, dprint, or Biome to clean up whitespace after removals. Invoke the project's configured formatter automatically when running in-place.
 
-### Baseline-adoption ergonomics
+### Baseline-adoption command
 
-Follow-ups to the `fallow.changedSince` setting shipped for issue #185. The setting works (Problems panel and sidebar scope to files changed since the configured ref) but a few UX polish items would close the loop for users adopting fallow on legacy codebases:
+The `fallow.changedSince` setting scopes the Problems panel and sidebar, while the status bar reports whether that scope was applied or dropped. One editor shortcut would still close the setup loop for legacy codebases:
 
 - **"Fallow: Set Baseline at HEAD" command** -- a palette command that runs `git tag fallow-baseline` and writes `fallow.changedSince` into `.vscode/settings.json` in one step, so users do not need to leave the editor or know the git tag command.
-- **Filter-dropped status surfacing** -- when the LSP cannot resolve the configured ref (typo, shallow clone, missing tag), it currently falls back to full scope and logs a `WARNING` to the Fallow output channel. Surface that state in the status bar (e.g. `Fallow: 118 issues (since fallow-baseline: scope dropped)`) so users notice immediately rather than after the next "wait, why am I seeing all these issues again?" question.
-- **Shallow-clone hint in CI templates** -- the runtime hint already explains the `fetch-depth: 0` fix; the GitHub Action template should default to a checkout depth that works with long-lived baseline tags, or document the requirement in the inline comments. The GitLab template ships `GIT_DEPTH: "0"` as a default since v2.54.0.
 
 ### Per-package `changedSince` overrides
 

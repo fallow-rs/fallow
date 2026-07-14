@@ -7,9 +7,9 @@
  * `npm/fallow/types/output-contract.d.ts` (published as `fallow/types`).
  *
  * To change a shape:
- *   1. Edit the Rust struct in `crates/types/src/results.rs` (or the
- *      duplicates crate at `crates/core/src/duplicates/types.rs`). The Rust
- *      side is the runtime source of truth for the JSON output.
+ *   1. Find the Rust owner through `derived_definition_names()` and its
+ *      imports in `crates/cli/src/bin/schema_emit.rs`, then edit that type.
+ *      Rust is the runtime source of truth for the JSON output.
  *   2. Regenerate `docs/output-schema.json` with
  *      `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit`.
  *      The schema-emit drift tests compare the committed schema against the

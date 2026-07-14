@@ -1,3 +1,4 @@
+use std::net::Ipv6Addr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -305,13 +306,12 @@ fn normalize_url_for_dedup(url: &str) -> String {
     let rest = rest.split_once('#').map_or(rest, |(value, _)| value);
     let authority_end = rest.find(['/', '?']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(authority_end);
-    let authority = authority.to_ascii_lowercase();
-    let authority = authority.strip_suffix(":443").unwrap_or(&authority);
+    let authority = normalize_url_authority(authority, &scheme);
 
     let tail = if tail == "/" {
         ""
-    } else if tail.ends_with('/') && !tail.contains('?') {
-        tail.strip_suffix('/').unwrap_or(tail)
+    } else if tail.starts_with("/?") {
+        &tail[1..]
     } else {
         tail
     };
@@ -320,6 +320,49 @@ fn normalize_url_for_dedup(url: &str) -> String {
         format!("{scheme}://{authority}")
     } else {
         format!("{scheme}://{authority}{tail}")
+    }
+}
+
+/// Normalize only the case-insensitive parts of a URL authority and its default port.
+fn normalize_url_authority(authority: &str, scheme: &str) -> String {
+    let (userinfo, host_port) = authority
+        .rsplit_once('@')
+        .map_or((None, authority), |(userinfo, host_port)| {
+            (Some(userinfo), host_port)
+        });
+
+    let (host, port) = if host_port.starts_with('[') {
+        host_port.find("]:").map_or((host_port, None), |separator| {
+            let (host, port) = host_port.split_at(separator + 1);
+            (host, port.strip_prefix(':'))
+        })
+    } else {
+        host_port
+            .rsplit_once(':')
+            .map_or((host_port, None), |(host, port)| (host, Some(port)))
+    };
+
+    let port = port.map(|value| {
+        value
+            .parse::<u16>()
+            .map_or_else(|_| value.to_string(), |number| number.to_string())
+    });
+    let port =
+        port.filter(|port| !matches!((scheme, port.as_str()), ("http", "80") | ("https", "443")));
+    let host = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .and_then(|value| value.parse::<Ipv6Addr>().ok())
+        .map_or_else(
+            || host.to_ascii_lowercase(),
+            |address| format!("[{address}]"),
+        );
+
+    match (userinfo, port.as_deref()) {
+        (Some(userinfo), Some(port)) => format!("{userinfo}@{host}:{port}"),
+        (Some(userinfo), None) => format!("{userinfo}@{host}"),
+        (None, Some(port)) => format!("{host}:{port}"),
+        (None, None) => host,
     }
 }
 
@@ -341,12 +384,23 @@ fn remote_config_display(location: &str) -> String {
 }
 
 /// Format a fetch error without trusting the HTTP client's URL rendering.
-fn remote_fetch_error_display(error: &str, url: &str) -> String {
-    if remote_config_display(url) == url {
-        error.to_string()
-    } else {
-        "request failed".to_string()
+fn remote_fetch_error_display(error: &ureq::Error, _url: &str) -> String {
+    match error {
+        ureq::Error::RequireHttpsOnly(redirect_target) => format!(
+            "configured for https only: {}",
+            remote_config_display(redirect_target)
+        ),
+        ureq::Error::StatusCode(code) => format!("http status {code}"),
+        ureq::Error::HostNotFound => "host not found".to_string(),
+        ureq::Error::Timeout(_) => "request timed out".to_string(),
+        _ => "request failed".to_string(),
     }
+}
+
+fn starts_with_url_prefix(value: &str, prefix: &str) -> bool {
+    value
+        .get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
 }
 
 /// Read the `FALLOW_EXTENDS_TIMEOUT_SECS` env var, falling back to [`DEFAULT_URL_TIMEOUT_SECS`].
@@ -380,7 +434,7 @@ fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette
         .new_agent();
 
     let mut response = agent.get(url).call().map_err(|e| {
-        let error_display = remote_fetch_error_display(&e.to_string(), url);
+        let error_display = remote_fetch_error_display(&e, url);
         miette::miette!(
             "Failed to fetch remote config from {url_display} \
              (referenced from {source_display}): {error_display}. \
@@ -536,11 +590,11 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             sealed_dir_canonical,
             depth,
         } = input;
-        if entry.starts_with(HTTPS_PREFIX) {
+        if starts_with_url_prefix(entry, HTTPS_PREFIX) {
             reject_sealed_remote_extends(path, entry, sealed, "URL")?;
             return self.resolve_remote(entry, depth + 1);
         }
-        if entry.starts_with(HTTP_PREFIX) {
+        if starts_with_url_prefix(entry, HTTP_PREFIX) {
             let entry_display = remote_config_display(entry);
             return Err(miette::miette!(
                 "URL extends must use https://, got http:// URL '{}' (in {}). \
@@ -626,9 +680,9 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         let url_display = remote_config_display(url);
         let mut merged = serde_json::Value::Object(serde_json::Map::new());
         for entry in &extends {
-            let base = if entry.starts_with(HTTPS_PREFIX) {
+            let base = if starts_with_url_prefix(entry, HTTPS_PREFIX) {
                 self.resolve_remote(entry, depth + 1)?
-            } else if entry.starts_with(HTTP_PREFIX) {
+            } else if starts_with_url_prefix(entry, HTTP_PREFIX) {
                 let entry_display = remote_config_display(entry);
                 return Err(miette::miette!(
                     "URL extends must use https://, got http:// URL '{}' (in remote config {}). \
@@ -2098,18 +2152,69 @@ unknown_field = true
     #[test]
     fn remote_fetch_error_detail_does_not_trust_normalized_urls() {
         let url = "https://request-user:request-password@config.example/config.json?token=request-token#request-fragment";
-        let normalized_error = "bad uri: https://request-user:request-password@config.example/config.json?token=request-token";
+        let normalized_error = ureq::Error::BadUri(
+            "https://request-user:request-password@config.example/config.json?token=request-token"
+                .to_string(),
+        );
 
         assert!(
-            remote_fetch_error_display(normalized_error, url) == "request failed",
+            remote_fetch_error_display(&normalized_error, url) == "request failed",
             "normalized network errors must not bypass URL redaction"
         );
+    }
+
+    #[test]
+    fn remote_fetch_error_detail_does_not_trust_redirect_like_payloads() {
+        let original = "https://config.example/config.json";
+        let error = ureq::Error::BadUri(
+            "http://redirect-user:redirect-password@example.com/next.json?token=secret#anchor"
+                .to_string(),
+        );
+
+        let display = remote_fetch_error_display(&error, original);
+        assert_eq!(display, "request failed");
+        for secret in [
+            "redirect-user",
+            "redirect-password",
+            "token=secret",
+            "anchor",
+        ] {
+            assert!(
+                !display.contains(secret),
+                "untrusted error detail must be hidden"
+            );
+        }
     }
 
     #[test]
     fn remote_extends_dispatch_when_explicitly_allowed() {
         let dir = test_dir("remote-explicitly-allowed");
         let url = "https://config.example/base.json";
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"extends": "{url}"}}"#),
+        )
+        .unwrap();
+        let mut fetcher = MockRemoteFetcher::default()
+            .with_response(url, serde_json::json!({"rules": {"unused-files": "warn"}}));
+
+        let config = load_with_fetcher(
+            &dir.path().join(".fallowrc.json"),
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        )
+        .unwrap();
+
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert_eq!(fetcher.requests, vec![url]);
+    }
+
+    #[test]
+    fn uppercase_https_remote_extends_dispatch_when_allowed() {
+        let dir = test_dir("remote-uppercase-scheme");
+        let url = "HTTPS://config.example/base.json";
         std::fs::write(
             dir.path().join(".fallowrc.json"),
             format!(r#"{{"extends": "{url}"}}"#),
@@ -4022,10 +4127,36 @@ thresholdOverrides = [
     }
 
     #[test]
-    fn normalize_url_trailing_slash() {
+    fn remote_fetch_error_redacts_require_https_only_redirect_target() {
+        let redirect_target =
+            "http://redirect-user:redirect-password@example.com/config.json?token=secret#anchor";
+        let dependency_error = ureq::Error::RequireHttpsOnly(redirect_target.to_string());
+
+        let display =
+            remote_fetch_error_display(&dependency_error, "https://config.example.com/config.json");
+
+        assert_eq!(
+            display,
+            "configured for https only: http://example.com/config.json"
+        );
+        for secret in [
+            "redirect-user",
+            "redirect-password",
+            "token=secret",
+            "anchor",
+        ] {
+            assert!(
+                !display.contains(secret),
+                "redirect secret must be redacted"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_url_preserves_non_root_trailing_slash() {
         assert_eq!(
             normalize_url_for_dedup("https://example.com/config/"),
-            "https://example.com/config"
+            "https://example.com/config/"
         );
     }
 
@@ -4058,6 +4189,16 @@ thresholdOverrides = [
     }
 
     #[test]
+    fn normalize_url_preserves_userinfo_case_and_normalizes_host() {
+        assert_eq!(
+            normalize_url_for_dedup(
+                "HTTPS://CaseSensitiveUser:CaseSensitivePassword@Example.COM/Config.json"
+            ),
+            "https://CaseSensitiveUser:CaseSensitivePassword@example.com/Config.json"
+        );
+    }
+
+    #[test]
     fn normalize_url_preserves_query_string() {
         assert_eq!(
             normalize_url_for_dedup("https://example.com/config.json?v=1"),
@@ -4082,6 +4223,18 @@ thresholdOverrides = [
     }
 
     #[test]
+    fn normalize_url_query_selects_resource_but_fragment_does_not() {
+        assert_ne!(
+            normalize_url_for_dedup("https://example.com/config.json?tenant=one"),
+            normalize_url_for_dedup("https://example.com/config.json?tenant=two")
+        );
+        assert_eq!(
+            normalize_url_for_dedup("https://example.com/config.json?tenant=one#first"),
+            normalize_url_for_dedup("https://example.com/config.json?tenant=one#second")
+        );
+    }
+
+    #[test]
     fn normalize_url_default_https_port() {
         assert_eq!(
             normalize_url_for_dedup("https://example.com:443/config.json"),
@@ -4090,6 +4243,42 @@ thresholdOverrides = [
         assert_eq!(
             normalize_url_for_dedup("https://example.com:8443/config.json"),
             "https://example.com:8443/config.json"
+        );
+    }
+
+    #[test]
+    fn normalize_url_only_strips_the_scheme_default_port() {
+        assert_eq!(
+            normalize_url_for_dedup("http://example.com:80/config.json"),
+            "http://example.com/config.json"
+        );
+        assert_eq!(
+            normalize_url_for_dedup("http://example.com:443/config.json"),
+            "http://example.com:443/config.json"
+        );
+        assert_eq!(
+            normalize_url_for_dedup("https://example.com:80/config.json"),
+            "https://example.com:80/config.json"
+        );
+    }
+
+    #[test]
+    fn normalize_url_canonicalizes_numeric_ports_and_root_query_path() {
+        assert_eq!(
+            normalize_url_for_dedup("https://example.com:0443/?profile=one"),
+            "https://example.com?profile=one"
+        );
+        assert_eq!(
+            normalize_url_for_dedup("https://example.com:080/config.json"),
+            "https://example.com:80/config.json"
+        );
+    }
+
+    #[test]
+    fn normalize_url_canonicalizes_equivalent_ipv6_hosts() {
+        assert_eq!(
+            normalize_url_for_dedup("https://[2001:0DB8:0:0:0:0:0:1]/config.json"),
+            "https://[2001:db8::1]/config.json"
         );
     }
 

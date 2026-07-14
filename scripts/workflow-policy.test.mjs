@@ -78,13 +78,28 @@ test("binary-size workflow isolates incompatible release builds", () => {
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const checkJob = indentedBlock(workflow, "check", 2);
+  const windowsRustJob = indentedBlock(workflow, "windows-rust", 2);
   const zedJob = indentedBlock(workflow, "zed", 2);
   const aggregateJob = indentedBlock(workflow, "ci-ok", 2);
+  const workflowWithoutWindowsRust = workflow.replace(windowsRustJob, "");
 
-  assert.doesNotMatch(workflow, /windows-latest|windows-11-arm|macos-latest/);
+  assert.doesNotMatch(workflowWithoutWindowsRust, /windows-latest|windows-11-arm|macos-latest/);
   assert.match(checkJob, /runs-on: ubuntu-latest/);
   assert.match(checkJob, /timeout-minutes: 20/);
   assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
+  assert.match(windowsRustJob, /needs: changes/);
+  assert.match(windowsRustJob, /if: needs\.changes\.outputs\.windows-rust == 'true'/);
+  assert.match(windowsRustJob, /runs-on: windows-latest/);
+  assert.match(windowsRustJob, /cargo test -p fallow-engine changed_files::tests/);
+  assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
+  assert.match(
+    windowsRustJob,
+    /cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree/,
+  );
+  assert.match(
+    windowsRustJob,
+    /cargo clippy -p fallow-engine -p fallow-mcp --all-targets -- -D warnings/,
+  );
   assert.match(zedJob, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
   assert.throws(() => indentedBlock(workflow, "windows-arm64", 2), /missing windows-arm64 block/);
@@ -92,6 +107,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     () => indentedBlock(workflow, "windows-audit-smoke", 2),
     /missing windows-audit-smoke block/,
   );
+  assert.match(aggregateJob, /windows-rust/);
   assert.doesNotMatch(aggregateJob, /windows-audit-smoke|windows-arm64/);
 });
 

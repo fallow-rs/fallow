@@ -21,6 +21,7 @@ const FAST_COMMANDS = [
 ];
 
 const FULL_ONLY_COMMANDS = [
+  ["node", ["--test", "scripts/*.test.mjs"]],
   ["cargo", ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"]],
   ["cargo", ["check", "--workspace", "--benches"]],
   ["cargo", ["doc", "--workspace", "--no-deps", "--document-private-items"]],

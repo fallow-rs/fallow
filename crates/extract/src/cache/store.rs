@@ -2,6 +2,9 @@
 
 use std::path::Path;
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::FxHashMap;
 
@@ -11,6 +14,11 @@ use super::types::{
     CACHE_VERSION, CachedModule, DEFAULT_CACHE_MAX_SIZE, EVICTION_SIGNIFICANT_BPS,
     EVICTION_TARGET_BPS, EVICTION_TRIGGER_BPS,
 };
+
+#[cfg(test)]
+thread_local! {
+    static FULL_STORE_ENCODE_COUNT: Cell<usize> = const { Cell::new(0) };
+}
 
 /// Cached module information stored on disk.
 #[derive(Debug, Encode, Decode)]
@@ -86,13 +94,12 @@ impl CacheStore {
 
         self.config_hash = config_hash;
         let initial_entries = self.entries.len();
-        let mut encoded = bitcode::encode(self);
+        let mut encoded = self.encode();
 
         let trigger = (max_size_bytes / 10_000).saturating_mul(EVICTION_TRIGGER_BPS);
         if encoded.len() > trigger {
             let target = (max_size_bytes / 10_000).saturating_mul(EVICTION_TARGET_BPS);
-            self.evict_lru_to_target(target);
-            encoded = bitcode::encode(self);
+            encoded = self.evict_lru_to_target(target, encoded);
             let evicted = initial_entries.saturating_sub(self.entries.len());
             let final_size = encoded.len();
             let significant_evicted =
@@ -123,38 +130,104 @@ impl CacheStore {
 
     /// Evict LRU entries until the re-encoded size is under `target_bytes`
     /// or only one entry remains.
-    fn evict_lru_to_target(&mut self, target_bytes: usize) {
-        let mut order: Vec<(u64, String)> = self
+    fn evict_lru_to_target(&mut self, target_bytes: usize, mut encoded: Vec<u8>) -> Vec<u8> {
+        let mut order: Vec<(u64, String, usize)> = self
             .entries
             .iter()
-            .map(|(k, v)| (v.last_access_secs, k.clone()))
+            .map(|(key, entry)| {
+                (
+                    entry.last_access_secs,
+                    key.clone(),
+                    bitcode::encode(entry)
+                        .len()
+                        .saturating_add(key.len())
+                        .max(1),
+                )
+            })
             .collect();
         order.sort();
 
-        const BATCH: usize = 100;
+        const MAX_REFINEMENT_PASSES: usize = 2;
+        const ESTIMATE_SAFETY_BPS: usize = 9_800;
         let mut idx = 0;
-        while idx < order.len() {
-            let batch_end = (idx + BATCH).min(order.len());
-            for (_, key) in &order[idx..batch_end] {
-                if self.entries.len() <= 1 {
-                    break;
-                }
+        let mut estimated_remaining: usize = order
+            .iter()
+            .map(|(_, _, estimated_bytes)| estimated_bytes)
+            .sum();
+        for _ in 0..MAX_REFINEMENT_PASSES {
+            if encoded.len() <= target_bytes || self.entries.len() <= 1 {
+                break;
+            }
+
+            let estimated_budget = estimated_eviction_budget(
+                estimated_remaining,
+                target_bytes,
+                encoded.len(),
+                ESTIMATE_SAFETY_BPS,
+            );
+            let start_idx = idx;
+            while idx + 1 < order.len() && estimated_remaining > estimated_budget {
+                let (_, key, estimated_bytes) = &order[idx];
+                self.entries.remove(key);
+                estimated_remaining = estimated_remaining.saturating_sub(*estimated_bytes);
+                idx += 1;
+            }
+            if idx == start_idx && idx + 1 < order.len() {
+                let (_, key, estimated_bytes) = &order[idx];
+                self.entries.remove(key);
+                estimated_remaining = estimated_remaining.saturating_sub(*estimated_bytes);
+                idx += 1;
+            }
+            encoded = self.encode();
+        }
+
+        if encoded.len() > target_bytes && self.entries.len() > 1 {
+            let conservative_budget = target_bytes / 2;
+            while idx + 1 < order.len() && estimated_remaining > conservative_budget {
+                let (_, key, estimated_bytes) = &order[idx];
+                self.entries.remove(key);
+                estimated_remaining = estimated_remaining.saturating_sub(*estimated_bytes);
+                idx += 1;
+            }
+            encoded = self.encode();
+        }
+
+        // Per-entry encodings are deliberately conservative, but keep the
+        // configured cap exact if a future bitcode layout violates that
+        // estimate. This safety path runs only after byte-aware retention had
+        // three opportunities to preserve a recent suffix.
+        if encoded.len() > target_bytes && self.entries.len() > 1 {
+            let keep_newest_from = order.len().saturating_sub(1);
+            for (_, key, _) in &order[idx..keep_newest_from] {
                 self.entries.remove(key);
             }
-            idx = batch_end;
-
-            let encoded_size = bitcode::encode(self).len();
-            if encoded_size <= target_bytes || self.entries.len() <= 1 {
-                if encoded_size > target_bytes && self.entries.len() <= 1 {
-                    tracing::warn!(
-                        encoded_kb = encoded_size / 1024,
-                        target_kb = target_bytes / 1024,
-                        "Single cache entry exceeds configured max; cache will overshoot the cap"
-                    );
-                }
-                return;
-            }
+            encoded = self.encode();
         }
+
+        if encoded.len() > target_bytes && self.entries.len() == 1 {
+            tracing::warn!(
+                encoded_kb = encoded.len() / 1024,
+                target_kb = target_bytes / 1024,
+                "Single cache entry exceeds configured max; cache will overshoot the cap"
+            );
+        }
+        encoded
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        #[cfg(test)]
+        FULL_STORE_ENCODE_COUNT.with(|count| count.set(count.get() + 1));
+        bitcode::encode(self)
+    }
+
+    #[cfg(test)]
+    pub(super) fn reset_full_store_encode_count() {
+        FULL_STORE_ENCODE_COUNT.with(|count| count.set(0));
+    }
+
+    #[cfg(test)]
+    pub(super) fn full_store_encode_count() -> usize {
+        FULL_STORE_ENCODE_COUNT.with(Cell::get)
     }
 
     /// Look up a cached module by path and content hash.
@@ -224,6 +297,23 @@ impl CacheStore {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+pub(super) fn estimated_eviction_budget(
+    estimated_remaining: usize,
+    target_bytes: usize,
+    encoded_bytes: usize,
+    safety_bps: usize,
+) -> usize {
+    if encoded_bytes == 0 {
+        return 0;
+    }
+
+    const BASIS_POINTS: u128 = 10_000;
+    let scaled = estimated_remaining as u128 * target_bytes as u128 / encoded_bytes as u128;
+    let safety = (safety_bps as u128).min(BASIS_POINTS);
+    let budget = scaled / BASIS_POINTS * safety + scaled % BASIS_POINTS * safety / BASIS_POINTS;
+    budget.min(usize::MAX as u128) as usize
 }
 
 fn write_cache_gitignore(cache_dir: &Path) -> Result<(), String> {

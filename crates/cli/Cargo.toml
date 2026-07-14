@@ -34,12 +34,10 @@ default = []
 # enabled in release builds; a compile_error! at
 # crates/cli/src/health/coverage.rs guards against that.
 test-sidecar-key = []
-# Library feature that toggles `JsonSchema` derives on the health output types
-# defined in `crates/cli/src/health_types/`. Mirrors the `schema` feature on
-# `fallow-types` so the schema-emit binary can derive a single `JsonSchema`
-# document covering health alongside the rest of the output contract. Strictly
-# additive: non-schema builds pay zero compile cost because every derive is
-# gated behind `#[cfg_attr(feature = "schema", ...)]`.
+# Library feature that enables `JsonSchema` derives across the API, output, and
+# base type crates so the schema-emit binary can derive one document covering
+# the complete output contract. Non-schema builds pay zero compile cost because
+# every derive is gated behind `#[cfg_attr(feature = "schema", ...)]`.
 schema = ["dep:schemars", "fallow-api/schema", "fallow-output/schema", "fallow-types/schema"]
 # Build-only feature that enables the `fallow-schema-emit` binary, which
 # regenerates `docs/output-schema.json` from the Rust source of truth. Pulls in

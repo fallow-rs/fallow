@@ -40,7 +40,7 @@ cargo build --release -p fallow-cli  # Release build (CLI only)
 ```bash
 npm run verify                        # Alias for the canonical fast checks
 npm run verify:fast                   # Formatting, linting, contracts, boundaries
-npm run verify:full                   # Fast checks plus tests, benches, docs, NAPI
+npm run verify:full                   # Fast checks plus script/Rust tests, benches, docs, NAPI
 cargo test -p fallow-core             # Focused single-crate test run
 ```
 
@@ -164,9 +164,9 @@ The schema covers two layers, with different ownership rules:
 
 ### Layer 1: types derived from Rust
 
-The per-finding structs in `crates/types/src/results.rs` and `crates/types/src/duplicates.rs`, the JSON-layer augmentation types in `crates/types/src/output.rs`, the per-finding action wrappers in `crates/types/src/output_health.rs`, the health output subtree in `crates/cli/src/health_types/`, the shared envelope and utility shapes in `crates/types/src/envelope.rs`, and the per-command envelope structs in `crates/cli/src/output_envelope.rs` all carry `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]`. The full list of derived definitions is `derived_definition_names()` in `crates/cli/src/bin/schema_emit.rs`.
+Rust-owned schema types live across `crates/types/src/` (analysis and base payloads), `crates/output/src/` (health, action, utility, and envelope wire shapes), `crates/api/src/` (programmatic and attribution wrappers), and `crates/config/src/` (configuration inputs). The types, output, and API crates gate their `JsonSchema` derives behind a `schema` feature; config derives `JsonSchema` unconditionally because it also owns the configuration schema. The authoritative output-contract inventory is `derived_definition_names()` plus the corresponding registrations and imports in `crates/cli/src/bin/schema_emit.rs`.
 
-The health and envelope types live on `fallow-cli` (the binary crate) rather than `fallow-types`, so deriving `JsonSchema` on them required a sibling `schema` cargo feature on `fallow-cli`. The `schema-emit` feature now depends on `fallow-cli/schema` alongside `fallow-types/schema` + `fallow-core/schema`, so a single `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit` covers the whole tree.
+The CLI's `schema-emit` feature enables the feature-gated derives through `fallow-cli/schema` and includes config's always-available schema types, so a single `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit` covers the whole tree.
 
 A drift gate (`cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit`) compares the derived shape against the committed `docs/output-schema.json` and fails when:
 - a Rust struct gains a field that is missing from the schema,
@@ -192,9 +192,9 @@ The following surfaces of `docs/output-schema.json` stay hand-maintained today:
 
 The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`); this is a check, not a hand-maintained section.
 
-The document-root `oneOf` is now derived from Rust as of #384 item 6: the typed `FallowOutput` enum (in `crates/cli/src/output_envelope.rs`) wraps every object-shaped envelope and emits the root union via the `rewrite_document_root_one_of` step in `crates/cli/src/bin/schema_emit.rs`. Editing the root `oneOf` by hand will be reverted on the next regeneration. The root union is `[FallowOutput, CodeClimateOutput, ...HAND_MAINTAINED_ROOT_ENVELOPES]`: `CodeClimateOutput` (a bare JSON array via `#[serde(transparent)]`) is a sibling branch because the planned future move to `#[serde(tag = "kind")]` requires every variant of `FallowOutput` to serialize as an object, which the Code Climate / GitLab Code Quality spec forbids for that one envelope.
+The document-root `oneOf` is now derived from Rust as of #384 item 6: the typed `FallowOutput` enum in `crates/output/src/root_envelopes.rs` wraps every object-shaped envelope and emits the root union via the `rewrite_document_root_one_of` step in `crates/cli/src/bin/schema_emit.rs`. Editing the root `oneOf` by hand will be reverted on the next regeneration. The root union is `[FallowOutput, CodeClimateOutput, ...HAND_MAINTAINED_ROOT_ENVELOPES]`: `CodeClimateOutput` (a bare JSON array via `#[serde(transparent)]`) is a sibling branch because the planned future move to `#[serde(tag = "kind")]` requires every variant of `FallowOutput` to serialize as an object, which the Code Climate / GitLab Code Quality spec forbids for that one envelope.
 
-If you add a new finding type or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. **Adding a new top-level envelope** also requires adding a new variant to `FallowOutput` in `crates/cli/src/output_envelope.rs` so the document root keeps documenting every wire shape.
+If you add a new finding type or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. **Adding a new top-level envelope** also requires adding a new variant to `FallowOutput` in `crates/output/src/root_envelopes.rs` so the document root keeps documenting every wire shape.
 
 ### After editing the schema
 

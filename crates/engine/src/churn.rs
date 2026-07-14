@@ -412,9 +412,9 @@ pub fn is_git_repo(root: &Path) -> bool {
 const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
 
 /// Cache schema version. Bump when the on-disk shape of [`ChurnCache`]
-/// changes so older payloads are rejected on load. Bumped to 3 when the cache
-/// switched from aggregate rows to per-commit events for incremental updates.
-const CHURN_CACHE_VERSION: u8 = 3;
+/// changes so older payloads are rejected on load. Version 5 stores paths in
+/// their platform-native byte representation instead of lossy UTF-8 strings.
+const CHURN_CACHE_VERSION: u8 = 5;
 
 /// Serializable per-commit event for the disk cache.
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
@@ -428,7 +428,7 @@ struct CachedCommitEvent {
 /// Serializable per-file churn entry for the disk cache.
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
 struct CachedFileChurn {
-    path: String,
+    path: Vec<u8>,
     events: Vec<CachedCommitEvent>,
 }
 
@@ -504,7 +504,7 @@ fn save_churn_cache(
         .files
         .iter()
         .map(|f| CachedFileChurn {
-            path: f.0.to_string_lossy().to_string(),
+            path: path_to_cache_bytes(f.0),
             events: f.1.events.clone(),
         })
         .collect();
@@ -602,13 +602,15 @@ impl ChurnCache {
         let files = self
             .files
             .into_iter()
-            .map(|entry| {
-                (
-                    PathBuf::from(entry.path),
-                    FileEvents {
-                        events: entry.events,
-                    },
-                )
+            .filter_map(|entry| {
+                path_from_cache_bytes(&entry.path).map(|path| {
+                    (
+                        path,
+                        FileEvents {
+                            events: entry.events,
+                        },
+                    )
+                })
             })
             .collect();
         ChurnEventState {
@@ -616,6 +618,50 @@ impl ChurnCache {
             author_pool: self.author_pool,
         }
     }
+}
+
+#[cfg(unix)]
+fn path_to_cache_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(unix)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "Windows rejects truncated UTF-16 bytes through this shared fallible contract"
+)]
+fn path_from_cache_bytes(path: &[u8]) -> Option<PathBuf> {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    Some(PathBuf::from(OsStr::from_bytes(path)))
+}
+
+#[cfg(windows)]
+fn path_to_cache_bytes(path: &Path) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+
+    path.as_os_str()
+        .encode_wide()
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+#[cfg(windows)]
+fn path_from_cache_bytes(path: &[u8]) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+
+    let chunks = path.chunks_exact(2);
+    if !chunks.remainder().is_empty() {
+        return None;
+    }
+    let wide: Vec<u16> = chunks
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    Some(PathBuf::from(OsString::from_wide(&wide)))
 }
 
 /// Run `git log --numstat` and return event-level churn state.
@@ -635,7 +681,8 @@ fn analyze_churn_events(
             "--no-merges",
             "--no-renames",
             "--use-mailmap",
-            "--format=format:%at|%ae",
+            "-z",
+            "--format=format:%at|%ae%x00",
             &format!("--after={}", since.git_after),
         ])
         .current_dir(root);
@@ -654,8 +701,7 @@ fn analyze_churn_events(
         return None;
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Some(parse_git_log_events(&stdout, root))
+    Some(parse_git_log_events_z(&output.stdout, root))
 }
 
 /// Merge new churn events into cached event state.
@@ -690,6 +736,7 @@ fn merge_churn_states(base: &mut ChurnEventState, delta: ChurnEventState) {
 }
 
 /// Parse `git log --numstat --format=format:%at|%ae` output into events.
+#[cfg(test)]
 fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -702,6 +749,27 @@ fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
         parser.consume_line(line);
     }
 
+    parser.finish()
+}
+
+fn parse_git_log_events_z(stdout: &[u8], root: &Path) -> ChurnEventState {
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut parser = GitLogEventParser::new(root, now_secs);
+    for record in stdout.split(|byte| *byte == 0) {
+        let record = record.strip_prefix(b"\n").unwrap_or(record);
+        if record.is_empty() {
+            continue;
+        }
+        if record.contains(&b'\t') {
+            parser.record_numstat_bytes(record);
+        } else {
+            parser.consume_line(&String::from_utf8_lossy(record));
+        }
+    }
     parser.finish()
 }
 
@@ -775,6 +843,37 @@ impl<'a> GitLogEventParser<'a> {
             return;
         };
 
+        self.record_numstat_path(added, deleted, PathBuf::from(path));
+    }
+
+    fn record_numstat_bytes(&mut self, record: &[u8]) {
+        let Some(first_tab) = record.iter().position(|byte| *byte == b'\t') else {
+            return;
+        };
+        let Some(second_tab_offset) = record[first_tab + 1..]
+            .iter()
+            .position(|byte| *byte == b'\t')
+        else {
+            return;
+        };
+        let second_tab = first_tab + 1 + second_tab_offset;
+        let Some(added) = std::str::from_utf8(&record[..first_tab])
+            .ok()
+            .and_then(|value| value.parse().ok())
+        else {
+            return;
+        };
+        let Some(deleted) = std::str::from_utf8(&record[first_tab + 1..second_tab])
+            .ok()
+            .and_then(|value| value.parse().ok())
+        else {
+            return;
+        };
+        let path = git_path_from_bytes(&record[second_tab + 1..]);
+        self.record_numstat_path(added, deleted, path);
+    }
+
+    fn record_numstat_path(&mut self, added: u32, deleted: u32, path: PathBuf) {
         let ts = self.current_timestamp.unwrap_or(self.now_secs);
         self.files
             .entry(self.root.join(path))
@@ -794,6 +893,19 @@ impl<'a> GitLogEventParser<'a> {
             author_pool: self.author_pool,
         }
     }
+}
+
+#[cfg(unix)]
+fn git_path_from_bytes(path: &[u8]) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    PathBuf::from(OsString::from_vec(path.to_vec()))
+}
+
+#[cfg(windows)]
+fn git_path_from_bytes(path: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(path).replace('/', "\\"))
 }
 
 /// Aggregate one file's raw commit events into a [`FileChurn`], applying
@@ -1586,6 +1698,103 @@ mod tests {
         let path = root.join(path);
         std::fs::create_dir_all(path.parent().expect("test path has parent")).unwrap();
         std::fs::write(path, contents).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn churn_preserves_special_filenames() {
+        let repo = tempfile::tempdir().expect("create repo");
+        let root = repo.path();
+        git(root, &["init", "--quiet"]);
+        git(root, &["config", "user.email", "churn@example.test"]);
+        git(root, &["config", "user.name", "Churn Test"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+
+        let special_files = [
+            "src/line\nbreak.ts",
+            "src/space name.ts",
+            "src/quote\"name.ts",
+            "src/back\\slash.ts",
+            "src/unicode-λ.ts",
+        ]
+        .map(|path| root.join(path));
+        std::fs::create_dir_all(root.join("src")).expect("source dir");
+        for special in &special_files {
+            std::fs::write(special, "export const value = 1;\n").expect("special fixture");
+        }
+        git(root, &["add", "."]);
+        git(root, &["commit", "--quiet", "-m", "initial"]);
+
+        let since = parse_since("1y").expect("valid duration");
+        let churn = analyze_churn(root, &since).expect("churn result");
+        for special in special_files {
+            assert!(
+                churn.files.contains_key(&special),
+                "missing {special:?}: {:?}",
+                churn.files.keys()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn churn_cache_preserves_non_utf8_filenames() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let invalid_path = PathBuf::from(OsString::from_vec(b"src/non-utf8-\xff.ts".to_vec()));
+        let mut files = FxHashMap::default();
+        files.insert(
+            invalid_path.clone(),
+            FileEvents {
+                events: vec![CachedCommitEvent {
+                    timestamp: 1,
+                    lines_added: 2,
+                    lines_deleted: 1,
+                    author_idx: None,
+                }],
+            },
+        );
+        let state = ChurnEventState {
+            files,
+            author_pool: Vec::new(),
+        };
+        let cache_dir = tempfile::tempdir().expect("cache directory");
+        save_churn_cache(cache_dir.path(), "abc123", "1 year ago", &state, false);
+        let warm = load_churn_cache(cache_dir.path(), "1 year ago")
+            .expect("warm churn cache")
+            .into_event_state();
+
+        assert!(warm.files.contains_key(&invalid_path));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn git_path_bytes_use_windows_separators() {
+        assert_eq!(
+            git_path_from_bytes(b"src/nested/file.ts"),
+            PathBuf::from(r"src\nested\file.ts")
+        );
+    }
+
+    #[test]
+    fn churn_cache_rejects_pre_lossless_path_encoding_version() {
+        let cache_dir = tempfile::tempdir().expect("cache directory");
+        let cache = ChurnCache {
+            version: 4,
+            last_indexed_sha: "abc123".to_string(),
+            git_after: "1 year ago".to_string(),
+            files: vec![CachedFileChurn {
+                path: br#"/project/\"src/line\\nbreak.ts\""#.to_vec(),
+                events: Vec::new(),
+            }],
+            shallow_clone: false,
+            author_pool: Vec::new(),
+        };
+        std::fs::write(cache_dir.path().join("churn.bin"), bitcode::encode(&cache))
+            .expect("cache fixture");
+
+        assert!(load_churn_cache(cache_dir.path(), "1 year ago").is_none());
     }
 
     #[test]

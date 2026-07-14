@@ -27,6 +27,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      windows-rust: ${{ steps.filter.outputs.windows-rust }}
       vscode: ${{ steps.filter.outputs.vscode }}
       zed: ${{ steps.filter.outputs.zed }}
       npm: ${{ steps.filter.outputs.npm }}
@@ -55,10 +56,10 @@ jobs:
             # keeping the filter at `crates/**` (rather than a narrower
             # per-crate list) ensures edits to ANY of the following subtrees
             # trigger the gate:
-            #   - crates/types/src/                       (finding structs)
-            #   - crates/core/src/duplicates/types.rs     (CloneFamily, CloneGroup, AttributedCloneGroup)
-            #   - crates/cli/src/health_types/            (ComplexityViolation, HealthFinding, hotspots, refactoring, coverage)
-            #   - crates/cli/src/output_envelope.rs       (FallowOutput enum + per-command envelopes)
+            #   - crates/types/src/                       (analysis and base payload types)
+            #   - crates/output/src/                      (health, action, and envelope wire shapes)
+            #   - crates/api/src/                         (programmatic and attribution wrappers)
+            #   - crates/cli/src/bin/schema_emit.rs       (derived definition registry and schema assembly)
             #   - crates/config/src/config/              (FallowConfig + RulesConfig + presets, source of schema.json)
             # Both `docs/output-schema.json` and `schema.json` are included so
             # PR edits that ONLY touch a committed schema (without a matching
@@ -91,6 +92,20 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'deny.toml'
+              - '.clippy.toml'
+              - 'rust-toolchain.toml'
+            windows-rust:
+              - 'crates/engine/src/changed_files.rs'
+              - 'crates/engine/src/churn.rs'
+              - 'crates/engine/Cargo.toml'
+              - 'crates/mcp/src/tools/code_mode_subprocess.rs'
+              - 'crates/mcp/src/tools/process_tree.rs'
+              - 'crates/mcp/Cargo.toml'
+              - '.github/actions/setup-rust/**'
+              - '.github/workflows/ci.yml'
+              - 'scripts/workflow-policy.test.mjs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
               - '.clippy.toml'
               - 'rust-toolchain.toml'
             vscode:
@@ -272,6 +287,31 @@ jobs:
 
       - name: Check for uncommitted changes
         run: git diff --exit-code
+
+  windows-rust:
+    name: Windows path and subprocess handling
+    needs: changes
+    if: needs.changes.outputs.windows-rust == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          cache-key: pr-windows-rust
+      - name: Test changed-file path handling
+        run: cargo test -p fallow-engine changed_files::tests
+      - name: Test churn path handling
+        run: cargo test -p fallow-engine churn::tests
+      - name: Test MCP subprocess cleanup
+        run: cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree
+      - name: Clippy platform-specific paths
+        run: cargo clippy -p fallow-engine -p fallow-mcp --all-targets -- -D warnings
 
   skills-vendor:
     name: Skills vendor drift
@@ -713,7 +753,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, doc, typos, js-lint, npm-package, fallow-self-analyze, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor]
+    needs: [check, windows-rust, doc, typos, js-lint, npm-package, fallow-self-analyze, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

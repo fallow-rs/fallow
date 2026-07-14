@@ -3989,6 +3989,94 @@ fn cache_save_evicts_when_over_threshold() {
 }
 
 #[test]
+fn cache_eviction_bounds_full_store_encoding_work() {
+    let dir = test_cache_dir("bounded_eviction_encoding");
+    let mut store = CacheStore::new();
+    for i in 0..2_000u64 {
+        store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
+    }
+    store
+        .save(&dir, 99, DEFAULT_CACHE_MAX_SIZE)
+        .expect("measure unbounded cache size");
+    let unbounded_size = std::fs::metadata(dir.join("cache.bin"))
+        .expect("cache metadata")
+        .len() as usize;
+
+    CacheStore::reset_full_store_encode_count();
+    store
+        .save(&dir, 99, unbounded_size)
+        .expect("save with eviction");
+    let encode_count = CacheStore::full_store_encode_count();
+
+    assert!(
+        encode_count <= 5,
+        "eviction encoded the full store {encode_count} times"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_eviction_budget_avoids_intermediate_overflow() {
+    let large = usize::MAX / 2;
+    let expected = ((large as u128 * large as u128 / large as u128) * 9_800 / 10_000) as usize;
+
+    assert_eq!(
+        super::store::estimated_eviction_budget(large, large, large, 9_800),
+        expected
+    );
+}
+
+#[test]
+fn cache_eviction_preserves_recent_entries_with_skewed_sizes() {
+    let dir = test_cache_dir("skewed_eviction_sizes");
+    let mut store = CacheStore::new();
+    for i in 0..1_000u64 {
+        store.insert(
+            Path::new(&format!("small{i}.ts")),
+            synthetic_module(i, i, 1),
+        );
+    }
+    store.insert(Path::new("large.ts"), synthetic_module(10_000, 1_000, 512));
+    store
+        .save(&dir, 99, DEFAULT_CACHE_MAX_SIZE)
+        .expect("measure unbounded cache size");
+    let unbounded_size = std::fs::metadata(dir.join("cache.bin"))
+        .expect("cache metadata")
+        .len() as usize;
+    let cap = unbounded_size * 9 / 10;
+
+    CacheStore::reset_full_store_encode_count();
+    store.save(&dir, 99, cap).expect("save skewed cache");
+    let encode_count = CacheStore::full_store_encode_count();
+    let loaded = CacheStore::load(&dir, 99, DEFAULT_CACHE_MAX_SIZE).expect("load skewed cache");
+
+    assert!(
+        loaded.len() > 200,
+        "size skew should retain recent small entries, retained {}",
+        loaded.len()
+    );
+    assert!(
+        loaded.get(Path::new("large.ts"), 10_000).is_some(),
+        "newest large entry survives"
+    );
+    assert!(
+        loaded.get(Path::new("small0.ts"), 0).is_none(),
+        "oldest small entry is evicted"
+    );
+    assert!(
+        encode_count <= 5,
+        "full-store encode count was {encode_count}"
+    );
+    let on_disk = std::fs::metadata(dir.join("cache.bin"))
+        .expect("cache metadata")
+        .len() as usize;
+    assert!(on_disk <= cap * 60 / 100, "cache exceeds eviction target");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cache_save_always_honors_cap_with_huge_entries() {
     let dir = test_cache_dir("huge_entry_overshoot");
     let mut store = CacheStore::new();

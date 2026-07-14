@@ -508,12 +508,23 @@ cat > "$ANALYZE_TMP/bin/git" <<'SH'
 case "$1" in
   diff)
     shift
+    name_only=false
+    nul_delimited=false
     for arg in "$@"; do
       if [ "$arg" = "--name-only" ]; then
-        printf '%s\n' "${FAKE_CHANGED_FILES:-src/a.ts}"
-        exit 0
+        name_only=true
+      elif [ "$arg" = "-z" ]; then
+        nul_delimited=true
       fi
     done
+    if [ "$name_only" = "true" ]; then
+      if [ "$nul_delimited" = "true" ]; then
+        printf '%s\0' "${FAKE_CHANGED_FILES:-src/a.ts}"
+      else
+        printf '%s\n' "${FAKE_CHANGED_FILES:-src/a.ts}"
+      fi
+      exit 0
+    fi
     printf '%s\n' 'diff --git a/src/a.ts b/src/a.ts'
     printf '%s\n' '--- a/src/a.ts'
     printf '%s\n' '+++ b/src/a.ts'
@@ -620,6 +631,14 @@ else
 fi
 assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=$EXPLICIT_DIFF" "analyze: explicit diff file is preserved"
 assert_contains "$OUT" "explicit diff file remains active" "analyze: explicit diff warns about remaining scope"
+
+OUT=$(run_analyze_scope_case "newline-filename" $'src/line\nbreak.ts' "" "" "")
+CHANGED_FILE="$ANALYZE_TMP/scope-newline-filename/fallow-changed-files.json"
+if jq -e 'length == 1 and .[0] == "src/line\nbreak.ts"' "$CHANGED_FILE" >/dev/null; then
+  pass "analyze: changed-file JSON preserves newline-bearing filename"
+else
+  fail "analyze: changed-file JSON preserves newline-bearing filename" "got: $(cat "$CHANGED_FILE")"
+fi
 
 # Audit verdict + gate are emitted to GITHUB_OUTPUT for the Check threshold step.
 # Without this, the threshold step gates on raw introduced count, re-introducing
@@ -1647,6 +1666,10 @@ SCRIPTS_DIR="$DIR/../scripts"
 cat > "$API_FAIL_BIN/gh" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = "api" ]; then
+  case " $* " in
+    *" --paginate "*) ;;
+    *) echo "missing --paginate" >&2; exit 2 ;;
+  esac
   echo "gh: HTTP 500: Internal Server Error (api.github.com/repos/owner/repo/pulls/123/files)" >&2
   exit 1
 fi
@@ -1682,7 +1705,15 @@ assert_contains "$API_FAIL_STDERR" "gh auth status" \
 cat > "$API_FAIL_BIN/gh" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = "api" ]; then
-  printf 'src/a.ts\nsrc/b.ts\n'
+  case " $* " in
+    *" --paginate "*) ;;
+    *) echo "missing --paginate" >&2; exit 2 ;;
+  esac
+  printf '%s\n' \
+    '"src/a.ts"' \
+    '"src/line\nbreak.ts"' \
+    '"src/quote\"file.ts"' \
+    '"src/back\\slash.ts"'
   exit 0
 fi
 exit 0
@@ -1710,6 +1741,19 @@ if grep -q '^changed_files_unavailable=false$' "$API_FAIL_OUTPUT" \
 else
   fail "analyze: emits changed_files_unavailable=false on gh api success" \
     "expected only =false, got: $(grep changed_files_unavailable "$API_FAIL_OUTPUT" || echo 'absent')"
+fi
+API_CHANGED_FILE="$API_FAIL_WORK/fallow-changed-files.json"
+if jq -e '
+  length == 4
+  and .[0] == "src/a.ts"
+  and .[1] == "src/line\nbreak.ts"
+  and .[2] == "src/quote\"file.ts"
+  and .[3] == "src/back\\slash.ts"
+' "$API_CHANGED_FILE" >/dev/null; then
+  pass "analyze: API fallback preserves JSON-escaped filenames"
+else
+  fail "analyze: API fallback preserves JSON-escaped filenames" \
+    "got: $(cat "$API_CHANGED_FILE" 2>/dev/null || echo absent)"
 fi
 
 # --- Test 2b: analyze.sh emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE ---

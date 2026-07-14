@@ -181,6 +181,7 @@ pub fn try_get_changed_files_with_toplevel(
         &[
             "diff",
             "--name-only",
+            "-z",
             "--end-of-options",
             &format!("{git_ref}...HEAD"),
         ],
@@ -188,12 +189,18 @@ pub fn try_get_changed_files_with_toplevel(
     files.extend(collect_git_paths(
         cwd,
         toplevel,
-        &["diff", "--name-only", "HEAD"],
+        &["diff", "--name-only", "-z", "HEAD"],
     )?);
     files.extend(collect_git_paths(
         cwd,
         toplevel,
-        &["ls-files", "--full-name", "--others", "--exclude-standard"],
+        &[
+            "ls-files",
+            "--full-name",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
     )?);
     Ok(files)
 }
@@ -249,7 +256,13 @@ fn append_untracked_diffs(
     let mut untracked: Vec<PathBuf> = collect_git_paths(
         root,
         toplevel,
-        &["ls-files", "--full-name", "--others", "--exclude-standard"],
+        &[
+            "ls-files",
+            "--full-name",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
     )?
     .into_iter()
     .filter_map(|path| {
@@ -343,18 +356,28 @@ fn collect_git_paths(
         });
     }
 
-    #[cfg(windows)]
-    let normalise_segment = |line: &str| line.replace('/', "\\");
-    #[cfg(not(windows))]
-    let normalise_segment = |line: &str| line.to_owned();
-
-    let files = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(|line| toplevel.join(normalise_segment(line)))
+    let files = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(git_path_from_bytes)
+        .map(|path| toplevel.join(path))
         .collect();
 
     Ok(files)
+}
+
+#[cfg(unix)]
+fn git_path_from_bytes(path: &[u8]) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    PathBuf::from(OsString::from_vec(path.to_vec()))
+}
+
+#[cfg(windows)]
+fn git_path_from_bytes(path: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(path).replace('/', "\\"))
 }
 
 #[expect(
@@ -816,6 +839,55 @@ mod tests {
         assert!(matches!(result, Err(ChangedFilesError::NotARepository)));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn changed_files_preserve_special_filenames() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        for args in [
+            &["init", "--quiet"][..],
+            &["config", "user.email", "test@example.com"][..],
+            &["config", "user.name", "Test User"][..],
+            &["config", "commit.gpgsign", "false"][..],
+        ] {
+            run_git(repo.path(), args);
+        }
+        std::fs::write(repo.path().join("initial.ts"), "initial\n").expect("initial fixture");
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "--quiet", "-m", "initial"]);
+        run_git(repo.path(), &["tag", "base"]);
+
+        let canonical_root = repo.path().canonicalize().expect("canonical repo");
+        let special_files = [
+            "src/line\nbreak.ts",
+            "src/space name.ts",
+            "src/quote\"name.ts",
+            "src/back\\slash.ts",
+            "src/unicode-λ.ts",
+        ]
+        .map(|path| canonical_root.join(path));
+        std::fs::create_dir_all(canonical_root.join("src")).expect("source dir");
+        for special in &special_files {
+            std::fs::write(special, "changed\n").expect("special fixture");
+        }
+
+        let changed = try_get_changed_files(repo.path(), "base").expect("changed files");
+        for special in special_files {
+            assert!(
+                changed.contains(&special),
+                "missing {special:?}: {changed:?}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn git_path_bytes_use_windows_separators() {
+        assert_eq!(
+            git_path_from_bytes(b"src/nested/file.ts"),
+            PathBuf::from(r"src\nested\file.ts")
+        );
+    }
+
     #[test]
     fn changed_diff_covers_staged_unstaged_and_untracked_files() {
         let repo = tempfile::tempdir().expect("tempdir");
@@ -823,6 +895,7 @@ mod tests {
             &["init", "--quiet"][..],
             &["config", "user.email", "test@example.com"][..],
             &["config", "user.name", "Test User"][..],
+            &["config", "commit.gpgsign", "false"][..],
         ] {
             run_git(repo.path(), args);
         }

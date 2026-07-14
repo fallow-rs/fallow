@@ -73,28 +73,36 @@ normalize_config_path() {
 }
 
 find_changed_fallow_config() {
-  local changed_files=$1
+  local changed_files_json=$1
   local explicit_config=""
+  local matched=""
+  local root_prefix=""
 
   if [ -n "${INPUT_CONFIG:-}" ]; then
     explicit_config=$(normalize_config_path "$INPUT_CONFIG")
   fi
+  if [ -n "${INPUT_ROOT:-}" ] && [ "$INPUT_ROOT" != "." ]; then
+    root_prefix="${INPUT_ROOT#./}/"
+  fi
 
-  while IFS= read -r changed_file; do
-    [ -n "$changed_file" ] || continue
-    changed_file=$(normalize_changed_path "$changed_file")
-    case "$changed_file" in
-      .fallowrc.json|.fallowrc.jsonc|fallow.toml|.fallow.toml)
-        printf '%s\n' "$changed_file"
-        return 0
-        ;;
-    esac
+  matched=$(printf '%s' "$changed_files_json" | jq -r \
+    --arg explicit "$explicit_config" --arg root "$root_prefix" '
+    .[]
+    | sub("^\\./"; "")
+    | if ($root != "" and startswith($root)) then ltrimstr($root) else . end
+    | select(
+        . == ".fallowrc.json"
+        or . == ".fallowrc.jsonc"
+        or . == "fallow.toml"
+        or . == ".fallow.toml"
+        or ($explicit != "" and . == $explicit)
+      )
+  ' | head -1)
 
-    if [ -n "$explicit_config" ] && [ "$changed_file" = "$explicit_config" ]; then
-      printf '%s\n' "$changed_file"
-      return 0
-    fi
-  done <<< "$changed_files"
+  if [ -n "$matched" ]; then
+    printf '%s\n' "$matched"
+    return 0
+  fi
 
   return 1
 }
@@ -369,21 +377,21 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
 fi
 
-_CHANGED=""
+_CHANGED_JSON=""
 
 if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   _ROOT="${INPUT_ROOT:-.}"
-  _CHANGED=""
+  _CHANGED_JSON=""
 
   # Try three-dot diff (precise: changes since merge-base, needs full history)
-  _CHANGED=$(cd "$_ROOT" && git diff --name-only --relative "${INPUT_CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+  _CHANGED_JSON=$(cd "$_ROOT" && git diff --name-only -z --relative "${INPUT_CHANGED_SINCE}...HEAD" -- . 2>/dev/null | jq -Rs 'split("\u0000") | map(select(length > 0))' || true)
 
   # Shallow clone fallback: fetch the base commit and try two-dot diff
-  if [ -z "$_CHANGED" ]; then
+  if ! printf '%s' "$_CHANGED_JSON" | jq -e 'length > 0' >/dev/null 2>&1; then
     if ! git cat-file -e "${INPUT_CHANGED_SINCE}^{commit}" 2>/dev/null; then
       git fetch --depth=1 origin "$INPUT_CHANGED_SINCE" 2>/dev/null || true
     fi
-    _CHANGED=$(cd "$_ROOT" && git diff --name-only --relative "${INPUT_CHANGED_SINCE}" HEAD -- . 2>/dev/null || true)
+    _CHANGED_JSON=$(cd "$_ROOT" && git diff --name-only -z --relative "${INPUT_CHANGED_SINCE}" HEAD -- . 2>/dev/null | jq -Rs 'split("\u0000") | map(select(length > 0))' || true)
   fi
 
   # Last resort: GitHub API (works regardless of clone depth).
@@ -393,19 +401,19 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   # workflow steps can gate on the degraded state rather than silently
   # running unscoped analysis. The existing shallow-clone warning below
   # keeps its framing for the no-API-credentials case.
-  if [ -z "$_CHANGED" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_REPO:-}" ]; then
+  if ! printf '%s' "$_CHANGED_JSON" | jq -e 'length > 0' >/dev/null 2>&1 \
+      && [ -n "${GH_TOKEN:-}" ] && [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_REPO:-}" ]; then
     _API_TMP=$(mktemp)
     _API_ERR=$(mktemp)
     trap 'rm -f "$_API_TMP" "$_API_ERR"' EXIT
-    if gh api --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename' \
+    if gh api --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename | @json' \
          > "$_API_TMP" 2> "$_API_ERR"; then
-      _API_FILES=$(cat "$_API_TMP")
-      if [ -n "$_API_FILES" ]; then
+      _CHANGED_JSON=$(jq -s '.' "$_API_TMP")
+      if printf '%s' "$_CHANGED_JSON" | jq -e 'length > 0' >/dev/null 2>&1; then
         if [ "$_ROOT" != "." ]; then
           # Strip root prefix; API returns repo-root-relative paths, fallow JSON uses root-relative.
-          _CHANGED=$(echo "$_API_FILES" | sed -n "s|^${_ROOT}/||p")
-        else
-          _CHANGED="$_API_FILES"
+          _CHANGED_JSON=$(printf '%s' "$_CHANGED_JSON" | jq -c --arg prefix "${_ROOT%/}/" \
+            'map(select(startswith($prefix)) | ltrimstr($prefix))')
         fi
       fi
     else
@@ -415,15 +423,16 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
     fi
   fi
 
-  if [ -n "$_CHANGED" ]; then
-    echo "$_CHANGED" | jq -R -s 'split("\n") | map(select(length > 0))' > "$CHANGED_FILES_FILE"
+  if printf '%s' "$_CHANGED_JSON" | jq -e 'length > 0' >/dev/null 2>&1; then
+    printf '%s\n' "$_CHANGED_JSON" > "$CHANGED_FILES_FILE"
   else
     echo "::warning::Could not determine changed files for --changed-since scoping. Use fetch-depth: 0 in actions/checkout for best results."
   fi
 fi
 
-if is_dead_code_baseline_command && [ -n "$_CHANGED" ]; then
-  CONFIG_SCOPE_TRIGGER=$(find_changed_fallow_config "$_CHANGED" || true)
+if is_dead_code_baseline_command \
+    && printf '%s' "$_CHANGED_JSON" | jq -e 'length > 0' >/dev/null 2>&1; then
+  CONFIG_SCOPE_TRIGGER=$(find_changed_fallow_config "$_CHANGED_JSON" || true)
   if [ -n "$CONFIG_SCOPE_TRIGGER" ]; then
     if [ "$AUTO_CHANGED_SINCE" = "true" ]; then
       if [ "$USER_DIFF_FILE" = "true" ]; then

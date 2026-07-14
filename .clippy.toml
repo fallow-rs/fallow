@@ -3,16 +3,13 @@ disallowed-types = [
     { path = "std::collections::HashSet", reason = "Use rustc_hash::FxHashSet for better performance" },
 ]
 
-# Process spawning is banned by default (level set to allow in the workspace
-# Cargo.toml, then re-denied per-crate). fallow's analysis crates (fallow-core,
-# fallow-extract, fallow-graph) re-enable this deny at their crate root so the
-# "static analysis never executes the analyzed project's code, only `git`"
-# invariant is machine-checkable: every git spawn there routes through
-# `fallow_core::spawn::git`, the one allowed call site. The CLI / MCP crates
-# legitimately spawn git worktrees, the coverage sidecar, and subprocesses, and
-# are off the analysis path, so they keep the workspace-level allow.
+# Process spawning is allowed at workspace level, then re-denied by the core,
+# extract, graph, and engine crates. Core, extract, and graph never spawn
+# processes. Engine permits only narrowly expected, engine-owned Git wrappers.
+# CLI and MCP legitimately spawn worktrees, sidecars, and subprocesses outside
+# the analysis core, so they keep the workspace-level allow.
 disallowed-methods = [
-    { path = "std::process::Command::new", reason = "On the analysis path, route process spawning through fallow_core::spawn (only `git` is permitted); the deny is scoped to fallow-core/extract/graph via crate-root attributes" },
+    { path = "std::process::Command::new", reason = "Analysis crates forbid process spawning except narrowly expected engine-owned Git wrappers; the deny is scoped by crate-root attributes" },
 ]
 
 # Maximum nesting depth before clippy::excessive_nesting fires.
