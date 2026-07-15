@@ -282,7 +282,7 @@ impl AnalysisSession {
         if let Ok(cache) = self.styling_cache.lock()
             && let Some(artifacts) = cache.as_ref()
         {
-            return artifacts.clone();
+            return Arc::clone(artifacts);
         }
 
         let artifacts = Arc::new(crate::health::build_styling_analysis_artifacts(
@@ -290,7 +290,7 @@ impl AnalysisSession {
             self.config(),
         ));
         if let Ok(mut cache) = self.styling_cache.lock() {
-            *cache = Some(artifacts.clone());
+            *cache = Some(Arc::clone(&artifacts));
         }
         artifacts
     }
