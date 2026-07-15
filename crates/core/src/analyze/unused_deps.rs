@@ -151,15 +151,23 @@ fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
     path.join("package.json")
 }
 
-fn deepest_matching_workspace<'a>(
-    path: &Path,
+fn deepest_matching_workspace<'a>(path: &Path, workspace_roots: &[&'a Path]) -> Option<&'a Path> {
+    workspace_roots
+        .iter()
+        .copied()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+}
+
+fn dependency_owning_workspace_roots<'a>(
     workspaces: &'a [fallow_config::WorkspaceInfo],
-) -> Option<&'a Path> {
+    config: &ResolvedConfig,
+) -> Vec<&'a Path> {
     workspaces
         .iter()
-        .filter(|workspace| path.starts_with(&workspace.root))
-        .max_by_key(|workspace| workspace.root.components().count())
+        .filter(|workspace| read_workspace_package(workspace, config).is_some())
         .map(|workspace| workspace.root.as_path())
+        .collect()
 }
 
 /// Reverse index: workspace root -> packages with ANY file under that root using
@@ -168,17 +176,17 @@ fn deepest_matching_workspace<'a>(
 /// O(packages * files * workspaces).
 fn collect_workspace_used_packages<'a>(
     graph: &'a ModuleGraph,
-    workspaces: &'a [fallow_config::WorkspaceInfo],
+    workspace_roots: &[&'a Path],
 ) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
     use rayon::prelude::*;
     let module_workspaces: Vec<Option<&Path>> = graph
         .modules
         .par_iter()
-        .map(|module| deepest_matching_workspace(&module.path, workspaces))
+        .map(|module| deepest_matching_workspace(&module.path, workspace_roots))
         .collect();
-    let mut by_ws: FxHashMap<&Path, FxHashSet<&str>> = workspaces
+    let mut by_ws: FxHashMap<&Path, FxHashSet<&str>> = workspace_roots
         .iter()
-        .map(|ws| (ws.root.as_path(), FxHashSet::default()))
+        .map(|root| (*root, FxHashSet::default()))
         .collect();
     for (package_name, file_ids) in &graph.package_usage {
         for id in file_ids {
@@ -264,7 +272,7 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
 /// Build a reverse index from package name to workspace roots that import it.
 fn collect_package_workspace_usage(
     graph: &ModuleGraph,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspace_roots: &[&Path],
 ) -> FxHashMap<String, Vec<PathBuf>> {
     let mut usage: FxHashMap<String, Vec<PathBuf>> = FxHashMap::default();
 
@@ -273,7 +281,7 @@ fn collect_package_workspace_usage(
             let Some(module) = graph.modules.get(id.0 as usize) else {
                 continue;
             };
-            let Some(ws_root) = deepest_matching_workspace(&module.path, workspaces) else {
+            let Some(ws_root) = deepest_matching_workspace(&module.path, workspace_roots) else {
                 continue;
             };
             usage
@@ -520,9 +528,10 @@ fn collect_dependency_usage_indices<'a>(
     let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(String::as_str).collect();
     let root_peer_used = PeerDependencyResolver::new()
         .peer_dependency_closure(&config.root, used_packages.iter().copied());
+    let workspace_roots = dependency_owning_workspace_roots(workspaces, config);
     DependencyUsageIndices {
-        package_workspace_usage: collect_package_workspace_usage(graph, workspaces),
-        workspace_used_packages: collect_workspace_used_packages(graph, workspaces),
+        package_workspace_usage: collect_package_workspace_usage(graph, &workspace_roots),
+        workspace_used_packages: collect_workspace_used_packages(graph, &workspace_roots),
         used_packages,
         root_peer_used,
     }
