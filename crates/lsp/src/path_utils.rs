@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-#[allow(
+#[expect(
     clippy::redundant_pub_crate,
     reason = "shared by sibling LSP modules through the private path_utils module"
 )]
