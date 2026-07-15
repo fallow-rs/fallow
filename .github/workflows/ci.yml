@@ -98,6 +98,7 @@ jobs:
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
               - 'crates/engine/Cargo.toml'
+              - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
               - 'crates/mcp/src/tools/mod.rs'
               - 'crates/mcp/src/tools/process_tree.rs'
@@ -309,10 +310,12 @@ jobs:
         run: cargo test -p fallow-engine changed_files::tests
       - name: Test churn path handling
         run: cargo test -p fallow-engine churn::tests
+      - name: Test LSP diagnostic URI handling
+        run: cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics
       - name: Test MCP subprocess cleanup
         run: cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree
       - name: Clippy platform-specific paths
-        run: cargo clippy -p fallow-engine -p fallow-mcp --all-targets -- -D warnings
+        run: cargo clippy -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
 
   skills-vendor:
     name: Skills vendor drift

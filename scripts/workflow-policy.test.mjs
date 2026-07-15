@@ -77,6 +77,7 @@ test("binary-size workflow isolates incompatible release builds", () => {
 
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
+  const windowsRustPaths = listedPaths(indentedBlock(workflow, "windows-rust", 12));
   const checkJob = indentedBlock(workflow, "check", 2);
   const windowsRustJob = indentedBlock(workflow, "windows-rust", 2);
   const zedJob = indentedBlock(workflow, "zed", 2);
@@ -90,15 +91,20 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsRustJob, /needs: changes/);
   assert.match(windowsRustJob, /if: needs\.changes\.outputs\.windows-rust == 'true'/);
   assert.match(windowsRustJob, /runs-on: windows-latest/);
+  assert.ok(windowsRustPaths.includes("crates/lsp/**"));
   assert.match(windowsRustJob, /cargo test -p fallow-engine changed_files::tests/);
   assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
+  assert.match(
+    windowsRustJob,
+    /cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics/,
+  );
   assert.match(
     windowsRustJob,
     /cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree/,
   );
   assert.match(
     windowsRustJob,
-    /cargo clippy -p fallow-engine -p fallow-mcp --all-targets -- -D warnings/,
+    /cargo clippy -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings/,
   );
   assert.match(zedJob, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
