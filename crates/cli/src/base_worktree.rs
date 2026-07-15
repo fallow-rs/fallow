@@ -214,7 +214,7 @@ impl Drop for WorktreeCleanupGuard<'_> {
 /// Concurrent acquirers either fall through (`None`) or observe a
 /// freshly-prepared cache after the holder releases.
 pub struct ReusableWorktreeLock {
-    _file: std::fs::File,
+    file: std::fs::File,
 }
 
 impl ReusableWorktreeLock {
@@ -222,7 +222,7 @@ impl ReusableWorktreeLock {
         let lock_path = reusable_worktree_lock_path(reusable_path);
         let file = open_or_create_owned_sidecar(&lock_path).ok()?;
         match file.try_lock() {
-            Ok(()) => Some(Self { _file: file }),
+            Ok(()) => Some(Self { file }),
             Err(std::fs::TryLockError::WouldBlock) => {
                 tracing::debug!(
                     path = %lock_path.display(),
@@ -239,6 +239,12 @@ impl ReusableWorktreeLock {
                 None
             }
         }
+    }
+}
+
+impl Drop for ReusableWorktreeLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
     }
 }
 
