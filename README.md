@@ -151,12 +151,12 @@ Per-command flags come from `fallow schema` (machine-readable) or the [CLI refer
 
 ## Output and exit codes
 
-For machine consumption, add `--format json --quiet` to any command and read the JSON on stdout. Exit 0 and 1 both mean the run succeeded (1 signals findings); exit 2 is a real error and still writes a JSON envelope to stdout. Branch on the code, treating 0 and 1 as success and 2 as failure, rather than blanket-suppressing with `|| true` (which hides real errors from anything that checks the exit code).
+For machine consumption, add `--format json --quiet` to any command, parse the JSON on stdout, and do not depend on whitespace. JSON is compact by default; add `--pretty` only for manual inspection. Exit 0 and 1 both mean the run succeeded (1 signals findings); exit 2 is a real error and still writes a JSON envelope to stdout. Branch on the code, treating 0 and 1 as success and 2 as failure, rather than blanket-suppressing with `|| true` (which hides real errors from anything that checks the exit code).
 
 | `--format` | What you get |
 |---|---|
 | `human` (default) | Terminal report with a `Next:` suggestion line |
-| `json` | The machine contract: one typed JSON document on stdout |
+| `json` | The machine contract: one compact typed JSON document on stdout (`--pretty` indents it) |
 | `sarif` | GitHub Code Scanning and other SARIF consumers |
 | `compact` | One grep-friendly line per finding |
 | `markdown` (`md` accepted via `FALLOW_FORMAT`) | Markdown report |

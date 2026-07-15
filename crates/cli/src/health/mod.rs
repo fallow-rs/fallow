@@ -295,13 +295,13 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     Ok(result)
 }
 
-pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
+pub fn run_health(opts: &HealthOptions<'_>, json_style: crate::json_style::JsonStyle) -> ExitCode {
     let result = match execute_health(opts) {
         Ok(r) => r,
         Err(code) => return code,
     };
     if let Some(ref timings) = result.timings {
-        report::print_health_performance(timings, opts.output);
+        report::print_health_performance(timings, opts.output, json_style);
     }
     print_health_result(
         &result,
@@ -314,6 +314,7 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
             show_explain_tip: true,
             skip_score_and_trend: false,
             css_requested: opts.css,
+            json_style,
         },
     )
 }
@@ -354,6 +355,7 @@ pub struct HealthPrintOptions {
     /// CSS result (no import-reachable stylesheet) is explained rather than
     /// silently omitted. Defaults `false` for callers that do not request CSS.
     pub css_requested: bool,
+    pub json_style: crate::json_style::JsonStyle,
 }
 
 pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -> ExitCode {
@@ -403,6 +405,7 @@ fn health_report_context(
         config_fixable: false,
         skip_score_and_trend: options.skip_score_and_trend,
         css_requested: options.css_requested,
+        json_style: options.json_style,
     }
 }
 
@@ -657,6 +660,7 @@ mod tests {
                 show_explain_tip: true,
                 skip_score_and_trend: false,
                 css_requested: false,
+                json_style: crate::json_style::JsonStyle::Compact,
             },
         )
     }
@@ -827,6 +831,7 @@ mod tests {
                     show_explain_tip: true,
                     skip_score_and_trend: false,
                     css_requested: false,
+                    json_style: crate::json_style::JsonStyle::Compact,
                 },
             ),
             ExitCode::from(1),

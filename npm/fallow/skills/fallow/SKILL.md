@@ -45,7 +45,7 @@ cargo install fallow-cli   # build from source
 
 ## Agent Rules
 
-1. **Always use `--format json --quiet 2>/dev/null`** for machine-readable output. The `2>/dev/null` discards stderr so progress messages and threshold warnings don't corrupt the JSON on stdout. Never use `2>&1`
+1. **Always use `--format json --quiet 2>/dev/null`** for machine-readable output and parse it as JSON. Compact JSON is the default; never depend on whitespace or add `--pretty` in agent pipelines. The `2>/dev/null` discards stderr so progress messages and threshold warnings don't corrupt the JSON on stdout. Never use `2>&1`
 2. **Always append `|| true`** to every fallow command. Exit code 1 means "issues found" (normal), not a runtime error. Without `|| true`, the Bash tool treats exit 1 as failure and cancels parallel commands. Only exit code 2 is a real error (invalid config, parse failure)
 3. **Use `--explain`** to include a `_meta` object in JSON output with metric definitions, ranges, and interpretation hints. In human format, `--explain` prints a `Description:` line under each section header.
 4. **Use the root `kind` field** to identify typed JSON envelopes (`dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, etc.).

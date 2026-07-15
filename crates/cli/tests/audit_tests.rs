@@ -96,6 +96,71 @@ fn create_audit_fixture(_suffix: &str) -> TempDir {
     tmp
 }
 
+#[test]
+fn audit_json_uses_the_selected_presentation_style() {
+    let fixture = create_audit_fixture("json-style");
+    let root = fixture
+        .path()
+        .to_str()
+        .expect("fixture path should be UTF-8");
+    let compact = run_fallow_raw(&[
+        "audit", "--root", root, "--base", "HEAD", "--format", "json", "--quiet",
+    ]);
+    let pretty = run_fallow_raw(&[
+        "audit", "--root", root, "--base", "HEAD", "--format", "json", "--pretty", "--quiet",
+    ]);
+
+    assert_eq!(
+        compact.code, pretty.code,
+        "presentation must not change the verdict"
+    );
+    assert_eq!(
+        compact.stdout.lines().count(),
+        1,
+        "audit JSON should be compact"
+    );
+    assert!(
+        pretty.stdout.lines().count() > 1,
+        "--pretty should indent audit JSON"
+    );
+    serde_json::from_str::<serde_json::Value>(&compact.stdout)
+        .expect("compact audit JSON should parse");
+    serde_json::from_str::<serde_json::Value>(&pretty.stdout)
+        .expect("pretty audit JSON should parse");
+}
+
+#[test]
+fn audit_performance_json_uses_the_selected_presentation_style() {
+    let fixture = create_audit_fixture("performance-json-style");
+    fs::write(
+        fixture.path().join("src/new.ts"),
+        "export const changed = () => 1;\n",
+    )
+    .expect("changed file should be written");
+    let root = fixture
+        .path()
+        .to_str()
+        .expect("fixture path should be UTF-8");
+    let pretty = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--pretty",
+        "--quiet",
+        "--performance",
+    ]);
+
+    assert!(
+        pretty.stderr.contains("\n  \""),
+        "--pretty should indent audit performance JSON: {}",
+        pretty.stderr
+    );
+}
+
 fn write_branchy_change(dir: &std::path::Path) {
     fs::write(
         dir.join("src/index.ts"),

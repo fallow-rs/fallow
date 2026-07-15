@@ -33,6 +33,7 @@ pub struct FixOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -133,6 +134,7 @@ fn finalize_fix_run(
 
     if let Err(code) = emit_fix_output(&FixOutputInput {
         output: opts.output,
+        json_style: opts.json_style,
         quiet: opts.quiet,
         dry_run: opts.dry_run,
         fixes,
@@ -244,7 +246,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
             Ok(envelope) if matches!(opts.output, OutputFormat::GithubSummary) => {
                 return crate::report::github_summary::print_fix_summary(&envelope);
             }
-            Ok(envelope) => match serde_json::to_string_pretty(&envelope) {
+            Ok(envelope) => match opts.json_style.serialize(&envelope) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
                     eprintln!("Error: failed to serialize fix output: {e}");
@@ -342,6 +344,7 @@ impl CommitOutcome {
 
 struct FixOutputInput<'a> {
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
     quiet: bool,
     dry_run: bool,
     fixes: &'a [serde_json::Value],
@@ -467,7 +470,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             Ok(envelope) if matches!(input.output, OutputFormat::GithubSummary) => {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
             }
-            Ok(envelope) => match serde_json::to_string_pretty(&envelope) {
+            Ok(envelope) => match input.json_style.serialize(&envelope) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
                     eprintln!("Error: failed to serialize fix output: {e}");

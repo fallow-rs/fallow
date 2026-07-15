@@ -71,6 +71,7 @@ pub fn dispatch_impact(
     root: &Path,
     quiet: bool,
     output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
     subcommand: Option<ImpactCli>,
     cross_repo: ImpactCrossRepoOpts,
 ) -> ExitCode {
@@ -85,14 +86,14 @@ pub fn dispatch_impact(
                 telemetry::FailureReason::Validation,
             );
         }
-        return render_impact_all(quiet, output, sort, limit);
+        return render_impact_all(quiet, output, json_style, sort, limit);
     }
     match subcommand {
         Some(ImpactCli::Enable) => impact_enable(root, quiet),
         Some(ImpactCli::Disable) => impact_disable(root, quiet),
         Some(ImpactCli::Default { state }) => impact_set_default(state, quiet),
         Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
-        Some(ImpactCli::Status) | None => render_impact_status(root, quiet, output),
+        Some(ImpactCli::Status) | None => render_impact_status(root, quiet, output, json_style),
     }
 }
 
@@ -186,12 +187,17 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn render_impact_status(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
+fn render_impact_status(
+    root: &Path,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let store = impact::load(root);
     let report = impact::build_report(&store);
     let is_human = matches!(output, fallow_config::OutputFormat::Human);
     let rendered = match output {
-        fallow_config::OutputFormat::Json => impact::render_json(&report),
+        fallow_config::OutputFormat::Json => impact::render_json_with_style(&report, json_style),
         fallow_config::OutputFormat::Markdown => impact::render_markdown(&report),
         fallow_config::OutputFormat::Human => impact::render_human(&report),
         fallow_config::OutputFormat::Sarif
@@ -229,13 +235,16 @@ fn render_impact_status(root: &Path, quiet: bool, output: fallow_config::OutputF
 fn render_impact_all(
     quiet: bool,
     output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
     sort: ImpactSortCli,
     limit: Option<usize>,
 ) -> ExitCode {
     let report = impact::aggregate(sort.to_impact());
     let is_human = matches!(output, fallow_config::OutputFormat::Human);
     let rendered = match output {
-        fallow_config::OutputFormat::Json => impact::render_cross_repo_json(&report),
+        fallow_config::OutputFormat::Json => {
+            impact::render_cross_repo_json_with_style(&report, json_style)
+        }
         fallow_config::OutputFormat::Markdown => impact::render_cross_repo_markdown(&report),
         fallow_config::OutputFormat::Human => impact::render_cross_repo_human(&report, limit),
         fallow_config::OutputFormat::Sarif

@@ -30,7 +30,11 @@ const NOTE: &str = "path_exists reports whether a file matches the seeded glob o
     gitignored and wrong-extension files).";
 
 /// Run the `plugin-check` command.
-pub fn run_plugin_check(root: &Path, output: OutputFormat) -> ExitCode {
+pub fn run_plugin_check(
+    root: &Path,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let doc = match build_plugin_check_doc(root) {
         Ok(doc) => doc,
         Err(e) => return emit_error(&e, 2, output),
@@ -39,13 +43,25 @@ pub fn run_plugin_check(root: &Path, output: OutputFormat) -> ExitCode {
         print_human(&doc);
         return ExitCode::SUCCESS;
     }
-    match serde_json::to_string_pretty(&doc) {
+    match render_plugin_check_json(&doc, json_style) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => emit_error(&format!("failed to serialize plugin-check: {e}"), 2, output),
+        Err(e) => crate::error::emit_error_with_style(
+            &format!("failed to serialize plugin-check: {e}"),
+            2,
+            output,
+            json_style,
+        ),
     }
+}
+
+fn render_plugin_check_json(
+    doc: &Value,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<String, serde_json::Error> {
+    json_style.serialize(doc)
 }
 
 /// Build the `plugin-check` JSON document (pure, no output side effects).
@@ -477,6 +493,25 @@ mod tests {
         assert_eq!(w["kind"], "field-path-unresolved");
         assert_eq!(w["field_path"], "plugin.typo");
         assert!(w.get("glob").is_none());
+    }
+
+    #[test]
+    fn plugin_check_json_respects_explicit_style() {
+        let doc = json!({"kind": "plugin-check", "plugins": []});
+        let compact = render_plugin_check_json(&doc, crate::json_style::JsonStyle::Compact)
+            .expect("compact plugin-check should serialize");
+        let pretty = render_plugin_check_json(&doc, crate::json_style::JsonStyle::Pretty)
+            .expect("pretty plugin-check should serialize");
+
+        assert!(
+            !compact.contains('\n'),
+            "compact JSON must stay on one line"
+        );
+        assert!(pretty.contains("\n  \""), "pretty JSON must be indented");
+        assert_eq!(
+            serde_json::from_str::<Value>(&compact).unwrap(),
+            serde_json::from_str::<Value>(&pretty).unwrap(),
+        );
     }
 
     fn kibana_fixture() -> std::path::PathBuf {

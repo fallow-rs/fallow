@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::{
     NETWORK_EXIT_CODE, api_url, http_status_message, sanitize_network_error, try_api_agent,
 };
+use crate::json_style::JsonStyle;
 
 /// Ed25519 verification key for fallow license JWT validation.
 #[cfg(not(feature = "test-sidecar-key"))]
@@ -129,34 +130,38 @@ impl LicenseKind {
 /// `output` is the globally-resolved [`OutputFormat`]; the human path is
 /// byte-for-byte unchanged from before, and `--format json` switches every
 /// subcommand to the machine-readable [`LicenseStatusJson`] / error envelope.
-pub fn run(subcommand: &LicenseSubcommand, output: OutputFormat) -> ExitCode {
+pub fn run(
+    subcommand: &LicenseSubcommand,
+    output: OutputFormat,
+    json_style: JsonStyle,
+) -> ExitCode {
     let json = matches!(output, OutputFormat::Json);
     match subcommand {
-        LicenseSubcommand::Activate(args) => run_activate(args, json),
-        LicenseSubcommand::Status => run_status(json),
-        LicenseSubcommand::Refresh => run_refresh(json),
-        LicenseSubcommand::Deactivate => run_deactivate(json),
+        LicenseSubcommand::Activate(args) => run_activate(args, json, json_style),
+        LicenseSubcommand::Status => run_status(json, json_style),
+        LicenseSubcommand::Refresh => run_refresh(json, json_style),
+        LicenseSubcommand::Deactivate => run_deactivate(json, json_style),
     }
 }
 
 /// Surface a setup / input error: JSON envelope on stdout under `--format json`
 /// (so the extension parses one stream), plain stderr otherwise.
-fn fail(message: &str, exit_code: u8, json: bool) -> ExitCode {
+fn fail(message: &str, exit_code: u8, json: bool, json_style: JsonStyle) -> ExitCode {
     if json {
-        emit_error_json(message, exit_code);
+        emit_error_json(message, exit_code, json_style);
     } else {
         eprintln!("fallow license: {message}");
     }
     ExitCode::from(exit_code)
 }
 
-fn emit_error_json(message: &str, exit_code: u8) {
+fn emit_error_json(message: &str, exit_code: u8, json_style: JsonStyle) {
     let error_obj = serde_json::json!({
         "error": true,
         "message": message,
         "exit_code": exit_code,
     });
-    if let Ok(json) = serde_json::to_string_pretty(&error_obj) {
+    if let Ok(json) = json_style.serialize(&error_obj) {
         println!("{json}");
     }
 }
@@ -164,25 +169,25 @@ fn emit_error_json(message: &str, exit_code: u8) {
 /// Render a verified status either as the existing human lines or as the JSON
 /// envelope, depending on `json`. Used by every success path so the two
 /// renderings never drift.
-fn emit_status(status: &LicenseStatus, kind: LicenseKind, json: bool) {
+fn emit_status(status: &LicenseStatus, kind: LicenseKind, json: bool, json_style: JsonStyle) {
     if json {
-        print_status_json(status, kind);
+        print_status_json(status, kind, json_style);
     } else {
         print_status(status);
     }
 }
 
-fn run_activate(args: &ActivateArgs, json: bool) -> ExitCode {
+fn run_activate(args: &ActivateArgs, json: bool, json_style: JsonStyle) -> ExitCode {
     if args.trial {
-        return run_trial(args.email.as_deref(), json);
+        return run_trial(args.email.as_deref(), json, json_style);
     }
     let jwt = match read_jwt(args) {
         Ok(jwt) => jwt,
-        Err(msg) => return fail(&msg, 2, json),
+        Err(msg) => return fail(&msg, 2, json, json_style),
     };
     let key = match verifying_key() {
         Ok(k) => k,
-        Err(msg) => return fail(&msg, 2, json),
+        Err(msg) => return fail(&msg, 2, json, json_style),
     };
     match verify_jwt_with_skew(
         &jwt,
@@ -193,65 +198,71 @@ fn run_activate(args: &ActivateArgs, json: bool) -> ExitCode {
     ) {
         Ok(status) => {
             if let Err(msg) = persist_jwt(&jwt, json) {
-                return fail(&msg, 2, json);
+                return fail(&msg, 2, json, json_style);
             }
-            emit_status(&status, LicenseKind::Activate, json);
+            emit_status(&status, LicenseKind::Activate, json, json_style);
             ExitCode::SUCCESS
         }
         Err(LicenseError::Truncated { .. }) => fail(
             &format!("{}", LicenseError::Truncated { actual: jwt.len() }),
             3,
             json,
+            json_style,
         ),
-        Err(err) => fail(&format!("failed to verify JWT: {err}"), 3, json),
+        Err(err) => fail(&format!("failed to verify JWT: {err}"), 3, json, json_style),
     }
 }
 
-fn run_status(json: bool) -> ExitCode {
+fn run_status(json: bool, json_style: JsonStyle) -> ExitCode {
     let key = match verifying_key() {
         Ok(k) => k,
-        Err(msg) => return fail(&msg, 2, json),
+        Err(msg) => return fail(&msg, 2, json, json_style),
     };
     match fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
         Ok(status) => {
-            emit_status(&status, LicenseKind::Status, json);
+            emit_status(&status, LicenseKind::Status, json, json_style);
             match status {
                 LicenseStatus::HardFail { .. } | LicenseStatus::Missing => ExitCode::from(3),
                 _ => ExitCode::SUCCESS,
             }
         }
-        Err(err) => fail(&format!("{err}"), 3, json),
+        Err(err) => fail(&format!("{err}"), 3, json, json_style),
     }
 }
 
-fn run_refresh(json: bool) -> ExitCode {
+fn run_refresh(json: bool, json_style: JsonStyle) -> ExitCode {
     match refresh_active_license(json) {
         Ok(status) => {
-            emit_status(&status, LicenseKind::Refresh, json);
+            emit_status(&status, LicenseKind::Refresh, json, json_style);
             ExitCode::SUCCESS
         }
-        Err(message) => fail(&message, NETWORK_EXIT_CODE, json),
+        Err(message) => fail(&message, NETWORK_EXIT_CODE, json, json_style),
     }
 }
 
-fn run_trial(email: Option<&str>, json: bool) -> ExitCode {
+fn run_trial(email: Option<&str>, json: bool, json_style: JsonStyle) -> ExitCode {
     let Some(email) = email else {
-        return fail("activate --trial requires --email <addr>", 2, json);
+        return fail(
+            "activate --trial requires --email <addr>",
+            2,
+            json,
+            json_style,
+        );
     };
     match activate_trial(email, json) {
         Ok(status) => {
-            emit_status(&status, LicenseKind::Activate, json);
+            emit_status(&status, LicenseKind::Activate, json, json_style);
             ExitCode::SUCCESS
         }
-        Err(message) => fail(&message, NETWORK_EXIT_CODE, json),
+        Err(message) => fail(&message, NETWORK_EXIT_CODE, json, json_style),
     }
 }
 
-fn run_deactivate(json: bool) -> ExitCode {
+fn run_deactivate(json: bool, json_style: JsonStyle) -> ExitCode {
     let path = default_license_path();
     if !path.exists() {
         if json {
-            print_deactivate_json(&path, false);
+            print_deactivate_json(&path, false, json_style);
         } else {
             println!("fallow license: no license file at {}", path.display());
         }
@@ -260,7 +271,7 @@ fn run_deactivate(json: bool) -> ExitCode {
     match std::fs::remove_file(&path) {
         Ok(()) => {
             if json {
-                print_deactivate_json(&path, true);
+                print_deactivate_json(&path, true, json_style);
             } else {
                 println!("fallow license: removed {}", path.display());
             }
@@ -270,6 +281,7 @@ fn run_deactivate(json: bool) -> ExitCode {
             &format!("failed to remove {}: {err}", path.display()),
             2,
             json,
+            json_style,
         ),
     }
 }
@@ -704,9 +716,9 @@ fn build_status_payload(
     }
 }
 
-fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
+fn print_status_json(status: &LicenseStatus, kind: LicenseKind, json_style: JsonStyle) {
     let payload = build_status_payload(status, kind, active_license_path());
-    print_json_payload(&payload);
+    print_json_payload(&payload, json_style);
 }
 
 /// JSON envelope for `fallow license deactivate --format json`.
@@ -715,7 +727,7 @@ fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
 /// `LicenseStatusJson` shape for the `Missing` state (every documented field is
 /// present, not just the six the previous hand-rolled `json!` literal emitted)
 /// and overrides `message` plus the deactivate-only `removed` flag.
-fn print_deactivate_json(path: &Path, removed: bool) {
+fn print_deactivate_json(path: &Path, removed: bool, json_style: JsonStyle) {
     let message = if removed {
         format!("License removed from {}.", path.display())
     } else {
@@ -728,16 +740,23 @@ fn print_deactivate_json(path: &Path, removed: bool) {
     );
     payload.message = message;
     payload.removed = Some(removed);
-    print_json_payload(&payload);
+    print_json_payload(&payload, json_style);
 }
 
 /// Serialize a [`LicenseStatusJson`] envelope to stdout, logging on the rare
 /// serialization failure rather than swallowing it silently.
-fn print_json_payload(payload: &LicenseStatusJson) {
-    match serde_json::to_string_pretty(payload) {
+fn print_json_payload(payload: &LicenseStatusJson, json_style: JsonStyle) {
+    match render_json_payload(payload, json_style) {
         Ok(json) => println!("{json}"),
         Err(err) => eprintln!("fallow license: failed to serialize JSON output: {err}"),
     }
+}
+
+fn render_json_payload(
+    payload: &LicenseStatusJson,
+    json_style: JsonStyle,
+) -> Result<String, serde_json::Error> {
+    json_style.serialize(payload)
 }
 
 #[cfg(test)]
@@ -848,25 +867,25 @@ mod tests {
 
     #[test]
     fn run_trial_without_email_errors() {
-        let exit = run_trial(None, false);
+        let exit = run_trial(None, false, JsonStyle::Compact);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
     }
 
     #[test]
     fn run_trial_without_email_errors_in_json_mode() {
-        let exit = run_trial(None, true);
+        let exit = run_trial(None, true, JsonStyle::Compact);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
     }
 
     #[test]
     fn activate_without_jwt_source_errors_before_verification() {
-        let exit = run_activate(&ActivateArgs::default(), true);
+        let exit = run_activate(&ActivateArgs::default(), true, JsonStyle::Compact);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
     }
 
     #[test]
     fn json_failures_return_requested_exit_code() {
-        let exit = fail("synthetic failure", 7, true);
+        let exit = fail("synthetic failure", 7, true, JsonStyle::Compact);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(7)));
     }
 
@@ -888,6 +907,29 @@ mod tests {
     fn json_value(status: &LicenseStatus, kind: LicenseKind) -> serde_json::Value {
         let payload = build_status_payload(status, kind, active_license_path());
         serde_json::to_value(&payload).unwrap()
+    }
+
+    #[test]
+    fn license_json_respects_explicit_style() {
+        let payload = build_status_payload(
+            &LicenseStatus::Missing,
+            LicenseKind::Status,
+            active_license_path(),
+        );
+        let compact = render_json_payload(&payload, crate::json_style::JsonStyle::Compact)
+            .expect("compact license status should serialize");
+        let pretty = render_json_payload(&payload, crate::json_style::JsonStyle::Pretty)
+            .expect("pretty license status should serialize");
+
+        assert!(
+            !compact.contains('\n'),
+            "compact JSON must stay on one line"
+        );
+        assert!(pretty.contains("\n  \""), "pretty JSON must be indented");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&compact).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&pretty).unwrap(),
+        );
     }
 
     /// The non-optional keys the VS Code extension's `LicenseStatusJson`

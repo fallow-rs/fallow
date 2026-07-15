@@ -14,6 +14,7 @@ pub struct FlagsOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<std::path::PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -148,7 +149,9 @@ fn print_flags_result(
 ) {
     match opts.output {
         OutputFormat::Human => print_flags_human(flags, config, elapsed, opts.quiet, files_scanned),
-        OutputFormat::Json => print_flags_json(flags, config, elapsed, opts.explain),
+        OutputFormat::Json => {
+            print_flags_json(flags, config, elapsed, opts.explain, opts.json_style);
+        }
         OutputFormat::Compact => print_flags_compact(flags, config),
         OutputFormat::Sarif => print_flags_sarif(flags, config),
         OutputFormat::Markdown => print_flags_markdown(flags, config),
@@ -645,6 +648,7 @@ fn print_flags_json(
     config: &ResolvedConfig,
     elapsed: std::time::Duration,
     explain: bool,
+    json_style: crate::json_style::JsonStyle,
 ) {
     let output =
         fallow_output::build_feature_flags_output(fallow_output::FeatureFlagsOutputInput {
@@ -664,7 +668,9 @@ fn print_flags_json(
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&output).expect("JSON serialization should not fail")
+        json_style
+            .serialize(&output)
+            .expect("JSON serialization should not fail")
     );
 }
 
@@ -703,6 +709,7 @@ mod tests {
             root,
             config_path: &NO_CONFIG,
             output,
+            json_style: crate::json_style::JsonStyle::Compact,
             no_cache: true,
             threads: 1,
             quiet: true,

@@ -20,7 +20,7 @@ use fallow_types::envelope::{
     RegressionToleranceKind,
 };
 
-use super::emit_json;
+use super::emit_report_json;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 use fallow_config::WorkspaceDiagnostic;
 use fallow_output::GroupByMode;
@@ -33,6 +33,7 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) regression: Option<&'a crate::regression::RegressionOutcome>,
     pub(super) baseline_matched: Option<(usize, usize)>,
     pub(super) config_fixable: bool,
+    pub(super) json_style: crate::json_style::JsonStyle,
 }
 
 pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
@@ -51,7 +52,7 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
         explain.then(fallow_output::check_meta),
         check_json_extras(regression, None, baseline_matched),
     ) {
-        Ok(output) => emit_json(&output, "JSON"),
+        Ok(output) => emit_report_json(&output, "JSON", input.json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize results: {e}");
             ExitCode::from(2)
@@ -68,6 +69,7 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) explain: bool,
     pub(super) resolver: &'a OwnershipResolver,
     pub(super) config_fixable: bool,
+    pub(super) json_style: crate::json_style::JsonStyle,
 }
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
@@ -96,7 +98,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         }
     };
 
-    emit_json(&output, "JSON")
+    emit_report_json(&output, "JSON", input.json_style)
 }
 
 #[allow(
@@ -386,9 +388,10 @@ pub(super) fn print_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match api_health_json_document(report, root, elapsed, explain) {
-        Ok(output) => emit_json(&output, "JSON"),
+        Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
             ExitCode::from(2)
@@ -402,9 +405,10 @@ pub(super) fn print_grouped_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match api_grouped_health_json_document(report, grouping, root, elapsed, explain) {
-        Ok(output) => emit_json(&output, "JSON"),
+        Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
             ExitCode::from(2)
@@ -442,9 +446,10 @@ pub(super) fn print_duplication_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match api_duplication_json_document(report, root, elapsed, explain) {
-        Ok(output) => emit_json(&output, "JSON"),
+        Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize duplication report: {e}");
             ExitCode::from(2)
@@ -494,9 +499,10 @@ pub(super) fn print_grouped_duplication_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match api_grouped_duplication_json_document(report, grouping, root, elapsed, explain) {
-        Ok(output) => emit_json(&output, "JSON"),
+        Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped duplication report: {e}");
             ExitCode::from(2)
@@ -504,8 +510,11 @@ pub(super) fn print_grouped_duplication_json(
     }
 }
 
-pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
-    match serde_json::to_string_pretty(value) {
+pub(super) fn print_trace_json<T: serde::Serialize>(
+    value: &T,
+    json_style: crate::json_style::JsonStyle,
+) {
+    match json_style.serialize(value) {
         Ok(json) => outln!("{json}"),
         Err(e) => {
             eprintln!("Error: failed to serialize trace output: {e}");

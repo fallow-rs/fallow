@@ -77,9 +77,10 @@ pub fn run_hooks_command(
     root: &Path,
     subcommand: HooksCli,
     output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match subcommand {
-        HooksCli::Status => setup_hooks::run_hooks_status(root, output),
+        HooksCli::Status => setup_hooks::run_hooks_status(root, output, json_style),
         install @ HooksCli::Install { .. } => run_hooks_install(root, install, output),
         uninstall @ HooksCli::Uninstall { .. } => run_hooks_uninstall(root, &uninstall, output),
     }

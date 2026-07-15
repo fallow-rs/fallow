@@ -26,7 +26,21 @@ use super::{AuditResult, AuditSummary, AuditVerdict};
 /// Print audit results and return the appropriate exit code.
 #[must_use]
 pub fn print_audit_result(result: &AuditResult, quiet: bool, explain: bool) -> ExitCode {
-    let format_exit = print_audit_format(result, quiet, explain);
+    print_audit_result_with_style(
+        result,
+        quiet,
+        explain,
+        crate::json_style::JsonStyle::Compact,
+    )
+}
+
+pub fn print_audit_result_with_style(
+    result: &AuditResult,
+    quiet: bool,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    let format_exit = print_audit_format(result, quiet, explain, json_style);
 
     if format_exit != ExitCode::SUCCESS {
         return format_exit;
@@ -46,9 +60,14 @@ fn audit_decision_conclusion(verdict: AuditVerdict) -> PrDecisionConclusion {
     }
 }
 
-fn print_audit_format(result: &AuditResult, quiet: bool, explain: bool) -> ExitCode {
+fn print_audit_format(
+    result: &AuditResult,
+    quiet: bool,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     match result.output {
-        OutputFormat::Json => print_audit_json(result),
+        OutputFormat::Json => print_audit_json(result, json_style),
         OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown => {
             print_audit_human(result, quiet, explain, result.output);
             ExitCode::SUCCESS
@@ -226,6 +245,7 @@ fn print_audit_dead_code_section(
             summary: false,
             summary_heading: true,
             show_explain_tip: false,
+            json_style: crate::json_style::JsonStyle::Compact,
         },
     );
 }
@@ -240,7 +260,15 @@ fn print_audit_duplication_section(
         show_headers,
         "── Duplication ────────────────────────────────────",
     );
-    crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
+    crate::dupes::print_dupes_result(
+        dupes,
+        quiet,
+        explain,
+        false,
+        true,
+        false,
+        crate::json_style::JsonStyle::Compact,
+    );
 }
 
 fn print_audit_complexity_section(
@@ -264,6 +292,7 @@ fn print_audit_complexity_section(
             show_explain_tip: false,
             skip_score_and_trend: false,
             css_requested: false,
+            json_style: crate::json_style::JsonStyle::Compact,
         },
     );
 }
@@ -668,12 +697,12 @@ fn print_audit_status_line(result: &AuditResult) {
     }
 }
 
-fn print_audit_json(result: &AuditResult) -> ExitCode {
+fn print_audit_json(result: &AuditResult, json_style: crate::json_style::JsonStyle) -> ExitCode {
     let output = match build_audit_json_output(result) {
         Ok(output) => output,
         Err(code) => return code,
     };
-    report::emit_json(&output, "audit")
+    report::emit_report_json(&output, "audit", json_style)
 }
 
 fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {

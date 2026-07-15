@@ -299,7 +299,6 @@ use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, PackageJson};
 
-use crate::error::emit_error;
 use crate::init::{ProjectInfo, detect_project};
 
 /// Framework presence signals: a framework label plus the dependency names that
@@ -605,23 +604,35 @@ fn build_recommendation_from(info: &ProjectInfo, deps: &[String]) -> Recommendat
 ///
 /// Read-only and always exits 0 (advisory). JSON is the machine contract; human
 /// output is a concise summary that ends by naming the taste questions to ask.
-pub fn run_recommend(root: &Path, output: OutputFormat) -> ExitCode {
+pub fn run_recommend(
+    root: &Path,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let recommendation = build_recommendation(root);
     if matches!(output, OutputFormat::Human) {
         print_recommendation_human(&recommendation);
         return ExitCode::SUCCESS;
     }
-    match serde_json::to_string_pretty(&recommendation.to_json()) {
+    match render_recommendation_json(&recommendation, json_style) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => emit_error(
+        Err(e) => crate::error::emit_error_with_style(
             &format!("failed to serialize recommendation: {e}"),
             2,
             output,
+            json_style,
         ),
     }
+}
+
+fn render_recommendation_json(
+    recommendation: &Recommendation,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<String, serde_json::Error> {
+    json_style.serialize(&recommendation.to_json())
 }
 
 /// Concise human summary of a recommendation.
@@ -953,6 +964,27 @@ mod tests {
         let a = build_recommendation_from(&next_monorepo_info(), &["next".to_owned()]).to_json();
         let b = build_recommendation_from(&next_monorepo_info(), &["next".to_owned()]).to_json();
         assert_eq!(a, b, "recommend output must be byte-deterministic");
+    }
+
+    #[test]
+    fn recommendation_json_respects_explicit_style() {
+        let recommendation = build_recommendation_from(&ts_lib_info(), &[]);
+        let compact =
+            render_recommendation_json(&recommendation, crate::json_style::JsonStyle::Compact)
+                .expect("compact recommendation should serialize");
+        let pretty =
+            render_recommendation_json(&recommendation, crate::json_style::JsonStyle::Pretty)
+                .expect("pretty recommendation should serialize");
+
+        assert!(
+            !compact.contains('\n'),
+            "compact JSON must stay on one line"
+        );
+        assert!(pretty.contains("\n  \""), "pretty JSON must be indented");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&compact).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&pretty).unwrap(),
+        );
     }
 
     #[test]

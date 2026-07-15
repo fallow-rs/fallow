@@ -312,6 +312,7 @@ pub struct CheckOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -518,7 +519,7 @@ fn handle_trace_side_effects(
         && opts.trace_opts.performance
         && !opts.defer_performance
     {
-        report::print_performance(timings, config.output);
+        report::print_performance(timings, config.output, opts.json_style);
     }
     if let Some(graph) = trace_graph {
         crate::telemetry::note_graph_structure(graph);
@@ -527,6 +528,7 @@ fn handle_trace_side_effects(
             opts.trace_opts,
             &config.root,
             config.output,
+            opts.json_style,
             script_used_packages,
         ) {
             return Err(code);
@@ -849,6 +851,7 @@ pub struct PrintCheckOptions {
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
+    pub json_style: crate::json_style::JsonStyle,
 }
 
 struct PreparedPrintCheck<'a> {
@@ -876,6 +879,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             config_fixable: result.config_fixable,
             skip_score_and_trend: false,
             css_requested: false,
+            json_style: opts.json_style,
         },
         regression_json: opts.regression_json,
         quiet: opts.quiet,
@@ -1000,6 +1004,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
+            json_style: opts.json_style,
         },
     );
 

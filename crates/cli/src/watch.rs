@@ -23,6 +23,7 @@ pub struct WatchOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -326,6 +327,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         config_fixable: crate::fix::is_config_fixable(&config.root, opts.config_path.as_ref()),
         skip_score_and_trend: false,
         css_requested: false,
+        json_style: opts.json_style,
     };
     let report_code = report::print_results(&results, &ctx, config.output, None);
     if report_code != ExitCode::SUCCESS {
@@ -1056,6 +1058,7 @@ mod tests {
             root,
             config_path: &None,
             output,
+            json_style: crate::json_style::JsonStyle::Compact,
             no_cache: false,
             threads,
             quiet,

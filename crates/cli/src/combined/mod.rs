@@ -23,6 +23,7 @@ pub struct CombinedOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -140,6 +141,7 @@ fn build_combined_check_options<'a>(
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
+        json_style: opts.json_style,
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
@@ -207,7 +209,7 @@ fn print_combined_deferred_performance(
         && let Some(ref mut timings) = check.timings
     {
         timings.duplication_ms = dupes_result.map(|dupes| dupes.elapsed.as_secs_f64() * 1000.0);
-        report::print_performance(timings, opts.output);
+        report::print_performance(timings, opts.output, opts.json_style);
     }
 }
 
@@ -318,6 +320,7 @@ fn build_combined_dupes_options<'a>(
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
+        json_style: opts.json_style,
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
@@ -514,6 +517,7 @@ mod tests {
             root: Path::new("."),
             config_path: &TEST_CONFIG_PATH,
             output: OutputFormat::Json,
+            json_style: crate::json_style::JsonStyle::Compact,
             no_cache: false,
             threads: 1,
             quiet: true,

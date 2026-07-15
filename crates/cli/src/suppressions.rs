@@ -24,6 +24,7 @@ pub struct SuppressionsOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -73,7 +74,7 @@ pub fn run_suppressions(opts: &SuppressionsOptions<'_>) -> ExitCode {
     let elapsed = start.elapsed();
     match opts.output {
         OutputFormat::Human => print_suppressions_human(&output, elapsed, opts.quiet),
-        OutputFormat::Json => print_suppressions_json(output),
+        OutputFormat::Json => print_suppressions_json(output, opts.json_style),
         _ => unreachable!("validated above"),
     }
 
@@ -278,7 +279,10 @@ fn print_suppression_file(file: &SuppressionInventoryFile) {
     clippy::expect_used,
     reason = "suppression inventory JSON output is built from serializable literals"
 )]
-fn print_suppressions_json(output: SuppressionInventoryOutput) {
+fn print_suppressions_json(
+    output: SuppressionInventoryOutput,
+    json_style: crate::json_style::JsonStyle,
+) {
     let value = serialize_suppression_inventory_json_output(
         output,
         crate::output_runtime::current_root_envelope_mode(),
@@ -288,7 +292,9 @@ fn print_suppressions_json(output: SuppressionInventoryOutput) {
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&value).expect("JSON serialization should not fail")
+        json_style
+            .serialize(&value)
+            .expect("JSON serialization should not fail")
     );
 }
 
@@ -308,6 +314,7 @@ mod tests {
             root,
             config_path: &NO_CONFIG,
             output,
+            json_style: crate::json_style::JsonStyle::Compact,
             no_cache: true,
             threads: 1,
             quiet: true,

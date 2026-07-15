@@ -16,6 +16,12 @@ These interfaces are covered by semver , breaking changes only happen in major v
 
 ### JSON output schema
 
+- **Whitespace is not part of the JSON contract**: consumers must parse JSON
+  rather than compare or split raw text. `--format json` emits compact JSON by
+  default, while global `--pretty` selects indented presentation. Both forms
+  carry the same values and end with exactly one line feed. This presentation
+  choice does not change `schema_version`.
+
 - **Top-level structure**: `schema_version`, `version`, `elapsed_ms`, `total_issues`, and all issue arrays
 - **Issue type arrays**: `unused_files`, `unused_exports`, `unused_types`, `private_type_leaks`, `unused_dependencies`, `unused_dev_dependencies`, `unused_enum_members`, `unused_class_members`, `unresolved_imports`, `unlisted_dependencies`, `duplicate_exports`, `type_only_dependencies`, `circular_dependencies`, `re_export_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`
 - **Issue object fields**: all fields documented in `docs/output-schema.json`

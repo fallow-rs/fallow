@@ -215,14 +215,14 @@ fn emit_result(ctx: &RulePackContext<'_>, result: &InitResult) -> ExitCode {
     }
 
     if matches!(ctx.output, OutputFormat::Json) {
-        return emit_json_result(result);
+        return emit_json_result(result, ctx.json_style);
     }
 
     emit_human_result(result);
     ExitCode::SUCCESS
 }
 
-fn emit_json_result(result: &InitResult) -> ExitCode {
+fn emit_json_result(result: &InitResult, json_style: crate::json_style::JsonStyle) -> ExitCode {
     let (config_updated, config_path) = match &result.config {
         ConfigUpdateResult::Updated(path) => (true, Some(path.as_str())),
         ConfigUpdateResult::AlreadyPresent(path)
@@ -233,7 +233,7 @@ fn emit_json_result(result: &InitResult) -> ExitCode {
         | ConfigUpdateResult::Missing
         | ConfigUpdateResult::Error(_) => (false, None),
     };
-    crate::report::emit_json(
+    super::emit_json(
         &json!({
             "kind": "rule-pack-init",
             "pack_path": result.pack_path,
@@ -243,6 +243,7 @@ fn emit_json_result(result: &InitResult) -> ExitCode {
             "config_path": config_path,
         }),
         "rule-pack-init",
+        json_style,
     )
 }
 

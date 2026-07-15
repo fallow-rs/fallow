@@ -23,6 +23,7 @@ pub struct InspectOptions<'a> {
     pub root: &'a Path,
     pub config_path: Option<&'a PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub no_production: bool,
     pub max_file_size: Option<u32>,
@@ -422,7 +423,7 @@ fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> Exit
                     );
                 }
             };
-            report::emit_json(&value, "inspect")
+            report::emit_report_json(&value, "inspect", opts.json_style)
         }
         OutputFormat::Human => {
             print_human(&bundle, opts.quiet);
@@ -807,6 +808,7 @@ mod tests {
             root,
             config_path,
             output: OutputFormat::Json,
+            json_style: crate::json_style::JsonStyle::Compact,
             no_cache: true,
             no_production: true,
             max_file_size: Some(2),

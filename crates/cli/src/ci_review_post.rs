@@ -7,12 +7,12 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::api::try_api_agent;
-use crate::error::emit_error;
+use crate::error::emit_error_with_style;
 
 use super::{
     ApplyResult, CiProvider, PlannedReconcile, ReconcileOptions, apply_provider_reconcile,
-    github_post_json, github_token, gitlab_post_json, load_provider_state, read_envelope,
-    require_target, url_encode_path_segment,
+    emit_ci_command_json, github_post_json, github_token, gitlab_post_json, load_provider_state,
+    read_envelope, require_target, url_encode_path_segment,
 };
 
 #[derive(Clone, Copy)]
@@ -49,10 +49,14 @@ struct PostReviewResult {
     post_errors: Vec<String>,
 }
 
-pub(super) fn post_review(input: PostReviewInput<'_>, output: OutputFormat) -> ExitCode {
+pub(super) fn post_review(
+    input: PostReviewInput<'_>,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let envelope = match read_envelope(input.envelope) {
         Ok(value) => value,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let opts = ReconcileOptions {
         repo: input.repo,
@@ -62,7 +66,9 @@ pub(super) fn post_review(input: PostReviewInput<'_>, output: OutputFormat) -> E
     };
     let provider_state = match load_provider_state(input.provider, input.target, opts) {
         Ok(state) => state,
-        Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+        Err(e) => {
+            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+        }
     };
     let current = envelope_fingerprints(&envelope);
     let planned = PlannedReconcile::new(&current, &provider_state);
@@ -72,7 +78,7 @@ pub(super) fn post_review(input: PostReviewInput<'_>, output: OutputFormat) -> E
         CiProvider::Gitlab => post_gitlab_review(input, &envelope, &provider_state.fingerprints),
     };
     if !result.post_errors.is_empty() {
-        return emit_post_review_result(&result, output);
+        return emit_post_review_result(&result, output, json_style);
     }
 
     let applied = if input.dry_run {
@@ -81,7 +87,7 @@ pub(super) fn post_review(input: PostReviewInput<'_>, output: OutputFormat) -> E
         apply_provider_reconcile(input.provider, &planned, input.target, opts)
     };
     attach_reconcile_result(&mut result, &planned.plan.stale, applied);
-    emit_post_review_result(&result, output)
+    emit_post_review_result(&result, output, json_style)
 }
 
 fn post_github_review(
@@ -310,11 +316,12 @@ fn result_with_error(input: PostReviewInput<'_>, error: String) -> PostReviewRes
     result
 }
 
-fn emit_post_review_result(result: &PostReviewResult, output: OutputFormat) -> ExitCode {
-    match serde_json::to_value(result) {
-        Ok(value) => crate::report::emit_json(&value, "review post result"),
-        Err(e) => emit_error(&format!("JSON serialization error: {e}"), 2, output),
-    }
+fn emit_post_review_result(
+    result: &PostReviewResult,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    emit_ci_command_json(result, "review post result", output, json_style)
 }
 
 fn github_repo(explicit: Option<&str>) -> Result<String, String> {

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`--format json` now emits compact JSON by default.** Machine consumers get
+  the same schema and values with less output. Use the global `--pretty` flag
+  when indented JSON is useful for manual inspection. JSON success and error
+  documents still end with exactly one line feed. SARIF, Code Climate, schema
+  commands, saved baselines, snapshots, caches, and other persisted JSON keep
+  their existing presentation. (Closes [#1861](https://github.com/fallow-rs/fallow/issues/1861))
+
 ## [3.5.1] - 2026-07-14
 
 ### Fixed

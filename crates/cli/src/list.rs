@@ -11,6 +11,7 @@ pub struct ListOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub threads: usize,
     pub no_cache: bool,
     pub entry_points: bool,
@@ -311,7 +312,7 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
+    match input.opts.json_style.serialize(&output) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS
@@ -644,6 +645,7 @@ mod tests {
             root: std::path::Path::new("/project"),
             config_path: &None,
             output: OutputFormat::Human,
+            json_style: crate::json_style::JsonStyle::Compact,
             threads: 4,
             no_cache: false,
             entry_points,

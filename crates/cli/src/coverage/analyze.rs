@@ -1218,7 +1218,7 @@ fn print_runtime_report(
 ) -> ExitCode {
     match ctx.output {
         OutputFormat::Human => print_runtime_human(report, elapsed, args, ctx.root),
-        _ => print_runtime_json(report, elapsed, ctx.explain),
+        _ => print_runtime_json(report, elapsed, ctx.explain, ctx.json_style),
     }
 }
 
@@ -1236,6 +1236,7 @@ fn print_runtime_json(
     report: &RuntimeCoverageReport,
     elapsed: std::time::Duration,
     explain: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     debug_assert_eq!(
         RUNTIME_COVERAGE_SCHEMA_VERSION, "1",
@@ -1256,7 +1257,7 @@ fn print_runtime_json(
             return ExitCode::from(2);
         }
     };
-    crate::report::emit_json(&output, "runtime coverage JSON")
+    crate::report::emit_report_json(&output, "runtime coverage JSON", json_style)
 }
 
 const HUMAN_DEFAULT_DISPLAY_LIMIT: usize = 10;

@@ -23,6 +23,7 @@ pub struct TraceChainOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -129,7 +130,7 @@ fn emit_trace(trace: SymbolChainTrace, opts: &TraceChainOptions<'_>) -> ExitCode
                     );
                 }
             };
-            report::emit_json(&value, "trace")
+            report::emit_report_json(&value, "trace", opts.json_style)
         }
         OutputFormat::Human => {
             print_human(&trace, opts.quiet);

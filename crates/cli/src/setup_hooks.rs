@@ -149,13 +149,25 @@ pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &
 }
 
 /// Render read-only status for all supported hook surfaces.
-pub fn run_hooks_status(root: &Path, output: fallow_config::OutputFormat) -> ExitCode {
+pub fn run_hooks_status(
+    root: &Path,
+    output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let report = build_hooks_status(root);
     match output {
-        fallow_config::OutputFormat::Json => {
-            let value = serde_json::json!({ "hooks": report });
-            crate::report::emit_json(&value, "hooks status")
-        }
+        fallow_config::OutputFormat::Json => match render_hooks_status_json(&report, json_style) {
+            Ok(json) => {
+                crate::report::sink::outln!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => crate::error::emit_error_with_style(
+                &format!("failed to serialize hooks status output: {error}"),
+                2,
+                output,
+                json_style,
+            ),
+        },
         fallow_config::OutputFormat::Human => {
             println!("Git hook: {}", describe_status(&report.git));
             println!("Claude hook: {}", describe_status(&report.claude));
@@ -164,6 +176,13 @@ pub fn run_hooks_status(root: &Path, output: fallow_config::OutputFormat) -> Exi
         }
         _ => crate::error::emit_error("hooks status supports human and json output", 2, output),
     }
+}
+
+fn render_hooks_status_json(
+    report: &HooksStatusReport,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<String, serde_json::Error> {
+    json_style.serialize(&serde_json::json!({ "hooks": report }))
 }
 
 #[derive(Debug, Default)]
@@ -1323,6 +1342,34 @@ mod tests {
             gitignore_claude: false,
             uninstall: false,
         }
+    }
+
+    #[test]
+    fn hooks_status_json_respects_explicit_style() {
+        let report = build_hooks_status(Path::new("/project"));
+        let compact = render_hooks_status_json(&report, crate::json_style::JsonStyle::Compact)
+            .expect("compact hooks status JSON should serialize");
+        let pretty = render_hooks_status_json(&report, crate::json_style::JsonStyle::Pretty)
+            .expect("pretty hooks status JSON should serialize");
+
+        assert!(
+            !compact.contains('\n'),
+            "compact JSON must stay on one line"
+        );
+        assert!(pretty.contains("\n  \""), "pretty JSON must be indented");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&compact).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&pretty).unwrap(),
+        );
+    }
+
+    #[test]
+    fn persisted_claude_settings_remain_pretty() {
+        let serialized = serialize_settings(&serde_json::json!({"hooks": {}}))
+            .expect("settings JSON should serialize");
+
+        assert!(serialized.contains("\n  \""));
+        assert!(serialized.ends_with('\n'));
     }
 
     #[test]

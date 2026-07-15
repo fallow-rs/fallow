@@ -915,7 +915,7 @@ fn config_with_invalid_rule_pack_exits_2() {
 }
 
 #[test]
-fn fallow_config_subcommand_rejects_unknown_boundary_zone() {
+fn fallow_config_subcommand_reports_unknown_boundary_zone_as_json() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
@@ -933,13 +933,18 @@ fn fallow_config_subcommand_rejects_unknown_boundary_zone() {
     let output = run_fallow_raw(&["--root", root.to_str().expect("utf-8 root"), "config"]);
     assert_eq!(
         output.code, 2,
-        "fallow config must reject invalid boundary config, stderr: {}",
-        output.stderr
+        "fallow config must reject invalid boundary config, stdout: {}",
+        output.stdout
     );
+    assert!(output.stderr.is_empty());
+    let error: serde_json::Value =
+        serde_json::from_str(&output.stdout).expect("config errors should be structured JSON");
     assert!(
-        output.stderr.contains("typo-zone"),
-        "stderr should name the typo'd zone, got: {}",
-        output.stderr
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("typo-zone")),
+        "JSON error should name the typo'd zone, got: {}",
+        output.stdout
     );
 }
 

@@ -124,6 +124,8 @@ pub struct ReportContext<'a> {
     /// was import-reachable, the CSS-health section renders an explanatory note
     /// instead of being silently omitted. Defaults `false` for non-css callers.
     pub css_requested: bool,
+    /// Presentation style for report JSON. Non-JSON renderers ignore it.
+    pub json_style: crate::json_style::JsonStyle,
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -163,13 +165,32 @@ pub const fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// Serialize a JSON value to pretty-printed stdout, returning the appropriate exit code.
+/// Serialize a spec-defined JSON value with its established pretty formatting.
 ///
 /// On success prints the JSON and returns `ExitCode::SUCCESS`.
 /// On serialization failure prints an error to stderr and returns exit code 2.
 #[must_use]
 pub fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
     match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            outln!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize {kind} output: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// Serialize report JSON with the requested presentation style.
+#[must_use]
+pub fn emit_report_json(
+    value: &serde_json::Value,
+    kind: &str,
+    style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    match style.serialize(value) {
         Ok(json) => {
             outln!("{json}");
             ExitCode::SUCCESS
@@ -285,6 +306,7 @@ pub fn print_results(
             regression,
             baseline_matched: ctx.baseline_matched,
             config_fixable: ctx.config_fixable,
+            json_style: ctx.json_style,
         }),
         OutputFormat::Compact => {
             compact::print_compact(results, ctx.root);
@@ -404,6 +426,7 @@ fn print_grouped_results(
             explain: ctx.explain,
             resolver,
             config_fixable: ctx.config_fixable,
+            json_style: ctx.json_style,
         }),
         OutputFormat::Compact => {
             compact::print_grouped_compact(groups, ctx.root);
@@ -461,7 +484,7 @@ pub fn print_duplication_report(
             ExitCode::SUCCESS
         }
         OutputFormat::Json => {
-            json::print_duplication_json(report, ctx.root, ctx.elapsed, ctx.explain)
+            json::print_duplication_json(report, ctx.root, ctx.elapsed, ctx.explain, ctx.json_style)
         }
         OutputFormat::Compact => {
             compact::print_duplication_compact(report, ctx.root);
@@ -544,6 +567,7 @@ fn print_grouped_duplication_report(
             ctx.root,
             ctx.elapsed,
             ctx.explain,
+            ctx.json_style,
         ),
         OutputFormat::Sarif => sarif::print_grouped_duplication_sarif(report, ctx.root, resolver),
         OutputFormat::CodeClimate => {
@@ -663,8 +687,11 @@ pub fn print_health_report(
                 ctx.root,
                 ctx.elapsed,
                 ctx.explain,
+                ctx.json_style,
             ),
-            None => json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain),
+            None => {
+                json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain, ctx.json_style)
+            }
         },
         OutputFormat::CodeClimate => match group_resolver {
             Some(resolver) => {
@@ -774,9 +801,13 @@ pub fn print_cross_reference_findings(
 }
 
 /// Print export trace results.
-pub fn print_export_trace(trace: &ExportTrace, format: OutputFormat) {
+pub fn print_export_trace(
+    trace: &ExportTrace,
+    format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) {
     match format {
-        OutputFormat::Json => json::print_trace_json(trace),
+        OutputFormat::Json => json::print_trace_json(trace, json_style),
         _ => human::print_export_trace_human(trace),
     }
 }
@@ -785,42 +816,60 @@ pub fn print_export_trace(trace: &ExportTrace, format: OutputFormat) {
 pub fn print_class_member_trace(
     trace: &fallow_engine::trace::ClassMemberTrace,
     format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) {
     match format {
-        OutputFormat::Json => json::print_trace_json(trace),
+        OutputFormat::Json => json::print_trace_json(trace, json_style),
         _ => human::print_class_member_trace_human(trace),
     }
 }
 
 /// Print file trace results.
-pub fn print_file_trace(trace: &FileTrace, format: OutputFormat) {
+pub fn print_file_trace(
+    trace: &FileTrace,
+    format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) {
     match format {
-        OutputFormat::Json => json::print_trace_json(trace),
+        OutputFormat::Json => json::print_trace_json(trace, json_style),
         _ => human::print_file_trace_human(trace),
     }
 }
 
 /// Print dependency trace results.
-pub fn print_dependency_trace(trace: &DependencyTrace, format: OutputFormat) {
+pub fn print_dependency_trace(
+    trace: &DependencyTrace,
+    format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) {
     match format {
-        OutputFormat::Json => json::print_trace_json(trace),
+        OutputFormat::Json => json::print_trace_json(trace, json_style),
         _ => human::print_dependency_trace_human(trace),
     }
 }
 
 /// Print clone trace results.
-pub fn print_clone_trace(trace: &CloneTrace, root: &Path, format: OutputFormat) {
+pub fn print_clone_trace(
+    trace: &CloneTrace,
+    root: &Path,
+    format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) {
     match format {
-        OutputFormat::Json => json::print_trace_json(trace),
+        OutputFormat::Json => json::print_trace_json(trace, json_style),
         _ => human::print_clone_trace_human(trace, root),
     }
 }
 
 /// Print impact-closure trace results. JSON only emits the structured
 /// closure; human renders a short summary.
-pub fn print_impact_closure_trace(trace: &ImpactClosureTrace, format: OutputFormat) {
+pub fn print_impact_closure_trace(
+    trace: &ImpactClosureTrace,
+    format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) {
     match format {
-        OutputFormat::Json => json::print_trace_json(trace),
+        OutputFormat::Json => json::print_trace_json(trace, json_style),
         _ => {
             outln!("Impact closure for {}", trace.seed);
             outln!(
@@ -841,9 +890,13 @@ pub fn print_impact_closure_trace(trace: &ImpactClosureTrace, format: OutputForm
 
 /// Print pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
-pub fn print_performance(timings: &PipelineTimings, format: OutputFormat) {
+pub fn print_performance(
+    timings: &PipelineTimings,
+    format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) {
     match format {
-        OutputFormat::Json => match serde_json::to_string_pretty(timings) {
+        OutputFormat::Json => match json_style.serialize(timings) {
             Ok(json) => eprintln!("{json}"),
             Err(e) => eprintln!("Error: failed to serialize timings: {e}"),
         },
@@ -853,9 +906,13 @@ pub fn print_performance(timings: &PipelineTimings, format: OutputFormat) {
 
 /// Print health pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
-pub fn print_health_performance(timings: &fallow_output::HealthTimings, format: OutputFormat) {
+pub fn print_health_performance(
+    timings: &fallow_output::HealthTimings,
+    format: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) {
     match format {
-        OutputFormat::Json => match serde_json::to_string_pretty(timings) {
+        OutputFormat::Json => match json_style.serialize(timings) {
             Ok(json) => eprintln!("{json}"),
             Err(e) => eprintln!("Error: failed to serialize timings: {e}"),
         },
@@ -938,6 +995,7 @@ mod tests {
             config_fixable: false,
             skip_score_and_trend: false,
             css_requested: false,
+            json_style: crate::json_style::JsonStyle::Compact,
         }
     }
 

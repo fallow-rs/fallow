@@ -2068,14 +2068,23 @@ fn render_human_footer(out: &mut String, report: &ImpactReport) {
 }
 
 /// Render the report as JSON.
+#[cfg(test)]
 pub fn render_json(report: &ImpactReport) -> String {
+    render_json_with_style(report, crate::json_style::JsonStyle::Compact)
+}
+
+pub fn render_json_with_style(
+    report: &ImpactReport,
+    json_style: crate::json_style::JsonStyle,
+) -> String {
     let value = fallow_output::serialize_impact_json_output(
         report.clone(),
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .unwrap_or_else(|_| serde_json::json!({"error":"failed to serialize impact report"}));
-    serde_json::to_string_pretty(&value)
+    json_style
+        .serialize(&value)
         .unwrap_or_else(|_| "{\"error\":\"failed to serialize impact report\"}".to_owned())
 }
 
@@ -2206,7 +2215,15 @@ fn render_markdown_footer(out: &mut String, report: &ImpactReport) {
 
 /// Render the cross-repo report as JSON via the typed `ImpactCrossRepo` envelope.
 #[must_use]
+#[cfg(test)]
 pub fn render_cross_repo_json(report: &CrossRepoImpactReport) -> String {
+    render_cross_repo_json_with_style(report, crate::json_style::JsonStyle::Compact)
+}
+
+pub fn render_cross_repo_json_with_style(
+    report: &CrossRepoImpactReport,
+    json_style: crate::json_style::JsonStyle,
+) -> String {
     let value = fallow_output::serialize_cross_repo_impact_json_output(
         report.clone(),
         crate::output_runtime::current_root_envelope_mode(),
@@ -2215,7 +2232,7 @@ pub fn render_cross_repo_json(report: &CrossRepoImpactReport) -> String {
     .unwrap_or_else(
         |_| serde_json::json!({"error":"failed to serialize cross-repo impact report"}),
     );
-    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+    json_style.serialize(&value).unwrap_or_else(|_| {
         "{\"error\":\"failed to serialize cross-repo impact report\"}".to_owned()
     })
 }
@@ -2933,9 +2950,10 @@ mod tests {
         let empty = build_report(&ImpactStore::default());
         assert_eq!(empty.schema_version, ImpactReportSchemaVersion::V1);
         let json = render_json(&empty);
-        assert!(
-            json.contains("\"schema_version\": \"1\""),
-            "schema_version must be present (as the \"1\" const) even when disabled: {json}"
+        let value: serde_json::Value = serde_json::from_str(&json).expect("impact JSON must parse");
+        assert_eq!(
+            value["schema_version"], "1",
+            "schema_version must be present even when disabled: {json}"
         );
 
         let mut store = ImpactStore {

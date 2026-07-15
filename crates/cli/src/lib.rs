@@ -51,6 +51,7 @@ mod health;
 mod impact;
 mod init;
 mod inspect;
+mod json_style;
 mod license;
 mod list;
 mod migrate;
@@ -85,7 +86,7 @@ use check::{CheckOptions, IssueFilters, TraceOptions};
 pub mod error;
 #[cfg(test)]
 use cli_format::parse_format_arg;
-use cli_format::{Format, FormatConfig, apply_ci_defaults};
+use cli_format::{Format, FormatConfig};
 use cli_hooks::{HooksCli, run_hooks_command};
 use cli_impact::{ImpactCli, ImpactCrossRepoOpts, ImpactSortCli, dispatch_impact};
 use cli_production::{ProductionModes, resolve_production_modes};
@@ -228,6 +229,10 @@ struct Cli {
         default_value = "human"
     )]
     format: Format,
+
+    /// Indent JSON output for manual inspection. Requires the final output format to be JSON.
+    #[arg(long, global = true)]
+    pretty: bool,
 
     /// Suppress progress output
     #[arg(short, long, global = true)]
@@ -2329,6 +2334,17 @@ fn emit_known_failure(
     emit_error(message, exit_code, output)
 }
 
+fn emit_known_failure_with_style(
+    message: &str,
+    exit_code: u8,
+    output: fallow_config::OutputFormat,
+    json_style: json_style::JsonStyle,
+    reason: telemetry::FailureReason,
+) -> ExitCode {
+    telemetry::note_failure_reason(reason);
+    error::emit_error_with_style(message, exit_code, output, json_style)
+}
+
 fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
     if cli.baseline.is_some() {
         Some("--baseline")
@@ -2380,7 +2396,8 @@ struct DispatchContext<'a> {
     root: &'a std::path::Path,
     output: fallow_config::OutputFormat,
     quiet: bool,
-    cli_format_was_explicit: bool,
+    fail_on_issues: bool,
+    json_style: json_style::JsonStyle,
     threads: usize,
     tolerance: regression::Tolerance,
     save_regression_file: Option<&'a std::path::PathBuf>,
@@ -2388,16 +2405,6 @@ struct DispatchContext<'a> {
 }
 
 impl DispatchContext<'_> {
-    fn ci_defaults(&self) -> (fallow_config::OutputFormat, bool, bool) {
-        apply_ci_defaults(
-            self.cli.ci,
-            self.cli.fail_on_issues,
-            self.output,
-            self.quiet,
-            self.cli_format_was_explicit,
-        )
-    }
-
     fn production_modes(
         &self,
         dead_code: bool,
@@ -2573,17 +2580,23 @@ pub fn run() -> ExitCode {
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
+    if cli.pretty && !fmt.payload_is_json {
+        eprintln!(
+            "Error: --pretty requires JSON output. Use --format json --pretty, or remove --pretty."
+        );
+        return ExitCode::from(2);
+    }
 
     if let Some(code) = run_schema_command_if_requested(&cli) {
         return code;
     }
 
-    if let Some(code) = run_telemetry_command_if_requested(&mut cli, fmt.output) {
+    if let Some(code) = run_telemetry_command_if_requested(&mut cli, fmt.output, fmt.json_style) {
         return code;
     }
     let telemetry_run = start_telemetry_run(&cli, &fmt);
 
-    let (root, threads) = match validate_inputs(&cli, fmt.output) {
+    let (root, threads) = match validate_inputs(&cli, fmt.output, fmt.json_style) {
         Ok(v) => v,
         Err(code) => {
             return record_run_epilogue(telemetry_run, code, None, cli.parent_run.as_deref());
@@ -2592,14 +2605,17 @@ pub fn run() -> ExitCode {
 
     let FormatConfig {
         output,
+        payload_is_json: _,
         quiet,
-        cli_format_was_explicit,
+        fail_on_issues,
+        json_style,
     } = fmt;
 
-    let tolerance = match run_pre_dispatch_checks(&cli, &root, output, quiet, telemetry_run) {
-        Ok(tolerance) => tolerance,
-        Err(code) => return code,
-    };
+    let tolerance =
+        match run_pre_dispatch_checks(&cli, &root, output, json_style, quiet, telemetry_run) {
+            Ok(tolerance) => tolerance,
+            Err(code) => return code,
+        };
 
     let (save_regression_file, save_to_config) = regression_save_targets(&cli);
 
@@ -2609,7 +2625,8 @@ pub fn run() -> ExitCode {
         root: &root,
         output,
         quiet,
-        cli_format_was_explicit,
+        fail_on_issues,
+        json_style,
         threads,
         tolerance,
         save_regression_file: save_regression_file.as_ref(),
@@ -2661,11 +2678,16 @@ fn dispatch_and_finalize(
 fn run_telemetry_command_if_requested(
     cli: &mut Cli,
     output: fallow_config::OutputFormat,
+    json_style: json_style::JsonStyle,
 ) -> Option<ExitCode> {
     if matches!(cli.command, Some(Command::Telemetry { .. }))
         && let Some(Command::Telemetry { subcommand }) = cli.command.take()
     {
-        return Some(telemetry::run(map_telemetry_subcommand(subcommand), output));
+        return Some(telemetry::run(
+            map_telemetry_subcommand(subcommand),
+            output,
+            json_style,
+        ));
     }
     None
 }
@@ -2738,11 +2760,13 @@ fn run_bare_combined(
     analyses: BareAnalyses,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
+    let (output, quiet, fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     combined::run_combined(&combined::CombinedOptions {
         root: dispatch.root,
         config_path: &cli.config,
         output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
@@ -2814,11 +2838,15 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         } => dispatch_trace_command(dispatch, symbol, callers, callees, depth),
         fix @ Command::Fix { .. } => dispatch_fix_command(&fix, dispatch),
         init @ Command::Init { .. } => dispatch_init_command(init, root, quiet),
-        Command::Hooks { subcommand } => run_hooks_command(root, subcommand, output),
-        Command::Ci { subcommand } => ci::run(map_ci_subcommand(subcommand), output),
+        Command::Hooks { subcommand } => {
+            run_hooks_command(root, subcommand, output, dispatch.json_style)
+        }
+        Command::Ci { subcommand } => {
+            ci::run(map_ci_subcommand(subcommand), output, dispatch.json_style)
+        }
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
-        Command::PluginCheck => plugin_check::run_plugin_check(root, output),
+        Command::PluginCheck => plugin_check::run_plugin_check(root, output, dispatch.json_style),
         Command::RulePackSchema => init::run_rule_pack_schema(),
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::Guard { files } => dispatch_guard_command(dispatch, &files),
@@ -2829,11 +2857,12 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             path_only: path,
             output,
             quiet,
+            json_style: dispatch.json_style,
             load_options: fallow_config::ConfigLoadOptions {
                 allow_remote_extends: cli.allow_remote_extends,
             },
         }),
-        Command::Recommend => onboarding::run_recommend(root, output),
+        Command::Recommend => onboarding::run_recommend(root, output, dispatch.json_style),
         list @ (Command::Workspaces | Command::List { .. }) => {
             dispatch_list_command(&list, dispatch)
         }
@@ -2841,7 +2870,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         health @ Command::Health { .. } => dispatch_health_command(health, dispatch),
         Command::Flags { top } => dispatch_flags_command(dispatch, top),
         Command::Suppressions { file } => dispatch_suppressions_command(dispatch, &file),
-        Command::Explain { issue_type } => explain::run_explain(&issue_type.join(" "), output),
+        Command::Explain { issue_type } => {
+            explain::run_explain(&issue_type.join(" "), output, dispatch.json_style)
+        }
         audit @ Command::Audit { .. } => dispatch_audit_command(audit, dispatch),
         Command::DecisionSurface { max_decisions } => {
             dispatch_decision_surface(dispatch, max_decisions)
@@ -2855,6 +2886,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             root,
             quiet,
             output,
+            dispatch.json_style,
             subcommand,
             ImpactCrossRepoOpts { all, sort, limit },
         ),
@@ -2862,7 +2894,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Report { from } => cli_report::run_report(&from, output, root),
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
-        Command::License { subcommand } => dispatch_license_command(subcommand, output),
+        Command::License { subcommand } => {
+            dispatch_license_command(subcommand, output, dispatch.json_style)
+        }
         Command::Telemetry { .. } => unreachable!("handled before root validation"),
         Command::Coverage { subcommand } => dispatch_coverage_command(dispatch, &subcommand),
         setup_hooks @ Command::SetupHooks { .. } => {
@@ -3088,6 +3122,7 @@ fn dispatch_inspect_command(
         root: dispatch.root,
         config_path: dispatch.cli.config.as_ref(),
         output: dispatch.output,
+        json_style: dispatch.json_style,
         no_cache: dispatch.cli.no_cache,
         no_production: dispatch.cli.no_production,
         max_file_size: dispatch.cli.max_file_size,
@@ -3114,6 +3149,7 @@ fn dispatch_trace_command(
         root: dispatch.root,
         config_path: &dispatch.cli.config,
         output: dispatch.output,
+        json_style: dispatch.json_style,
         no_cache: dispatch.cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
@@ -3140,9 +3176,11 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
 
     let gate = gate.map(security::SecurityGateArg::into_mode);
     let cli = dispatch.cli;
-    let (output, _quiet, fail_on_issues) = dispatch.ci_defaults();
+    let (output, _quiet, fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let derived_flags = SecurityDerivedFlagState {
         output,
+        json_style: dispatch.json_style,
         ci: cli.ci,
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
@@ -3191,11 +3229,13 @@ fn run_security_blind_spots_or_default(
     derived_flags: &SecurityDerivedFlagState<'_>,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
+    let (output, quiet, fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let opts = security::SecurityOptions {
         root: dispatch.root,
         config_path: &cli.config,
         output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
@@ -3247,6 +3287,7 @@ fn try_run_security_survivors(
     Some(security::run_survivors(
         &security::SecuritySurvivorsOptions {
             output: flags.output,
+            json_style: flags.json_style,
             candidates,
             verdicts,
             require_verdict_for_each_candidate: *require_verdict_for_each_candidate,
@@ -3271,6 +3312,7 @@ fn scoped_security_files(
 
 struct SecurityDerivedFlagState<'a> {
     output: fallow_config::OutputFormat,
+    json_style: json_style::JsonStyle,
     ci: bool,
     fail_on_issues: bool,
     sarif_file: Option<&'a Path>,
@@ -3462,8 +3504,9 @@ fn dispatch_migrate_command(command: Command, root: &Path) -> ExitCode {
 fn dispatch_license_command(
     subcommand: LicenseCli,
     output: fallow_config::OutputFormat,
+    json_style: json_style::JsonStyle,
 ) -> ExitCode {
-    license::run(&map_license_subcommand(subcommand), output)
+    license::run(&map_license_subcommand(subcommand), output, json_style)
 }
 
 fn dispatch_ci_template_command(subcommand: CiTemplateCli) -> ExitCode {
@@ -3485,6 +3528,7 @@ fn dispatch_coverage_command(dispatch: &DispatchContext<'_>, subcommand: &Covera
             root: dispatch.root,
             config_path: &cli.config,
             output: dispatch.output,
+            json_style: dispatch.json_style,
             quiet: dispatch.quiet,
             no_cache: cli.no_cache,
             threads: dispatch.threads,
@@ -3670,6 +3714,7 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
         root,
         config_path: &cli.config,
         output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads,
         quiet,
@@ -3698,6 +3743,7 @@ fn dispatch_suppressions_command(
         root,
         config_path: &cli.config,
         output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
@@ -3715,6 +3761,7 @@ fn dispatch_guard_command(dispatch: &DispatchContext<'_>, files: &[String]) -> E
         root: dispatch.root,
         config_path: &dispatch.cli.config,
         output: dispatch.output,
+        json_style: dispatch.json_style,
         quiet: dispatch.quiet,
         allow_remote_extends: dispatch.cli.allow_remote_extends,
         files,
@@ -3726,6 +3773,7 @@ fn dispatch_rule_pack_command(dispatch: &DispatchContext<'_>, subcommand: RulePa
         root: dispatch.root,
         config_path: &dispatch.cli.config,
         output: dispatch.output,
+        json_style: dispatch.json_style,
         quiet: dispatch.quiet,
         no_cache: dispatch.cli.no_cache,
         threads: Some(dispatch.threads),
@@ -4125,6 +4173,7 @@ fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
         root: dispatch.root,
         config_path: &cli.config,
         output: dispatch.output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
@@ -4153,6 +4202,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
         root: dispatch.root,
         config_path: &cli.config,
         output: dispatch.output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
@@ -4174,6 +4224,7 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: ListDispatchArgs) -> Exit
         root: dispatch.root,
         config_path: &cli.config,
         output: dispatch.output,
+        json_style: dispatch.json_style,
         threads: dispatch.threads,
         no_cache: cli.no_cache,
         entry_points: args.entry_points,
@@ -4188,7 +4239,8 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: ListDispatchArgs) -> Exit
 
 fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
+    let (output, quiet, fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
@@ -4197,6 +4249,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         root: dispatch.root,
         config_path: &cli.config,
         output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
@@ -4263,7 +4316,8 @@ struct DupesDispatchArgs {
 
 fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, _fail_on_issues) = dispatch.ci_defaults();
+    let (output, quiet, _fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::Dupes) {
         Ok(production) => production,
         Err(code) => return code,
@@ -4272,6 +4326,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         root: dispatch.root,
         config_path: &cli.config,
         output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
@@ -4450,6 +4505,7 @@ fn run_resolved_audit(
             config_path: &cli.config,
             cache_dir: &inputs.cache_dir,
             output: dispatch.output,
+            json_style: dispatch.json_style,
             no_cache: cli.no_cache,
             threads: dispatch.threads,
             quiet: dispatch.quiet,
@@ -4549,6 +4605,7 @@ fn decision_surface_audit_options<'a>(
         config_path: &cli.config,
         cache_dir: &inputs.cache_dir,
         output: dispatch.output,
+        json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
@@ -4723,7 +4780,8 @@ fn resolve_runtime_coverage_options(
 fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>) -> ExitCode {
     let cli = dispatch.cli;
     let root = dispatch.root;
-    let (output, _quiet, _fail_on_issues) = dispatch.ci_defaults();
+    let (output, _quiet, _fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     if let Err(code) = validate_health_report_only_gate(
         args.report_only,
         args.min_score,
@@ -4829,61 +4887,65 @@ fn run_health_dispatch(
     resolved: ResolvedHealthDispatch<'_>,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, _fail_on_issues) = dispatch.ci_defaults();
+    let (output, quiet, _fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let run = resolved.run;
     let sections = run.sections;
     let production = resolved.production;
-    health::run_health(&HealthOptions {
-        root: dispatch.root,
-        config_path: &cli.config,
-        output,
-        no_cache: cli.no_cache,
-        threads: dispatch.threads,
-        quiet,
-        thresholds: run.thresholds,
-        top: run.top,
-        sort: run.sort,
-        production,
-        production_override: Some(production),
-        allow_remote_extends: cli.allow_remote_extends,
-        changed_since: cli.changed_since.as_deref(),
-        diff_index: None,
-        use_shared_diff_index: true,
-        workspace: cli.workspace.as_deref(),
-        changed_workspaces: cli.changed_workspaces.as_deref(),
-        baseline: cli.baseline.as_deref(),
-        save_baseline: cli.save_baseline.as_deref(),
-        complexity: sections.complexity,
-        file_scores: sections.file_scores,
-        coverage_gaps: sections.coverage_gaps,
-        config_activates_coverage_gaps: !sections.any_section,
-        hotspots: sections.hotspots,
-        ownership: run.ownership,
-        ownership_emails: run.ownership_emails,
-        targets: sections.targets,
-        css: sections.css,
-        css_deep: false,
-        force_full: sections.force_full,
-        score_only_output: sections.score_only_output,
-        enforce_coverage_gap_gate: true,
-        effort: run.effort,
-        score: sections.score,
-        gates: run.gates,
-        since: run.since,
-        min_commits: run.min_commits,
-        explain: cli.explain,
-        summary: cli.summary,
-        save_snapshot: args
-            .save_snapshot
-            .map(|opt| PathBuf::from(opt.as_deref().unwrap_or_default())),
-        trend: args.trend,
-        coverage_inputs: run.coverage_inputs,
-        performance: cli.performance,
-        runtime_coverage: run.runtime_coverage,
-        churn_file: cli.churn_file.as_deref(),
-        complexity_breakdown: args.complexity_breakdown,
-        group_by: cli.group_by.map(Into::into),
-    })
+    health::run_health(
+        &HealthOptions {
+            root: dispatch.root,
+            config_path: &cli.config,
+            output,
+            no_cache: cli.no_cache,
+            threads: dispatch.threads,
+            quiet,
+            thresholds: run.thresholds,
+            top: run.top,
+            sort: run.sort,
+            production,
+            production_override: Some(production),
+            allow_remote_extends: cli.allow_remote_extends,
+            changed_since: cli.changed_since.as_deref(),
+            diff_index: None,
+            use_shared_diff_index: true,
+            workspace: cli.workspace.as_deref(),
+            changed_workspaces: cli.changed_workspaces.as_deref(),
+            baseline: cli.baseline.as_deref(),
+            save_baseline: cli.save_baseline.as_deref(),
+            complexity: sections.complexity,
+            file_scores: sections.file_scores,
+            coverage_gaps: sections.coverage_gaps,
+            config_activates_coverage_gaps: !sections.any_section,
+            hotspots: sections.hotspots,
+            ownership: run.ownership,
+            ownership_emails: run.ownership_emails,
+            targets: sections.targets,
+            css: sections.css,
+            css_deep: false,
+            force_full: sections.force_full,
+            score_only_output: sections.score_only_output,
+            enforce_coverage_gap_gate: true,
+            effort: run.effort,
+            score: sections.score,
+            gates: run.gates,
+            since: run.since,
+            min_commits: run.min_commits,
+            explain: cli.explain,
+            summary: cli.summary,
+            save_snapshot: args
+                .save_snapshot
+                .map(|opt| PathBuf::from(opt.as_deref().unwrap_or_default())),
+            trend: args.trend,
+            coverage_inputs: run.coverage_inputs,
+            performance: cli.performance,
+            runtime_coverage: run.runtime_coverage,
+            churn_file: cli.churn_file.as_deref(),
+            complexity_breakdown: args.complexity_breakdown,
+            group_by: cli.group_by.map(Into::into),
+        },
+        dispatch.json_style,
+    )
 }
 
 #[cfg(test)]

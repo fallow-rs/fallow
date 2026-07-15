@@ -5,9 +5,9 @@ use fallow_config::OutputFormat;
 use fallow_output::{PrDecisionAnnotation, PrDecisionAnnotationLevel, PrDecisionConclusion};
 use serde_json::{Value, json};
 
-use crate::error::emit_error;
+use crate::error::emit_error_with_style;
 
-use super::{github_post_json, github_token, read_text_file};
+use super::{emit_ci_command_json, github_post_json, github_token, read_text_file};
 
 #[derive(Clone, Copy)]
 pub(super) struct PostCheckRunInput<'a> {
@@ -19,10 +19,14 @@ pub(super) struct PostCheckRunInput<'a> {
     pub dry_run: bool,
 }
 
-pub(super) fn post_check_run(input: &PostCheckRunInput<'_>, output: OutputFormat) -> ExitCode {
+pub(super) fn post_check_run(
+    input: &PostCheckRunInput<'_>,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let decision = match read_decision(input.decision) {
         Ok(decision) => decision,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let payloads = github_check_run_payloads(&decision, input.head_sha, input.split_gates);
     if input.dry_run {
@@ -31,15 +35,24 @@ pub(super) fn post_check_run(input: &PostCheckRunInput<'_>, output: OutputFormat
         } else {
             payloads.into_iter().next().unwrap_or_else(|| json!({}))
         };
-        return crate::report::emit_json(&value, "check run payload");
+        return emit_ci_command_json(&value, "check run payload", output, json_style);
     }
     let token = match github_token() {
         Ok(token) => token,
-        Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+        Err(e) => {
+            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+        }
     };
     let agent = match crate::api::try_api_agent() {
         Ok(agent) => agent,
-        Err(e) => return emit_error(&e.to_string(), crate::api::NETWORK_EXIT_CODE, output),
+        Err(e) => {
+            return emit_error_with_style(
+                &e.to_string(),
+                crate::api::NETWORK_EXIT_CODE,
+                output,
+                json_style,
+            );
+        }
     };
     let api = input
         .api_url
@@ -50,10 +63,22 @@ pub(super) fn post_check_run(input: &PostCheckRunInput<'_>, output: OutputFormat
     for payload in &payloads {
         match github_post_json(&agent, &url, &token, payload) {
             Ok(value) => results.push(value),
-            Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+            Err(e) => {
+                return emit_error_with_style(
+                    &e,
+                    crate::api::NETWORK_EXIT_CODE,
+                    output,
+                    json_style,
+                );
+            }
         }
     }
-    crate::report::emit_json(&Value::Array(results), "check run result")
+    emit_ci_command_json(
+        &Value::Array(results),
+        "check run result",
+        output,
+        json_style,
+    )
 }
 
 fn read_decision(path: &Path) -> Result<fallow_output::PrDecisionSurface, String> {

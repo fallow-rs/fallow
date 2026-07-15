@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
-use crate::error::emit_error;
+use crate::error::emit_error_with_style;
 
 #[path = "ci_check_run.rs"]
 mod check_run;
@@ -74,17 +75,33 @@ pub enum CiProvider {
     Gitlab,
 }
 
-pub fn run(command: CiCommand, output: OutputFormat) -> ExitCode {
+pub fn run(
+    command: CiCommand,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     match command {
-        command @ CiCommand::PlanPrComment { .. } => run_plan_pr_comment(command, output),
-        command @ CiCommand::PostPrComment { .. } => run_post_pr_comment(command, output),
-        command @ CiCommand::PostReview { .. } => run_post_review(command, output),
-        command @ CiCommand::PostCheckRun { .. } => run_post_check_run_command(command, output),
-        command @ CiCommand::ReconcileReview { .. } => run_reconcile_review(command, output),
+        command @ CiCommand::PlanPrComment { .. } => {
+            run_plan_pr_comment(command, output, json_style)
+        }
+        command @ CiCommand::PostPrComment { .. } => {
+            run_post_pr_comment(command, output, json_style)
+        }
+        command @ CiCommand::PostReview { .. } => run_post_review(command, output, json_style),
+        command @ CiCommand::PostCheckRun { .. } => {
+            run_post_check_run_command(command, output, json_style)
+        }
+        command @ CiCommand::ReconcileReview { .. } => {
+            run_reconcile_review(command, output, json_style)
+        }
     }
 }
 
-fn run_plan_pr_comment(command: CiCommand, output: OutputFormat) -> ExitCode {
+fn run_plan_pr_comment(
+    command: CiCommand,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let CiCommand::PlanPrComment {
         body,
         marker_id,
@@ -103,10 +120,15 @@ fn run_plan_pr_comment(command: CiCommand, output: OutputFormat) -> ExitCode {
         existing_comment_id,
         existing_body.as_deref(),
         output,
+        json_style,
     )
 }
 
-fn run_post_review(command: CiCommand, output: OutputFormat) -> ExitCode {
+fn run_post_review(
+    command: CiCommand,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let CiCommand::PostReview {
         provider,
         target,
@@ -131,10 +153,15 @@ fn run_post_review(command: CiCommand, output: OutputFormat) -> ExitCode {
             dry_run,
         },
         output,
+        json_style,
     )
 }
 
-fn run_post_check_run_command(command: CiCommand, output: OutputFormat) -> ExitCode {
+fn run_post_check_run_command(
+    command: CiCommand,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let CiCommand::PostCheckRun {
         provider,
         decision,
@@ -159,10 +186,15 @@ fn run_post_check_run_command(command: CiCommand, output: OutputFormat) -> ExitC
             dry_run,
         },
         output,
+        json_style,
     )
 }
 
-fn run_reconcile_review(command: CiCommand, output: OutputFormat) -> ExitCode {
+fn run_reconcile_review(
+    command: CiCommand,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let CiCommand::ReconcileReview {
         provider,
         target,
@@ -187,10 +219,15 @@ fn run_reconcile_review(command: CiCommand, output: OutputFormat) -> ExitCode {
             dry_run,
         },
         output,
+        json_style,
     )
 }
 
-fn run_post_pr_comment(command: CiCommand, output: OutputFormat) -> ExitCode {
+fn run_post_pr_comment(
+    command: CiCommand,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let CiCommand::PostPrComment {
         provider,
         target,
@@ -220,6 +257,7 @@ fn run_post_pr_comment(command: CiCommand, output: OutputFormat) -> ExitCode {
             dry_run,
         },
         output,
+        json_style,
     )
 }
 
@@ -227,13 +265,20 @@ fn run_post_check_run(
     provider: CiProvider,
     input: PostCheckRunInput<'_>,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match provider {
-        CiProvider::Github => post_check_run(&input, output),
-        CiProvider::Gitlab => emit_error("GitLab check runs are not supported", 2, output),
+        CiProvider::Github => post_check_run(&input, output, json_style),
+        CiProvider::Gitlab => {
+            emit_error_with_style("GitLab check runs are not supported", 2, output, json_style)
+        }
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "PR comment planning keeps provider inputs explicit and now also carries JSON presentation"
+)]
 fn plan_pr_comment(
     body: &Path,
     marker_id: String,
@@ -241,14 +286,15 @@ fn plan_pr_comment(
     existing_comment_id: Option<String>,
     existing_body: Option<&Path>,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let body = match read_text_file(body, "PR comment body") {
         Ok(body) => body,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let existing = match existing_comment(existing_comment_id, existing_body) {
         Ok(existing) => existing,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let envelope = fallow_output::PrCommentEnvelope {
         marker_id,
@@ -262,7 +308,7 @@ fn plan_pr_comment(
         envelope: &envelope,
         existing: existing.as_ref(),
     });
-    emit_pr_comment_post_plan(&plan, output)
+    emit_pr_comment_post_plan(&plan, output, json_style)
 }
 
 fn existing_comment(
@@ -292,10 +338,33 @@ fn read_text_file(path: &Path, label: &str) -> Result<String, String> {
 fn emit_pr_comment_post_plan(
     plan: &fallow_output::PrCommentPostPlan,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match serde_json::to_value(plan) {
-        Ok(value) => crate::report::emit_json(&value, "PR comment post plan"),
-        Err(e) => emit_error(&format!("JSON serialization error: {e}"), 2, output),
+    emit_ci_command_json(plan, "PR comment post plan", output, json_style)
+}
+
+#[cfg(test)]
+fn serialize_ci_command_json<T: Serialize + ?Sized>(
+    value: &T,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<String, serde_json::Error> {
+    json_style.serialize(value)
+}
+
+fn emit_ci_command_json<T: Serialize + ?Sized>(
+    value: &T,
+    kind: &str,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    match serde_json::to_value(value) {
+        Ok(value) => crate::report::emit_report_json(&value, kind, json_style),
+        Err(e) => emit_error_with_style(
+            &format!("JSON serialization error: {e}"),
+            2,
+            output,
+            json_style,
+        ),
     }
 }
 
@@ -313,11 +382,12 @@ fn reconcile_review(
     envelope: &Path,
     opts: ReconcileOptions<'_>,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let envelope = match read_envelope(envelope) {
         Ok(value) => value,
         Err(e) => {
-            return emit_error(&e, 2, output);
+            return emit_error_with_style(&e, 2, output, json_style);
         }
     };
     let current = envelope_fingerprints(&envelope);
@@ -332,9 +402,13 @@ fn reconcile_review(
                 opts,
                 &plan,
                 &ApplyResult::default(),
+                output,
+                json_style,
             );
         }
-        Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+        Err(e) => {
+            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+        }
     };
     let plan = PlannedReconcile::new(&current, &state);
 
@@ -344,7 +418,9 @@ fn reconcile_review(
         apply_provider_reconcile(provider, &plan, target, opts)
     };
 
-    emit_reconcile_result(provider, target, &envelope, opts, &plan.plan, &applied)
+    emit_reconcile_result(
+        provider, target, &envelope, opts, &plan.plan, &applied, output, json_style,
+    )
 }
 
 /// Load existing provider review state (comments + threads/discussions) for the
@@ -378,6 +454,10 @@ fn apply_provider_reconcile(
     clippy::cast_possible_truncation,
     reason = "comment / fingerprint counts on a single PR are bounded well below u32::MAX"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "review reconciliation renders one provider result from explicit planning and output inputs"
+)]
 fn emit_reconcile_result(
     provider: CiProvider,
     target: Option<&str>,
@@ -385,6 +465,8 @@ fn emit_reconcile_result(
     opts: ReconcileOptions<'_>,
     plan: &ReconcilePlan,
     applied: &ApplyResult,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let envelope_struct = fallow_output::ReviewReconcileOutput {
         schema: fallow_output::ReviewReconcileSchema::V1,
@@ -414,11 +496,12 @@ fn emit_reconcile_result(
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
-        Ok(value) => crate::report::emit_json(&value, "review reconcile"),
-        Err(e) => emit_error(
+        Ok(value) => emit_ci_command_json(&value, "review reconcile", output, json_style),
+        Err(e) => emit_error_with_style(
             &format!("JSON serialization error: {e}"),
             2,
-            fallow_config::OutputFormat::Json,
+            output,
+            json_style,
         ),
     }
 }
@@ -2760,6 +2843,23 @@ mod tests {
                 .get("ok")
                 .and_then(serde_json::Value::as_bool),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn ci_command_json_serialization_honors_selected_style() {
+        let value = serde_json::json!({ "action": "skip", "dry_run": true });
+
+        let compact = serialize_ci_command_json(&value, crate::json_style::JsonStyle::Compact)
+            .expect("compact CI JSON must serialize");
+        let pretty = serialize_ci_command_json(&value, crate::json_style::JsonStyle::Pretty)
+            .expect("pretty CI JSON must serialize");
+
+        assert_eq!(compact, r#"{"action":"skip","dry_run":true}"#);
+        assert!(pretty.contains("\n  \"action\": \"skip\""));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&compact).expect("compact JSON must parse"),
+            serde_json::from_str::<serde_json::Value>(&pretty).expect("pretty JSON must parse")
         );
     }
 

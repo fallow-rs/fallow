@@ -68,16 +68,19 @@ fn print_machine_combined_report(
 ) -> Result<Option<u8>, ExitCode> {
     match opts.output {
         OutputFormat::Json => {
-            let code = print_combined_json(CombinedJsonPrintInput {
-                check_result,
-                dupes_result,
-                health_result,
-                root: opts.root,
-                elapsed: total_elapsed,
-                explain: opts.explain,
-                config_fixable: opts.config_path.is_some()
-                    || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
-            });
+            let code = print_combined_json(
+                CombinedJsonPrintInput {
+                    check_result,
+                    dupes_result,
+                    health_result,
+                    root: opts.root,
+                    elapsed: total_elapsed,
+                    explain: opts.explain,
+                    config_fixable: opts.config_path.is_some()
+                        || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+                },
+                opts.json_style,
+            );
             combined_machine_success(code)
         }
         OutputFormat::Sarif => {
@@ -566,6 +569,7 @@ fn print_check_section(
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,
+            json_style: crate::json_style::JsonStyle::Compact,
         },
     );
     exit_code_to_u8(code)
@@ -590,6 +594,7 @@ fn print_dupes_section(
         opts.summary,
         !show_headers,
         false,
+        opts.json_style,
     );
     exit_code_to_u8(code)
 }
@@ -607,7 +612,7 @@ fn print_health_section(
         eprintln!("── Complexity ─────────────────────────────────────");
     }
     if let Some(ref timings) = result.timings {
-        report::print_health_performance(timings, opts.output);
+        report::print_health_performance(timings, opts.output, opts.json_style);
     }
     let code = crate::health::print_health_result(
         result,
@@ -620,6 +625,7 @@ fn print_health_section(
             show_explain_tip: false,
             skip_score_and_trend: true,
             css_requested: false,
+            json_style: opts.json_style,
         },
     );
     exit_code_to_u8(code)
@@ -762,12 +768,15 @@ struct CombinedJsonPrintInput<'a> {
     config_fixable: bool,
 }
 
-fn print_combined_json(input: CombinedJsonPrintInput<'_>) -> ExitCode {
+fn print_combined_json(
+    input: CombinedJsonPrintInput<'_>,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let output = match build_combined_json_output(input) {
         Ok(output) => output,
         Err(code) => return code,
     };
-    emit_combined_json_output(&output)
+    emit_combined_json_output(&output, json_style)
 }
 
 fn build_combined_json_output(
@@ -819,8 +828,11 @@ fn combined_next_steps(
     )
 }
 
-fn emit_combined_json_output(output: &serde_json::Value) -> ExitCode {
-    match serde_json::to_string_pretty(output) {
+fn emit_combined_json_output(
+    output: &serde_json::Value,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    match json_style.serialize(output) {
         Ok(json) => {
             outln!("{json}");
             ExitCode::SUCCESS
@@ -1092,6 +1104,9 @@ mod tests {
             "elapsed_ms": 0,
         });
 
-        assert_eq!(emit_combined_json_output(&combined), ExitCode::SUCCESS);
+        assert_eq!(
+            emit_combined_json_output(&combined, crate::json_style::JsonStyle::Compact),
+            ExitCode::SUCCESS
+        );
     }
 }

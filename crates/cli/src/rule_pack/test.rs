@@ -32,7 +32,13 @@ pub fn run(args: &TestArgs, ctx: &RulePackContext<'_>) -> ExitCode {
     let summaries = build_rule_summaries(&config, &findings);
 
     if matches!(ctx.output, OutputFormat::Json) {
-        return emit_json(&config, forced_severity, &summaries, &findings);
+        return emit_json(
+            &config,
+            forced_severity,
+            &summaries,
+            &findings,
+            ctx.json_style,
+        );
     }
 
     emit_human(&summaries, &findings, ctx.root, forced_severity)
@@ -124,8 +130,9 @@ fn emit_json(
     forced_severity: bool,
     summaries: &[RuleSummary],
     findings: &[PolicyViolationFinding],
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    crate::report::emit_json(
+    super::emit_json(
         &json!({
             "kind": "rule-pack-test",
             "packs": config.rule_packs.iter().map(|pack| pack.name.as_str()).collect::<Vec<_>>(),
@@ -142,6 +149,7 @@ fn emit_json(
             "findings": findings,
         }),
         "rule-pack-test",
+        json_style,
     )
 }
 

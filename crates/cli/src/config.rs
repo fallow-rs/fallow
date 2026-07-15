@@ -46,6 +46,7 @@ pub fn run_config(
         path_only,
         output,
         quiet,
+        json_style: crate::json_style::JsonStyle::Compact,
         load_options: fallow_config::ConfigLoadOptions::default(),
     })
 }
@@ -57,6 +58,7 @@ pub struct RunConfigInput<'a> {
     pub(crate) path_only: bool,
     pub(crate) output: OutputFormat,
     pub(crate) quiet: bool,
+    pub(crate) json_style: crate::json_style::JsonStyle,
     pub(crate) load_options: fallow_config::ConfigLoadOptions,
 }
 
@@ -91,7 +93,7 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
                 if !input.quiet {
                     eprintln!("loaded config: {}", path.display());
                 }
-                match serde_json::to_string_pretty(&config) {
+                match input.json_style.serialize(&config) {
                     Ok(json) => println!("{json}"),
                     Err(e) => {
                         return emit_error(&format!("failed to serialize config: {e}"), 2, output);
@@ -114,7 +116,7 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
             if !input.quiet {
                 eprintln!("no config file found, using defaults");
             }
-            match serde_json::to_string_pretty(&FallowConfig::default()) {
+            match input.json_style.serialize(&FallowConfig::default()) {
                 Ok(json) => {
                     println!("{json}");
                     ExitCode::SUCCESS

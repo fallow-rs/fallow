@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::api::{api_url, try_api_agent_with_timeout};
+use crate::json_style::JsonStyle;
 
 const CONFIG_SCHEMA_VERSION: u8 = 2;
 const TELEMETRY_SCHEMA_VERSION: u8 = 2;
@@ -1008,12 +1009,12 @@ pub struct WorkflowRecord<'a> {
     pub context: WorkflowContext,
 }
 
-pub fn run(command: TelemetryCommand, output: OutputFormat) -> ExitCode {
+pub fn run(command: TelemetryCommand, output: OutputFormat, json_style: JsonStyle) -> ExitCode {
     match command {
-        TelemetryCommand::Status => print_status(output),
-        TelemetryCommand::Enable => set_enabled(true, output),
-        TelemetryCommand::Disable => set_enabled(false, output),
-        TelemetryCommand::Inspect { example } => inspect(example, output),
+        TelemetryCommand::Status => print_status(output, json_style),
+        TelemetryCommand::Enable => set_enabled(true, output, json_style),
+        TelemetryCommand::Disable => set_enabled(false, output, json_style),
+        TelemetryCommand::Inspect { example } => inspect(example, output, json_style),
     }
 }
 
@@ -1132,10 +1133,10 @@ pub fn maybe_print_opt_in_note(output: OutputFormat, quiet: bool) -> bool {
     true
 }
 
-fn print_status(output: OutputFormat) -> ExitCode {
+fn print_status(output: OutputFormat, json_style: JsonStyle) -> ExitCode {
     let status = collect_status();
     match output {
-        OutputFormat::Json => print_status_json(&status),
+        OutputFormat::Json => print_status_json(&status, json_style),
         _ => print_status_human(status),
     }
 }
@@ -1164,7 +1165,7 @@ fn collect_status() -> TelemetryStatus {
     }
 }
 
-fn print_status_json(status: &TelemetryStatus) -> ExitCode {
+fn print_status_json(status: &TelemetryStatus, json_style: JsonStyle) -> ExitCode {
     let value = serde_json::json!({
         "telemetry": {
             "state": status.state,
@@ -1182,7 +1183,7 @@ fn print_status_json(status: &TelemetryStatus) -> ExitCode {
             "docs": "docs/telemetry.md"
         }
     });
-    crate::report::emit_json(&value, "telemetry status")
+    crate::report::emit_report_json(&value, "telemetry status", json_style)
 }
 
 fn print_status_human(status: TelemetryStatus) -> ExitCode {
@@ -1214,7 +1215,7 @@ fn print_status_human(status: TelemetryStatus) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
+fn set_enabled(enabled: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCode {
     if admin_disabled() && enabled {
         return crate::error::emit_error(
             "telemetry is disabled by DO_NOT_TRACK or FALLOW_TELEMETRY_DISABLED",
@@ -1261,7 +1262,7 @@ fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
                     "config_path": path.display().to_string()
                 }
             });
-            crate::report::emit_json(&value, "telemetry config")
+            crate::report::emit_report_json(&value, "telemetry config", json_style)
         }
         _ => {
             println!(
@@ -1274,7 +1275,7 @@ fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
     }
 }
 
-fn inspect(example: bool, output: OutputFormat) -> ExitCode {
+fn inspect(example: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCode {
     if !example {
         match output {
             OutputFormat::Json => {
@@ -1285,7 +1286,7 @@ fn inspect(example: bool, output: OutputFormat) -> ExitCode {
                         "example_command": "fallow telemetry inspect --example"
                     }
                 });
-                return crate::report::emit_json(&value, "telemetry inspect");
+                return crate::report::emit_report_json(&value, "telemetry inspect", json_style);
             }
             _ => {
                 println!(
@@ -1311,7 +1312,7 @@ fn inspect(example: bool, output: OutputFormat) -> ExitCode {
                     .map(|(header, purpose)| serde_json::json!({ "header": header, "purpose": purpose }))
                     .collect::<Vec<_>>(),
             });
-            crate::report::emit_json(&value, "telemetry inspect")
+            crate::report::emit_report_json(&value, "telemetry inspect", json_style)
         }
         _ => {
             println!(

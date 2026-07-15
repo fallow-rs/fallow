@@ -1638,6 +1638,7 @@ Available on all commands:
 | `-c, --config` | `string` | - | Config file path |
 | `--allow-remote-extends` | `bool` | `false` | Allow trusted config files to extend HTTPS URLs |
 | `-f, --format` | `human\|json\|sarif\|compact\|markdown\|codeclimate\|pr-comment-github\|pr-comment-gitlab\|review-github\|review-gitlab\|badge\|github-annotations\|github-summary` | `human` | Output format (alias: --output) |
+| `--pretty` | `bool` | `false` | Indent JSON output for manual inspection. Requires the final output format to be JSON |
 | `-q, --quiet` | `bool` | `false` | Suppress progress output |
 | `--no-cache` | `bool` | `false` | Disable incremental caching |
 | `--threads` | `string` | - | Number of parser threads |
@@ -1767,7 +1768,7 @@ Set `FALLOW_FORMAT=json` and `FALLOW_QUIET=1` in your agent environment to avoid
 | Format | Description | Use Case |
 |--------|-------------|----------|
 | `human` | Colored terminal output | Interactive use |
-| `json` | Machine-readable JSON | Agent integration, CI pipelines |
+| `json` | Compact machine-readable JSON by default; add `--pretty` for indented manual inspection | Agent integration, CI pipelines |
 | `sarif` | Static Analysis Results Interchange Format | GitHub Code Scanning, SARIF-compatible tools |
 | `compact` | Grep-friendly: one issue per line. Dupes lines include `code-duplication:path:start-end:fingerprint=dup:<id>,...` | Quick filtering |
 | `markdown` | Markdown tables | Documentation, PR comments |

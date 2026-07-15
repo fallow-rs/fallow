@@ -215,6 +215,10 @@ async fn run_fallow_with_top_level_warnings_inserts_empty_array() {
     .unwrap();
     assert_eq!(result.is_error, Some(false));
     let text = extract_text(&result);
+    assert!(
+        !text.chars().any(char::is_whitespace),
+        "warning injection should preserve compact JSON: {text}"
+    );
     let parsed: serde_json::Value = serde_json::from_str(text).expect("should be valid JSON");
     assert_eq!(parsed["warnings"], serde_json::json!([]));
     assert_eq!(parsed["runtime_coverage"]["schema_version"], "1");

@@ -9,7 +9,6 @@ use fallow_types::guard::{GuardFileReport, GuardPolicyRule, GuardReport};
 use serde_json::{Value, json};
 
 use crate::error::emit_error;
-use crate::report;
 use crate::report::sink::outln;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
@@ -18,6 +17,7 @@ pub struct GuardOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub quiet: bool,
     pub allow_remote_extends: bool,
     pub files: &'a [String],
@@ -52,12 +52,16 @@ pub fn run_guard(opts: &GuardOptions<'_>) -> ExitCode {
         }
     };
 
-    emit_guard_report(&report, opts.output)
+    emit_guard_report(&report, opts.output, opts.json_style)
 }
 
-fn emit_guard_report(report: &GuardReport, output: OutputFormat) -> ExitCode {
+fn emit_guard_report(
+    report: &GuardReport,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     match output {
-        OutputFormat::Json => emit_json(report),
+        OutputFormat::Json => emit_json(report, json_style),
         OutputFormat::Human => {
             emit_human(report);
             ExitCode::SUCCESS
@@ -66,24 +70,30 @@ fn emit_guard_report(report: &GuardReport, output: OutputFormat) -> ExitCode {
     }
 }
 
-fn emit_json(report: &GuardReport) -> ExitCode {
-    let mut value = match serde_json::to_value(report) {
-        Ok(value) => value,
-        Err(err) => {
-            return emit_error(
-                &format!("failed to serialize guard output: {err}"),
-                2,
-                OutputFormat::Json,
-            );
+fn emit_json(report: &GuardReport, json_style: crate::json_style::JsonStyle) -> ExitCode {
+    match render_guard_json(report, json_style) {
+        Ok(json) => {
+            outln!("{json}");
+            ExitCode::SUCCESS
         }
-    };
-    match &mut value {
-        Value::Object(map) => {
-            map.insert("kind".to_string(), json!("guard"));
-            report::emit_json(&value, "guard")
-        }
-        _ => emit_error("failed to serialize guard output", 2, OutputFormat::Json),
+        Err(err) => crate::error::emit_error_with_style(
+            &format!("failed to serialize guard output: {err}"),
+            2,
+            OutputFormat::Json,
+            json_style,
+        ),
     }
+}
+
+fn render_guard_json(
+    report: &GuardReport,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<String, serde_json::Error> {
+    let mut value = serde_json::to_value(report)?;
+    if let Value::Object(map) = &mut value {
+        map.insert("kind".to_string(), json!("guard"));
+    }
+    json_style.serialize(&value)
 }
 
 fn emit_human(report: &GuardReport) {
@@ -180,4 +190,28 @@ fn emit_policy_rule(rule: &GuardPolicyRule) {
         "           suppress: // fallow-ignore-next-line {} -- <reason>",
         rule.suppress_token
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guard_json_respects_explicit_style() {
+        let report = GuardReport { files: vec![] };
+        let compact = render_guard_json(&report, crate::json_style::JsonStyle::Compact)
+            .expect("compact guard JSON should serialize");
+        let pretty = render_guard_json(&report, crate::json_style::JsonStyle::Pretty)
+            .expect("pretty guard JSON should serialize");
+
+        assert!(
+            !compact.contains('\n'),
+            "compact JSON must stay on one line"
+        );
+        assert!(pretty.contains("\n  \""), "pretty JSON must be indented");
+        assert_eq!(
+            serde_json::from_str::<Value>(&compact).unwrap(),
+            serde_json::from_str::<Value>(&pretty).unwrap(),
+        );
+    }
 }

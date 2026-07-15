@@ -52,6 +52,16 @@
       ]
     },
     {
+      "name": "--pretty",
+      "type": "bool",
+      "required": false,
+      "description": "Indent JSON output for manual inspection. Requires the final output format to be JSON",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--quiet",
       "type": "bool",
       "required": false,

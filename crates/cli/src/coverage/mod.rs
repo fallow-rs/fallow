@@ -64,6 +64,7 @@ pub struct RunContext<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub quiet: bool,
     pub no_cache: bool,
     pub threads: usize,
@@ -333,7 +334,7 @@ impl CoverageSetupContext {
 /// Dispatch a `fallow coverage <sub>` invocation.
 pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
     match subcommand {
-        CoverageSubcommand::Setup(args) => run_setup(args, ctx.root),
+        CoverageSubcommand::Setup(args) => run_setup(args, ctx.root, ctx.json_style),
         CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
         CoverageSubcommand::UploadInventory(args) => {
             upload_inventory::run(&args, ctx.root, ctx.allow_remote_extends)
@@ -540,9 +541,9 @@ fn hash_bytes(bytes: &[u8]) -> String {
     output
 }
 
-fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
+fn run_setup(args: SetupArgs, root: &Path, json_style: crate::json_style::JsonStyle) -> ExitCode {
     if args.json {
-        return run_setup_json(root, args.explain);
+        return run_setup_json(root, args.explain, json_style);
     }
 
     let _lock = match CoverageSetupLock::try_acquire(root) {
@@ -711,16 +712,29 @@ fn setup_error_exit(message: &str, code: u8) -> ExitCode {
     ExitCode::from(code)
 }
 
-fn run_setup_json(root: &Path, explain: bool) -> ExitCode {
+fn run_setup_json(
+    root: &Path,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let payload = build_setup_json(root, explain);
-    let stdout = std::io::stdout();
-    let mut handle = stdout.lock();
-    if let Err(err) = serde_json::to_writer_pretty(&mut handle, &payload) {
-        eprintln!("fallow coverage setup: failed to write JSON output: {err}");
-        return ExitCode::from(2);
+    match render_setup_json(&payload, json_style) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("fallow coverage setup: failed to write JSON output: {err}");
+            ExitCode::from(2)
+        }
     }
-    println!();
-    ExitCode::SUCCESS
+}
+
+fn render_setup_json(
+    payload: &serde_json::Value,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<String, serde_json::Error> {
+    json_style.serialize(payload)
 }
 
 #[expect(
@@ -1826,8 +1840,8 @@ mod tests {
         CoverageSetupContext, FrameworkKind, PackageManager, SetupArgs, build_setup_json,
         detect_coverage_artifact, detect_framework, detect_package_manager, handle_license_step,
         load_setup_state, recipe_contents, recipe_state_is_current, record_recipe_state,
-        record_sidecar_state, run_setup, setup_context_fingerprint, setup_state_path,
-        sidecar_state_is_current, write_recipe,
+        record_sidecar_state, render_setup_json, run_setup, setup_context_fingerprint,
+        setup_state_path, sidecar_state_is_current, write_recipe,
     };
     use fallow_config::PackageJson;
     use fallow_license::LicenseStatus;
@@ -2351,6 +2365,25 @@ mod tests {
     }
 
     #[test]
+    fn setup_json_respects_explicit_style() {
+        let payload = serde_json::json!({"kind": "coverage-setup", "commands": []});
+        let compact = render_setup_json(&payload, crate::json_style::JsonStyle::Compact)
+            .expect("compact coverage setup should serialize");
+        let pretty = render_setup_json(&payload, crate::json_style::JsonStyle::Pretty)
+            .expect("pretty coverage setup should serialize");
+
+        assert!(
+            !compact.contains('\n'),
+            "compact JSON must stay on one line"
+        );
+        assert!(pretty.contains("\n  \""), "pretty JSON must be indented");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&compact).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&pretty).unwrap(),
+        );
+    }
+
+    #[test]
     fn run_setup_json_does_not_write_state_lock_or_recipe() {
         let dir = tempdir().expect("tempdir should be created");
 
@@ -2360,6 +2393,7 @@ mod tests {
                 ..SetupArgs::default()
             },
             dir.path(),
+            crate::json_style::JsonStyle::Compact,
         );
 
         assert_eq!(exit, std::process::ExitCode::SUCCESS);
@@ -2542,6 +2576,7 @@ mod tests {
                 ..SetupArgs::default()
             },
             root,
+            crate::json_style::JsonStyle::Compact,
         );
 
         let mut restored = std::fs::metadata(&docs_dir)

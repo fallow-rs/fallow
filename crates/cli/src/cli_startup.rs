@@ -8,8 +8,8 @@ use fallow_engine::validate;
 use crate::cli_format::{Format, FormatConfig, format_from_env, parse_format_arg, resolve_format};
 use crate::cli_telemetry::{TelemetryRun, record_run_epilogue};
 use crate::{
-    Cli, Command, emit_known_failure, rayon_pool, regression, report, runtime_support,
-    security_help_target, telemetry,
+    Cli, Command, emit_known_failure, emit_known_failure_with_style, rayon_pool, regression,
+    report, runtime_support, security_help_target, telemetry,
 };
 
 /// Build the tracing filter for the CLI.
@@ -49,10 +49,11 @@ pub fn setup_tracing() {
 pub fn validate_inputs(
     cli: &Cli,
     output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> Result<(PathBuf, usize), ExitCode> {
-    validate_input_flags(cli, output)?;
-    let root = resolve_validated_root(cli, output)?;
-    validate_input_git_refs(cli, output)?;
+    validate_input_flags(cli, output, json_style)?;
+    let root = resolve_validated_root(cli, output, json_style)?;
+    validate_input_git_refs(cli, output, json_style)?;
 
     let threads = cli
         .threads
@@ -65,9 +66,19 @@ pub fn validate_inputs(
 
 /// Reject unsupported security globals, control characters in path-shaped flags,
 /// and the `--workspace`/`--changed-workspaces` mutual exclusion.
-fn validate_input_flags(cli: &Cli, output: fallow_config::OutputFormat) -> Result<(), ExitCode> {
+fn validate_input_flags(
+    cli: &Cli,
+    output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<(), ExitCode> {
     let validation_failure = |message: &str| {
-        emit_known_failure(message, 2, output, telemetry::FailureReason::Validation)
+        emit_known_failure_with_style(
+            message,
+            2,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        )
     };
 
     if matches!(&cli.command, Some(Command::Security { .. }))
@@ -117,27 +128,40 @@ fn validate_input_flags(cli: &Cli, output: fallow_config::OutputFormat) -> Resul
 fn resolve_validated_root(
     cli: &Cli,
     output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> Result<PathBuf, ExitCode> {
     let raw_root = if let Some(root) = cli.root.clone() {
         root
     } else {
         std::env::current_dir().map_err(|err| {
-            emit_known_failure(
+            emit_known_failure_with_style(
                 &format!("Failed to get current directory: {err}"),
                 2,
                 output,
+                json_style,
                 telemetry::FailureReason::Config,
             )
         })?
     };
-    validate::validate_root(&raw_root)
-        .map_err(|e| emit_known_failure(&e, 2, output, telemetry::FailureReason::Config))
+    validate::validate_root(&raw_root).map_err(|e| {
+        emit_known_failure_with_style(&e, 2, output, json_style, telemetry::FailureReason::Config)
+    })
 }
 
 /// Validate `--changed-since` / `--changed-workspaces` as well-formed git refs.
-fn validate_input_git_refs(cli: &Cli, output: fallow_config::OutputFormat) -> Result<(), ExitCode> {
+fn validate_input_git_refs(
+    cli: &Cli,
+    output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<(), ExitCode> {
     let validation_failure = |message: &str| {
-        emit_known_failure(message, 2, output, telemetry::FailureReason::Validation)
+        emit_known_failure_with_style(
+            message,
+            2,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        )
     };
 
     if let Some(ref git_ref) = cli.changed_since
@@ -292,6 +316,7 @@ pub fn run_pre_dispatch_checks(
     cli: &Cli,
     root: &Path,
     output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
     quiet: bool,
     telemetry_run: TelemetryRun,
 ) -> Result<regression::Tolerance, ExitCode> {
@@ -306,17 +331,24 @@ pub fn run_pre_dispatch_checks(
     if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some() || cli.output_file.is_some())
         && command_rejects_output_gate(cli.command.as_ref())
     {
-        let code = emit_known_failure(
+        let code = emit_known_failure_with_style(
             "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, dupes, health, security, or bare invocation",
             2,
             output,
+            json_style,
             telemetry::FailureReason::Validation,
         );
         return Err(fail(code, telemetry::FailureReason::Validation));
     }
 
     if let Some(message) = global_filter_error(cli) {
-        let code = emit_known_failure(message, 2, output, telemetry::FailureReason::Validation);
+        let code = emit_known_failure_with_style(
+            message,
+            2,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        );
         return Err(fail(code, telemetry::FailureReason::Validation));
     }
 
@@ -330,11 +362,12 @@ pub fn run_pre_dispatch_checks(
                 | fallow_config::OutputFormat::ReviewGitlab
         )
     {
-        let code = emit_known_failure(
+        let code = emit_known_failure_with_style(
             "--report-path-prefix is only valid with --format github-annotations, \
              github-summary, codeclimate, review-github, or review-gitlab",
             2,
             output,
+            json_style,
             telemetry::FailureReason::Validation,
         );
         return Err(fail(code, telemetry::FailureReason::Validation));
@@ -372,15 +405,31 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
         parse_error_output_format(std::env::args_os().skip(1)),
         fallow_config::OutputFormat::Json
     ) {
-        return crate::error::emit_error(
+        return crate::error::emit_error_with_style(
             err.to_string().trim(),
             exit_code,
             fallow_config::OutputFormat::Json,
+            parse_error_json_style(std::env::args_os().skip(1)),
         );
     }
 
     let _ = err.print();
     ExitCode::from(exit_code)
+}
+
+fn parse_error_json_style<I, S>(args: I) -> crate::json_style::JsonStyle
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    if args
+        .into_iter()
+        .any(|arg| arg.as_ref() == OsStr::new("--pretty"))
+    {
+        crate::json_style::JsonStyle::Pretty
+    } else {
+        crate::json_style::JsonStyle::Compact
+    }
 }
 
 fn parse_error_output_format<I, S>(args: I) -> fallow_config::OutputFormat

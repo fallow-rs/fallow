@@ -1551,6 +1551,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: false,
         threads: 1,
         quiet: true,
@@ -1623,6 +1624,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: false,
         threads: 1,
         quiet: true,
@@ -1709,6 +1711,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: false,
         threads: 1,
         quiet: true,
@@ -1792,6 +1795,7 @@ fn audit_gate_all_skips_base_snapshot() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -1895,6 +1899,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -1999,6 +2004,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -2087,6 +2093,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -2264,6 +2271,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -2409,6 +2417,7 @@ export function App() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -2561,6 +2570,7 @@ export function App() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -2633,7 +2643,6 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
     .expect("package.json should be written");
     fs::write(root.join("src/index.ts"), "export const used = 1;\n")
         .expect("index should be written");
-
     git(root, &["init", "-b", "main"]);
     git(root, &["add", "."]);
     git(
@@ -2654,6 +2663,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -2731,8 +2741,8 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
     fs::write(
             root.join("package.json"),
             r#"{"name":"audit-current-config","main":"src/index.ts","dependencies":{"left-pad":"1.3.1"}}"#,
-        )
-        .expect("package.json should be touched");
+    )
+    .expect("package.json should be touched");
 
     let config_path = None;
     let cache_root = root.join(".fallow");
@@ -2741,6 +2751,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,
@@ -2827,13 +2838,13 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         )
         .expect("package.json should be touched");
 
-    let config_path = None;
     let cache_root = root.join(".fallow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
-        config_path: &config_path,
+        config_path: &None,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: false,
         threads: 1,
         quiet: true,
@@ -2950,6 +2961,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         cache_dir: &cache_root,
         config_path: &config_path,
         output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         threads: 1,
         quiet: true,

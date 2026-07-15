@@ -80,6 +80,7 @@ pub struct AuditOptions<'a> {
     pub config_path: &'a Option<std::path::PathBuf>,
     pub cache_dir: &'a std::path::Path,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -611,6 +612,7 @@ fn build_base_audit_options<'a>(
         config_path: current_config_path,
         cache_dir: base_cache_dir,
         output: opts.output,
+        json_style: opts.json_style,
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: true,
@@ -2023,6 +2025,7 @@ fn run_audit_check<'a>(
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
+        json_style: opts.json_style,
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
@@ -2122,6 +2125,7 @@ fn build_audit_dupes_options<'a>(
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
+        json_style: opts.json_style,
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
@@ -2261,7 +2265,7 @@ mod output;
 pub use output::audit_json_header_input;
 pub use output::{
     insert_audit_dead_code_json, insert_audit_duplication_json, insert_audit_health_json,
-    print_audit_findings, print_audit_result,
+    print_audit_findings, print_audit_result, print_audit_result_with_style,
 };
 
 /// Run the full audit command: execute analyses, print results, return exit code.
@@ -2271,7 +2275,7 @@ pub use output::{
 /// the verdict, exit code, or output.
 pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode {
     if let Err(e) = fallow_engine::health::validate_coverage_root_absolute(opts.coverage_root) {
-        return emit_error(&e, 2, opts.output);
+        return crate::error::emit_error_with_style(&e, 2, opts.output, opts.json_style);
     }
     let coverage_resolved = opts
         .coverage
@@ -2287,7 +2291,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
     match execute_audit(&resolved_opts) {
         Ok(result) => {
             record_audit_impact(opts, gate_marker, &result);
-            print_audit_command_result(opts, &result)
+            print_audit_command_result(opts, &result, opts.json_style)
         }
         Err(code) => code,
     }
@@ -2332,9 +2336,13 @@ fn record_audit_impact(opts: &AuditOptions<'_>, gate_marker: Option<&str>, resul
     );
 }
 
-fn print_audit_command_result(opts: &AuditOptions<'_>, result: &AuditResult) -> ExitCode {
+fn print_audit_command_result(
+    opts: &AuditOptions<'_>,
+    result: &AuditResult,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     if opts.walkthrough_guide {
-        return crate::audit_brief::print_walkthrough_guide_result(result);
+        return crate::audit_brief::print_walkthrough_guide_result(result, json_style);
     }
     if opts.walkthrough {
         return crate::audit_brief::print_walkthrough_human_result(
@@ -2344,10 +2352,11 @@ fn print_audit_command_result(opts: &AuditOptions<'_>, result: &AuditResult) -> 
             opts.mark_viewed,
             opts.show_cleared,
             opts.quiet,
+            json_style,
         );
     }
     if let Some(path) = opts.walkthrough_file {
-        return crate::audit_brief::print_walkthrough_file_result(result, path);
+        return crate::audit_brief::print_walkthrough_file_result(result, path, json_style);
     }
     if opts.brief {
         return crate::audit_brief::print_brief_result(
@@ -2356,9 +2365,10 @@ fn print_audit_command_result(opts: &AuditOptions<'_>, result: &AuditResult) -> 
             opts.quiet,
             opts.explain,
             opts.show_deprioritized,
+            json_style,
         );
     }
-    print_audit_result(result, opts.quiet, opts.explain)
+    print_audit_result_with_style(result, opts.quiet, opts.explain, json_style)
 }
 
 /// Run the standalone `fallow decision-surface` command: the separable, cheap
@@ -2377,7 +2387,9 @@ pub fn run_decision_surface(opts: &AuditOptions<'_>) -> ExitCode {
         ..*opts
     };
     match execute_audit(&brief_opts) {
-        Ok(result) => crate::audit_brief::print_decision_surface_result(&result, opts.quiet),
+        Ok(result) => {
+            crate::audit_brief::print_decision_surface_result(&result, opts.quiet, opts.json_style)
+        }
         Err(code) => code,
     }
 }

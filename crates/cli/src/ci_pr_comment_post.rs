@@ -5,7 +5,7 @@ use fallow_config::OutputFormat;
 use serde_json::Value;
 
 use crate::api::try_api_agent;
-use crate::error::emit_error;
+use crate::error::emit_error_with_style;
 
 use super::{
     CiProvider, emit_pr_comment_post_plan, github_get_json, github_post_json, github_token,
@@ -27,30 +27,40 @@ pub(super) struct PostPrCommentInput<'a> {
     pub dry_run: bool,
 }
 
-pub(super) fn post_pr_comment(input: &PostPrCommentInput<'_>, output: OutputFormat) -> ExitCode {
+pub(super) fn post_pr_comment(
+    input: &PostPrCommentInput<'_>,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     match input.provider {
-        CiProvider::Github => post_github_pr_comment(input, output),
-        CiProvider::Gitlab => post_gitlab_mr_comment(input, output),
+        CiProvider::Github => post_github_pr_comment(input, output, json_style),
+        CiProvider::Gitlab => post_gitlab_mr_comment(input, output, json_style),
     }
 }
 
-fn post_github_pr_comment(input: &PostPrCommentInput<'_>, output: OutputFormat) -> ExitCode {
+fn post_github_pr_comment(
+    input: &PostPrCommentInput<'_>,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let pr = match require_target("GitHub pull request", input.target) {
         Ok(pr) => pr,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let envelope =
         match read_pr_comment_envelope(input.envelope, input.body, &input.marker_id, input.clean) {
             Ok(envelope) => envelope,
-            Err(e) => return emit_error(&e, 2, output),
+            Err(e) => return emit_error_with_style(&e, 2, output, json_style),
         };
     let repo = match github_repo(input.repo) {
         Ok(repo) => repo,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let token = match github_token() {
         Ok(token) => token,
-        Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+        Err(e) => {
+            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+        }
     };
     let api = input
         .api_url
@@ -58,12 +68,26 @@ fn post_github_pr_comment(input: &PostPrCommentInput<'_>, output: OutputFormat) 
         .trim_end_matches('/');
     let agent = match try_api_agent() {
         Ok(agent) => agent,
-        Err(err) => return emit_error(&err.to_string(), crate::api::NETWORK_EXIT_CODE, output),
+        Err(err) => {
+            return emit_error_with_style(
+                &err.to_string(),
+                crate::api::NETWORK_EXIT_CODE,
+                output,
+                json_style,
+            );
+        }
     };
     let existing =
         match find_github_sticky_comment(&agent, api, &repo, pr, &token, &input.marker_id) {
             Ok(existing) => existing,
-            Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+            Err(e) => {
+                return emit_error_with_style(
+                    &e,
+                    crate::api::NETWORK_EXIT_CODE,
+                    output,
+                    json_style,
+                );
+            }
         };
     let plan = fallow_output::plan_pr_comment_post(&fallow_output::PrCommentPostPlanInput {
         envelope: &envelope,
@@ -72,40 +96,60 @@ fn post_github_pr_comment(input: &PostPrCommentInput<'_>, output: OutputFormat) 
     if !input.dry_run
         && let Err(e) = apply_github_pr_comment_plan(&agent, api, &repo, pr, &token, &plan)
     {
-        return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output);
+        return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
     }
-    emit_pr_comment_post_plan(&plan, output)
+    emit_pr_comment_post_plan(&plan, output, json_style)
 }
 
-fn post_gitlab_mr_comment(input: &PostPrCommentInput<'_>, output: OutputFormat) -> ExitCode {
+fn post_gitlab_mr_comment(
+    input: &PostPrCommentInput<'_>,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let mr = match require_target("GitLab merge request", input.target) {
         Ok(mr) => mr,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let envelope =
         match read_pr_comment_envelope(input.envelope, input.body, &input.marker_id, input.clean) {
             Ok(envelope) => envelope,
-            Err(e) => return emit_error(&e, 2, output),
+            Err(e) => return emit_error_with_style(&e, 2, output, json_style),
         };
     let project_id = match gitlab_project_id(input.project_id) {
         Ok(project_id) => project_id,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
     let token = match gitlab_token() {
         Ok(token) => token,
-        Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+        Err(e) => {
+            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+        }
     };
     let api = gitlab_api_url(input.api_url);
     let agent = match try_api_agent() {
         Ok(agent) => agent,
-        Err(err) => return emit_error(&err.to_string(), crate::api::NETWORK_EXIT_CODE, output),
+        Err(err) => {
+            return emit_error_with_style(
+                &err.to_string(),
+                crate::api::NETWORK_EXIT_CODE,
+                output,
+                json_style,
+            );
+        }
     };
     let encoded_project = url_encode_path_segment(&project_id);
     let existing =
         match find_gitlab_sticky_note(&agent, &api, &encoded_project, mr, &token, &input.marker_id)
         {
             Ok(existing) => existing,
-            Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
+            Err(e) => {
+                return emit_error_with_style(
+                    &e,
+                    crate::api::NETWORK_EXIT_CODE,
+                    output,
+                    json_style,
+                );
+            }
         };
     let plan = fallow_output::plan_pr_comment_post(&fallow_output::PrCommentPostPlanInput {
         envelope: &envelope,
@@ -115,9 +159,9 @@ fn post_gitlab_mr_comment(input: &PostPrCommentInput<'_>, output: OutputFormat) 
         && let Err(e) =
             apply_gitlab_mr_comment_plan(&agent, &api, &encoded_project, mr, &token, &plan)
     {
-        return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output);
+        return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
     }
-    emit_pr_comment_post_plan(&plan, output)
+    emit_pr_comment_post_plan(&plan, output, json_style)
 }
 
 fn read_pr_comment_envelope(

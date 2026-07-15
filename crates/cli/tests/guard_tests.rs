@@ -149,8 +149,13 @@ fn guard_rejects_path_outside_root() {
     );
 
     assert_eq!(output.code, 2);
-    assert!(output.stdout.contains("\"error\": true"));
-    assert!(output.stdout.contains("outside project root"));
+    let json = parse_json(&output);
+    assert_eq!(json["error"], true);
+    assert!(
+        json["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("outside project root"))
+    );
 }
 
 #[test]

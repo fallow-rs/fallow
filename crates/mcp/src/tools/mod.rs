@@ -606,6 +606,6 @@ fn ensure_top_level_warnings(result: CallToolResult) -> CallToolResult {
     map.entry("warnings".to_string())
         .or_insert_with(|| serde_json::Value::Array(Vec::new()));
 
-    let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| text.text.clone());
+    let text = serde_json::to_string(&value).unwrap_or_else(|_| text.text.clone());
     CallToolResult::success(vec![ContentBlock::text(text)])
 }

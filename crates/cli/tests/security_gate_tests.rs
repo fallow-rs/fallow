@@ -57,6 +57,10 @@ fn run_security_gate_new(root: &Path, extra: &[&str], stdin: Option<&str>) -> (i
     run_security_gate(root, "new", extra, stdin)
 }
 
+fn parse_gate(stdout: &str) -> serde_json::Value {
+    serde_json::from_str(stdout).expect("security gate output should be valid JSON")
+}
+
 fn write_reachability_project(root: &Path, imports_component: bool) {
     std::fs::create_dir_all(root.join("src")).expect("src dir");
     std::fs::write(
@@ -161,8 +165,9 @@ fn gate_exits_8_when_diff_adds_a_new_sink() {
         code, 8,
         "a new sink in changed lines must exit 8; stdout: {stdout}"
     );
-    assert!(stdout.contains("\"verdict\": \"fail\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"new_count\": 1"), "stdout: {stdout}");
+    let gate = parse_gate(&stdout);
+    assert_eq!(gate["gate"]["verdict"], "fail");
+    assert_eq!(gate["gate"]["new_count"], 1);
 }
 
 #[test]
@@ -173,8 +178,9 @@ fn gate_exits_0_when_diff_touches_file_but_not_sink_line() {
         code, 0,
         "a pre-existing sink in a touched file (anchor not added) must exit 0; stdout: {stdout}"
     );
-    assert!(stdout.contains("\"verdict\": \"pass\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"new_count\": 0"), "stdout: {stdout}");
+    let gate = parse_gate(&stdout);
+    assert_eq!(gate["gate"]["verdict"], "pass");
+    assert_eq!(gate["gate"]["new_count"], 0);
 }
 
 #[test]
@@ -217,11 +223,9 @@ fn newly_reachable_gate_exits_8_when_existing_sink_becomes_entry_reachable() {
         code, 8,
         "existing sink becoming entry-reachable must exit 8; stdout: {stdout}"
     );
-    assert!(
-        stdout.contains("\"mode\": \"newly-reachable\""),
-        "stdout: {stdout}"
-    );
-    assert!(stdout.contains("\"new_count\": 1"), "stdout: {stdout}");
+    let gate = parse_gate(&stdout);
+    assert_eq!(gate["gate"]["mode"], "newly-reachable");
+    assert_eq!(gate["gate"]["new_count"], 1);
 }
 
 #[test]
@@ -237,7 +241,8 @@ fn newly_reachable_gate_exits_0_when_sink_was_already_reachable_in_base() {
         code, 0,
         "already-reachable sink must not trip newly-reachable gate; stdout: {stdout}"
     );
-    assert!(stdout.contains("\"verdict\": \"pass\""), "stdout: {stdout}");
+    let gate = parse_gate(&stdout);
+    assert_eq!(gate["gate"]["verdict"], "pass");
 }
 
 #[test]
@@ -253,7 +258,8 @@ fn newly_reachable_gate_exits_0_when_sink_remains_unreachable_in_head() {
         code, 0,
         "unreachable sink must not trip newly-reachable gate; stdout: {stdout}"
     );
-    assert!(stdout.contains("\"new_count\": 0"), "stdout: {stdout}");
+    let gate = parse_gate(&stdout);
+    assert_eq!(gate["gate"]["new_count"], 0);
 }
 
 #[test]

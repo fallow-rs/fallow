@@ -25,14 +25,14 @@ pub fn run(ctx: &RulePackContext<'_>) -> ExitCode {
     };
 
     if matches!(ctx.output, OutputFormat::Json) {
-        return emit_json(&config);
+        return emit_json(&config, ctx.json_style);
     }
 
     emit_human(&config)
 }
 
-fn emit_json(config: &ResolvedConfig) -> ExitCode {
-    crate::report::emit_json(
+fn emit_json(config: &ResolvedConfig, json_style: crate::json_style::JsonStyle) -> ExitCode {
+    super::emit_json(
         &json!({
             "kind": "rule-pack-list",
             "packs": config.rule_packs.iter().enumerate().map(|(index, pack)| {
@@ -55,6 +55,7 @@ fn emit_json(config: &ResolvedConfig) -> ExitCode {
             }).collect::<Vec<_>>(),
         }),
         "rule-pack-list",
+        json_style,
     )
 }
 

@@ -15,12 +15,22 @@ pub(super) fn handle_trace_output(
     trace_opts: &TraceOptions,
     root: &std::path::Path,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
     script_used_packages: &FxHashSet<String>,
 ) -> Option<ExitCode> {
-    handle_trace_export(graph, trace_opts, root, output)
-        .or_else(|| handle_trace_file(graph, trace_opts, root, output))
-        .or_else(|| handle_trace_dependency(graph, trace_opts, root, output, script_used_packages))
-        .or_else(|| handle_impact_closure_trace(graph, trace_opts, root, output))
+    handle_trace_export(graph, trace_opts, root, output, json_style)
+        .or_else(|| handle_trace_file(graph, trace_opts, root, output, json_style))
+        .or_else(|| {
+            handle_trace_dependency(
+                graph,
+                trace_opts,
+                root,
+                output,
+                json_style,
+                script_used_packages,
+            )
+        })
+        .or_else(|| handle_impact_closure_trace(graph, trace_opts, root, output, json_style))
 }
 
 fn handle_trace_export(
@@ -28,6 +38,7 @@ fn handle_trace_export(
     trace_opts: &TraceOptions,
     root: &std::path::Path,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> Option<ExitCode> {
     let trace_spec = trace_opts.trace_export.as_ref()?;
     let Some((file_path, export_name)) = parse_trace_spec(trace_spec) else {
@@ -38,7 +49,7 @@ fn handle_trace_export(
         ));
     };
     if let Some(trace) = fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
-        report::print_export_trace(&trace, output);
+        report::print_export_trace(&trace, output, json_style);
         return Some(ExitCode::SUCCESS);
     }
     // #1744: the name is not a top-level export. It may be a class / enum / store
@@ -47,7 +58,7 @@ fn handle_trace_export(
     if let Some(trace) =
         fallow_engine::trace::trace_class_member(graph, root, file_path, export_name)
     {
-        report::print_class_member_trace(&trace, output);
+        report::print_class_member_trace(&trace, output, json_style);
         return Some(ExitCode::SUCCESS);
     }
     Some(emit_error(
@@ -62,11 +73,12 @@ fn handle_trace_file(
     trace_opts: &TraceOptions,
     root: &std::path::Path,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> Option<ExitCode> {
     let file_path = trace_opts.trace_file.as_ref()?;
     match fallow_engine::trace::trace_file(graph, root, file_path) {
         Some(trace) => {
-            report::print_file_trace(&trace, output);
+            report::print_file_trace(&trace, output, json_style);
             Some(ExitCode::SUCCESS)
         }
         None => Some(emit_error(
@@ -82,11 +94,12 @@ fn handle_trace_dependency(
     trace_opts: &TraceOptions,
     root: &std::path::Path,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
     script_used_packages: &FxHashSet<String>,
 ) -> Option<ExitCode> {
     let pkg_name = trace_opts.trace_dependency.as_ref()?;
     let trace = fallow_engine::trace::trace_dependency(graph, root, pkg_name, script_used_packages);
-    report::print_dependency_trace(&trace, output);
+    report::print_dependency_trace(&trace, output, json_style);
     Some(ExitCode::SUCCESS)
 }
 
@@ -95,11 +108,12 @@ fn handle_impact_closure_trace(
     trace_opts: &TraceOptions,
     root: &std::path::Path,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> Option<ExitCode> {
     let file_path = trace_opts.impact_closure.as_ref()?;
     match fallow_engine::trace::trace_impact_closure(graph, root, file_path) {
         Some(trace) => {
-            report::print_impact_closure_trace(&trace, output);
+            report::print_impact_closure_trace(&trace, output, json_style);
             Some(ExitCode::SUCCESS)
         }
         None => Some(emit_error(

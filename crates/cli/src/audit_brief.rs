@@ -497,6 +497,7 @@ fn build_brief_json(
 fn print_brief_json(
     result: &AuditResult,
     diff_index: Option<&fallow_output::DiffIndex>,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match build_brief_json(result, diff_index) {
         Ok(output) => {
@@ -507,11 +508,18 @@ fn print_brief_json(
             ) else {
                 return ExitCode::SUCCESS;
             };
-            let _ = crate::report::emit_json(&output, "audit-brief");
-            ExitCode::SUCCESS
+            crate::report::emit_report_json(&output, "audit-brief", json_style)
         }
         Err(_) => ExitCode::SUCCESS,
     }
+}
+
+#[cfg(test)]
+fn serialize_brief_json(
+    value: &serde_json::Value,
+    json_style: crate::json_style::JsonStyle,
+) -> Result<String, serde_json::Error> {
+    json_style.serialize(value)
 }
 
 /// Render the brief in human / compact / markdown form: a short orientation
@@ -800,11 +808,12 @@ pub fn print_brief_result(
     quiet: bool,
     explain: bool,
     show_deprioritized: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     use fallow_config::OutputFormat;
 
     match result.output {
-        OutputFormat::Json => print_brief_json(result, diff_index),
+        OutputFormat::Json => print_brief_json(result, diff_index, json_style),
         OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown => {
             print_brief_human(result, diff_index, quiet, explain, show_deprioritized);
             ExitCode::SUCCESS
@@ -826,7 +835,11 @@ pub fn print_brief_result(
 /// JSON renders the typed decision-surface envelope (`kind:
 /// "decision-surface"`); human / compact / markdown render the apex header.
 #[must_use]
-pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitCode {
+pub fn print_decision_surface_result(
+    result: &AuditResult,
+    quiet: bool,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     use fallow_config::OutputFormat;
 
     let surface = result.decision_surface.clone().unwrap_or_default();
@@ -839,7 +852,7 @@ pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitC
                 crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) {
                 Ok(value) => {
-                    let _ = crate::report::emit_json(&value, "decision-surface");
+                    let _ = crate::report::emit_report_json(&value, "decision-surface", json_style);
                     ExitCode::SUCCESS
                 }
                 Err(_) => ExitCode::SUCCESS,
@@ -861,14 +874,17 @@ pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitC
 /// as JSON: the guide is an agent-facing contract, not a human walkthrough.
 /// Always exit 0.
 #[must_use]
-pub fn print_walkthrough_guide_result(result: &AuditResult) -> ExitCode {
+pub fn print_walkthrough_guide_result(
+    result: &AuditResult,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
     if let Ok(value) = fallow_output::serialize_walkthrough_guide_json_output(
         guide,
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
-        let _ = crate::report::emit_json(&value, "review-walkthrough-guide");
+        let _ = crate::report::emit_report_json(&value, "review-walkthrough-guide", json_style);
     }
     ExitCode::SUCCESS
 }
@@ -883,7 +899,11 @@ pub fn print_walkthrough_guide_result(result: &AuditResult) -> ExitCode {
 /// which never matches the current hash, so it is refused as stale, the safe
 /// direction: a missing or garbled agent file never accepts a judgment.
 #[must_use]
-pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Path) -> ExitCode {
+pub fn print_walkthrough_file_result(
+    result: &AuditResult,
+    path: &std::path::Path,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     let contents = std::fs::read_to_string(path).unwrap_or_default();
     let agent = crate::audit_walkthrough::parse_agent_walkthrough(&contents);
     let surface = result.decision_surface.clone().unwrap_or_default();
@@ -901,7 +921,8 @@ pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Pat
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
-        let _ = crate::report::emit_json(&value, "review-walkthrough-validation");
+        let _ =
+            crate::report::emit_report_json(&value, "review-walkthrough-validation", json_style);
     }
     ExitCode::SUCCESS
 }
@@ -926,6 +947,10 @@ pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Pat
 /// viewed-state ledger. `mark_viewed` records files as viewed BEFORE rendering;
 /// the render itself is read-only. Always exit 0, even when the verdict is Fail.
 #[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "walkthrough rendering needs its existing view state plus the JSON presentation style"
+)]
 pub fn print_walkthrough_human_result(
     result: &AuditResult,
     root: &std::path::Path,
@@ -933,12 +958,13 @@ pub fn print_walkthrough_human_result(
     mark_viewed: &[std::path::PathBuf],
     show_cleared: bool,
     quiet: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     use fallow_config::OutputFormat;
 
     // JSON reuses the single guide JSON path verbatim (no second serializer).
     if matches!(result.output, OutputFormat::Json) {
-        return print_walkthrough_guide_result(result);
+        return print_walkthrough_guide_result(result, json_style);
     }
 
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
@@ -1092,14 +1118,28 @@ mod tests {
         // Human path.
         let human = audit_result(AuditVerdict::Fail, OutputFormat::Human);
         assert_eq!(
-            print_brief_result(&human, None, true, false, false),
+            print_brief_result(
+                &human,
+                None,
+                true,
+                false,
+                false,
+                crate::json_style::JsonStyle::Compact,
+            ),
             ExitCode::SUCCESS
         );
 
         // JSON path.
         let json = audit_result(AuditVerdict::Fail, OutputFormat::Json);
         assert_eq!(
-            print_brief_result(&json, None, true, false, false),
+            print_brief_result(
+                &json,
+                None,
+                true,
+                false,
+                false,
+                crate::json_style::JsonStyle::Compact,
+            ),
             ExitCode::SUCCESS
         );
     }
@@ -1129,6 +1169,24 @@ mod tests {
         let first_str = serde_json::to_string_pretty(&first).expect("serialize first");
         let second_str = serde_json::to_string_pretty(&second).expect("serialize second");
         assert_eq!(first_str, second_str);
+    }
+
+    #[test]
+    fn brief_json_serialization_honors_selected_style() {
+        let result = audit_result(AuditVerdict::Warn, OutputFormat::Json);
+        let value = build_brief_json(&result, None).expect("brief json must build");
+
+        let compact = serialize_brief_json(&value, crate::json_style::JsonStyle::Compact)
+            .expect("compact brief JSON must serialize");
+        let pretty = serialize_brief_json(&value, crate::json_style::JsonStyle::Pretty)
+            .expect("pretty brief JSON must serialize");
+
+        assert_eq!(compact.lines().count(), 1);
+        assert!(pretty.lines().count() > 1);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&compact).expect("compact JSON must parse"),
+            serde_json::from_str::<serde_json::Value>(&pretty).expect("pretty JSON must parse")
+        );
     }
 
     #[test]

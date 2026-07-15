@@ -32,6 +32,7 @@ pub struct DupesOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
     pub output: OutputFormat,
+    pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
@@ -107,6 +108,7 @@ fn run_clone_trace(
     root: &std::path::Path,
     trace_spec: &str,
     output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let (trace_result, not_found) = if let Some(fp) =
         trace_spec.strip_prefix(fallow_engine::duplicates::FINGERPRINT_PREFIX)
@@ -128,7 +130,7 @@ fn run_clone_trace(
     if trace_result.matched_instance.is_none() {
         return emit_error(&not_found, 2, output);
     }
-    crate::report::print_clone_trace(&trace_result, root, output);
+    crate::report::print_clone_trace(&trace_result, root, output, json_style);
     ExitCode::SUCCESS
 }
 
@@ -362,7 +364,13 @@ fn execute_dupes_inner(
         // for telemetry before the focused early-return so the Dupes workflow's
         // findings_present stays populated regardless of the output view (issue
         // #1650). A trace error (exit 2) is a failed run and is left unset.
-        let code = run_clone_trace(&report, &config.root, trace_spec, opts.output);
+        let code = run_clone_trace(
+            &report,
+            &config.root,
+            trace_spec,
+            opts.output,
+            opts.json_style,
+        );
         if code == ExitCode::SUCCESS {
             crate::telemetry::note_result_count(report.clone_groups.len());
         }
@@ -608,6 +616,10 @@ fn run_duplication_analysis_with_session(
 }
 
 /// Print duplication results and return appropriate exit code.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "duplication rendering carries independent report, grouping, and presentation options"
+)]
 pub fn print_dupes_result(
     result: &DupesResult,
     quiet: bool,
@@ -615,6 +627,7 @@ pub fn print_dupes_result(
     summary: bool,
     summary_heading: bool,
     show_explain_tip: bool,
+    json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let ctx = report::ReportContext {
         root: &result.config.root,
@@ -631,6 +644,7 @@ pub fn print_dupes_result(
         config_fixable: false,
         skip_score_and_trend: false,
         css_requested: false,
+        json_style,
     };
     print_default_ignore_note(result, quiet);
     print_min_occurrences_note(result, quiet);
@@ -676,6 +690,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         summary: opts.summary,
         summary_heading: true,
         show_explain_tip: true,
+        json_style: opts.json_style,
     })
 }
 
@@ -743,6 +758,7 @@ struct DupesResultGroupingInput<'a> {
     summary: bool,
     summary_heading: bool,
     show_explain_tip: bool,
+    json_style: crate::json_style::JsonStyle,
 }
 
 fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> ExitCode {
@@ -762,6 +778,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         config_fixable: false,
         skip_score_and_trend: false,
         css_requested: false,
+        json_style: input.json_style,
     };
     print_default_ignore_note(result, input.quiet);
     print_min_occurrences_note(result, input.quiet);
@@ -928,6 +945,7 @@ mod tests {
             root,
             config_path: &None,
             output: OutputFormat::Human,
+            json_style: crate::json_style::JsonStyle::Compact,
             no_cache: true,
             threads: 1,
             quiet: true,
