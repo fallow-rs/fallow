@@ -1,7 +1,7 @@
 //! Engine-owned health runners for non-CLI callers.
 
-use std::path::PathBuf;
 use std::time::Instant;
+use std::{path::PathBuf, sync::Arc};
 
 use fallow_config::ProductionAnalysis;
 use fallow_types::output_format::OutputFormat;
@@ -166,7 +166,7 @@ struct HealthRunPartsInput<'a, M> {
     shared_parse: bool,
     pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pre_computed_duplication: Option<DuplicationReport>,
-    styling_artifacts: Option<super::StylingAnalysisArtifacts>,
+    styling_artifacts: Option<Arc<super::StylingAnalysisArtifacts>>,
 }
 
 fn run_ungrouped_health_from_parts<M: AsRef<[fallow_types::extract::ModuleInfo]>>(

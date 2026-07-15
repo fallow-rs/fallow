@@ -1,0 +1,5 @@
+{
+  "name": "nested-workspace-dependency-ownership",
+  "private": true,
+  "workspaces": ["packages/**"]
+}

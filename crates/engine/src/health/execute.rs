@@ -151,7 +151,7 @@ where
         elapsed: start.elapsed(),
         should_fail_on_coverage_gaps: enforce_coverage_gaps,
         dead_code_results: dead_code_results.as_ref(),
-        styling_artifacts: styling_artifacts.as_ref(),
+        styling_artifacts: styling_artifacts.as_deref(),
         workspace_diagnostics,
     }))
 }

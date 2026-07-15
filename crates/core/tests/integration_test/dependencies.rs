@@ -456,6 +456,40 @@ fn unused_workspace_dependency_reports_other_workspace_usage() {
 }
 
 #[test]
+fn nested_workspace_dependency_usage_belongs_to_deepest_workspace() {
+    let root = fixture_path("nested-workspace-dependency-ownership");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let parent_path = root.join("packages/parent/package.json");
+    let child_path = root.join("packages/parent/packages/child/package.json");
+    let shared_lib_findings: Vec<_> = results
+        .unused_dependencies
+        .iter()
+        .filter(|dep| dep.dep.package_name == "shared-lib")
+        .collect();
+
+    assert_eq!(
+        shared_lib_findings.len(),
+        1,
+        "only the parent declaration should be unused: {shared_lib_findings:?}"
+    );
+    assert_eq!(shared_lib_findings[0].dep.path, parent_path);
+    assert_eq!(
+        shared_lib_findings[0].dep.used_in_workspaces,
+        vec![root.join("packages/parent/packages/child")],
+        "the parent finding should identify the nested child as the owner of usage"
+    );
+    assert!(
+        results
+            .unused_dependencies
+            .iter()
+            .all(|dep| dep.dep.path != child_path || dep.dep.package_name != "shared-lib"),
+        "the nested child declaration should be credited for its import"
+    );
+}
+
+#[test]
 fn peer_dependency_of_used_installed_package_is_not_unused() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let root = tmp.path();

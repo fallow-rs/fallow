@@ -4,7 +4,7 @@ use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_output::DiffIndex;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     duplicates::DuplicationReport,
@@ -27,7 +27,7 @@ pub struct HealthPipelineInputs {
     pub shared_parse: bool,
     pub pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pub dead_code_results: Option<AnalysisResults>,
-    pub styling_artifacts: Option<StylingAnalysisArtifacts>,
+    pub styling_artifacts: Option<Arc<StylingAnalysisArtifacts>>,
     pub pre_computed_duplication: Option<DuplicationReport>,
     pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
@@ -44,7 +44,7 @@ pub(super) struct HealthPipelineRunInputs<M> {
     pub(super) shared_parse: bool,
     pub(super) pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pub(super) dead_code_results: Option<AnalysisResults>,
-    pub(super) styling_artifacts: Option<StylingAnalysisArtifacts>,
+    pub(super) styling_artifacts: Option<Arc<StylingAnalysisArtifacts>>,
     pub(super) pre_computed_duplication: Option<DuplicationReport>,
     pub(super) workspaces: Vec<WorkspaceInfo>,
     pub(super) workspace_diagnostics: Vec<WorkspaceDiagnostic>,

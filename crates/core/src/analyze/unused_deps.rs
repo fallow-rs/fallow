@@ -151,9 +151,19 @@ fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
     path.join("package.json")
 }
 
+fn deepest_matching_workspace<'a>(
+    path: &Path,
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+) -> Option<&'a Path> {
+    workspaces
+        .iter()
+        .filter(|workspace| path.starts_with(&workspace.root))
+        .max_by_key(|workspace| workspace.root.components().count())
+        .map(|workspace| workspace.root.as_path())
+}
+
 /// Reverse index: workspace root -> packages with ANY file under that root using
-/// them (prefix-match attribution, mirroring the original `packages_used_in_workspace`).
-/// Each module's matching workspace roots are pre-computed once in parallel so the
+/// them. Each module's deepest matching workspace root is pre-computed once in parallel so the
 /// package_usage walk costs O(packages * avg_files_per_package) instead of
 /// O(packages * files * workspaces).
 fn collect_workspace_used_packages<'a>(
@@ -161,16 +171,10 @@ fn collect_workspace_used_packages<'a>(
     workspaces: &'a [fallow_config::WorkspaceInfo],
 ) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
     use rayon::prelude::*;
-    let module_workspaces: Vec<Vec<&Path>> = graph
+    let module_workspaces: Vec<Option<&Path>> = graph
         .modules
         .par_iter()
-        .map(|module| {
-            workspaces
-                .iter()
-                .filter(|ws| module.path.starts_with(&ws.root))
-                .map(|ws| ws.root.as_path())
-                .collect()
-        })
+        .map(|module| deepest_matching_workspace(&module.path, workspaces))
         .collect();
     let mut by_ws: FxHashMap<&Path, FxHashSet<&str>> = workspaces
         .iter()
@@ -178,13 +182,11 @@ fn collect_workspace_used_packages<'a>(
         .collect();
     for (package_name, file_ids) in &graph.package_usage {
         for id in file_ids {
-            if let Some(ws_paths) = module_workspaces.get(id.0 as usize) {
-                for ws_path in ws_paths {
-                    by_ws
-                        .entry(*ws_path)
-                        .or_default()
-                        .insert(package_name.as_str());
-                }
+            if let Some(Some(ws_path)) = module_workspaces.get(id.0 as usize) {
+                by_ws
+                    .entry(*ws_path)
+                    .or_default()
+                    .insert(package_name.as_str());
             }
         }
     }
@@ -271,16 +273,13 @@ fn collect_package_workspace_usage(
             let Some(module) = graph.modules.get(id.0 as usize) else {
                 continue;
             };
-            let Some(ws) = workspaces
-                .iter()
-                .find(|workspace| module.path.starts_with(&workspace.root))
-            else {
+            let Some(ws_root) = deepest_matching_workspace(&module.path, workspaces) else {
                 continue;
             };
             usage
                 .entry(package_name.clone())
                 .or_default()
-                .push(ws.root.clone());
+                .push(ws_root.to_path_buf());
         }
     }
 

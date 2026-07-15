@@ -83,6 +83,11 @@ export function compute{index}(input: number): number {{
         }
     }
     write_file(&root, "src/index.ts", format!("{imports}\n{uses}\n"));
+    write_file(
+        &root,
+        "src/styles.css",
+        ":root { --color-accent: #06c; }\n.button { color: var(--color-accent); padding: 0.5rem 1rem; }\n",
+    );
 
     EngineFixture {
         _temp_dir: temp_dir,
@@ -155,6 +160,13 @@ fn warm_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_
         runtime_coverage: None,
         churn_file: None,
         group_by: None,
+    }
+}
+
+fn warm_css_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
+    HealthExecutionOptions {
+        css: true,
+        ..warm_health_options(fixture)
     }
 }
 
@@ -244,6 +256,19 @@ fn component_engine_warm_session_health(c: &mut Criterion) {
     });
 }
 
+fn component_engine_warm_session_css_health(c: &mut Criterion) {
+    let fixture = create_warm_engine_fixture();
+    let options = warm_css_health_options(&fixture);
+    run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+        .expect("CSS health warm-up succeeds");
+    c.bench_function("component_engine_warm_session_css_health", |bencher| {
+        bencher.iter(|| {
+            run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+                .expect("warm CSS health analysis succeeds")
+        });
+    });
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
@@ -252,6 +277,7 @@ criterion_group!(
     component_engine_warm_session_dead_code_large,
     component_engine_warm_session_complexity_owned,
     component_engine_warm_session_complexity_shared,
-    component_engine_warm_session_health
+    component_engine_warm_session_health,
+    component_engine_warm_session_css_health
 );
 criterion_main!(benches);

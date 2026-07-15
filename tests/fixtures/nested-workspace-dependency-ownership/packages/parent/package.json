@@ -1,0 +1,8 @@
+{
+  "name": "parent",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "shared-lib": "1.0.0"
+  }
+}
