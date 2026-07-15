@@ -96,7 +96,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
   assert.match(
     windowsRustJob,
-    /cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics/,
+    /^[ \t]+run: cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics$/m,
   );
   assert.match(
     windowsRustJob,
@@ -104,7 +104,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   );
   assert.match(
     windowsRustJob,
-    /cargo clippy -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings/,
+    /^[ \t]+run: cargo clippy -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
   );
   assert.match(zedJob, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
