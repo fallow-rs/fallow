@@ -643,6 +643,10 @@ async fn initialize_advertises_pull_diagnostics_for_refreshable_clients() {
 }
 
 #[cfg(windows)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one protocol regression covers both supported LSP initialization shapes"
+)]
 #[tokio::test(flavor = "current_thread")]
 async fn windows_initialization_publishes_uri_safe_diagnostics() {
     let dir = tempfile::tempdir().expect("temp dir");
