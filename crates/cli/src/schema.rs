@@ -13,10 +13,10 @@ use crate::explain::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, SECURITY_RULES, rule_docs_url,
 };
 
-pub fn run_schema() -> ExitCode {
+pub fn run_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
     let cmd = Cli::command();
     let schema = build_cli_schema(&cmd);
-    match serde_json::to_string_pretty(&schema) {
+    match json_style.serialize(&schema) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS

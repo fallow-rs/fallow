@@ -2609,7 +2609,7 @@ pub fn run() -> ExitCode {
         return ExitCode::from(2);
     }
 
-    if let Some(code) = run_schema_command_if_requested(&cli) {
+    if let Some(code) = run_schema_command_if_requested(&cli, fmt.json_style) {
         return code;
     }
 
@@ -2714,12 +2714,15 @@ fn run_telemetry_command_if_requested(
     None
 }
 
-fn run_schema_command_if_requested(cli: &Cli) -> Option<ExitCode> {
+fn run_schema_command_if_requested(
+    cli: &Cli,
+    json_style: json_style::JsonStyle,
+) -> Option<ExitCode> {
     match cli.command {
-        Some(Command::Schema) => Some(schema::run_schema()),
-        Some(Command::ConfigSchema) => Some(init::run_config_schema()),
-        Some(Command::PluginSchema) => Some(init::run_plugin_schema()),
-        Some(Command::RulePackSchema) => Some(init::run_rule_pack_schema()),
+        Some(Command::Schema) => Some(schema::run_schema(json_style)),
+        Some(Command::ConfigSchema) => Some(init::run_config_schema(json_style)),
+        Some(Command::PluginSchema) => Some(init::run_plugin_schema(json_style)),
+        Some(Command::RulePackSchema) => Some(init::run_rule_pack_schema(json_style)),
         _ => None,
     }
 }
@@ -2866,10 +2869,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Ci { subcommand } => {
             ci::run(map_ci_subcommand(subcommand), output, dispatch.json_style)
         }
-        Command::ConfigSchema => init::run_config_schema(),
-        Command::PluginSchema => init::run_plugin_schema(),
+        Command::ConfigSchema => init::run_config_schema(dispatch.json_style),
+        Command::PluginSchema => init::run_plugin_schema(dispatch.json_style),
         Command::PluginCheck => plugin_check::run_plugin_check(root, output, dispatch.json_style),
-        Command::RulePackSchema => init::run_rule_pack_schema(),
+        Command::RulePackSchema => init::run_rule_pack_schema(dispatch.json_style),
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::Guard { files } => dispatch_guard_command(dispatch, &files),
         Command::CiTemplate { subcommand } => dispatch_ci_template_command(subcommand),

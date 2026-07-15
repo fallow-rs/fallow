@@ -415,8 +415,62 @@ fn config_path_rejects_pretty_because_it_is_not_json() {
 }
 
 #[test]
+fn schema_commands_use_the_selected_presentation_style() {
+    let commands: &[(&str, &[&str], &[&str])] = &[
+        ("schema", &["schema"], &["schema", "--pretty"]),
+        (
+            "config-schema",
+            &["config-schema"],
+            &["config-schema", "--pretty"],
+        ),
+        (
+            "plugin-schema",
+            &["plugin-schema"],
+            &["plugin-schema", "--pretty"],
+        ),
+        (
+            "rule-pack-schema",
+            &["rule-pack-schema"],
+            &["rule-pack-schema", "--pretty"],
+        ),
+        (
+            "rule-pack schema",
+            &["rule-pack", "schema"],
+            &["rule-pack", "schema", "--pretty"],
+        ),
+    ];
+
+    for (name, compact_args, pretty_args) in commands {
+        let compact = run_fallow_raw(compact_args);
+        let pretty = run_fallow_raw(pretty_args);
+
+        assert_eq!(compact.code, 0, "{name} should succeed");
+        assert_eq!(
+            pretty.code, compact.code,
+            "presentation must not change exit code"
+        );
+        assert_eq!(
+            compact.stdout.lines().count(),
+            1,
+            "{name} JSON should be compact by default"
+        );
+        assert!(
+            pretty.stdout.lines().count() > 1,
+            "--pretty should indent {name} JSON"
+        );
+        let compact_value = serde_json::from_str::<serde_json::Value>(&compact.stdout)
+            .expect("compact schema output should be valid JSON");
+        let pretty_value = serde_json::from_str::<serde_json::Value>(&pretty.stdout)
+            .expect("pretty schema output should be valid JSON");
+        assert_eq!(
+            compact_value, pretty_value,
+            "presentation must not change values"
+        );
+    }
+}
+
+#[test]
 fn always_json_commands_accept_pretty_without_a_format_override() {
-    let schema = run_fallow_raw(&["schema", "--pretty"]);
     let root = fixture_path("basic-project");
     let coverage = run_fallow_raw(&[
         "coverage",
@@ -427,10 +481,7 @@ fn always_json_commands_accept_pretty_without_a_format_override() {
         root.to_str().expect("fixture path should be UTF-8"),
     ]);
 
-    assert_eq!(schema.code, 0, "schema --pretty should succeed");
     assert_eq!(coverage.code, 0, "coverage setup JSON should succeed");
-    serde_json::from_str::<serde_json::Value>(&schema.stdout)
-        .expect("schema should remain valid JSON");
     serde_json::from_str::<serde_json::Value>(&coverage.stdout)
         .expect("coverage setup should remain valid JSON");
     assert!(coverage.stdout.lines().count() > 1);

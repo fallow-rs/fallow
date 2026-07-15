@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--format json` now emits compact JSON by default.** Machine consumers get
   the same schema and values with less output. Use the global `--pretty` flag
   when indented JSON is useful for manual inspection. JSON success and error
-  documents still end with exactly one line feed. SARIF, Code Climate, schema
-  commands, saved baselines, snapshots, caches, and other persisted JSON keep
-  their existing presentation. (Closes [#1861](https://github.com/fallow-rs/fallow/issues/1861))
+  documents still end with exactly one line feed. Schema commands follow the
+  same compact-by-default behavior, while generated schema artifacts remain
+  indented. SARIF, Code Climate, saved baselines, snapshots, caches, and other
+  persisted JSON keep their existing presentation. (Closes
+  [#1861](https://github.com/fallow-rs/fallow/issues/1861))
 
 - **Reusable audit base snapshots are root-owned and safe to clean while audits run.** Each requested project root now has one base-worktree cache that is rebuilt in place when the full resolved base SHA changes. The reuse lock stays held for the audit lifetime, old SHA-keyed caches remain reclaimable, and `fallow audit-cache remove --root <PATH>` provides explicit preview and confirmation controls. Temporary source snapshots are private on Unix, predictable sidecars reject symlinks, and Git administration cleanup is restricted to the current repository's verified worktree entry.
 

@@ -36,8 +36,18 @@ const run = (cmd, args, options = {}) =>
     stdio: options.stdio ?? ["ignore", "pipe", "inherit"],
   });
 
-const cargoFallow = (subcommand) =>
-  run("cargo", ["run", "--quiet", "-p", "fallow-cli", "--bin", "fallow", "--", subcommand]);
+const cargoFallow = (subcommand, ...args) =>
+  run("cargo", [
+    "run",
+    "--quiet",
+    "-p",
+    "fallow-cli",
+    "--bin",
+    "fallow",
+    "--",
+    subcommand,
+    ...args,
+  ]);
 
 const outputSchema = () =>
   run("cargo", [
@@ -84,10 +94,10 @@ const issueRegistry = (capabilitySchema) => {
 };
 
 const generateSchemaFiles = (stagingRoot) => {
-  const configSchema = ensureTrailingNewline(cargoFallow("config-schema"));
-  const pluginSchema = ensureTrailingNewline(cargoFallow("plugin-schema"));
-  const rulePackSchema = ensureTrailingNewline(cargoFallow("rule-pack-schema"));
-  const capabilitySchema = ensureTrailingNewline(cargoFallow("schema"));
+  const configSchema = ensureTrailingNewline(cargoFallow("config-schema", "--pretty"));
+  const pluginSchema = ensureTrailingNewline(cargoFallow("plugin-schema", "--pretty"));
+  const rulePackSchema = ensureTrailingNewline(cargoFallow("rule-pack-schema", "--pretty"));
+  const capabilitySchema = ensureTrailingNewline(cargoFallow("schema", "--pretty"));
   const registry = issueRegistry(capabilitySchema);
   const output = ensureTrailingNewline(outputSchema());
 

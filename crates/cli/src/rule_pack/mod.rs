@@ -79,7 +79,7 @@ pub enum RulePackSubcommand {
 
 pub fn run(subcommand: &RulePackSubcommand, ctx: &RulePackContext<'_>) -> ExitCode {
     match subcommand {
-        RulePackSubcommand::Schema => crate::init::run_rule_pack_schema(),
+        RulePackSubcommand::Schema => crate::init::run_rule_pack_schema(ctx.json_style),
         RulePackSubcommand::Init(args) => init::run(args, ctx),
         RulePackSubcommand::List => list::run(ctx),
         RulePackSubcommand::Test(args) => test::run(args, ctx),
