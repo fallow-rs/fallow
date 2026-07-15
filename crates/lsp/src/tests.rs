@@ -642,6 +642,141 @@ async fn initialize_advertises_pull_diagnostics_for_refreshable_clients() {
     );
 }
 
+#[cfg(windows)]
+#[tokio::test(flavor = "current_thread")]
+async fn windows_initialization_publishes_uri_safe_diagnostics() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().to_path_buf();
+    let source_dir = root.join("src");
+    let unused_file = source_dir.join("unused.ts");
+    std::fs::create_dir_all(&source_dir).expect("create source dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"windows-lsp-uri","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(source_dir.join("index.ts"), "export const ready = 1;\n")
+        .expect("write entry point");
+    std::fs::write(&unused_file, "export const unused = 2;\n").expect("write unused file");
+
+    let workspace_uri = Uri::from_file_path(&root).expect("workspace file URI");
+    let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+    let initialize = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "workspaceFolders": [{
+                "uri": workspace_uri,
+                "name": "windows-lsp-uri"
+            }]
+        }))
+        .id(1)
+        .finish();
+    let response = service
+        .ready()
+        .await
+        .expect("service should be ready")
+        .call(initialize)
+        .await
+        .expect("initialize request should be handled")
+        .expect("initialize request should return a response");
+    assert!(
+        response.is_ok(),
+        "workspace-folder initialization must succeed"
+    );
+
+    let backend = service.inner();
+    let stored_root = backend
+        .root
+        .read()
+        .await
+        .clone()
+        .expect("workspace root should be stored");
+    assert!(
+        !stored_root.to_string_lossy().starts_with(r"\\?\"),
+        "workspace root must not use a Windows verbatim path: {}",
+        stored_root.display()
+    );
+
+    backend.run_analysis().await;
+    let cached = backend.cached_diagnostics.read().await;
+    let unused_uri = cached
+        .iter()
+        .find_map(|(uri, diagnostics)| {
+            diagnostics
+                .iter()
+                .any(|diagnostic| {
+                    matches!(
+                        diagnostic.code.as_ref(),
+                        Some(NumberOrString::String(code)) if code == "unused-file"
+                    )
+                })
+                .then_some(uri.clone())
+        })
+        .expect("analysis should cache an unused-file diagnostic");
+    drop(cached);
+
+    let uri_text = unused_uri.to_string();
+    let lowercase_uri = uri_text.to_ascii_lowercase();
+    assert!(
+        uri_text.starts_with("file:///"),
+        "unexpected file URI: {uri_text}"
+    );
+    assert!(
+        !uri_text.contains("file:////"),
+        "unexpected file URI: {uri_text}"
+    );
+    assert!(
+        !uri_text.contains(r"\\?\"),
+        "unexpected file URI: {uri_text}"
+    );
+    assert!(
+        !lowercase_uri.contains("%5c%5c%3f"),
+        "unexpected encoded verbatim marker in file URI: {uri_text}"
+    );
+    assert_eq!(
+        unused_uri
+            .to_file_path()
+            .expect("diagnostic URI should convert to a file path")
+            .into_owned(),
+        unused_file,
+        "diagnostic URI should round-trip to the unused file"
+    );
+
+    let legacy_uri = Uri::from_file_path(&root).expect("legacy root file URI");
+    let (mut legacy_service, _) = LspService::build(FallowLspServer::new).finish();
+    let initialize = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "rootUri": legacy_uri
+        }))
+        .id(1)
+        .finish();
+    let response = legacy_service
+        .ready()
+        .await
+        .expect("legacy service should be ready")
+        .call(initialize)
+        .await
+        .expect("legacy initialize request should be handled")
+        .expect("legacy initialize request should return a response");
+    assert!(
+        response.is_ok(),
+        "legacy rootUri initialization must succeed"
+    );
+    let legacy_root = legacy_service
+        .inner()
+        .root
+        .read()
+        .await
+        .clone()
+        .expect("legacy root should be stored");
+    assert!(
+        !legacy_root.to_string_lossy().starts_with(r"\\?\"),
+        "legacy root must not use a Windows verbatim path: {}",
+        legacy_root.display()
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn fallow_issue_types_request_is_served() {
     let (mut service, _) = LspService::build(FallowLspServer::new)
