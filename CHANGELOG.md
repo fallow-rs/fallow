@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands, saved baselines, snapshots, caches, and other persisted JSON keep
   their existing presentation. (Closes [#1861](https://github.com/fallow-rs/fallow/issues/1861))
 
+- **Reusable audit base snapshots are root-owned and safe to clean while audits run.** Each requested project root now has one base-worktree cache that is rebuilt in place when the full resolved base SHA changes. The reuse lock stays held for the audit lifetime, old SHA-keyed caches remain reclaimable, and `fallow audit-cache remove --root <PATH>` provides explicit preview and confirmation controls. Temporary source snapshots are private on Unix, predictable sidecars reject symlinks, and Git administration cleanup is restricted to the current repository's verified worktree entry.
+
 ## [3.5.1] - 2026-07-14
 
 ### Fixed

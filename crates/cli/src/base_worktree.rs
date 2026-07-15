@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,7 +42,14 @@ impl BaseWorktree {
         // worktree admin entry behind (issue #1815). No early return runs
         // between here and the struct binding, so defusing the guard next is
         // safe: the entry is already unregistered.
-        unregister_worktree(guard.path());
+        if let Err(error) = unregister_worktree(repo_root, guard.path()) {
+            tracing::debug!(
+                path = %guard.path().display(),
+                error = %error,
+                "could not deregister non-reusable audit base worktree",
+            );
+            return None;
+        }
         guard.defuse();
         drop(guard);
         let worktree = Self {
@@ -59,7 +66,7 @@ impl BaseWorktree {
         let reusable_lock = ReusableWorktreeLock::try_acquire(&path)?;
 
         if reusable_audit_worktree_is_ready(&path, base_sha)
-            || try_migrate_legacy_reusable_cache(repo_root, &path, base_sha)
+            || try_migrate_registered_current_cache(repo_root, &path, base_sha)
         {
             let worktree = Self {
                 path,
@@ -79,7 +86,7 @@ impl BaseWorktree {
             );
             return None;
         }
-        if let Err(error) = remove_reusable_cache_entry_locked(&path) {
+        if let Err(error) = remove_reusable_cache_entry_locked(repo_root, &path) {
             tracing::debug!(
                 path = %path.display(),
                 error = %error,
@@ -104,7 +111,7 @@ impl BaseWorktree {
         // full base SHA through the `.sha` sidecar. Publication happens only
         // after successful materialization and deregistration under the lock,
         // so a torn snapshot is never advertised as ready to the next run.
-        if let Err(error) = unregister_worktree_checked(guard.path()) {
+        if let Err(error) = unregister_worktree_checked(repo_root, guard.path()) {
             tracing::debug!(
                 path = %guard.path().display(),
                 error = %error,
@@ -213,12 +220,7 @@ pub struct ReusableWorktreeLock {
 impl ReusableWorktreeLock {
     pub fn try_acquire(reusable_path: &Path) -> Option<Self> {
         let lock_path = reusable_worktree_lock_path(reusable_path);
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-            .ok()?;
+        let file = open_or_create_owned_sidecar(&lock_path).ok()?;
         match file.try_lock() {
             Ok(()) => Some(Self { _file: file }),
             Err(std::fs::TryLockError::WouldBlock) => {
@@ -280,7 +282,14 @@ fn write_reusable_sha(reusable_path: &Path, base_sha: &str) -> std::io::Result<(
         ),
     );
     let result = (|| {
-        let mut file = std::fs::File::create(&temp_path)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp_path)?;
         file.write_all(format!("{base_sha}\n").as_bytes())?;
         file.sync_all()?;
         std::fs::rename(&temp_path, &sha_path)
@@ -340,11 +349,7 @@ pub fn reusable_worktree_last_used_path(reusable_path: &Path) -> PathBuf {
 /// default `RUST_LOG=warn`; the caller does not abort the audit.
 pub fn touch_last_used(reusable_path: &Path) {
     let last_used = reusable_worktree_last_used_path(reusable_path);
-    let result = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&last_used)
+    let result = open_or_create_owned_sidecar(&last_used)
         .and_then(|file| file.set_modified(SystemTime::now()));
     if let Err(err) = result {
         tracing::warn!(
@@ -353,6 +358,49 @@ pub fn touch_last_used(reusable_path: &Path) {
             "failed to touch reusable audit worktree sidecar; staleness signal may not update",
         );
     }
+}
+
+fn open_or_create_owned_sidecar(path: &Path) -> std::io::Result<std::fs::File> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if sidecar_metadata_is_trusted(&metadata) => {
+            std::fs::OpenOptions::new().write(true).open(path)
+        }
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "refusing to open an untrusted audit cache sidecar",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut options = std::fs::OpenOptions::new();
+            options.create_new(true).write(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                options.mode(0o600);
+            }
+            options.open(path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+fn sidecar_metadata_is_trusted(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+
+    metadata_is_regular_file(metadata) && metadata.uid() == rustix::process::geteuid().as_raw()
+}
+
+#[cfg(not(unix))]
+fn sidecar_metadata_is_trusted(metadata: &std::fs::Metadata) -> bool {
+    metadata_is_regular_file(metadata)
+}
+
+#[expect(
+    clippy::filetype_is_file,
+    reason = "security-sensitive sidecars and gitfiles must be regular files, not arbitrary non-directories"
+)]
+fn metadata_is_regular_file(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_file()
 }
 
 /// Resolve the GC threshold for persistent reusable caches.
@@ -467,7 +515,7 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
     let now = SystemTime::now();
     let mut removed: u32 = 0;
     for path in paths {
-        if reclaim_reusable_cache_entry(&path, max_age, now) {
+        if reclaim_reusable_cache_entry(repo_root, &path, max_age, now) {
             removed += 1;
         }
     }
@@ -488,9 +536,9 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
 }
 
 /// Deregister reusable base-snapshot caches left REGISTERED by fallow versions
-/// before #1815. Seeds the `.sha` sidecar from the entry's HEAD first so a
-/// still-warm legacy cache stays reusable after deregistration. Returns `true`
-/// when at least one entry was deregistered.
+/// before #1815. A mixed-version registration at the current path stays warm;
+/// released SHA-keyed paths are removed because the root-owned cache cannot
+/// reuse them. Returns `true` when at least one entry was deregistered.
 fn deregister_legacy_reusable_caches(repo_root: &Path) -> bool {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
         return false;
@@ -506,12 +554,23 @@ fn deregister_legacy_reusable_caches(repo_root: &Path) -> bool {
         if !audit_worktree_is_registered(repo_root, &path) {
             continue;
         }
-        let head = legacy_reusable_sha(&path);
-        if unregister_worktree_checked(&path).is_err() {
+        let is_current_path = paths_equal(&path, &reusable_audit_worktree_path(repo_root));
+        let head = is_current_path
+            .then(|| legacy_reusable_sha(&path))
+            .flatten();
+        if unregister_worktree_checked(repo_root, &path).is_err() {
             continue;
         }
-        if let Some(head) = head {
-            let _ = write_reusable_sha(&path, &head);
+        if is_current_path {
+            if let Some(head) = head {
+                let _ = write_reusable_sha(&path, &head);
+            }
+        } else if let Err(error) = remove_reusable_cache_entry_locked(repo_root, &path) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to remove released SHA-keyed audit cache",
+            );
         }
         deregistered = true;
     }
@@ -538,6 +597,17 @@ fn scan_legacy_reusable_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
     let Some(prefix) = legacy_reusable_cache_repo_prefix(repo_root) else {
         return Vec::new();
     };
+    scan_cache_paths_with_hex_suffix(&prefix)
+}
+
+fn scan_root_owned_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
+    let Some(prefix) = root_owned_cache_repo_prefix(repo_root) else {
+        return Vec::new();
+    };
+    scan_cache_paths_with_hex_suffix(&prefix)
+}
+
+fn scan_cache_paths_with_hex_suffix(prefix: &str) -> Vec<PathBuf> {
     let temp = std::env::temp_dir();
     let Ok(entries) = std::fs::read_dir(&temp) else {
         return Vec::new();
@@ -550,10 +620,10 @@ fn scan_legacy_reusable_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
             continue;
         };
         let cache_name = strip_cache_sidecar_suffix(name);
-        let Some(sha_suffix) = cache_name.strip_prefix(&prefix) else {
+        let Some(hash_suffix) = cache_name.strip_prefix(prefix) else {
             continue;
         };
-        if sha_suffix.len() != 16 || !sha_suffix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        if hash_suffix.len() != 16 || !hash_suffix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             continue;
         }
         let path = temp.join(cache_name);
@@ -582,7 +652,12 @@ fn strip_cache_sidecar_suffix(name: &str) -> &str {
 
 /// Reclaim a single reusable-cache entry. Returns `true` when the entry was
 /// removed (either as a sidecar orphan or as aged-out past `max_age`).
-fn reclaim_reusable_cache_entry(path: &Path, max_age: Option<Duration>, now: SystemTime) -> bool {
+fn reclaim_reusable_cache_entry(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Option<Duration>,
+    now: SystemTime,
+) -> bool {
     // Sidecar orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
     // container restart, CI cache eviction) removed the cache directory but
     // its sidecars survive next to it. Reclaim the leftover `.last-used` /
@@ -591,12 +666,12 @@ fn reclaim_reusable_cache_entry(path: &Path, max_age: Option<Duration>, now: Sys
     // fixes a leak that predates #1815: a manual `git worktree remove` left
     // sidecars the old git-scoped sweep could never see.
     if !path.exists() {
-        return reclaim_orphan_cache_entry(path);
+        return reclaim_orphan_cache_entry(repo_root, path);
     }
     let Some(max_age) = max_age else {
         return false;
     };
-    reclaim_aged_cache_entry(path, max_age, now)
+    reclaim_aged_cache_entry(repo_root, path, max_age, now)
 }
 
 /// Reclaim the leftover sidecars of a cache directory that was deleted out
@@ -604,7 +679,7 @@ fn reclaim_reusable_cache_entry(path: &Path, max_age: Option<Duration>, now: Sys
 /// recreated the directory is preserved. The `.lock` sidecar is deliberately
 /// never removed (an unlinked-but-flocked inode plus a racer's `open(O_CREAT)`
 /// would split the lock across two inodes).
-fn reclaim_orphan_cache_entry(path: &Path) -> bool {
+fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> bool {
     let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
         return false;
     };
@@ -613,7 +688,7 @@ fn reclaim_orphan_cache_entry(path: &Path) -> bool {
     if path.exists() {
         return false;
     }
-    remove_reusable_cache_entry_locked(path).unwrap_or(false)
+    remove_reusable_cache_entry_locked(repo_root, path).unwrap_or(false)
 }
 
 /// Reclaim a cache entry whose `.last-used` sidecar is older than `max_age`.
@@ -621,7 +696,12 @@ fn reclaim_orphan_cache_entry(path: &Path) -> bool {
 /// `false` so they age from real last-use on the next run). Removal is
 /// directory-and-sidecars only: the entry is unregistered, so no `git`
 /// subprocess is involved.
-fn reclaim_aged_cache_entry(path: &Path, max_age: Duration, now: SystemTime) -> bool {
+fn reclaim_aged_cache_entry(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Duration,
+    now: SystemTime,
+) -> bool {
     let sidecar = reusable_worktree_last_used_path(path);
     let sidecar_mtime = std::fs::metadata(&sidecar)
         .ok()
@@ -639,7 +719,7 @@ fn reclaim_aged_cache_entry(path: &Path, max_age: Duration, now: SystemTime) -> 
     let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
         return false;
     };
-    match remove_reusable_cache_entry_locked(path) {
+    match remove_reusable_cache_entry_locked(repo_root, path) {
         Ok(removed) => removed,
         Err(err) => {
             tracing::warn!(
@@ -654,12 +734,45 @@ fn reclaim_aged_cache_entry(path: &Path, max_age: Duration, now: SystemTime) -> 
 
 fn canonical_root_hash(root: &Path) -> u64 {
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    xxh3_64(canonical_root.to_string_lossy().as_bytes())
+    xxh3_64(&path_identity_bytes(&canonical_root))
+}
+
+#[cfg(unix)]
+fn path_identity_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(windows)]
+fn path_identity_bytes(path: &Path) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    path.as_os_str()
+        .encode_wide()
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn path_identity_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().as_bytes().to_vec()
 }
 
 pub fn reusable_audit_worktree_path(requested_root: &Path) -> PathBuf {
     let root_hash = canonical_root_hash(requested_root);
-    std::env::temp_dir().join(format!("fallow-audit-base-cache-{root_hash:016x}"))
+    let repo_hash = git_toplevel(requested_root)
+        .as_deref()
+        .map_or(root_hash, canonical_root_hash);
+    std::env::temp_dir().join(format!(
+        "fallow-audit-base-cache-{repo_hash:016x}-root-{root_hash:016x}"
+    ))
+}
+
+fn root_owned_cache_repo_prefix(requested_root: &Path) -> Option<String> {
+    let git_root = git_toplevel(requested_root)?;
+    let repo_hash = canonical_root_hash(&git_root);
+    Some(format!("fallow-audit-base-cache-{repo_hash:016x}-root-"))
 }
 
 fn legacy_reusable_cache_repo_prefix(requested_root: &Path) -> Option<String> {
@@ -691,27 +804,56 @@ pub fn legacy_reusable_audit_worktree_path(
 /// is repaired idempotently so gitignore parity holds even if the stub was
 /// removed out-of-band.
 fn reusable_audit_worktree_is_ready(path: &Path, base_sha: &str) -> bool {
-    if !path.exists() {
+    if !reusable_cache_directory_is_trusted(path) {
         return false;
     }
-    let recorded = std::fs::read_to_string(reusable_worktree_sha_path(path))
-        .ok()
-        .map(|contents| contents.trim().to_owned());
+    let recorded = read_reusable_sha(path);
     if recorded.as_deref() != Some(base_sha) {
         return false;
     }
-    repair_unregistered_git_stub(path);
-    true
+    repair_unregistered_git_stub(path)
 }
 
-/// Migrate a pre-#1815 reusable cache that is still a REGISTERED git worktree.
+fn read_reusable_sha(path: &Path) -> Option<String> {
+    const MAX_SHA_SIDECAR_BYTES: u64 = 129;
+
+    let sidecar = reusable_worktree_sha_path(path);
+    let metadata = std::fs::symlink_metadata(&sidecar).ok()?;
+    if !metadata_is_regular_file(&metadata) || metadata.len() > MAX_SHA_SIDECAR_BYTES {
+        return None;
+    }
+    let mut contents = String::new();
+    std::fs::File::open(sidecar)
+        .ok()?
+        .take(MAX_SHA_SIDECAR_BYTES)
+        .read_to_string(&mut contents)
+        .ok()?;
+    Some(contents.trim().to_owned())
+}
+
+#[cfg(unix)]
+fn reusable_cache_directory_is_trusted(path: &Path) -> bool {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    metadata.file_type().is_dir()
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.permissions().mode().trailing_zeros() >= 6
+}
+
+#[cfg(not(unix))]
+fn reusable_cache_directory_is_trusted(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_dir())
+}
+
+/// Recover a current-path cache that is still a registered Git worktree.
 ///
-/// Older fallow versions left the base-snapshot worktree registered. On the
-/// first run after upgrade, keep such a cache warm instead of rebuilding: if
-/// the registered worktree's HEAD (read via the one remaining in-worktree
-/// `git rev-parse`) matches `base_sha` and it was raw-materialized, seed the
-/// `.sha` sidecar, deregister it in place, and treat it as ready.
-fn try_migrate_legacy_reusable_cache(repo_root: &Path, path: &Path, base_sha: &str) -> bool {
+/// This can occur during mixed-version use or after interruption between
+/// registration and deregistration. Keep the cache warm only when HEAD matches
+/// the requested full SHA and raw materialization completed.
+fn try_migrate_registered_current_cache(repo_root: &Path, path: &Path, base_sha: &str) -> bool {
     if !path.exists() || !audit_worktree_is_registered(repo_root, path) {
         return false;
     }
@@ -720,7 +862,7 @@ fn try_migrate_legacy_reusable_cache(repo_root: &Path, path: &Path, base_sha: &s
     {
         return false;
     }
-    if unregister_worktree_checked(path).is_err() {
+    if unregister_worktree_checked(repo_root, path).is_err() {
         return false;
     }
     write_reusable_sha(path, base_sha).is_ok()
@@ -730,31 +872,67 @@ fn try_migrate_legacy_reusable_cache(repo_root: &Path, path: &Path, base_sha: &s
 ///
 /// The root-owned entry and every SHA-suffixed entry from the old
 /// git-top-level identity are locked independently. Contended entries are
-/// skipped successfully. Lock files are permanent lock identities and are
-/// never removed.
-pub fn remove_reusable_audit_caches(requested_root: &Path) -> std::io::Result<()> {
+/// reported as skipped. Lock files are permanent lock identities and are never
+/// removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuditCacheRemovalReport {
+    pub found: usize,
+    pub removed: usize,
+    pub skipped: usize,
+    pub dry_run: bool,
+}
+
+pub fn remove_reusable_audit_caches(
+    requested_root: &Path,
+    dry_run: bool,
+) -> std::io::Result<AuditCacheRemovalReport> {
     let mut paths = vec![reusable_audit_worktree_path(requested_root)];
     paths.extend(scan_legacy_reusable_cache_paths(requested_root));
+    if git_toplevel(requested_root).is_some_and(|root| paths_equal(&root, requested_root)) {
+        paths.extend(scan_root_owned_cache_paths(requested_root));
+    }
     paths.sort();
     paths.dedup();
 
+    let mut report = AuditCacheRemovalReport {
+        found: 0,
+        removed: 0,
+        skipped: 0,
+        dry_run,
+    };
     for path in paths {
+        if !reusable_cache_entry_exists(&path) {
+            continue;
+        }
+        report.found += 1;
         let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
+            report.skipped += 1;
             continue;
         };
-        remove_reusable_cache_entry_locked(&path)?;
+        if !dry_run && remove_reusable_cache_entry_locked(requested_root, &path)? {
+            report.removed += 1;
+        }
     }
-    Ok(())
+    Ok(report)
+}
+
+fn reusable_cache_entry_exists(path: &Path) -> bool {
+    path_entry_exists(path)
+        || path_entry_exists(&reusable_worktree_sha_path(path))
+        || path_entry_exists(&reusable_worktree_last_used_path(path))
+}
+
+fn path_entry_exists(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
 }
 
 /// Remove one reusable cache while its caller holds the entry's exclusive
 /// lock. Absence is success. The lock sidecar is deliberately preserved.
-fn remove_reusable_cache_entry_locked(path: &Path) -> std::io::Result<bool> {
-    let existed = path.exists()
-        || reusable_worktree_sha_path(path).exists()
-        || reusable_worktree_last_used_path(path).exists();
-    if audit_worktree_has_registration_pointer(path) {
-        unregister_worktree_checked(path)?;
+fn remove_reusable_cache_entry_locked(repo_root: &Path, path: &Path) -> std::io::Result<bool> {
+    let existed = reusable_cache_entry_exists(path);
+    ensure_cache_entry_is_owned(path)?;
+    if trusted_worktree_admin_dir(repo_root, path).is_some() {
+        unregister_worktree_checked(repo_root, path)?;
     }
     remove_dir_if_exists(path)?;
     remove_file_if_exists(&reusable_worktree_sha_path(path))?;
@@ -762,11 +940,37 @@ fn remove_reusable_cache_entry_locked(path: &Path) -> std::io::Result<bool> {
     Ok(existed)
 }
 
-fn audit_worktree_has_registration_pointer(path: &Path) -> bool {
-    std::fs::read_to_string(path.join(".git"))
-        .ok()
-        .and_then(|contents| parse_worktree_gitdir(&contents))
-        .is_some_and(|admin_dir| is_fallow_admin_dir(&admin_dir))
+#[cfg(unix)]
+fn ensure_cache_entry_is_owned(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let effective_uid = rustix::process::geteuid().as_raw();
+    for entry in [
+        path.to_path_buf(),
+        reusable_worktree_sha_path(path),
+        reusable_worktree_last_used_path(path),
+    ] {
+        let metadata = match std::fs::symlink_metadata(&entry) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.uid() != effective_uid {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "refusing to remove unowned audit cache entry `{}`",
+                    entry.display()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_cache_entry_is_owned(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn remove_dir_if_exists(path: &Path) -> std::io::Result<()> {
@@ -794,40 +998,93 @@ fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
 /// name-collision admin suffixing (`<name>1`) is handled for free. The `.git`
 /// gitfile is REPLACED with an invalid stub (see [`UNREGISTERED_GITDIR_STUB`]),
 /// never deleted.
-pub fn unregister_worktree(path: &Path) {
-    let _ = unregister_worktree_checked(path);
+pub fn unregister_worktree(repo_root: &Path, path: &Path) -> std::io::Result<()> {
+    unregister_worktree_checked(repo_root, path)
 }
 
-fn unregister_worktree_checked(path: &Path) -> std::io::Result<()> {
-    let gitfile = path.join(".git");
-    if let Ok(contents) = std::fs::read_to_string(&gitfile)
-        && let Some(admin_dir) = parse_worktree_gitdir(&contents)
-        && is_fallow_admin_dir(&admin_dir)
-    {
-        remove_dir_if_exists(&admin_dir)?;
-    }
+fn unregister_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    std::fs::write(&gitfile, UNREGISTERED_GITDIR_STUB)
+    let gitfile = path.join(".git");
+    let metadata = std::fs::symlink_metadata(&gitfile)?;
+    if !metadata_is_regular_file(&metadata) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "refusing to deregister through a non-file audit worktree .git entry",
+        ));
+    }
+    let contents = std::fs::read_to_string(&gitfile)?;
+    if contents == UNREGISTERED_GITDIR_STUB {
+        return Ok(());
+    }
+    let Some(admin_dir) = trusted_worktree_admin_dir(repo_root, path) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "refusing to deregister an unverified audit worktree admin entry",
+        ));
+    };
+    remove_dir_if_exists(&admin_dir)?;
+    write_git_stub_safely(&gitfile)
 }
 
 /// Ensure a cache hit's `.git` stub stays valid. Recreates the stub if the
 /// gitfile is gone (so gitignore parity holds), and deregisters in place if a
 /// live pointer to a fallow admin dir is found (a mixed-version re-registration
 /// or a torn transient window).
-fn repair_unregistered_git_stub(path: &Path) {
+fn repair_unregistered_git_stub(path: &Path) -> bool {
     let gitfile = path.join(".git");
-    match std::fs::read_to_string(&gitfile) {
-        Ok(contents) => {
-            if parse_worktree_gitdir(&contents).is_some_and(|admin| is_fallow_admin_dir(&admin)) {
-                unregister_worktree(path);
-            }
-        }
-        Err(_) => {
-            let _ = std::fs::write(&gitfile, UNREGISTERED_GITDIR_STUB);
-        }
+    let Ok(metadata) = std::fs::symlink_metadata(&gitfile) else {
+        return write_git_stub_safely(&gitfile).is_ok();
+    };
+    if !metadata_is_regular_file(&metadata) {
+        return false;
     }
+    std::fs::read_to_string(&gitfile).is_ok_and(|contents| contents == UNREGISTERED_GITDIR_STUB)
+}
+
+fn write_git_stub_safely(gitfile: &Path) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).truncate(true);
+    match std::fs::symlink_metadata(gitfile) {
+        Ok(metadata) if metadata_is_regular_file(&metadata) => {}
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "refusing to replace non-file audit worktree .git entry",
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            options.create_new(true);
+        }
+        Err(error) => return Err(error),
+    }
+    let mut file = options.open(gitfile)?;
+    file.write_all(UNREGISTERED_GITDIR_STUB.as_bytes())?;
+    file.sync_all()
+}
+
+fn trusted_worktree_admin_dir(repo_root: &Path, path: &Path) -> Option<PathBuf> {
+    let gitfile = path.join(".git");
+    let metadata = std::fs::symlink_metadata(&gitfile).ok()?;
+    if !metadata_is_regular_file(&metadata) {
+        return None;
+    }
+    let contents = std::fs::read_to_string(&gitfile).ok()?;
+    let admin_dir = parse_worktree_gitdir(&contents)?;
+    if !is_fallow_admin_dir(&admin_dir) {
+        return None;
+    }
+    let common_dir = fallow_engine::changed_files::resolve_git_common_dir(repo_root).ok()?;
+    let worktrees_dir = dunce::canonicalize(common_dir.join("worktrees")).ok()?;
+    let admin_parent = dunce::canonicalize(admin_dir.parent()?).ok()?;
+    if admin_parent != worktrees_dir {
+        return None;
+    }
+    let backlink = std::fs::read_to_string(admin_dir.join("gitdir")).ok()?;
+    let expected_gitfile = dunce::canonicalize(&gitfile).ok()?;
+    let actual_gitfile = dunce::canonicalize(Path::new(backlink.trim())).ok()?;
+    (actual_gitfile == expected_gitfile).then_some(admin_dir)
 }
 
 /// Parse the `gitdir: <path>` pointer from a linked-worktree `.git` gitfile.
@@ -1253,5 +1510,21 @@ mod tests {
         assert!(is_fallow_audit_worktree_path(&path));
         assert!(!is_reusable_audit_worktree_path(&path));
         assert_eq!(audit_worktree_pid(name), Some(std::process::id()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_sidecar_open_does_not_follow_symlinks() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let victim = temp.path().join("victim");
+        let sidecar = temp.path().join("cache.lock");
+        std::fs::write(&victim, "unchanged\n").expect("victim should be written");
+        std::os::unix::fs::symlink(&victim, &sidecar).expect("sidecar symlink should be created");
+
+        assert!(open_or_create_owned_sidecar(&sidecar).is_err());
+        assert_eq!(
+            std::fs::read_to_string(victim).expect("victim should remain readable"),
+            "unchanged\n",
+        );
     }
 }

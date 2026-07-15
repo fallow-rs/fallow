@@ -235,7 +235,9 @@ fn run_fallow_raw_with_env(
 fn audit_cache_paths(root: &Path, base_sha: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let canonical_root = root.canonicalize().expect("root should canonicalize");
     let root_hash = xxhash_rust::xxh3::xxh3_64(canonical_root.to_string_lossy().as_bytes());
-    let new_path = std::env::temp_dir().join(format!("fallow-audit-base-cache-{root_hash:016x}"));
+    let new_path = std::env::temp_dir().join(format!(
+        "fallow-audit-base-cache-{root_hash:016x}-root-{root_hash:016x}"
+    ));
     let legacy_path = std::env::temp_dir().join(format!(
         "fallow-audit-base-cache-{root_hash:016x}-{}",
         &base_sha[..16]
@@ -291,11 +293,53 @@ fn audit_cache_remove_requires_explicit_root_and_removes_sidecars_but_keeps_lock
         "validation failure must not remove legacy caches"
     );
 
+    let preview = run_fallow_raw(&[
+        "audit-cache",
+        "remove",
+        "--root",
+        root.to_str().expect("root should be utf-8"),
+        "--dry-run",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        preview.code, 0,
+        "dry-run should succeed: {}{}",
+        preview.stdout, preview.stderr
+    );
+    let preview_json = parse_json(&preview);
+    assert_eq!(preview_json["dry_run"], serde_json::json!(true));
+    assert_eq!(preview_json["would_remove"], serde_json::json!(2));
+    assert_eq!(preview_json["complete"], serde_json::json!(true));
+    assert!(new_path.is_dir(), "dry-run must preserve the current cache");
+    assert!(
+        legacy_path.is_dir(),
+        "dry-run must preserve the legacy cache"
+    );
+
+    let unconfirmed = run_fallow_raw(&[
+        "audit-cache",
+        "remove",
+        "--root",
+        root.to_str().expect("root should be utf-8"),
+        "--quiet",
+    ]);
+    assert_eq!(
+        unconfirmed.code, 2,
+        "non-interactive removal must require --yes"
+    );
+    assert!(
+        new_path.is_dir(),
+        "unconfirmed removal must preserve caches"
+    );
+
     let output = run_fallow_raw(&[
         "audit-cache",
         "remove",
         "--root",
         root.to_str().expect("root should be utf-8"),
+        "--yes",
         "--quiet",
     ]);
     assert_eq!(
@@ -311,6 +355,47 @@ fn audit_cache_remove_requires_explicit_root_and_removes_sidecars_but_keeps_lock
         fs::remove_file(cache_sidecar(path, ".lock"))
             .expect("test lock sidecar should be removable");
     }
+}
+
+#[test]
+fn audit_cache_remove_reports_lock_contention_as_incomplete() {
+    let fixture = create_audit_fixture("cache-remove-contended");
+    let root = fixture.path();
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (cache_path, _) = audit_cache_paths(root, base_sha);
+    fs::create_dir_all(&cache_path).expect("cache directory should be created");
+    fs::write(cache_sidecar(&cache_path, ".sha"), base_sha)
+        .expect("readiness sidecar should be written");
+    fs::write(cache_sidecar(&cache_path, ".lock"), "").expect("lock sidecar should be written");
+    let held_lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(cache_sidecar(&cache_path, ".lock"))
+        .expect("cache lock should open");
+    held_lock.try_lock().expect("cache lock should be held");
+
+    let output = run_fallow_raw(&[
+        "audit-cache",
+        "remove",
+        "--root",
+        root.to_str().expect("root should be utf-8"),
+        "--yes",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(output.code, 2, "partial removal must not report success");
+    let json = parse_json(&output);
+    assert_eq!(json["removed"], serde_json::json!(0));
+    assert_eq!(json["skipped"], serde_json::json!(1));
+    assert_eq!(json["complete"], serde_json::json!(false));
+    assert!(cache_path.is_dir(), "held cache must remain");
+    drop(held_lock);
+    fs::remove_dir_all(&cache_path).expect("cache fixture should be removed");
+    fs::remove_file(cache_sidecar(&cache_path, ".sha"))
+        .expect("readiness fixture should be removed");
+    fs::remove_file(cache_sidecar(&cache_path, ".lock")).expect("lock fixture should be removed");
 }
 
 #[test]

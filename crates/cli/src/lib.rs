@@ -12,6 +12,7 @@
     )
 )]
 
+use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -1618,7 +1619,15 @@ enum SecuritySubcommand {
 #[derive(clap::Subcommand)]
 enum AuditCacheCli {
     /// Remove reusable audit caches owned by an explicit project root.
-    Remove,
+    Remove {
+        /// Print what would be removed without touching the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Confirm removal in non-interactive environments.
+        #[arg(long, alias = "force")]
+        yes: bool,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -2887,7 +2896,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             explain::run_explain(&issue_type.join(" "), output, dispatch.json_style)
         }
         audit @ Command::Audit { .. } => dispatch_audit_command(audit, dispatch),
-        Command::AuditCache { subcommand } => dispatch_audit_cache_command(dispatch, subcommand),
+        Command::AuditCache { subcommand } => dispatch_audit_cache_command(dispatch, &subcommand),
         Command::DecisionSurface { max_decisions } => {
             dispatch_decision_surface(dispatch, max_decisions)
         }
@@ -3716,20 +3725,65 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
 
 fn dispatch_audit_cache_command(
     dispatch: &DispatchContext<'_>,
-    subcommand: AuditCacheCli,
+    subcommand: &AuditCacheCli,
 ) -> ExitCode {
     match subcommand {
-        AuditCacheCli::Remove => match base_worktree::remove_reusable_audit_caches(dispatch.root) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => emit_error(
-                &format!(
-                    "failed to remove audit caches for {}: {error}",
-                    dispatch.root.display()
+        AuditCacheCli::Remove { dry_run, yes } => {
+            if !*dry_run && !*yes && !std::io::stdin().is_terminal() {
+                return emit_error(
+                    "audit-cache remove requires --yes (or --force) in non-interactive environments. Use --dry-run to preview removal first, then pass --yes to confirm.",
+                    2,
+                    dispatch.output,
+                );
+            }
+            match base_worktree::remove_reusable_audit_caches(dispatch.root, *dry_run) {
+                Ok(report) => {
+                    let action = if *dry_run { "would remove" } else { "removed" };
+                    if matches!(dispatch.output, fallow_config::OutputFormat::Json) {
+                        let value = serde_json::json!({
+                            "kind": "audit-cache-remove",
+                            "schema_version": 1,
+                            "command": "audit-cache remove",
+                            "root": dispatch.root,
+                            "dry_run": report.dry_run,
+                            "found": report.found,
+                            "would_remove": report.found.saturating_sub(report.skipped),
+                            "removed": report.removed,
+                            "skipped": report.skipped,
+                            "complete": report.skipped == 0,
+                        });
+                        let output_code = report::emit_json(&value, "audit cache removal");
+                        if output_code != ExitCode::SUCCESS {
+                            return output_code;
+                        }
+                    } else if !dispatch.quiet {
+                        println!(
+                            "audit cache: {action} {}, skipped {} for {}",
+                            if *dry_run {
+                                report.found.saturating_sub(report.skipped)
+                            } else {
+                                report.removed
+                            },
+                            report.skipped,
+                            dispatch.root.display(),
+                        );
+                    }
+                    if report.skipped == 0 {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(2)
+                    }
+                }
+                Err(error) => emit_error(
+                    &format!(
+                        "failed to remove audit caches for {}: {error}",
+                        dispatch.root.display()
+                    ),
+                    2,
+                    dispatch.output,
                 ),
-                2,
-                dispatch.output,
-            ),
-        },
+            }
+        }
     }
 }
 
