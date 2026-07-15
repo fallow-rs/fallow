@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Reusable audit base snapshots are root-owned and safe to clean while audits run.** Each requested project root now has one base-worktree cache that is rebuilt in place when the full resolved base SHA changes. The reuse lock stays held for the audit lifetime, old SHA-keyed caches remain reclaimable, and `fallow audit-cache remove --root <PATH>` provides explicit preview and confirmation controls. Temporary source snapshots are private on Unix, predictable sidecars reject symlinks, and Git administration cleanup is restricted to the current repository's verified worktree entry.
 
+### Fixed
+
+- **Windows editor diagnostics use valid file URIs.** LSP paths no longer retain
+  the Windows verbatim path prefix that prevented diagnostics from rendering.
+  (Closes [#1899](https://github.com/fallow-rs/fallow/issues/1899))
+
 ## [3.5.1] - 2026-07-14
 
 ### Fixed
