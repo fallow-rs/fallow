@@ -38,6 +38,7 @@ jobs:
       npm-package: ${{ steps.filter.outputs.npm-package }}
       self-analyze: ${{ steps.filter.outputs.self-analyze }}
       skills: ${{ steps.filter.outputs.skills }}
+      action-current: ${{ steps.filter.outputs.action-current }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
@@ -112,6 +113,10 @@ jobs:
               - 'rust-toolchain.toml'
             vscode:
               - 'editors/vscode/**'
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
               - '.github/workflows/ci.yml'
             zed:
               - 'editors/zed/**'
@@ -149,6 +154,17 @@ jobs:
               - 'npm/fallow/skills/**'
               - 'scripts/vendor-skills.mjs'
               - '.github/workflows/ci.yml'
+            action-current:
+              - 'action/**'
+              - 'action.yml'
+              - 'crates/**'
+              - 'tests/fixtures/basic-project/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.github/actions/setup-rust/**'
+              - '.github/workflows/ci.yml'
+              - 'scripts/workflow-policy.test.mjs'
 
   docker:
     name: Docker
@@ -409,8 +425,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install locked repository tools
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
       - name: Validate bundled Agent Skill
-        run: npx --yes @tanstack/intent@0.0.29 validate npm/fallow/skills
+        run: npx --no-install intent validate npm/fallow/skills
 
       - name: Check npm package contents
         run: |
@@ -507,6 +526,52 @@ jobs:
           test -f node_modules/fallow/scripts/sentinel-path.js
           test -f node_modules/fallow/scripts/run-binary.js
 
+  action-current:
+    name: Action with current binary
+    needs: changes
+    if: needs.changes.outputs.action-current == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - name: Build current fallow binary
+        run: cargo build --bin fallow
+      - name: Put current fallow binary first on PATH
+        run: printf '%s\n' "${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_PATH"
+      - name: Run Action shell tests with current binary
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
+        run: bash action/tests/run.sh
+      - name: Run checked-in Action JSON smoke
+        id: current_action
+        uses: ./
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          command: dead-code
+          root: tests/fixtures/basic-project
+          format: json
+          annotations: false
+          fail-on-issues: false
+          auto-changed-since: false
+      - name: Verify current-binary JSON contract
+        env:
+          RESULTS_PATH: ${{ steps.current_action.outputs.results }}
+        run: |
+          test -f "$RESULTS_PATH"
+          jq empty "$RESULTS_PATH"
+          jq -e '.total_issues >= 0 and (.unused_files | type == "array")' "$RESULTS_PATH"
+
   fallow-self-analyze:
     name: Fallow Self Analysis
     needs: changes
@@ -561,6 +626,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup-rust
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 11.10.0
@@ -579,8 +645,14 @@ jobs:
       - name: Verify generated extension contracts
         run: cd editors/vscode && pnpm run check:contracts
       - run: cd editors/vscode && pnpm lint
+      - name: Build current multicall binary
+        run: cargo build -p fallow-multicall --bin fallow-multicall
       - name: Run VS Code extension-host integration tests
         run: cd editors/vscode && xvfb-run -a pnpm test:integration
+      - name: Run VS Code real CLI and LSP contract smoke
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow-multicall
+        run: xvfb-run -a pnpm --dir editors/vscode run test:integration:real
       - run: cd editors/vscode && pnpm test:unit
       - run: cd editors/vscode && pnpm package
 
@@ -770,7 +842,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, windows-rust, doc, typos, js-lint, npm-package, fallow-self-analyze, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor]
+    needs: [check, windows-rust, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

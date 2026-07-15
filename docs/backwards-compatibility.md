@@ -69,7 +69,7 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 
 `json-schema-to-typescript` drops the orphan inner definitions when every field is subsumed by a flattening parent (even with `unreachableDefinitions: true`), so the bare names disappear from the generated `.d.ts` unless they are aliased back explicitly. The npm-published `fallow/types` subpath (`npm/fallow/types/output-contract.d.ts`) carries an alias for every wrapper so external consumers importing the bare names continue to compile. The full list lives at the end of the generated file under the `// Backwards-compat aliases` section, with per-alias JSDoc explaining the migration history.
 
-**Stability commitment**: the bare-name aliases are part of fallow's v2.x stable surface. They are scheduled for removal alongside the kind-tagged `FallowOutput` major bump ([#413](https://github.com/fallow-rs/fallow/issues/413)). The removal will be preceded by one minor release that adds `@deprecated` JSDoc to each alias and a CHANGELOG headline announcing the timeline. New code that consumes fallow's JSON output should import the `*Finding` wrapper names directly so the major bump is a no-op for the consumer.
+**Stability commitment**: legacy output aliases remain supported throughout v3. Removing them requires an explicit deprecation period and a future major release. New code that consumes fallow's JSON output should import the `*Finding` wrapper names directly.
 
 ### Rust programmatic API
 

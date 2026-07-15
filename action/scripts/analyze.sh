@@ -275,6 +275,37 @@ build_command_args() {
 
 # --- Validation ---
 
+contains_ascii_control() {
+  local LC_ALL=C
+  local value=$1
+  [[ "$value" =~ [[:cntrl:]] ]]
+}
+
+validate_action_scalars() {
+  local changed_since="${INPUT_CHANGED_SINCE:-}"
+  local diff_file="${FALLOW_DIFF_FILE:-}"
+
+  if [ -z "$changed_since" ] && [ "${INPUT_AUTO_CHANGED_SINCE:-}" = "true" ] && \
+     { [ "${EVENT_NAME:-}" = "pull_request" ] || [ "${EVENT_NAME:-}" = "pull_request_target" ]; }; then
+    changed_since="${PR_BASE_SHA:-}"
+  fi
+
+  if [[ "$changed_since" = -* ]]; then
+    printf '%s\n' "::error::changed-since must not begin with '-'"
+    exit 2
+  fi
+  if contains_ascii_control "$changed_since"; then
+    printf '%s\n' "::error::changed-since must not contain ASCII control characters"
+    exit 2
+  fi
+  if contains_ascii_control "$diff_file"; then
+    printf '%s\n' "::error::diff-file must not contain ASCII control characters"
+    exit 2
+  fi
+}
+
+validate_action_scalars
+
 case "$INPUT_COMMAND" in
   ""|dead-code|check|dupes|health|audit|security|fix) ;;
   *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, security, fix, or empty (runs all)."; exit 2 ;;
@@ -340,14 +371,13 @@ CHANGED_FILES_FILE=$(artifact_path fallow-changed-files.json)
 AUTO_DIFF_FILE="$PWD/$(artifact_path fallow-pr.diff)"
 
 if [ -n "${GITHUB_ENV:-}" ]; then
-  {
-    echo "FALLOW_RESULTS_FILE=${RESULTS_FILE}"
-    echo "FALLOW_SCOPED_RESULTS_FILE=${SCOPED_RESULTS_FILE}"
-    echo "FALLOW_ANALYSIS_ARGS_FILE=${ANALYSIS_ARGS_FILE}"
-    echo "FALLOW_CHANGED_FILES_FILE=${CHANGED_FILES_FILE}"
-    echo "FALLOW_SARIF_FILE=${SARIF_FILE}"
-    echo "FALLOW_ARTIFACTS_DIR=${ARTIFACTS_DIR}"
-  } >> "$GITHUB_ENV"
+  printf '%s\n' \
+    "FALLOW_RESULTS_FILE=${RESULTS_FILE}" \
+    "FALLOW_SCOPED_RESULTS_FILE=${SCOPED_RESULTS_FILE}" \
+    "FALLOW_ANALYSIS_ARGS_FILE=${ANALYSIS_ARGS_FILE}" \
+    "FALLOW_CHANGED_FILES_FILE=${CHANGED_FILES_FILE}" \
+    "FALLOW_SARIF_FILE=${SARIF_FILE}" \
+    "FALLOW_ARTIFACTS_DIR=${ARTIFACTS_DIR}" >> "$GITHUB_ENV"
 fi
 
 # --- Check for --sarif-file support ---
@@ -375,7 +405,7 @@ if fallow report --help > /dev/null 2>&1; then
   HAS_NATIVE_REPORT=true
 fi
 if [ -n "${GITHUB_ENV:-}" ]; then
-  echo "HAS_NATIVE_REPORT=${HAS_NATIVE_REPORT}" >> "$GITHUB_ENV"
+  printf '%s\n' "HAS_NATIVE_REPORT=${HAS_NATIVE_REPORT}" >> "$GITHUB_ENV"
 fi
 
 # --- Auto-detect changed-since in PR context ---
@@ -404,7 +434,7 @@ fi
 # `outputs.changed_files_unavailable == 'false'` as a positive signal see an
 # absent field instead of false when changed-since is not set.
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
-  echo "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
+  printf '%s\n' "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
 fi
 
 _CHANGED_JSON=""
@@ -443,7 +473,7 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
         _API_ROOT=$(repo_relative_root || true)
         if [ -z "$_API_ROOT" ]; then
           echo "::warning::fallow: absolute root is outside GITHUB_WORKSPACE; GitHub API paths cannot be scoped safely." >&2
-          [ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=true" >> "$GITHUB_OUTPUT"
+          [ -n "${GITHUB_OUTPUT:-}" ] && printf '%s\n' "changed_files_unavailable=true" >> "$GITHUB_OUTPUT"
           _CHANGED_JSON='[]'
         elif [ "$_API_ROOT" != "." ]; then
           # Strip root prefix; API returns repo-root-relative paths, fallow JSON uses root-relative.
@@ -454,7 +484,7 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
     else
       _STDERR_HEAD=$(head -3 "$_API_ERR" | tr '\n' ' ')
       echo "::warning::fallow: GitHub API call to list PR files failed; analysis will run against the full codebase, not just files changed in this PR. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
-      [ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=true" >> "$GITHUB_OUTPUT"
+      [ -n "${GITHUB_OUTPUT:-}" ] && printf '%s\n' "changed_files_unavailable=true" >> "$GITHUB_OUTPUT"
     fi
   fi
 
@@ -486,7 +516,7 @@ fi
 # Propagate the effective changed-since value after config safety logic so
 # downstream steps do not reapply stale PR scope.
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
-  echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
+  printf '%s\n' "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 fi
 
 # --- Pre-compute unified diff for line-level hot-path scoping ---
@@ -512,7 +542,7 @@ fi
 # need to declare their own FALLOW_DIFF_FILE env (which would override
 # the analyze-step propagation otherwise). User-supplied path wins.
 if [ -n "${FALLOW_DIFF_FILE:-}" ] && [ -n "${GITHUB_ENV:-}" ]; then
-  echo "FALLOW_DIFF_FILE=${FALLOW_DIFF_FILE}" >> "$GITHUB_ENV"
+  printf '%s\n' "FALLOW_DIFF_FILE=${FALLOW_DIFF_FILE}" >> "$GITHUB_ENV"
 fi
 
 if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
@@ -543,7 +573,7 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
     # Propagate to the comment / review render steps (separate composite
     # steps see only $GITHUB_ENV, not exported shell variables).
     if [ -n "${GITHUB_ENV:-}" ]; then
-      echo "FALLOW_DIFF_FILE=${_DIFF_PATH}" >> "$GITHUB_ENV"
+      printf '%s\n' "FALLOW_DIFF_FILE=${_DIFF_PATH}" >> "$GITHUB_ENV"
     fi
   else
     rm -f "$_DIFF_PATH"
@@ -650,15 +680,17 @@ if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-echo "issues=${ISSUES}" >> "$GITHUB_OUTPUT"
-echo "results=${RESULTS_FILE}" >> "$GITHUB_OUTPUT"
-echo "command=${INPUT_COMMAND}" >> "$GITHUB_OUTPUT"
-echo "verdict=${VERDICT}" >> "$GITHUB_OUTPUT"
-echo "gate=${GATE}" >> "$GITHUB_OUTPUT"
-
-if [ -f "$SARIF_FILE" ]; then
-  echo "sarif=${SARIF_FILE}" >> "$GITHUB_OUTPUT"
-fi
+{
+  printf '%s\n' \
+    "issues=${ISSUES}" \
+    "results=${RESULTS_FILE}" \
+    "command=${INPUT_COMMAND}" \
+    "verdict=${VERDICT}" \
+    "gate=${GATE}"
+  if [ -f "$SARIF_FILE" ]; then
+    printf '%s\n' "sarif=${SARIF_FILE}"
+  fi
+} >> "$GITHUB_OUTPUT"
 
 if [ "$ISSUES" -gt 0 ]; then
   case "$INPUT_COMMAND" in

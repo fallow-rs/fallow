@@ -14,7 +14,7 @@ discover these without parsing this page.
 
 | Variable | Description | Default | Example |
 | --- | --- | --- | --- |
-| `FALLOW_FORMAT` | Default output format (`json`, `human`, `sarif`, `compact`, `markdown`, `codeclimate`, `gitlab-codequality`, `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab`, `badge`). The `--format` flag overrides it. | `human` | `FALLOW_FORMAT=json` |
+| `FALLOW_FORMAT` | Default output format (`json`, `human`, `sarif`, `compact`, `markdown`, `codeclimate`, `gitlab-codequality`, `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab`, `badge`, `github-annotations`, `github-summary`). The `--format` flag overrides it. | `human` | `FALLOW_FORMAT=json` |
 | `FALLOW_QUIET` | Set to `1` or `true` to suppress progress output. The `--quiet` flag overrides it. | unset (off) | `FALLOW_QUIET=1` |
 | `FALLOW_SUGGESTIONS` | Set to `off`/`0`/`false`/`no`/`disabled` to suppress the `next_steps[]` array in JSON output and the human `Next:` line. Useful for CI consumers that snapshot-diff raw `--format json`. | `on` | `FALLOW_SUGGESTIONS=off` |
 | `FALLOW_UPDATE_CHECK` | Set to `off`/`0`/`false`/`disabled`/`no` to disable the human-TTY upgrade nudge and its background version check. | unset (on) | `FALLOW_UPDATE_CHECK=off` |

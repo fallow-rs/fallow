@@ -22,9 +22,13 @@
     "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src scripts commitlint.config.mjs",
     "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src scripts commitlint.config.mjs"
   },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "devDependencies": {
     "@commitlint/cli": "21.2.0",
     "@commitlint/config-conventional": "21.2.0",
+    "@tanstack/intent": "0.3.5",
     "oxfmt": "0.58.0",
     "oxlint": "1.73.0"
   }

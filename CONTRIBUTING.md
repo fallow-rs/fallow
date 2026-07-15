@@ -4,7 +4,8 @@ Thanks for your interest in contributing to fallow! This guide covers everything
 
 ## Getting started
 
-Repository tooling and the published Node packages require Node.js 22 or later.
+Repository tooling requires Node.js 22.12.0 or later. Published Node packages
+require Node.js 22 or later.
 
 ```bash
 git clone https://github.com/fallow-rs/fallow.git

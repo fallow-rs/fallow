@@ -505,6 +505,7 @@ chmod +x "$ANALYZE_TMP/bin/fallow"
 
 cat > "$ANALYZE_TMP/bin/git" <<'SH'
 #!/usr/bin/env bash
+[ -n "${FAKE_GIT_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
 case "$1" in
   diff)
     shift
@@ -543,6 +544,95 @@ case "$1" in
 esac
 SH
 chmod +x "$ANALYZE_TMP/bin/git"
+
+run_analyze_input_case() {
+  local case_name=$1
+  local changed_since=$2
+  local diff_file=$3
+  local work="$ANALYZE_TMP/input-$case_name"
+  local output="$ANALYZE_TMP/input-output-$case_name"
+  local env_file="$ANALYZE_TMP/input-env-$case_name"
+  local git_log="$ANALYZE_TMP/input-git-$case_name"
+  mkdir -p "$work"
+  : > "$output"
+  : > "$env_file"
+  : > "$git_log"
+
+  (
+    cd "$work" || exit 1
+    PATH="$ANALYZE_TMP/bin:$PATH" \
+      FAKE_GIT_LOG="$git_log" \
+      GITHUB_OUTPUT="$output" \
+      GITHUB_ENV="$env_file" \
+      INPUT_ROOT="." \
+      INPUT_COMMAND="dead-code" \
+      INPUT_FORMAT="json" \
+      INPUT_AUTO_CHANGED_SINCE="false" \
+      INPUT_CHANGED_SINCE="$changed_since" \
+      FALLOW_DIFF_FILE="$diff_file" \
+      bash "$DIR/../scripts/analyze.sh"
+  ) 2>&1
+}
+
+OUT=$(run_analyze_input_case "option-like-ref" "-main" "")
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: rejects option-like changed-since"
+else
+  fail "analyze: rejects option-like changed-since" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "::error::changed-since must not begin with '-'" "analyze: option-like changed-since error is stable"
+if [ ! -s "$ANALYZE_TMP/input-git-option-like-ref" ]; then
+  pass "analyze: rejects option-like changed-since before Git"
+else
+  fail "analyze: rejects option-like changed-since before Git" "Git was invoked"
+fi
+if [ ! -s "$ANALYZE_TMP/input-output-option-like-ref" ] && [ ! -s "$ANALYZE_TMP/input-env-option-like-ref" ]; then
+  pass "analyze: rejects option-like changed-since before file-command writes"
+else
+  fail "analyze: rejects option-like changed-since before file-command writes" "output or env file was modified"
+fi
+
+OUT=$(run_analyze_input_case "control-ref" $'main\ninjected=value' "")
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: rejects control characters in changed-since"
+else
+  fail "analyze: rejects control characters in changed-since" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "::error::changed-since must not contain ASCII control characters" "analyze: changed-since control-character error is stable"
+if [ ! -s "$ANALYZE_TMP/input-output-control-ref" ] && [ ! -s "$ANALYZE_TMP/input-env-control-ref" ]; then
+  pass "analyze: rejects changed-since newline before file-command writes"
+else
+  fail "analyze: rejects changed-since newline before file-command writes" "output or env file was modified"
+fi
+
+OUT=$(run_analyze_input_case "control-diff" "" $'reports/diff\nINJECTED=value')
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: rejects control characters in diff-file"
+else
+  fail "analyze: rejects control characters in diff-file" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "::error::diff-file must not contain ASCII control characters" "analyze: diff-file control-character error is stable"
+if [ ! -s "$ANALYZE_TMP/input-output-control-diff" ] && [ ! -s "$ANALYZE_TMP/input-env-control-diff" ]; then
+  pass "analyze: rejects diff-file newline before file-command writes"
+else
+  fail "analyze: rejects diff-file newline before file-command writes" "output or env file was modified"
+fi
+
+VALID_DIFF="$ANALYZE_TMP/diff files/current change.patch"
+mkdir -p "$(dirname "$VALID_DIFF")"
+printf '%s\n' 'diff --git a/src/a.ts b/src/a.ts' > "$VALID_DIFF"
+OUT=$(run_analyze_input_case "valid-scalars" "refs/remotes/origin/main~1" "$VALID_DIFF")
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "analyze: preserves valid ref and spaced diff-file path"
+else
+  fail "analyze: preserves valid ref and spaced diff-file path" "exit $cmd_status, output: $OUT"
+fi
+assert_contains "$(cat "$ANALYZE_TMP/input-output-valid-scalars")" "changed_since=refs/remotes/origin/main~1" "analyze: preserves valid relative ref"
+assert_contains "$(cat "$ANALYZE_TMP/input-env-valid-scalars")" "FALLOW_DIFF_FILE=$VALID_DIFF" "analyze: preserves diff-file path containing spaces"
 
 run_analyze_scope_case() {
   local case_name=$1

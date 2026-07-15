@@ -10466,12 +10466,10 @@ export type RefactoringTarget = Omit<RefactoringTargetFinding, "actions">;
 // import the bare names from `fallow/types` would break at upgrade time
 // otherwise.
 //
-// Stability commitment: these aliases ship as part of fallow's v2.x stable
-// surface. They are scheduled for removal alongside the kind-tagged
-// `FallowOutput` major bump (see https://github.com/fallow-rs/fallow/issues/413),
-// with a one-minor-cycle deprecation window (`@deprecated` JSDoc +
-// CHANGELOG headline) preceding the removal. New code should prefer the
-// `*Finding` wrapper names. Full public-consumer policy:
+// Stability commitment: legacy output aliases remain supported throughout v3.
+// Removing them requires an explicit deprecation period and a future major
+// release. New code should prefer the `*Finding` wrapper names. Full
+// public-consumer policy:
 // https://github.com/fallow-rs/fallow/blob/main/docs/backwards-compatibility.md
 //
 

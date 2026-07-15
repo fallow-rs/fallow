@@ -42,6 +42,68 @@ test("workflow block parser rejects missing keys", () => {
   assert.throws(() => indentedBlock("root:\n  value: true", "missing", 0), /missing missing block/);
 });
 
+test("bundled skill validation uses the root lockfile without network fallback", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const npmPackageJob = indentedBlock(workflow, "npm-package", 2);
+  const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
+  const nestedPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
+  const lockfile = JSON.parse(readFileSync("package-lock.json", "utf8"));
+
+  assert.equal(rootPackage.devDependencies["@tanstack/intent"], "0.3.5");
+  assert.equal(
+    nestedPackage.devDependencies?.["@tanstack/intent"],
+    rootPackage.devDependencies["@tanstack/intent"],
+  );
+  assert.equal(lockfile.packages[""].devDependencies["@tanstack/intent"], "0.3.5");
+  assert.equal(lockfile.packages["node_modules/@tanstack/intent"].version, "0.3.5");
+  assert.match(
+    npmPackageJob,
+    /npm ci --no-audit --no-fund --ignore-scripts[\s\S]*npx --no-install intent validate npm\/fallow\/skills/,
+  );
+  assert.doesNotMatch(npmPackageJob, /npx[^\n]*@tanstack\/intent@/);
+});
+
+test("CI runs the checked-in Action against the current Rust binary", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const changesJob = indentedBlock(workflow, "changes", 2);
+  const actionFilter = listedPaths(indentedBlock(changesJob, "action-current", 12));
+  const actionJob = indentedBlock(workflow, "action-current", 2);
+  const aggregateJob = indentedBlock(workflow, "ci-ok", 2);
+  const publishedCompatibilityWorkflow = readWorkflow(".github/workflows/test-action.yml");
+
+  assert.match(actionJob, /needs: changes/);
+  assert.match(actionJob, /if: needs\.changes\.outputs\.action-current == 'true'/);
+  assert.match(actionJob, /timeout-minutes: (?:1[0-9]|20)/);
+  assert.match(actionJob, /persist-credentials: false/);
+  assert.match(actionJob, /uses: \.\/\.github\/actions\/setup-rust/);
+  assert.match(actionJob, /cargo build --bin fallow/);
+  assert.match(
+    actionJob,
+    /FALLOW_BIN: \$\{\{ github\.workspace \}\}\/target\/debug\/fallow[\s\S]*bash action\/tests\/run\.sh/,
+  );
+  assert.match(actionJob, /uses: \.\//);
+  assert.match(actionJob, /format: json/);
+  assert.match(actionJob, /jq empty "\$RESULTS_PATH"/);
+  assert.match(aggregateJob, /action-current/);
+
+  for (const path of [
+    "action/**",
+    "action.yml",
+    "crates/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    ".github/actions/setup-rust/**",
+    ".github/workflows/ci.yml",
+    "scripts/workflow-policy.test.mjs",
+  ]) {
+    assert.ok(actionFilter.includes(path), `current-binary Action filter is missing ${path}`);
+  }
+
+  assert.match(publishedCompatibilityWorkflow, /uses: \.\//);
+  assert.match(publishedCompatibilityWorkflow, /FALLOW_SKIP_BINARY_VERIFY: "1"/);
+  assert.doesNotMatch(publishedCompatibilityWorkflow, /cargo build --bin fallow/);
+});
+
 test("binary-size workflow isolates incompatible release builds", () => {
   const workflow = readWorkflow(".github/workflows/bloat.yml");
   const globalEnv = indentedBlock(workflow, "env", 0);
@@ -179,6 +241,14 @@ test("VS Code CI runs the extension-host integration suite with a pinned cached 
   assert.match(vscodeJob, /pnpm audit --prod/);
   assert.match(vscodeFilter, /editors\/vscode\/\*\*/);
   assert.match(vscodeFilter, /\.github\/workflows\/ci\.yml/);
+  for (const path of ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]) {
+    assert.ok(listedPaths(vscodeFilter).includes(path), `VS Code filter is missing ${path}`);
+  }
+  assert.match(vscodeJob, /uses: \.\/\.github\/actions\/setup-rust/);
+  assert.match(
+    vscodeJob,
+    /name: Build current multicall binary\n\s+run: cargo build -p fallow-multicall --bin fallow-multicall/,
+  );
   assert.match(
     vscodeJob,
     /name: Cache VS Code test download[\s\S]*uses: actions\/cache@[0-9a-f]{40}[\s\S]*path: \/tmp\/fallow-vscode-test-cache[\s\S]*key: .*vscode-1\.96\.0/,
@@ -186,6 +256,10 @@ test("VS Code CI runs the extension-host integration suite with a pinned cached 
   assert.match(
     vscodeJob,
     /name: Run VS Code extension-host integration tests\n\s+run: cd editors\/vscode && xvfb-run -a pnpm test:integration/,
+  );
+  assert.match(
+    vscodeJob,
+    /name: Run VS Code real CLI and LSP contract smoke[\s\S]*FALLOW_BIN: \$\{\{ github\.workspace \}\}\/target\/debug\/fallow-multicall[\s\S]*run: xvfb-run -a pnpm --dir editors\/vscode run test:integration:real/,
   );
 
   const harness = readFileSync("editors/vscode/test/integration/runTest.ts", "utf8");

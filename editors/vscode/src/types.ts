@@ -17,7 +17,8 @@
 // per-alias rationale live in the generated `output-contract.d.ts` under the
 // `// Backwards-compat aliases` section. They are sourced from the same
 // `export type { ... }` block below so the published `fallow/types` subpath
-// carries the v2.x stable surface. Public-consumer policy:
+// Legacy output aliases remain supported throughout v3. Removing them requires
+// an explicit deprecation period and a future major release. Policy:
 // `docs/backwards-compatibility.md`.
 export type {
   AddToConfigAction,

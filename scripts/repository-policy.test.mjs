@@ -34,6 +34,16 @@ test("published Node packages and Action smoke tests use Node 22", () => {
   assert.deepEqual([...new Set(versions)], ["22"]);
 });
 
+test("root repository tooling declares its exact Node floor", () => {
+  const rootPackage = readJson("package.json");
+  const rootLock = readJson("package-lock.json");
+  const contributing = readFileSync("CONTRIBUTING.md", "utf8");
+
+  assert.equal(rootPackage.engines.node, ">=22.12.0");
+  assert.equal(rootLock.packages[""].engines.node, ">=22.12.0");
+  assert.match(contributing, /Repository tooling requires Node\.js 22\.12\.0 or later\./);
+});
+
 test("CONTRIBUTING uses the root contract generation commands", () => {
   const contributing = readFileSync("CONTRIBUTING.md", "utf8");
 
@@ -51,4 +61,21 @@ test("plugin authoring guide documents every top-level schema field", () => {
   const schemaFields = Object.keys(schema.properties).toSorted();
 
   assert.deepEqual(documented, schemaFields);
+});
+
+test("FALLOW_FORMAT docs include every GitHub-native format", () => {
+  const formatSource = readFileSync("crates/cli/src/cli_format.rs", "utf8");
+  const githubFormats = [
+    ...formatSource.matchAll(/#\[value\(name = "(github-[^"]+)"\)\]/g),
+  ].map((match) => match[1]);
+  assert.ok(githubFormats.length > 0, "Rust format catalog must include GitHub-native formats");
+
+  const docs = readFileSync("docs/environment-variables.md", "utf8");
+  const row = docs.match(/^\| `FALLOW_FORMAT` \| ([^|]+)\|/m);
+  assert.ok(row, "environment variable docs must contain a FALLOW_FORMAT row");
+  const documentedFormats = [...row[1].matchAll(/`([^`]+)`/g)].map((match) => match[1]);
+
+  for (const format of githubFormats) {
+    assert.ok(documentedFormats.includes(format), `FALLOW_FORMAT docs are missing ${format}`);
+  }
 });
