@@ -16,6 +16,7 @@ mod document_state;
 mod hover;
 mod initialization;
 mod markdown;
+mod path_utils;
 mod position;
 mod protocol;
 mod server_capabilities;
@@ -64,6 +65,7 @@ use initialization::{
     LspInitializationOptions, initialization_duplication_options,
     initialization_inline_complexity_enabled, initialization_production_override,
 };
+use path_utils::canonicalize_for_lsp;
 #[cfg(test)]
 use protocol::analysis_complete_params_for_test;
 #[cfg(test)]
@@ -171,7 +173,7 @@ impl LanguageServer for FallowLspServer {
                     .root_uri
                     .and_then(|u| u.to_file_path().map(|path| path.into_owned()))
             });
-        let canonical_root = root.map(|path| path.canonicalize().unwrap_or(path));
+        let canonical_root = root.map(|path| canonicalize_for_lsp(&path));
         if let Some(path) = &canonical_root {
             *self.root.write().await = Some(path.clone());
         }
@@ -903,9 +905,7 @@ async fn serve_stdio() {
 /// in agreement with the CLI. A `Vec` is returned (always length one) so the
 /// caller's accumulate-then-publish structure stays uniform.
 fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let root = canonicalize_for_lsp(workspace_root);
     vec![root]
 }
 

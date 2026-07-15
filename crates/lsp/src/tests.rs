@@ -1407,7 +1407,7 @@ fn find_project_roots_returns_only_workspace_root() {
 
     let roots = find_project_roots(root);
     assert_eq!(roots.len(), 1, "LSP analyzes exactly one root per run");
-    let expected = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let expected = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     assert_eq!(roots[0], expected, "the single root is the workspace root");
 }
 

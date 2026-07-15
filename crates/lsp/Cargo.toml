@@ -16,6 +16,7 @@ name = "fallow-lsp"
 path = "src/main.rs"
 
 [dependencies]
+dunce = { workspace = true }
 fallow-api = { workspace = true }
 fallow-config = { workspace = true }
 fallow-types = { workspace = true }

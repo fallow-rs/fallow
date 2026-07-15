@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use fallow_config::{DetectionMode, DuplicatesConfig};
 use serde::Deserialize;
 
+use crate::path_utils::canonicalize_for_lsp;
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LspHealthOptions {
@@ -79,7 +81,7 @@ fn resolve_config_path(raw: Option<&str>, root: Option<&Path>) -> Option<PathBuf
         path
     };
 
-    Some(path.canonicalize().unwrap_or(path))
+    Some(canonicalize_for_lsp(&path))
 }
 
 pub fn initialization_config_path(
