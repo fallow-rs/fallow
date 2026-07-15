@@ -301,7 +301,7 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
 #[tokio::test(flavor = "current_thread")]
 async fn failed_analysis_refresh_preserves_last_valid_snapshot_and_diagnostics() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path().canonicalize().expect("canonical root");
+    let root = canonicalize_for_lsp(dir.path());
     let orphan = write_analysis_failure_fixture(&root, "^__");
     let orphan_uri = Uri::from_file_path(&orphan).expect("orphan file URI");
 
@@ -378,7 +378,7 @@ async fn failed_analysis_refresh_preserves_last_valid_snapshot_and_diagnostics()
 #[tokio::test(flavor = "current_thread")]
 async fn explicit_config_failure_preserves_last_valid_snapshot_and_diagnostics() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path().canonicalize().expect("canonical root");
+    let root = canonicalize_for_lsp(dir.path());
     let orphan = write_analysis_failure_fixture(&root, "^__");
     let orphan_uri = Uri::from_file_path(&orphan).expect("orphan file URI");
 
@@ -738,7 +738,7 @@ async fn windows_initialization_publishes_uri_safe_diagnostics() {
             .to_file_path()
             .expect("diagnostic URI should convert to a file path")
             .into_owned(),
-        unused_file,
+        canonicalize_for_lsp(&unused_file),
         "diagnostic URI should round-trip to the unused file"
     );
 
