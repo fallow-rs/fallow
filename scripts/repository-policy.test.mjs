@@ -65,17 +65,17 @@ test("plugin authoring guide documents every top-level schema field", () => {
 
 test("FALLOW_FORMAT docs include every GitHub-native format", () => {
   const formatSource = readFileSync("crates/cli/src/cli_format.rs", "utf8");
-  const githubFormats = [
-    ...formatSource.matchAll(/#\[value\(name = "(github-[^"]+)"\)\]/g),
-  ].map((match) => match[1]);
+  const githubFormats = [...formatSource.matchAll(/#\[value\(name = "(github-[^"]+)"\)\]/g)].map(
+    (match) => match[1],
+  );
   assert.ok(githubFormats.length > 0, "Rust format catalog must include GitHub-native formats");
 
   const docs = readFileSync("docs/environment-variables.md", "utf8");
   const row = docs.match(/^\| `FALLOW_FORMAT` \| ([^|]+)\|/m);
   assert.ok(row, "environment variable docs must contain a FALLOW_FORMAT row");
-  const documentedFormats = [...row[1].matchAll(/`([^`]+)`/g)].map((match) => match[1]);
+  const documentedFormats = new Set([...row[1].matchAll(/`([^`]+)`/g)].map((match) => match[1]));
 
   for (const format of githubFormats) {
-    assert.ok(documentedFormats.includes(format), `FALLOW_FORMAT docs are missing ${format}`);
+    assert.ok(documentedFormats.has(format), `FALLOW_FORMAT docs are missing ${format}`);
   }
 });
