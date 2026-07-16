@@ -127,6 +127,8 @@ interface GraphViewState {
   /** Transient HUD notice (e.g. "no dependency path found"). */
   notice: string;
   noticeAt: number;
+  /** First-render reveal choreography start (0 = pending, -1 = skipped). */
+  revealAt: number;
 }
 
 const FONT_SMALL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
@@ -197,6 +199,7 @@ const getGVS = (state: AppState): GraphViewState => {
       pulseAt: 0,
       notice: "",
       noticeAt: 0,
+      revealAt: 0,
     };
   }
   return ext._gvs;
@@ -821,6 +824,7 @@ export const initGraphNodes = (state: AppState): void => {
   gvs.zoomBehavior = zoomBehavior;
 
   gvs.initialized = true;
+  gvs.revealAt = 0;
   renderGraph(state);
 };
 
@@ -965,12 +969,40 @@ export const renderGraph = (state: AppState): void => {
 
 // ── Overview ────────────────────────────────────────────────────
 
+/** Opening choreography: layers sweep in left to right, then the roads. */
+const REVEAL_LAYER_MS = 110;
+const REVEAL_FADE_MS = 380;
+
+const revealProgress = (
+  gvs: GraphViewState,
+  reduced: boolean,
+): { t: number; cluster: (c: ClusterInfo) => number; roads: number; labels: number } => {
+  if (gvs.revealAt === 0) gvs.revealAt = reduced ? -1 : performance.now();
+  if (gvs.revealAt < 0) {
+    return { t: 1, cluster: () => 1, roads: 1, labels: 1 };
+  }
+  const elapsed = performance.now() - gvs.revealAt;
+  const maxLayer = gvs.clusters.reduce((max, c) => Math.max(max, c.isolated ? 0 : c.layer), 0);
+  const total = (maxLayer + 1) * REVEAL_LAYER_MS + REVEAL_FADE_MS + 420;
+  const t = Math.min(1, elapsed / total);
+  const clusterAlpha = (c: ClusterInfo): number => {
+    const start = (c.isolated ? maxLayer + 1 : c.layer) * REVEAL_LAYER_MS;
+    return easeOut(Math.min(1, Math.max(0, (elapsed - start) / REVEAL_FADE_MS)));
+  };
+  const roadsStart = (maxLayer + 1) * REVEAL_LAYER_MS * 0.6;
+  const roads = easeOut(Math.min(1, Math.max(0, (elapsed - roadsStart) / (REVEAL_FADE_MS + 200))));
+  const labelsStart = roadsStart + 180;
+  const labels = easeOut(Math.min(1, Math.max(0, (elapsed - labelsStart) / REVEAL_FADE_MS)));
+  return { t, cluster: clusterAlpha, roads, labels };
+};
+
 const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
   const { ctx, theme, data } = state;
   const { transform, clusters, roads, fileNodes } = gvs;
   const files = data.files;
   const searching = state.search.trim() !== "";
   const kRel = transform.k / gvs.fitK;
+  const reveal = revealProgress(gvs, state.reducedMotion);
 
   ctx.save();
   ctx.translate(transform.x, transform.y);
@@ -984,7 +1016,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.beginPath();
     hullPath(ctx, cluster.hull);
     ctx.fillStyle = theme.surface1;
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = 0.85 * reveal.cluster(cluster);
     ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -1030,7 +1062,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.beginPath();
     hullPath(ctx, cluster.hull);
     ctx.strokeStyle = cluster.tangle ? theme.amber : theme.borderDefault;
-    ctx.globalAlpha = cluster.tangle ? 0.7 : 0.45;
+    ctx.globalAlpha = (cluster.tangle ? 0.7 : 0.45) * reveal.cluster(cluster);
     ctx.lineWidth = 1 / transform.k;
     ctx.stroke();
     ctx.globalAlpha = 1;
@@ -1043,7 +1075,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.beginPath();
     taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.6, wSrc * 0.3));
     ctx.fillStyle = theme.textLow;
-    ctx.globalAlpha = 0.28;
+    ctx.globalAlpha = 0.28 * reveal.roads;
     ctx.fill();
     ctx.globalAlpha = 1;
 
@@ -1134,6 +1166,8 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     if (dimmed) alpha = 0.12;
     if (searching && !matched) alpha = Math.min(alpha, 0.1);
     if (isNeighbor) alpha = 1;
+    alpha *= reveal.cluster(clusters[node.cluster]);
+    if (alpha <= 0.01) continue;
 
     ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
@@ -1230,8 +1264,12 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
 
   ctx.restore();
 
-  drawRoadLabels(state, gvs);
-  drawClusterLabels(state, gvs);
+  // Labels join once the roads have flowed in (their internal alpha
+  // handling would fight a global fade).
+  if (reveal.labels > 0.35) {
+    drawRoadLabels(state, gvs);
+    drawClusterLabels(state, gvs);
+  }
   drawAxisCaptions(state, w, h);
   drawPathTrace(state, gvs, w, h);
 
@@ -1257,7 +1295,9 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
 
   // Motion frames while something animates.
   const animating =
-    (gvs.hoveredRoad !== null && !state.reducedMotion) || gvs.pulseFile !== null;
+    (gvs.hoveredRoad !== null && !state.reducedMotion) ||
+    gvs.pulseFile !== null ||
+    reveal.t < 1;
   if (animating) {
     cancelAnimationFrame(gvs.raf);
     gvs.raf = requestAnimationFrame(() => {

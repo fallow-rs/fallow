@@ -1,6 +1,6 @@
 import { applyHash, createState, runSearch, setDarkMode, syncHash } from "./state";
 import type { AppState } from "./state";
-import type { Lens } from "./types";
+import type { Lens, TreeNode } from "./types";
 import {
   captureLensColors,
   drillInto,
@@ -285,6 +285,7 @@ const init = (): void => {
             cell.node.name,
             countLeaves(cell.node),
             cell.node.size,
+            countLensFindings(state, cell.node),
             e.clientX,
             e.clientY,
           );
@@ -496,6 +497,43 @@ const countLeaves = (node: { children: Array<{ children: unknown[]; fileIndex: n
     n += countLeaves(child as typeof node);
   }
   return n;
+};
+
+/** Count the active lens's findings under a treemap directory node. */
+const countLensFindings = (
+  state: AppState,
+  node: TreeNode,
+): { value: number; label: string } | null => {
+  let value = 0;
+  const walk = (n: TreeNode): void => {
+    if (n.fileIndex !== null) {
+      const file = state.data.files[n.fileIndex];
+      switch (state.lens) {
+        case "deadcode":
+          if (file.status === "unused" || file.status === "hasUnusedExports") value++;
+          break;
+        case "dupes":
+          if (file.dup_lines > 0) value++;
+          break;
+        case "boundaries":
+          if (state.index.violationSources.has(n.fileIndex)) value++;
+          break;
+        case "hotspots":
+          if (file.max_cyclomatic >= 10) value++;
+          break;
+      }
+      return;
+    }
+    for (const child of n.children) walk(child);
+  };
+  walk(node);
+  const labels: Record<typeof state.lens, string> = {
+    deadcode: "dead code",
+    dupes: "with clones",
+    boundaries: "violating",
+    hotspots: "hotspots",
+  };
+  return { value, label: labels[state.lens] };
 };
 
 if (document.readyState === "loading") {

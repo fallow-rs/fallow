@@ -190,18 +190,25 @@ export const showDirTooltip = (
   name: string,
   fileCount: number,
   size: number,
+  findings: { value: number; label: string } | null,
   mouseX: number,
   mouseY: number,
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
   tip.appendChild(line("tip-name", `${name}/`));
-  tip.appendChild(
-    statGrid([
-      { value: formatCount(fileCount), label: "files" },
-      { value: formatSize(size), label: "size" },
-    ]),
-  );
+  const stats: Stat[] = [
+    { value: formatCount(fileCount), label: "files" },
+    { value: formatSize(size), label: "size" },
+  ];
+  if (findings && findings.value > 0) {
+    stats.push({
+      value: formatCount(findings.value),
+      label: findings.label,
+      cls: "sev-warn",
+    });
+  }
+  tip.appendChild(statGrid(stats));
   tip.appendChild(line("tip-muted tip-line", "click to zoom in"));
   position(tip, mouseX, mouseY);
 };
