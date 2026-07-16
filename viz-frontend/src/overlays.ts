@@ -1,18 +1,9 @@
-import type { AppState } from "./state";
-import type { Insight, InsightAction } from "./insights";
-import { formatCount } from "./data";
-
 /**
- * HTML layers over the canvas: the briefing drawer (auto-generated
- * orientation insights), the help overlay (how to read the map), and
- * the presenter tour bar. All DOM, all styled by the shared tokens.
+ * HTML layers over the canvas. Currently the help overlay (how to read
+ * the map); styled by the shared design tokens.
  */
 
 export interface OverlayHandlers {
-  onInsight: (action: InsightAction) => void;
-  onTourStart: () => void;
-  onTourStep: (delta: number) => void;
-  onTourEnd: () => void;
   onHelpClose: () => void;
 }
 
@@ -35,89 +26,6 @@ const bracketTitle = (host: HTMLElement, title: string): void => {
   host.appendChild(el("span", "bracket", "[ "));
   host.appendChild(document.createTextNode(title));
   host.appendChild(el("span", "bracket", " ]"));
-};
-
-// ── Briefing drawer ─────────────────────────────────────────────
-
-export const buildBriefing = (
-  state: AppState,
-  insights: Insight[],
-  handlers: OverlayHandlers,
-): { briefing: HTMLElement; toggle: HTMLButtonElement } => {
-  const briefing = el("aside");
-  briefing.id = "briefing";
-  briefing.setAttribute("aria-label", "Codebase briefing");
-
-  const head = el("div", "brief-head");
-  const title = el("span", "brief-title");
-  bracketTitle(title, "briefing");
-  head.appendChild(title);
-  const collapse = button("brief-collapse", "–");
-  collapse.setAttribute("aria-label", "Collapse briefing");
-  head.appendChild(collapse);
-  briefing.appendChild(head);
-
-  const list = el("ol", "brief-list");
-  insights.forEach((insight) => {
-    const li = el("li");
-    const btn = button("brief-item", "");
-    btn.appendChild(el("span", `brief-dot sev-${insight.severity}`));
-    const body = el("span", "brief-body");
-    body.appendChild(el("span", "brief-text", insight.text));
-    if (insight.detail) body.appendChild(el("span", "brief-detail", insight.detail));
-    btn.appendChild(body);
-    btn.addEventListener("click", () => handlers.onInsight(insight.action));
-    li.appendChild(btn);
-    list.appendChild(li);
-  });
-  if (insights.length === 0) {
-    const li = el("li", "brief-empty", "no findings to brief; this map is clean");
-    list.appendChild(li);
-  }
-  briefing.appendChild(list);
-
-  const foot = el("div", "brief-foot");
-  if (insights.length > 1) {
-    const tour = button("brief-tour", "▸ start tour");
-    tour.addEventListener("click", handlers.onTourStart);
-    foot.appendChild(tour);
-  }
-  foot.appendChild(el("span", "brief-hint", "b toggle · ? help"));
-  briefing.appendChild(foot);
-
-  const toggle = button("brief-toggle", "");
-  toggle.id = "briefing-toggle";
-  toggle.appendChild(el("span", "bracket", "[ "));
-  toggle.appendChild(document.createTextNode("briefing "));
-  toggle.appendChild(el("span", "value", formatCount(insights.length)));
-  toggle.appendChild(el("span", "bracket", " ]"));
-  toggle.setAttribute("aria-label", "Open briefing");
-
-  const sync = (): void => {
-    briefing.classList.toggle("open", state.briefingOpen);
-    toggle.classList.toggle("hidden", state.briefingOpen);
-  };
-  collapse.addEventListener("click", () => {
-    state.briefingOpen = false;
-    sync();
-  });
-  toggle.addEventListener("click", () => {
-    state.briefingOpen = true;
-    sync();
-  });
-  sync();
-
-  return { briefing, toggle };
-};
-
-/** Re-sync open/collapsed classes after programmatic state changes. */
-export const syncBriefing = (
-  state: AppState,
-  briefing: HTMLElement,
-  toggle: HTMLElement,
-): void => {
-  briefing.classList.toggle("open", state.briefingOpen);
-  toggle.classList.toggle("hidden", state.briefingOpen);
 };
 
 // ── Help overlay ────────────────────────────────────────────────
@@ -154,7 +62,7 @@ const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
       ["/ then enter", "search, zoom to the best match"],
       ["minimap", "bottom right: click to pan the camera"],
       ["1 2 3 4", "switch lens · m map · g graph · 0 reset view"],
-      ["b · png", "toggle the briefing · export this view"],
+      ["png", "export this view for a slide or doc"],
       ["esc", "back out of anything"],
     ],
   },
@@ -206,47 +114,4 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
     if (e.target === overlay) handlers.onHelpClose();
   });
   return overlay;
-};
-
-// ── Tour bar ────────────────────────────────────────────────────
-
-export const buildTourBar = (handlers: OverlayHandlers): HTMLElement => {
-  const bar = el("div");
-  bar.id = "tour-bar";
-  bar.setAttribute("role", "status");
-  bar.setAttribute("aria-live", "polite");
-
-  const step = el("span", "tour-step");
-  bar.appendChild(step);
-  const text = el("span", "tour-text");
-  bar.appendChild(text);
-  const prev = button("tour-btn", "◂");
-  prev.setAttribute("aria-label", "Previous stop");
-  prev.addEventListener("click", () => handlers.onTourStep(-1));
-  bar.appendChild(prev);
-  const next = button("tour-btn", "▸");
-  next.setAttribute("aria-label", "Next stop");
-  next.addEventListener("click", () => handlers.onTourStep(1));
-  bar.appendChild(next);
-  const end = button("tour-btn tour-end", "×");
-  end.setAttribute("aria-label", "End tour");
-  end.addEventListener("click", handlers.onTourEnd);
-  bar.appendChild(end);
-  return bar;
-};
-
-export const updateTourBar = (
-  bar: HTMLElement,
-  insights: Insight[],
-  index: number | null,
-): void => {
-  bar.classList.toggle("open", index !== null);
-  if (index === null) return;
-  const insight = insights[index];
-  const step = bar.querySelector(".tour-step");
-  const text = bar.querySelector(".tour-text");
-  if (step) step.textContent = `${index + 1}/${insights.length}`;
-  if (text) {
-    text.textContent = insight.detail ? `${insight.text} · ${insight.detail}` : insight.text;
-  }
 };

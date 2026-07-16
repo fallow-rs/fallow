@@ -14,32 +14,20 @@ import {
   centerOnFile,
   clearGraphFocus,
   getClusterMode,
-  graphDrag,
-  graphDragEnd,
-  graphDragStart,
   graphFocusSearch,
   graphHandleClick,
   graphHoverTarget,
   graphPathTrace,
   initGraphNodes,
-  isDragging,
   minimapHit,
   minimapPan,
   renderGraph,
   resetEgoTrail,
   resetGraphView,
   roadFacts,
-  selectRoadByDirs,
   setClusterMode,
 } from "./graph";
-import { computeInsights, type InsightAction } from "./insights";
-import {
-  buildBriefing,
-  buildHelpOverlay,
-  buildTourBar,
-  syncBriefing,
-  updateTourBar,
-} from "./overlays";
+import { buildHelpOverlay } from "./overlays";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
 import { createPanel, renderPanel } from "./panel";
@@ -146,71 +134,13 @@ const init = (): void => {
   app.appendChild(stage);
   app.appendChild(statuslineOf(refs));
 
-  // ── Orientation overlays (briefing, help, tour) ───────────────
-  const insights = computeInsights(data, state.index);
-
-  const applyInsight = (action: InsightAction): void => {
-    state.selectedRoad = null;
-    if (action.kind === "lens" || action.kind === "file" || action.kind === "dir") {
-      if (action.lens) setLens(action.lens);
-    }
-    switch (action.kind) {
-      case "file": {
-        if (action.view) setView(action.view);
-        if (state.view === "graph") initGraphNodes(state);
-        selectFile(action.fileIndex, true);
-        break;
-      }
-      case "dir": {
-        setView("map");
-        selectFile(null);
-        drillTo(state, action.path);
-        break;
-      }
-      case "road": {
-        setView("graph");
-        initGraphNodes(state);
-        selectFile(null);
-        state.selectedRoad = selectRoadByDirs(state, action.srcDir, action.dstDir);
-        break;
-      }
-      case "lens": {
-        if (action.view) setView(action.view);
-        break;
-      }
-    }
-    requestRender();
-  };
-
-  const tourGoto = (index: number | null): void => {
-    state.tour =
-      index === null ? null : Math.max(0, Math.min(insights.length - 1, index));
-    updateTourBar(tourBar, insights, state.tour);
-    if (state.tour !== null) {
-      state.briefingOpen = false;
-      syncBriefing(state, briefing, briefingToggle);
-      applyInsight(insights[state.tour].action);
-    }
-  };
-
-  const overlayHandlers = {
-    onInsight: (action: InsightAction) => applyInsight(action),
-    onTourStart: () => tourGoto(0),
-    onTourStep: (delta: number) => {
-      if (state.tour !== null) tourGoto(state.tour + delta);
-    },
-    onTourEnd: () => tourGoto(null),
+  // ── Help overlay ──────────────────────────────────────────────
+  const helpOverlay = buildHelpOverlay({
     onHelpClose: () => {
       state.helpOpen = false;
       helpOverlay.classList.remove("open");
     },
-  };
-  const { briefing, toggle: briefingToggle } = buildBriefing(state, insights, overlayHandlers);
-  const helpOverlay = buildHelpOverlay(overlayHandlers);
-  const tourBar = buildTourBar(overlayHandlers);
-  stage.appendChild(briefing);
-  stage.appendChild(briefingToggle);
-  stage.appendChild(tourBar);
+  });
   document.body.appendChild(helpOverlay);
 
   const toggleHelp = (): void => {
@@ -274,7 +204,6 @@ const init = (): void => {
 
   // ── Canvas interactions ───────────────────────────────────────
   let mouseDownAt: { x: number; y: number } | null = null;
-  let dragMoved = false;
   let lastGraphTarget = "";
 
   const canvasPoint = (e: MouseEvent): { x: number; y: number } => {
@@ -310,12 +239,6 @@ const init = (): void => {
         hideTooltip();
       }
     } else {
-      if (isDragging(state)) {
-        dragMoved = true;
-        graphDrag(state, x, y);
-        renderGraph(state);
-        return;
-      }
       const target = graphHoverTarget(state, x, y);
       const hovered = target && target.kind === "file" ? target.fileIndex : null;
       const targetKey = target
@@ -375,23 +298,14 @@ const init = (): void => {
       return;
     }
     mouseDownAt = { x, y };
-    dragMoved = false;
-    if (state.view === "graph" && state.selected === null) {
-      const target = graphHoverTarget(state, x, y);
-      if (target && target.kind === "file") graphDragStart(state, target.fileIndex);
-    }
   });
 
   window.addEventListener("mouseup", (e) => {
-    if (state.view === "graph" && isDragging(state)) {
-      graphDragEnd(state);
-    }
     if (!mouseDownAt) return;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const moved =
-      dragMoved || Math.abs(x - mouseDownAt.x) > 4 || Math.abs(y - mouseDownAt.y) > 4;
+    const moved = Math.abs(x - mouseDownAt.x) > 4 || Math.abs(y - mouseDownAt.y) > 4;
     mouseDownAt = null;
     if (moved || e.target !== canvas) return;
 
@@ -440,10 +354,6 @@ const init = (): void => {
         toggleHelp();
         return;
       }
-      if (state.tour !== null) {
-        tourGoto(null);
-        return;
-      }
       if (inInput && refs) {
         refs.search.value = "";
         runSearch(state, "");
@@ -477,15 +387,6 @@ const init = (): void => {
       refs?.search.focus();
     } else if (e.key === "?") {
       toggleHelp();
-    } else if (e.key === "b") {
-      state.briefingOpen = !state.briefingOpen;
-      syncBriefing(state, briefing, briefingToggle);
-    } else if (state.tour !== null && (e.key === " " || e.key === "ArrowRight")) {
-      e.preventDefault();
-      tourGoto(state.tour + 1);
-    } else if (state.tour !== null && e.key === "ArrowLeft") {
-      e.preventDefault();
-      tourGoto(state.tour - 1);
     } else if (e.key >= "1" && e.key <= "4") {
       setLens(lensOrder[Number(e.key) - 1]);
     } else if (e.key === "m") {

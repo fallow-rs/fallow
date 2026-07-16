@@ -35,11 +35,8 @@ export interface AppState {
   theme: Theme;
   reducedMotion: boolean;
 
-  /** Orientation overlays. */
-  briefingOpen: boolean;
+  /** Help overlay visibility. */
   helpOpen: boolean;
-  /** Active tour stop index, or null when no tour is running. */
-  tour: number | null;
 
   /** Set by main.ts; call after any state mutation. */
   requestRender: () => void;
@@ -73,9 +70,7 @@ export const createState = (
     dark,
     theme: getTheme(dark),
     reducedMotion: prefersReducedMotion(),
-    briefingOpen: true,
     helpOpen: false,
-    tour: null,
     requestRender: () => {},
   };
 };

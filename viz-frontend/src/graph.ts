@@ -103,7 +103,6 @@ interface GraphViewState {
   hubFloor: number;
   transform: { x: number; y: number; k: number };
   fitK: number;
-  draggedNode: number | null;
   initialized: boolean;
   clusterMode: ClusterMode;
   zoomBehavior: ReturnType<typeof zoom<HTMLCanvasElement, unknown>> | null;
@@ -181,7 +180,6 @@ const getGVS = (state: AppState): GraphViewState => {
       hubFloor: Infinity,
       transform: { x: 0, y: 0, k: 1 },
       fitK: 1,
-      draggedNode: null,
       initialized: false,
       clusterMode: "directory",
       zoomBehavior: null,
@@ -2437,47 +2435,6 @@ export const graphHandleClick = (state: AppState, x: number, y: number): GraphCl
   return { kind: "none" };
 };
 
-/**
- * Select the heaviest road between two top-level directories (briefing /
- * tour navigation) and center the camera on it. Returns the resolved
- * selection for the panel, or null when no such road exists.
- */
-export const selectRoadByDirs = (
-  state: AppState,
-  srcDir: string,
-  dstDir: string,
-): RoadSelection | null => {
-  const gvs = getGVS(state);
-  if (!gvs.initialized) return null;
-  const matches = (key: string, dir: string): boolean => key === dir || key.startsWith(`${dir}/`);
-  let best = -1;
-  let bestCount = -1;
-  gvs.roads.forEach((road, i) => {
-    if (
-      matches(gvs.clusters[road.src].key, srcDir) &&
-      matches(gvs.clusters[road.dst].key, dstDir) &&
-      road.count > bestCount
-    ) {
-      best = i;
-      bestCount = road.count;
-    }
-  });
-  if (best < 0) return null;
-  gvs.selectedRoad = best;
-
-  if (gvs.zoomBehavior) {
-    const { p0, p1, p2, p3 } = roadGeometry(gvs, gvs.roads[best]);
-    const mid = cubicPoint(p0, p1, p2, p3, 0.5);
-    const stageEl = state.canvas.parentElement;
-    const w = stageEl ? stageEl.clientWidth : window.innerWidth;
-    const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-    const k = Math.max(gvs.transform.k, gvs.fitK * 1.15);
-    const target = zoomIdentity.translate(w / 2 - mid.x * k, h / 2 - mid.y * k).scale(k);
-    select(state.canvas).call(gvs.zoomBehavior.transform, target);
-  }
-  return buildRoadSelection(state, best);
-};
-
 /** Reset ego navigation history (call when selection is cleared). */
 export const resetEgoTrail = (state: AppState): void => {
   const gvs = getGVS(state);
@@ -2485,28 +2442,6 @@ export const resetEgoTrail = (state: AppState): void => {
   gvs.egoExpanded.clear();
   gvs.lastRoot = null;
 };
-
-// ── Drag (overview only; layouts are frozen, drag just repositions) ──
-
-export const graphDragStart = (state: AppState, fileIndex: number): void => {
-  if (state.selected !== null) return;
-  const gvs = getGVS(state);
-  if (gvs.fileNodes[fileIndex]) gvs.draggedNode = fileIndex;
-};
-
-export const graphDrag = (state: AppState, canvasX: number, canvasY: number): void => {
-  const gvs = getGVS(state);
-  if (gvs.draggedNode === null) return;
-  const node = gvs.fileNodes[gvs.draggedNode];
-  node.x = (canvasX - gvs.transform.x) / gvs.transform.k;
-  node.y = (canvasY - gvs.transform.y) / gvs.transform.k;
-};
-
-export const graphDragEnd = (state: AppState): void => {
-  getGVS(state).draggedNode = null;
-};
-
-export const isDragging = (state: AppState): boolean => getGVS(state).draggedNode !== null;
 
 /** Pan/zoom so a file's node is centered (overview only; ego centers itself). */
 export const centerOnFile = (state: AppState, fileIndex: number): void => {
