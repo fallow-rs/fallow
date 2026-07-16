@@ -180,6 +180,7 @@ export const buildChrome = (
     ["4", " lens"],
     ["m", " map"],
     ["g", " graph"],
+    ["0", " reset"],
     ["esc", " back"],
   ];
   hintPairs.forEach(([key, label], i) => {
