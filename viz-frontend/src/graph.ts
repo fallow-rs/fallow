@@ -1222,6 +1222,11 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.globalAlpha = 1;
   }
 
+  // Deep-zoom file labels: name the important dots once there is room.
+  if (kRel >= 2 && state.graphHovered === null) {
+    drawZoomLabels(state, gvs, w, h);
+  }
+
   // Neighbor labels on hover.
   if (neighbors !== null) {
     ctx.font = FONT_SMALL;
@@ -1305,6 +1310,58 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     gvs.raf = requestAnimationFrame(() => {
       if (state.view === "graph") renderGraph(state);
     });
+  }
+};
+
+/** Greedy screen-space labels for the highest-degree files in view. */
+const drawZoomLabels = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+  const { ctx, theme, data } = state;
+  const { transform } = gvs;
+  const candidates: Array<{ node: FileNode; degree: number }> = [];
+  for (const node of gvs.fileNodes) {
+    if (!node || node.x == null || node.y == null) continue;
+    const sx = node.x * transform.k + transform.x;
+    const sy = node.y * transform.k + transform.y;
+    if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) continue;
+    const file = data.files[node.fileIndex];
+    candidates.push({ node, degree: file.importer_count + file.import_count });
+  }
+  candidates.sort((a, b) => b.degree - a.degree);
+
+  ctx.font = FONT_SMALL;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  let drawn = 0;
+  for (const { node } of candidates) {
+    if (drawn >= 40) break;
+    if (node.x == null || node.y == null) continue;
+    const name = basename(data.files[node.fileIndex].path);
+    const textW = ctx.measureText(name).width;
+    const x = node.x;
+    const y = node.y + node.radius + 2 / transform.k;
+    // Occupancy check in screen space.
+    const sx = x * transform.k + transform.x;
+    const sy = y * transform.k + transform.y;
+    const rect = { x: sx - textW / 2 - 2, y: sy, w: textW + 4, h: 13 };
+    const overlaps = placed.some(
+      (r) => rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y,
+    );
+    if (overlaps) continue;
+    placed.push(rect);
+    drawn++;
+    // Draw in world space (crisper under the active transform).
+    const worldFont = 10 / transform.k;
+    ctx.font = `${worldFont}px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace`;
+    const wTextW = ctx.measureText(name).width;
+    ctx.fillStyle = theme.bg;
+    ctx.globalAlpha = 0.82;
+    ctx.fillRect(x - wTextW / 2 - 2 / transform.k, y, wTextW + 4 / transform.k, 12 / transform.k);
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = theme.textLow;
+    ctx.fillText(name, x, y + 1 / transform.k);
+    ctx.globalAlpha = 1;
+    ctx.font = FONT_SMALL;
   }
 };
 
