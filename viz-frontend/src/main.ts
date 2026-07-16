@@ -16,10 +16,12 @@ import {
   graphDrag,
   graphDragEnd,
   graphDragStart,
-  graphHitTest,
+  graphHandleClick,
+  graphHoverTarget,
   initGraphNodes,
   isDragging,
   renderGraph,
+  resetEgoTrail,
   setClusterMode,
 } from "./graph";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
@@ -131,6 +133,7 @@ const init = (): void => {
   // ── Navigation shared by panel + views ────────────────────────
   const selectFile = (fileIndex: number | null, reveal = false): void => {
     state.selected = fileIndex;
+    if (fileIndex === null) resetEgoTrail(state);
     if (fileIndex !== null && reveal) {
       if (state.view === "map") {
         const dir = dirname(state.data.files[fileIndex].path);
@@ -207,14 +210,19 @@ const init = (): void => {
         renderGraph(state);
         return;
       }
-      const hit = graphHitTest(state, x, y);
-      if (hit !== state.graphHovered) {
-        state.graphHovered = hit;
+      const target = graphHoverTarget(state, x, y);
+      const hovered = target && target.kind === "file" ? target.fileIndex : null;
+      if (hovered !== state.graphHovered) {
+        state.graphHovered = hovered;
         renderGraph(state);
       }
-      canvas.style.cursor = hit !== null ? "pointer" : "grab";
-      if (hit !== null) {
-        showFileTooltip(state, hit, e.clientX, e.clientY);
+      canvas.style.cursor = target
+        ? "pointer"
+        : state.selected !== null
+          ? "default"
+          : "grab";
+      if (hovered !== null) {
+        showFileTooltip(state, hovered, e.clientX, e.clientY);
       } else {
         hideTooltip();
       }
@@ -238,9 +246,9 @@ const init = (): void => {
     const { x, y } = canvasPoint(e);
     mouseDownAt = { x, y };
     dragMoved = false;
-    if (state.view === "graph") {
-      const hit = graphHitTest(state, x, y);
-      if (hit !== null) graphDragStart(state, hit);
+    if (state.view === "graph" && state.selected === null) {
+      const target = graphHoverTarget(state, x, y);
+      if (target && target.kind === "file") graphDragStart(state, target.fileIndex);
     }
   });
 
@@ -270,8 +278,14 @@ const init = (): void => {
         requestRender();
       }
     } else {
-      const hit = graphHitTest(state, x, y);
-      selectFile(hit);
+      const result = graphHandleClick(state, x, y);
+      if (result.kind === "file") {
+        selectFile(result.fileIndex);
+      } else if (result.kind === "none") {
+        selectFile(null);
+      } else {
+        requestRender();
+      }
     }
   });
 

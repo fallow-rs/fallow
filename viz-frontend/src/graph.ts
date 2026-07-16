@@ -1,13 +1,26 @@
+/**
+ * Import-graph view: a layered, data-driven map of the codebase.
+ *
+ * Cluster placement is computed from the dependency data itself
+ * (Sugiyama-lite): the cluster meta-graph is condensed (Tarjan SCC),
+ * layered sink-side (entry clusters left, widely-depended-on shared
+ * clusters right), ordered within layers by weighted barycenter so
+ * strongly coupled clusters sit adjacent, and finally each cluster's
+ * files get a frozen, seeded local force layout. Cross-cluster edges
+ * never enter a simulation and are drawn as aggregated tapered "roads"
+ * (wide end = importer). Selecting a file opens a screen-space ego
+ * stage: importers left, imports right, over a dimmed map ghost.
+ * Deterministic by construction: same input, same map.
+ */
 import {
-  forceSimulation,
+  forceCollide,
   forceLink,
   forceManyBody,
-  forceCenter,
-  forceCollide,
+  forceSimulation,
   forceX,
   forceY,
-  type SimulationNodeDatum,
   type SimulationLinkDatum,
+  type SimulationNodeDatum,
 } from "d3-force";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type D3ZoomEvent } from "d3-zoom";
@@ -15,54 +28,123 @@ import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import type { AppState } from "./state";
 import type { VizFile } from "./types";
-import { lensColor, lensFlag } from "./data";
+import { basename, dirname, formatCount, lensColor } from "./data";
 
 // ── Types ───────────────────────────────────────────────────────
 
 interface FileNode extends SimulationNodeDatum {
   fileIndex: number;
   radius: number;
-  group: string;
-  groupX: number;
-  groupY: number;
+  cluster: number;
 }
 
-interface FileLink extends SimulationLinkDatum<FileNode> {
-  isCross: boolean;
-  typeOnly: boolean;
-  isCycle: boolean;
-  isViolation: boolean;
-}
+type LocalLink = SimulationLinkDatum<FileNode>;
 
-interface GroupInfo {
-  name: string;
+interface ClusterInfo {
+  key: string;
+  indices: number[];
+  /** Dependency layer, 0 = entry side (left). */
+  layer: number;
+  /** Row order within the layer. */
+  order: number;
   cx: number;
   cy: number;
-  radius: number;
-  fileCount: number;
-  findings: number;
+  r: number;
+  /** Padded convex hull polygon (world coords). */
+  hull: Array<{ x: number; y: number }>;
+  /** Member of a cluster-level dependency tangle (meta-SCC > 1). */
+  tangle: boolean;
+}
+
+interface Road {
+  src: number;
+  dst: number;
+  count: number;
+  violations: number;
+  cycleEdges: number;
+  /** Reverse road exists (cluster-level 2-cycle). */
+  bidi: boolean;
+  /** Points against the dependency axis (target layer <= source layer). */
+  back: boolean;
+}
+
+interface StageRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  kind: "file" | "group" | "crumb";
+  fileIndex?: number;
+  groupKey?: string;
 }
 
 export type ClusterMode = "directory" | "imports";
 
+export type GraphHoverTarget =
+  | { kind: "file"; fileIndex: number }
+  | { kind: "ui" }
+  | null;
+
+export type GraphClickResult =
+  | { kind: "file"; fileIndex: number }
+  | { kind: "handled" }
+  | { kind: "none" };
+
 interface GraphViewState {
   fileNodes: FileNode[];
-  fileLinks: FileLink[];
-  groups: GroupInfo[];
+  clusters: ClusterInfo[];
+  roads: Road[];
   transform: { x: number; y: number; k: number };
+  fitK: number;
   draggedNode: number | null;
   initialized: boolean;
   clusterMode: ClusterMode;
-  simulation: ReturnType<typeof forceSimulation<FileNode>> | null;
   zoomBehavior: ReturnType<typeof zoom<HTMLCanvasElement, unknown>> | null;
+  /** Ego stage state. */
+  egoExpanded: Set<string>;
+  crumbs: number[];
+  stageRects: StageRect[];
+  stageEnterAt: number;
+  lastRoot: number | null;
+  raf: number;
 }
 
-const FONT = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-const FONT_SMALL = '9px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const FONT_SMALL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const FONT_MICRO = '9px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const FONT_CARD = '700 13px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 
 const NODE_R_MIN = 2.5;
-const NODE_R_MAX = 11;
+const NODE_R_MAX = 10;
 const MAX_CLUSTERS = 40;
+const LAYER_GAP = 170;
+const ROW_GAP = 56;
+const STAGE_ENTER_MS = 220;
+/** Relative-zoom LOD thresholds (k / fit-to-view k). */
+const LOD_INTRA = 1.6;
+const LOD_INTER = 3.0;
+const LOD_SEVERITY = 0.9;
+
+// ── Deterministic randomness ────────────────────────────────────
+
+const fnv1a = (s: string): number => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+};
+
+const mulberry32 = (seed: number): (() => number) => {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
 
 // ── State accessor ──────────────────────────────────────────────
 
@@ -71,14 +153,20 @@ const getGVS = (state: AppState): GraphViewState => {
   if (!ext._gvs) {
     ext._gvs = {
       fileNodes: [],
-      fileLinks: [],
-      groups: [],
+      clusters: [],
+      roads: [],
       transform: { x: 0, y: 0, k: 1 },
+      fitK: 1,
       draggedNode: null,
       initialized: false,
       clusterMode: "directory",
-      simulation: null,
       zoomBehavior: null,
+      egoExpanded: new Set(),
+      crumbs: [],
+      stageRects: [],
+      stageEnterAt: 0,
+      lastRoot: null,
+      raf: 0,
     };
   }
   return ext._gvs;
@@ -86,52 +174,15 @@ const getGVS = (state: AppState): GraphViewState => {
 
 export const getClusterMode = (state: AppState): ClusterMode => getGVS(state).clusterMode;
 
-// ── Clustering ──────────────────────────────────────────────────
-
-const louvainCluster = (
-  files: VizFile[],
-  edges: [number, number, number][],
-): Map<string, number[]> => {
-  const g = new Graph({ type: "undirected" });
-  for (let i = 0; i < files.length; i++) g.addNode(String(i));
-
-  const seen = new Set<string>();
-  for (const [src, tgt] of edges) {
-    if (src >= files.length || tgt >= files.length || src === tgt) continue;
-    const key = src < tgt ? `${src}-${tgt}` : `${tgt}-${src}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    g.addEdge(String(src), String(tgt));
-  }
-
-  const communities = louvain(g, { resolution: 1.2 });
-  const communityMap = new Map<number, number[]>();
-  for (let i = 0; i < files.length; i++) {
-    const comm = communities[String(i)] ?? 0;
-    if (!communityMap.has(comm)) communityMap.set(comm, []);
-    communityMap.get(comm)?.push(i);
-  }
-
-  const result = new Map<string, number[]>();
-  for (const [, indices] of communityMap) {
-    const dirCounts = new Map<string, number>();
-    for (const idx of indices) {
-      const parts = files[idx].path.split("/");
-      const dir = parts.length > 1 ? parts.slice(0, 2).join("/") : parts[0];
-      const shortDir = dir.split("/").pop() ?? dir;
-      dirCounts.set(shortDir, (dirCounts.get(shortDir) ?? 0) + 1);
-    }
-    const sorted = Array.from(dirCounts.entries()).sort((a, b) => b[1] - a[1]);
-    let name = sorted.slice(0, 2).map(([dir]) => dir).join(" + ");
-    if (result.has(name)) {
-      let suffix = 2;
-      while (result.has(`${name} (${suffix})`)) suffix++;
-      name = `${name} (${suffix})`;
-    }
-    result.set(name, indices);
-  }
-  return result;
+export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
+  const gvs = getGVS(state);
+  if (gvs.clusterMode === mode) return;
+  gvs.clusterMode = mode;
+  gvs.initialized = false;
+  initGraphNodes(state);
 };
+
+// ── Clustering ──────────────────────────────────────────────────
 
 const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
   const clusters = new Map<string, { indices: number[]; depth: number }>();
@@ -153,7 +204,6 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
       }
     }
     if (largestSize <= Math.max(20, files.length / MAX_CLUSTERS)) break;
-
     const largest = clusters.get(largestKey);
     if (!largest) break;
     const nextDepth = largest.depth + 1;
@@ -171,8 +221,407 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
   }
 
   const result = new Map<string, number[]>();
-  for (const [key, { indices }] of clusters) result.set(key, indices);
+  for (const key of [...clusters.keys()].sort()) {
+    const entry = clusters.get(key);
+    if (entry) result.set(key, entry.indices);
+  }
   return result;
+};
+
+const louvainCluster = (
+  files: VizFile[],
+  edges: [number, number, number][],
+): Map<string, number[]> => {
+  const g = new Graph({ type: "undirected" });
+  for (let i = 0; i < files.length; i++) g.addNode(String(i));
+  const seen = new Set<string>();
+  for (const [src, tgt] of edges) {
+    if (src >= files.length || tgt >= files.length || src === tgt) continue;
+    const key = src < tgt ? `${src}-${tgt}` : `${tgt}-${src}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    g.addEdge(String(src), String(tgt));
+  }
+  const communities = louvain(g, { resolution: 1.2, rng: mulberry32(fnv1a("fallow-louvain")) });
+  const communityMap = new Map<number, number[]>();
+  for (let i = 0; i < files.length; i++) {
+    const comm = communities[String(i)] ?? 0;
+    if (!communityMap.has(comm)) communityMap.set(comm, []);
+    communityMap.get(comm)?.push(i);
+  }
+  const result = new Map<string, number[]>();
+  for (const [, indices] of communityMap) {
+    const dirCounts = new Map<string, number>();
+    for (const idx of indices) {
+      const parts = files[idx].path.split("/");
+      const dir = parts.length > 1 ? parts.slice(0, 2).join("/") : parts[0];
+      dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+    }
+    const sorted = [...dirCounts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    let name = sorted[0]?.[0] ?? "misc";
+    while (result.has(name)) name = `${name}*`;
+    result.set(name, indices);
+  }
+  return new Map([...result.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+};
+
+// ── Meta-graph, SCC condensation, layering, ordering ────────────
+
+interface MetaEdge {
+  src: number;
+  dst: number;
+  count: number;
+  violations: number;
+  cycleEdges: number;
+}
+
+const buildMetaGraph = (
+  state: AppState,
+  clusterOf: number[],
+  clusterCount: number,
+): MetaEdge[] => {
+  const n = state.data.files.length;
+  const buckets = new Map<number, MetaEdge>();
+  for (const [from, to] of state.data.edges) {
+    const a = clusterOf[from];
+    const b = clusterOf[to];
+    if (a === undefined || b === undefined || a === b) continue;
+    const key = a * clusterCount + b;
+    let edge = buckets.get(key);
+    if (!edge) {
+      edge = { src: a, dst: b, count: 0, violations: 0, cycleEdges: 0 };
+      buckets.set(key, edge);
+    }
+    edge.count++;
+    const packed = from * n + to;
+    if (state.index.violationEdges.has(packed)) edge.violations++;
+    if (state.index.cycleEdges.has(packed)) edge.cycleEdges++;
+  }
+  return [...buckets.values()].sort((a, b) => a.src - b.src || a.dst - b.dst);
+};
+
+/** Iterative Tarjan SCC over the cluster meta-graph. */
+const tarjanSCC = (count: number, adj: number[][]): number[] => {
+  const sccOf = new Array<number>(count).fill(-1);
+  const low = new Array<number>(count).fill(0);
+  const disc = new Array<number>(count).fill(-1);
+  const onStack = new Array<boolean>(count).fill(false);
+  const stack: number[] = [];
+  let time = 0;
+  let sccCount = 0;
+
+  for (let start = 0; start < count; start++) {
+    if (disc[start] !== -1) continue;
+    const work: Array<[number, number]> = [[start, 0]];
+    while (work.length > 0) {
+      const frame = work[work.length - 1];
+      const v = frame[0];
+      if (frame[1] === 0) {
+        disc[v] = low[v] = time++;
+        stack.push(v);
+        onStack[v] = true;
+      }
+      let advanced = false;
+      while (frame[1] < adj[v].length) {
+        const w = adj[v][frame[1]];
+        frame[1]++;
+        if (disc[w] === -1) {
+          work.push([w, 0]);
+          advanced = true;
+          break;
+        }
+        if (onStack[w]) low[v] = Math.min(low[v], disc[w]);
+      }
+      if (advanced) continue;
+      if (low[v] === disc[v]) {
+        for (;;) {
+          const w = stack.pop();
+          if (w === undefined) break;
+          onStack[w] = false;
+          sccOf[w] = sccCount;
+          if (w === v) break;
+        }
+        sccCount++;
+      }
+      work.pop();
+      if (work.length > 0) {
+        const parent = work[work.length - 1][0];
+        low[parent] = Math.min(low[parent], low[v]);
+      }
+    }
+  }
+  return sccOf;
+};
+
+/**
+ * Sink-side longest-path layering on the SCC condensation, mirrored so
+ * entry clusters (nothing imports them) sit at layer 0 (left) and the
+ * most depended-on foundations sit at the highest layer (right).
+ */
+const assignLayers = (clusterCount: number, meta: MetaEdge[], sccOf: number[]): number[] => {
+  const sccCount = sccOf.reduce((max, s) => Math.max(max, s), -1) + 1;
+  const succ: Array<Set<number>> = Array.from({ length: sccCount }, () => new Set());
+  for (const e of meta) {
+    const a = sccOf[e.src];
+    const b = sccOf[e.dst];
+    if (a !== b) succ[a].add(b);
+  }
+  const memo = new Array<number>(sccCount).fill(-1);
+  const depth = (s: number): number => {
+    if (memo[s] !== -1) return memo[s];
+    memo[s] = 0; // provisional (condensation is acyclic; guards reentry)
+    let best = 0;
+    for (const t of succ[s]) best = Math.max(best, 1 + depth(t));
+    memo[s] = best;
+    return best;
+  };
+  let maxLayer = 0;
+  for (let s = 0; s < sccCount; s++) maxLayer = Math.max(maxLayer, depth(s));
+  const layers = new Array<number>(clusterCount);
+  for (let c = 0; c < clusterCount; c++) {
+    layers[c] = maxLayer - memo[sccOf[c]];
+  }
+  return layers;
+};
+
+/** 4 weighted barycenter sweeps for within-layer ordering. */
+const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
+  const byLayer = new Map<number, ClusterInfo[]>();
+  for (const c of clusters) {
+    if (!byLayer.has(c.layer)) byLayer.set(c.layer, []);
+    byLayer.get(c.layer)?.push(c);
+  }
+  for (const list of byLayer.values()) {
+    list.sort((a, b) => (a.key < b.key ? -1 : 1));
+    list.forEach((c, i) => {
+      c.order = i;
+    });
+  }
+
+  const neighbors = new Map<number, Array<{ other: number; w: number }>>();
+  clusters.forEach((_, i) => neighbors.set(i, []));
+  for (const e of meta) {
+    neighbors.get(e.src)?.push({ other: e.dst, w: e.count });
+    neighbors.get(e.dst)?.push({ other: e.src, w: e.count });
+  }
+
+  const layerKeys = [...byLayer.keys()].sort((a, b) => a - b);
+  const indexOf = new Map<string, number>();
+  clusters.forEach((c, i) => indexOf.set(c.key, i));
+
+  const sweep = (keys: number[]): void => {
+    for (const layer of keys) {
+      const list = byLayer.get(layer);
+      if (!list || list.length < 2) continue;
+      const scored = list.map((c) => {
+        const idx = indexOf.get(c.key) ?? 0;
+        let num = 0;
+        let den = 0;
+        for (const nb of neighbors.get(idx) ?? []) {
+          const other = clusters[nb.other];
+          if (Math.abs(other.layer - layer) !== 1) continue;
+          num += nb.w * other.order;
+          den += nb.w;
+        }
+        return { c, bary: den > 0 ? num / den : c.order };
+      });
+      scored.sort((a, b) => a.bary - b.bary || (a.c.key < b.c.key ? -1 : 1));
+      scored.forEach((s, i) => {
+        s.c.order = i;
+      });
+    }
+  };
+
+  sweep(layerKeys);
+  sweep([...layerKeys].reverse());
+  sweep(layerKeys);
+  sweep([...layerKeys].reverse());
+};
+
+/** Coordinate assignment: x per layer, y stacked by order + relaxation. */
+const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
+  const byLayer = new Map<number, ClusterInfo[]>();
+  for (const c of clusters) {
+    if (!byLayer.has(c.layer)) byLayer.set(c.layer, []);
+    byLayer.get(c.layer)?.push(c);
+  }
+  const layerKeys = [...byLayer.keys()].sort((a, b) => a - b);
+
+  let x = 0;
+  let prevMaxR = 0;
+  layerKeys.forEach((layer, i) => {
+    const list = byLayer.get(layer) ?? [];
+    const maxR = list.reduce((max, c) => Math.max(max, c.r), 30);
+    if (i > 0) x += prevMaxR + maxR + LAYER_GAP;
+    for (const c of list) c.cx = x;
+    prevMaxR = maxR;
+  });
+
+  for (const layer of layerKeys) {
+    const list = (byLayer.get(layer) ?? []).sort((a, b) => a.order - b.order);
+    let y = 0;
+    list.forEach((c, i) => {
+      if (i > 0) y += list[i - 1].r + c.r + ROW_GAP;
+      c.cy = y;
+    });
+  }
+
+  const indexOf = new Map<string, number>();
+  clusters.forEach((c, i) => indexOf.set(c.key, i));
+  const adjacency = new Map<number, Array<{ other: number; w: number }>>();
+  clusters.forEach((_, i) => adjacency.set(i, []));
+  for (const e of meta) {
+    adjacency.get(e.src)?.push({ other: e.dst, w: e.count });
+    adjacency.get(e.dst)?.push({ other: e.src, w: e.count });
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    for (const layer of layerKeys) {
+      const list = (byLayer.get(layer) ?? []).sort((a, b) => a.order - b.order);
+      for (const c of list) {
+        const idx = indexOf.get(c.key) ?? 0;
+        let num = 0;
+        let den = 0;
+        for (const nb of adjacency.get(idx) ?? []) {
+          num += nb.w * clusters[nb.other].cy;
+          den += nb.w;
+        }
+        if (den > 0) c.cy = (c.cy + num / den) / 2;
+      }
+      for (let i = 1; i < list.length; i++) {
+        const minY = list[i - 1].cy + list[i - 1].r + list[i].r + ROW_GAP;
+        if (list[i].cy < minY) list[i].cy = minY;
+      }
+    }
+  }
+
+  const globalMid = clusters.reduce((sum, c) => sum + c.cy, 0) / Math.max(1, clusters.length);
+  for (const layer of layerKeys) {
+    const list = byLayer.get(layer) ?? [];
+    const mid = list.reduce((s, c) => s + c.cy, 0) / Math.max(1, list.length);
+    for (const c of list) c.cy += globalMid - mid;
+  }
+};
+
+// ── Local per-cluster layouts (frozen, seeded) ──────────────────
+
+const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
+  const files = state.data.files;
+  const maxSize = files.reduce((max, f) => Math.max(max, f.size), 1);
+
+  for (let ci = 0; ci < gvs.clusters.length; ci++) {
+    const cluster = gvs.clusters[ci];
+    const rand = mulberry32(fnv1a(cluster.key));
+    const nodes: FileNode[] = cluster.indices.map((fileIndex, i) => {
+      // Phyllotaxis init in path-sorted member order: deterministic.
+      const angle = i * 2.399963229728653;
+      const radius = 6 * Math.sqrt(i + 0.5);
+      const sizeRatio = Math.log(files[fileIndex].size + 1) / Math.log(maxSize + 1);
+      return {
+        fileIndex,
+        cluster: ci,
+        radius: NODE_R_MIN + sizeRatio * (NODE_R_MAX - NODE_R_MIN),
+        x: cluster.cx + Math.cos(angle) * radius,
+        y: cluster.cy + Math.sin(angle) * radius,
+      };
+    });
+    const inCluster = new Map<number, FileNode>();
+    for (const node of nodes) inCluster.set(node.fileIndex, node);
+
+    const links: LocalLink[] = [];
+    for (const [from, to] of state.data.edges) {
+      const a = inCluster.get(from);
+      const b = inCluster.get(to);
+      if (a && b && a !== b) links.push({ source: a, target: b });
+    }
+
+    const sim = forceSimulation(nodes)
+      .randomSource(rand)
+      .force("link", forceLink<FileNode, LocalLink>(links).distance(24).strength(0.3))
+      .force("charge", forceManyBody<FileNode>().strength(-30).theta(0.9).distanceMax(240))
+      .force("collide", forceCollide<FileNode>((d) => d.radius + 2))
+      .force("x", forceX<FileNode>(cluster.cx).strength(0.15))
+      .force("y", forceY<FileNode>(cluster.cy).strength(0.15))
+      .alphaDecay(0.028)
+      .stop();
+    const ticks = Math.min(300, 120 + cluster.indices.length * 2);
+    for (let t = 0; t < ticks; t++) sim.tick();
+    sim.stop();
+
+    for (const node of nodes) gvs.fileNodes[node.fileIndex] = node;
+  }
+};
+
+// ── Hull polygons ───────────────────────────────────────────────
+
+interface Pt {
+  x: number;
+  y: number;
+}
+
+const convexHull = (pts: Pt[]): Pt[] => {
+  const sorted = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+  if (sorted.length < 3) return sorted;
+  const cross = (o: Pt, a: Pt, b: Pt): number =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: Pt[] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper: Pt[] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+};
+
+const buildHulls = (gvs: GraphViewState): void => {
+  for (const cluster of gvs.clusters) {
+    const pts = cluster.indices
+      .map((i) => gvs.fileNodes[i])
+      .filter((node) => node && node.x != null && node.y != null)
+      .map((node) => ({ x: node.x ?? 0, y: node.y ?? 0 }));
+    let cx = 0;
+    let cy = 0;
+    for (const p of pts) {
+      cx += p.x;
+      cy += p.y;
+    }
+    cx /= Math.max(1, pts.length);
+    cy /= Math.max(1, pts.length);
+    cluster.cx = cx;
+    cluster.cy = cy;
+
+    let hull: Pt[];
+    if (pts.length < 3) {
+      hull = [];
+      const r = cluster.r * 0.5 + 20;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        hull.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+      }
+    } else {
+      hull = convexHull(pts).map((p) => {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        const d = Math.max(1, Math.hypot(dx, dy));
+        const pad = 20;
+        return { x: cx + dx * ((d + pad) / d), y: cy + dy * ((d + pad) / d) };
+      });
+    }
+    cluster.hull = hull;
+    let maxD = 0;
+    for (const p of hull) maxD = Math.max(maxD, Math.hypot(p.x - cx, p.y - cy));
+    cluster.r = maxD;
+  }
 };
 
 // ── Init ────────────────────────────────────────────────────────
@@ -185,178 +634,100 @@ export const initGraphNodes = (state: AppState): void => {
     return;
   }
 
-  const stage = canvas.parentElement;
-  const w = stage ? stage.clientWidth : window.innerWidth;
-  const h = stage ? stage.clientHeight : window.innerHeight;
-  const cx = w / 2;
-  const cy = h / 2;
-
   const files = data.files;
-  const maxSize = files.reduce((max, f) => Math.max(max, f.size), 1);
-  const n = files.length;
-
   const groupMap =
-    gvs.clusterMode === "imports"
-      ? louvainCluster(files, data.edges)
-      : directoryCluster(files);
+    gvs.clusterMode === "imports" ? louvainCluster(files, data.edges) : directoryCluster(files);
 
-  const groupEntries = Array.from(groupMap.entries()).sort((a, b) => b[1].length - a[1].length);
-  const groupCount = groupEntries.length;
-
-  const groupInfos: GroupInfo[] = groupEntries.map(([name, indices]) => {
-    let findings = 0;
-    for (const idx of indices) {
-      if (lensFlag(state.lens, state.index, files[idx], idx)) findings++;
-      else if (files[idx].status === "hasUnusedExports") findings++;
-    }
-    return {
-      name,
+  const clusterOf = new Array<number>(files.length).fill(0);
+  const clusters: ClusterInfo[] = [];
+  for (const [key, indices] of groupMap) {
+    const ci = clusters.length;
+    for (const idx of indices) clusterOf[idx] = ci;
+    clusters.push({
+      key,
+      indices,
+      layer: 0,
+      order: 0,
       cx: 0,
       cy: 0,
-      radius: Math.sqrt(indices.length) * 15 + 25,
-      fileCount: indices.length,
-      findings,
-    };
+      r: 24 + 9 * Math.sqrt(indices.length),
+      hull: [],
+      tangle: false,
+    });
+  }
+  gvs.clusters = clusters;
+
+  const meta = buildMetaGraph(state, clusterOf, clusters.length);
+  const adj: number[][] = Array.from({ length: clusters.length }, () => []);
+  for (const e of meta) adj[e.src].push(e.dst);
+  const sccOf = tarjanSCC(clusters.length, adj);
+  const sccSize = new Map<number, number>();
+  for (const s of sccOf) sccSize.set(s, (sccSize.get(s) ?? 0) + 1);
+  clusters.forEach((c, i) => {
+    c.tangle = (sccSize.get(sccOf[i]) ?? 1) > 1;
   });
-
-  const groupSim = forceSimulation(groupInfos as unknown as SimulationNodeDatum[])
-    .force("charge", forceManyBody().strength(-30))
-    .force("center", forceCenter(cx, cy))
-    .force(
-      "collide",
-      forceCollide<SimulationNodeDatum & { radius: number }>((d) => d.radius * 0.6),
-    )
-    .stop();
-  for (let g = 0; g < groupCount; g++) {
-    const a = (g / groupCount) * Math.PI * 2 - Math.PI / 2;
-    const r = Math.min(w, h) * 0.15;
-    (groupInfos[g] as unknown as SimulationNodeDatum).x = cx + Math.cos(a) * r;
-    (groupInfos[g] as unknown as SimulationNodeDatum).y = cy + Math.sin(a) * r;
-  }
-  for (let i = 0; i < 200; i++) groupSim.tick();
-  for (let g = 0; g < groupCount; g++) {
-    const node = groupInfos[g] as unknown as SimulationNodeDatum;
-    groupInfos[g].cx = node.x ?? cx;
-    groupInfos[g].cy = node.y ?? cy;
-  }
-  gvs.groups = groupInfos;
-
-  const fileToGroup = new Map<number, string>();
-  for (const [name, indices] of groupMap) {
-    for (const idx of indices) fileToGroup.set(idx, name);
-  }
-  const groupCenterMap = new Map<string, { x: number; y: number }>();
-  for (let g = 0; g < groupCount; g++) {
-    groupCenterMap.set(groupEntries[g][0], { x: groupInfos[g].cx, y: groupInfos[g].cy });
-  }
-
-  gvs.fileNodes = files.map((file, i) => {
-    const group = fileToGroup.get(i) ?? "unknown";
-    const gc = groupCenterMap.get(group) ?? { x: cx, y: cy };
-    const sizeRatio = Math.log(file.size + 1) / Math.log(maxSize + 1);
-    const radius = NODE_R_MIN + sizeRatio * (NODE_R_MAX - NODE_R_MIN);
-    return {
-      fileIndex: i,
-      radius,
-      group,
-      groupX: gc.x,
-      groupY: gc.y,
-      x: gc.x + (Math.random() - 0.5) * 40,
-      y: gc.y + (Math.random() - 0.5) * 40,
-    };
+  const layers = assignLayers(clusters.length, meta, sccOf);
+  clusters.forEach((c, i) => {
+    c.layer = layers[i];
   });
+  orderWithinLayers(clusters, meta);
+  assignCoordinates(clusters, meta);
 
-  gvs.fileLinks = data.edges
-    .filter(([s, t]) => s < n && t < n)
-    .map(([s, t, flags]) => ({
-      source: s,
-      target: t,
-      isCross: gvs.fileNodes[s].group !== gvs.fileNodes[t].group,
-      typeOnly: (flags & 1) === 1,
-      isCycle: state.index.cycleEdges.has(s * n + t),
-      isViolation: state.index.violationEdges.has(s * n + t),
-    }));
+  gvs.fileNodes = new Array<FileNode>(files.length);
+  runLocalLayouts(state, gvs);
+  buildHulls(gvs);
 
-  const sim = forceSimulation(gvs.fileNodes)
-    .force("charge", forceManyBody<FileNode>().strength(-15).distanceMax(200))
-    .force(
-      "link",
-      forceLink<FileNode, FileLink>(gvs.fileLinks)
-        .distance((d) => (d.isCross ? 150 : 30))
-        .strength((d) => (d.isCross ? 0.005 : 0.12)),
-    )
-    .force("collide", forceCollide<FileNode>((d) => d.radius + 1.5))
-    .force("groupX", forceX<FileNode>((d) => d.groupX).strength(0.5))
-    .force("groupY", forceY<FileNode>((d) => d.groupY).strength(0.5))
-    .alphaDecay(0.02)
-    .on("tick", () => renderGraph(state))
-    .stop();
-
-  for (let i = 0; i < 300; i++) sim.tick();
-  sim.stop();
-  gvs.simulation = sim;
-
-  // Recompute group hulls from settled node positions.
-  for (const gi of gvs.groups) {
-    let sx = 0;
-    let sy = 0;
-    let count = 0;
-    for (const fn of gvs.fileNodes) {
-      if (fn.group === gi.name && fn.x != null && fn.y != null) {
-        sx += fn.x;
-        sy += fn.y;
-        count++;
-      }
-    }
-    if (count > 0) {
-      gi.cx = sx / count;
-      gi.cy = sy / count;
-    }
-    let maxDist = 0;
-    for (const fn of gvs.fileNodes) {
-      if (fn.group !== gi.name || fn.x == null || fn.y == null) continue;
-      const dx = fn.x - gi.cx;
-      const dy = fn.y - gi.cy;
-      maxDist = Math.max(maxDist, Math.sqrt(dx * dx + dy * dy) + fn.radius);
-    }
-    gi.radius = maxDist + 12;
-  }
+  const pairSet = new Set<number>();
+  for (const e of meta) pairSet.add(e.src * clusters.length + e.dst);
+  gvs.roads = meta.map((e) => ({
+    src: e.src,
+    dst: e.dst,
+    count: e.count,
+    violations: e.violations,
+    cycleEdges: e.cycleEdges,
+    bidi: pairSet.has(e.dst * clusters.length + e.src),
+    back: clusters[e.dst].layer <= clusters[e.src].layer,
+  }));
 
   // Fit-to-view.
+  const stageEl = canvas.parentElement;
+  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const fn of gvs.fileNodes) {
-    if (fn.x == null || fn.y == null) continue;
-    minX = Math.min(minX, fn.x - fn.radius);
-    minY = Math.min(minY, fn.y - fn.radius);
-    maxX = Math.max(maxX, fn.x + fn.radius);
-    maxY = Math.max(maxY, fn.y + fn.radius);
+  for (const c of clusters) {
+    minX = Math.min(minX, c.cx - c.r);
+    minY = Math.min(minY, c.cy - c.r);
+    maxX = Math.max(maxX, c.cx + c.r);
+    maxY = Math.max(maxY, c.cy + c.r);
   }
-  const padding = 40;
-  const bboxW = maxX - minX + padding * 2;
-  const bboxH = maxY - minY + padding * 2;
-  const fitScale = Math.min(w / bboxW, h / bboxH);
-  const fitX = (w - bboxW * fitScale) / 2 - minX * fitScale + padding * fitScale;
-  const fitY = (h - bboxH * fitScale) / 2 - minY * fitScale + padding * fitScale;
+  const pad = 70;
+  const bboxW = maxX - minX + pad * 2;
+  const bboxH = maxY - minY + pad * 2;
+  // Reserve horizontal screen room for cluster labels that stick out of hulls.
+  const fitScale = Math.min((w - 200) / bboxW, (h - 60) / bboxH, 1.4);
+  const fitX = (w - bboxW * fitScale) / 2 - minX * fitScale + pad * fitScale;
+  const fitY = (h - bboxH * fitScale) / 2 - minY * fitScale + pad * fitScale;
   gvs.transform = { x: fitX, y: fitY, k: fitScale };
+  gvs.fitK = fitScale;
 
   const zoomBehavior = zoom<HTMLCanvasElement, unknown>()
-    .scaleExtent([0.1, 6])
+    .scaleExtent([fitScale * 0.4, fitScale * 12])
     .filter((event: MouseEvent | WheelEvent) => {
+      if (state.selected !== null) return false; // camera frozen in ego mode
       if (event.type === "wheel") return !event.ctrlKey;
       if ((event as MouseEvent).button !== 0) return true;
       const rect = canvas.getBoundingClientRect();
       const px = (event as MouseEvent).clientX - rect.left;
       const py = (event as MouseEvent).clientY - rect.top;
-      return graphHitTest(state, px, py) === null;
+      return nodeHitTest(state, px, py) === null;
     })
     .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
       gvs.transform = { x: event.transform.x, y: event.transform.y, k: event.transform.k };
       renderGraph(state);
     });
-
   const initialTransform = zoomIdentity.translate(fitX, fitY).scale(fitScale);
   select(canvas).call(zoomBehavior).call(zoomBehavior.transform, initialTransform);
   gvs.zoomBehavior = zoomBehavior;
@@ -365,24 +736,117 @@ export const initGraphNodes = (state: AppState): void => {
   renderGraph(state);
 };
 
-export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
-  const gvs = getGVS(state);
-  if (gvs.clusterMode === mode) return;
-  gvs.clusterMode = mode;
-  gvs.initialized = false;
-  initGraphNodes(state);
+// ── Geometry helpers ────────────────────────────────────────────
+
+const segIntersect = (a1: Pt, a2: Pt, b1: Pt, b2: Pt): Pt | null => {
+  const d1x = a2.x - a1.x;
+  const d1y = a2.y - a1.y;
+  const d2x = b2.x - b1.x;
+  const d2y = b2.y - b1.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = ((b1.x - a1.x) * d2y - (b1.y - a1.y) * d2x) / denom;
+  const u = ((b1.x - a1.x) * d1y - (b1.y - a1.y) * d1x) / denom;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { x: a1.x + t * d1x, y: a1.y + t * d1y };
 };
+
+/** Where the segment from a cluster's centre toward `toward` leaves its hull. */
+const gatePoint = (cluster: ClusterInfo, toward: Pt): Pt => {
+  const from = { x: cluster.cx, y: cluster.cy };
+  const hull = cluster.hull;
+  for (let i = 0; i < hull.length; i++) {
+    const hit = segIntersect(from, toward, hull[i], hull[(i + 1) % hull.length]);
+    if (hit) return hit;
+  }
+  return from;
+};
+
+const cubicPoint = (p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: number): Pt => {
+  const u = 1 - t;
+  return {
+    x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+    y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+  };
+};
+
+/** Trace a tapered ribbon polygon along a cubic bezier into the current path. */
+const taperedRibbon = (
+  ctx: CanvasRenderingContext2D,
+  p0: Pt,
+  p1: Pt,
+  p2: Pt,
+  p3: Pt,
+  wSrc: number,
+  wDst: number,
+): void => {
+  const SAMPLES = 20;
+  const centers: Pt[] = [];
+  for (let i = 0; i <= SAMPLES; i++) centers.push(cubicPoint(p0, p1, p2, p3, i / SAMPLES));
+  const left: Pt[] = [];
+  const right: Pt[] = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const t = i / SAMPLES;
+    const prev = centers[Math.max(0, i - 1)];
+    const next = centers[Math.min(SAMPLES, i + 1)];
+    const dx = next.x - prev.x;
+    const dy = next.y - prev.y;
+    const len = Math.max(1e-6, Math.hypot(dx, dy));
+    const nx = -dy / len;
+    const ny = dx / len;
+    const hw = (wSrc * (1 - t) + wDst * t) / 2;
+    left.push({ x: centers[i].x + nx * hw, y: centers[i].y + ny * hw });
+    right.push({ x: centers[i].x - nx * hw, y: centers[i].y - ny * hw });
+  }
+  ctx.moveTo(left[0].x, left[0].y);
+  for (let i = 1; i <= SAMPLES; i++) ctx.lineTo(left[i].x, left[i].y);
+  for (let i = SAMPLES; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+  ctx.closePath();
+};
+
+const roadGeometry = (gvs: GraphViewState, road: Road): { p0: Pt; p1: Pt; p2: Pt; p3: Pt } => {
+  const src = gvs.clusters[road.src];
+  const dst = gvs.clusters[road.dst];
+  let p0 = gatePoint(src, { x: dst.cx, y: dst.cy });
+  let p3 = gatePoint(dst, { x: src.cx, y: src.cy });
+
+  if (road.bidi) {
+    // Two one-way lanes, offset perpendicular to the chord.
+    const dx = p3.x - p0.x;
+    const dy = p3.y - p0.y;
+    const len = Math.max(1e-6, Math.hypot(dx, dy));
+    const nx = (-dy / len) * 6;
+    const ny = (dx / len) * 6;
+    p0 = { x: p0.x + nx, y: p0.y + ny };
+    p3 = { x: p3.x + nx, y: p3.y + ny };
+  }
+
+  const dx = p3.x - p0.x;
+  let bow = 0;
+  if (road.back) {
+    const chord = Math.hypot(p3.x - p0.x, p3.y - p0.y);
+    bow = -0.18 * chord; // back-edges arc above the fabric
+  }
+  const p1 = { x: p0.x + dx * 0.45, y: p0.y + bow };
+  const p2 = { x: p3.x - dx * 0.45, y: p3.y + bow };
+  return { p0, p1, p2, p3 };
+};
+
+const roadWidth = (count: number): number =>
+  Math.min(8, Math.max(1.5, 1 + Math.floor(Math.log2(count))));
 
 // ── Rendering ───────────────────────────────────────────────────
 
+const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
+
 export const renderGraph = (state: AppState): void => {
-  const { canvas, ctx, data, theme, dpr } = state;
+  const { canvas, ctx, theme, dpr } = state;
   const gvs = getGVS(state);
   if (!gvs.initialized) return;
 
-  const stage = canvas.parentElement;
-  const w = stage ? stage.clientWidth : window.innerWidth;
-  const h = stage ? stage.clientHeight : window.innerHeight;
+  const stageEl = canvas.parentElement;
+  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
   const pw = Math.round(w * dpr);
   const ph = Math.round(h * dpr);
   if (canvas.width !== pw || canvas.height !== ph) {
@@ -396,254 +860,903 @@ export const renderGraph = (state: AppState): void => {
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, w, h);
 
-  const { transform, fileNodes, fileLinks, groups } = gvs;
+  if (state.selected !== null && gvs.fileNodes[state.selected]) {
+    renderGhost(state, gvs);
+    renderEgoStage(state, gvs, w, h);
+  } else {
+    gvs.stageRects = [];
+    gvs.lastRoot = null;
+    renderOverview(state, gvs, w, h);
+  }
+};
+
+// ── Overview ────────────────────────────────────────────────────
+
+const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+  const { ctx, theme, data } = state;
+  const { transform, clusters, roads, fileNodes } = gvs;
   const files = data.files;
   const searching = state.search.trim() !== "";
+  const kRel = transform.k / gvs.fitK;
 
   ctx.save();
   ctx.translate(transform.x, transform.y);
   ctx.scale(transform.k, transform.k);
 
-  // Group hulls.
-  ctx.font = FONT;
-  for (const g of groups) {
-    ctx.fillStyle = theme.surface1;
-    ctx.globalAlpha = 0.5;
-    ctx.beginPath();
-    ctx.arc(g.cx, g.cy, g.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 0.35;
-    ctx.strokeStyle = theme.borderSubtle;
-    ctx.lineWidth = 1 / transform.k;
-    ctx.stroke();
+  drawLayerBands(state, gvs);
 
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = theme.textLow;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    const nameParts = g.name.split("/");
-    const shortName = nameParts.length > 2 ? nameParts.slice(-2).join("/") : g.name;
-    ctx.fillText(shortName, g.cx, g.cy - g.radius - 5);
+  // Hull fills.
+  for (const cluster of clusters) {
+    if (cluster.hull.length < 3) continue;
+    ctx.beginPath();
+    hullPath(ctx, cluster.hull);
+    ctx.fillStyle = theme.surface1;
+    ctx.globalAlpha = 0.85;
+    ctx.fill();
     ctx.globalAlpha = 1;
   }
 
-  // Hover/selection neighborhood. Hover dims the rest hard; a selection
-  // alone keeps the surrounding graph readable.
-  const focus = state.graphHovered ?? state.selected;
-  const hardDim = state.graphHovered !== null;
-  const dimAlpha = hardDim ? 0.08 : 0.3;
-  const dimEdgeAlpha = hardDim ? 0.02 : 0.05;
-  let neighbors: Set<number> | null = null;
-  if (focus !== null) {
-    neighbors = new Set<number>([focus]);
-    for (const link of fileLinks) {
-      const si = (link.source as FileNode).fileIndex;
-      const ti = (link.target as FileNode).fileIndex;
-      if (si === focus) neighbors.add(ti);
-      if (ti === focus) neighbors.add(si);
-    }
-  }
-
-  // Edges.
-  for (const link of fileLinks) {
-    const src = link.source as FileNode;
-    const tgt = link.target as FileNode;
-    if (src.x == null || tgt.x == null || src.y == null || tgt.y == null) continue;
-
-    const inFocus =
-      neighbors !== null && neighbors.has(src.fileIndex) && neighbors.has(tgt.fileIndex);
-
-    if (link.isViolation) {
-      ctx.strokeStyle = theme.red;
-      ctx.globalAlpha = neighbors !== null && !inFocus ? 0.1 : 0.75;
-      ctx.lineWidth = 1.5 / transform.k;
-      ctx.setLineDash([]);
-    } else if (link.isCycle) {
-      ctx.strokeStyle = theme.amber;
-      ctx.globalAlpha = neighbors !== null && !inFocus ? 0.1 : 0.6;
-      ctx.lineWidth = 1.2 / transform.k;
-      ctx.setLineDash([5 / transform.k, 3 / transform.k]);
-    } else if (inFocus) {
-      const srcColor = lensColor(state.lens, theme, state.index, files[src.fileIndex]);
-      ctx.strokeStyle = srcColor === theme.cellNeutral ? theme.textLow : srcColor;
-      ctx.globalAlpha = 0.6;
-      ctx.lineWidth = 1.5 / transform.k;
-      ctx.setLineDash(link.typeOnly ? [2 / transform.k, 2 / transform.k] : []);
-    } else if (neighbors !== null) {
-      ctx.globalAlpha = dimEdgeAlpha;
-      ctx.strokeStyle = theme.textMuted;
-      ctx.lineWidth = 0.4 / transform.k;
-      ctx.setLineDash([]);
-    } else {
-      ctx.strokeStyle = theme.textMuted;
-      ctx.globalAlpha = link.typeOnly ? 0.04 : 0.08;
-      ctx.lineWidth = 0.5 / transform.k;
-      ctx.setLineDash(link.typeOnly ? [2 / transform.k, 2 / transform.k] : []);
-    }
-
+  // Intra-cluster edges (LOD).
+  if (kRel >= LOD_INTRA) {
+    ctx.strokeStyle = theme.textMuted;
+    ctx.globalAlpha = 0.12;
+    ctx.lineWidth = 1 / transform.k;
     ctx.beginPath();
-    ctx.moveTo(src.x, src.y);
-    ctx.lineTo(tgt.x, tgt.y);
+    for (const [from, to] of data.edges) {
+      const a = fileNodes[from];
+      const b = fileNodes[to];
+      if (!a || !b || a.cluster !== b.cluster) continue;
+      if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
     ctx.stroke();
+    ctx.globalAlpha = 1;
   }
-  ctx.setLineDash([]);
-  ctx.globalAlpha = 1;
+  // Individual inter-cluster edges only at deep zoom.
+  if (kRel >= LOD_INTER) {
+    ctx.strokeStyle = theme.textMuted;
+    ctx.globalAlpha = 0.1;
+    ctx.lineWidth = 0.8 / transform.k;
+    ctx.beginPath();
+    for (const [from, to] of data.edges) {
+      const a = fileNodes[from];
+      const b = fileNodes[to];
+      if (!a || !b || a.cluster === b.cluster) continue;
+      if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
-  // Nodes: flagged findings render on top.
-  const renderNode = (i: number, pass: "base" | "top"): void => {
-    const node = fileNodes[i];
-    if (node.x == null || node.y == null) return;
+  // Hull borders.
+  for (const cluster of clusters) {
+    if (cluster.hull.length < 3) continue;
+    ctx.beginPath();
+    hullPath(ctx, cluster.hull);
+    ctx.strokeStyle = cluster.tangle ? theme.amber : theme.borderDefault;
+    ctx.globalAlpha = cluster.tangle ? 0.7 : 0.45;
+    ctx.lineWidth = 1 / transform.k;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // Roads: tapered ribbons, wide at importer, narrow at imported.
+  for (const road of roads) {
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
+    const wSrc = roadWidth(road.count);
+    ctx.beginPath();
+    taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.6, wSrc * 0.3));
+    ctx.fillStyle = theme.textLow;
+    ctx.globalAlpha = 0.28;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Severity overdraw parallel to the road (never aggregated away).
+    if (road.violations > 0 || (road.bidi && road.cycleEdges > 0)) {
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y + 4);
+      ctx.bezierCurveTo(p1.x, p1.y + 4, p2.x, p2.y + 4, p3.x, p3.y + 4);
+      if (road.violations > 0) {
+        ctx.strokeStyle = theme.red;
+        ctx.setLineDash([]);
+      } else {
+        ctx.strokeStyle = theme.amber;
+        ctx.setLineDash([4 / transform.k, 3 / transform.k]);
+      }
+      ctx.lineWidth = 1.2 / transform.k;
+      ctx.globalAlpha = 0.9;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Individual severity edges from mid zoom.
+  if (kRel >= LOD_SEVERITY) drawSeverityEdges(state, gvs);
+
+  // Hover neighborhood.
+  const hovered = state.graphHovered;
+  let neighbors: Set<number> | null = null;
+  if (hovered !== null) {
+    neighbors = new Set([hovered]);
+    for (const [from, to] of data.edges) {
+      if (from !== hovered && to !== hovered) continue;
+      neighbors.add(from);
+      neighbors.add(to);
+      const a = fileNodes[from];
+      const b = fileNodes[to];
+      if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) continue;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = theme.bg;
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 3 / transform.k;
+      ctx.stroke();
+      ctx.strokeStyle = from === hovered ? theme.blue : theme.textLow;
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 1.2 / transform.k;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Nodes.
+  for (const node of fileNodes) {
+    if (!node || node.x == null || node.y == null) continue;
     const file = files[node.fileIndex];
-    const flagged =
-      lensFlag(state.lens, state.index, file, node.fileIndex) ||
-      (state.lens === "deadcode" && file.status === "hasUnusedExports");
-    if (pass === "base" && flagged) return;
-    if (pass === "top" && !flagged) return;
-
-    const isFocus = focus === node.fileIndex;
-    const isNeighbor = neighbors !== null && neighbors.has(node.fileIndex);
-    const dimmed = neighbors !== null && !isNeighbor;
-    const matched = !searching || state.searchMatches.has(node.fileIndex);
-
     const color = lensColor(state.lens, theme, state.index, file);
     const recessive = color === theme.cellNeutral || color === theme.cellEntry;
-    let alpha = recessive ? 0.6 : 0.95;
-    if (dimmed) alpha = dimAlpha;
-    if (searching && !matched) alpha = Math.min(alpha, 0.08);
-    if (isFocus || isNeighbor) alpha = 1;
+    const matched = !searching || state.searchMatches.has(node.fileIndex);
+    const isNeighbor = neighbors?.has(node.fileIndex) ?? false;
+    const dimmed = neighbors !== null && !isNeighbor;
 
-    let r = node.radius;
-    if (isFocus) r *= 1.35;
+    let alpha = recessive ? 0.65 : 0.95;
+    if (dimmed) alpha = 0.12;
+    if (searching && !matched) alpha = Math.min(alpha, 0.1);
+    if (isNeighbor) alpha = 1;
 
     ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+    ctx.arc(
+      node.x,
+      node.y,
+      node.radius * (state.graphHovered === node.fileIndex ? 1.3 : 1),
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
 
-    // Ring encodings (never color alone): dashed red = unused file,
-    // solid amber = unused exports, solid blue = selection.
     if (!dimmed) {
       if (state.lens === "deadcode" && file.status === "unused") {
         ctx.setLineDash([3 / transform.k, 3 / transform.k]);
         ctx.strokeStyle = theme.redText;
-        ctx.lineWidth = 1.5 / transform.k;
+        ctx.lineWidth = 1.4 / transform.k;
         ctx.stroke();
         ctx.setLineDash([]);
       } else if (state.lens === "boundaries" && state.index.violationSources.has(node.fileIndex)) {
         ctx.setLineDash([3 / transform.k, 3 / transform.k]);
         ctx.strokeStyle = theme.red;
-        ctx.lineWidth = 1.5 / transform.k;
+        ctx.lineWidth = 1.4 / transform.k;
         ctx.stroke();
         ctx.setLineDash([]);
       }
       if (searching && matched) {
         ctx.strokeStyle = theme.amberText;
-        ctx.lineWidth = 1.5 / transform.k;
+        ctx.lineWidth = 1.4 / transform.k;
         ctx.stroke();
       }
-    }
-    if (state.selected === node.fileIndex) {
-      ctx.strokeStyle = theme.blue;
-      ctx.lineWidth = 2 / transform.k;
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-  };
-
-  for (let i = 0; i < fileNodes.length; i++) renderNode(i, "base");
-  for (let i = 0; i < fileNodes.length; i++) renderNode(i, "top");
-
-  // Labels for the focused neighborhood.
-  if (neighbors !== null) {
-    for (const node of fileNodes) {
-      if (node.x == null || node.y == null) continue;
-      if (!neighbors.has(node.fileIndex)) continue;
-      const isFocus = focus === node.fileIndex;
-      const file = files[node.fileIndex];
-      const name = file.path.split("/").pop() ?? file.path;
-      const r = node.radius * (isFocus ? 1.35 : 1);
-
-      ctx.font = isFocus ? FONT : FONT_SMALL;
-      const textW = ctx.measureText(name).width;
-      ctx.fillStyle = theme.bg;
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(node.x - textW / 2 - 2, node.y + r + 1, textW + 4, isFocus ? 14 : 12);
-      ctx.globalAlpha = isFocus ? 1 : 0.85;
-      ctx.fillStyle = theme.textHigh;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillText(name, node.x, node.y + r + 2);
     }
     ctx.globalAlpha = 1;
   }
 
+  // Neighbor labels on hover.
+  if (neighbors !== null) {
+    ctx.font = FONT_SMALL;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (const idx of neighbors) {
+      const node = fileNodes[idx];
+      if (!node || node.x == null || node.y == null) continue;
+      const name = basename(files[idx].path);
+      const textW = ctx.measureText(name).width;
+      ctx.fillStyle = theme.bg;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(node.x - textW / 2 - 2, node.y + node.radius + 1, textW + 4, 12);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = idx === hovered ? theme.textHigh : theme.textLow;
+      ctx.fillText(name, node.x, node.y + node.radius + 2);
+    }
+  }
+
+  ctx.restore();
+
+  drawRoadLabels(state, gvs);
+  drawClusterLabels(state, gvs);
+  drawAxisCaptions(state, w, h);
+};
+
+const hullPath = (ctx: CanvasRenderingContext2D, hull: Pt[]): void => {
+  ctx.moveTo(hull[0].x, hull[0].y);
+  for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i].x, hull[i].y);
+  ctx.closePath();
+};
+
+const drawLayerBands = (state: AppState, gvs: GraphViewState): void => {
+  const { ctx, theme } = state;
+  const layers = new Map<number, { min: number; max: number }>();
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const c of gvs.clusters) {
+    const entry = layers.get(c.layer) ?? { min: Infinity, max: -Infinity };
+    entry.min = Math.min(entry.min, c.cx - c.r);
+    entry.max = Math.max(entry.max, c.cx + c.r);
+    layers.set(c.layer, entry);
+    minY = Math.min(minY, c.cy - c.r - 80);
+    maxY = Math.max(maxY, c.cy + c.r + 80);
+  }
+  const keys = [...layers.keys()].sort((a, b) => a - b);
+  ctx.strokeStyle = theme.textMuted;
+  ctx.globalAlpha = 0.08;
+  ctx.lineWidth = 1 / gvs.transform.k;
+  for (let i = 1; i < keys.length; i++) {
+    const prev = layers.get(keys[i - 1]);
+    const cur = layers.get(keys[i]);
+    if (!prev || !cur) continue;
+    const x = (prev.max + cur.min) / 2;
+    ctx.beginPath();
+    ctx.moveTo(x, minY);
+    ctx.lineTo(x, maxY);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+};
+
+const worldToScreen = (gvs: GraphViewState, p: Pt): Pt => ({
+  x: p.x * gvs.transform.k + gvs.transform.x,
+  y: p.y * gvs.transform.k + gvs.transform.y,
+});
+
+const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
+  const { ctx, theme } = state;
+  ctx.font = FONT_MICRO;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const road of gvs.roads) {
+    if (road.count < 2 && road.violations === 0 && road.cycleEdges === 0) continue;
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
+    const mid = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, 0.5));
+    let label = formatCount(road.count);
+    if (road.violations > 0) label += ` !${road.violations}`;
+    if (road.bidi && road.cycleEdges > 0) label += " ~";
+    const textW = ctx.measureText(label).width;
+    ctx.fillStyle = theme.bg;
+    ctx.globalAlpha = 0.92;
+    ctx.fillRect(mid.x - textW / 2 - 3, mid.y - 7, textW + 6, 14);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = theme.borderSubtle;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mid.x - textW / 2 - 3.5, mid.y - 7.5, textW + 7, 15);
+    if (road.violations > 0) ctx.fillStyle = theme.redText;
+    else if (road.bidi && road.cycleEdges > 0) ctx.fillStyle = theme.amberText;
+    else ctx.fillStyle = theme.textLow;
+    ctx.fillText(label, mid.x, mid.y + 0.5);
+  }
+};
+
+const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
+  const { ctx, theme } = state;
+  ctx.font = FONT_SMALL;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  // Bigger clusters claim their spot first; smaller ones move below on overlap.
+  const ordered = [...gvs.clusters].sort(
+    (a, b) => b.indices.length - a.indices.length || (a.key < b.key ? -1 : 1),
+  );
+  for (const cluster of ordered) {
+    let topLeft = cluster.hull[0] ?? { x: cluster.cx, y: cluster.cy };
+    for (const p of cluster.hull) {
+      if (p.y < topLeft.y || (p.y === topLeft.y && p.x < topLeft.x)) topLeft = p;
+    }
+    const s = worldToScreen(gvs, topLeft);
+    const label = cluster.key.toUpperCase();
+    const sub = formatCount(cluster.indices.length);
+    const labelW = ctx.measureText(label).width;
+    const subW = ctx.measureText(sub).width;
+    const x = s.x - 4;
+    let y = s.y - 12;
+    const boxW = labelW + subW + 17;
+    for (let tries = 0; tries < 6; tries++) {
+      const overlaps = placed.some(
+        (r) => x < r.x + r.w && x + boxW > r.x && y - 9 < r.y + r.h && y + 9 > r.y,
+      );
+      if (!overlaps) break;
+      y += 19;
+    }
+    placed.push({ x: x - 3, y: y - 9, w: boxW + 1, h: 18 });
+    ctx.fillStyle = theme.bg;
+    ctx.globalAlpha = 0.92;
+    ctx.fillRect(x - 3, y - 8, labelW + subW + 16, 16);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = cluster.tangle ? theme.amber : theme.borderSubtle;
+    ctx.strokeRect(x - 3.5, y - 8.5, labelW + subW + 17, 17);
+    ctx.fillStyle = theme.textLow;
+    ctx.fillText(label, x + 2, y + 0.5);
+    ctx.fillStyle = theme.textMuted;
+    ctx.fillText(sub, x + labelW + 8, y + 0.5);
+  }
+};
+
+const drawAxisCaptions = (state: AppState, w: number, h: number): void => {
+  const { ctx, theme } = state;
+  ctx.font = FONT_MICRO;
+  ctx.textBaseline = "top";
+  ctx.fillStyle = theme.textMuted;
+  ctx.globalAlpha = 0.7;
+  ctx.textAlign = "left";
+  ctx.fillText("ENTRY ▸", 14, 10);
+  ctx.textAlign = "right";
+  ctx.fillText("▸ SHARED", w - 14, 10);
+  ctx.textAlign = "left";
+  ctx.globalAlpha = 0.55;
+  ctx.fillText("thick ▸ thin = import direction", 14, h - 20);
+  ctx.globalAlpha = 1;
+};
+
+const drawSeverityEdges = (state: AppState, gvs: GraphViewState): void => {
+  const { ctx, theme, data } = state;
+  const n = data.files.length;
+  const k = gvs.transform.k;
+  for (const [from, to] of data.edges) {
+    const packed = from * n + to;
+    const isViolation = state.index.violationEdges.has(packed);
+    const isCycle = state.index.cycleEdges.has(packed);
+    if (!isViolation && !isCycle) continue;
+    const a = gvs.fileNodes[from];
+    const b = gvs.fileNodes[to];
+    if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) continue;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = theme.bg;
+    ctx.lineWidth = 3 / k;
+    ctx.globalAlpha = 0.9;
+    ctx.setLineDash([]);
+    ctx.stroke();
+    ctx.strokeStyle = isViolation ? theme.red : theme.amber;
+    ctx.lineWidth = 1.4 / k;
+    if (isCycle && !isViolation) ctx.setLineDash([4 / k, 3 / k]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+};
+
+// ── Ghost layer (ego mode background) ───────────────────────────
+
+const renderGhost = (state: AppState, gvs: GraphViewState): void => {
+  const { ctx, theme } = state;
+  const { transform } = gvs;
+  ctx.save();
+  ctx.translate(transform.x, transform.y);
+  ctx.scale(transform.k, transform.k);
+  for (const cluster of gvs.clusters) {
+    if (cluster.hull.length < 3) continue;
+    ctx.beginPath();
+    hullPath(ctx, cluster.hull);
+    ctx.strokeStyle = theme.borderSubtle;
+    ctx.globalAlpha = 0.25;
+    ctx.lineWidth = 1 / transform.k;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.12;
+  for (const node of gvs.fileNodes) {
+    if (!node || node.x == null || node.y == null) continue;
+    ctx.fillStyle = lensColor(state.lens, theme, state.index, state.data.files[node.fileIndex]);
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
   ctx.restore();
 };
 
-// ── Hit testing / hover / drag ──────────────────────────────────
+// ── Ego stage ───────────────────────────────────────────────────
 
-export const graphHitTest = (state: AppState, canvasX: number, canvasY: number): number | null => {
+interface StageRow {
+  kind: "file" | "group" | "header" | "more";
+  fileIndex?: number;
+  groupKey?: string;
+  label: string;
+  dim?: string;
+  count?: number;
+  violation?: boolean;
+  cycle?: boolean;
+}
+
+const buildColumn = (
+  state: AppState,
+  gvs: GraphViewState,
+  rootIdx: number,
+  indices: number[],
+  side: "left" | "right",
+  maxRows: number,
+): StageRow[] => {
+  const files = state.data.files;
+  const n = files.length;
+  const isViolation = (other: number): boolean =>
+    side === "left"
+      ? state.index.violationEdges.has(other * n + rootIdx)
+      : state.index.violationEdges.has(rootIdx * n + other);
+  const isCycle = (other: number): boolean =>
+    state.index.cycleEdges.has(rootIdx * n + other) ||
+    state.index.cycleEdges.has(other * n + rootIdx);
+
+  const groups = new Map<string, number[]>();
+  for (const idx of indices) {
+    const top = files[idx].path.split("/")[0];
+    if (!groups.has(top)) groups.set(top, []);
+    groups.get(top)?.push(idx);
+  }
+  const layerOf = (dir: string): number => {
+    const cluster = gvs.clusters.find((c) => c.key === dir || c.key.startsWith(`${dir}/`));
+    return cluster ? cluster.layer * 1000 + cluster.order : 999999;
+  };
+  const groupKeys = [...groups.keys()].sort((a, b) => layerOf(a) - layerOf(b) || (a < b ? -1 : 1));
+
+  const fileRow = (idx: number): StageRow => ({
+    kind: "file",
+    fileIndex: idx,
+    label: basename(files[idx].path),
+    dim: dirname(files[idx].path),
+    violation: isViolation(idx),
+    cycle: isCycle(idx),
+  });
+
+  const sortIndices = (list: number[]): number[] =>
+    [...list].sort((a, b) => {
+      const sevA = (isViolation(a) ? 2 : 0) + (isCycle(a) ? 1 : 0);
+      const sevB = (isViolation(b) ? 2 : 0) + (isCycle(b) ? 1 : 0);
+      if (sevA !== sevB) return sevB - sevA;
+      return files[a].path < files[b].path ? -1 : 1;
+    });
+
+  // Decide collapsed vs expanded BEFORE layout.
+  const totalExpanded = indices.length + (groupKeys.length > 1 ? groupKeys.length : 0);
+  const collapse = totalExpanded > maxRows && groupKeys.length > 1;
+
+  const rows: StageRow[] = [];
+  for (const key of groupKeys) {
+    const members = sortIndices(groups.get(key) ?? []);
+    const expandKey = `${side}:${key}`;
+    const expanded = !collapse || gvs.egoExpanded.has(expandKey);
+    if (groupKeys.length > 1) {
+      if (collapse && !expanded) {
+        rows.push({
+          kind: "group",
+          groupKey: expandKey,
+          label: `${key}/`,
+          count: members.length,
+          violation: members.some(isViolation),
+          cycle: members.some(isCycle),
+        });
+        continue;
+      }
+      rows.push({ kind: "header", label: `${key}/`, groupKey: expandKey });
+    }
+    for (const idx of members) rows.push(fileRow(idx));
+  }
+  if (rows.length > maxRows) {
+    const kept = rows.slice(0, maxRows - 1);
+    const hidden = rows.length - (maxRows - 1);
+    kept.push({ kind: "more", label: `… ${hidden} more (see panel)` });
+    return kept;
+  }
+  return rows;
+};
+
+const renderEgoStage = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+  const { ctx, theme, data } = state;
+  const rootIdx = state.selected;
+  if (rootIdx === null) return;
+  const rootFile = data.files[rootIdx];
+  const rootNode = gvs.fileNodes[rootIdx];
+
+  if (gvs.lastRoot !== rootIdx) {
+    gvs.stageEnterAt = state.reducedMotion ? 0 : performance.now();
+    if (gvs.crumbs[gvs.crumbs.length - 1] !== rootIdx) {
+      gvs.crumbs.push(rootIdx);
+      if (gvs.crumbs.length > 12) gvs.crumbs.shift();
+    }
+    gvs.lastRoot = rootIdx;
+  }
+  const t = state.reducedMotion
+    ? 1
+    : Math.min(1, (performance.now() - gvs.stageEnterAt) / STAGE_ENTER_MS);
+  const ease = easeOut(t);
+
+  // Stage area: keep clear of the detail panel (380px when open).
+  const panelW = Math.min(380, w * 0.9);
+  const stageW = Math.max(420, w - panelW);
+  const cx = stageW / 2;
+  const cy = h / 2;
+
+  gvs.stageRects = [];
+
+  const importers = state.index.importersOf[rootIdx];
+  const imports = state.index.importsOf[rootIdx];
+  const availH = h - 170;
+  const maxRows = Math.max(6, Math.floor(availH / 19));
+  const leftRows = buildColumn(state, gvs, rootIdx, importers, "left", maxRows);
+  const rightRows = buildColumn(state, gvs, rootIdx, imports, "right", maxRows);
+  const colOffset = Math.min(Math.max(0.3 * stageW, 230), 430);
+  const leftX = cx - colOffset;
+  const rightX = cx + colOffset;
+
+  ctx.save();
+  ctx.globalAlpha = ease;
+
+  // Column headers.
+  ctx.font = FONT_MICRO;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = theme.textMuted;
+  ctx.textAlign = "right";
+  ctx.fillText(`◂ IMPORTED BY ${formatCount(importers.length)}`, leftX, cy - availH / 2 - 14);
+  ctx.textAlign = "left";
+  ctx.fillText(`IMPORTS ${formatCount(imports.length)} ▸`, rightX, cy - availH / 2 - 14);
+
+  drawStageColumn(state, gvs, leftRows, "left", leftX, cy, availH, cx, ease, stageW);
+  drawStageColumn(state, gvs, rightRows, "right", rightX, cy, availH, cx, ease, stageW);
+
+  // Center card.
+  const cardW = 250;
+  const cardH = 66;
+  ctx.fillStyle = theme.surface1;
+  ctx.fillRect(cx - cardW / 2, cy - cardH / 2, cardW, cardH);
+  ctx.strokeStyle = theme.blue;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx - cardW / 2 + 0.5, cy - cardH / 2 + 0.5, cardW - 1, cardH - 1);
+  ctx.textAlign = "center";
+  ctx.font = FONT_MICRO;
+  ctx.fillStyle = theme.textMuted;
+  const dir = dirname(rootFile.path);
+  ctx.fillText(middleTruncate(ctx, dir ? `${dir}/` : "", cardW - 20), cx, cy - 18);
+  ctx.font = FONT_CARD;
+  ctx.fillStyle = theme.textHigh;
+  ctx.fillText(middleTruncate(ctx, basename(rootFile.path), cardW - 20), cx, cy + 1);
+  ctx.font = FONT_MICRO;
+  ctx.fillStyle = theme.textLow;
+  ctx.fillText(
+    `in ${formatCount(importers.length)} / out ${formatCount(imports.length)}`,
+    cx,
+    cy + 19,
+  );
+
+  // Crosshair at the true map position.
+  if (rootNode && rootNode.x != null && rootNode.y != null) {
+    const s = worldToScreen(gvs, { x: rootNode.x, y: rootNode.y });
+    ctx.strokeStyle = theme.blue;
+    ctx.globalAlpha = 0.5 * ease;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(s.x - 6, s.y);
+    ctx.lineTo(s.x + 6, s.y);
+    ctx.moveTo(s.x, s.y - 6);
+    ctx.lineTo(s.x, s.y + 6);
+    ctx.stroke();
+    ctx.globalAlpha = ease;
+  }
+
+  drawCrumbs(state, gvs, stageW);
+
+  ctx.restore();
+
+  if (t < 1) {
+    cancelAnimationFrame(gvs.raf);
+    gvs.raf = requestAnimationFrame(() => {
+      if (state.view === "graph") renderGraph(state);
+    });
+  }
+};
+
+const drawStageColumn = (
+  state: AppState,
+  gvs: GraphViewState,
+  rows: StageRow[],
+  side: "left" | "right",
+  colX: number,
+  cy: number,
+  availH: number,
+  centerX: number,
+  ease: number,
+  stageW: number,
+): void => {
+  const { ctx, theme } = state;
+  if (rows.length === 0) return;
+  const rowH = Math.min(24, Math.max(18, availH / rows.length));
+  const totalH = rows.length * rowH;
+  let y = cy - totalH / 2 + rowH / 2;
+  const dirSign = side === "left" ? -1 : 1;
+  const slide = 14 * (1 - ease) * dirSign;
+  const cardEdgeX = centerX + dirSign * 128;
+
+  for (const row of rows) {
+    const rowY = y;
+    y += rowH;
+    const textX = colX + dirSign * 14 + slide;
+
+    if (row.kind === "file" || row.kind === "group") {
+      const endX = colX - dirSign * 6 + slide;
+      ctx.beginPath();
+      ctx.moveTo(cardEdgeX, cy);
+      const dx = endX - cardEdgeX;
+      ctx.bezierCurveTo(cardEdgeX + dx * 0.45, cy, cardEdgeX + dx * 0.55, rowY, endX, rowY);
+      if (row.violation) {
+        ctx.strokeStyle = theme.red;
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([]);
+      } else if (row.cycle) {
+        ctx.strokeStyle = theme.amber;
+        ctx.lineWidth = 1.1;
+        ctx.setLineDash([4, 3]);
+      } else {
+        ctx.strokeStyle = theme.blue;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+      }
+      ctx.globalAlpha = 0.7 * ease;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = ease;
+    }
+
+    ctx.textBaseline = "middle";
+    ctx.textAlign = side === "left" ? "right" : "left";
+
+    if (row.kind === "header" || row.kind === "more") {
+      ctx.font = FONT_MICRO;
+      ctx.fillStyle = theme.textMuted;
+      ctx.fillText(row.kind === "header" ? row.label.toUpperCase() : row.label, textX, rowY);
+      continue;
+    }
+
+    const dotX = colX - dirSign * 6 + slide;
+    if (row.kind === "file" && row.fileIndex !== undefined) {
+      ctx.fillStyle = lensColor(state.lens, theme, state.index, state.data.files[row.fileIndex]);
+    } else {
+      ctx.fillStyle = theme.borderStrong;
+    }
+    ctx.beginPath();
+    ctx.arc(dotX, rowY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.font = FONT_SMALL;
+    const maxTextW = side === "left" ? colX - 30 : stageW - colX - 30;
+    if (row.kind === "group") {
+      const label = `${row.label} (${row.count ?? 0})`;
+      ctx.fillStyle = row.violation ? theme.redText : row.cycle ? theme.amberText : theme.textHigh;
+      ctx.fillText(middleTruncate(ctx, label, Math.min(maxTextW, 320)), textX, rowY);
+    } else {
+      const dim = row.dim ? `${row.dim}/` : "";
+      const nameColor = row.violation ? theme.redText : row.cycle ? theme.amberText : theme.textHigh;
+      const name = row.cycle ? `${row.label} ~` : row.label;
+      const nameW = ctx.measureText(name).width;
+      let drawDim = dim;
+      if (ctx.measureText(dim).width + nameW > maxTextW) {
+        drawDim = middleTruncate(ctx, dim, Math.max(0, maxTextW - nameW));
+      }
+      if (side === "left") {
+        ctx.fillStyle = nameColor;
+        ctx.fillText(name, textX, rowY);
+        ctx.fillStyle = theme.textMuted;
+        ctx.fillText(drawDim, textX - nameW, rowY);
+      } else {
+        ctx.fillStyle = theme.textMuted;
+        ctx.fillText(drawDim, textX, rowY);
+        ctx.fillStyle = nameColor;
+        ctx.fillText(name, textX + ctx.measureText(drawDim).width, rowY);
+      }
+    }
+
+    // Leader line to the true map position (spatial identity).
+    if (row.kind === "file" && row.fileIndex !== undefined) {
+      const node = gvs.fileNodes[row.fileIndex];
+      if (node && node.x != null && node.y != null) {
+        const s = worldToScreen(gvs, { x: node.x, y: node.y });
+        ctx.beginPath();
+        ctx.moveTo(dotX, rowY);
+        ctx.lineTo(s.x, s.y);
+        ctx.strokeStyle = theme.textLow;
+        ctx.globalAlpha = 0.08 * ease;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.globalAlpha = ease;
+      }
+    }
+
+    const rectW = Math.min(maxTextW + 40, 460);
+    gvs.stageRects.push({
+      x: side === "left" ? colX - rectW : colX - 8,
+      y: rowY - rowH / 2,
+      w: rectW + 8,
+      h: rowH,
+      kind: row.kind === "group" ? "group" : "file",
+      fileIndex: row.fileIndex,
+      groupKey: row.groupKey,
+    });
+  }
+};
+
+const drawCrumbs = (state: AppState, gvs: GraphViewState, stageW: number): void => {
+  const { ctx, theme, data } = state;
+  if (gvs.crumbs.length < 2) return;
+  const shown = gvs.crumbs.slice(-6);
+  ctx.font = FONT_MICRO;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  let x = 14;
+  const y = 14;
+  shown.forEach((idx, i) => {
+    const name = basename(data.files[idx].path);
+    const isLast = i === shown.length - 1;
+    const textW = ctx.measureText(name).width;
+    if (x + textW > stageW - 40) return;
+    ctx.fillStyle = isLast ? theme.textHigh : theme.textLow;
+    ctx.fillText(name, x, y);
+    if (!isLast) {
+      gvs.stageRects.push({
+        x: x - 2,
+        y: y - 8,
+        w: textW + 4,
+        h: 16,
+        kind: "crumb",
+        fileIndex: idx,
+      });
+    }
+    x += textW;
+    if (!isLast) {
+      ctx.fillStyle = theme.textMuted;
+      ctx.fillText(" ▸ ", x, y);
+      x += ctx.measureText(" ▸ ").width;
+    }
+  });
+};
+
+const middleTruncate = (
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string => {
+  if (text === "") return "";
+  if (maxWidth <= 10) return "…";
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let lo = 1;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    const keep = Math.floor(mid / 2);
+    const candidate = `${text.slice(0, keep)}…${text.slice(text.length - (mid - keep))}`;
+    if (ctx.measureText(candidate).width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  const keep = Math.floor(lo / 2);
+  return `${text.slice(0, keep)}…${text.slice(text.length - (lo - keep))}`;
+};
+
+// ── Hit testing / interaction ───────────────────────────────────
+
+const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): number | null => {
   const gvs = getGVS(state);
   const { transform, fileNodes } = gvs;
   const gx = (canvasX - transform.x) / transform.k;
   const gy = (canvasY - transform.y) / transform.k;
+  const slop = 4 / transform.k;
   for (let i = fileNodes.length - 1; i >= 0; i--) {
     const node = fileNodes[i];
-    if (node.x == null || node.y == null) continue;
+    if (!node || node.x == null || node.y == null) continue;
     const dx = gx - node.x;
     const dy = gy - node.y;
-    if (dx * dx + dy * dy <= (node.radius + 4) ** 2) return node.fileIndex;
+    const r = node.radius + slop;
+    if (dx * dx + dy * dy <= r * r) return node.fileIndex;
   }
   return null;
 };
 
-export const graphDragStart = (state: AppState, fileIndex: number): void => {
+const stageHitTest = (state: AppState, x: number, y: number): StageRect | null => {
   const gvs = getGVS(state);
-  const node = gvs.fileNodes[fileIndex];
-  if (!node) return;
-  gvs.draggedNode = fileIndex;
-  node.fx = node.x;
-  node.fy = node.y;
-  if (gvs.simulation && !state.reducedMotion) {
-    gvs.simulation.alphaTarget(0.3).restart();
+  for (const rect of gvs.stageRects) {
+    if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) return rect;
   }
+  return null;
+};
+
+/** What the cursor is over (drives hover state, cursor, and tooltip). */
+export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHoverTarget => {
+  if (state.selected !== null) {
+    const rect = stageHitTest(state, x, y);
+    if (rect) {
+      if (rect.kind !== "group" && rect.fileIndex !== undefined) {
+        return { kind: "file", fileIndex: rect.fileIndex };
+      }
+      return { kind: "ui" };
+    }
+    const node = nodeHitTest(state, x, y);
+    return node !== null ? { kind: "file", fileIndex: node } : null;
+  }
+  const node = nodeHitTest(state, x, y);
+  return node !== null ? { kind: "file", fileIndex: node } : null;
+};
+
+/** Handle a primary click; the caller applies file selection. */
+export const graphHandleClick = (state: AppState, x: number, y: number): GraphClickResult => {
+  const gvs = getGVS(state);
+  if (state.selected !== null) {
+    const rect = stageHitTest(state, x, y);
+    if (rect) {
+      if (rect.kind !== "group" && rect.fileIndex !== undefined) {
+        return { kind: "file", fileIndex: rect.fileIndex };
+      }
+      if (rect.kind === "group" && rect.groupKey) {
+        if (gvs.egoExpanded.has(rect.groupKey)) gvs.egoExpanded.delete(rect.groupKey);
+        else gvs.egoExpanded.add(rect.groupKey);
+        return { kind: "handled" };
+      }
+      return { kind: "handled" };
+    }
+    const node = nodeHitTest(state, x, y);
+    if (node !== null) return { kind: "file", fileIndex: node };
+    return { kind: "none" };
+  }
+  const node = nodeHitTest(state, x, y);
+  if (node !== null) return { kind: "file", fileIndex: node };
+  return { kind: "none" };
+};
+
+/** Reset ego navigation history (call when selection is cleared). */
+export const resetEgoTrail = (state: AppState): void => {
+  const gvs = getGVS(state);
+  gvs.crumbs = [];
+  gvs.egoExpanded.clear();
+  gvs.lastRoot = null;
+};
+
+// ── Drag (overview only; layouts are frozen, drag just repositions) ──
+
+export const graphDragStart = (state: AppState, fileIndex: number): void => {
+  if (state.selected !== null) return;
+  const gvs = getGVS(state);
+  if (gvs.fileNodes[fileIndex]) gvs.draggedNode = fileIndex;
 };
 
 export const graphDrag = (state: AppState, canvasX: number, canvasY: number): void => {
   const gvs = getGVS(state);
   if (gvs.draggedNode === null) return;
   const node = gvs.fileNodes[gvs.draggedNode];
-  const gx = (canvasX - gvs.transform.x) / gvs.transform.k;
-  const gy = (canvasY - gvs.transform.y) / gvs.transform.k;
-  node.fx = gx;
-  node.fy = gy;
-  node.x = gx;
-  node.y = gy;
+  node.x = (canvasX - gvs.transform.x) / gvs.transform.k;
+  node.y = (canvasY - gvs.transform.y) / gvs.transform.k;
 };
 
 export const graphDragEnd = (state: AppState): void => {
-  const gvs = getGVS(state);
-  if (gvs.draggedNode === null) return;
-  const node = gvs.fileNodes[gvs.draggedNode];
-  node.fx = null;
-  node.fy = null;
-  gvs.draggedNode = null;
-  if (gvs.simulation) gvs.simulation.alphaTarget(0);
+  getGVS(state).draggedNode = null;
 };
 
 export const isDragging = (state: AppState): boolean => getGVS(state).draggedNode !== null;
 
-/** Pan/zoom the graph so a file's node sits centered (panel navigation). */
+/** Pan/zoom so a file's node is centered (overview only; ego centers itself). */
 export const centerOnFile = (state: AppState, fileIndex: number): void => {
   const gvs = getGVS(state);
-  if (!gvs.initialized || !gvs.zoomBehavior) return;
+  if (!gvs.initialized || !gvs.zoomBehavior || state.selected !== null) return;
   const node = gvs.fileNodes[fileIndex];
   if (!node || node.x == null || node.y == null) return;
-  const stage = state.canvas.parentElement;
-  const w = stage ? stage.clientWidth : window.innerWidth;
-  const h = stage ? stage.clientHeight : window.innerHeight;
-  const k = Math.max(gvs.transform.k, 1.2);
+  const stageEl = state.canvas.parentElement;
+  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
+  const k = Math.max(gvs.transform.k, gvs.fitK * 1.5);
   const target = zoomIdentity.translate(w / 2 - node.x * k, h / 2 - node.y * k).scale(k);
   select(state.canvas).call(gvs.zoomBehavior.transform, target);
 };
