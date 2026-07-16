@@ -212,6 +212,7 @@ export const buildTourBar = (handlers: OverlayHandlers): HTMLElement => {
   const bar = el("div");
   bar.id = "tour-bar";
   bar.setAttribute("role", "status");
+  bar.setAttribute("aria-live", "polite");
 
   const step = el("span", "tour-step");
   bar.appendChild(step);

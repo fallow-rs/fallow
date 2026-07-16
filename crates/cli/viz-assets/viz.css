@@ -998,21 +998,26 @@ button {
 
 /* ── Help overlay ────────────────────────────────────────────── */
 
-#help-btn {
+#help-btn,
+#export-btn {
   font-size: 12px;
   padding: 3px 9px;
   border: 1px solid var(--border-default);
   color: var(--text-low);
   background: var(--surface-1);
   box-shadow: 2px 2px 0 var(--border-default);
+  text-transform: lowercase;
+  letter-spacing: 0.05em;
 }
 
-#help-btn:hover {
+#help-btn:hover,
+#export-btn:hover {
   background: var(--surface-3);
   color: var(--text-high);
 }
 
-#help-btn:active {
+#help-btn:active,
+#export-btn:active {
   transform: translate(1px, 1px);
   box-shadow: 1px 1px 0 var(--border-default);
 }

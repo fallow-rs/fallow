@@ -22,6 +22,8 @@ export interface ChromeRefs {
   crumbHandler?: (path: string) => void;
   /** Wired by main.ts after chrome build (help overlay toggle). */
   helpHandler?: () => void;
+  /** Wired by main.ts after chrome build (PNG export of the canvas). */
+  exportHandler?: () => void;
 }
 
 export interface ChromeHandlers {
@@ -76,6 +78,11 @@ export const buildChrome = (
   const stats = el("div");
   stats.id = "stats";
   topbar.appendChild(stats);
+
+  const exportBtn = button("", "png");
+  exportBtn.id = "export-btn";
+  exportBtn.setAttribute("aria-label", "Export the current view as PNG");
+  topbar.appendChild(exportBtn);
 
   const helpBtn = button("", "?");
   helpBtn.id = "help-btn";
@@ -203,6 +210,7 @@ export const buildChrome = (
   };
 
   helpBtn.addEventListener("click", () => refs.helpHandler?.());
+  exportBtn.addEventListener("click", () => refs.exportHandler?.());
 
   buildStats(state, refs, handlers);
   return refs;

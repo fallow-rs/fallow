@@ -23,8 +23,11 @@ import {
   graphPathTrace,
   initGraphNodes,
   isDragging,
+  minimapHit,
+  minimapPan,
   renderGraph,
   resetEgoTrail,
+  resetGraphView,
   roadFacts,
   selectRoadByDirs,
   setClusterMode,
@@ -216,6 +219,18 @@ const init = (): void => {
   };
   refs.helpHandler = toggleHelp;
 
+  // PNG export of the current canvas (map or graph, current lens state).
+  refs.exportHandler = () => {
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `fallow-map-${data.root}-${state.view}-${state.lens}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, "image/png");
+  };
+
   // ── Navigation shared by panel + views ────────────────────────
   const selectFile = (fileIndex: number | null, reveal = false): void => {
     state.selected = fileIndex;
@@ -354,6 +369,11 @@ const init = (): void => {
   canvas.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     const { x, y } = canvasPoint(e);
+    if (state.view === "graph" && minimapHit(state, x, y)) {
+      minimapPan(state, x, y);
+      mouseDownAt = null;
+      return;
+    }
     mouseDownAt = { x, y };
     dragMoved = false;
     if (state.view === "graph" && state.selected === null) {
@@ -472,6 +492,13 @@ const init = (): void => {
       setView("map");
     } else if (e.key === "g") {
       setView("graph");
+    } else if (e.key === "0") {
+      if (state.view === "graph") {
+        resetGraphView(state);
+      } else {
+        drillTo(state, "");
+        requestRender();
+      }
     }
   });
 
