@@ -291,22 +291,14 @@ const lensFindingCount = (state: AppState, lens: Lens): number => {
   }
 };
 
-const legendItem = (
-  swatchColor: string | null,
-  prefix: string | null,
-  label: string,
-  hatched = false,
-): HTMLElement => {
+const legendItem = (swatchColor: string, label: string, hatched = false): HTMLElement => {
   const item = el("span", "legend-item");
   item.setAttribute("role", "listitem");
-  if (swatchColor) {
-    const swatch = el("span", "legend-swatch");
-    swatch.style.background = hatched
-      ? `repeating-linear-gradient(45deg, ${swatchColor}, ${swatchColor} 2px, transparent 2px, transparent 4px)`
-      : swatchColor;
-    item.appendChild(swatch);
-  }
-  if (prefix) item.appendChild(el("span", "legend-prefix", prefix));
+  const swatch = el("span", "legend-swatch");
+  swatch.style.background = hatched
+    ? `repeating-linear-gradient(45deg, ${swatchColor}, ${swatchColor} 2px, transparent 2px, transparent 4px)`
+    : swatchColor;
+  item.appendChild(swatch);
   item.appendChild(el("span", undefined, label));
   return item;
 };
@@ -323,10 +315,10 @@ const updateLegend = (state: AppState, refs: ChromeRefs): void => {
   switch (state.lens) {
     case "deadcode": {
       refs.legend.append(
-        legendItem(t.red, "[E]", "unused file", true),
-        legendItem(t.amber, "[W]", "unused exports"),
-        legendItem(t.cellEntry, "[*]", "entry point"),
-        legendItem(t.cellNeutral, null, "live"),
+        legendItem(t.red, "unused file", true),
+        legendItem(t.amber, "unused exports"),
+        legendItem(t.cellEntry, "entry point"),
+        legendItem(t.cellNeutral, "live"),
       );
       break;
     }
@@ -341,13 +333,13 @@ const updateLegend = (state: AppState, refs: ChromeRefs): void => {
     case "boundaries": {
       const zones = state.data.zones;
       zones.slice(0, t.zones.length).forEach((zone, i) => {
-        refs.legend.appendChild(legendItem(t.zones[i], null, zone.name));
+        refs.legend.appendChild(legendItem(t.zones[i], zone.name));
       });
       if (zones.length > t.zones.length) {
-        refs.legend.appendChild(legendItem(t.zoneOther, null, "other zones"));
+        refs.legend.appendChild(legendItem(t.zoneOther, "other zones"));
       }
       if (zones.length > 0) {
-        refs.legend.appendChild(legendItem(t.red, "[E]", "violation", true));
+        refs.legend.appendChild(legendItem(t.red, "violation", true));
       }
       break;
     }

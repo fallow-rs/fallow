@@ -79,7 +79,7 @@ export const showFileTooltip = (
       tip.appendChild(
         line(
           "sev-error tip-line",
-          file.importer_count === 0 ? "[E] unused file, nothing imports it" : "[E] unused file",
+          file.importer_count === 0 ? "unused file, nothing imports it" : "unused file",
         ),
       );
       break;
@@ -87,11 +87,11 @@ export const showFileTooltip = (
       const names = file.unused_exports ?? [];
       const shown = names.slice(0, 5).join(", ");
       const extra = names.length > 5 ? ` +${names.length - 5}` : "";
-      tip.appendChild(line("sev-warn tip-line", `[W] unused: ${shown}${extra}`));
+      tip.appendChild(line("sev-warn tip-line", `unused: ${shown}${extra}`));
       break;
     }
     case "entryPoint":
-      tip.appendChild(line("sev-info tip-line", "[*] entry point"));
+      tip.appendChild(line("sev-info tip-line", "entry point"));
       break;
     default:
       break;
@@ -120,29 +120,38 @@ export const showFileTooltip = (
     tip.appendChild(statGrid(heat));
     const top = file.functions?.[0];
     if (top && ccCls) {
-      const worst = line(`${ccCls} tip-line`, "");
-      worst.append("[W] worst: ");
+      const worst = line("tip-line", "");
+      const label = document.createElement("span");
+      label.className = "tip-muted";
+      label.textContent = "worst ";
       const fn = document.createElement("span");
       fn.className = "fn";
       fn.textContent = `${top.name}()`;
-      worst.appendChild(fn);
+      worst.append(label, fn);
       tip.appendChild(worst);
     }
   }
   if (state.lens === "boundaries") {
     const zone = file.zone !== undefined ? state.data.zones[file.zone]?.name : undefined;
-    tip.appendChild(
-      line(zone ? "sev-info tip-line" : "tip-muted tip-line", zone ? `[I] zone: ${zone}` : "no zone"),
-    );
+    const zoneLine = line("tip-line", "");
+    const label = document.createElement("span");
+    label.className = "tip-muted";
+    label.textContent = "zone ";
+    zoneLine.appendChild(label);
+    const value = document.createElement("span");
+    value.className = zone ? "sev-info" : "tip-muted";
+    value.textContent = zone ?? "none";
+    zoneLine.appendChild(value);
+    tip.appendChild(zoneLine);
     if (state.index.violationSources.has(fileIndex)) {
       const count = state.data.violations.filter((v) => v.from === fileIndex).length;
       tip.appendChild(
-        line("sev-error tip-line", `[E] ${count} boundary violation${count === 1 ? "" : "s"}`),
+        line("sev-error tip-line", `${count} boundary violation${count === 1 ? "" : "s"}`),
       );
     }
   }
   if (file.in_cycle) {
-    tip.appendChild(line("sev-warn tip-line", "[W] part of a dependency cycle"));
+    tip.appendChild(line("sev-warn tip-line", "part of a dependency cycle"));
   }
 
   tip.appendChild(line("tip-muted tip-line", "click for details"));

@@ -55,18 +55,18 @@ const statusLabel = (file: VizFile): HTMLElement => {
   const wrap = el("span");
   switch (file.status) {
     case "unused":
-      wrap.appendChild(sev("sev-error", "[E] unused file"));
+      wrap.appendChild(sev("sev-error", "unused file"));
       break;
     case "hasUnusedExports":
       wrap.appendChild(
-        sev("sev-warn", `[W] ${formatCount(file.unused_export_count)} unused export${file.unused_export_count === 1 ? "" : "s"}`),
+        sev("sev-warn", `${formatCount(file.unused_export_count)} unused export${file.unused_export_count === 1 ? "" : "s"}`),
       );
       break;
     case "entryPoint":
-      wrap.appendChild(sev("sev-info", "[*] entry point"));
+      wrap.appendChild(sev("sev-info", "entry point"));
       break;
     default:
-      wrap.appendChild(sev("sev-ok", "[OK] live"));
+      wrap.appendChild(sev("sev-ok", "live"));
   }
   return wrap;
 };
@@ -125,7 +125,7 @@ export const renderPanel = (
   statusLine.appendChild(statusLabel(file));
   fileBox.appendChild(statusLine);
   head.appendChild(fileBox);
-  const closeBtn = el("button", "close", "[x]") as HTMLButtonElement;
+  const closeBtn = el("button", "close", "×") as HTMLButtonElement;
   closeBtn.type = "button";
   closeBtn.setAttribute("aria-label", "Close details");
   closeBtn.addEventListener("click", close);
@@ -153,15 +153,11 @@ export const renderPanel = (
   // Dead code
   if (file.status === "unused") {
     const dead = sectionEl("dead code");
-    const msg = el("div");
-    msg.appendChild(sev("sev-error", "[E] "));
-    msg.appendChild(
-      document.createTextNode(
-        file.importer_count === 0
-          ? "no file imports this one; nothing reaches it from an entry point."
-          : "unreachable from every entry point.",
-      ),
-    );
+    const msg = el("div", "sev-error");
+    msg.textContent =
+      file.importer_count === 0
+        ? "no file imports this one; nothing reaches it from an entry point."
+        : "unreachable from every entry point.";
     dead.appendChild(msg);
     const hint = el("div", "action-hint");
     hint.append("verify: ", elCode(`fallow dead-code --trace ${file.path}`));
@@ -276,9 +272,9 @@ export const renderPanel = (
     const b = sectionEl("boundary violations");
     for (const v of outgoing.slice(0, 6)) {
       const row = el("div");
-      row.appendChild(sev("sev-error", "[E] "));
       row.appendChild(
-        document.createTextNode(
+        sev(
+          "sev-error",
           `${state.data.zones[v.from_zone]?.name ?? "?"} → ${state.data.zones[v.to_zone]?.name ?? "?"} `,
         ),
       );
@@ -304,7 +300,7 @@ export const renderPanel = (
     const cyc = sectionEl("circular dependency");
     const cycles = state.data.cycles.filter((c) => c.includes(fileIdx));
     for (const cycle of cycles.slice(0, 2)) {
-      cyc.appendChild(el("div", "sev-warn", `[W] cycle of ${cycle.length} files`));
+      cyc.appendChild(el("div", "sev-warn", `cycle of ${cycle.length} files`));
       cyc.appendChild(linkList(state, cycle.filter((i) => i !== fileIdx), navigate, 8));
     }
     panel.appendChild(cyc);

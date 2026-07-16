@@ -391,10 +391,6 @@ button {
   display: inline-block;
 }
 
-.legend-prefix {
-  color: var(--text-muted);
-}
-
 .legend-ramp {
   width: 72px;
   height: 10px;
@@ -450,11 +446,6 @@ button {
   color: var(--text-high);
   font-weight: 700;
   margin-bottom: 8px;
-}
-
-#empty-state .box .title::before {
-  content: "[I] ";
-  color: var(--blue-text);
 }
 
 #empty-state .box code {
