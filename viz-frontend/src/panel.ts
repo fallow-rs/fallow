@@ -199,12 +199,17 @@ export const renderPanel = (
       nameTd.appendChild(el("span", "fn-name", fn.name));
       nameTd.appendChild(el("span", "muted", `:${fn.line}`));
       if (fn.hooks > 0 || fn.jsx_depth > 0) {
-        const react = el("div", "muted");
-        const parts: string[] = [];
-        if (fn.hooks > 0) parts.push(`${fn.hooks} hooks`);
-        if (fn.jsx_depth > 0) parts.push(`jsx depth ${fn.jsx_depth}`);
-        if (fn.props > 0) parts.push(`${fn.props} props`);
-        react.textContent = parts.join(" · ");
+        const react = el("div", "fn-react");
+        const pairs: Array<[string, number]> = [];
+        if (fn.hooks > 0) pairs.push(["hooks", fn.hooks]);
+        if (fn.jsx_depth > 0) pairs.push(["jsx", fn.jsx_depth]);
+        if (fn.props > 0) pairs.push(["props", fn.props]);
+        for (const [label, value] of pairs) {
+          const pair = el("span", "pair");
+          pair.appendChild(el("span", "muted", `${label} `));
+          pair.appendChild(el("span", "mono", String(value)));
+          react.appendChild(pair);
+        }
         nameTd.appendChild(react);
       }
       tr.appendChild(nameTd);

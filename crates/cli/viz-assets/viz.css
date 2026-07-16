@@ -629,6 +629,14 @@ button {
   color: var(--text-high);
 }
 
+#panel .fn-react {
+  font-size: 10px;
+}
+
+#panel .fn-react .pair + .pair {
+  margin-left: 12px;
+}
+
 #panel .sev-error {
   color: var(--red-text);
 }
@@ -732,11 +740,13 @@ button {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 6px;
+  overflow-wrap: anywhere;
 }
 
 #panel .action-hint code {
   color: var(--green-text);
   font-family: inherit;
+  overflow-wrap: anywhere;
 }
 
 /* ── Tooltip ─────────────────────────────────────────────────── */
@@ -747,7 +757,7 @@ button {
   background: var(--surface-3);
   color: var(--text-high);
   border: 1px solid var(--border-strong);
-  padding: 8px 10px;
+  padding: 9px 12px;
   font-size: 11px;
   line-height: 1.5;
   max-width: 380px;
@@ -755,9 +765,53 @@ button {
   z-index: 10;
 }
 
-#tooltip .tip-path {
-  font-weight: 700;
+#tooltip .tip-dir {
+  color: var(--text-muted);
+  font-size: 10px;
   overflow-wrap: anywhere;
+}
+
+#tooltip .tip-name {
+  font-weight: 700;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+#tooltip .tip-stats {
+  display: flex;
+  gap: 16px;
+  margin: 7px 0 2px;
+}
+
+#tooltip .tip-stat .v {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-high);
+  font-variant-numeric: tabular-nums;
+}
+
+#tooltip .tip-stat .v.sev-error {
+  color: var(--red-text);
+}
+
+#tooltip .tip-stat .v.sev-warn {
+  color: var(--amber-text);
+}
+
+#tooltip .tip-stat .l {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+  margin-top: -2px;
+}
+
+#tooltip .tip-line {
+  margin-top: 4px;
+}
+
+#tooltip .tip-line .fn {
+  color: var(--text-high);
 }
 
 #tooltip .tip-dim {

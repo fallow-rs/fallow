@@ -1,5 +1,5 @@
 import type { AppState } from "./state";
-import { dupRatio, formatCount, formatSize } from "./data";
+import { basename, dirname, dupRatio, formatCount, formatSize } from "./data";
 
 let tipEl: HTMLDivElement | null = null;
 
@@ -19,6 +19,38 @@ const line = (cls: string, text: string): HTMLElement => {
   return div;
 };
 
+interface Stat {
+  value: string;
+  label: string;
+  /** Severity class on the value ("sev-error" | "sev-warn"). */
+  cls?: string;
+}
+
+/** Mini stat row: prominent value over a muted micro-label per fact. */
+const statGrid = (stats: Stat[]): HTMLElement => {
+  const grid = document.createElement("div");
+  grid.className = "tip-stats";
+  for (const stat of stats) {
+    const tile = document.createElement("div");
+    tile.className = "tip-stat";
+    const v = document.createElement("div");
+    v.className = stat.cls ? `v ${stat.cls}` : "v";
+    v.textContent = stat.value;
+    const l = document.createElement("div");
+    l.className = "l";
+    l.textContent = stat.label;
+    tile.append(v, l);
+    grid.appendChild(tile);
+  }
+  return grid;
+};
+
+const header = (tip: HTMLDivElement, path: string): void => {
+  const dir = dirname(path);
+  if (dir) tip.appendChild(line("tip-dir", `${dir}/`));
+  tip.appendChild(line("tip-name", basename(path)));
+};
+
 /** Show the tooltip for a file (both views route through here). */
 export const showFileTooltip = (
   state: AppState,
@@ -30,20 +62,24 @@ export const showFileTooltip = (
   const tip = getTip();
   tip.replaceChildren();
 
-  tip.appendChild(line("tip-path", file.path));
+  header(tip, file.path);
 
-  const facts: string[] = [formatSize(file.size)];
-  if (file.export_count > 0) facts.push(`${formatCount(file.export_count)} exports`);
-  if (file.importer_count > 0) facts.push(`${formatCount(file.importer_count)} importers`);
-  if (file.import_count > 0) facts.push(`${formatCount(file.import_count)} imports`);
-  tip.appendChild(line("tip-dim", facts.join(" · ")));
+  const facts: Stat[] = [{ value: formatSize(file.size), label: "size" }];
+  if (file.export_count > 0) {
+    facts.push({ value: formatCount(file.export_count), label: "exports" });
+  }
+  facts.push({ value: formatCount(file.importer_count), label: "imported by" });
+  if (file.import_count > 0) {
+    facts.push({ value: formatCount(file.import_count), label: "imports" });
+  }
+  tip.appendChild(statGrid(facts));
 
   switch (file.status) {
     case "unused":
       tip.appendChild(
         line(
-          "sev-error",
-          file.importer_count === 0 ? "[E] unused file · nothing imports it" : "[E] unused file",
+          "sev-error tip-line",
+          file.importer_count === 0 ? "[E] unused file, nothing imports it" : "[E] unused file",
         ),
       );
       break;
@@ -51,11 +87,11 @@ export const showFileTooltip = (
       const names = file.unused_exports ?? [];
       const shown = names.slice(0, 5).join(", ");
       const extra = names.length > 5 ? ` +${names.length - 5}` : "";
-      tip.appendChild(line("sev-warn", `[W] unused: ${shown}${extra}`));
+      tip.appendChild(line("sev-warn tip-line", `[W] unused: ${shown}${extra}`));
       break;
     }
     case "entryPoint":
-      tip.appendChild(line("sev-info", "[*] entry point"));
+      tip.appendChild(line("sev-info tip-line", "[*] entry point"));
       break;
     default:
       break;
@@ -63,43 +99,53 @@ export const showFileTooltip = (
 
   if (state.lens === "dupes" && file.dup_lines > 0) {
     tip.appendChild(
-      line(
-        "sev-warn",
-        `[W] ${formatCount(file.dup_lines)} duplicated lines (${Math.round(dupRatio(file) * 100)}%) · ${file.clone_groups?.length ?? 0} groups`,
-      ),
+      statGrid([
+        { value: formatCount(file.dup_lines), label: "dup lines", cls: "sev-warn" },
+        { value: `${Math.round(dupRatio(file) * 100)}%`, label: "of file" },
+        { value: formatCount(file.clone_groups?.length ?? 0), label: "groups" },
+      ]),
     );
   }
   if (state.lens === "hotspots" && file.max_cyclomatic > 0) {
-    const cls =
-      file.max_cyclomatic >= 20 ? "sev-error" : file.max_cyclomatic >= 10 ? "sev-warn" : "tip-dim";
+    const ccCls =
+      file.max_cyclomatic >= 20 ? "sev-error" : file.max_cyclomatic >= 10 ? "sev-warn" : undefined;
+    const cogCls =
+      file.max_cognitive >= 25 ? "sev-error" : file.max_cognitive >= 15 ? "sev-warn" : undefined;
+    const heat: Stat[] = [
+      { value: String(file.max_cyclomatic), label: "cyclomatic", cls: ccCls },
+      { value: String(file.max_cognitive), label: "cognitive", cls: cogCls },
+    ];
+    if (file.react_hooks > 0) heat.push({ value: String(file.react_hooks), label: "hooks" });
+    if (file.jsx_depth > 0) heat.push({ value: String(file.jsx_depth), label: "jsx depth" });
+    tip.appendChild(statGrid(heat));
     const top = file.functions?.[0];
-    tip.appendChild(
-      line(
-        cls,
-        `cc ${file.max_cyclomatic} · cog ${file.max_cognitive}${top ? ` · worst: ${top.name}()` : ""}`,
-      ),
-    );
-    if (file.react_hooks > 0 || file.jsx_depth > 0) {
-      tip.appendChild(
-        line("tip-muted", `react: ${file.react_hooks} hooks · jsx depth ${file.jsx_depth}`),
-      );
+    if (top && ccCls) {
+      const worst = line(`${ccCls} tip-line`, "");
+      worst.append("[W] worst: ");
+      const fn = document.createElement("span");
+      fn.className = "fn";
+      fn.textContent = `${top.name}()`;
+      worst.appendChild(fn);
+      tip.appendChild(worst);
     }
   }
   if (state.lens === "boundaries") {
     const zone = file.zone !== undefined ? state.data.zones[file.zone]?.name : undefined;
-    tip.appendChild(line(zone ? "sev-info" : "tip-muted", zone ? `zone: ${zone}` : "no zone"));
+    tip.appendChild(
+      line(zone ? "sev-info tip-line" : "tip-muted tip-line", zone ? `[I] zone: ${zone}` : "no zone"),
+    );
     if (state.index.violationSources.has(fileIndex)) {
       const count = state.data.violations.filter((v) => v.from === fileIndex).length;
       tip.appendChild(
-        line("sev-error", `[E] ${count} boundary violation${count === 1 ? "" : "s"}`),
+        line("sev-error tip-line", `[E] ${count} boundary violation${count === 1 ? "" : "s"}`),
       );
     }
   }
   if (file.in_cycle) {
-    tip.appendChild(line("sev-warn", "[W] part of a dependency cycle"));
+    tip.appendChild(line("sev-warn tip-line", "[W] part of a dependency cycle"));
   }
 
-  tip.appendChild(line("tip-muted", "click for details"));
+  tip.appendChild(line("tip-muted tip-line", "click for details"));
   position(tip, mouseX, mouseY);
 };
 
@@ -113,9 +159,14 @@ export const showDirTooltip = (
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
-  tip.appendChild(line("tip-path", `${name}/`));
-  tip.appendChild(line("tip-dim", `${formatCount(fileCount)} files · ${formatSize(size)}`));
-  tip.appendChild(line("tip-muted", "click to zoom in"));
+  tip.appendChild(line("tip-name", `${name}/`));
+  tip.appendChild(
+    statGrid([
+      { value: formatCount(fileCount), label: "files" },
+      { value: formatSize(size), label: "size" },
+    ]),
+  );
+  tip.appendChild(line("tip-muted tip-line", "click to zoom in"));
   position(tip, mouseX, mouseY);
 };
 
