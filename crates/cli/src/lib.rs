@@ -84,6 +84,7 @@ mod update_check;
 use fallow_engine::validate;
 use fallow_engine::vital_signs;
 mod cli_telemetry;
+mod viz;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
@@ -144,6 +145,7 @@ Project inspection:
   explain        Explain one issue type without running analysis
   suppressions   List active fallow-ignore suppression markers
   impact         Show what fallow has done for you (opt-in, local-only)
+  viz            Generate an interactive HTML map of the codebase
 
 Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
@@ -1595,6 +1597,21 @@ enum Command {
         #[arg(long)]
         uninstall: bool,
     },
+
+    /// Generate an interactive HTML map of the codebase
+    Viz {
+        /// Output file path (default: fallow-viz.html in project root)
+        #[arg(long = "out", value_name = "PATH")]
+        output: Option<PathBuf>,
+
+        /// Don't open the output file in the browser
+        #[arg(long)]
+        no_open: bool,
+
+        /// Visualization output format
+        #[arg(long = "viz-format", default_value = "html")]
+        viz_format: viz::VizFormat,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2921,6 +2938,11 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             ImpactCrossRepoOpts { all, sort, limit },
         ),
         security @ Command::Security { .. } => dispatch_security_command(security, dispatch),
+        Command::Viz {
+            output: viz_output,
+            no_open,
+            viz_format,
+        } => dispatch_viz(dispatch, viz_output.as_deref(), no_open, viz_format),
         Command::Report { from } => cli_report::run_report(&from, output, root),
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
@@ -4261,6 +4283,31 @@ impl ListDispatchArgs {
     }
 }
 
+fn dispatch_viz(
+    dispatch: &DispatchContext<'_>,
+    output_path: Option<&std::path::Path>,
+    no_open: bool,
+    format: viz::VizFormat,
+) -> ExitCode {
+    let cli = dispatch.cli;
+    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
+        Ok(production) => production,
+        Err(code) => return code,
+    };
+    viz::run_viz(&viz::VizOptions {
+        root: dispatch.root,
+        config_path: &cli.config,
+        no_cache: cli.no_cache,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
+        production,
+        allow_remote_extends: cli.allow_remote_extends,
+        output_path,
+        no_open,
+        format,
+    })
+}
+
 fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
     let cli = dispatch.cli;
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
@@ -5217,6 +5264,7 @@ mod tests {
             "  workspaces",
             "  explain",
             "  impact",
+            "  viz",
             "Setup and configuration:",
             "  init",
             "  recommend",

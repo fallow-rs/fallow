@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": ["src/main.ts"],
+  "ignorePatterns": ["**/*.css"],
+  "rules": {
+    "unused-dev-dependencies": "off",
+    "unlisted-dependencies": "off"
+  }
+}

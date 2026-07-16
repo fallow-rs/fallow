@@ -1,0 +1,23 @@
+{
+  "name": "fallow-viz-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rolldown -c rolldown.config.mjs && cp src/styles.css ../crates/cli/viz-assets/viz.css",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-transition": "^3.0.9",
+    "@types/d3-zoom": "^3.0.8",
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
+    "d3-zoom": "^3.0.0",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "rolldown": "^1.0.0-beta.8",
+    "typescript": "^5.8.0"
+  }
+}

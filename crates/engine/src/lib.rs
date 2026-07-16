@@ -153,6 +153,7 @@ pub mod trace;
 pub mod trace_chain;
 pub mod validate;
 pub mod vital_signs;
+pub mod viz;
 pub mod workspace_scope;
 
 /// Result alias for typed engine operations.

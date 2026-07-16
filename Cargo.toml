@@ -103,6 +103,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-st
 # File watching
 notify = "8"
 
+# Browser
+open = "5"
+
 # Testing
 criterion2 = { version = "3.0.3", default-features = false }
 dhat = "0.3"

@@ -24,7 +24,7 @@ crates/
   api/      -- Programmatic API boundary for JS/native callers
   napi/     -- napi-rs native Node addon (cdylib, #[napi] bindings) behind the @fallow/node package
   cli/      -- CLI binary, split into per-command modules
-    audit.rs, check/, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, regression/, impact.rs, security.rs
+    audit.rs, check/, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, regression/, impact.rs, security.rs, viz.rs
     license/    -- `fallow license {activate, status, refresh, deactivate}` with offline JWT verify plus live trial / refresh flows
     coverage/   -- `fallow coverage setup` resumable first-run state machine for runtime coverage
     report/     -- Output formatting (mod.rs dispatch, human/, json.rs, sarif.rs, compact.rs, markdown.rs)
@@ -35,6 +35,7 @@ crates/
   multicall/ -- Packaged `fallow` binary bundling the CLI, LSP, and MCP servers into one engine (renamed to `fallow` at packaging time for npm platform packages and VS Code); publish = false, so `cargo install fallow-cli` stays the pure CLI
 editors/
   vscode/   -- VS Code extension (LSP client, tree views, status bar, auto-download)
+viz-frontend/ -- TS source (rolldown) for the `fallow viz` interactive HTML; bundles to crates/cli/viz-assets/
 npm/
   fallow/   -- npm wrapper package with optionalDependencies pattern
 action/       -- GitHub Action (composite)

@@ -80,6 +80,7 @@ rayon = { workspace = true }
 tempfile = { workspace = true }
 miette = { workspace = true, features = ["fancy"] }
 rustc-hash = { workspace = true }
+open = { workspace = true }
 oxc_coverage_instrument = { workspace = true }
 srcmap-sourcemap = "=0.3.7"
 httpdate = { workspace = true }

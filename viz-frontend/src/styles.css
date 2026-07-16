@@ -1,0 +1,309 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+#fallow-app {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* ── Header ───────────────────────────────────────────────── */
+
+#fallow-header {
+  flex-shrink: 0;
+}
+
+/* ── Summary bar ──────────────────────────────────────────── */
+
+#fallow-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  transition: background-color 0.2s;
+}
+
+.summary-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.summary-label {
+  opacity: 0.6;
+}
+
+.summary-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Controls row ─────────────────────────────────────────── */
+
+#fallow-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+/* ── View tabs ────────────────────────────────────────────── */
+
+#fallow-view-tabs {
+  display: flex;
+  gap: 2px;
+  background: rgba(128, 128, 128, 0.1);
+  border-radius: 5px;
+  padding: 2px;
+}
+
+.view-tab {
+  padding: 3px 12px;
+  border: none;
+  background: none;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.view-tab:hover {
+  opacity: 0.8;
+}
+
+.view-tab.active {
+  background: rgba(128, 128, 128, 0.15);
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* ── Graph filters + cluster toggle ───────────────────────── */
+
+#fallow-graph-filters,
+#fallow-cluster-mode {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(128, 128, 128, 0.1);
+  border-radius: 5px;
+  padding: 2px;
+}
+
+.cluster-label {
+  font-size: 11px;
+  opacity: 0.6;
+  padding: 0 6px 0 4px;
+}
+
+.filter-btn {
+  padding: 3px 10px;
+  border: none;
+  background: none;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.filter-btn:hover {
+  opacity: 0.8;
+}
+
+.filter-btn.active {
+  background: rgba(128, 128, 128, 0.15);
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* ── Breadcrumb ───────────────────────────────────────────── */
+
+#fallow-breadcrumb {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.breadcrumb-segment {
+  font-weight: 500;
+}
+
+.breadcrumb-link {
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.breadcrumb-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.breadcrumb-sep {
+  opacity: 0.4;
+  margin: 0 2px;
+}
+
+/* ── Search ───────────────────────────────────────────────── */
+
+#fallow-search {
+  padding: 4px 10px;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: inherit;
+  color: inherit;
+  outline: none;
+  width: 200px;
+  transition: border-color 0.2s;
+}
+
+#fallow-search:focus {
+  border-color: #3B82F6;
+}
+
+#fallow-search::placeholder {
+  opacity: 0.5;
+}
+
+/* ── Dark mode toggle ─────────────────────────────────────── */
+
+#fallow-darkmode {
+  background: none;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: inherit;
+  line-height: 1;
+}
+
+#fallow-darkmode:hover {
+  border-color: rgba(128, 128, 128, 0.6);
+}
+
+/* ── Legend ────────────────────────────────────────────────── */
+
+#fallow-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* ── Canvas ───────────────────────────────────────────────── */
+
+#fallow-canvas {
+  display: block;
+}
+
+/* ── Tooltip ──────────────────────────────────────────────── */
+
+#fallow-tooltip {
+  position: fixed;
+  display: none;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid;
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+  z-index: 1000;
+  max-width: 400px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.tip-path {
+  font-weight: 600;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.tip-size {
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+.tip-status {
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.tip-details {
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+.tip-unused {
+  margin-top: 6px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tip-workspace {
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+/* ── Keyboard focus visibility ─────────────────────────────── */
+
+#fallow-app button:focus-visible,
+.view-tab:focus-visible,
+.filter-btn:focus-visible,
+#fallow-darkmode:focus-visible {
+  outline: 2px solid #3B82F6;
+  outline-offset: 2px;
+}
+
+#fallow-canvas:focus-visible {
+  outline: 2px solid #3B82F6;
+  outline-offset: -2px;
+}
+
+/* ── Respect reduced-motion preference ─────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
