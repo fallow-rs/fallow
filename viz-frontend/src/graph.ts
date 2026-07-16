@@ -99,6 +99,8 @@ interface GraphViewState {
   clusters: ClusterInfo[];
   clusterOf: number[];
   roads: Road[];
+  /** Importer-count floor above which a node gets the hub badge. */
+  hubFloor: number;
   transform: { x: number; y: number; k: number };
   fitK: number;
   draggedNode: number | null;
@@ -174,6 +176,7 @@ const getGVS = (state: AppState): GraphViewState => {
       clusters: [],
       clusterOf: [],
       roads: [],
+      hubFloor: Infinity,
       transform: { x: 0, y: 0, k: 1 },
       fitK: 1,
       draggedNode: null,
@@ -751,6 +754,17 @@ export const initGraphNodes = (state: AppState): void => {
   runLocalLayouts(state, gvs);
   buildHulls(gvs);
 
+  // Hub floor: p95 of importer counts, min 25 (spec: badge, never suppress).
+  const importerCounts = files
+    .map((f) => f.importer_count)
+    .filter((c) => c > 0)
+    .sort((a, b) => a - b);
+  const p95 =
+    importerCounts.length > 0
+      ? importerCounts[Math.min(importerCounts.length - 1, Math.floor(importerCounts.length * 0.95))]
+      : Infinity;
+  gvs.hubFloor = Math.max(25, p95);
+
   const pairSet = new Set<number>();
   for (const e of meta) pairSet.add(e.src * clusters.length + e.dst);
   gvs.roads = meta.map((e) => ({
@@ -1151,6 +1165,24 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
         ctx.strokeStyle = theme.amberText;
         ctx.lineWidth = 1.4 / transform.k;
         ctx.stroke();
+      }
+      // Hub badge: heavily depended-on files get an extra ring + count.
+      if (file.importer_count >= gvs.hubFloor) {
+        ctx.globalAlpha = Math.max(alpha, 0.85);
+        ctx.strokeStyle = theme.textLow;
+        ctx.lineWidth = 1 / transform.k;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + 3 / transform.k, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.font = FONT_MICRO;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = theme.textLow;
+        ctx.fillText(
+          `×${formatCount(file.importer_count)}`,
+          node.x + node.radius + 6 / transform.k,
+          node.y,
+        );
       }
     }
     ctx.globalAlpha = 1;
