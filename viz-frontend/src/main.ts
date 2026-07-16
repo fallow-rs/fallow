@@ -12,22 +12,26 @@ import {
 } from "./treemap";
 import {
   centerOnFile,
+  clearGraphFocus,
   getClusterMode,
   graphDrag,
   graphDragEnd,
   graphDragStart,
+  graphFocusSearch,
   graphHandleClick,
   graphHoverTarget,
+  graphPathTrace,
   initGraphNodes,
   isDragging,
   renderGraph,
   resetEgoTrail,
+  roadFacts,
   setClusterMode,
 } from "./graph";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
 import { createPanel, renderPanel } from "./panel";
-import { hideTooltip, showDirTooltip, showFileTooltip } from "./tooltip";
+import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
 import { dirname } from "./data";
 
 const renderView = (state: AppState): void => {
@@ -161,7 +165,10 @@ const init = (): void => {
     requestAnimationFrame(() => {
       renderQueued = false;
       rerenderChrome();
-      renderPanel(state, panel, (idx) => selectFile(idx, true), () => selectFile(null));
+      renderPanel(state, panel, (idx) => selectFile(idx, true), () => {
+        state.selectedRoad = null;
+        selectFile(null);
+      });
       renderView(state);
       syncHash(state);
     });
@@ -171,6 +178,7 @@ const init = (): void => {
   // ── Canvas interactions ───────────────────────────────────────
   let mouseDownAt: { x: number; y: number } | null = null;
   let dragMoved = false;
+  let lastGraphTarget = "";
 
   const canvasPoint = (e: MouseEvent): { x: number; y: number } => {
     const rect = canvas.getBoundingClientRect();
@@ -212,8 +220,16 @@ const init = (): void => {
       }
       const target = graphHoverTarget(state, x, y);
       const hovered = target && target.kind === "file" ? target.fileIndex : null;
-      if (hovered !== state.graphHovered) {
+      const targetKey = target
+        ? target.kind === "road"
+          ? `road:${target.road}`
+          : target.kind === "file"
+            ? `file:${target.fileIndex}`
+            : "ui"
+        : "";
+      if (hovered !== state.graphHovered || targetKey !== lastGraphTarget) {
         state.graphHovered = hovered;
+        lastGraphTarget = targetKey;
         renderGraph(state);
       }
       canvas.style.cursor = target
@@ -223,6 +239,17 @@ const init = (): void => {
           : "grab";
       if (hovered !== null) {
         showFileTooltip(state, hovered, e.clientX, e.clientY);
+      } else if (target && target.kind === "road") {
+        const facts = roadFacts(state, target.road);
+        showRoadTooltip(
+          facts.srcKey,
+          facts.dstKey,
+          facts.count,
+          facts.violations,
+          facts.cycleEdges,
+          e.clientX,
+          e.clientY,
+        );
       } else {
         hideTooltip();
       }
@@ -278,10 +305,20 @@ const init = (): void => {
         requestRender();
       }
     } else {
+      if (e.shiftKey && graphPathTrace(state, x, y)) {
+        return;
+      }
       const result = graphHandleClick(state, x, y);
       if (result.kind === "file") {
+        state.selectedRoad = null;
         selectFile(result.fileIndex);
+      } else if (result.kind === "road") {
+        state.selectedRoad = result.road;
+        state.selected = null;
+        hideTooltip();
+        requestRender();
       } else if (result.kind === "none") {
+        state.selectedRoad = null;
         selectFile(null);
       } else {
         requestRender();
@@ -305,6 +342,9 @@ const init = (): void => {
       }
       if (state.selected !== null) {
         selectFile(null);
+      } else if (state.selectedRoad !== null || clearGraphFocus(state)) {
+        state.selectedRoad = null;
+        requestRender();
       } else if (state.search !== "" && refs) {
         refs.search.value = "";
         runSearch(state, "");
@@ -314,7 +354,12 @@ const init = (): void => {
       }
       return;
     }
-    if (inInput) return;
+    if (inInput) {
+      if (e.key === "Enter" && state.view === "graph" && state.search.trim() !== "") {
+        graphFocusSearch(state);
+      }
+      return;
+    }
 
     if (e.key === "/") {
       e.preventDefault();

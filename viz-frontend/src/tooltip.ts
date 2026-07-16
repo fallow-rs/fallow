@@ -158,6 +158,33 @@ export const showFileTooltip = (
   position(tip, mouseX, mouseY);
 };
 
+/** Show the tooltip for an aggregated road (graph overview). */
+export const showRoadTooltip = (
+  srcKey: string,
+  dstKey: string,
+  count: number,
+  violations: number,
+  cycleEdges: number,
+  mouseX: number,
+  mouseY: number,
+): void => {
+  const tip = getTip();
+  tip.replaceChildren();
+  tip.appendChild(line("tip-name", `${srcKey} ▸ ${dstKey}`));
+  const stats: Array<{ value: string; label: string; cls?: string }> = [
+    { value: formatCount(count), label: "imports" },
+  ];
+  if (violations > 0) {
+    stats.push({ value: formatCount(violations), label: "violations", cls: "sev-error" });
+  }
+  if (cycleEdges > 0) {
+    stats.push({ value: formatCount(cycleEdges), label: "cycle edges", cls: "sev-warn" });
+  }
+  tip.appendChild(statGrid(stats));
+  tip.appendChild(line("tip-muted tip-line", "click to list the file pairs"));
+  position(tip, mouseX, mouseY);
+};
+
 /** Show the tooltip for a treemap directory cell. */
 export const showDirTooltip = (
   name: string,

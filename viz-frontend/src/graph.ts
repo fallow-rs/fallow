@@ -27,7 +27,7 @@ import { zoom, zoomIdentity, type D3ZoomEvent } from "d3-zoom";
 import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import type { AppState } from "./state";
-import type { VizFile } from "./types";
+import type { RoadSelection, VizFile } from "./types";
 import { basename, dirname, formatCount, lensColor } from "./data";
 
 // ── Types ───────────────────────────────────────────────────────
@@ -54,6 +54,8 @@ interface ClusterInfo {
   hull: Array<{ x: number; y: number }>;
   /** Member of a cluster-level dependency tangle (meta-SCC > 1). */
   tangle: boolean;
+  /** No imports in either direction: parked in the standalone strip. */
+  isolated: boolean;
 }
 
 interface Road {
@@ -82,17 +84,20 @@ export type ClusterMode = "directory" | "imports";
 
 export type GraphHoverTarget =
   | { kind: "file"; fileIndex: number }
+  | { kind: "road"; road: number }
   | { kind: "ui" }
   | null;
 
 export type GraphClickResult =
   | { kind: "file"; fileIndex: number }
+  | { kind: "road"; road: RoadSelection }
   | { kind: "handled" }
   | { kind: "none" };
 
 interface GraphViewState {
   fileNodes: FileNode[];
   clusters: ClusterInfo[];
+  clusterOf: number[];
   roads: Road[];
   transform: { x: number; y: number; k: number };
   fitK: number;
@@ -107,6 +112,19 @@ interface GraphViewState {
   stageEnterAt: number;
   lastRoot: number | null;
   raf: number;
+  /** Hovered road index (overview). */
+  hoveredRoad: number | null;
+  /** Selected road index (overview drill-down). */
+  selectedRoad: number | null;
+  /** Path-trace mode: pending start, and the traced path. */
+  pathFrom: number | null;
+  path: number[] | null;
+  /** Search pulse: file index + start timestamp. */
+  pulseFile: number | null;
+  pulseAt: number;
+  /** Transient HUD notice (e.g. "no dependency path found"). */
+  notice: string;
+  noticeAt: number;
 }
 
 const FONT_SMALL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
@@ -154,6 +172,7 @@ const getGVS = (state: AppState): GraphViewState => {
     ext._gvs = {
       fileNodes: [],
       clusters: [],
+      clusterOf: [],
       roads: [],
       transform: { x: 0, y: 0, k: 1 },
       fitK: 1,
@@ -167,6 +186,14 @@ const getGVS = (state: AppState): GraphViewState => {
       stageEnterAt: 0,
       lastRoot: null,
       raf: 0,
+      hoveredRoad: null,
+      selectedRoad: null,
+      pathFrom: null,
+      path: null,
+      pulseFile: null,
+      pulseAt: 0,
+      notice: "",
+      noticeAt: 0,
     };
   }
   return ext._gvs;
@@ -388,6 +415,7 @@ const assignLayers = (clusterCount: number, meta: MetaEdge[], sccOf: number[]): 
 const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   const byLayer = new Map<number, ClusterInfo[]>();
   for (const c of clusters) {
+    if (c.isolated) continue;
     if (!byLayer.has(c.layer)) byLayer.set(c.layer, []);
     byLayer.get(c.layer)?.push(c);
   }
@@ -442,6 +470,7 @@ const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
 const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   const byLayer = new Map<number, ClusterInfo[]>();
   for (const c of clusters) {
+    if (c.isolated) continue;
     if (!byLayer.has(c.layer)) byLayer.set(c.layer, []);
     byLayer.get(c.layer)?.push(c);
   }
@@ -494,11 +523,41 @@ const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
     }
   }
 
-  const globalMid = clusters.reduce((sum, c) => sum + c.cy, 0) / Math.max(1, clusters.length);
+  const flowing = clusters.filter((c) => !c.isolated);
+  const globalMid = flowing.reduce((sum, c) => sum + c.cy, 0) / Math.max(1, flowing.length);
   for (const layer of layerKeys) {
     const list = byLayer.get(layer) ?? [];
     const mid = list.reduce((s, c) => s + c.cy, 0) / Math.max(1, list.length);
     for (const c of list) c.cy += globalMid - mid;
+  }
+};
+
+/** Park isolated clusters in a compact strip below the dependency flow. */
+const placeIsolated = (clusters: ClusterInfo[]): void => {
+  const isolated = clusters.filter((c) => c.isolated).sort((a, b) => (a.key < b.key ? -1 : 1));
+  if (isolated.length === 0) return;
+  const flowing = clusters.filter((c) => !c.isolated);
+  let minX = 0;
+  let maxX = 800;
+  let maxY = 0;
+  if (flowing.length > 0) {
+    minX = Math.min(...flowing.map((c) => c.cx - c.r));
+    maxX = Math.max(...flowing.map((c) => c.cx + c.r));
+    maxY = Math.max(...flowing.map((c) => c.cy + c.r));
+  }
+  let x = minX;
+  let y = maxY + 200;
+  let rowMax = 0;
+  for (const c of isolated) {
+    if (x + c.r * 2 > maxX && x > minX) {
+      x = minX;
+      y += rowMax + 90;
+      rowMax = 0;
+    }
+    c.cx = x + c.r;
+    c.cy = y + c.r;
+    x += c.r * 2 + 120;
+    rowMax = Math.max(rowMax, c.r * 2);
   }
 };
 
@@ -639,6 +698,7 @@ export const initGraphNodes = (state: AppState): void => {
     gvs.clusterMode === "imports" ? louvainCluster(files, data.edges) : directoryCluster(files);
 
   const clusterOf = new Array<number>(files.length).fill(0);
+  gvs.clusterOf = clusterOf;
   const clusters: ClusterInfo[] = [];
   for (const [key, indices] of groupMap) {
     const ci = clusters.length;
@@ -653,6 +713,7 @@ export const initGraphNodes = (state: AppState): void => {
       r: 24 + 9 * Math.sqrt(indices.length),
       hull: [],
       tangle: false,
+      isolated: false,
     });
   }
   gvs.clusters = clusters;
@@ -666,12 +727,25 @@ export const initGraphNodes = (state: AppState): void => {
   clusters.forEach((c, i) => {
     c.tangle = (sccSize.get(sccOf[i]) ?? 1) > 1;
   });
+  // Clusters with no inter-cluster imports at all sit outside the flow:
+  // park them in a standalone strip below the map instead of polluting
+  // the entry/shared columns.
+  const connected = new Set<number>();
+  for (const e of meta) {
+    connected.add(e.src);
+    connected.add(e.dst);
+  }
+  clusters.forEach((c, i) => {
+    c.isolated = !connected.has(i);
+  });
+
   const layers = assignLayers(clusters.length, meta, sccOf);
   clusters.forEach((c, i) => {
     c.layer = layers[i];
   });
   orderWithinLayers(clusters, meta);
   assignCoordinates(clusters, meta);
+  placeIsolated(clusters);
 
   gvs.fileNodes = new Array<FileNode>(files.length);
   runLocalLayouts(state, gvs);
@@ -823,9 +897,14 @@ const roadGeometry = (gvs: GraphViewState, road: Road): { p0: Pt; p1: Pt; p2: Pt
 
   const dx = p3.x - p0.x;
   let bow = 0;
+  const chord = Math.hypot(p3.x - p0.x, p3.y - p0.y);
   if (road.back) {
-    const chord = Math.hypot(p3.x - p0.x, p3.y - p0.y);
     bow = -0.18 * chord; // back-edges arc above the fabric
+  } else {
+    const span = Math.abs(gvs.clusters[road.dst].layer - gvs.clusters[road.src].layer);
+    // Long hops bow gently over intermediate layers instead of cutting
+    // through their hulls.
+    if (span >= 2) bow = -0.06 * chord;
   }
   const p1 = { x: p0.x + dx * 0.45, y: p0.y + bow };
   const p2 = { x: p3.x - dx * 0.45, y: p3.y + bow };
@@ -977,6 +1056,29 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   // Individual severity edges from mid zoom.
   if (kRel >= LOD_SEVERITY) drawSeverityEdges(state, gvs);
 
+  // Hovered / selected road highlight: bright centerline, marching when hovered.
+  const focusRoad = gvs.hoveredRoad ?? gvs.selectedRoad;
+  if (focusRoad !== null && gvs.roads[focusRoad]) {
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, gvs.roads[focusRoad]);
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+    ctx.strokeStyle = theme.bg;
+    ctx.lineWidth = 5 / transform.k;
+    ctx.globalAlpha = 0.8;
+    ctx.stroke();
+    ctx.strokeStyle = theme.blue;
+    ctx.lineWidth = 2 / transform.k;
+    ctx.globalAlpha = 1;
+    if (gvs.hoveredRoad !== null && !state.reducedMotion) {
+      ctx.setLineDash([8 / transform.k, 6 / transform.k]);
+      ctx.lineDashOffset = -((performance.now() / 40) % 14) / transform.k;
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+  }
+
   // Hover neighborhood.
   const hovered = state.graphHovered;
   let neighbors: Set<number> | null = null;
@@ -1073,11 +1175,143 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     }
   }
 
+  // Search pulse rings.
+  if (gvs.pulseFile !== null) {
+    const node = fileNodes[gvs.pulseFile];
+    const age = performance.now() - gvs.pulseAt;
+    if (node && node.x != null && node.y != null && age < 1200) {
+      for (const phase of [0, 400]) {
+        const t = (age - phase) / 800;
+        if (t < 0 || t > 1) continue;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + 4 + t * 26, 0, Math.PI * 2);
+        ctx.strokeStyle = theme.blue;
+        ctx.globalAlpha = 0.8 * (1 - t);
+        ctx.lineWidth = 2 / transform.k;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      gvs.pulseFile = null;
+    }
+  }
+
   ctx.restore();
 
   drawRoadLabels(state, gvs);
   drawClusterLabels(state, gvs);
   drawAxisCaptions(state, w, h);
+  drawPathTrace(state, gvs, w, h);
+
+  // Transient notice (fades after 1.8s).
+  if (gvs.notice !== "") {
+    const age = performance.now() - gvs.noticeAt;
+    if (age < 1800) {
+      ctx.font = FONT_SMALL;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = theme.amberText;
+      ctx.globalAlpha = age > 1400 ? 1 - (age - 1400) / 400 : 1;
+      ctx.fillText(gvs.notice, w / 2, 28);
+      ctx.globalAlpha = 1;
+      cancelAnimationFrame(gvs.raf);
+      gvs.raf = requestAnimationFrame(() => {
+        if (state.view === "graph") renderGraph(state);
+      });
+    } else {
+      gvs.notice = "";
+    }
+  }
+
+  // Motion frames while something animates.
+  const animating =
+    (gvs.hoveredRoad !== null && !state.reducedMotion) || gvs.pulseFile !== null;
+  if (animating) {
+    cancelAnimationFrame(gvs.raf);
+    gvs.raf = requestAnimationFrame(() => {
+      if (state.view === "graph") renderGraph(state);
+    });
+  }
+};
+
+/** Path-trace overlay: dim the map, draw the dependency chain on top. */
+const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+  const { ctx, theme, data } = state;
+
+  if (gvs.pathFrom !== null && gvs.path === null) {
+    const node = gvs.fileNodes[gvs.pathFrom];
+    if (node && node.x != null && node.y != null) {
+      const s = worldToScreen(gvs, { x: node.x, y: node.y });
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 10, 0, Math.PI * 2);
+      ctx.strokeStyle = theme.blue;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = FONT_MICRO;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = theme.blueText;
+      ctx.fillText("trace from here · shift-click a target", s.x, s.y + 16);
+    }
+    return;
+  }
+
+  const path = gvs.path;
+  if (!path || path.length < 2) return;
+
+  // Dim everything under the trace.
+  ctx.fillStyle = theme.bg;
+  ctx.globalAlpha = 0.62;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalAlpha = 1;
+
+  const pts = path
+    .map((idx) => gvs.fileNodes[idx])
+    .filter((n) => n && n.x != null && n.y != null)
+    .map((n) => worldToScreen(gvs, { x: n.x ?? 0, y: n.y ?? 0 }));
+  if (pts.length < 2) return;
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.strokeStyle = theme.bg;
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.strokeStyle = theme.blue;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.font = FONT_SMALL;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  path.forEach((idx, i) => {
+    const p = pts[i];
+    if (!p) return;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = i === 0 || i === path.length - 1 ? theme.blue : theme.textHigh;
+    ctx.fill();
+    const name = basename(data.files[idx].path);
+    const textW = ctx.measureText(name).width;
+    ctx.fillStyle = theme.bg;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(p.x - textW / 2 - 3, p.y - 24, textW + 6, 14);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = theme.textHigh;
+    ctx.fillText(name, p.x, p.y - 11);
+  });
+
+  ctx.font = FONT_MICRO;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = theme.blueText;
+  ctx.fillText(
+    `dependency trace · ${path.length - 1} hop${path.length === 2 ? "" : "s"} · esc to clear`,
+    14,
+    28,
+  );
 };
 
 const hullPath = (ctx: CanvasRenderingContext2D, hull: Pt[]): void => {
@@ -1092,6 +1326,7 @@ const drawLayerBands = (state: AppState, gvs: GraphViewState): void => {
   let minY = Infinity;
   let maxY = -Infinity;
   for (const c of gvs.clusters) {
+    if (c.isolated) continue;
     const entry = layers.get(c.layer) ?? { min: Infinity, max: -Infinity };
     entry.min = Math.min(entry.min, c.cx - c.r);
     entry.max = Math.max(entry.max, c.cx + c.r);
@@ -1126,8 +1361,12 @@ const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
   ctx.font = FONT_MICRO;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  const kRel = gvs.transform.k / gvs.fitK;
   for (const road of gvs.roads) {
-    if (road.count < 2 && road.violations === 0 && road.cycleEdges === 0) continue;
+    const severe = road.violations > 0 || (road.bidi && road.cycleEdges > 0);
+    // Small roads keep their labels for zoomed-in reading only.
+    if (!severe && (road.count < 5 ? kRel < 1.3 : false)) continue;
+    if (road.count < 2 && !severe) continue;
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
     const mid = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, 0.5));
     let label = formatCount(road.count);
@@ -1164,7 +1403,7 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
       if (p.y < topLeft.y || (p.y === topLeft.y && p.x < topLeft.x)) topLeft = p;
     }
     const s = worldToScreen(gvs, topLeft);
-    const label = cluster.key.toUpperCase();
+    const label = middleTruncate(ctx, cluster.key.toUpperCase(), 210);
     const sub = formatCount(cluster.indices.length);
     const labelW = ctx.measureText(label).width;
     const subW = ctx.measureText(sub).width;
@@ -1185,10 +1424,23 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     ctx.globalAlpha = 1;
     ctx.strokeStyle = cluster.tangle ? theme.amber : theme.borderSubtle;
     ctx.strokeRect(x - 3.5, y - 8.5, labelW + subW + 17, 17);
-    ctx.fillStyle = theme.textLow;
+    ctx.fillStyle = cluster.isolated ? theme.textMuted : theme.textLow;
     ctx.fillText(label, x + 2, y + 0.5);
     ctx.fillStyle = theme.textMuted;
     ctx.fillText(sub, x + labelW + 8, y + 0.5);
+  }
+
+  // Caption for the standalone strip.
+  const isolated = gvs.clusters.filter((c) => c.isolated);
+  if (isolated.length > 0) {
+    const minX = Math.min(...isolated.map((c) => c.cx - c.r));
+    const minY = Math.min(...isolated.map((c) => c.cy - c.r));
+    const s = worldToScreen(gvs, { x: minX, y: minY });
+    ctx.font = FONT_MICRO;
+    ctx.fillStyle = theme.textMuted;
+    ctx.globalAlpha = 0.7;
+    ctx.fillText("STANDALONE · no project imports", s.x, s.y - 26);
+    ctx.globalAlpha = 1;
   }
 };
 
@@ -1456,7 +1708,11 @@ const renderEgoStage = (state: AppState, gvs: GraphViewState, w: number, h: numb
 
   ctx.restore();
 
-  if (t < 1) {
+  const rowMarching =
+    !state.reducedMotion &&
+    state.graphHovered !== null &&
+    gvs.stageRects.some((r) => r.kind === "file" && r.fileIndex === state.graphHovered);
+  if (t < 1 || rowMarching) {
     cancelAnimationFrame(gvs.raf);
     gvs.raf = requestAnimationFrame(() => {
       if (state.view === "graph") renderGraph(state);
@@ -1492,26 +1748,35 @@ const drawStageColumn = (
 
     if (row.kind === "file" || row.kind === "group") {
       const endX = colX - dirSign * 6 + slide;
+      const hoveredRow =
+        row.kind === "file" &&
+        row.fileIndex !== undefined &&
+        state.graphHovered === row.fileIndex;
       ctx.beginPath();
       ctx.moveTo(cardEdgeX, cy);
       const dx = endX - cardEdgeX;
       ctx.bezierCurveTo(cardEdgeX + dx * 0.45, cy, cardEdgeX + dx * 0.55, rowY, endX, rowY);
       if (row.violation) {
         ctx.strokeStyle = theme.red;
-        ctx.lineWidth = 1.4;
+        ctx.lineWidth = hoveredRow ? 2 : 1.4;
         ctx.setLineDash([]);
       } else if (row.cycle) {
         ctx.strokeStyle = theme.amber;
-        ctx.lineWidth = 1.1;
+        ctx.lineWidth = hoveredRow ? 1.8 : 1.1;
         ctx.setLineDash([4, 3]);
       } else {
         ctx.strokeStyle = theme.blue;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = hoveredRow ? 2 : 1;
         ctx.setLineDash([]);
       }
-      ctx.globalAlpha = 0.7 * ease;
+      if (hoveredRow && !state.reducedMotion) {
+        ctx.setLineDash([8, 6]);
+        ctx.lineDashOffset = -((performance.now() / 40) % 14);
+      }
+      ctx.globalAlpha = hoveredRow ? ease : 0.7 * ease;
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
       ctx.globalAlpha = ease;
     }
 
@@ -1655,7 +1920,7 @@ const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): number 
   const { transform, fileNodes } = gvs;
   const gx = (canvasX - transform.x) / transform.k;
   const gy = (canvasY - transform.y) / transform.k;
-  const slop = 4 / transform.k;
+  const slop = 6 / transform.k;
   for (let i = fileNodes.length - 1; i >= 0; i--) {
     const node = fileNodes[i];
     if (!node || node.x == null || node.y == null) continue;
@@ -1675,9 +1940,149 @@ const stageHitTest = (state: AppState, x: number, y: number): StageRect | null =
   return null;
 };
 
+/** Distance-to-bezier road hit test in screen space (overview only). */
+const roadHitTest = (state: AppState, x: number, y: number): number | null => {
+  const gvs = getGVS(state);
+  const threshold = 8;
+  let best: number | null = null;
+  let bestDist = threshold;
+  for (let ri = 0; ri < gvs.roads.length; ri++) {
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, gvs.roads[ri]);
+    for (let i = 0; i <= 16; i++) {
+      const p = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, i / 16));
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = ri;
+      }
+    }
+  }
+  return best;
+};
+
+/** Resolve a road to its contributing file pairs for the panel. */
+const buildRoadSelection = (state: AppState, roadIndex: number): RoadSelection => {
+  const gvs = getGVS(state);
+  const road = gvs.roads[roadIndex];
+  const pairs: Array<[number, number]> = [];
+  for (const [from, to] of state.data.edges) {
+    if (gvs.clusterOf[from] === road.src && gvs.clusterOf[to] === road.dst) {
+      pairs.push([from, to]);
+    }
+  }
+  pairs.sort(
+    (a, b) =>
+      (state.data.files[a[0]].path < state.data.files[b[0]].path ? -1 : 1) ||
+      (state.data.files[a[1]].path < state.data.files[b[1]].path ? -1 : 1),
+  );
+  return {
+    srcKey: gvs.clusters[road.src].key,
+    dstKey: gvs.clusters[road.dst].key,
+    count: road.count,
+    violations: road.violations,
+    cycleEdges: road.cycleEdges,
+    pairs,
+  };
+};
+
+/** BFS shortest path over directed imports; falls back to the reverse
+ *  direction so a trace works whichever node was clicked first. */
+const shortestPath = (state: AppState, from: number, to: number): number[] | null => {
+  const bfs = (start: number, goal: number, adj: number[][]): number[] | null => {
+    const prev = new Map<number, number>();
+    prev.set(start, -1);
+    let frontier = [start];
+    while (frontier.length > 0) {
+      const next: number[] = [];
+      for (const v of frontier) {
+        if (v === goal) {
+          const path: number[] = [];
+          let cur = goal;
+          while (cur !== -1) {
+            path.push(cur);
+            cur = prev.get(cur) ?? -1;
+          }
+          return path.reverse();
+        }
+        for (const w of adj[v]) {
+          if (!prev.has(w)) {
+            prev.set(w, v);
+            next.push(w);
+          }
+        }
+      }
+      frontier = next;
+    }
+    return null;
+  };
+  return (
+    bfs(from, to, state.index.importsOf) ??
+    bfs(to, from, state.index.importsOf) ??
+    null
+  );
+};
+
+/** Start or complete a shift-click dependency trace. Returns true when handled. */
+export const graphPathTrace = (state: AppState, x: number, y: number): boolean => {
+  if (state.selected !== null) return false;
+  const gvs = getGVS(state);
+  const node = nodeHitTest(state, x, y);
+  if (node === null) {
+    // Shift-click is trace-only: a miss never falls through to selection.
+    gvs.notice = "shift-click a file dot to trace";
+    gvs.noticeAt = performance.now();
+    renderGraph(state);
+    return true;
+  }
+  if (gvs.pathFrom === null || gvs.pathFrom === node) {
+    gvs.pathFrom = node;
+    gvs.path = null;
+  } else {
+    gvs.path = shortestPath(state, gvs.pathFrom, node);
+    if (gvs.path) {
+      gvs.pathFrom = null;
+    } else {
+      gvs.notice = "no dependency path between these files";
+      gvs.noticeAt = performance.now();
+    }
+  }
+  renderGraph(state);
+  return true;
+};
+
+/** Clear road selection / path trace (esc, click-away, view switches). */
+export const clearGraphFocus = (state: AppState): boolean => {
+  const gvs = getGVS(state);
+  const had =
+    gvs.selectedRoad !== null || gvs.path !== null || gvs.pathFrom !== null;
+  gvs.selectedRoad = null;
+  gvs.path = null;
+  gvs.pathFrom = null;
+  return had;
+};
+
+/** Zoom to the first search match and pulse it (Enter in the search box). */
+export const graphFocusSearch = (state: AppState): void => {
+  const gvs = getGVS(state);
+  if (!gvs.initialized || state.searchMatches.size === 0) return;
+  let best: number | null = null;
+  for (const idx of state.searchMatches) {
+    if (best === null || state.data.files[idx].path.length < state.data.files[best].path.length) {
+      best = idx;
+    }
+  }
+  if (best === null) return;
+  centerOnFile(state, best);
+  gvs.pulseFile = best;
+  gvs.pulseAt = performance.now();
+  renderGraph(state);
+};
+
 /** What the cursor is over (drives hover state, cursor, and tooltip). */
 export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHoverTarget => {
+  const gvs = getGVS(state);
   if (state.selected !== null) {
+    gvs.hoveredRoad = null;
     const rect = stageHitTest(state, x, y);
     if (rect) {
       if (rect.kind !== "group" && rect.fileIndex !== undefined) {
@@ -1689,7 +2094,29 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
     return node !== null ? { kind: "file", fileIndex: node } : null;
   }
   const node = nodeHitTest(state, x, y);
-  return node !== null ? { kind: "file", fileIndex: node } : null;
+  if (node !== null) {
+    gvs.hoveredRoad = null;
+    return { kind: "file", fileIndex: node };
+  }
+  const road = roadHitTest(state, x, y);
+  gvs.hoveredRoad = road;
+  return road !== null ? { kind: "road", road } : null;
+};
+
+/** Road facts for the tooltip (hover). */
+export const roadFacts = (
+  state: AppState,
+  roadIndex: number,
+): { srcKey: string; dstKey: string; count: number; violations: number; cycleEdges: number } => {
+  const gvs = getGVS(state);
+  const road = gvs.roads[roadIndex];
+  return {
+    srcKey: gvs.clusters[road.src].key,
+    dstKey: gvs.clusters[road.dst].key,
+    count: road.count,
+    violations: road.violations,
+    cycleEdges: road.cycleEdges,
+  };
 };
 
 /** Handle a primary click; the caller applies file selection. */
@@ -1714,6 +2141,12 @@ export const graphHandleClick = (state: AppState, x: number, y: number): GraphCl
   }
   const node = nodeHitTest(state, x, y);
   if (node !== null) return { kind: "file", fileIndex: node };
+  const road = roadHitTest(state, x, y);
+  if (road !== null) {
+    gvs.selectedRoad = road;
+    return { kind: "road", road: buildRoadSelection(state, road) };
+  }
+  if (clearGraphFocus(state)) return { kind: "handled" };
   return { kind: "none" };
 };
 

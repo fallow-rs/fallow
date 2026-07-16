@@ -105,6 +105,10 @@ export const renderPanel = (
   navigate: NavigateFn,
   close: () => void,
 ): void => {
+  if (state.selected === null && state.selectedRoad !== null) {
+    renderRoadPanel(state, panel, navigate, close);
+    return;
+  }
   if (state.selected === null) {
     panel.classList.remove("open");
     return;
@@ -325,4 +329,69 @@ const elCode = (text: string): HTMLElement => {
   const code = document.createElement("code");
   code.textContent = text;
   return code;
+};
+
+/** Drill-down panel for an aggregated road: the contributing file pairs. */
+const renderRoadPanel = (
+  state: AppState,
+  panel: HTMLElement,
+  navigate: NavigateFn,
+  close: () => void,
+): void => {
+  const road = state.selectedRoad;
+  if (!road) return;
+  panel.replaceChildren();
+  panel.classList.add("open");
+
+  const head = el("div", "panel-head");
+  const box = el("div", "file");
+  box.appendChild(el("div", "dir", "dependency road"));
+  box.appendChild(el("div", "name", `${road.srcKey} ▸ ${road.dstKey}`));
+  const statusLine = el("div", "status-line");
+  statusLine.appendChild(
+    sev("sev-info", `${formatCount(road.count)} import${road.count === 1 ? "" : "s"}`),
+  );
+  if (road.violations > 0) {
+    statusLine.appendChild(document.createTextNode("  "));
+    statusLine.appendChild(sev("sev-error", `${formatCount(road.violations)} violations`));
+  }
+  if (road.cycleEdges > 0) {
+    statusLine.appendChild(document.createTextNode("  "));
+    statusLine.appendChild(sev("sev-warn", `${formatCount(road.cycleEdges)} cycle edges`));
+  }
+  box.appendChild(statusLine);
+  head.appendChild(box);
+  const closeBtn = el("button", "close", "×") as HTMLButtonElement;
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close details");
+  closeBtn.addEventListener("click", close);
+  head.appendChild(closeBtn);
+  panel.appendChild(head);
+
+  const section = sectionEl(`file pairs ${formatCount(road.pairs.length)}`);
+  const ul = el("ul", "link-list");
+  ul.style.maxHeight = "none";
+  const n = state.data.files.length;
+  for (const [from, to] of road.pairs.slice(0, 80)) {
+    const li = el("li");
+    const btn = el("button") as HTMLButtonElement;
+    btn.type = "button";
+    const packed = from * n + to;
+    const fromName = state.data.files[from].path;
+    const toName = basename(state.data.files[to].path);
+    btn.textContent = `${fromName} ▸ ${toName}`;
+    if (state.index.violationEdges.has(packed)) btn.classList.add("sev-error");
+    else if (state.index.cycleEdges.has(packed)) btn.classList.add("sev-warn");
+    btn.addEventListener("click", () => navigate(from));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+  if (road.pairs.length > 80) {
+    ul.appendChild(el("li", "muted", `… ${formatCount(road.pairs.length - 80)} more`));
+  }
+  section.appendChild(ul);
+  const hint = el("div", "action-hint");
+  hint.append("click a pair to open the importing file");
+  section.appendChild(hint);
+  panel.appendChild(section);
 };

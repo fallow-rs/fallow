@@ -126,6 +126,17 @@ export type ActiveView = "map" | "graph";
 
 export type Lens = "deadcode" | "dupes" | "boundaries" | "hotspots";
 
+/** A drilled-down aggregated road (cluster-to-cluster import bundle). */
+export interface RoadSelection {
+  srcKey: string;
+  dstKey: string;
+  count: number;
+  violations: number;
+  cycleEdges: number;
+  /** Contributing file edges as [from, to] file indices. */
+  pairs: Array<[number, number]>;
+}
+
 declare global {
   interface Window {
     __FALLOW_DATA__: VizData;

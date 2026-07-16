@@ -1,4 +1,4 @@
-import type { ActiveView, Lens, LayoutCell, VizData } from "./types";
+import type { ActiveView, Lens, LayoutCell, RoadSelection, VizData } from "./types";
 import type { DataIndex } from "./data";
 import type { Theme } from "./theme";
 import { getTheme, prefersReducedMotion } from "./theme";
@@ -23,6 +23,8 @@ export interface AppState {
 
   /** Selected file index (opens the detail panel). */
   selected: number | null;
+  /** Selected aggregated road (graph overview drill-down). */
+  selectedRoad: RoadSelection | null;
   /** Hovered file index in graph view. */
   graphHovered: number | null;
 
@@ -58,6 +60,7 @@ export const createState = (
     layout: [],
     hoveredCell: null,
     selected: null,
+    selectedRoad: null,
     graphHovered: null,
     search: "",
     searchMatches: new Set(),
