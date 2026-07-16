@@ -1952,6 +1952,40 @@
           ]
         }
       ]
+    },
+    {
+      "name": "viz",
+      "description": "Generate an interactive HTML map of the codebase",
+      "flags": [
+        {
+          "name": "--out",
+          "type": "string",
+          "required": false,
+          "description": "Output file path (default: fallow-viz.html in project root)"
+        },
+        {
+          "name": "--no-open",
+          "type": "bool",
+          "required": false,
+          "description": "Don't open the output file in the browser",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--viz-format",
+          "type": "string",
+          "required": false,
+          "description": "Visualization output format",
+          "default": "html",
+          "possible_values": [
+            "html",
+            "dot",
+            "mermaid"
+          ]
+        }
+      ]
     }
   ],
   "default_command": null,

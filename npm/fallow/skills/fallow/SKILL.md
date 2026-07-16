@@ -122,6 +122,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 | `coverage` | Runtime coverage setup, focused analysis, and cloud inventory workflow helper | `setup`, `setup --yes`, `setup --non-interactive`, `analyze --runtime-coverage <path>`, `analyze --cloud --repo owner/repo`, `upload-inventory` |
 | `coverage upload-source-maps` | Upload build source maps from CI so bundled runtime coverage resolves to original source paths. Retries 429 `Retry-After` and transient gateway failures. Use `FALLOW_CA_BUNDLE` for complete custom PEM trust bundles. | `--dir dist`, `--git-sha <sha>`, `--repo <name>`, `--strip-path=false`, `--dry-run` |
 | `setup-hooks` | Install or remove a Claude Code PreToolUse hook that gates `git commit` / `git push` on `fallow audit`, so the agent cleans findings before the command runs | `--agent`, `--dry-run`, `--force`, `--user`, `--gitignore-claude`, `--uninstall` |
+| `viz` | Generate an interactive HTML map of the codebase | `--out`, `--no-open`, `--viz-format` |
 
 Run `fallow <command> --help` for the full flag list per command (see also references/cli-reference.md).
 <!-- generated:commands:end -->
