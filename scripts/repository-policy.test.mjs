@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
@@ -15,6 +16,46 @@ const documentedFields = (guide, heading) => {
 
   return [...section.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1]);
 };
+
+const markdownSection = (document, heading) => {
+  const marker = `## ${heading}`;
+  const start = document.indexOf(marker);
+  assert.notEqual(start, -1, `missing ${heading} section`);
+
+  const remaining = document.slice(start + marker.length);
+  const nextHeading = remaining.indexOf("\n## ");
+  return nextHeading === -1 ? remaining : remaining.slice(0, nextHeading);
+};
+
+const exportedNodeFunctions = (declarations) =>
+  [...declarations.matchAll(/^export function ([A-Za-z_$][\w$]*)\(/gmu)].map((match) => match[1]);
+
+const missingDocumentedNodeFunctions = (declarations, readme) => {
+  const section = markdownSection(readme, "Editors and integrations");
+  return exportedNodeFunctions(declarations).filter(
+    (functionName) => !section.includes(`\`${functionName}\``),
+  );
+};
+
+test("committed binary-signing public keys remain in parity", () => {
+  assert.equal(checkRepositorySigningKeyParity().length, 32);
+});
+
+test("root Node API overview follows the published declarations", () => {
+  const declarations = readFileSync("crates/napi/index.d.ts", "utf8");
+  const readme = readFileSync("README.md", "utf8");
+  const missing = missingDocumentedNodeFunctions(declarations, readme);
+
+  assert.deepEqual(missing, [], `root Node API overview is missing: ${missing.join(", ")}`);
+  assert.match(
+    markdownSection(readme, "Editors and integrations"),
+    /\[package API reference\]\(crates\/napi\/README\.md\)/u,
+  );
+
+  const firstFunction = exportedNodeFunctions(declarations)[0];
+  const neuteredReadme = readme.replace(`\`${firstFunction}\``, "`removedFunction`");
+  assert.deepEqual(missingDocumentedNodeFunctions(declarations, neuteredReadme), [firstFunction]);
+});
 
 test("published Node packages and Action smoke tests use Node 22", () => {
   const packagePaths = ["npm/fallow/package.json", "crates/napi/package.json"];

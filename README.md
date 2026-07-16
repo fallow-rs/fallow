@@ -259,7 +259,7 @@ Details: [runtime coverage](https://docs.fallow.tools/analysis/runtime-coverage)
 - [VS Code extension](https://docs.fallow.tools/integrations/vscode)
 - Zed and Neovim setups under the [`editors/`](https://github.com/fallow-rs/fallow/tree/main/editors) tree ([Neovim guide](https://docs.fallow.tools/integrations/neovim))
 - The `fallow-lsp` server: diagnostics, hover, code actions, and code lenses. It resolves the project-local binary from a devDependency install
-- The Node API [`@fallow-cli/fallow-node`](https://docs.fallow.tools/integrations/node-bindings) exports `detectDeadCode`, `detectDuplication`, and `computeHealth`
+- The Node API [`@fallow-cli/fallow-node`](https://docs.fallow.tools/integrations/node-bindings) exports `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. See the [package API reference](crates/napi/README.md) for options and return types
 - [README badges](https://docs.fallow.tools/integrations/badges): `fallow health --format badge > badge.svg`
 
 ## Migrating from other tools

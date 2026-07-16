@@ -27,7 +27,7 @@ fi
 # script targets in package.json. Update both when adding a new tree.
 js_ts_changed=$(
   git diff --cached --name-only --diff-filter=ACMR | \
-    grep -E '^(npm/|benchmarks/|crates/napi/|\.github/scripts/|editors/vscode/src/|commitlint\.config\.mjs$)' | \
+    grep -E '^(npm/|benchmarks/|crates/napi/|\.github/scripts/|editors/vscode/src/|scripts/|commitlint\.config\.mjs$)' | \
     grep -E '\.(js|ts|mjs|cjs|jsx|tsx)$' || true
 )
 

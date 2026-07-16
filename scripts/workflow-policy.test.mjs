@@ -228,6 +228,24 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(vscodePublish, /needs: \[vscode-prep, release\]/);
 });
 
+test("release verifies committed signing-key parity before signing", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const parityStep = workflow.indexOf("- name: Verify binary-signing public key parity");
+  const signingStep = workflow.indexOf("- name: Sign raw binaries");
+
+  assert.notEqual(parityStep, -1, "release must verify signing-key parity");
+  assert.notEqual(signingStep, -1, "release must sign raw binaries");
+  assert.ok(parityStep < signingStep, "release must verify public-key parity before signing");
+
+  const parityBlock = workflow.slice(parityStep, signingStep);
+  assert.match(
+    parityBlock,
+    /ED25519_BINARY_SIGNING_PUBLIC_KEY: \$\{\{ vars\.ED25519_BINARY_SIGNING_PUBLIC_KEY \}\}/u,
+  );
+  assert.match(parityBlock, /node scripts\/signing-key-parity\.mjs --release-env/u);
+  assert.doesNotMatch(parityBlock, /ED25519_BINARY_SIGNING_PRIVATE_KEY|secrets\./u);
+});
+
 test("VS Code CI runs the extension-host integration suite with a pinned cached download", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const vscodeJob = indentedBlock(workflow, "vscode", 2);

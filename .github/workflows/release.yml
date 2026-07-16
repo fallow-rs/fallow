@@ -346,6 +346,12 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.lsp_binary }} fallow-lsp-${{ matrix.npm_dir }}.exe
           cp target/${{ matrix.target }}/release/${{ matrix.mcp_binary }} fallow-mcp-${{ matrix.npm_dir }}.exe
 
+      - name: Verify binary-signing public key parity
+        shell: bash
+        env:
+          ED25519_BINARY_SIGNING_PUBLIC_KEY: ${{ vars.ED25519_BINARY_SIGNING_PUBLIC_KEY }}
+        run: node scripts/signing-key-parity.mjs --release-env
+
       - name: Sign raw binaries
         shell: bash
         env:
