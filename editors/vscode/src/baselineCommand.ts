@@ -233,7 +233,7 @@ const createBaselineTag = async (
   runGit: GitRunner,
   root: string,
 ): Promise<"git-error" | null> => {
-  const created = await runGit(["tag", BASELINE_TAG, "HEAD"], root);
+  const created = await runGit(["tag", "--no-sign", BASELINE_TAG, "HEAD"], root);
   if (created.code === 0) {
     return null;
   }

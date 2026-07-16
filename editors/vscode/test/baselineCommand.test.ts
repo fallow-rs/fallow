@@ -136,7 +136,7 @@ describe("runBaselineCommand", () => {
 
     await expect(runBaselineCommand(host, runGit)).resolves.toBe("configured");
 
-    expect(runGit).toHaveBeenLastCalledWith(["tag", BASELINE_TAG, "HEAD"], "/repo");
+    expect(runGit).toHaveBeenLastCalledWith(["tag", "--no-sign", BASELINE_TAG, "HEAD"], "/repo");
     expect(updateChangedSince).toHaveBeenCalledWith(BASELINE_TAG);
     expect(refreshAnalysis).toHaveBeenCalledOnce();
     expect(showInformation).toHaveBeenCalledWith(
@@ -252,6 +252,7 @@ describe("runGitCommand", () => {
     expect(
       (await runGitCommand(["-c", "commit.gpgsign=false", "commit", "-m", "initial"], root)).code,
     ).toBe(0);
+    expect((await runGitCommand(["config", "tag.gpgSign", "true"], root)).code).toBe(0);
   });
 
   afterEach(async () => {
