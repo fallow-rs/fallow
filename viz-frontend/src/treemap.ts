@@ -144,7 +144,7 @@ const getTM = (state: AppState): TreemapState => {
 const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 
 /** Kick a zoom transition; `rect` is the drilled cell in viewport coords. */
-export const startZoom = (state: AppState, rect: Rect, dir: "in" | "out"): void => {
+const startZoom = (state: AppState, rect: Rect, dir: "in" | "out"): void => {
   if (state.reducedMotion) return;
   const tm = getTM(state);
   tm.anim = { kind: dir === "in" ? "zoom-in" : "zoom-out", start: performance.now(), rect };

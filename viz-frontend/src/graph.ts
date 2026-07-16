@@ -373,11 +373,6 @@ export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
   initGraphNodes(state);
 };
 
-/** Reset cached graph state (e.g. after a theme change to re-read colors). */
-export const invalidateGraph = (state: AppState): void => {
-  getGVS(state).initialized = false;
-};
-
 // ── Rendering ───────────────────────────────────────────────────
 
 export const renderGraph = (state: AppState): void => {

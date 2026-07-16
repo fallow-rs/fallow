@@ -88,7 +88,7 @@ export const runSearch = (state: AppState, query: string): void => {
 
 // ── URL hash state (deep links for demos) ───────────────────────
 
-export const encodeHash = (state: AppState): string => {
+const encodeHash = (state: AppState): string => {
   const parts: string[] = [`view=${state.view}`, `lens=${state.lens}`];
   if (state.drillPath) parts.push(`path=${encodeURIComponent(state.drillPath)}`);
   if (state.selected !== null) {

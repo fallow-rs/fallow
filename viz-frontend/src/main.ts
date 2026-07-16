@@ -18,7 +18,6 @@ import {
   graphDragStart,
   graphHitTest,
   initGraphNodes,
-  invalidateGraph,
   isDragging,
   renderGraph,
   setClusterMode,
@@ -328,10 +327,6 @@ const init = (): void => {
   for (const [m, b] of refs.clusterButtons) {
     b.setAttribute("aria-pressed", String(m === getClusterMode(state)));
   }
-
-  // Re-derive the graph when the theme changes (colors are read per render,
-  // but cached hull metrics keep node colors; a re-render suffices).
-  void invalidateGraph;
 };
 
 const countLeaves = (node: { children: Array<{ children: unknown[]; fileIndex: number | null }>; fileIndex: number | null }): number => {

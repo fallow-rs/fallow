@@ -46,7 +46,7 @@ const button = (cls: string, text: string): HTMLButtonElement => {
   return b;
 };
 
-export const LENS_LABELS: Record<Lens, string> = {
+const LENS_LABELS: Record<Lens, string> = {
   deadcode: "dead code",
   dupes: "duplication",
   boundaries: "boundaries",
