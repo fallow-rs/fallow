@@ -1,6 +1,10 @@
 use rustc_hash::FxHashSet;
 
 use super::propagate::{count_named_import_origin_index_builds, count_star_reference_set_rebuilds};
+use super::{
+    ReExportPropagationPlan, ReExportTuple, capture_propagation_visits,
+    with_re_export_differential_check,
+};
 use crate::graph::ModuleGraph;
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -2371,6 +2375,372 @@ fn deep_named_re_export_chain_propagates_25_hops() {
     run_chain(25);
 }
 
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "fixture construction makes the scheduling assertion self-contained"
+)]
+fn work_queue_does_not_revisit_unrelated_settled_edge() {
+    const CHAIN_LENGTH: u32 = 6;
+    let unrelated_barrel_id = FileId(CHAIN_LENGTH + 2);
+    let unrelated_source_id = FileId(CHAIN_LENGTH + 3);
+    let unrelated_consumer_id = FileId(CHAIN_LENGTH + 4);
+
+    let mut files = Vec::new();
+    let mut resolved_modules = Vec::new();
+
+    files.push(discovered_file(0, "/project/leaf.ts"));
+    resolved_modules.push(ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/leaf.ts"),
+        exports: vec![merged_export(false)],
+        ..Default::default()
+    });
+
+    for idx in 1..=CHAIN_LENGTH {
+        let path = format!("/project/barrel_{idx}.ts");
+        files.push(discovered_file(idx, &path));
+        resolved_modules.push(ResolvedModule {
+            file_id: FileId(idx),
+            path: PathBuf::from(path),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: format!("./barrel_{}", idx - 1),
+                    imported_name: "Merged".to_string(),
+                    exported_name: "Merged".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(idx - 1)),
+            }],
+            ..Default::default()
+        });
+    }
+
+    let chain_consumer_id = FileId(CHAIN_LENGTH + 1);
+    files.push(discovered_file(
+        chain_consumer_id.0,
+        "/project/chain_consumer.ts",
+    ));
+    resolved_modules.push(ResolvedModule {
+        file_id: chain_consumer_id,
+        path: PathBuf::from("/project/chain_consumer.ts"),
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: format!("./barrel_{CHAIN_LENGTH}"),
+                imported_name: ImportedName::Named("Merged".to_string()),
+                local_name: "Merged".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 10),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(CHAIN_LENGTH)),
+        }],
+        ..Default::default()
+    });
+
+    files.push(discovered_file(
+        unrelated_barrel_id.0,
+        "/project/unrelated_barrel.ts",
+    ));
+    resolved_modules.push(ResolvedModule {
+        file_id: unrelated_barrel_id,
+        path: PathBuf::from("/project/unrelated_barrel.ts"),
+        re_exports: vec![ResolvedReExport {
+            info: fallow_types::extract::ReExportInfo {
+                source: "./unrelated_source".to_string(),
+                imported_name: "Merged".to_string(),
+                exported_name: "Merged".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(unrelated_source_id),
+        }],
+        ..Default::default()
+    });
+
+    files.push(discovered_file(
+        unrelated_source_id.0,
+        "/project/unrelated_source.ts",
+    ));
+    resolved_modules.push(ResolvedModule {
+        file_id: unrelated_source_id,
+        path: PathBuf::from("/project/unrelated_source.ts"),
+        exports: vec![merged_export(false)],
+        ..Default::default()
+    });
+
+    files.push(discovered_file(
+        unrelated_consumer_id.0,
+        "/project/unrelated_consumer.ts",
+    ));
+    resolved_modules.push(ResolvedModule {
+        file_id: unrelated_consumer_id,
+        path: PathBuf::from("/project/unrelated_consumer.ts"),
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./unrelated_barrel".to_string(),
+                imported_name: ImportedName::Named("Merged".to_string()),
+                local_name: "Merged".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 10),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(unrelated_barrel_id),
+        }],
+        ..Default::default()
+    });
+
+    let entry_points = vec![
+        EntryPoint {
+            path: PathBuf::from("/project/chain_consumer.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        },
+        EntryPoint {
+            path: PathBuf::from("/project/unrelated_consumer.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        },
+    ];
+
+    let (_, visits) =
+        capture_propagation_visits(|| ModuleGraph::build(&resolved_modules, &entry_points, &files));
+    let unrelated_visits = visits
+        .iter()
+        .filter(|visit| **visit == (unrelated_barrel_id, unrelated_source_id))
+        .count();
+
+    assert_eq!(
+        unrelated_visits, 1,
+        "an unrelated settled edge should only run during the initial stable-order pass"
+    );
+}
+
+#[test]
+fn work_queue_matches_legacy_on_generated_small_graphs() {
+    with_re_export_differential_check(|| {
+        for barrel_count in 1..=8 {
+            let graph = graph_for_named_chain(barrel_count);
+            let leaf = &graph.modules[0];
+            assert!(
+                leaf.exports[0].references.iter().any(|reference| {
+                    reference.from_file == FileId(barrel_count.saturating_add(1))
+                }),
+                "generated {barrel_count}-barrel graph should reach the leaf"
+            );
+        }
+
+        graph_for_merged_star_import(
+            vec![
+                named_import("Merged", "MergedValue", false),
+                named_import("Merged", "MergedType", true),
+            ],
+            vec!["MergedType"],
+            vec!["MergedValue"],
+        );
+        graph_for_merged_star_chain_import(
+            vec![
+                named_import_with_span("Merged", "MergedType", false, 0, 10),
+                named_import_with_span("Merged", "MergedValue", false, 20, 30),
+            ],
+            vec!["MergedType"],
+            vec!["MergedValue"],
+        );
+    });
+}
+
+#[test]
+fn equivalent_re_export_declaration_orders_produce_identical_results() {
+    let forward = graph_for_parallel_named_re_exports(false);
+    let reversed = graph_for_parallel_named_re_exports(true);
+
+    assert_eq!(
+        serde_json::to_value(&forward.modules[2].exports).unwrap(),
+        serde_json::to_value(&reversed.modules[2].exports).unwrap(),
+    );
+    assert_eq!(
+        serde_json::to_value(&forward.modules[3].exports).unwrap(),
+        serde_json::to_value(&reversed.modules[3].exports).unwrap(),
+    );
+}
+
+#[test]
+fn propagation_plan_preserves_stable_fifo_order() {
+    let entries = [
+        re_export_tuple(2, 1),
+        re_export_tuple(1, 0),
+        re_export_tuple(4, 3),
+    ];
+    let mut plan = ReExportPropagationPlan::new(&entries);
+
+    assert_eq!(plan.pop_front(), Some(0));
+    assert_eq!(plan.pop_front(), Some(1));
+    assert_eq!(plan.pop_front(), Some(2));
+    assert_eq!(plan.pop_front(), None);
+}
+
+#[test]
+fn propagation_plan_requeues_only_affected_observers_once() {
+    let entries = [
+        re_export_tuple(2, 1),
+        re_export_tuple(1, 0),
+        re_export_tuple(2, 3),
+        re_export_tuple(4, 2),
+    ];
+    let mut plan = ReExportPropagationPlan::new(&entries);
+    while plan.pop_front().is_some() {}
+
+    plan.enqueue_observers(FileId(2));
+    plan.enqueue_observers(FileId(2));
+
+    assert_eq!(plan.pop_front(), Some(0));
+    assert_eq!(plan.pop_front(), Some(2));
+    assert_eq!(plan.pop_front(), None);
+}
+
+fn re_export_tuple(barrel: u32, source: u32) -> ReExportTuple {
+    ReExportTuple {
+        barrel: FileId(barrel),
+        source: FileId(source),
+        imported_name: "Merged".to_string(),
+        exported_name: "Merged".to_string(),
+        is_type_only: false,
+    }
+}
+
+fn graph_for_named_chain(barrel_count: u32) -> ModuleGraph {
+    let consumer_id = FileId(barrel_count + 1);
+    let mut files = vec![discovered_file(0, "/project/leaf.ts")];
+    let mut resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/leaf.ts"),
+        exports: vec![merged_export(false)],
+        ..Default::default()
+    }];
+
+    for idx in 1..=barrel_count {
+        let path = format!("/project/barrel_{idx}.ts");
+        files.push(discovered_file(idx, &path));
+        resolved_modules.push(ResolvedModule {
+            file_id: FileId(idx),
+            path: PathBuf::from(path),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: format!("./barrel_{}", idx - 1),
+                    imported_name: "Merged".to_string(),
+                    exported_name: "Merged".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(idx - 1)),
+            }],
+            ..Default::default()
+        });
+    }
+
+    files.push(discovered_file(consumer_id.0, "/project/consumer.ts"));
+    resolved_modules.push(ResolvedModule {
+        file_id: consumer_id,
+        path: PathBuf::from("/project/consumer.ts"),
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: format!("./barrel_{barrel_count}"),
+                imported_name: ImportedName::Named("Merged".to_string()),
+                local_name: "Merged".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 10),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(barrel_count)),
+        }],
+        ..Default::default()
+    });
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/consumer.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    ModuleGraph::build(&resolved_modules, &entry_points, &files)
+}
+
+fn graph_for_parallel_named_re_exports(reverse: bool) -> ModuleGraph {
+    let files = vec![
+        discovered_file(0, "/project/consumer.ts"),
+        discovered_file(1, "/project/barrel.ts"),
+        discovered_file(2, "/project/a.ts"),
+        discovered_file(3, "/project/b.ts"),
+    ];
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/consumer.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let mut re_exports = vec![
+        ResolvedReExport {
+            info: fallow_types::extract::ReExportInfo {
+                source: "./a".to_string(),
+                imported_name: "A".to_string(),
+                exported_name: "A".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(2)),
+        },
+        ResolvedReExport {
+            info: fallow_types::extract::ReExportInfo {
+                source: "./b".to_string(),
+                imported_name: "B".to_string(),
+                exported_name: "B".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(3)),
+        },
+    ];
+    if reverse {
+        re_exports.reverse();
+    }
+
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/consumer.ts"),
+            resolved_imports: vec![
+                ResolvedImport {
+                    info: named_import("A", "A", false).info,
+                    target: ResolveResult::InternalModule(FileId(1)),
+                },
+                ResolvedImport {
+                    info: named_import("B", "B", false).info,
+                    target: ResolveResult::InternalModule(FileId(1)),
+                },
+            ],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/barrel.ts"),
+            re_exports,
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(2),
+            path: PathBuf::from("/project/a.ts"),
+            exports: vec![named_export("A", false)],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(3),
+            path: PathBuf::from("/project/b.ts"),
+            exports: vec![named_export("B", false)],
+            ..Default::default()
+        },
+    ];
+
+    ModuleGraph::build(&resolved_modules, &entry_points, &files)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "fixture construction dominates; assertions stay tight"
@@ -3393,9 +3763,13 @@ fn named_import_with_span(
 }
 
 fn merged_export(is_type_only: bool) -> fallow_types::extract::ExportInfo {
+    named_export("Merged", is_type_only)
+}
+
+fn named_export(name: &str, is_type_only: bool) -> fallow_types::extract::ExportInfo {
     fallow_types::extract::ExportInfo {
-        name: ExportName::Named("Merged".to_string()),
-        local_name: Some("Merged".to_string()),
+        name: ExportName::Named(name.to_string()),
+        local_name: Some(name.to_string()),
         is_type_only,
         visibility: VisibilityTag::None,
         expected_unused_reason: None,

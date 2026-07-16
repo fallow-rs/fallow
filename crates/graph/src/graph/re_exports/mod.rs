@@ -4,20 +4,58 @@ mod propagate;
 #[cfg(test)]
 mod tests;
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+
+#[cfg(test)]
+use std::cell::{Cell, RefCell};
 
 use fallow_types::discover::FileId;
 
 use crate::resolve::ResolvedModule;
 
-use super::ModuleGraph;
+use super::{Edge, ModuleGraph};
 
 use propagate::{
     NamedImportOriginIndex, NamedReExportPropagation, StarReExportPropagation,
     propagate_named_re_export, propagate_star_re_export,
 };
+
+#[cfg(test)]
+thread_local! {
+    static PROPAGATION_VISITS: RefCell<Option<Vec<(FileId, FileId)>>> =
+        const { RefCell::new(None) };
+    static DIFFERENTIAL_CHECK_ENABLED: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+fn record_propagation_visit(entry: &ReExportTuple) {
+    PROPAGATION_VISITS.with(|visits| {
+        if let Some(visits) = visits.borrow_mut().as_mut() {
+            visits.push((entry.barrel, entry.source));
+        }
+    });
+}
+
+#[cfg(test)]
+fn capture_propagation_visits<T>(run: impl FnOnce() -> T) -> (T, Vec<(FileId, FileId)>) {
+    PROPAGATION_VISITS.with(|visits| *visits.borrow_mut() = Some(Vec::new()));
+    let result = run();
+    let visits = PROPAGATION_VISITS.with(|visits| visits.borrow_mut().take().unwrap_or_default());
+    (result, visits)
+}
+
+#[cfg(test)]
+fn with_re_export_differential_check<T>(run: impl FnOnce() -> T) -> T {
+    DIFFERENTIAL_CHECK_ENABLED.with(|enabled| {
+        let previous = enabled.replace(true);
+        let result = run();
+        enabled.set(previous);
+        result
+    })
+}
 
 /// A re-export cycle or self-loop detected during Phase 4 chain resolution.
 ///
@@ -66,6 +104,65 @@ struct ReExportContext<'a> {
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     existing_refs: &'a mut FxHashSet<FileId>,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
+}
+
+#[cfg(test)]
+struct LegacyReExportFullScan<'a> {
+    modules: &'a mut [super::types::ModuleNode],
+    edges: &'a [Edge],
+    re_export_info: &'a [ReExportTuple],
+    entry_star_targets: &'a FxHashSet<FileId>,
+    edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
+    named_import_origin_index: &'a NamedImportOriginIndex,
+    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+}
+
+/// Deterministic scheduler for monotone re-export propagation.
+///
+/// Each tuple reads export state from `barrel` and may add references or
+/// synthetic exports to `source`. When `source` changes, only tuples whose
+/// `barrel` is that module can observe the new state, so those tuple indices
+/// are re-enqueued in their original stable order.
+struct ReExportPropagationPlan {
+    observers_by_module: FxHashMap<FileId, Vec<usize>>,
+    queue: VecDeque<usize>,
+    enqueued: Vec<bool>,
+}
+
+impl ReExportPropagationPlan {
+    fn new(re_export_info: &[ReExportTuple]) -> Self {
+        let mut observers_by_module: FxHashMap<FileId, Vec<usize>> = FxHashMap::default();
+        for (idx, entry) in re_export_info.iter().enumerate() {
+            observers_by_module
+                .entry(entry.barrel)
+                .or_default()
+                .push(idx);
+        }
+
+        Self {
+            observers_by_module,
+            queue: (0..re_export_info.len()).collect(),
+            enqueued: vec![true; re_export_info.len()],
+        }
+    }
+
+    fn pop_front(&mut self) -> Option<usize> {
+        let idx = self.queue.pop_front()?;
+        self.enqueued[idx] = false;
+        Some(idx)
+    }
+
+    fn enqueue_observers(&mut self, changed_module: FileId) {
+        let Some(observers) = self.observers_by_module.get(&changed_module) else {
+            return;
+        };
+        for &idx in observers {
+            if !self.enqueued[idx] {
+                self.enqueued[idx] = true;
+                self.queue.push_back(idx);
+            }
+        }
+    }
 }
 
 impl ModuleGraph {
@@ -184,7 +281,7 @@ impl ModuleGraph {
         })
     }
 
-    /// Run the monotone fixpoint that propagates references through every chain.
+    /// Run monotone propagation, revisiting only tuples affected by new state.
     fn run_re_export_fixpoint(
         &mut self,
         re_export_info: &[ReExportTuple],
@@ -193,15 +290,37 @@ impl ModuleGraph {
         named_import_origin_index: &NamedImportOriginIndex,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     ) {
-        let safety_cap = re_export_info.len().saturating_add(1);
-        let mut changed = true;
-        let mut iteration: usize = 0;
+        #[cfg(test)]
+        let mut legacy_modules: Option<Vec<super::types::ModuleNode>> = DIFFERENTIAL_CHECK_ENABLED
+            .with(|enabled| {
+                enabled.get().then(|| {
+                    serde_json::from_value(
+                        serde_json::to_value(&self.modules)
+                            .expect("module graph should serialize for differential testing"),
+                    )
+                    .expect("module graph should deserialize for differential testing")
+                })
+            });
+
+        let safety_cap = self.re_export_transition_safety_cap(re_export_info);
+        let mut processed = 0usize;
+        let mut plan = ReExportPropagationPlan::new(re_export_info);
         let mut existing_refs: FxHashSet<FileId> = FxHashSet::default();
         let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
-        while changed && iteration < safety_cap {
-            changed = false;
-            iteration += 1;
+        while let Some(entry_idx) = plan.pop_front() {
+            if processed >= safety_cap {
+                tracing::error!(
+                    processed,
+                    safety_cap,
+                    re_export_edges = re_export_info.len(),
+                    "Re-export propagation exceeded its finite-state safety cap; \
+                     propagation may be non-monotonic. Please file a bug at \
+                     https://github.com/fallow-rs/fallow/issues with the repro."
+                );
+                break;
+            }
+            processed += 1;
 
             let mut context = ReExportContext {
                 entry_star_targets,
@@ -212,40 +331,88 @@ impl ModuleGraph {
                 synthetic_stubs: &mut synthetic_stubs,
             };
 
-            for entry in re_export_info {
-                changed |= self.propagate_re_export_entry(entry, &mut context);
+            let entry = &re_export_info[entry_idx];
+            #[cfg(test)]
+            record_propagation_visit(entry);
+            if Self::propagate_re_export_entry(&mut self.modules, &self.edges, entry, &mut context)
+            {
+                plan.enqueue_observers(entry.source);
             }
         }
 
-        if iteration >= safety_cap && changed {
-            tracing::error!(
-                iterations = iteration,
-                safety_cap,
-                re_export_edges = re_export_info.len(),
-                "Re-export chain fixpoint exceeded safety cap; \
-                 propagation may be non-monotonic. Please file a bug at \
-                 https://github.com/fallow-rs/fallow/issues with the repro."
+        #[cfg(test)]
+        if let Some(legacy_modules) = legacy_modules.as_mut() {
+            Self::run_re_export_full_scan(LegacyReExportFullScan {
+                modules: legacy_modules,
+                edges: &self.edges,
+                re_export_info,
+                entry_star_targets,
+                edges_by_target,
+                named_import_origin_index,
+                module_by_id,
+            });
+            assert_eq!(
+                serde_json::to_value(legacy_modules)
+                    .expect("legacy module graph should serialize for comparison"),
+                serde_json::to_value(&self.modules)
+                    .expect("queue module graph should serialize for comparison"),
+                "work-queue propagation must match the legacy full-scan fixpoint"
             );
         }
     }
 
+    /// Bound scheduler work by the finite set of exports, synthetic names, and
+    /// reference source modules that monotone propagation can add.
+    fn re_export_transition_safety_cap(&self, re_export_info: &[ReExportTuple]) -> usize {
+        let initial_exports = self
+            .modules
+            .iter()
+            .map(|module| module.exports.len())
+            .sum::<usize>();
+        let named_inputs = self
+            .edges
+            .iter()
+            .flat_map(|edge| &edge.symbols)
+            .filter(|symbol| {
+                matches!(
+                    &symbol.imported_name,
+                    fallow_types::extract::ImportedName::Named(_)
+                )
+            })
+            .count()
+            .saturating_add(initial_exports)
+            .saturating_add(re_export_info.len());
+
+        let module_count = self.modules.len();
+        let synthetic_exports = module_count.saturating_mul(named_inputs).saturating_mul(2);
+        let max_exports = initial_exports.saturating_add(synthetic_exports);
+        let reference_additions = max_exports.saturating_mul(module_count);
+        let state_changes = synthetic_exports.saturating_add(reference_additions);
+
+        re_export_info
+            .len()
+            .saturating_add(state_changes.saturating_mul(re_export_info.len()))
+            .max(re_export_info.len())
+    }
+
     /// Propagate references for one re-export edge, dispatching star vs named.
     fn propagate_re_export_entry(
-        &mut self,
+        modules: &mut [super::types::ModuleNode],
+        edges: &[Edge],
         entry: &ReExportTuple,
         context: &mut ReExportContext<'_>,
     ) -> bool {
         let barrel_idx = entry.barrel.0 as usize;
         let source_idx = entry.source.0 as usize;
 
-        if barrel_idx >= self.modules.len() || source_idx >= self.modules.len() {
+        if barrel_idx >= modules.len() || source_idx >= modules.len() {
             return false;
         }
 
         if entry.exported_name == "*" {
             propagate_star_re_export(StarReExportPropagation {
-                modules: &mut self.modules,
-                edges: &self.edges,
+                modules,
+                edges,
                 edges_by_target: context.edges_by_target,
                 named_import_origin_index: context.named_import_origin_index,
                 module_by_id: context.module_by_id,
@@ -259,7 +426,7 @@ impl ModuleGraph {
             })
         } else {
             propagate_named_re_export(NamedReExportPropagation {
-                modules: &mut self.modules,
+                modules,
                 barrel_id: entry.barrel,
                 barrel_idx,
                 source_idx,
@@ -267,6 +434,40 @@ impl ModuleGraph {
                 exported_name: &entry.exported_name,
                 existing_refs: context.existing_refs,
             })
+        }
+    }
+
+    #[cfg(test)]
+    fn run_re_export_full_scan(input: LegacyReExportFullScan<'_>) {
+        let LegacyReExportFullScan {
+            modules,
+            edges,
+            re_export_info,
+            entry_star_targets,
+            edges_by_target,
+            named_import_origin_index,
+            module_by_id,
+        } = input;
+        let max_iterations = re_export_info.len().saturating_add(1);
+        let mut existing_refs: FxHashSet<FileId> = FxHashSet::default();
+        let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
+
+        for _ in 0..max_iterations {
+            let mut changed = false;
+            for entry in re_export_info {
+                let mut context = ReExportContext {
+                    entry_star_targets,
+                    edges_by_target,
+                    named_import_origin_index,
+                    module_by_id,
+                    existing_refs: &mut existing_refs,
+                    synthetic_stubs: &mut synthetic_stubs,
+                };
+                changed |= Self::propagate_re_export_entry(modules, edges, entry, &mut context);
+            }
+            if !changed {
+                break;
+            }
         }
     }
 }
