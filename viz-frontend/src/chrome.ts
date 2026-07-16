@@ -20,6 +20,8 @@ export interface ChromeRefs {
   emptyState: HTMLElement;
   /** Wired by main.ts after chrome build (breadcrumb navigation). */
   crumbHandler?: (path: string) => void;
+  /** Wired by main.ts after chrome build (help overlay toggle). */
+  helpHandler?: () => void;
 }
 
 export interface ChromeHandlers {
@@ -74,6 +76,11 @@ export const buildChrome = (
   const stats = el("div");
   stats.id = "stats";
   topbar.appendChild(stats);
+
+  const helpBtn = button("", "?");
+  helpBtn.id = "help-btn";
+  helpBtn.setAttribute("aria-label", "How to read this map");
+  topbar.appendChild(helpBtn);
 
   const themeToggle = button("", state.dark ? "light" : "dark");
   themeToggle.id = "theme-toggle";
@@ -194,6 +201,8 @@ export const buildChrome = (
     clusterButtons,
     emptyState,
   };
+
+  helpBtn.addEventListener("click", () => refs.helpHandler?.());
 
   buildStats(state, refs, handlers);
   return refs;

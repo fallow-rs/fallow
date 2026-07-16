@@ -26,8 +26,17 @@ import {
   renderGraph,
   resetEgoTrail,
   roadFacts,
+  selectRoadByDirs,
   setClusterMode,
 } from "./graph";
+import { computeInsights, type InsightAction } from "./insights";
+import {
+  buildBriefing,
+  buildHelpOverlay,
+  buildTourBar,
+  syncBriefing,
+  updateTourBar,
+} from "./overlays";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
 import { createPanel, renderPanel } from "./panel";
@@ -133,6 +142,79 @@ const init = (): void => {
   stage.appendChild(panel);
   app.appendChild(stage);
   app.appendChild(statuslineOf(refs));
+
+  // ── Orientation overlays (briefing, help, tour) ───────────────
+  const insights = computeInsights(data, state.index);
+
+  const applyInsight = (action: InsightAction): void => {
+    state.selectedRoad = null;
+    if (action.kind === "lens" || action.kind === "file" || action.kind === "dir") {
+      if (action.lens) setLens(action.lens);
+    }
+    switch (action.kind) {
+      case "file": {
+        if (action.view) setView(action.view);
+        if (state.view === "graph") initGraphNodes(state);
+        selectFile(action.fileIndex, true);
+        break;
+      }
+      case "dir": {
+        setView("map");
+        selectFile(null);
+        drillTo(state, action.path);
+        break;
+      }
+      case "road": {
+        setView("graph");
+        initGraphNodes(state);
+        selectFile(null);
+        state.selectedRoad = selectRoadByDirs(state, action.srcDir, action.dstDir);
+        break;
+      }
+      case "lens": {
+        if (action.view) setView(action.view);
+        break;
+      }
+    }
+    requestRender();
+  };
+
+  const tourGoto = (index: number | null): void => {
+    state.tour =
+      index === null ? null : Math.max(0, Math.min(insights.length - 1, index));
+    updateTourBar(tourBar, insights, state.tour);
+    if (state.tour !== null) {
+      state.briefingOpen = false;
+      syncBriefing(state, briefing, briefingToggle);
+      applyInsight(insights[state.tour].action);
+    }
+  };
+
+  const overlayHandlers = {
+    onInsight: (action: InsightAction) => applyInsight(action),
+    onTourStart: () => tourGoto(0),
+    onTourStep: (delta: number) => {
+      if (state.tour !== null) tourGoto(state.tour + delta);
+    },
+    onTourEnd: () => tourGoto(null),
+    onHelpClose: () => {
+      state.helpOpen = false;
+      helpOverlay.classList.remove("open");
+    },
+  };
+  const { briefing, toggle: briefingToggle } = buildBriefing(state, insights, overlayHandlers);
+  const helpOverlay = buildHelpOverlay(overlayHandlers);
+  const tourBar = buildTourBar(overlayHandlers);
+  stage.appendChild(briefing);
+  stage.appendChild(briefingToggle);
+  stage.appendChild(tourBar);
+  document.body.appendChild(helpOverlay);
+
+  const toggleHelp = (): void => {
+    state.helpOpen = !state.helpOpen;
+    helpOverlay.classList.toggle("open", state.helpOpen);
+  };
+  refs.helpHandler = toggleHelp;
 
   // ── Navigation shared by panel + views ────────────────────────
   const selectFile = (fileIndex: number | null, reveal = false): void => {
@@ -333,6 +415,14 @@ const init = (): void => {
     const inInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
 
     if (e.key === "Escape") {
+      if (state.helpOpen) {
+        toggleHelp();
+        return;
+      }
+      if (state.tour !== null) {
+        tourGoto(null);
+        return;
+      }
       if (inInput && refs) {
         refs.search.value = "";
         runSearch(state, "");
@@ -364,6 +454,17 @@ const init = (): void => {
     if (e.key === "/") {
       e.preventDefault();
       refs?.search.focus();
+    } else if (e.key === "?") {
+      toggleHelp();
+    } else if (e.key === "b") {
+      state.briefingOpen = !state.briefingOpen;
+      syncBriefing(state, briefing, briefingToggle);
+    } else if (state.tour !== null && (e.key === " " || e.key === "ArrowRight")) {
+      e.preventDefault();
+      tourGoto(state.tour + 1);
+    } else if (state.tour !== null && e.key === "ArrowLeft") {
+      e.preventDefault();
+      tourGoto(state.tour - 1);
     } else if (e.key >= "1" && e.key <= "4") {
       setLens(lensOrder[Number(e.key) - 1]);
     } else if (e.key === "m") {
