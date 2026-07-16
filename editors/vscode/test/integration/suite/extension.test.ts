@@ -168,6 +168,7 @@ describe("Fallow VS Code extension", () => {
     assert.ok(commands.includes("fallow.reloadAnalysis"));
     assert.ok(commands.includes("fallow.health.reload"));
     assert.ok(commands.includes("fallow.audit"));
+    assert.ok(commands.includes("fallow.setBaselineAtHead"));
     assert.ok(commands.includes("fallow.fix"));
     assert.ok(commands.includes("fallow.fixDryRun"));
     assert.ok(commands.includes("fallow.restart"));
@@ -216,8 +217,7 @@ describe("Fallow VS Code extension", () => {
     // log. The awaited direct call is what we assert produced the expected argv.
     assert.ok(
       sidebarAnalysisCalls.some(
-        (entry) =>
-          entry.args.join(" ") === "--format json --quiet --skip health",
+        (entry) => entry.args.join(" ") === "--format json --quiet --skip health",
       ),
       "combined analysis should not pass package default duplication settings as overrides",
     );

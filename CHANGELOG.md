@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **VS Code can set a changed-code baseline at HEAD in one command.** The new
+  `Fallow: Set Baseline at HEAD` palette command creates the local lightweight
+  `fallow-baseline` tag, writes `fallow.changedSince` to a single-folder
+  workspace, and refreshes analysis. It confirms before mutation, never pushes
+  a remote ref, refuses to move an existing tag, and leaves multi-root
+  workspaces unchanged until per-root baseline semantics exist.
+
 ## [3.6.0] - 2026-07-15
 
 ### Changed

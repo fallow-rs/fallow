@@ -39,6 +39,7 @@ code --install-extension fallow-rs.fallow-vscode
 | Command | Description |
 |---------|-------------|
 | `Fallow: Run Analysis` | Run full codebase analysis and update tree views. Clean runs show a scoped JS/TS summary and link to the Fallow output channel. |
+| `Fallow: Set Baseline at HEAD` | Create the local lightweight `fallow-baseline` Git tag at the current commit, set `fallow.changedSince` in the single-folder workspace, and refresh analysis. The command confirms before mutation, never pushes, and refuses to move an existing tag. |
 | `Fallow: Audit Changed Files` | Audit the current change set for a pass/warn/fail verdict, shown in the audit verdict status-bar item (or an information message when that item is disabled). Findings are static candidates to verify. |
 | `Fallow: Reload Health` | Re-run the Health view analysis (score, complexity, hotspot and refactoring candidates) |
 | `Fallow: Scan for Security Candidates` | Scan for local security candidates (`client-server-leak`, tainted-sink CWE findings) and populate the Security Candidates view. Requires `fallow.security.enabled`. Results are UNVERIFIED candidates to verify, never confirmed vulnerabilities. |
@@ -96,7 +97,7 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.license.showStatusBar` | `true` | Show a Fallow license indicator in the status bar. Disable to remove the indicator and skip the license status probe on activation. |
 | `fallow.license.refreshOnStartup` | `false` | Probe license status once when the extension activates. Off by default so the editor never shells out to fallow on startup unless you opt in; the indicator otherwise updates only when you run a Fallow license command. |
 | `fallow.production` | `false` | Production mode: exclude test/dev files, only production scripts. |
-| `fallow.changedSince` | `""` | Git ref (tag, branch, or SHA) to scope the Problems panel and sidebar to files changed since that ref, mirroring the CLI's `--changed-since`. Tag your current commit (e.g. `fallow-baseline`) and set this to the tag to enforce "no new issues going forward" while ignoring pre-existing findings. |
+| `fallow.changedSince` | `""` | Git ref (tag, branch, or SHA) to scope the Problems panel and sidebar to files changed since that ref, mirroring the CLI's `--changed-since`. Run **Fallow: Set Baseline at HEAD** in a single-folder workspace to create and configure `fallow-baseline` safely. |
 | `fallow.audit.gate` | `"new-only"` | Which findings affect the audit verdict. `new-only` fails only on findings introduced by the current change set (runs an extra base-snapshot pass); `all` fails on every finding in changed files. Mirrors `fallow audit --gate`. |
 | `fallow.audit.statusBar.enabled` | `true` | Show the audit verdict (pass/warn/fail) for the current change set in the status bar. Toggling takes effect immediately, no window reload needed. |
 | `fallow.audit.runOnSave` | `false` | Re-run the audit verdict automatically when a JS/TS file is saved. Off by default to avoid added latency; the **Fallow: Audit Changed Files** command and the status-bar item run it on demand. |

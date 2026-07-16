@@ -94,6 +94,11 @@
         "icon": "$(inspect)"
       },
       {
+        "command": "fallow.setBaselineAtHead",
+        "title": "Fallow: Set Baseline at HEAD",
+        "icon": "$(git-commit)"
+      },
+      {
         "command": "fallow.selectWorkspace",
         "title": "Fallow: Select Workspace Scope...",
         "icon": "$(layers)"
@@ -487,7 +492,7 @@
         "fallow.changedSince": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Show only issues in files changed since the given git ref. Tag your current commit (`git tag fallow-baseline`) and set this to the tag name to keep existing issues hidden while flagging new ones in the Problems panel. Mirrors the CLI's `--changed-since`. Empty = full scope."
+          "markdownDescription": "Show only issues in files changed since the given git ref. Run **Fallow: Set Baseline at HEAD** to create the local `fallow-baseline` tag and configure this setting in one step. The command never pushes or moves an existing tag. Mirrors the CLI's `--changed-since`. Empty = full scope."
         },
         "fallow.health.enabled": {
           "type": "boolean",

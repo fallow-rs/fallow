@@ -83,6 +83,15 @@ describe("package.json command contributions", () => {
       icon: "$(refresh)",
     });
   });
+
+  it("contributes and registers the baseline-at-HEAD command", () => {
+    expect(command("fallow.setBaselineAtHead")).toMatchObject({
+      title: "Fallow: Set Baseline at HEAD",
+      icon: "$(git-commit)",
+    });
+    expect(extensionSource).toContain('registerCommand("fallow.setBaselineAtHead"');
+    expect(commandPaletteEntry("fallow.setBaselineAtHead")).toBeUndefined();
+  });
 });
 
 describe("package.json view title menus", () => {

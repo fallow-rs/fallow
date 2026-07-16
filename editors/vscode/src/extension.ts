@@ -6,6 +6,7 @@ import {
   countCheckIssues,
   countDuplicationGroups,
 } from "./analysis-utils.js";
+import { runBaselineCommand } from "./baselineCommand.js";
 import { shouldAcceptLspAnalysisComplete } from "./analysisNotification.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
@@ -664,6 +665,49 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     cliAnalysisRan = await triggerCliAnalysis({ force: true });
   };
 
+  const runSetBaselineAtHeadCommand = async (): Promise<void> => {
+    await runBaselineCommand({
+      workspaceRoots: () =>
+        vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [],
+      changedSince: () =>
+        vscode.workspace.getConfiguration("fallow").get<string>("changedSince", ""),
+      confirm: async (message) =>
+        (await vscode.window.showWarningMessage(message, { modal: true }, "Set Baseline")) ===
+        "Set Baseline",
+      showWarning: async (message, action) => {
+        if (!action) {
+          await vscode.window.showWarningMessage(message);
+          return false;
+        }
+        return (await vscode.window.showWarningMessage(message, action)) === action;
+      },
+      showError: async (message) => {
+        await vscode.window.showErrorMessage(message);
+      },
+      showInformation: async (message) => {
+        await vscode.window.showInformationMessage(message);
+      },
+      openChangedSinceSetting: async () => {
+        await vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          "fallow.changedSince",
+        );
+      },
+      updateChangedSince: async (value) => {
+        await vscode.workspace
+          .getConfiguration("fallow")
+          .update("changedSince", value, vscode.ConfigurationTarget.Workspace);
+      },
+      refreshAnalysis: async () => {
+        cliAnalysisRan = await triggerCliAnalysis({ force: true });
+        if (!cliAnalysisRan) {
+          throw new Error("analysis did not complete");
+        }
+      },
+      appendOutput: (line) => outputChannel.appendLine(line),
+    });
+  };
+
   const runHealthAnalysisCommand = async (): Promise<void> => {
     healthAnalysisRan = await triggerHealthAnalysis();
   };
@@ -755,6 +799,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     vscode.commands.registerCommand("fallow.inspectActiveFile", () =>
       runInspectActiveFile(context, outputChannel),
     ),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.setBaselineAtHead", runSetBaselineAtHeadCommand),
   );
 
   // Re-run the sidebar after a scope change so the tree views and status bar

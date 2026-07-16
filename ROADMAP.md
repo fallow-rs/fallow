@@ -22,12 +22,6 @@ The coverage setup state machine works end to end, but the install handoff still
 
 `fallow fix` leaves Prettier, dprint, or Biome to clean up whitespace after removals. Invoke the project's configured formatter automatically when running in-place.
 
-### Baseline-adoption command
-
-The `fallow.changedSince` setting scopes the Problems panel and sidebar, while the status bar reports whether that scope was applied or dropped. One editor shortcut would still close the setup loop for legacy codebases:
-
-- **"Fallow: Set Baseline at HEAD" command** -- a palette command that runs `git tag fallow-baseline` and writes `fallow.changedSince` into `.vscode/settings.json` in one step, so users do not need to leave the editor or know the git tag command.
-
 ### Per-package `changedSince` overrides
 
 Monorepos with packages on different release cadences want different baseline refs per package (e.g. `packages/web` tracks `main`, `packages/legacy` tracks `release/2024.10`). Today `fallow.changedSince` is workspace-wide. Extending this to per-package overrides requires config-schema work (a new `[overrides]` block keyed on workspace root, or `package.json` field), resolution semantics (which baseline wins for a file in package A imported from package B), and matching status-bar logic.
