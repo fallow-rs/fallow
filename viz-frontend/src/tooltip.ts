@@ -1,123 +1,135 @@
-import type { VizData, LayoutNode } from "./types";
-import type { ColorTheme } from "./colors";
-import { formatSize } from "./utils";
+import type { AppState } from "./state";
+import { dupRatio, formatCount, formatSize } from "./data";
 
-let tooltipEl: HTMLDivElement | null = null;
+let tipEl: HTMLDivElement | null = null;
 
-const getTooltip = (): HTMLDivElement => {
-  if (!tooltipEl) {
-    tooltipEl = document.createElement("div");
-    tooltipEl.id = "fallow-tooltip";
-    document.body.appendChild(tooltipEl);
+const getTip = (): HTMLDivElement => {
+  if (!tipEl) {
+    tipEl = document.createElement("div");
+    tipEl.id = "tooltip";
+    document.body.appendChild(tipEl);
   }
-  return tooltipEl;
+  return tipEl;
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  clean: "Clean",
-  hasUnusedExports: "Has unused exports",
-  unused: "Unused file",
-  entryPoint: "Entry point",
+const line = (cls: string, text: string): HTMLElement => {
+  const div = document.createElement("div");
+  div.className = cls;
+  div.textContent = text;
+  return div;
 };
 
-const createEl = (
-  tag: string,
-  className: string,
-  text: string,
-  style?: string,
-): HTMLElement => {
-  const el = document.createElement(tag);
-  el.className = className;
-  el.textContent = text;
-  if (style) el.setAttribute("style", style);
-  return el;
-};
-
-export const showTooltip = (
-  cell: LayoutNode,
-  data: VizData,
-  theme: ColorTheme,
+/** Show the tooltip for a file (both views route through here). */
+export const showFileTooltip = (
+  state: AppState,
+  fileIndex: number,
   mouseX: number,
   mouseY: number,
 ): void => {
-  const tip = getTooltip();
-  const isFile = cell.node.fileIndex !== null;
-
-  // Clear previous content safely
+  const file = state.data.files[fileIndex];
+  const tip = getTip();
   tip.replaceChildren();
 
-  tip.appendChild(createEl("div", "tip-path", cell.node.path));
-  tip.appendChild(createEl("div", "tip-size", formatSize(cell.node.size)));
+  tip.appendChild(line("tip-path", file.path));
 
-  if (isFile) {
-    const file = data.files[cell.node.fileIndex!];
-    const statusLabel = STATUS_LABELS[file.status] ?? file.status;
-    const statusColor = theme.statusColors[file.status];
+  const facts: string[] = [formatSize(file.size)];
+  if (file.export_count > 0) facts.push(`${formatCount(file.export_count)} exports`);
+  if (file.importer_count > 0) facts.push(`${formatCount(file.importer_count)} importers`);
+  if (file.import_count > 0) facts.push(`${formatCount(file.import_count)} imports`);
+  tip.appendChild(line("tip-dim", facts.join(" · ")));
 
-    tip.appendChild(
-      createEl("div", "tip-status", statusLabel, `color:${statusColor}`),
-    );
-
-    const details: string[] = [];
-    if (file.export_count > 0) {
-      details.push(`${file.export_count} export${file.export_count !== 1 ? "s" : ""}`);
-    }
-    if (file.import_count > 0) {
-      details.push(`${file.import_count} import${file.import_count !== 1 ? "s" : ""}`);
-    }
-    if (file.importer_count > 0) {
-      details.push(`${file.importer_count} importer${file.importer_count !== 1 ? "s" : ""}`);
-    }
-    if (details.length > 0) {
-      tip.appendChild(createEl("div", "tip-details", details.join(" · ")));
-    }
-
-    // Show actual unused export names, the actionable part
-    if (file.unused_exports && file.unused_exports.length > 0) {
-      const maxShow = 8;
-      const names = file.unused_exports.slice(0, maxShow);
-      const label = names.map((n) => n).join(", ");
-      const suffix = file.unused_exports.length > maxShow
-        ? ` (+${file.unused_exports.length - maxShow} more)`
-        : "";
+  switch (file.status) {
+    case "unused":
       tip.appendChild(
-        createEl("div", "tip-unused", `Unused: ${label}${suffix}`, `color:${theme.statusColors.hasUnusedExports}`),
+        line(
+          "sev-error",
+          file.importer_count === 0 ? "[E] unused file · nothing imports it" : "[E] unused file",
+        ),
+      );
+      break;
+    case "hasUnusedExports": {
+      const names = file.unused_exports ?? [];
+      const shown = names.slice(0, 5).join(", ");
+      const extra = names.length > 5 ? ` +${names.length - 5}` : "";
+      tip.appendChild(line("sev-warn", `[W] unused: ${shown}${extra}`));
+      break;
+    }
+    case "entryPoint":
+      tip.appendChild(line("sev-info", "[*] entry point"));
+      break;
+    default:
+      break;
+  }
+
+  if (state.lens === "dupes" && file.dup_lines > 0) {
+    tip.appendChild(
+      line(
+        "sev-warn",
+        `[W] ${formatCount(file.dup_lines)} duplicated lines (${Math.round(dupRatio(file) * 100)}%) · ${file.clone_groups?.length ?? 0} groups`,
+      ),
+    );
+  }
+  if (state.lens === "hotspots" && file.max_cyclomatic > 0) {
+    const cls =
+      file.max_cyclomatic >= 20 ? "sev-error" : file.max_cyclomatic >= 10 ? "sev-warn" : "tip-dim";
+    const top = file.functions?.[0];
+    tip.appendChild(
+      line(
+        cls,
+        `cc ${file.max_cyclomatic} · cog ${file.max_cognitive}${top ? ` · worst: ${top.name}()` : ""}`,
+      ),
+    );
+    if (file.react_hooks > 0 || file.jsx_depth > 0) {
+      tip.appendChild(
+        line("tip-muted", `react: ${file.react_hooks} hooks · jsx depth ${file.jsx_depth}`),
       );
     }
-
-    if (file.workspace) {
-      tip.appendChild(createEl("div", "tip-workspace", file.workspace));
+  }
+  if (state.lens === "boundaries") {
+    const zone = file.zone !== undefined ? state.data.zones[file.zone]?.name : undefined;
+    tip.appendChild(line(zone ? "sev-info" : "tip-muted", zone ? `zone: ${zone}` : "no zone"));
+    if (state.index.violationSources.has(fileIndex)) {
+      const count = state.data.violations.filter((v) => v.from === fileIndex).length;
+      tip.appendChild(
+        line("sev-error", `[E] ${count} boundary violation${count === 1 ? "" : "s"}`),
+      );
     }
-  } else {
-    tip.appendChild(
-      createEl("div", "tip-status", "Directory, click to expand", `color:${theme.textSecondary}`),
-    );
+  }
+  if (file.in_cycle) {
+    tip.appendChild(line("sev-warn", "[W] part of a dependency cycle"));
   }
 
-  tip.style.backgroundColor = theme.tooltipBg;
-  tip.style.color = theme.tooltipText;
-  tip.style.borderColor = theme.tooltipBorder;
+  tip.appendChild(line("tip-muted", "click for details"));
+  position(tip, mouseX, mouseY);
+};
+
+/** Show the tooltip for a treemap directory cell. */
+export const showDirTooltip = (
+  name: string,
+  fileCount: number,
+  size: number,
+  mouseX: number,
+  mouseY: number,
+): void => {
+  const tip = getTip();
+  tip.replaceChildren();
+  tip.appendChild(line("tip-path", `${name}/`));
+  tip.appendChild(line("tip-dim", `${formatCount(fileCount)} files · ${formatSize(size)}`));
+  tip.appendChild(line("tip-muted", "click to zoom in"));
+  position(tip, mouseX, mouseY);
+};
+
+const position = (tip: HTMLDivElement, mouseX: number, mouseY: number): void => {
   tip.style.display = "block";
-
-  // Position near cursor, flip if near edge
-  const padding = 12;
-  const tipRect = tip.getBoundingClientRect();
-  let left = mouseX + padding;
-  let top = mouseY + padding;
-
-  if (left + tipRect.width > window.innerWidth - padding) {
-    left = mouseX - tipRect.width - padding;
-  }
-  if (top + tipRect.height > window.innerHeight - padding) {
-    top = mouseY - tipRect.height - padding;
-  }
-
-  tip.style.left = `${Math.max(padding, left)}px`;
-  tip.style.top = `${Math.max(padding, top)}px`;
+  const rect = tip.getBoundingClientRect();
+  let left = mouseX + 14;
+  let top = mouseY + 14;
+  if (left + rect.width > window.innerWidth - 12) left = mouseX - rect.width - 14;
+  if (top + rect.height > window.innerHeight - 12) top = mouseY - rect.height - 14;
+  tip.style.left = `${Math.max(12, left)}px`;
+  tip.style.top = `${Math.max(12, top)}px`;
 };
 
 export const hideTooltip = (): void => {
-  if (tooltipEl) {
-    tooltipEl.style.display = "none";
-  }
+  if (tipEl) tipEl.style.display = "none";
 };

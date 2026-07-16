@@ -1,92 +1,19 @@
-import type { VizData, VizFile, TreeNode, LayoutNode } from "./types";
 import type { AppState } from "./state";
-import type { ColorTheme } from "./colors";
-import { splitPath, formatSize, contrastText } from "./utils";
+import type { LayoutCell, TreeNode } from "./types";
+import { contrastText, mix } from "./theme";
+import { formatCount, lensColor, lensFlag } from "./data";
 
-// ── Deep hierarchy builder ──────────────────────────────────────
+// ── Constants ───────────────────────────────────────────────────
 
-const buildTree = (
-  files: VizFile[],
-  currentPath: string[],
-): TreeNode[] => {
-  const prefix = currentPath.join("/");
-  const root = new Map<string, TreeNode>();
-
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    const rel = prefix ? file.path.slice(prefix.length + 1) : file.path;
-    if (prefix && !file.path.startsWith(prefix + "/")) continue;
-    if (!rel) continue;
-
-    insertIntoTree(root, splitPath(rel), file, i, prefix);
-  }
-
-  const result = Array.from(root.values());
-  // Flatten single-child directory chains: src → src/components becomes "src/components"
-  return result.map(flattenSingleChild).sort((a, b) => b.size - a.size);
-};
-
-const insertIntoTree = (
-  level: Map<string, TreeNode>,
-  parts: string[],
-  file: VizFile,
-  fileIndex: number,
-  prefix: string,
-): void => {
-  const name = parts[0];
-  const isLeaf = parts.length === 1;
-
-  if (isLeaf) {
-    level.set(name, {
-      name,
-      path: file.path,
-      size: file.size,
-      children: [],
-      fileIndex,
-    });
-    return;
-  }
-
-  let node = level.get(name);
-  if (!node) {
-    const nodePath = prefix ? `${prefix}/${name}` : name;
-    node = { name, path: nodePath, size: 0, children: [], fileIndex: null };
-    level.set(name, node);
-  }
-
-  // Build children map lazily
-  if (!(node as TreeNode & { _childMap?: Map<string, TreeNode> })._childMap) {
-    (node as TreeNode & { _childMap: Map<string, TreeNode> })._childMap = new Map();
-  }
-  const childMap = (node as TreeNode & { _childMap: Map<string, TreeNode> })._childMap;
-
-  insertIntoTree(childMap, parts.slice(1), file, fileIndex, node.path);
-
-  // Sync children array and size from child map
-  node.children = Array.from(childMap.values()).sort((a, b) => b.size - a.size);
-  node.size = node.children.reduce((sum, c) => sum + c.size, 0);
-};
-
-/** Collapse single-child directory chains: a/b/c with only one child each → "a/b/c" */
-const flattenSingleChild = (node: TreeNode): TreeNode => {
-  if (node.fileIndex !== null) return node; // leaf file
-
-  while (
-    node.children.length === 1 &&
-    node.children[0].fileIndex === null
-  ) {
-    const child = node.children[0];
-    node = {
-      ...child,
-      name: `${node.name}/${child.name}`,
-    };
-  }
-
-  node.children = node.children.map(flattenSingleChild);
-  return node;
-};
-
-// ── Squarify layout ─────────────────────────────────────────────
+const DIR_HEADER = 18;
+const DIR_PAD = 3;
+const MIN_LABEL_W = 40;
+const MIN_LABEL_H = 13;
+const FONT_CELL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const FONT_DIR = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const ZOOM_MS = 220;
+const LENS_MS = 200;
+const REVEAL_MS = 420;
 
 interface Rect {
   x: number;
@@ -95,13 +22,12 @@ interface Rect {
   h: number;
 }
 
-const squarify = (nodes: TreeNode[], rect: Rect): LayoutNode[] => {
-  if (nodes.length === 0) return [];
-  const totalSize = nodes.reduce((sum, n) => sum + n.size, 0);
-  if (totalSize === 0) return [];
+// ── Squarify ────────────────────────────────────────────────────
 
-  const result: LayoutNode[] = [];
-  layoutStrip(nodes, rect, totalSize, result);
+const squarify = (nodes: TreeNode[], rect: Rect): LayoutCell[] => {
+  const total = nodes.reduce((sum, n) => sum + n.size, 0);
+  const result: LayoutCell[] = [];
+  if (total > 0) layoutStrip(nodes, rect, total, result);
   return result;
 };
 
@@ -109,12 +35,11 @@ const layoutStrip = (
   nodes: TreeNode[],
   rect: Rect,
   totalSize: number,
-  result: LayoutNode[],
+  result: LayoutCell[],
 ): void => {
   if (nodes.length === 0 || totalSize === 0) return;
-
   if (nodes.length === 1) {
-    result.push({ x: rect.x, y: rect.y, w: rect.w, h: rect.h, node: nodes[0] });
+    result.push({ ...rect, node: nodes[0], depth: 0 });
     return;
   }
 
@@ -129,7 +54,6 @@ const layoutStrip = (
   while (i < nodes.length) {
     const testSize = rowSize + nodes[i].size;
     const testAspect = worstAspect(row.concat(nodes[i]), testSize, side, totalSize, rect);
-
     if (testAspect <= bestAspect || row.length === 0) {
       row.push(nodes[i]);
       rowSize = testSize;
@@ -150,11 +74,11 @@ const layoutStrip = (
     const fraction = node.size / rowSize;
     if (isWide) {
       const h = rowRect.h * fraction;
-      result.push({ x: rowRect.x, y: rowRect.y + offset, w: rowRect.w, h, node });
+      result.push({ x: rowRect.x, y: rowRect.y + offset, w: rowRect.w, h, node, depth: 0 });
       offset += h;
     } else {
       const w = rowRect.w * fraction;
-      result.push({ x: rowRect.x + offset, y: rowRect.y, w, h: rowRect.h, node });
+      result.push({ x: rowRect.x + offset, y: rowRect.y, w, h: rowRect.h, node, depth: 0 });
       offset += w;
     }
   }
@@ -179,235 +103,464 @@ const worstAspect = (
   const rowLength = isWide
     ? (rowSize / totalSize) * rect.w
     : (rowSize / totalSize) * rect.h;
-
   if (rowLength === 0) return Infinity;
 
   let worst = 0;
   for (const node of row) {
-    const fraction = node.size / rowSize;
-    const nodeLength = side * fraction;
+    const nodeLength = side * (node.size / rowSize);
     const aspect = Math.max(rowLength / nodeLength, nodeLength / rowLength);
     if (aspect > worst) worst = aspect;
   }
   return worst;
 };
 
-// ── Nested rendering ────────────────────────────────────────────
+// ── Animation state (module-local) ──────────────────────────────
 
-const DIR_HEADER_HEIGHT = 20;
-const DIR_PADDING = 2;
-const MIN_LABEL_WIDTH = 36;
-const MIN_LABEL_HEIGHT = 14;
-const FONT = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-const FONT_SMALL = '9px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+interface TreemapAnim {
+  kind: "zoom-in" | "zoom-out" | "lens" | "reveal";
+  start: number;
+  /** Zoom: the cell rect (in viewport coords) being expanded/collapsed. */
+  rect?: Rect;
+  /** Lens crossfade: previous fill colors keyed by file index. */
+  prevColors?: Map<number, string>;
+}
 
-/** Severity order: unused (worst) > hasUnusedExports > clean > entryPoint (best) */
-const STATUS_SEVERITY: Record<string, number> = {
-  unused: 3,
-  hasUnusedExports: 2,
-  clean: 1,
-  entryPoint: 0,
+interface TreemapState {
+  anim: TreemapAnim | null;
+  hatch: CanvasPattern | null;
+  hatchKey: string;
+  raf: number;
+  revealed: boolean;
+}
+
+const getTM = (state: AppState): TreemapState => {
+  const ext = state as AppState & { _tm?: TreemapState };
+  if (!ext._tm) {
+    ext._tm = { anim: null, hatch: null, hatchKey: "", raf: 0, revealed: false };
+  }
+  return ext._tm;
 };
 
-/** For narrow cells: pick the worst (most severe) status color from any child */
-const getWorstColor = (node: TreeNode, data: VizData, theme: ColorTheme): string => {
-  let worstSeverity = -1;
-  let worstColor = theme.statusColors.clean;
+const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 
-  const walk = (n: TreeNode): void => {
-    if (n.fileIndex !== null) {
-      const file = data.files[n.fileIndex];
-      const severity = STATUS_SEVERITY[file.status] ?? 0;
-      if (severity > worstSeverity) {
-        worstSeverity = severity;
-        worstColor = theme.statusColors[file.status];
-      }
-    } else {
-      for (const child of n.children) walk(child);
-    }
-  };
-
-  walk(node);
-  return worstColor;
+/** Kick a zoom transition; `rect` is the drilled cell in viewport coords. */
+export const startZoom = (state: AppState, rect: Rect, dir: "in" | "out"): void => {
+  if (state.reducedMotion) return;
+  const tm = getTM(state);
+  tm.anim = { kind: dir === "in" ? "zoom-in" : "zoom-out", start: performance.now(), rect };
 };
+
+/** Kick a lens crossfade from the current cell colors. */
+export const startLensFade = (state: AppState, prevColors: Map<number, string>): void => {
+  if (state.reducedMotion) return;
+  const tm = getTM(state);
+  tm.anim = { kind: "lens", start: performance.now(), prevColors };
+};
+
+/** Capture the current lens colors of all files (for the crossfade). */
+export const captureLensColors = (state: AppState): Map<number, string> => {
+  const colors = new Map<number, string>();
+  for (let i = 0; i < state.data.files.length; i++) {
+    colors.set(i, lensColor(state.lens, state.theme, state.index, state.data.files[i]));
+  }
+  return colors;
+};
+
+// ── Hatch texture (secondary encoding for findings) ─────────────
+
+const buildHatch = (color: string): CanvasPattern | null => {
+  const c = document.createElement("canvas");
+  c.width = 6;
+  c.height = 6;
+  const pctx = c.getContext("2d");
+  if (!pctx) return null;
+  pctx.strokeStyle = color;
+  pctx.globalAlpha = 0.5;
+  pctx.lineWidth = 1;
+  pctx.beginPath();
+  pctx.moveTo(-1, 5);
+  pctx.lineTo(7, -3);
+  pctx.moveTo(-1, 11);
+  pctx.lineTo(7, 3);
+  pctx.stroke();
+  const ctx2 = document.createElement("canvas").getContext("2d");
+  return ctx2 ? ctx2.createPattern(c, "repeat") : null;
+};
+
+// ── Rendering ───────────────────────────────────────────────────
+
+interface RenderCtx {
+  state: AppState;
+  now: number;
+  /** 0..1 lens crossfade progress (1 = no fade active). */
+  lensT: number;
+  prevColors: Map<number, string> | null;
+  /** 0..1 reveal progress (1 = fully revealed). */
+  revealT: number;
+  hitTest: boolean;
+  labels: boolean;
+}
 
 export const renderTreemap = (state: AppState): void => {
-  const { canvas, ctx, data, theme, dpr } = state;
+  const { canvas, ctx, dpr } = state;
+  const tm = getTM(state);
+  const stage = canvas.parentElement;
+  const w = stage ? stage.clientWidth : window.innerWidth;
+  const h = stage ? stage.clientHeight : window.innerHeight;
 
-  // Calculate available space: full viewport minus the header
-  const header = document.getElementById("fallow-header");
-  const headerHeight = header ? header.offsetHeight : 0;
-  const containerWidth = window.innerWidth;
-  const containerHeight = window.innerHeight - headerHeight;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
 
-  // Set both CSS and pixel dimensions
-  canvas.style.width = `${containerWidth}px`;
-  canvas.style.height = `${containerHeight}px`;
-  canvas.width = containerWidth * dpr;
-  canvas.height = containerHeight * dpr;
-  ctx.scale(dpr, dpr);
+  // First render: start the staggered reveal.
+  if (!tm.revealed) {
+    tm.revealed = true;
+    if (!state.reducedMotion) {
+      tm.anim = { kind: "reveal", start: performance.now() };
+    }
+  }
 
-  ctx.fillStyle = theme.bg;
-  ctx.fillRect(0, 0, containerWidth, containerHeight);
+  if (tm.hatchKey !== state.theme.red) {
+    tm.hatch = buildHatch(state.theme.textHigh);
+    tm.hatchKey = state.theme.red;
+  }
 
-  // Build nested tree
-  const nodes = buildTree(data.files, state.currentPath);
-  const rootRect: Rect = { x: 1, y: 1, w: containerWidth - 2, h: containerHeight - 2 };
+  const now = performance.now();
+  const anim = tm.anim;
+  let animT = 1;
+  if (anim) {
+    const dur = anim.kind === "lens" ? LENS_MS : anim.kind === "reveal" ? REVEAL_MS : ZOOM_MS;
+    animT = Math.min(1, (now - anim.start) / dur);
+    if (animT >= 1) tm.anim = null;
+  }
 
-  // Reset layout for hit-testing
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = state.theme.bg;
+  ctx.fillRect(0, 0, w, h);
+
+  const rootNode = state.index.nodesByPath.get(state.drillPath) ?? state.index.tree;
+  const rootRect: Rect = { x: 0, y: 0, w, h };
+
+  const zooming = anim && (anim.kind === "zoom-in" || anim.kind === "zoom-out") && animT < 1;
+  const t = easeOut(animT);
+
+  if (zooming && anim) {
+    ctx.save();
+    if (anim.kind === "zoom-in" && anim.rect) {
+      // The drilled cell expands to fill the viewport: render the new layout
+      // inside an interpolated rect that grows from the cell to full size.
+      const r = anim.rect;
+      ctx.translate(r.x * (1 - t), r.y * (1 - t));
+      ctx.scale(r.w / w + (1 - r.w / w) * t, r.h / h + (1 - r.h / h) * t);
+    } else {
+      // Zoom out: the parent view settles back from slightly zoomed-in.
+      const s = 1.08 - 0.08 * t;
+      ctx.translate((w - w * s) / 2, (h - h * s) / 2);
+      ctx.scale(s, s);
+    }
+  }
+
   state.layout = [];
+  const rctx: RenderCtx = {
+    state,
+    now,
+    lensT: anim?.kind === "lens" ? t : 1,
+    prevColors: anim?.kind === "lens" ? (anim.prevColors ?? null) : null,
+    revealT: anim?.kind === "reveal" ? t : 1,
+    hitTest: !zooming,
+    labels: !zooming,
+  };
 
-  // Layout top-level nodes, then recursively render their children
-  const topLayout = squarify(nodes, rootRect);
-  for (const cell of topLayout) {
-    renderCell(state, cell, 0);
+  const cells = squarify(rootNode.children, insetRect(rootRect, 1));
+  const total = cells.length;
+  let cellSeq = 0;
+  for (const cell of cells) {
+    cellSeq = renderCell(rctx, cell, 0, cellSeq, total);
+  }
+
+  if (zooming) {
+    ctx.restore();
+    scheduleFrame(state);
+  } else if (anim && animT < 1) {
+    scheduleFrame(state);
   }
 };
 
-const renderCell = (state: AppState, cell: LayoutNode, depth: number): void => {
-  const { ctx, data, theme } = state;
-  const isFile = cell.node.fileIndex !== null;
-  const hasChildren = cell.node.children.length > 0;
-  const layoutIndex = state.layout.length;
-  state.layout.push(cell);
+const scheduleFrame = (state: AppState): void => {
+  const tm = getTM(state);
+  cancelAnimationFrame(tm.raf);
+  tm.raf = requestAnimationFrame(() => {
+    if (state.view === "map") renderTreemap(state);
+  });
+};
 
-  const isHovered = state.hoveredIndex === layoutIndex;
-  const isSearchMatch = state.searchQuery !== "" && state.searchResults.has(layoutIndex);
+const insetRect = (r: Rect, by: number): Rect => ({
+  x: r.x + by,
+  y: r.y + by,
+  w: Math.max(0, r.w - by * 2),
+  h: Math.max(0, r.h - by * 2),
+});
+
+/** Recursively render one cell; returns the running sequence counter. */
+const renderCell = (
+  rctx: RenderCtx,
+  cell: LayoutCell,
+  depth: number,
+  seq: number,
+  totalTop: number,
+): number => {
+  const { state } = rctx;
+  const { ctx, theme, data, index } = state;
+  const isFile = cell.node.fileIndex !== null;
+
+  // Staggered reveal: top-level cells appear like terminal output lines.
+  let alpha = 1;
+  if (rctx.revealT < 1 && depth === 0) {
+    const slot = totalTop <= 1 ? 0 : seq / (totalTop * 1.4);
+    const local = Math.min(1, Math.max(0, (rctx.revealT - slot) / (1 - slot || 1)));
+    alpha = easeOut(local);
+  }
+  const nextSeq = seq + 1;
+  if (alpha <= 0.01) return nextSeq;
+
+  cell.depth = depth;
+  const layoutIndex = state.layout.length;
+  if (rctx.hitTest) state.layout.push(cell);
+
+  const hovered = rctx.hitTest && state.hoveredCell === layoutIndex;
+  const searching = state.search.trim() !== "";
+
+  ctx.globalAlpha = alpha;
 
   if (isFile) {
-    // Leaf file, fill with status color
-    const file = data.files[cell.node.fileIndex!];
-    ctx.fillStyle = theme.statusColors[file.status];
-    ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
-
-    if (isHovered) {
-      ctx.fillStyle = theme.hover;
-      ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
+    const fi = cell.node.fileIndex as number;
+    const file = data.files[fi];
+    let fill = lensColor(state.lens, theme, index, file);
+    if (rctx.prevColors && rctx.lensT < 1) {
+      const prev = rctx.prevColors.get(fi);
+      if (prev && prev !== fill) fill = mix(prev, fill, rctx.lensT);
     }
 
-    // Border
-    ctx.strokeStyle = theme.border;
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(cell.x, cell.y, cell.w, cell.h);
+    const matched = !searching || state.searchMatches.has(fi);
+    if (searching && !matched) ctx.globalAlpha = alpha * 0.18;
 
-    // Label
-    if (cell.w > MIN_LABEL_WIDTH && cell.h > MIN_LABEL_HEIGHT) {
-      ctx.fillStyle = contrastText(theme.statusColors[file.status]);
-      ctx.font = FONT;
+    const r = { x: cell.x + 0.5, y: cell.y + 0.5, w: cell.w - 1, h: cell.h - 1 };
+    ctx.fillStyle = fill;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+
+    // Texture channel: hatch marks findings so color is never the only signal.
+    const tm = getTM(state);
+    if (tm.hatch && lensFlag(state.lens, index, file, fi)) {
+      ctx.fillStyle = tm.hatch;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+
+    // Hover: inverse-selection wash + strong border.
+    if (hovered) {
+      ctx.fillStyle = theme.textHigh;
+      ctx.globalAlpha = ctx.globalAlpha * 0.18;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = theme.textHigh;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    }
+
+    // Selection ring (blue = interactive, never a severity color).
+    if (state.selected === fi) {
+      ctx.strokeStyle = theme.blue;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    }
+
+    // Search match ring.
+    if (searching && matched) {
+      ctx.strokeStyle = theme.amberText;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(r.x + 0.75, r.y + 0.75, r.w - 1.5, r.h - 1.5);
+    }
+
+    if (rctx.labels && cell.w > MIN_LABEL_W && cell.h > MIN_LABEL_H) {
+      ctx.fillStyle = contrastText(fill);
+      ctx.font = FONT_CELL;
       ctx.textBaseline = "top";
-      const label = truncateText(ctx, cell.node.name, cell.w - 6);
-      ctx.fillText(label, cell.x + 3, cell.y + 3);
-
-      if (cell.h > 30 && cell.w > 50) {
-        ctx.font = FONT_SMALL;
-        ctx.globalAlpha = 0.7;
-        ctx.fillText(formatSize(cell.node.size), cell.x + 3, cell.y + 16);
-        ctx.globalAlpha = 1;
-      }
+      ctx.textAlign = "left";
+      const label = truncate(ctx, cell.node.name, cell.w - 8);
+      ctx.globalAlpha = ctx.globalAlpha * 0.92;
+      ctx.fillText(label, cell.x + 4, cell.y + 3);
+      ctx.globalAlpha = alpha;
     }
-  } else if (hasChildren) {
-    // Directory with children, render as container with header + nested children
-    const tooNarrow = cell.w < 30 || cell.h < 30;
-    const showHeader = !tooNarrow && cell.w > 50 && cell.h > DIR_HEADER_HEIGHT + 10;
-    const headerH = showHeader ? DIR_HEADER_HEIGHT : 0;
+  } else {
+    // Directory container.
+    const tooSmall = cell.w < 34 || cell.h < 30;
+    const showHeader = !tooSmall && cell.h > DIR_HEADER + 12 && cell.w > 46;
 
-    if (tooNarrow) {
-      // Cell too small to nest children, show dominant status color as summary
-      const dominantColor = getWorstColor(cell.node, data, theme);
-      ctx.fillStyle = dominantColor;
-      ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
-
-      ctx.strokeStyle = theme.border;
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(cell.x, cell.y, cell.w, cell.h);
-
-      if (isHovered) {
-        ctx.fillStyle = theme.hover;
-        ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
+    if (tooSmall) {
+      ctx.fillStyle = dirSummaryColor(rctx, cell.node);
+      ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
+      if (hovered) {
+        ctx.fillStyle = theme.textHigh;
+        ctx.globalAlpha = alpha * 0.18;
+        ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
+        ctx.globalAlpha = alpha;
       }
     } else {
-      // Directory background
-      ctx.fillStyle = theme.directory;
+      ctx.fillStyle = theme.dirFill;
       ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
+      ctx.strokeStyle = depth === 0 ? theme.borderDefault : theme.borderSubtle;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
 
-      // Directory header
+      const headerH = showHeader ? DIR_HEADER : 0;
       if (showHeader) {
-        ctx.fillStyle = depth === 0 ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.04)";
-        ctx.fillRect(cell.x, cell.y, cell.w, headerH);
-
-        ctx.fillStyle = theme.directoryText;
-        ctx.font = FONT;
+        ctx.fillStyle = hovered ? theme.surface3 : theme.dirHeader;
+        ctx.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, headerH - 1);
+        ctx.fillStyle = hovered ? theme.textHigh : theme.textLow;
+        ctx.font = FONT_DIR;
         ctx.textBaseline = "top";
-        const dirLabel = truncateText(ctx, cell.node.name, cell.w - 6);
-        ctx.fillText(dirLabel, cell.x + 4, cell.y + 4);
-      }
-
-      // Border around directory
-      ctx.strokeStyle = depth === 0 ? "rgba(0,0,0,0.2)" : theme.border;
-      ctx.lineWidth = depth === 0 ? 1.5 : 0.5;
-      ctx.strokeRect(cell.x, cell.y, cell.w, cell.h);
-
-      // Recursively render children inside the remaining space
-      const innerRect: Rect = {
-        x: cell.x + DIR_PADDING,
-        y: cell.y + headerH + DIR_PADDING,
-        w: cell.w - DIR_PADDING * 2,
-        h: cell.h - headerH - DIR_PADDING * 2,
-      };
-
-      if (innerRect.w > 8 && innerRect.h > 8) {
-        const childLayout = squarify(cell.node.children, innerRect);
-        for (const child of childLayout) {
-          renderCell(state, child, depth + 1);
+        ctx.textAlign = "left";
+        const count = countFiles(cell.node);
+        const suffix = cell.w > 150 ? `  ${formatCount(count)}` : "";
+        const label = truncate(ctx, `${cell.node.name}/`, cell.w - 10 - ctx.measureText(suffix).width);
+        ctx.fillText(label, cell.x + 5, cell.y + 4);
+        if (suffix) {
+          ctx.fillStyle = theme.textMuted;
+          ctx.textAlign = "right";
+          ctx.fillText(suffix.trim(), cell.x + cell.w - 5, cell.y + 4);
+          ctx.textAlign = "left";
         }
       }
 
-      if (isHovered) {
-        ctx.fillStyle = theme.hover;
-        ctx.fillRect(cell.x, cell.y, cell.w, headerH || cell.h);
+      const inner = {
+        x: cell.x + DIR_PAD,
+        y: cell.y + headerH + DIR_PAD,
+        w: cell.w - DIR_PAD * 2,
+        h: cell.h - headerH - DIR_PAD * 2,
+      };
+      if (inner.w > 6 && inner.h > 6) {
+        const children = squarify(cell.node.children, inner);
+        let s = nextSeq;
+        for (const child of children) {
+          s = renderCell(rctx, child, depth + 1, s, totalTop);
+        }
+        ctx.globalAlpha = 1;
+        return s;
       }
     }
-  } else {
-    // Empty directory (no children at this level)
-    ctx.fillStyle = theme.directory;
-    ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
-    ctx.strokeStyle = theme.border;
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(cell.x, cell.y, cell.w, cell.h);
-
-    if (cell.w > MIN_LABEL_WIDTH && cell.h > MIN_LABEL_HEIGHT) {
-      ctx.fillStyle = theme.directoryText;
-      ctx.font = FONT;
-      ctx.textBaseline = "top";
-      ctx.fillText(truncateText(ctx, cell.node.name, cell.w - 6), cell.x + 3, cell.y + 3);
-    }
   }
 
-  // Search highlight on top of everything
-  if (isSearchMatch) {
-    ctx.strokeStyle = "#FFD700";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(cell.x + 1, cell.y + 1, cell.w - 2, cell.h - 2);
-  }
+  ctx.globalAlpha = 1;
+  return nextSeq;
 };
 
-const truncateText = (
+// Worst-severity rollup color for directories too small to nest.
+const dirSummaryColor = (rctx: RenderCtx, node: TreeNode): string => {
+  const { state } = rctx;
+  let best = state.theme.cellNeutral;
+  let bestRank = -1;
+  const walk = (n: TreeNode): void => {
+    if (n.fileIndex !== null) {
+      const color = lensColor(state.lens, state.theme, state.index, state.data.files[n.fileIndex]);
+      const rank = colorRank(state, color);
+      if (rank > bestRank) {
+        bestRank = rank;
+        best = color;
+      }
+      return;
+    }
+    for (const c of n.children) walk(c);
+  };
+  walk(node);
+  return best;
+};
+
+const colorRank = (state: AppState, color: string): number => {
+  if (color === state.theme.cellNeutral) return 0;
+  if (color === state.theme.red) return 4;
+  if (color === state.theme.amber) return 3;
+  if (color === state.theme.cellEntry) return 1;
+  return 2;
+};
+
+const countFiles = (node: TreeNode): number => {
+  if (node.fileIndex !== null) return 1;
+  let n = 0;
+  for (const c of node.children) n += countFiles(c);
+  return n;
+};
+
+const truncate = (
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
 ): string => {
+  if (maxWidth <= 8) return "";
   if (ctx.measureText(text).width <= maxWidth) return text;
-
-  // Binary search for the longest fitting substring
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
     const mid = (lo + hi + 1) >>> 1;
-    if (ctx.measureText(text.slice(0, mid) + "…").width <= maxWidth) {
+    if (ctx.measureText(`${text.slice(0, mid)}…`).width <= maxWidth) {
       lo = mid;
     } else {
       hi = mid - 1;
     }
   }
-  return lo > 0 ? text.slice(0, lo) + "…" : "…";
+  return lo > 0 ? `${text.slice(0, lo)}…` : "";
+};
+
+// ── Hit testing & navigation ────────────────────────────────────
+
+/** Smallest cell containing the point (files win over directories). */
+export const treemapHitTest = (state: AppState, x: number, y: number): number | null => {
+  let hit: number | null = null;
+  let hitArea = Infinity;
+  for (let i = 0; i < state.layout.length; i++) {
+    const c = state.layout[i];
+    if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
+      const isDirHeader =
+        c.node.fileIndex === null &&
+        y <= c.y + DIR_HEADER &&
+        c.w >= 34 &&
+        c.h >= 30;
+      const area = c.w * c.h;
+      if (c.node.fileIndex !== null || isDirHeader || c.w < 34 || c.h < 30) {
+        if (area < hitArea) {
+          hitArea = area;
+          hit = i;
+        }
+      }
+    }
+  }
+  return hit;
+};
+
+/** Drill into a directory cell (with zoom animation). */
+export const drillInto = (state: AppState, cell: LayoutCell): void => {
+  if (cell.node.fileIndex !== null) return;
+  startZoom(state, { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, "in");
+  state.drillPath = cell.node.path;
+  state.hoveredCell = null;
+};
+
+/** Go up one directory level; returns false at the root. */
+export const drillUp = (state: AppState): boolean => {
+  if (state.drillPath === "") return false;
+  const current = state.index.nodesByPath.get(state.drillPath);
+  state.drillPath = current?.parent?.path ?? "";
+  state.hoveredCell = null;
+  startZoom(state, { x: 0, y: 0, w: 0, h: 0 }, "out");
+  return true;
+};
+
+/** Jump straight to a directory path (breadcrumb navigation). */
+export const drillTo = (state: AppState, path: string): void => {
+  if (!state.index.nodesByPath.has(path)) return;
+  const zoomIn = path.length > state.drillPath.length;
+  state.drillPath = path;
+  state.hoveredCell = null;
+  if (!zoomIn) startZoom(state, { x: 0, y: 0, w: 0, h: 0 }, "out");
 };

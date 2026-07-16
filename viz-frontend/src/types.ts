@@ -1,11 +1,15 @@
-/** Mirrors the Rust VizData struct */
+/** Mirrors the Rust `fallow_engine::viz::VizData` contract. */
 export interface VizData {
   root: string;
   files: VizFile[];
-  edges: [number, number][];
+  /** Import edges as [from, to, flags]; flags bit 0 = all imports type-only. */
+  edges: [number, number, number][];
   summary: VizSummary;
   workspaces: VizWorkspace[];
+  zones: VizZone[];
   cycles: number[][];
+  clones: VizCloneGroup[];
+  violations: VizViolation[];
 }
 
 export interface VizFile {
@@ -17,8 +21,18 @@ export interface VizFile {
   is_entry: boolean;
   importer_count: number;
   import_count: number;
-  workspace: string;
+  workspace?: number;
+  zone?: number;
   unused_exports?: string[];
+  fn_count: number;
+  max_cyclomatic: number;
+  max_cognitive: number;
+  react_hooks: number;
+  jsx_depth: number;
+  functions?: VizFunction[];
+  dup_lines: number;
+  clone_groups?: number[];
+  in_cycle: boolean;
 }
 
 export type VizFileStatus =
@@ -27,55 +41,90 @@ export type VizFileStatus =
   | "unused"
   | "entryPoint";
 
+export interface VizFunction {
+  name: string;
+  line: number;
+  cyclomatic: number;
+  cognitive: number;
+  lines: number;
+  hooks: number;
+  jsx_depth: number;
+  props: number;
+}
+
 export interface VizSummary {
   total_files: number;
   total_size: number;
+  total_edges: number;
   unused_files: number;
   unused_exports: number;
   unused_types: number;
   unused_deps: number;
   unresolved_imports: number;
   circular_deps: number;
+  clone_groups: number;
+  duplicated_lines: number;
+  boundary_violations: number;
+  hotspot_files: number;
 }
 
-// fallow-ignore-next-line unused-type
 export interface VizWorkspace {
   name: string;
   root: string;
 }
 
-/** A node in the directory tree hierarchy */
+export interface VizZone {
+  name: string;
+  files: number;
+}
+
+export interface VizCloneGroup {
+  lines: number;
+  tokens: number;
+  instances: VizCloneInstance[];
+  preview: string;
+}
+
+export interface VizCloneInstance {
+  file: number;
+  start_line: number;
+  end_line: number;
+}
+
+export interface VizViolation {
+  from: number;
+  to: number;
+  from_zone: number;
+  to_zone: number;
+  line: number;
+  specifier: string;
+}
+
+/** A node in the directory-tree hierarchy (built once for the full project). */
 export interface TreeNode {
   name: string;
+  /** Full path from the project root ("" for the root node). */
   path: string;
   size: number;
   children: TreeNode[];
-  /** Index into VizData.files, only set for leaf (file) nodes */
+  /** Index into VizData.files; null for directories. */
   fileIndex: number | null;
+  parent: TreeNode | null;
 }
 
-/** A laid-out rectangle from the squarify algorithm */
-export interface LayoutNode {
+/** A laid-out treemap rectangle. */
+export interface LayoutCell {
   x: number;
   y: number;
   w: number;
   h: number;
   node: TreeNode;
+  depth: number;
 }
 
-/** A positioned node in the graph view */
-export interface GraphNode {
-  fileIndex: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  /** Directory group for clustering */
-  group: string;
-}
+export type ActiveView = "map" | "graph";
 
-export type ActiveView = "treemap" | "graph";
+export type Lens = "deadcode" | "dupes" | "boundaries" | "hotspots";
 
 declare global {
   interface Window {
