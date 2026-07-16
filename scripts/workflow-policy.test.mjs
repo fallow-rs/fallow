@@ -153,9 +153,15 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsRustJob, /needs: changes/);
   assert.match(windowsRustJob, /if: needs\.changes\.outputs\.windows-rust == 'true'/);
   assert.match(windowsRustJob, /runs-on: windows-latest/);
+  assert.ok(windowsRustPaths.includes("crates/core/src/discover/walk.rs"));
+  assert.ok(windowsRustPaths.includes("crates/core/src/plugins/manifest_entries.rs"));
+  assert.ok(
+    windowsRustPaths.includes("crates/core/tests/integration_test/symlink_root_containment.rs"),
+  );
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
   assert.match(windowsRustJob, /cargo test -p fallow-engine changed_files::tests/);
   assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
+  assert.match(windowsRustJob, /cargo test -p fallow-core symlink/);
   assert.match(
     windowsRustJob,
     /^[ \t]+run: cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics$/m,
@@ -166,7 +172,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   );
   assert.match(
     windowsRustJob,
-    /^[ \t]+run: cargo clippy -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
+    /^[ \t]+run: cargo clippy -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
   );
   assert.match(zedJob, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);

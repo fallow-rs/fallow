@@ -247,9 +247,10 @@ struct ChurnFileEvent {
 /// `root` is the project root that relative event paths are joined to (matching
 /// how the git path joins numstat paths), so the churn keys line up with the
 /// analyzed files. Returns a human-readable error (the CLI maps it to exit code
-/// 2) on a missing file, malformed JSON, wrong `schema`, an empty event path, a
-/// far-future timestamp, or an event count past `MAX_CHURN_EVENTS`. An empty
-/// `events` array is valid (no hotspots), not an error. Never runs `git`.
+/// 2) on an oversized or missing file, malformed JSON, wrong `schema`, an
+/// invalid repo-relative event path, a far-future timestamp, line totals above
+/// `u32::MAX`, or an event count past `MAX_CHURN_EVENTS`. An empty `events`
+/// array is valid (no hotspots), not an error. Never runs `git`.
 pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, String> {
     let raw = read_churn_file_with_limit(path, MAX_CHURN_FILE_BYTES)?;
     let doc: ChurnFileDoc = serde_json::from_str(&raw)
@@ -293,8 +294,9 @@ fn read_churn_file_with_limit(path: &Path, limit: usize) -> Result<String, Strin
 
 /// Validate and fold a parsed `fallow-churn/v1` document into event state.
 ///
-/// Rejects empty paths and far-future (likely millisecond) timestamps; interns
-/// authors into the pool exactly as the git-log path does.
+/// Rejects invalid paths, far-future (likely millisecond) timestamps, and line
+/// totals outside the public `u32` contract. Interns authors into the pool
+/// exactly as the git-log path does.
 fn churn_event_state_from_doc(
     doc: &ChurnFileDoc,
     path: &Path,

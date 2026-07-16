@@ -96,6 +96,10 @@ jobs:
               - '.clippy.toml'
               - 'rust-toolchain.toml'
             windows-rust:
+              - 'crates/core/src/discover/walk.rs'
+              - 'crates/core/src/plugins/manifest_entries.rs'
+              - 'crates/core/tests/integration_test.rs'
+              - 'crates/core/tests/integration_test/symlink_root_containment.rs'
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
               - 'crates/engine/Cargo.toml'
@@ -326,12 +330,14 @@ jobs:
         run: cargo test -p fallow-engine changed_files::tests
       - name: Test churn path handling
         run: cargo test -p fallow-engine churn::tests
+      - name: Test source and manifest symlink containment
+        run: cargo test -p fallow-core symlink
       - name: Test LSP diagnostic URI handling
         run: cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics
       - name: Test MCP subprocess cleanup
         run: cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree
       - name: Clippy platform-specific paths
-        run: cargo clippy -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
+        run: cargo clippy -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
 
   skills-vendor:
     name: Skills vendor drift
