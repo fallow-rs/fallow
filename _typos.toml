@@ -20,6 +20,8 @@ xdescribe = "xdescribe"
 xit = "xit"
 
 [default.extend-words]
+# Level-of-detail rendering tiers in the viz frontend
+LOD = "LOD"
 ba = "ba"
 daa = "daa"
 ist = "ist"
