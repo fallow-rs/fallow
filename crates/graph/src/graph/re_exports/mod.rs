@@ -384,7 +384,19 @@ impl ModuleGraph {
             .saturating_add(re_export_info.len());
 
         let module_count = self.modules.len();
-        let synthetic_exports = module_count.saturating_mul(named_inputs).saturating_mul(2);
+        let synthetic_export_hosts = self
+            .modules
+            .iter()
+            .filter(|module| {
+                module
+                    .re_exports
+                    .iter()
+                    .any(|re_export| re_export.exported_name == "*")
+            })
+            .count();
+        let synthetic_exports = synthetic_export_hosts
+            .saturating_mul(named_inputs)
+            .saturating_mul(2);
         let max_exports = initial_exports.saturating_add(synthetic_exports);
         let reference_additions = max_exports.saturating_mul(module_count);
         let state_changes = synthetic_exports.saturating_add(reference_additions);

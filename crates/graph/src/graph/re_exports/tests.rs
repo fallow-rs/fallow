@@ -2599,6 +2599,28 @@ fn propagation_plan_requeues_only_affected_observers_once() {
     assert_eq!(plan.pop_front(), None);
 }
 
+#[test]
+fn named_only_chain_safety_cap_excludes_synthetic_export_states() {
+    let graph = graph_for_named_chain(256);
+    let re_export_info = graph.collect_re_export_tuples();
+    let initial_exports = graph
+        .modules
+        .iter()
+        .map(|module| module.exports.len())
+        .sum::<usize>();
+    let expected = re_export_info.len().saturating_add(
+        initial_exports
+            .saturating_mul(graph.modules.len())
+            .saturating_mul(re_export_info.len()),
+    );
+
+    assert_eq!(
+        graph.re_export_transition_safety_cap(&re_export_info),
+        expected,
+        "named-only chains cannot create synthetic exports"
+    );
+}
+
 fn re_export_tuple(barrel: u32, source: u32) -> ReExportTuple {
     ReExportTuple {
         barrel: FileId(barrel),
