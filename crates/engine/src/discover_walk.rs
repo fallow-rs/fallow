@@ -332,6 +332,7 @@ impl HiddenDirScope {
 /// identical to the config-capture-disabled walk.
 struct FileVisitor<'a> {
     root: &'a Path,
+    canonical_root: Option<&'a Path>,
     ignore_patterns: &'a globset::GlobSet,
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
@@ -362,8 +363,21 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
         {
             return ignore::WalkState::Continue;
         }
+        let symlink_size = if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
+            let Some(size) = contained_symlink_file_size(entry.path(), self.canonical_root) else {
+                tracing::debug!(
+                    path = %entry.path().display(),
+                    "skipping source symlink with a broken, non-file, or outside-root target"
+                );
+                return ignore::WalkState::Continue;
+            };
+            Some(size)
+        } else {
+            None
+        };
         if has_source_extension(entry.path()) {
-            let size_bytes = entry.metadata().map_or(0, |m| m.len());
+            let size_bytes =
+                symlink_size.unwrap_or_else(|| entry.metadata().map_or(0, |m| m.len()));
             self.local.push((entry.into_path(), size_bytes));
         } else if self.config_shared.is_some() {
             // A non-source file admitted by the config-candidate type group. No
@@ -372,6 +386,16 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
         }
         ignore::WalkState::Continue
     }
+}
+
+fn contained_symlink_file_size(path: &Path, canonical_root: Option<&Path>) -> Option<u64> {
+    let root = canonical_root?;
+    let target = path.canonicalize().ok()?;
+    if !target.starts_with(root) {
+        return None;
+    }
+    let metadata = target.metadata().ok()?;
+    metadata.is_file().then_some(metadata.len())
 }
 
 impl Drop for FileVisitor<'_> {
@@ -400,6 +424,7 @@ impl Drop for FileVisitor<'_> {
 /// Builder that creates per-thread `FileVisitor` instances for the parallel walker.
 struct FileVisitorBuilder<'a> {
     root: &'a Path,
+    canonical_root: Option<&'a Path>,
     ignore_patterns: &'a globset::GlobSet,
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
@@ -410,6 +435,7 @@ impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
     fn build(&mut self) -> Box<dyn ignore::ParallelVisitor + 's> {
         Box::new(FileVisitor {
             root: self.root,
+            canonical_root: self.canonical_root,
             ignore_patterns: self.ignore_patterns,
             production_excludes: self.production_excludes,
             shared: self.shared,
@@ -734,11 +760,13 @@ pub fn discover_files_and_config_candidates(
     let walk_builder =
         build_source_walk_builder(config, additional_hidden_dir_scopes, capture_config);
     let production_excludes = build_production_excludes(config);
+    let canonical_root = config.root.canonicalize().ok();
 
     let collected: Mutex<Vec<(std::path::PathBuf, u64)>> = Mutex::new(Vec::new());
     let config_collected: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
     let mut visitor_builder = FileVisitorBuilder {
         root: &config.root,
+        canonical_root: canonical_root.as_deref(),
         ignore_patterns: &config.ignore_patterns,
         production_excludes: &production_excludes,
         shared: &collected,
@@ -1190,6 +1218,63 @@ mod tests {
                         .replace('\\', "/")
                 })
                 .collect()
+        }
+
+        #[cfg(unix)]
+        fn symlink_file(target: &Path, link: &Path) {
+            std::os::unix::fs::symlink(target, link).expect("create file symlink");
+        }
+
+        #[cfg(windows)]
+        fn symlink_file(target: &Path, link: &Path) {
+            std::os::windows::fs::symlink_file(target, link).expect("create file symlink");
+        }
+
+        #[cfg(unix)]
+        fn symlink_dir(target: &Path, link: &Path) {
+            std::os::unix::fs::symlink(target, link).expect("create directory symlink");
+        }
+
+        #[cfg(windows)]
+        fn symlink_dir(target: &Path, link: &Path) {
+            std::os::windows::fs::symlink_dir(target, link).expect("create directory symlink");
+        }
+
+        #[test]
+        fn source_symlinks_must_target_regular_files_inside_root() {
+            let dir = tempfile::tempdir().expect("create project");
+            let outside = tempfile::tempdir().expect("create outside dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("regular.ts"), "export const regular = 1;").unwrap();
+            std::fs::write(src.join("inside-target.ts"), "export const inside = 1;").unwrap();
+            std::fs::write(
+                outside.path().join("outside-target.ts"),
+                "export const outside = 1;",
+            )
+            .unwrap();
+            std::fs::create_dir_all(src.join("directory-target")).unwrap();
+
+            symlink_file(&src.join("inside-target.ts"), &src.join("inside-link.ts"));
+            symlink_file(
+                &outside.path().join("outside-target.ts"),
+                &src.join("outside-link.ts"),
+            );
+            symlink_file(&src.join("missing-target.ts"), &src.join("broken-link.ts"));
+            symlink_dir(
+                &src.join("directory-target"),
+                &src.join("directory-link.ts"),
+            );
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let names = file_names(&discover_files(&config), dir.path());
+
+            assert!(names.contains(&"src/regular.ts".to_string()));
+            assert!(names.contains(&"src/inside-target.ts".to_string()));
+            assert!(names.contains(&"src/inside-link.ts".to_string()));
+            assert!(!names.contains(&"src/outside-link.ts".to_string()));
+            assert!(!names.contains(&"src/broken-link.ts".to_string()));
+            assert!(!names.contains(&"src/directory-link.ts".to_string()));
         }
 
         #[test]

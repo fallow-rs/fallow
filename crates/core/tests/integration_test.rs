@@ -105,6 +105,8 @@ mod safe_analysis;
 mod sfc_parsing;
 #[path = "integration_test/svelte_dead_event.rs"]
 mod svelte_dead_event;
+#[path = "integration_test/symlink_root_containment.rs"]
+mod symlink_root_containment;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/workspaces.rs"]

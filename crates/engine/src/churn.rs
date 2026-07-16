@@ -4,7 +4,8 @@
 //! recency-weighted churn scores and trend indicators.
 
 use rustc_hash::FxHashMap;
-use std::path::{Path, PathBuf};
+use std::io::Read as _;
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
@@ -64,6 +65,9 @@ const CHURN_FILE_SCHEMA: &str = "fallow-churn/v1";
 /// state from a single untrusted file. Mirrors the diff parser's
 /// `MAX_ADDED_LINES` guard in the CLI.
 const MAX_CHURN_EVENTS: usize = 5_000_000;
+
+/// Upper bound on the serialized churn import before JSON deserialization.
+const MAX_CHURN_FILE_BYTES: usize = 256 * 1024 * 1024;
 
 /// Reject an imported `timestamp` more than this many seconds in the future
 /// (one year). A unix-seconds commit time is never legitimately this far ahead
@@ -247,8 +251,7 @@ struct ChurnFileEvent {
 /// far-future timestamp, or an event count past `MAX_CHURN_EVENTS`. An empty
 /// `events` array is valid (no hotspots), not an error. Never runs `git`.
 pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, String> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read churn file {}: {e}", path.display()))?;
+    let raw = read_churn_file_with_limit(path, MAX_CHURN_FILE_BYTES)?;
     let doc: ChurnFileDoc = serde_json::from_str(&raw)
         .map_err(|e| format!("failed to parse churn file {}: {e}", path.display()))?;
     if doc.schema != CHURN_FILE_SCHEMA {
@@ -268,6 +271,24 @@ pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, 
 
     let state = churn_event_state_from_doc(&doc, path, root)?;
     Ok(build_churn_result(state, false))
+}
+
+fn read_churn_file_with_limit(path: &Path, limit: usize) -> Result<String, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| format!("failed to read churn file {}: {e}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("failed to read churn file {}: {e}", path.display()))?;
+    if bytes.len() > limit {
+        return Err(format!(
+            "churn file {} is at least {} bytes, exceeding the {limit} byte limit",
+            path.display(),
+            bytes.len()
+        ));
+    }
+    String::from_utf8(bytes)
+        .map_err(|e| format!("failed to read churn file {} as UTF-8: {e}", path.display()))
 }
 
 /// Validate and fold a parsed `fallow-churn/v1` document into event state.
@@ -301,6 +322,7 @@ struct ChurnFileImportBuilder<'a> {
     root: &'a Path,
     future_limit: u64,
     files: FxHashMap<PathBuf, FileEvents>,
+    totals: FxHashMap<PathBuf, (u64, u64)>,
     author_pool: Vec<String>,
     author_index: FxHashMap<String, u32>,
 }
@@ -312,6 +334,7 @@ impl<'a> ChurnFileImportBuilder<'a> {
             root,
             future_limit,
             files: FxHashMap::default(),
+            totals: FxHashMap::default(),
             author_pool: Vec::new(),
             author_index: FxHashMap::default(),
         }
@@ -322,6 +345,18 @@ impl<'a> ChurnFileImportBuilder<'a> {
         validate_churn_event_timestamp(self.path, event.timestamp, self.future_limit, &rel)?;
 
         let abs_path = self.root.join(&rel);
+        let totals = self.totals.entry(abs_path.clone()).or_default();
+        totals.0 += u64::from(event.added);
+        totals.1 += u64::from(event.deleted);
+        if totals.0 > u64::from(u32::MAX) || totals.1 > u64::from(u32::MAX) {
+            return Err(format!(
+                "churn file {} has line totals for \"{rel}\" exceeding the u32 limit \
+                 (added {}, deleted {})",
+                self.path.display(),
+                totals.0,
+                totals.1
+            ));
+        }
         let author_idx = self.intern_author(event.author.as_deref());
         self.files
             .entry(abs_path)
@@ -357,6 +392,18 @@ fn normalize_churn_event_path(path: &Path, event_path: &str) -> Result<String, S
     if rel.is_empty() {
         return Err(format!(
             "churn file {} has an event with an empty path",
+            path.display()
+        ));
+    }
+    let bytes = rel.as_bytes();
+    let has_drive_prefix = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    let has_empty_component = rel.split('/').any(str::is_empty);
+    let components_are_normal = Path::new(rel)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)));
+    if rel.starts_with('/') || has_drive_prefix || has_empty_component || !components_are_normal {
+        return Err(format!(
+            "churn file {} has an invalid repo-relative event path \"{event_path}\"",
             path.display()
         ));
     }
@@ -917,8 +964,8 @@ fn git_path_from_bytes(path: &[u8]) -> PathBuf {
 fn aggregate_file_churn(path: PathBuf, file: FileEvents, now_secs: u64) -> FileChurn {
     let mut timestamps = Vec::with_capacity(file.events.len());
     let mut weighted_commits = 0.0;
-    let mut lines_added = 0;
-    let mut lines_deleted = 0;
+    let mut lines_added = 0_u32;
+    let mut lines_deleted = 0_u32;
     let mut authors: FxHashMap<u32, AuthorContribution> = FxHashMap::default();
 
     for event in file.events {
@@ -926,8 +973,8 @@ fn aggregate_file_churn(path: PathBuf, file: FileEvents, now_secs: u64) -> FileC
         let age_days = (now_secs.saturating_sub(event.timestamp)) as f64 / SECS_PER_DAY;
         let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
         weighted_commits += weight;
-        lines_added += event.lines_added;
-        lines_deleted += event.lines_deleted;
+        lines_added = lines_added.saturating_add(event.lines_added);
+        lines_deleted = lines_deleted.saturating_add(event.lines_deleted);
         accumulate_author(&mut authors, event.author_idx, weight, event.timestamp);
     }
 
@@ -1963,6 +2010,22 @@ mod tests {
     }
 
     #[test]
+    fn churn_file_reader_accepts_exact_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(dir.path(), "12345678");
+        assert_eq!(read_churn_file_with_limit(&path, 8).unwrap(), "12345678");
+    }
+
+    #[test]
+    fn churn_file_reader_rejects_limit_plus_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(dir.path(), "123456789");
+        let err = read_churn_file_with_limit(&path, 8).unwrap_err();
+        assert!(err.contains("at least 9 bytes"), "{err}");
+        assert!(err.contains("8 byte limit"), "{err}");
+    }
+
+    #[test]
     fn churn_file_empty_path_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_churn_file(
@@ -1971,6 +2034,43 @@ mod tests {
         );
         let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
         assert!(err.contains("empty path"), "{err}");
+    }
+
+    #[test]
+    fn churn_file_rejects_non_relative_paths() {
+        let invalid = [
+            "/tmp/a.ts",
+            r"C:\tmp\a.ts",
+            "../a.ts",
+            "src/../../a.ts",
+            "./src/a.ts",
+            "//server/share/a.ts",
+        ];
+        for event_path in invalid {
+            let dir = tempfile::tempdir().unwrap();
+            let body = format!(
+                r#"{{ "schema": "fallow-churn/v1", "events": [ {{ "path": {event_path:?}, "timestamp": 1700000000, "added": 1, "deleted": 0 }} ] }}"#
+            );
+            let path = write_churn_file(dir.path(), &body);
+            let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
+            assert!(err.contains(event_path), "{event_path}: {err}");
+            assert!(err.contains("repo-relative"), "{event_path}: {err}");
+        }
+    }
+
+    #[test]
+    fn churn_file_accepts_unicode_and_spaces_in_path_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/ruimte map/naïef.ts", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
+        );
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        assert!(
+            result
+                .files
+                .contains_key(&PathBuf::from("/project/src/ruimte map/naïef.ts"))
+        );
     }
 
     #[test]
@@ -2036,5 +2136,36 @@ mod tests {
                 .files
                 .contains_key(&PathBuf::from("/project/src/a.ts"))
         );
+    }
+
+    #[test]
+    fn churn_file_rejects_line_totals_above_u32() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [
+                { "path": "src/a.ts", "timestamp": 1700000000, "added": 4294967295, "deleted": 0 },
+                { "path": "src/a.ts", "timestamp": 1700000001, "added": 1, "deleted": 0 }
+            ] }"#,
+        );
+        let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
+        assert!(err.contains("exceeding the u32 limit"), "{err}");
+        assert!(err.contains("src/a.ts"), "{err}");
+    }
+
+    #[test]
+    fn churn_file_accepts_line_totals_at_u32_max() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [
+                { "path": "src/a.ts", "timestamp": 1700000000, "added": 4294967294, "deleted": 4294967295 },
+                { "path": "src/a.ts", "timestamp": 1700000001, "added": 1, "deleted": 0 }
+            ] }"#,
+        );
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        let churn = &result.files[&PathBuf::from("/project/src/a.ts")];
+        assert_eq!(churn.lines_added, u32::MAX);
+        assert_eq!(churn.lines_deleted, u32::MAX);
     }
 }

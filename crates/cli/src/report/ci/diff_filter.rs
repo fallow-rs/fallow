@@ -180,32 +180,8 @@ pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<
 
 /// Drain stdin once and parse it into a `LoadedDiff`, warning on failure / empty index.
 fn load_diff_index_from_stdin(quiet: bool) -> Option<LoadedDiff> {
-    let mut buf = String::new();
-    match std::io::stdin().read_to_string(&mut buf) {
-        Ok(_) => {
-            let index = DiffIndex::from_unified_diff(&buf);
-            if !quiet && index.added_line_count() == 0 {
-                eprintln!(
-                    "fallow: warning [diff-file]: --diff-stdin parsed \
-                     0 added lines; no findings will pass the diff filter. \
-                     Did you pipe a non-unified diff or an empty stream? \
-                     (Pure-rename, binary-only, and deletion-only diffs \
-                     also produce empty indices.)"
-                );
-            }
-            Some(LoadedDiff { index, raw: buf })
-        }
-        Err(err) => {
-            if !quiet {
-                eprintln!(
-                    "fallow: warning [diff-file]: could not read stdin: {err} \
-                     (line-level filtering disabled; rerun with \
-                     --diff-file PATH to point at a file on disk)"
-                );
-            }
-            None
-        }
-    }
+    let stdin = std::io::stdin();
+    load_diff_index_from_reader(stdin.lock(), "--diff-stdin", MAX_DIFF_BYTES, quiet)
 }
 
 /// Read a diff file (respecting the size cap) and parse it into a `LoadedDiff`.
@@ -222,20 +198,8 @@ fn load_diff_index_from_file(path: &Path, label: &str, quiet: bool) -> Option<Lo
         }
         return None;
     }
-    match std::fs::read_to_string(path) {
-        Ok(text) => {
-            let index = DiffIndex::from_unified_diff(&text);
-            if !quiet && index.added_line_count() == 0 {
-                eprintln!(
-                    "fallow: warning [diff-file]: {label} parsed 0 added \
-                     lines; no findings will pass the diff filter. \
-                     Verify the file is a unified diff (look for \
-                     `+++ b/<path>` headers). Pure-rename, binary-only, \
-                     and deletion-only diffs also produce empty indices."
-                );
-            }
-            Some(LoadedDiff { index, raw: text })
-        }
+    match std::fs::File::open(path) {
+        Ok(file) => load_diff_index_from_reader(file, label, MAX_DIFF_BYTES, quiet),
         Err(err) => {
             if !quiet {
                 eprintln!(
@@ -246,6 +210,56 @@ fn load_diff_index_from_file(path: &Path, label: &str, quiet: bool) -> Option<Lo
             None
         }
     }
+}
+
+fn load_diff_index_from_reader(
+    reader: impl std::io::Read,
+    label: &str,
+    limit: u64,
+    quiet: bool,
+) -> Option<LoadedDiff> {
+    let mut bytes = Vec::new();
+    if let Err(err) = reader.take(limit + 1).read_to_end(&mut bytes) {
+        if !quiet {
+            eprintln!(
+                "fallow: warning [diff-file]: could not read {label}: {err} \
+                 (line-level filtering disabled)"
+            );
+        }
+        return None;
+    }
+    if bytes.len() as u64 > limit {
+        if !quiet {
+            eprintln!(
+                "fallow: warning [diff-file]: {label} is at least {} bytes (cap {limit}); \
+                 line-level filtering disabled, reporting all findings",
+                bytes.len()
+            );
+        }
+        return None;
+    }
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(err) => {
+            if !quiet {
+                eprintln!(
+                    "fallow: warning [diff-file]: could not read {label} as UTF-8: {err} \
+                     (line-level filtering disabled)"
+                );
+            }
+            return None;
+        }
+    };
+    let index = DiffIndex::from_unified_diff(&text);
+    if !quiet && index.added_line_count() == 0 {
+        eprintln!(
+            "fallow: warning [diff-file]: {label} parsed 0 added lines; \
+             no findings will pass the diff filter. Verify the input is a unified diff \
+             (look for `+++ b/<path>` headers). Pure-rename, binary-only, and \
+             deletion-only diffs also produce empty indices."
+        );
+    }
+    Some(LoadedDiff { index, raw: text })
 }
 
 /// Process-wide cache for the diff index resolved at startup, so combined
@@ -602,10 +616,50 @@ fn diff_index_keeps_issue(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
+    use std::io::{Cursor, Write as _};
 
     use super::*;
     use fallow_output::relative_to_diff_path;
+
+    #[test]
+    fn bounded_diff_reader_accepts_exact_limit() {
+        let loaded =
+            load_diff_index_from_reader(Cursor::new(b"12345678"), "test diff", 8, true).unwrap();
+        assert_eq!(loaded.raw, "12345678");
+    }
+
+    #[test]
+    fn bounded_diff_reader_rejects_limit_plus_one() {
+        assert!(
+            load_diff_index_from_reader(Cursor::new(b"123456789"), "test diff", 8, true).is_none()
+        );
+    }
+
+    #[test]
+    fn bounded_diff_reader_rejects_invalid_utf8() {
+        assert!(
+            load_diff_index_from_reader(Cursor::new([0xff, 0xfe]), "test diff", 8, true).is_none()
+        );
+    }
+
+    #[test]
+    fn bounded_diff_reader_parses_valid_unified_diff() {
+        let text = "diff --git a/src/a.ts b/src/a.ts\n\
+                    --- a/src/a.ts\n\
+                    +++ b/src/a.ts\n\
+                    @@ -0,0 +1,1 @@\n\
+                    +export const a = 1;\n";
+        let loaded =
+            load_diff_index_from_reader(Cursor::new(text), "test diff", 1024, true).unwrap();
+        assert_eq!(loaded.index.added_line_count(), 1);
+    }
+
+    #[test]
+    fn bounded_diff_reader_preserves_empty_index_behavior() {
+        let loaded =
+            load_diff_index_from_reader(Cursor::new(b"not a diff"), "test diff", 32, true).unwrap();
+        assert_eq!(loaded.index.added_line_count(), 0);
+    }
 
     #[test]
     fn filter_issues_from_path_skips_oversize_diff() {

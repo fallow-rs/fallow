@@ -2927,6 +2927,41 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
     );
     assert_eq!(parse_json(&bad)["error"].as_bool(), Some(true));
 
+    // Imported line totals that exceed the public u32 contract are rejected as
+    // one structured input error. The old aggregation path panicked in debug
+    // builds and wrapped in release builds.
+    write_file(
+        &dir.path().join("overflow.json"),
+        r#"{ "schema": "fallow-churn/v1", "events": [
+          { "path": "src/hot.ts", "timestamp": 1700000000, "added": 4294967295, "deleted": 0 },
+          { "path": "src/hot.ts", "timestamp": 1700000001, "added": 1, "deleted": 0 }
+        ] }"#,
+    );
+    let overflow = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--hotspots",
+            "--churn-file",
+            "overflow.json",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(
+        overflow.code, 2,
+        "overflowing churn file should exit 2: stdout={} stderr={}",
+        overflow.stdout, overflow.stderr
+    );
+    let overflow_json = parse_json(&overflow);
+    assert_eq!(overflow_json["error"].as_bool(), Some(true));
+    assert!(overflow_json.get("hotspots").is_none());
+    assert!(
+        !overflow.stderr.contains("panicked"),
+        "overflow must not panic: {}",
+        overflow.stderr
+    );
+
     // Inert: with no churn-consuming section (--score only), the same malformed
     // file is never validated, so it does not fail the run. The gate is
     // validate-iff-consume.

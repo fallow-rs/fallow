@@ -491,6 +491,7 @@ fn dotted_lookup<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
 /// to the manifest glob; runs only when an active plugin declares manifestEntries.
 fn discover_manifest_paths(root: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
     let mut out = Vec::new();
+    let canonical_root = root.canonicalize().ok();
     let walker = ignore::WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -499,12 +500,22 @@ fn discover_manifest_paths(root: &Path, matcher: &globset::GlobMatcher) -> Vec<P
         .filter_entry(|entry| entry.file_name() != "node_modules")
         .build();
     for entry in walker.flatten() {
-        // Skip directories; match everything else (regular files and any
-        // symlinked manifest) against the glob, reads fail gracefully.
-        if entry.file_type().is_none_or(|ft| ft.is_dir()) {
+        let Some(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             continue;
         }
         let path = entry.path();
+        if file_type.is_symlink()
+            && !is_contained_regular_file_symlink(path, canonical_root.as_deref())
+        {
+            tracing::debug!(
+                path = %path.display(),
+                "skipping manifest symlink with a broken, non-file, or outside-root target"
+            );
+            continue;
+        }
         if let Some(rel) = root_relative_forward_slash(path, root)
             && matcher.is_match(Path::new(&rel))
         {
@@ -516,6 +527,16 @@ fn discover_manifest_paths(root: &Path, matcher: &globset::GlobMatcher) -> Vec<P
     // across machines and CI runners.
     out.sort();
     out
+}
+
+fn is_contained_regular_file_symlink(path: &Path, canonical_root: Option<&Path>) -> bool {
+    let Some(root) = canonical_root else {
+        return false;
+    };
+    let Ok(target) = path.canonicalize() else {
+        return false;
+    };
+    target.starts_with(root) && target.metadata().is_ok_and(|metadata| metadata.is_file())
 }
 
 /// Root-relative forward-slash string for a discovered (absolute) path, or
@@ -694,6 +715,53 @@ mod tests {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, body).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn symlink_file(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).expect("create file symlink");
+    }
+
+    #[cfg(windows)]
+    fn symlink_file(target: &Path, link: &Path) {
+        std::os::windows::fs::symlink_file(target, link).expect("create file symlink");
+    }
+
+    #[test]
+    fn manifest_symlinks_must_target_regular_files_inside_root() {
+        let dir = tempfile::tempdir().expect("create project");
+        let outside = tempfile::tempdir().expect("create outside dir");
+        let root = dir.path();
+        let targets = root.join("targets");
+        let plugins = root.join("plugins");
+        std::fs::create_dir_all(&targets).unwrap();
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::write(targets.join("inside.jsonc"), r#"{"type":"plugin"}"#).unwrap();
+        std::fs::write(outside.path().join("outside.jsonc"), r#"{"type":"plugin"}"#).unwrap();
+
+        symlink_file(
+            &targets.join("inside.jsonc"),
+            &plugins.join("inside-kibana.jsonc"),
+        );
+        symlink_file(
+            &outside.path().join("outside.jsonc"),
+            &plugins.join("outside-kibana.jsonc"),
+        );
+        symlink_file(
+            &targets.join("missing.jsonc"),
+            &plugins.join("broken-kibana.jsonc"),
+        );
+
+        let matcher = globset::Glob::new("**/*-kibana.jsonc")
+            .unwrap()
+            .compile_matcher();
+        let paths = discover_manifest_paths(root, &matcher);
+        let relative: Vec<String> = paths
+            .iter()
+            .filter_map(|path| root_relative_forward_slash(path, root))
+            .collect();
+
+        assert_eq!(relative, vec!["plugins/inside-kibana.jsonc"]);
     }
 
     fn kinds(reports: &[RuleReport]) -> Vec<WarningKind> {

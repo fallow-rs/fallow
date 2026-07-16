@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a remote ref, refuses to move an existing tag, and leaves multi-root
   workspaces unchanged until per-root baseline semantics exist.
 
+### Fixed
+
+- **Imported churn history is bounded and validated before analysis.** Churn
+  files now enforce a serialized size limit, reject paths outside the project,
+  and report line-total overflow as an input error instead of panicking or
+  wrapping.
+
+- **Unified diffs read from stdin enforce the same size cap as diff files.**
+  Oversized or invalid stdin now disables line filtering and reports all
+  findings instead of allocating an unbounded buffer or parsing a truncated
+  diff.
+
+- **Source and plugin-manifest symlinks stay inside the project root.** Broken
+  links, directory targets, and links to outside files are skipped before
+  content is read, while links to regular files inside the project remain
+  supported under their visible paths.
+
 ## [3.6.0] - 2026-07-15
 
 ### Changed
