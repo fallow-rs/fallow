@@ -108,15 +108,25 @@ pub fn run_viz(opts: &VizOptions<'_>) -> ExitCode {
 
     match opts.format {
         VizFormat::Html => write_html(opts, &data, elapsed),
-        VizFormat::Dot => {
-            println!("{}", generate_dot(&data));
-            ExitCode::SUCCESS
-        }
-        VizFormat::Mermaid => {
-            println!("{}", generate_mermaid(&data));
-            ExitCode::SUCCESS
-        }
+        VizFormat::Dot => write_text_format(opts, &generate_dot(&data)),
+        VizFormat::Mermaid => write_text_format(opts, &generate_mermaid(&data)),
     }
+}
+
+/// Emit a DOT/Mermaid document: to `--out` when given (symlink-safe,
+/// parent-creating, like the HTML path), otherwise to stdout.
+fn write_text_format(opts: &VizOptions<'_>, content: &str) -> ExitCode {
+    let Some(path) = opts.output_path else {
+        println!("{content}");
+        return ExitCode::SUCCESS;
+    };
+    if let Err(message) = write_output(path, content) {
+        return emit_error(&message, 2, OutputFormat::Human);
+    }
+    if !opts.quiet {
+        eprintln!("  → {}", path.display());
+    }
+    ExitCode::SUCCESS
 }
 
 // ── HTML generation ─────────────────────────────────────────────
@@ -138,7 +148,7 @@ fn escape_payload_json(json: &str) -> String {
 
 /// Write the rendered HTML, refusing to follow a planted symlink and
 /// creating missing `--out` parent directories.
-fn write_output(path: &Path, html: &str) -> Result<(), String> {
+fn write_output(path: &Path, content: &str) -> Result<(), String> {
     if let Ok(meta) = path.symlink_metadata()
         && meta.file_type().is_symlink()
     {
@@ -158,7 +168,7 @@ fn write_output(path: &Path, html: &str) -> Result<(), String> {
             )
         })?;
     }
-    std::fs::write(path, html).map_err(|e| format!("Failed to write HTML: {e}"))
+    std::fs::write(path, content).map_err(|e| format!("Failed to write output file: {e}"))
 }
 
 fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duration) -> ExitCode {
@@ -286,6 +296,7 @@ fn generate_mermaid(data: &VizData) -> String {
     for (i, f) in data.files.iter().enumerate() {
         let escaped_path = sanitize_label(&f.path)
             .replace('"', "#quot;")
+            .replace('[', "#91;")
             .replace(']', "#93;");
         let _ = writeln!(out, "  n{i}[\"{escaped_path}\"]");
     }
@@ -466,13 +477,24 @@ mod tests {
     #[test]
     fn generate_mermaid_strips_control_characters_from_paths() {
         let mut data = sample_data();
-        data.files[0].path = "evil\r\nname\t].ts".to_string();
+        data.files[0].path = "evil\r\nname\t[].ts".to_string();
         let mermaid = generate_mermaid(&data);
         // CR and LF collapse to spaces, other control characters drop, and
-        // the bracket still escapes; the node stays on one line.
-        assert!(mermaid.contains("n0[\"evil  name#93;.ts\"]"));
+        // both brackets escape; the node stays on one line.
+        assert!(mermaid.contains("n0[\"evil  name#91;#93;.ts\"]"));
         assert!(!mermaid.contains("evil\r"));
         assert!(!mermaid.contains("evil\n"));
+    }
+
+    #[test]
+    fn mermaid_escapes_dynamic_route_brackets() {
+        // Next.js/Remix/SvelteKit `[id]` segments must not reach a raw
+        // `[` in the Mermaid label, which would break its parser.
+        let mut data = sample_data();
+        data.files[0].path = "app/routes/[id]/page.tsx".to_string();
+        let mermaid = generate_mermaid(&data);
+        assert!(mermaid.contains("n0[\"app/routes/#91;id#93;/page.tsx\"]"));
+        assert!(!mermaid.contains("[id]"));
     }
 
     #[cfg(unix)]
@@ -504,6 +526,32 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&target).expect("read output"),
             "<html></html>"
+        );
+    }
+
+    #[test]
+    fn text_format_honors_out_path() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("graph.dot");
+        let config_path = None;
+        let opts = VizOptions {
+            root: temp.path(),
+            config_path: &config_path,
+            no_cache: false,
+            threads: 1,
+            quiet: true,
+            production: false,
+            allow_remote_extends: false,
+            output_path: Some(target.as_path()),
+            no_open: true,
+            format: VizFormat::Dot,
+        };
+
+        let _ = write_text_format(&opts, "digraph fallow {}\n");
+
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("--out should have been written"),
+            "digraph fallow {}\n"
         );
     }
 }
