@@ -551,6 +551,48 @@ const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
     for (const c of list) c.cy += globalMid - mid;
   }
 
+  // Import-community clustering collapses into few layers (the
+  // communities import each other), which the rank layout stacks as a
+  // tall column. When the result is portrait, re-wrap the clusters
+  // into rows targeting a wide aspect instead.
+  const tallMinX = Math.min(...flowing.map((c) => c.cx - c.r));
+  const tallMaxX = Math.max(...flowing.map((c) => c.cx + c.r));
+  const tallMinY = Math.min(...flowing.map((c) => c.cy - c.r));
+  const tallMaxY = Math.max(...flowing.map((c) => c.cy + c.r));
+  const tallAspect = (tallMaxX - tallMinX) / Math.max(1, tallMaxY - tallMinY);
+  if (tallAspect < 1 && flowing.length > 3) {
+    const GRID_GAP = 150;
+    const list = [...flowing].sort((a, b) => a.layer - b.layer || a.cy - b.cy);
+    const totalW = list.reduce((sum, c) => sum + c.r * 2 + GRID_GAP, 0);
+    const avgRowH = list.reduce((sum, c) => sum + c.r * 2, 0) / list.length + GRID_GAP;
+    const rowW = Math.max(
+      Math.sqrt(2 * totalW * avgRowH),
+      Math.max(...list.map((c) => c.r * 2 + GRID_GAP)),
+    );
+    let x = 0;
+    let rowTop = 0;
+    let rowMaxR = 0;
+    const flushRow = (row: ClusterInfo[]): void => {
+      for (const c of row) c.cy = rowTop + rowMaxR;
+      rowTop += rowMaxR * 2 + GRID_GAP;
+    };
+    let row: ClusterInfo[] = [];
+    for (const c of list) {
+      if (x + c.r * 2 > rowW && row.length > 0) {
+        flushRow(row);
+        row = [];
+        x = 0;
+        rowMaxR = 0;
+      }
+      c.cx = x + c.r;
+      x += c.r * 2 + GRID_GAP;
+      rowMaxR = Math.max(rowMaxR, c.r);
+      row.push(c);
+    }
+    flushRow(row);
+    return;
+  }
+
   // The rank layout tends toward a flat ribbon (aspect 4:1+) that leaves
   // half the viewport empty. Spread rows vertically toward a presentable
   // aspect and stagger single-cluster layers off the midline; x gaps
@@ -1879,6 +1921,9 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
 
 /** Screen-space axis endpoints: the one annotation that explains the x layout. */
 const drawAxisMarkers = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+  // The entry-to-shared axis only describes the folder rank layout;
+  // import communities carry no left-right meaning.
+  if (gvs.clusterMode === "imports") return;
   const kRel = gvs.transform.k / gvs.fitK;
   if (kRel > 1.3 || state.selected !== null) return;
   const { ctx, theme } = state;
