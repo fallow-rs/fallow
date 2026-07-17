@@ -276,7 +276,7 @@ pub fn build_viz_data(input: &VizBuildInput<'_>) -> VizData {
         },
     );
 
-    let summary = build_summary(input, &files, &clones);
+    let summary = build_summary(input, &files, &clones, &cycles, &violations);
 
     VizData {
         root: display_root(root),
@@ -712,6 +712,8 @@ fn build_summary(
     input: &VizBuildInput<'_>,
     files: &[VizFile],
     clones: &[VizCloneGroup],
+    cycles: &[Vec<u32>],
+    violations: &[VizViolation],
 ) -> VizSummary {
     let results = input.results;
     VizSummary {
@@ -725,10 +727,10 @@ fn build_summary(
             + results.unused_dev_dependencies.len()
             + results.unused_optional_dependencies.len(),
         unresolved_imports: results.unresolved_imports.len(),
-        circular_deps: results.circular_dependencies.len(),
+        circular_deps: cycles.len(),
         clone_groups: clones.len(),
         duplicated_lines: clones.iter().map(|c| c.lines * c.instances.len()).sum(),
-        boundary_violations: results.boundary_violations.len(),
+        boundary_violations: violations.len(),
         hotspot_files: files
             .iter()
             .filter(|f| f.max_cyclomatic >= HOTSPOT_CYCLOMATIC_FLOOR)
@@ -1051,9 +1053,9 @@ mod tests {
         assert!(data.files[0].in_cycle);
         assert!(data.files[1].in_cycle);
         assert!(!data.files[2].in_cycle);
-        // Characterization: the summary still counts the RAW results, so the
-        // dropped cycle is counted anyway. plan 043 changes this.
-        assert_eq!(data.summary.circular_deps, 2);
+        // The summary counts the rendered cycles, not the raw results, so
+        // the dropped cycle does not inflate the header number.
+        assert_eq!(data.summary.circular_deps, data.cycles.len());
     }
 
     #[test]
@@ -1080,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_counts_match_arrays_except_known_quirk() {
+    fn summary_counts_match_rendered_arrays() {
         let fx = fixture();
         let data = build_viz_data(&fx.input());
         let s = &data.summary;
@@ -1093,12 +1095,11 @@ mod tests {
         assert_eq!(s.hotspot_files, 0);
         assert_eq!(s.unused_files, 0);
         assert_eq!(s.unused_exports, 0);
-        // KNOWN QUIRK: these two count the RAW analysis results instead of
-        // the rendered arrays, so unresolvable entries inflate the header
-        // numbers. plan 043 changes this.
-        assert_eq!(s.circular_deps, 2);
-        assert_ne!(s.circular_deps, data.cycles.len());
-        assert_eq!(s.boundary_violations, 2);
-        assert_ne!(s.boundary_violations, data.violations.len());
+        // The raw results carry one unresolvable cycle and one unresolvable
+        // violation; the header counts only what the arrays render.
+        assert_eq!(s.circular_deps, data.cycles.len());
+        assert_eq!(s.circular_deps, 1);
+        assert_eq!(s.boundary_violations, data.violations.len());
+        assert_eq!(s.boundary_violations, 1);
     }
 }
