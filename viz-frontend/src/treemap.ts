@@ -514,7 +514,9 @@ const colorRank = (state: AppState, color: string): number => {
   if (color === state.theme.cellNeutral) return 0;
   if (color === state.theme.red) return 4;
   if (color === state.theme.amber) return 3;
-  if (color === state.theme.cellEntry) return 1;
+  // Entry tint never wins a summary tile: in the overview it is an
+  // outline-only marker, and a solid blue block would overclaim.
+  if (color === state.theme.cellEntry) return 0;
   return 2;
 };
 
