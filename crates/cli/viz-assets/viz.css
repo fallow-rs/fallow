@@ -505,9 +505,12 @@ button {
   width: 100%;
 }
 
-/* Truncate the dim directory prefix, never the filename. */
+/* Truncate the dim directory prefix, never the filename. The label
+   grows to fill the row so it stays left-aligned (space-between would
+   otherwise center it between the bullet and the metric). */
 #panel .rank-list .rank-label {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   white-space: nowrap;
 }
@@ -769,6 +772,12 @@ button {
   outline: 2px solid var(--blue);
   outline-offset: 1px;
 }
+
+/* Syntax highlighting for the clone-preview snippet. */
+#panel pre .tok-kw { color: var(--blue-text); }
+#panel pre .tok-str { color: var(--green-text); }
+#panel pre .tok-num { color: var(--amber-text); }
+#panel pre .tok-com { color: var(--text-muted); font-style: italic; }
 
 #panel pre {
   border-radius: var(--radius-sm);

@@ -409,6 +409,42 @@ export const renderPanel = (
   }
 };
 
+/** Keywords the preview highlighter tints as language syntax. */
+const CODE_KEYWORDS = new Set([
+  "const", "let", "var", "function", "return", "if", "else", "for", "while",
+  "do", "switch", "case", "break", "continue", "new", "class", "extends",
+  "super", "this", "import", "export", "from", "default", "async", "await",
+  "yield", "typeof", "instanceof", "in", "of", "void", "delete", "try",
+  "catch", "finally", "throw", "null", "true", "false", "undefined", "as",
+  "interface", "type", "enum", "public", "private", "readonly", "static",
+]);
+
+/**
+ * Minimal JS/TS syntax highlighting for the clone preview. One regex
+ * splits comments, strings, numbers, and identifiers; everything else
+ * stays plain. Self-contained (no dependency), good enough for a
+ * read-only snippet, and preserves whitespace inside the <pre>.
+ */
+const CODE_TOKEN =
+  /(\/\/.*|\/\*[\s\S]*?\*\/)|(`(?:\\[\s\S]|[^`\\])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(\b\d[\w.]*\b)|([A-Za-z_$][\w$]*)/g;
+
+const highlightCode = (pre: HTMLElement, code: string): void => {
+  let last = 0;
+  for (let m = CODE_TOKEN.exec(code); m !== null; m = CODE_TOKEN.exec(code)) {
+    if (m.index > last) pre.appendChild(document.createTextNode(code.slice(last, m.index)));
+    const [text, comment, str, num, ident] = m;
+    let cls = "";
+    if (comment !== undefined) cls = "tok-com";
+    else if (str !== undefined) cls = "tok-str";
+    else if (num !== undefined) cls = "tok-num";
+    else if (ident !== undefined && CODE_KEYWORDS.has(ident)) cls = "tok-kw";
+    if (cls) pre.appendChild(el("span", cls, text));
+    else pre.appendChild(document.createTextNode(text));
+    last = m.index + text.length;
+  }
+  if (last < code.length) pre.appendChild(document.createTextNode(code.slice(last)));
+};
+
 const elCode = (text: string): HTMLElement => {
   const code = document.createElement("code");
   code.textContent = text;
@@ -553,7 +589,7 @@ const renderLensPanel = (
       ].join("\n"),
     ),
   );
-  const cap = 30;
+  const cap = 100;
   const ul = el("ul", "link-list rank-list");
   for (const row of rows.slice(0, cap)) {
     const li = el("li");
@@ -639,14 +675,12 @@ const renderClonePanel = (
   copies.appendChild(ul);
   panel.appendChild(copies);
 
+  const shared = sectionEl("the shared code");
   if (group.preview) {
-    const prev = sectionEl("the shared code");
     const pre = el("pre");
-    pre.textContent = group.preview;
-    prev.appendChild(pre);
-    panel.appendChild(prev);
+    highlightCode(pre, group.preview);
+    shared.appendChild(pre);
   }
-
   const first = group.instances[0];
   if (first) {
     const hint = el("div", "action-hint");
@@ -654,8 +688,9 @@ const renderClonePanel = (
       "verify: ",
       elCode(`fallow dupes --trace ${state.data.files[first.file].path}:${first.start_line}`),
     );
-    panel.appendChild(hint);
+    shared.appendChild(hint);
   }
+  if (shared.childNodes.length > 1) panel.appendChild(shared);
 };
 
 /**
