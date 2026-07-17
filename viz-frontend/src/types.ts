@@ -124,7 +124,7 @@ export interface LayoutCell {
 
 export type ActiveView = "map" | "graph";
 
-export type Lens = "deadcode" | "dupes" | "boundaries" | "hotspots";
+export type Lens = "overview" | "deadcode" | "dupes" | "boundaries" | "hotspots";
 
 /** A drilled-down aggregated road (cluster-to-cluster import bundle). */
 export interface RoadSelection {

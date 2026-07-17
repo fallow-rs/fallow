@@ -13,6 +13,7 @@ import {
 import {
   centerOnFile,
   clearGraphFocus,
+  dismissIntro,
   getClusterMode,
   graphFocusSearch,
   graphHandleClick,
@@ -128,7 +129,6 @@ const init = (): void => {
   };
 
   stage.appendChild(canvas);
-  stage.appendChild(refs.emptyState);
   const panel = createPanel();
   stage.appendChild(panel);
   app.appendChild(stage);
@@ -291,6 +291,7 @@ const init = (): void => {
 
   canvas.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
+    dismissIntro(state);
     const { x, y } = canvasPoint(e);
     if (state.view === "graph" && minimapHit(state, x, y)) {
       minimapPan(state, x, y);
@@ -344,7 +345,7 @@ const init = (): void => {
   });
 
   // ── Keyboard ──────────────────────────────────────────────────
-  const lensOrder: Lens[] = ["deadcode", "dupes", "boundaries", "hotspots"];
+  const lensOrder: Lens[] = ["overview", "deadcode", "dupes", "boundaries", "hotspots"];
   window.addEventListener("keydown", (e) => {
     const target = e.target as HTMLElement | null;
     const inInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
@@ -387,9 +388,9 @@ const init = (): void => {
       refs?.search.focus();
     } else if (e.key === "?") {
       toggleHelp();
-    } else if (e.key >= "1" && e.key <= "4") {
+    } else if (e.key >= "1" && e.key <= "5") {
       setLens(lensOrder[Number(e.key) - 1]);
-    } else if (e.key === "m") {
+    } else if (e.key === "t" || e.key === "m") {
       setView("map");
     } else if (e.key === "g") {
       setView("graph");
@@ -432,11 +433,14 @@ const countLensFindings = (
   state: AppState,
   node: TreeNode,
 ): { value: number; label: string } | null => {
+  if (state.lens === "overview") return null;
   let value = 0;
   const walk = (n: TreeNode): void => {
     if (n.fileIndex !== null) {
       const file = state.data.files[n.fileIndex];
       switch (state.lens) {
+        case "overview":
+          break;
         case "deadcode":
           if (file.status === "unused" || file.status === "hasUnusedExports") value++;
           break;
@@ -455,11 +459,12 @@ const countLensFindings = (
     for (const child of n.children) walk(child);
   };
   walk(node);
-  const labels: Record<typeof state.lens, string> = {
-    deadcode: "dead code",
+  const labels: Record<Lens, string> = {
+    overview: "",
+    deadcode: "unused",
     dupes: "with clones",
     boundaries: "violating",
-    hotspots: "hotspots",
+    hotspots: "complex",
   };
   return { value, label: labels[state.lens] };
 };

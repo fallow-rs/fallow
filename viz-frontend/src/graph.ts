@@ -126,6 +126,11 @@ interface GraphViewState {
   /** Transient HUD notice (e.g. "no dependency path found"). */
   notice: string;
   noticeAt: number;
+  /** Standalone strip expanded state + chip hit rect (screen space). */
+  standaloneOpen: boolean;
+  standaloneChip: { x: number; y: number; w: number; h: number } | null;
+  /** First-run captions synced to the reveal. */
+  showIntro: boolean;
   /** First-render reveal choreography start (0 = pending, -1 = skipped). */
   revealAt: number;
 }
@@ -198,6 +203,9 @@ const getGVS = (state: AppState): GraphViewState => {
       notice: "",
       noticeAt: 0,
       revealAt: 0,
+      standaloneOpen: false,
+      standaloneChip: null,
+      showIntro: false,
     };
   }
   return ext._gvs;
@@ -786,7 +794,10 @@ export const initGraphNodes = (state: AppState): void => {
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
+  const anyConnected = clusters.some((c) => !c.isolated);
   for (const c of clusters) {
+    // Standalone clusters are hidden until toggled: keep them out of the fit.
+    if (c.isolated && anyConnected) continue;
     minX = Math.min(minX, c.cx - c.r);
     minY = Math.min(minY, c.cy - c.r);
     maxX = Math.max(maxX, c.cx + c.r);
@@ -823,7 +834,27 @@ export const initGraphNodes = (state: AppState): void => {
 
   gvs.initialized = true;
   gvs.revealAt = 0;
+  gvs.showIntro = shouldShowIntro() && !state.reducedMotion;
   renderGraph(state);
+};
+
+const INTRO_KEY = "fallow-viz-intro-seen";
+
+const shouldShowIntro = (): boolean => {
+  try {
+    if (new URLSearchParams(window.location.search).get("intro") === "1") return true;
+    return window.localStorage.getItem(INTRO_KEY) === null;
+  } catch {
+    return true;
+  }
+};
+
+const markIntroSeen = (): void => {
+  try {
+    window.localStorage.setItem(INTRO_KEY, "1");
+  } catch {
+    // Storage unavailable (some file:// contexts): show it again next time.
+  }
 };
 
 // ── Geometry helpers ────────────────────────────────────────────
@@ -1006,10 +1037,9 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   ctx.translate(transform.x, transform.y);
   ctx.scale(transform.k, transform.k);
 
-  drawLayerBands(state, gvs);
-
   // Hull fills.
   for (const cluster of clusters) {
+    if (cluster.isolated && !gvs.standaloneOpen) continue;
     if (cluster.hull.length < 3) continue;
     ctx.beginPath();
     hullPath(ctx, cluster.hull);
@@ -1056,29 +1086,36 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
 
   // Hull borders.
   for (const cluster of clusters) {
+    if (cluster.isolated && !gvs.standaloneOpen) continue;
     if (cluster.hull.length < 3) continue;
     ctx.beginPath();
     hullPath(ctx, cluster.hull);
-    ctx.strokeStyle = cluster.tangle ? theme.amber : theme.borderDefault;
-    ctx.globalAlpha = (cluster.tangle ? 0.7 : 0.45) * reveal.cluster(cluster);
+    const showTangle = cluster.tangle && state.lens === "boundaries";
+    ctx.strokeStyle = showTangle ? theme.amber : theme.borderDefault;
+    ctx.globalAlpha = (showTangle ? 0.7 : 0.45) * reveal.cluster(cluster);
     ctx.lineWidth = 1 / transform.k;
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
   // Roads: tapered ribbons, wide at importer, narrow at imported.
+  // At fit zoom the ribbons carry the whole story, so hold a minimum
+  // on-screen width and lift the alpha; both relax as the user zooms in.
+  const roadBoost = Math.min(1, Math.max(0, 1.6 - kRel));
+  const minRoadW = 1.4 / transform.k;
   for (const road of roads) {
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
-    const wSrc = roadWidth(road.count);
+    const wSrc = Math.max(minRoadW, roadWidth(road.count));
     ctx.beginPath();
     taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.6, wSrc * 0.3));
     ctx.fillStyle = theme.textLow;
-    ctx.globalAlpha = 0.28 * reveal.roads;
+    ctx.globalAlpha = (0.28 + 0.16 * roadBoost) * reveal.roads;
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    // Severity overdraw parallel to the road (never aggregated away).
-    if (road.violations > 0 || (road.bidi && road.cycleEdges > 0)) {
+    // Severity overdraw parallel to the road (boundaries lens only;
+    // the overview stays neutral until the user asks a question).
+    if (state.lens === "boundaries" && (road.violations > 0 || (road.bidi && road.cycleEdges > 0))) {
       ctx.beginPath();
       ctx.moveTo(p0.x, p0.y + 4);
       ctx.bezierCurveTo(p1.x, p1.y + 4, p2.x, p2.y + 4, p3.x, p3.y + 4);
@@ -1097,8 +1134,8 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     }
   }
 
-  // Individual severity edges from mid zoom.
-  if (kRel >= LOD_SEVERITY) drawSeverityEdges(state, gvs);
+  // Individual severity edges from mid zoom (boundaries lens only).
+  if (state.lens === "boundaries" && kRel >= LOD_SEVERITY) drawSeverityEdges(state, gvs);
 
   // Hovered / selected road highlight: bright centerline, marching when hovered.
   const focusRoad = gvs.hoveredRoad ?? gvs.selectedRoad;
@@ -1153,6 +1190,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   // Nodes.
   for (const node of fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
+    if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
     const file = files[node.fileIndex];
     const color = lensColor(state.lens, theme, state.index, file);
     const recessive = color === theme.cellNeutral || color === theme.cellEntry;
@@ -1198,7 +1236,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
         ctx.lineWidth = 1.4 / transform.k;
         ctx.stroke();
       }
-      // Hub badge: heavily depended-on files get an extra ring + count.
+      // Hub ring always; the xN count joins once there is room (zoomed).
       if (file.importer_count >= gvs.hubFloor) {
         ctx.globalAlpha = Math.max(alpha, 0.85);
         ctx.strokeStyle = theme.textLow;
@@ -1206,15 +1244,17 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius + 3 / transform.k, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.font = FONT_MICRO;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = theme.textLow;
-        ctx.fillText(
-          `×${formatCount(file.importer_count)}`,
-          node.x + node.radius + 6 / transform.k,
-          node.y,
-        );
+        if (kRel >= 1.5 || state.graphHovered === node.fileIndex) {
+          ctx.font = FONT_MICRO;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = theme.textLow;
+          ctx.fillText(
+            `×${formatCount(file.importer_count)}`,
+            node.x + node.radius + 6 / transform.k,
+            node.y,
+          );
+        }
       }
     }
     ctx.globalAlpha = 1;
@@ -1273,7 +1313,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     drawRoadLabels(state, gvs);
     drawClusterLabels(state, gvs);
   }
-  drawAxisCaptions(state, w, h);
+  drawCanvasLegend(state, w, h);
   drawPathTrace(state, gvs, w, h);
 
   drawMinimap(state, gvs, w, h);
@@ -1298,11 +1338,14 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     }
   }
 
+  drawIntroCaptions(state, gvs, w);
+
   // Motion frames while something animates.
   const animating =
     (gvs.hoveredRoad !== null && !state.reducedMotion) ||
     gvs.pulseFile !== null ||
-    reveal.t < 1;
+    reveal.t < 1 ||
+    gvs.showIntro;
   if (animating) {
     cancelAnimationFrame(gvs.raf);
     gvs.raf = requestAnimationFrame(() => {
@@ -1363,6 +1406,66 @@ const drawZoomLabels = (state: AppState, gvs: GraphViewState, w: number, h: numb
   }
 };
 
+/** Three staged captions that teach the map during the opening reveal. */
+const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): void => {
+  if (!gvs.showIntro || gvs.revealAt <= 0) return;
+  const { ctx, theme } = state;
+  const elapsed = performance.now() - gvs.revealAt;
+  const s = state.data.summary;
+  const findingBits: string[] = [];
+  if (s.unused_files + s.unused_exports > 0) {
+    findingBits.push(`${formatCount(s.unused_files + s.unused_exports)} unused`);
+  }
+  if (s.clone_groups > 0) findingBits.push(`${formatCount(s.clone_groups)} duplications`);
+  if (s.circular_deps + s.boundary_violations > 0) {
+    findingBits.push(`${formatCount(s.circular_deps + s.boundary_violations)} boundary issues`);
+  }
+  if (s.hotspot_files > 0) findingBits.push(`${formatCount(s.hotspot_files)} complexity findings`);
+  const captions: Array<[number, number, string]> = [
+    [0, 2400, "Every dot is a file · the shapes group them by folder"],
+    [2400, 4800, "Connections are imports · the thick end is the importer"],
+    [
+      4800,
+      8200,
+      findingBits.length > 0
+        ? `The lenses above recolor the map: ${findingBits.join(", ")}`
+        : "The lenses above recolor the map by findings · this codebase is clean",
+    ],
+  ];
+  const total = captions[captions.length - 1][1];
+  if (elapsed >= total) {
+    gvs.showIntro = false;
+    markIntroSeen();
+    return;
+  }
+  for (const [from, to, text] of captions) {
+    if (elapsed < from || elapsed >= to) continue;
+    const local = (elapsed - from) / (to - from);
+    const alpha = local < 0.12 ? local / 0.12 : local > 0.85 ? (1 - local) / 0.15 : 1;
+    ctx.font = FONT_CARD;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const textW = ctx.measureText(text).width;
+    ctx.globalAlpha = Math.max(0, alpha);
+    // Backed chip so the caption reads over cluster labels behind it.
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(w / 2 - textW / 2 - 14, 12, textW + 28, 30);
+    ctx.strokeStyle = theme.borderSubtle;
+    ctx.strokeRect(w / 2 - textW / 2 - 13.5, 12.5, textW + 27, 29);
+    ctx.fillStyle = theme.textHigh;
+    ctx.fillText(text, w / 2, 27.5);
+    ctx.globalAlpha = 1;
+  }
+};
+
+/** Any real interaction ends the intro early. */
+export const dismissIntro = (state: AppState): void => {
+  const gvs = getGVS(state);
+  if (!gvs.showIntro) return;
+  gvs.showIntro = false;
+  markIntroSeen();
+};
+
 // ── Minimap ─────────────────────────────────────────────────────
 
 const MINIMAP_W = 172;
@@ -1414,6 +1517,8 @@ const minimapFrame = (
 
 const drawMinimap = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
   const { ctx, theme } = state;
+  // Only earns pixels once the camera left the fit view.
+  if (gvs.transform.k / gvs.fitK < 1.08) return;
   const frame = minimapFrame(state, gvs, w, h);
   if (!frame) return;
 
@@ -1463,6 +1568,7 @@ const drawMinimap = (state: AppState, gvs: GraphViewState, w: number, h: number)
 export const minimapHit = (state: AppState, x: number, y: number): boolean => {
   const gvs = getGVS(state);
   if (!gvs.initialized || state.selected !== null) return false;
+  if (gvs.transform.k / gvs.fitK < 1.08) return false;
   const stageEl = state.canvas.parentElement;
   const w = stageEl ? stageEl.clientWidth : window.innerWidth;
   const h = stageEl ? stageEl.clientHeight : window.innerHeight;
@@ -1575,37 +1681,6 @@ const hullPath = (ctx: CanvasRenderingContext2D, hull: Pt[]): void => {
   ctx.closePath();
 };
 
-const drawLayerBands = (state: AppState, gvs: GraphViewState): void => {
-  const { ctx, theme } = state;
-  const layers = new Map<number, { min: number; max: number }>();
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const c of gvs.clusters) {
-    if (c.isolated) continue;
-    const entry = layers.get(c.layer) ?? { min: Infinity, max: -Infinity };
-    entry.min = Math.min(entry.min, c.cx - c.r);
-    entry.max = Math.max(entry.max, c.cx + c.r);
-    layers.set(c.layer, entry);
-    minY = Math.min(minY, c.cy - c.r - 80);
-    maxY = Math.max(maxY, c.cy + c.r + 80);
-  }
-  const keys = [...layers.keys()].sort((a, b) => a - b);
-  ctx.strokeStyle = theme.textMuted;
-  ctx.globalAlpha = 0.08;
-  ctx.lineWidth = 1 / gvs.transform.k;
-  for (let i = 1; i < keys.length; i++) {
-    const prev = layers.get(keys[i - 1]);
-    const cur = layers.get(keys[i]);
-    if (!prev || !cur) continue;
-    const x = (prev.max + cur.min) / 2;
-    ctx.beginPath();
-    ctx.moveTo(x, minY);
-    ctx.lineTo(x, maxY);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-};
-
 const worldToScreen = (gvs: GraphViewState, p: Pt): Pt => ({
   x: p.x * gvs.transform.k + gvs.transform.x,
   y: p.y * gvs.transform.k + gvs.transform.y,
@@ -1617,16 +1692,15 @@ const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const kRel = gvs.transform.k / gvs.fitK;
-  for (const road of gvs.roads) {
-    const severe = road.violations > 0 || (road.bidi && road.cycleEdges > 0);
-    // Small roads keep their labels for zoomed-in reading only.
-    if (!severe && (road.count < 5 ? kRel < 1.3 : false)) continue;
-    if (road.count < 2 && !severe) continue;
+  for (let ri = 0; ri < gvs.roads.length; ri++) {
+    const road = gvs.roads[ri];
+    const focused = gvs.hoveredRoad === ri || gvs.selectedRoad === ri;
+    // Quiet by default: numbers appear on zoom or on intent (hover/click).
+    if (!focused && kRel < 1.5) continue;
+    if (road.count < 2 && !focused) continue;
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
     const mid = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, 0.5));
-    let label = formatCount(road.count);
-    if (road.violations > 0) label += ` !${road.violations}`;
-    if (road.bidi && road.cycleEdges > 0) label += " ~";
+    const label = formatCount(road.count);
     const textW = ctx.measureText(label).width;
     ctx.fillStyle = theme.bg;
     ctx.globalAlpha = 0.92;
@@ -1635,8 +1709,8 @@ const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
     ctx.strokeStyle = theme.borderSubtle;
     ctx.lineWidth = 1;
     ctx.strokeRect(mid.x - textW / 2 - 3.5, mid.y - 7.5, textW + 7, 15);
-    if (road.violations > 0) ctx.fillStyle = theme.redText;
-    else if (road.bidi && road.cycleEdges > 0) ctx.fillStyle = theme.amberText;
+    if (state.lens === "boundaries" && road.violations > 0) ctx.fillStyle = theme.redText;
+    else if (state.lens === "boundaries" && road.bidi && road.cycleEdges > 0) ctx.fillStyle = theme.amberText;
     else ctx.fillStyle = theme.textLow;
     ctx.fillText(label, mid.x, mid.y + 0.5);
   }
@@ -1653,15 +1727,22 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     (a, b) => b.indices.length - a.indices.length || (a.key < b.key ? -1 : 1),
   );
   for (const cluster of ordered) {
+    if (cluster.isolated && !getGVS(state).standaloneOpen) continue;
     let topLeft = cluster.hull[0] ?? { x: cluster.cx, y: cluster.cy };
     for (const p of cluster.hull) {
       if (p.y < topLeft.y || (p.y === topLeft.y && p.x < topLeft.x)) topLeft = p;
     }
     const s = worldToScreen(gvs, topLeft);
-    const label = middleTruncate(ctx, cluster.key.toUpperCase(), 210);
-    const sub = formatCount(cluster.indices.length);
+    // Single-file clusters: just the filename, no count. The full path
+    // lives in the tooltip; short labels collide far less.
+    const single = cluster.indices.length === 1;
+    const raw = single
+      ? basename(state.data.files[cluster.indices[0]].path)
+      : cluster.key;
+    const label = middleTruncate(ctx, raw.toUpperCase(), 210);
+    const sub = single ? "" : formatCount(cluster.indices.length);
     const labelW = ctx.measureText(label).width;
-    const subW = ctx.measureText(sub).width;
+    const subW = sub ? ctx.measureText(sub).width : -8;
     const x = s.x - 4;
     let y = s.y - 12;
     const boxW = labelW + subW + 17;
@@ -1677,42 +1758,74 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     ctx.globalAlpha = 0.92;
     ctx.fillRect(x - 3, y - 8, labelW + subW + 16, 16);
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = cluster.tangle ? theme.amber : theme.borderSubtle;
+    ctx.strokeStyle =
+      cluster.tangle && state.lens === "boundaries" ? theme.amber : theme.borderSubtle;
     ctx.strokeRect(x - 3.5, y - 8.5, labelW + subW + 17, 17);
     ctx.fillStyle = cluster.isolated ? theme.textMuted : theme.textLow;
     ctx.fillText(label, x + 2, y + 0.5);
-    ctx.fillStyle = theme.textMuted;
-    ctx.fillText(sub, x + labelW + 8, y + 0.5);
+    if (sub) {
+      ctx.fillStyle = theme.textMuted;
+      ctx.fillText(sub, x + labelW + 8, y + 0.5);
+    }
   }
 
-  // Caption for the standalone strip.
+  // Standalone strip: a single chip when collapsed, caption when open.
   const isolated = gvs.clusters.filter((c) => c.isolated);
+  gvs.standaloneChip = null;
   if (isolated.length > 0) {
+    const fileCount = isolated.reduce((sum, c) => sum + c.indices.length, 0);
     const minX = Math.min(...isolated.map((c) => c.cx - c.r));
     const minY = Math.min(...isolated.map((c) => c.cy - c.r));
     const s = worldToScreen(gvs, { x: minX, y: minY });
     ctx.font = FONT_MICRO;
-    ctx.fillStyle = theme.textMuted;
-    ctx.globalAlpha = 0.7;
-    ctx.fillText("STANDALONE · no project imports", s.x, s.y - 26);
-    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    if (gvs.standaloneOpen) {
+      ctx.fillStyle = theme.textMuted;
+      ctx.globalAlpha = 0.7;
+      ctx.fillText("STANDALONE · configs & CI · nothing imports them · click to collapse", s.x, s.y - 26);
+      ctx.globalAlpha = 1;
+      gvs.standaloneChip = { x: s.x - 4, y: s.y - 36, w: 420, h: 20 };
+    } else {
+      const label = `[ standalone · ${formatCount(fileCount)} files ]`;
+      const textW = ctx.measureText(label).width;
+      ctx.fillStyle = theme.bg;
+      ctx.globalAlpha = 0.9;
+      ctx.fillRect(s.x - 4, s.y - 10, textW + 8, 20);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = theme.borderSubtle;
+      ctx.strokeRect(s.x - 4.5, s.y - 10.5, textW + 9, 21);
+      ctx.fillStyle = theme.textMuted;
+      ctx.fillText(label, s.x, s.y + 0.5);
+      gvs.standaloneChip = { x: s.x - 4, y: s.y - 10, w: textW + 8, h: 20 };
+    }
   }
 };
 
-const drawAxisCaptions = (state: AppState, w: number, h: number): void => {
+const drawCanvasLegend = (state: AppState, w: number, h: number): void => {
   const { ctx, theme } = state;
+  const lines: Record<string, string> = {
+    overview:
+      "dot = file · roads = imports, thick end is the importer · entry code left, shared code right",
+    deadcode: "red = never imported · amber = has unused exports",
+    dupes: "deeper amber = more duplicated lines",
+    boundaries: "red = crosses a boundary rule or joins a cycle · amber outline = tangled folders",
+    hotspots: "amber to red = harder to change safely",
+  };
+  const text = lines[state.lens] ?? "";
+  if (text === "") return;
   ctx.font = FONT_MICRO;
-  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const textW = ctx.measureText(text).width;
+  ctx.fillStyle = theme.bg;
+  ctx.globalAlpha = 0.85;
+  ctx.fillRect(10, h - 26, textW + 12, 18);
+  ctx.globalAlpha = 0.8;
   ctx.fillStyle = theme.textMuted;
-  ctx.globalAlpha = 0.7;
-  ctx.textAlign = "left";
-  ctx.fillText("ENTRY ▸", 14, 10);
-  ctx.textAlign = "right";
-  ctx.fillText("▸ SHARED", w - 14, 10);
-  ctx.textAlign = "left";
-  ctx.globalAlpha = 0.55;
-  ctx.fillText("thick ▸ thin = import direction", 14, h - 20);
+  ctx.fillText(text, 16, h - 17);
   ctx.globalAlpha = 1;
+  void w;
 };
 
 const drawSeverityEdges = (state: AppState, gvs: GraphViewState): void => {
@@ -2328,7 +2441,9 @@ export const resetGraphView = (state: AppState): void => {
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
+  const anyConnected = gvs.clusters.some((c) => !c.isolated);
   for (const c of gvs.clusters) {
+    if (c.isolated && anyConnected && !gvs.standaloneOpen) continue;
     minX = Math.min(minX, c.cx - c.r);
     minY = Math.min(minY, c.cy - c.r);
     maxX = Math.max(maxX, c.cx + c.r);
@@ -2378,6 +2493,11 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
     const node = nodeHitTest(state, x, y);
     return node !== null ? { kind: "file", fileIndex: node } : null;
   }
+  const chip = gvs.standaloneChip;
+  if (chip && x >= chip.x && x <= chip.x + chip.w && y >= chip.y && y <= chip.y + chip.h) {
+    gvs.hoveredRoad = null;
+    return { kind: "ui" };
+  }
   const node = nodeHitTest(state, x, y);
   if (node !== null) {
     gvs.hoveredRoad = null;
@@ -2423,6 +2543,12 @@ export const graphHandleClick = (state: AppState, x: number, y: number): GraphCl
     const node = nodeHitTest(state, x, y);
     if (node !== null) return { kind: "file", fileIndex: node };
     return { kind: "none" };
+  }
+  const chip = gvs.standaloneChip;
+  if (chip && x >= chip.x && x <= chip.x + chip.w && y >= chip.y && y <= chip.y + chip.h) {
+    gvs.standaloneOpen = !gvs.standaloneOpen;
+    renderGraph(state);
+    return { kind: "handled" };
   }
   const node = nodeHitTest(state, x, y);
   if (node !== null) return { kind: "file", fileIndex: node };

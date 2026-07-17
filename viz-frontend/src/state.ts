@@ -57,8 +57,8 @@ export const createState = (
     canvas,
     ctx,
     dpr: window.devicePixelRatio || 1,
-    view: "map",
-    lens: "deadcode",
+    view: "graph",
+    lens: "overview",
     drillPath: "",
     layout: [],
     hoveredCell: null,
@@ -109,7 +109,13 @@ export const applyHash = (state: AppState, hash: string): void => {
   const view = params.get("view");
   if (view === "map" || view === "graph") state.view = view;
   const lens = params.get("lens");
-  if (lens === "deadcode" || lens === "dupes" || lens === "boundaries" || lens === "hotspots") {
+  if (
+    lens === "overview" ||
+    lens === "deadcode" ||
+    lens === "dupes" ||
+    lens === "boundaries" ||
+    lens === "hotspots"
+  ) {
     state.lens = lens;
   }
   const path = params.get("path");

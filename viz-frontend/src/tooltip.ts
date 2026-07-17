@@ -45,7 +45,8 @@ const statGrid = (stats: Stat[]): HTMLElement => {
   return grid;
 };
 
-const header = (tip: HTMLDivElement, path: string): void => {
+const header = (tip: HTMLDivElement, kind: string, path: string): void => {
+  tip.appendChild(line("tip-kind", kind));
   const dir = dirname(path);
   if (dir) tip.appendChild(line("tip-dir", `${dir}/`));
   tip.appendChild(line("tip-name", basename(path)));
@@ -62,7 +63,7 @@ export const showFileTooltip = (
   const tip = getTip();
   tip.replaceChildren();
 
-  header(tip, file.path);
+  header(tip, "FILE", file.path);
 
   const facts: Stat[] = [{ value: formatSize(file.size), label: "size" }];
   if (file.export_count > 0) {
@@ -170,6 +171,7 @@ export const showRoadTooltip = (
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
+  tip.appendChild(line("tip-kind", "IMPORTS"));
   tip.appendChild(line("tip-name", `${srcKey} ▸ ${dstKey}`));
   const stats: Array<{ value: string; label: string; cls?: string }> = [
     { value: formatCount(count), label: "imports" },
@@ -196,6 +198,7 @@ export const showDirTooltip = (
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
+  tip.appendChild(line("tip-kind", "FOLDER"));
   tip.appendChild(line("tip-name", `${name}/`));
   const stats: Stat[] = [
     { value: formatCount(fileCount), label: "files" },

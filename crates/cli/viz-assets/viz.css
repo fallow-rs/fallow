@@ -158,77 +158,14 @@ button {
   letter-spacing: 0.08em;
 }
 
-/* Stat boxes: [ label value ] bracket chrome, clickable → lens */
-#stats {
+/* One-shot buttons top-right: png / ? / theme. Brackets-free chips. */
+.topbar-actions {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  gap: 6px;
   margin-left: auto;
 }
 
-.stat {
-  font-size: 12px;
-  padding: 2px 4px;
-  letter-spacing: 0.03em;
-  color: var(--text-low);
-  white-space: nowrap;
-  opacity: 0;
-  transform: translateY(2px);
-  transition: opacity 200ms ease-out, transform 200ms ease-out;
-}
-
-.stat.revealed {
-  opacity: 1;
-  transform: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .stat {
-    opacity: 1;
-    transform: none;
-    transition: none;
-  }
-}
-
-.stat .bracket {
-  color: var(--border-default);
-  transition: color 100ms ease-out;
-}
-
-.stat:hover .bracket,
-.stat:focus-visible .bracket {
-  color: var(--red);
-}
-
-.stat:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 2px;
-}
-
-.stat .value {
-  color: var(--text-high);
-  font-weight: 700;
-}
-
-.stat.sev-error .value {
-  color: var(--red-text);
-}
-
-.stat.sev-warn .value {
-  color: var(--amber-text);
-}
-
-.stat.sev-ok .value {
-  color: var(--green-text);
-}
-
-.stat.zero .value {
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-/* Theme toggle */
-#theme-toggle {
+.chip-btn {
   font-size: 12px;
   text-transform: lowercase;
   letter-spacing: 0.05em;
@@ -240,93 +177,147 @@ button {
   transition: background 100ms ease-out, color 100ms ease-out;
 }
 
-#theme-toggle:hover {
+.chip-btn:hover {
   background: var(--surface-3);
   color: var(--text-high);
 }
 
-#theme-toggle:active {
+.chip-btn:active {
   transform: translate(1px, 1px);
   box-shadow: 1px 1px 0 var(--border-default);
 }
 
-#theme-toggle:focus-visible {
+.chip-btn:focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
 }
 
-/* ── Toolbar ─────────────────────────────────────────────────── */
+/* ── Toolbar: labeled switch groups ──────────────────────────── */
 
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 22px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-0);
   flex-wrap: wrap;
 }
 
+.group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.group-label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+}
+
+.group-bracket {
+  color: var(--border-default);
+  font-size: 14px;
+}
+
 .seg {
   display: flex;
-  gap: 0;
+  align-items: stretch;
 }
 
 .seg button {
   font-size: 12px;
   text-transform: lowercase;
   letter-spacing: 0.05em;
-  padding: 4px 12px;
-  border: 1px solid var(--border-default);
-  color: var(--text-low);
-  background: var(--surface-0);
+  padding: 3px 11px;
+  border: none;
+  color: var(--text-muted);
+  background: transparent;
   transition: background 100ms ease-out, color 100ms ease-out;
 }
 
 .seg button + button {
-  border-left: none;
+  border-left: 1px solid var(--border-subtle);
 }
 
 .seg button:hover {
-  background: var(--surface-2);
   color: var(--text-high);
 }
 
 .seg button[aria-pressed="true"] {
   background: var(--text-high);
   color: var(--surface-0);
-  border-color: var(--text-high);
   font-weight: 700;
 }
 
 .seg button:focus-visible {
   outline: 2px solid var(--blue);
-  outline-offset: 2px;
+  outline-offset: 1px;
   position: relative;
   z-index: 1;
 }
 
-.seg button .badge {
+/* Lens tabs: name + count on line 1, plain-language gloss on line 2. */
+.lens-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  text-align: left;
+}
+
+.lens-tab .seg-name {
+  display: block;
+  line-height: 1.35;
+}
+
+.lens-tab .gloss {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.lens-tab[aria-pressed="true"] .gloss {
+  color: var(--surface-0);
+  opacity: 0.75;
+}
+
+.seg .badge {
   margin-left: 6px;
   font-weight: 700;
 }
 
-.seg button .badge.sev-error {
+.seg .badge.sev-error {
   color: var(--red-text);
 }
 
-.seg button .badge.sev-warn {
+.seg .badge.sev-warn {
   color: var(--amber-text);
 }
 
-.seg button[aria-pressed="true"] .badge.sev-error,
-.seg button[aria-pressed="true"] .badge.sev-warn {
+.seg button[aria-pressed="true"] .badge {
   color: inherit;
 }
 
-.seg button .badge.zero {
-  color: var(--text-muted);
-  font-weight: 400;
+.seg .badge:empty {
+  display: none;
+}
+
+/* One dim line that says what the active lens just did. */
+#lens-summary {
+  display: none;
+  padding: 5px 16px;
+  font-size: 11px;
+  color: var(--text-low);
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+#lens-summary.visible {
+  display: block;
 }
 
 /* Search */
@@ -366,38 +357,6 @@ button {
   font-weight: 700;
 }
 
-/* Legend */
-#legend {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--text-low);
-  flex-wrap: wrap;
-}
-
-.legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.legend-swatch {
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--border-strong);
-  display: inline-block;
-}
-
-.legend-ramp {
-  width: 72px;
-  height: 10px;
-  border: 1px solid var(--border-strong);
-  display: inline-block;
-}
-
 /* ── Stage ───────────────────────────────────────────────────── */
 
 #stage {
@@ -416,41 +375,6 @@ button {
 #canvas:focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: -2px;
-}
-
-/* Empty-state overlay (e.g. boundaries lens without zones) */
-#empty-state {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-#empty-state.visible {
-  display: flex;
-}
-
-#empty-state .box {
-  pointer-events: auto;
-  background: var(--surface-1);
-  border: 1px solid var(--border-default);
-  padding: 20px 28px;
-  max-width: 60ch;
-  font-size: 12px;
-  color: var(--text-low);
-}
-
-#empty-state .box .title {
-  color: var(--text-high);
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-#empty-state .box code {
-  color: var(--amber-text);
-  font-family: inherit;
 }
 
 /* ── Detail panel ────────────────────────────────────────────── */
@@ -756,6 +680,13 @@ button {
   z-index: 10;
 }
 
+#tooltip .tip-kind {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: var(--text-muted);
+  margin-bottom: 1px;
+}
+
 #tooltip .tip-dir {
   color: var(--text-muted);
   font-size: 10px;
@@ -830,30 +761,6 @@ button {
 }
 
 /* ── Help overlay ────────────────────────────────────────────── */
-
-#help-btn,
-#export-btn {
-  font-size: 12px;
-  padding: 3px 9px;
-  border: 1px solid var(--border-default);
-  color: var(--text-low);
-  background: var(--surface-1);
-  box-shadow: 2px 2px 0 var(--border-default);
-  text-transform: lowercase;
-  letter-spacing: 0.05em;
-}
-
-#help-btn:hover,
-#export-btn:hover {
-  background: var(--surface-3);
-  color: var(--text-high);
-}
-
-#help-btn:active,
-#export-btn:active {
-  transform: translate(1px, 1px);
-  box-shadow: 1px 1px 0 var(--border-default);
-}
 
 #help-overlay {
   position: fixed;

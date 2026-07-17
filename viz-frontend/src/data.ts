@@ -184,6 +184,8 @@ export const lensColor = (
   file: VizFile,
 ): string => {
   switch (lens) {
+    case "overview":
+      return file.status === "entryPoint" ? theme.cellEntry : theme.cellNeutral;
     case "deadcode":
       switch (file.status) {
         case "unused":
@@ -213,6 +215,8 @@ export const lensColor = (
 /** Whether the file carries a finding under the active lens (drives texture). */
 export const lensFlag = (lens: Lens, index: DataIndex, file: VizFile, fileIdx: number): boolean => {
   switch (lens) {
+    case "overview":
+      return false;
     case "deadcode":
       return file.status === "unused";
     case "dupes":
