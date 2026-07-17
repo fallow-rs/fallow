@@ -151,11 +151,27 @@ export const buildChrome = (
     b.appendChild(el("span", "tab-name", def.name));
     b.appendChild(el("span", "badge"));
     b.title = def.gloss;
-    b.setAttribute("aria-pressed", String(state.lens === def.id));
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(state.lens === def.id));
+    // Roving tabindex: only the active tab sits in the tab order.
+    b.tabIndex = state.lens === def.id ? 0 : -1;
     b.addEventListener("click", () => handlers.onLens(def.id));
     lensButtons.set(def.id, b);
     tabs.appendChild(b);
   }
+  // Arrow keys move the lens selection, as tablist semantics promise.
+  tabs.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const ids = LENSES.map((d) => d.id);
+    const active = ids.findIndex(
+      (id) => lensButtons.get(id)?.getAttribute("aria-selected") === "true",
+    );
+    const delta = e.key === "ArrowRight" ? 1 : -1;
+    const next = ids[(active + delta + ids.length) % ids.length];
+    handlers.onLens(next);
+    lensButtons.get(next)?.focus();
+  });
   toolbar.appendChild(tabs);
 
   const viewSeg = el("div", "seg view-seg");
@@ -269,7 +285,8 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
   for (const def of LENSES) {
     const b = refs.lensButtons.get(def.id);
     if (!b) continue;
-    b.setAttribute("aria-pressed", String(state.lens === def.id));
+    b.setAttribute("aria-selected", String(state.lens === def.id));
+    b.tabIndex = state.lens === def.id ? 0 : -1;
     const badge = b.querySelector(".badge");
     if (badge) {
       const count = def.count(state);

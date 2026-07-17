@@ -241,12 +241,12 @@ button {
   background: var(--surface-1);
 }
 
-.lens-tab[aria-pressed="true"] {
+.lens-tab[aria-selected="true"] {
   color: var(--text-high);
   font-weight: 700;
 }
 
-.lens-tab[aria-pressed="true"]::after {
+.lens-tab[aria-selected="true"]::after {
   content: "";
   position: absolute;
   left: 0;
