@@ -2,6 +2,7 @@ import type { AppState } from "./state";
 import type { LayoutCell, TreeNode } from "./types";
 import { contrastText, mix } from "./theme";
 import { formatCount, legendText, lensColor, lensFlag } from "./data";
+import { usableStageWidth } from "./graph";
 
 // ── Constants ───────────────────────────────────────────────────
 
@@ -243,8 +244,9 @@ export const renderTreemap = (state: AppState): void => {
   ctx.fillRect(0, 0, w, h);
 
   const rootNode = state.index.nodesByPath.get(state.drillPath) ?? state.index.tree;
-  // Reserve a footer gutter so the legend never paints over tiles.
-  const rootRect: Rect = { x: 0, y: 0, w, h: h - 22 };
+  // Reserve a footer gutter for the legend and keep tiles clear of an
+  // open right panel.
+  const rootRect: Rect = { x: 0, y: 0, w: usableStageWidth(state, w), h: h - 22 };
 
   const zooming = anim && (anim.kind === "zoom-in" || anim.kind === "zoom-out") && animT < 1;
   const t = easeOut(animT);

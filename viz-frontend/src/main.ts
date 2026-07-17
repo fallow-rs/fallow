@@ -341,6 +341,7 @@ const init = (): void => {
       if (hit === null) return;
       const cell = state.layout[hit];
       if (cell.node.fileIndex !== null) {
+        hideTooltip();
         selectFile(cell.node.fileIndex);
       } else {
         hideTooltip();

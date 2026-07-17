@@ -1063,8 +1063,8 @@ const chipRect = (
 const roadWidth = (count: number): number =>
   Math.min(8, Math.max(1.5, 1 + Math.floor(Math.log2(count))));
 
-/** Width the graph can actually use: the right panel overlays the stage. */
-const usableStageWidth = (state: AppState, stageW: number): number => {
+/** Width the canvas can actually use: the right panel overlays the stage. */
+export const usableStageWidth = (state: AppState, stageW: number): number => {
   const panelOpen =
     state.selected !== null ||
     state.selectedRoad !== null ||
@@ -1553,13 +1553,15 @@ const drawZoomLabels = (state: AppState, gvs: GraphViewState, w: number, h: numb
     if (overlaps) continue;
     placed.push(rect);
     drawn++;
-    // Draw in world space (crisper under the active transform).
+    // Draw in world space (crisper under the active transform); halo
+    // instead of a knockout slab, matching the hover labels.
     const worldFont = 10 / transform.k;
     ctx.font = `${worldFont}px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace`;
-    const wTextW = ctx.measureText(name).width;
-    ctx.fillStyle = theme.bg;
-    ctx.globalAlpha = 0.82;
-    ctx.fillRect(x - wTextW / 2 - 2 / transform.k, y, wTextW + 4 / transform.k, 12 / transform.k);
+    ctx.strokeStyle = theme.bg;
+    ctx.lineWidth = 3 / transform.k;
+    ctx.lineJoin = "round";
+    ctx.globalAlpha = 0.92;
+    ctx.strokeText(name, x, y + 1 / transform.k);
     ctx.globalAlpha = 0.9;
     ctx.fillStyle = theme.textLow;
     ctx.fillText(name, x, y + 1 / transform.k);
