@@ -82,8 +82,8 @@ const dark: Theme = {
   blueSubtle: "#0d2847",
   dirFill: "#191918",
   dirHeader: "#222221",
-  cellNeutral: "#31312e",
-  cellEntry: "#26374b",
+  cellNeutral: "#45443f",
+  cellEntry: "#2b3f56",
   zones: ["#0090ff", "#e35b00", "#12a594", "#5b5bd6", "#d6409f"],
   zoneOther: "#62605b",
 };

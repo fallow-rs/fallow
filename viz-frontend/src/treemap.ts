@@ -1,7 +1,7 @@
 import type { AppState } from "./state";
 import type { LayoutCell, TreeNode } from "./types";
 import { contrastText, mix } from "./theme";
-import { formatCount, lensColor, lensFlag } from "./data";
+import { formatCount, legendText, lensColor, lensFlag } from "./data";
 
 // ── Constants ───────────────────────────────────────────────────
 
@@ -10,6 +10,7 @@ const DIR_PAD = 3;
 const MIN_LABEL_W = 40;
 const MIN_LABEL_H = 13;
 const FONT_CELL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const FONT_LEGEND = '9px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 const FONT_DIR = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 const ZOOM_MS = 220;
 const LENS_MS = 200;
@@ -281,6 +282,23 @@ export const renderTreemap = (state: AppState): void => {
     cellSeq = renderCell(rctx, cell, 0, cellSeq, total);
   }
 
+  if (!zooming) {
+    const legend = legendText(state.lens, state.data, "map");
+    if (legend !== "") {
+      ctx.font = FONT_LEGEND;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      const textW = ctx.measureText(legend).width;
+      ctx.fillStyle = state.theme.bg;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(10, h - 26, textW + 12, 18);
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = state.theme.textMuted;
+      ctx.fillText(legend, 16, h - 17);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   if (zooming) {
     ctx.restore();
     scheduleFrame(state);
@@ -338,7 +356,13 @@ const renderCell = (
   if (isFile) {
     const fi = cell.node.fileIndex as number;
     const file = data.files[fi];
-    let fill = lensColor(state.lens, theme, index, file);
+    // In the overview lens entry points keep a neutral fill with a blue
+    // outline; a solid tint floods test-heavy repos and stops reading
+    // as a marker.
+    const entryOutline = state.lens === "overview" && file.status === "entryPoint";
+    let fill = entryOutline
+      ? theme.cellNeutral
+      : lensColor(state.lens, theme, index, file);
     if (rctx.prevColors && rctx.lensT < 1) {
       const prev = rctx.prevColors.get(fi);
       if (prev && prev !== fill) fill = mix(prev, fill, rctx.lensT);
@@ -350,6 +374,14 @@ const renderCell = (
     const r = { x: cell.x + 0.5, y: cell.y + 0.5, w: cell.w - 1, h: cell.h - 1 };
     ctx.fillStyle = fill;
     ctx.fillRect(r.x, r.y, r.w, r.h);
+
+    if (entryOutline && cell.w > 6 && cell.h > 6) {
+      ctx.strokeStyle = theme.blue;
+      ctx.globalAlpha = ctx.globalAlpha * 0.55;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+      ctx.globalAlpha = alpha;
+    }
 
     // Texture channel: hatch marks findings so color is never the only signal.
     const tm = getTM(state);

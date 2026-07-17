@@ -228,6 +228,38 @@ export const lensFlag = (lens: Lens, index: DataIndex, file: VizFile, fileIdx: n
   }
 };
 
+/**
+ * One-line canvas legend for the active lens, shared by both views so
+ * their vocabulary cannot drift. Zero-findings lenses explain the
+ * neutral map instead of advertising absent colors.
+ */
+export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): string => {
+  const s = data.summary;
+  const findings: Record<Lens, number> = {
+    overview: -1,
+    deadcode: s.unused_files + s.unused_exports,
+    dupes: s.clone_groups,
+    boundaries: s.circular_deps + s.boundary_violations,
+    hotspots: s.hotspot_files,
+  };
+  if (findings[lens] === 0) {
+    return "no findings in this lens · the map keeps its neutral colors";
+  }
+  if (lens === "overview") {
+    return view === "map"
+      ? "tile = file · area = bytes on disk · blue outline = entry point"
+      : "dot = file · roads = imports, thick end is the importer";
+  }
+  const lines: Record<Lens, string> = {
+    overview: "",
+    deadcode: "red = never imported · amber = has unused exports",
+    dupes: "deeper amber = more duplicated lines",
+    boundaries: "red = crosses a boundary rule or joins a cycle · amber outline = tangled folders",
+    hotspots: "amber → red = harder to change safely",
+  };
+  return lines[lens];
+};
+
 // ── Formatting helpers ──────────────────────────────────────────
 
 export const formatSize = (bytes: number): string => {

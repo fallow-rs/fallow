@@ -292,8 +292,10 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
     const badge = b.querySelector(".badge");
     if (badge) {
       const count = def.count(state);
-      badge.textContent = count !== null && count > 0 ? formatCount(count) : "";
-      badge.className = `badge sev-${def.sev}`;
+      // A silent badge is ambiguous ("clean, or not counted?"): finding
+      // lenses always show their number, with zero in a calm green.
+      badge.textContent = count !== null ? formatCount(count) : "";
+      badge.className = count === 0 ? "badge sev-zero" : `badge sev-${def.sev}`;
     }
   }
   refs.clusterGroup.style.display = state.view === "graph" ? "" : "none";
@@ -303,6 +305,15 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
   updateCrumbs(state, refs);
   updateStatusInfo(state, refs);
   updateSearchCount(state, refs);
+};
+
+/** The CLI that reproduces the active lens's findings in the terminal. */
+const LENS_COMMANDS: Record<Lens, string> = {
+  overview: "",
+  deadcode: "$ fallow dead-code",
+  dupes: "$ fallow dupes",
+  boundaries: "$ fallow dead-code",
+  hotspots: "$ fallow health",
 };
 
 /** Plain-language line under the rail: what did switching this lens do? */
@@ -316,7 +327,7 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
     case "deadcode":
       text =
         s.unused_files + s.unused_exports === 0
-          ? "nothing unreachable · every file and export is imported somewhere"
+          ? `nothing unreachable · all ${formatCount(s.total_files)} files and their exports are imported somewhere`
           : `${formatCount(s.unused_files)} files and ${formatCount(s.unused_exports)} exports nothing imports · shown red and amber`;
       break;
     case "dupes":
@@ -335,10 +346,17 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
       text =
         s.hotspot_files === 0
           ? "no files in the top complexity band"
-          : `${formatCount(s.hotspot_files)} files in the top complexity band · closer to red = harder to change safely`;
+          : `${formatCount(s.hotspot_files)} files in the top complexity band · amber → red = harder to change safely`;
       break;
   }
-  refs.summaryLine.textContent = text;
+  refs.summaryLine.replaceChildren();
+  if (text !== "") {
+    refs.summaryLine.appendChild(el("span", "summary-text", text));
+    const cmd = LENS_COMMANDS[state.lens];
+    if (cmd !== "") {
+      refs.summaryLine.appendChild(el("span", "summary-cmd", cmd));
+    }
+  }
   refs.summaryLine.classList.toggle("visible", text !== "");
 };
 

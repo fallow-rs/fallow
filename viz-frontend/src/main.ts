@@ -13,6 +13,7 @@ import {
 import {
   centerOnFile,
   clearGraphFocus,
+  clearRoadHover,
   dismissIntro,
   getClusterMode,
   graphFocusSearch,
@@ -258,7 +259,7 @@ const init = (): void => {
         : state.selected !== null
           ? "default"
           : "grab";
-      if (hovered !== null) {
+      if (hovered !== null && hovered !== state.selected) {
         showFileTooltip(state, hovered, e.clientX, e.clientY);
       } else if (target && target.kind === "road") {
         const facts = roadFacts(state, target.road);
@@ -283,9 +284,11 @@ const init = (): void => {
       state.hoveredCell = null;
       requestRender();
     }
-    if (state.view === "graph" && state.graphHovered !== null) {
+    if (state.view === "graph") {
+      const changed = state.graphHovered !== null;
       state.graphHovered = null;
-      renderGraph(state);
+      lastGraphTarget = "";
+      if (clearRoadHover(state) || changed) renderGraph(state);
     }
   });
 
@@ -329,6 +332,7 @@ const init = (): void => {
       const result = graphHandleClick(state, x, y);
       if (result.kind === "file") {
         state.selectedRoad = null;
+        hideTooltip();
         selectFile(result.fileIndex);
       } else if (result.kind === "road") {
         state.selectedRoad = result.road;
@@ -373,6 +377,8 @@ const init = (): void => {
         requestRender();
       } else if (state.view === "map" && drillUp(state)) {
         requestRender();
+      } else if (state.lens !== "overview") {
+        setLens("overview");
       }
       return;
     }

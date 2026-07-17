@@ -28,7 +28,7 @@ import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import type { AppState } from "./state";
 import type { RoadSelection, VizFile } from "./types";
-import { basename, dirname, formatCount, lensColor } from "./data";
+import { basename, dirname, formatCount, legendText, lensColor } from "./data";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -129,6 +129,8 @@ interface GraphViewState {
   /** Standalone strip expanded state + chip hit rect (screen space). */
   standaloneOpen: boolean;
   standaloneChip: { x: number; y: number; w: number; h: number } | null;
+  /** Ego-view "back to map" chip hit rect (screen space). */
+  egoBackChip: { x: number; y: number; w: number; h: number } | null;
   /** First-run captions synced to the reveal. */
   showIntro: boolean;
   /** First-render reveal choreography start (0 = pending, -1 = skipped). */
@@ -205,6 +207,7 @@ const getGVS = (state: AppState): GraphViewState => {
       revealAt: 0,
       standaloneOpen: false,
       standaloneChip: null,
+      egoBackChip: null,
       showIntro: false,
     };
   }
@@ -541,6 +544,31 @@ const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
     const list = byLayer.get(layer) ?? [];
     const mid = list.reduce((s, c) => s + c.cy, 0) / Math.max(1, list.length);
     for (const c of list) c.cy += globalMid - mid;
+  }
+
+  // The rank layout tends toward a flat ribbon (aspect 4:1+) that leaves
+  // half the viewport empty. Spread rows vertically toward a presentable
+  // aspect and stagger single-cluster layers off the midline; x gaps
+  // between layers make the stagger collision-free.
+  if (flowing.length > 1) {
+    const minX = Math.min(...flowing.map((c) => c.cx - c.r));
+    const maxX = Math.max(...flowing.map((c) => c.cx + c.r));
+    const minY = Math.min(...flowing.map((c) => c.cy - c.r));
+    const maxY = Math.max(...flowing.map((c) => c.cy + c.r));
+    const aspect = (maxX - minX) / Math.max(1, maxY - minY);
+    const TARGET_ASPECT = 2.2;
+    if (aspect > TARGET_ASPECT) {
+      const factor = Math.min(2.6, aspect / TARGET_ASPECT);
+      for (const c of flowing) c.cy = globalMid + (c.cy - globalMid) * factor;
+      let flip = -1;
+      for (const layer of layerKeys) {
+        const list = byLayer.get(layer) ?? [];
+        if (list.length === 1) {
+          list[0].cy += flip * Math.min(240, list[0].r + 100) * Math.min(1, factor - 0.6);
+          flip = -flip;
+        }
+      }
+    }
   }
 };
 
@@ -961,6 +989,10 @@ const roadGeometry = (gvs: GraphViewState, road: Road): { p0: Pt; p1: Pt; p2: Pt
 const roadWidth = (count: number): number =>
   Math.min(8, Math.max(1.5, 1 + Math.floor(Math.log2(count))));
 
+/** Folder keys whose imports carry little overview signal (test suites). */
+const isTestCluster = (key: string): boolean =>
+  /(^|\/)(tests?|__tests__|e2e|spec)($|\/)/.test(key);
+
 // ── Rendering ───────────────────────────────────────────────────
 
 const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
@@ -1109,7 +1141,10 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.beginPath();
     taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.6, wSrc * 0.3));
     ctx.fillStyle = theme.textLow;
-    ctx.globalAlpha = (0.28 + 0.16 * roadBoost) * reveal.roads;
+    // Test-to-source imports are the least interesting overview signal
+    // but the biggest bundles; keep them recessive so source roads lead.
+    const testDim = isTestCluster(clusters[road.src].key) ? 0.4 : 1;
+    ctx.globalAlpha = (0.3 + 0.18 * roadBoost) * testDim * reveal.roads;
     ctx.fill();
     ctx.globalAlpha = 1;
 
@@ -1198,7 +1233,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     const isNeighbor = neighbors?.has(node.fileIndex) ?? false;
     const dimmed = neighbors !== null && !isNeighbor;
 
-    let alpha = recessive ? 0.65 : 0.95;
+    let alpha = recessive ? 0.82 : 0.95;
     if (dimmed) alpha = 0.12;
     if (searching && !matched) alpha = Math.min(alpha, 0.1);
     if (isNeighbor) alpha = 1;
@@ -1236,8 +1271,12 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
         ctx.lineWidth = 1.4 / transform.k;
         ctx.stroke();
       }
-      // Hub ring always; the xN count joins once there is room (zoomed).
-      if (file.importer_count >= gvs.hubFloor) {
+      // Hub ring from mid zoom (a bare ring at fit zoom reads as an
+      // artifact); the xN count joins once there is room.
+      if (
+        file.importer_count >= gvs.hubFloor &&
+        (kRel >= 1.2 || state.graphHovered === node.fileIndex)
+      ) {
         ctx.globalAlpha = Math.max(alpha, 0.85);
         ctx.strokeStyle = theme.textLow;
         ctx.lineWidth = 1 / transform.k;
@@ -1313,6 +1352,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     drawRoadLabels(state, gvs);
     drawClusterLabels(state, gvs);
   }
+  drawAxisMarkers(state, gvs, w, h);
   drawCanvasLegend(state, w, h);
   drawPathTrace(state, gvs, w, h);
 
@@ -1411,26 +1451,11 @@ const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): voi
   if (!gvs.showIntro || gvs.revealAt <= 0) return;
   const { ctx, theme } = state;
   const elapsed = performance.now() - gvs.revealAt;
-  const s = state.data.summary;
-  const findingBits: string[] = [];
-  if (s.unused_files + s.unused_exports > 0) {
-    findingBits.push(`${formatCount(s.unused_files + s.unused_exports)} unused`);
-  }
-  if (s.clone_groups > 0) findingBits.push(`${formatCount(s.clone_groups)} duplications`);
-  if (s.circular_deps + s.boundary_violations > 0) {
-    findingBits.push(`${formatCount(s.circular_deps + s.boundary_violations)} boundary issues`);
-  }
-  if (s.hotspot_files > 0) findingBits.push(`${formatCount(s.hotspot_files)} complexity findings`);
+  // Three beats: the nouns, the lines, then the verbs (what to do next).
   const captions: Array<[number, number, string]> = [
-    [0, 2400, "Every dot is a file · the shapes group them by folder"],
-    [2400, 4800, "Connections are imports · the thick end is the importer"],
-    [
-      4800,
-      8200,
-      findingBits.length > 0
-        ? `The lenses above recolor the map: ${findingBits.join(", ")}`
-        : "The lenses above recolor the map by findings · this codebase is clean",
-    ],
+    [0, 2600, "Every dot is a file · the shapes are folders"],
+    [2600, 5200, "Lines are imports · the thick end is the importer"],
+    [5200, 8600, "Click any dot for its story · keys 1-5 switch lenses"],
   ];
   const total = captions[captions.length - 1][1];
   if (elapsed >= total) {
@@ -1726,26 +1751,31 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
   const ordered = [...gvs.clusters].sort(
     (a, b) => b.indices.length - a.indices.length || (a.key < b.key ? -1 : 1),
   );
+  const kRel = gvs.transform.k / gvs.fitK;
   for (const cluster of ordered) {
     if (cluster.isolated && !getGVS(state).standaloneOpen) continue;
+    // Small clusters keep their chips until mid zoom would only add
+    // collisions at fit zoom; the hulls still show where they are.
+    if (cluster.indices.length < 6 && kRel < 1.5) continue;
     let topLeft = cluster.hull[0] ?? { x: cluster.cx, y: cluster.cy };
     for (const p of cluster.hull) {
       if (p.y < topLeft.y || (p.y === topLeft.y && p.x < topLeft.x)) topLeft = p;
     }
     const s = worldToScreen(gvs, topLeft);
-    // Single-file clusters: just the filename, no count. The full path
-    // lives in the tooltip; short labels collide far less.
+    // Single-file clusters: just the filename, borderless dim text. The
+    // full path lives in the tooltip; quiet labels collide far less.
     const single = cluster.indices.length === 1;
     const raw = single
       ? basename(state.data.files[cluster.indices[0]].path)
       : cluster.key;
     const label = middleTruncate(ctx, raw.toUpperCase(), 210);
-    const sub = single ? "" : formatCount(cluster.indices.length);
+    const sub = single ? "" : `${formatCount(cluster.indices.length)} files`;
     const labelW = ctx.measureText(label).width;
     const subW = sub ? ctx.measureText(sub).width : -8;
-    const x = s.x - 4;
-    let y = s.y - 12;
     const boxW = labelW + subW + 17;
+    // Clamp inside the viewport so edge clusters keep readable chips.
+    const x = Math.min(Math.max(6, s.x - 4), state.canvas.clientWidth - boxW - 8);
+    let y = s.y - 12;
     for (let tries = 0; tries < 6; tries++) {
       const overlaps = placed.some(
         (r) => x < r.x + r.w && x + boxW > r.x && y - 9 < r.y + r.h && y + 9 > r.y,
@@ -1755,13 +1785,15 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     }
     placed.push({ x: x - 3, y: y - 9, w: boxW + 1, h: 18 });
     ctx.fillStyle = theme.bg;
-    ctx.globalAlpha = 0.92;
+    ctx.globalAlpha = single ? 0.75 : 0.92;
     ctx.fillRect(x - 3, y - 8, labelW + subW + 16, 16);
     ctx.globalAlpha = 1;
-    ctx.strokeStyle =
-      cluster.tangle && state.lens === "boundaries" ? theme.amber : theme.borderSubtle;
-    ctx.strokeRect(x - 3.5, y - 8.5, labelW + subW + 17, 17);
-    ctx.fillStyle = cluster.isolated ? theme.textMuted : theme.textLow;
+    if (!single) {
+      ctx.strokeStyle =
+        cluster.tangle && state.lens === "boundaries" ? theme.amber : theme.borderSubtle;
+      ctx.strokeRect(x - 3.5, y - 8.5, labelW + subW + 17, 17);
+    }
+    ctx.fillStyle = cluster.isolated || single ? theme.textMuted : theme.textLow;
     ctx.fillText(label, x + 2, y + 0.5);
     if (sub) {
       ctx.fillStyle = theme.textMuted;
@@ -1769,50 +1801,63 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     }
   }
 
-  // Standalone strip: a single chip when collapsed, caption when open.
+  // Standalone toggle: a fixed chip docked above the canvas legend so it
+  // never floats orphaned in world space. When open, a caption sits by
+  // the revealed strip itself.
   const isolated = gvs.clusters.filter((c) => c.isolated);
   gvs.standaloneChip = null;
   if (isolated.length > 0) {
+    const h = state.canvas.clientHeight;
     const fileCount = isolated.reduce((sum, c) => sum + c.indices.length, 0);
-    const minX = Math.min(...isolated.map((c) => c.cx - c.r));
-    const minY = Math.min(...isolated.map((c) => c.cy - c.r));
-    const s = worldToScreen(gvs, { x: minX, y: minY });
     ctx.font = FONT_MICRO;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
+    const label = gvs.standaloneOpen
+      ? "[ hide standalone files ]"
+      : `[ standalone · ${formatCount(fileCount)} files · nothing imports them ]`;
+    const textW = ctx.measureText(label).width;
+    const cx0 = 10;
+    const cy0 = h - 52;
+    ctx.fillStyle = theme.bg;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(cx0, cy0, textW + 12, 20);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = theme.borderSubtle;
+    ctx.strokeRect(cx0 + 0.5, cy0 + 0.5, textW + 11, 19);
+    ctx.fillStyle = theme.textMuted;
+    ctx.fillText(label, cx0 + 6, cy0 + 10.5);
+    gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 12, h: 20 };
     if (gvs.standaloneOpen) {
+      const minX = Math.min(...isolated.map((c) => c.cx - c.r));
+      const minY = Math.min(...isolated.map((c) => c.cy - c.r));
+      const s = worldToScreen(gvs, { x: minX, y: minY });
       ctx.fillStyle = theme.textMuted;
       ctx.globalAlpha = 0.7;
-      ctx.fillText("STANDALONE · configs & CI · nothing imports them · click to collapse", s.x, s.y - 26);
+      ctx.fillText("STANDALONE · configs & CI · nothing imports them", s.x, s.y - 26);
       ctx.globalAlpha = 1;
-      gvs.standaloneChip = { x: s.x - 4, y: s.y - 36, w: 420, h: 20 };
-    } else {
-      const label = `[ standalone · ${formatCount(fileCount)} files ]`;
-      const textW = ctx.measureText(label).width;
-      ctx.fillStyle = theme.bg;
-      ctx.globalAlpha = 0.9;
-      ctx.fillRect(s.x - 4, s.y - 10, textW + 8, 20);
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = theme.borderSubtle;
-      ctx.strokeRect(s.x - 4.5, s.y - 10.5, textW + 9, 21);
-      ctx.fillStyle = theme.textMuted;
-      ctx.fillText(label, s.x, s.y + 0.5);
-      gvs.standaloneChip = { x: s.x - 4, y: s.y - 10, w: textW + 8, h: 20 };
     }
   }
 };
 
+/** Screen-space axis endpoints: the one annotation that explains the x layout. */
+const drawAxisMarkers = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+  const kRel = gvs.transform.k / gvs.fitK;
+  if (kRel > 1.3 || state.selected !== null) return;
+  const { ctx, theme } = state;
+  ctx.font = FONT_MICRO;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = theme.textMuted;
+  ctx.globalAlpha = 0.8;
+  ctx.textAlign = "left";
+  ctx.fillText("ENTRY CODE ▸", 14, h / 2);
+  ctx.textAlign = "right";
+  ctx.fillText("◂ SHARED FOUNDATIONS", w - 14, h / 2);
+  ctx.globalAlpha = 1;
+};
+
 const drawCanvasLegend = (state: AppState, w: number, h: number): void => {
   const { ctx, theme } = state;
-  const lines: Record<string, string> = {
-    overview:
-      "dot = file · roads = imports, thick end is the importer · entry code left, shared code right",
-    deadcode: "red = never imported · amber = has unused exports",
-    dupes: "deeper amber = more duplicated lines",
-    boundaries: "red = crosses a boundary rule or joins a cycle · amber outline = tangled folders",
-    hotspots: "amber to red = harder to change safely",
-  };
-  const text = lines[state.lens] ?? "";
+  const text = legendText(state.lens, state.data, "graph");
   if (text === "") return;
   ctx.font = FONT_MICRO;
   ctx.textAlign = "left";
@@ -2021,17 +2066,46 @@ const renderEgoStage = (state: AppState, gvs: GraphViewState, w: number, h: numb
   ctx.save();
   ctx.globalAlpha = ease;
 
-  // Column headers.
+  // Column headers, anchored just above each column's own rows (or the
+  // card when a side is empty) instead of floating at the viewport top.
+  const headerY = (rows: StageRow[]): number => {
+    if (rows.length === 0) return cy - 33 - 18;
+    const rowH = Math.min(24, Math.max(18, availH / rows.length));
+    return cy - (rows.length * rowH) / 2 - 18;
+  };
   ctx.font = FONT_MICRO;
   ctx.textBaseline = "middle";
   ctx.fillStyle = theme.textMuted;
   ctx.textAlign = "right";
-  ctx.fillText(`◂ IMPORTED BY ${formatCount(importers.length)}`, leftX, cy - availH / 2 - 14);
+  ctx.fillText(`◂ IMPORTED BY ${formatCount(importers.length)}`, leftX, headerY(leftRows));
   ctx.textAlign = "left";
-  ctx.fillText(`IMPORTS ${formatCount(imports.length)} ▸`, rightX, cy - availH / 2 - 14);
+  ctx.fillText(`IMPORTS ${formatCount(imports.length)} ▸`, rightX, headerY(rightRows));
+  if (importers.length === 0) {
+    ctx.textAlign = "right";
+    ctx.fillText("[ nothing imports this file ]", leftX, cy);
+  }
+  if (imports.length === 0) {
+    ctx.textAlign = "left";
+    ctx.fillText("[ no imports ]", rightX, cy);
+  }
 
   drawStageColumn(state, gvs, leftRows, "left", leftX, cy, availH, cx, ease, stageW);
   drawStageColumn(state, gvs, rightRows, "right", rightX, cy, availH, cx, ease, stageW);
+
+  // Escape hatch at the point of attention, not only in the statusbar.
+  ctx.font = FONT_MICRO;
+  ctx.textAlign = "left";
+  const backLabel = "[ ◂ back to map · esc ]";
+  const backW = ctx.measureText(backLabel).width;
+  ctx.fillStyle = theme.bg;
+  ctx.globalAlpha = 0.9 * ease;
+  ctx.fillRect(12, 12, backW + 12, 20);
+  ctx.globalAlpha = ease;
+  ctx.strokeStyle = theme.borderSubtle;
+  ctx.strokeRect(12.5, 12.5, backW + 11, 19);
+  ctx.fillStyle = theme.textLow;
+  ctx.fillText(backLabel, 18, 22.5);
+  gvs.egoBackChip = { x: 12, y: 12, w: backW + 12, h: 20 };
 
   // Center card.
   const cardW = 250;
@@ -2052,7 +2126,7 @@ const renderEgoStage = (state: AppState, gvs: GraphViewState, w: number, h: numb
   ctx.font = FONT_MICRO;
   ctx.fillStyle = theme.textLow;
   ctx.fillText(
-    `in ${formatCount(importers.length)} / out ${formatCount(imports.length)}`,
+    `imported by ${formatCount(importers.length)} · imports ${formatCount(imports.length)}`,
     cx,
     cy + 19,
   );
@@ -2169,7 +2243,7 @@ const drawStageColumn = (
     ctx.fill();
 
     ctx.font = FONT_SMALL;
-    const maxTextW = side === "left" ? colX - 30 : stageW - colX - 30;
+    const maxTextW = side === "left" ? colX - 44 : stageW - colX - 44;
     if (row.kind === "group") {
       const label = `${row.label} (${row.count ?? 0})`;
       ctx.fillStyle = row.violation ? theme.redText : row.cycle ? theme.amberText : theme.textHigh;
@@ -2181,7 +2255,7 @@ const drawStageColumn = (
       const nameW = ctx.measureText(name).width;
       let drawDim = dim;
       if (ctx.measureText(dim).width + nameW > maxTextW) {
-        drawDim = middleTruncate(ctx, dim, Math.max(0, maxTextW - nameW));
+        drawDim = tailTruncate(ctx, dim, Math.max(0, maxTextW - nameW));
       }
       if (side === "left") {
         ctx.fillStyle = nameColor;
@@ -2260,6 +2334,24 @@ const drawCrumbs = (state: AppState, gvs: GraphViewState, stageW: number): void 
   });
 };
 
+/**
+ * Truncate a directory prefix from the front, keeping whole trailing
+ * segments ("…/mdx-components/"), so the informative tail survives.
+ */
+const tailTruncate = (
+  ctx: CanvasRenderingContext2D,
+  dir: string,
+  maxWidth: number,
+): string => {
+  if (dir === "" || ctx.measureText(dir).width <= maxWidth) return dir;
+  const parts = dir.split("/").filter((p) => p !== "");
+  for (let drop = 1; drop < parts.length; drop++) {
+    const candidate = `…/${parts.slice(drop).join("/")}`;
+    if (ctx.measureText(candidate).width <= maxWidth) return candidate;
+  }
+  return ctx.measureText("…/").width <= maxWidth ? "…/" : "";
+};
+
 const middleTruncate = (
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -2285,19 +2377,27 @@ const middleTruncate = (
 
 const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): number | null => {
   const gvs = getGVS(state);
-  const { transform, fileNodes } = gvs;
+  const { transform, fileNodes, clusters } = gvs;
   const gx = (canvasX - transform.x) / transform.k;
   const gy = (canvasY - transform.y) / transform.k;
-  const slop = 6 / transform.k;
-  for (let i = fileNodes.length - 1; i >= 0; i--) {
-    const node = fileNodes[i];
+  // Nearest-wins with a 9px screen-space floor so dots stay clickable
+  // at fit zoom.
+  const floor = 9 / transform.k;
+  let best: number | null = null;
+  let bestD = Infinity;
+  for (const node of fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
+    if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
     const dx = gx - node.x;
     const dy = gy - node.y;
-    const r = node.radius + slop;
-    if (dx * dx + dy * dy <= r * r) return node.fileIndex;
+    const d = dx * dx + dy * dy;
+    const r = Math.max(node.radius + 3 / transform.k, floor);
+    if (d <= r * r && d < bestD) {
+      bestD = d;
+      best = node.fileIndex;
+    }
   }
-  return null;
+  return best;
 };
 
 const stageHitTest = (state: AppState, x: number, y: number): StageRect | null => {
@@ -2483,6 +2583,10 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
   const gvs = getGVS(state);
   if (state.selected !== null) {
     gvs.hoveredRoad = null;
+    const back = gvs.egoBackChip;
+    if (back && x >= back.x && x <= back.x + back.w && y >= back.y && y <= back.y + back.h) {
+      return { kind: "ui" };
+    }
     const rect = stageHitTest(state, x, y);
     if (rect) {
       if (rect.kind !== "group" && rect.fileIndex !== undefined) {
@@ -2508,6 +2612,14 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
   return road !== null ? { kind: "road", road } : null;
 };
 
+/** Drop road hover when the cursor leaves the canvas; true if state changed. */
+export const clearRoadHover = (state: AppState): boolean => {
+  const gvs = getGVS(state);
+  if (gvs.hoveredRoad === null) return false;
+  gvs.hoveredRoad = null;
+  return true;
+};
+
 /** Road facts for the tooltip (hover). */
 export const roadFacts = (
   state: AppState,
@@ -2528,6 +2640,10 @@ export const roadFacts = (
 export const graphHandleClick = (state: AppState, x: number, y: number): GraphClickResult => {
   const gvs = getGVS(state);
   if (state.selected !== null) {
+    const back = gvs.egoBackChip;
+    if (back && x >= back.x && x <= back.x + back.w && y >= back.y && y <= back.y + back.h) {
+      return { kind: "none" };
+    }
     const rect = stageHitTest(state, x, y);
     if (rect) {
       if (rect.kind !== "group" && rect.fileIndex !== undefined) {

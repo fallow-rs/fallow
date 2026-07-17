@@ -66,7 +66,7 @@ const statusLabel = (file: VizFile): HTMLElement => {
       wrap.appendChild(sev("sev-info", "entry point"));
       break;
     default:
-      wrap.appendChild(sev("sev-ok", "live"));
+      wrap.appendChild(sev("sev-ok", "in use"));
   }
   return wrap;
 };
@@ -110,6 +110,12 @@ export const renderPanel = (
     return;
   }
   if (state.selected === null) {
+    // A finding lens with nothing selected shows its ranked worst-first
+    // list, so the lens answers "which ones first", not just "how many".
+    if (state.lens !== "overview") {
+      renderLensPanel(state, panel, navigate);
+      return;
+    }
     panel.classList.remove("open");
     return;
   }
@@ -127,7 +133,23 @@ export const renderPanel = (
   fileBox.appendChild(el("div", "name", basename(file.path)));
   const statusLine = el("div", "status-line");
   statusLine.appendChild(statusLabel(file));
+  const copyBtn = el("button", "copy-path", "[ copy path ]") as HTMLButtonElement;
+  copyBtn.type = "button";
+  copyBtn.addEventListener("click", () => {
+    void navigator.clipboard?.writeText(file.path).then(() => {
+      copyBtn.textContent = "[ copied ]";
+      setTimeout(() => {
+        copyBtn.textContent = "[ copy path ]";
+      }, 1200);
+    });
+  });
+  statusLine.appendChild(copyBtn);
   fileBox.appendChild(statusLine);
+  if (file.status === "clean") {
+    fileBox.appendChild(el("div", "status-gloss", "reachable from an entry point"));
+  } else if (file.status === "entryPoint") {
+    fileBox.appendChild(el("div", "status-gloss", "where execution starts; nothing needs to import it"));
+  }
   head.appendChild(fileBox);
   const closeBtn = el("button", "close", "×") as HTMLButtonElement;
   closeBtn.type = "button";
@@ -227,6 +249,7 @@ export const renderPanel = (
     }
     table.appendChild(tbody);
     cx.appendChild(table);
+    cx.appendChild(el("div", "muted key-line", "cc cyclomatic · cog cognitive · loc lines"));
     panel.appendChild(cx);
   }
 
@@ -329,6 +352,142 @@ const elCode = (text: string): HTMLElement => {
   const code = document.createElement("code");
   code.textContent = text;
   return code;
+};
+
+interface RankRow {
+  label: string;
+  dir?: string;
+  metric: string;
+  metricCls: string;
+  fileIndex: number;
+}
+
+const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } => {
+  const files = state.data.files;
+  switch (state.lens) {
+    case "deadcode": {
+      const rows: RankRow[] = [];
+      const unused = files
+        .map((f, i) => ({ f, i }))
+        .filter(({ f }) => f.status === "unused")
+        .sort((a, b) => b.f.size - a.f.size);
+      for (const { f, i } of unused) {
+        rows.push({
+          label: basename(f.path),
+          dir: dirname(f.path),
+          metric: formatSize(f.size),
+          metricCls: "sev-error",
+          fileIndex: i,
+        });
+      }
+      const partial = files
+        .map((f, i) => ({ f, i }))
+        .filter(({ f }) => f.status !== "unused" && f.unused_export_count > 0)
+        .sort((a, b) => b.f.unused_export_count - a.f.unused_export_count);
+      for (const { f, i } of partial) {
+        rows.push({
+          label: basename(f.path),
+          dir: dirname(f.path),
+          metric: `${formatCount(f.unused_export_count)} exports`,
+          metricCls: "sev-warn",
+          fileIndex: i,
+        });
+      }
+      return { title: "unused · biggest first", rows, empty: "nothing is unreachable" };
+    }
+    case "dupes": {
+      const rows = [...state.data.clones.keys()]
+        .sort((a, b) => state.data.clones[b].lines - state.data.clones[a].lines)
+        .map((g) => {
+          const group = state.data.clones[g];
+          const first = group.instances[0];
+          return {
+            label: `${basename(files[first.file].path)} ×${group.instances.length}`,
+            dir: dirname(files[first.file].path),
+            metric: `${formatCount(group.lines)} lines`,
+            metricCls: "sev-warn",
+            fileIndex: first.file,
+          };
+        });
+      return { title: "duplication · biggest blocks first", rows, empty: "no duplicated blocks" };
+    }
+    case "boundaries": {
+      const rows: RankRow[] = [];
+      for (const v of state.data.violations) {
+        rows.push({
+          label: `${basename(files[v.from].path)} → ${basename(files[v.to].path)}`,
+          dir: dirname(files[v.from].path),
+          metric: state.data.zones[v.to_zone]?.name ?? "zone",
+          metricCls: "sev-error",
+          fileIndex: v.from,
+        });
+      }
+      state.data.cycles.forEach((cycle) => {
+        rows.push({
+          label: `cycle · ${formatCount(cycle.length)} files`,
+          dir: dirname(files[cycle[0]].path),
+          metric: basename(files[cycle[0]].path),
+          metricCls: "sev-warn",
+          fileIndex: cycle[0],
+        });
+      });
+      return { title: "boundaries · breaks then cycles", rows, empty: "no cycles or layer breaks" };
+    }
+    case "hotspots": {
+      const rows = files
+        .map((f, i) => ({ f, i }))
+        .filter(({ f }) => f.max_cyclomatic > 0)
+        .sort((a, b) => b.f.max_cyclomatic - a.f.max_cyclomatic)
+        .slice(0, 40)
+        .map(({ f, i }) => ({
+          label: basename(f.path),
+          dir: dirname(f.path),
+          metric: `cc ${formatCount(f.max_cyclomatic)}`,
+          metricCls: f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "muted",
+          fileIndex: i,
+        }));
+      return { title: "complexity · hardest first", rows, empty: "no complex functions" };
+    }
+    default:
+      return { title: "", rows: [], empty: "" };
+  }
+};
+
+/** Ranked worst-first findings for the active lens (nothing selected). */
+const renderLensPanel = (state: AppState, panel: HTMLElement, navigate: NavigateFn): void => {
+  const { title, rows, empty } = rankRowsFor(state);
+  panel.replaceChildren();
+  panel.classList.add("open");
+
+  const section = sectionEl(title);
+  if (rows.length === 0) {
+    section.appendChild(el("div", "sev-ok", empty));
+    panel.appendChild(section);
+    return;
+  }
+  const cap = 30;
+  const ul = el("ul", "link-list rank-list");
+  for (const row of rows.slice(0, cap)) {
+    const li = el("li");
+    const btn = el("button") as HTMLButtonElement;
+    btn.type = "button";
+    const labelBox = el("span", "rank-label");
+    if (row.dir) labelBox.appendChild(el("span", "muted", `${row.dir}/`));
+    labelBox.appendChild(document.createTextNode(row.label));
+    btn.appendChild(labelBox);
+    btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
+    btn.addEventListener("click", () => navigate(row.fileIndex));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+  if (rows.length > cap) {
+    ul.appendChild(el("li", "muted", `… ${formatCount(rows.length - cap)} more`));
+  }
+  section.appendChild(ul);
+  const hint = el("div", "action-hint");
+  hint.append("click a row to focus that file on the map");
+  section.appendChild(hint);
+  panel.appendChild(section);
 };
 
 /** Drill-down panel for an aggregated road: the contributing file pairs. */
