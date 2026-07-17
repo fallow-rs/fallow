@@ -129,6 +129,13 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Escape every `<` so no script-content sequence (`</script`, `<!--`,
+/// `<script`) can terminate or re-enter the script element; the `<`
+/// escape is transparent to the JS value the browser materializes.
+fn escape_payload_json(json: &str) -> String {
+    json.replace('<', "\\u003c")
+}
+
 fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duration) -> ExitCode {
     let json = match serde_json::to_string(data) {
         Ok(j) => j,
@@ -141,8 +148,7 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
         }
     };
 
-    // Prevent </script> in JSON string values from closing the script tag
-    let json_safe = json.replace("</", "<\\/");
+    let json_safe = escape_payload_json(&json);
     let title = html_escape(&data.root);
 
     let css = VIZ_CSS;
@@ -356,6 +362,29 @@ mod tests {
             html_escape(r#"<script>"a"&'b'</script>"#),
             "&lt;script&gt;&quot;a&quot;&amp;'b'&lt;/script&gt;"
         );
+    }
+
+    #[test]
+    fn embedded_json_contains_no_raw_angle_bracket() {
+        let mut data = sample_data();
+        data.files[0].path = "</script><!--<script>alert(1)".to_string();
+        let json = serde_json::to_string(&data).expect("serialize viz data");
+        let escaped = escape_payload_json(&json);
+        assert!(!escaped.contains('<'));
+        assert!(!escaped.contains("</"));
+    }
+
+    #[test]
+    fn escaped_payload_round_trips() {
+        let mut data = sample_data();
+        data.files[0].path = "</script><!--<script>alert(1)".to_string();
+        let json = serde_json::to_string(&data).expect("serialize viz data");
+        let escaped = escape_payload_json(&json);
+        // The angle-bracket escape is a plain JSON string escape, so the
+        // escaped payload stays valid JSON and decodes to the original text.
+        let value: serde_json::Value =
+            serde_json::from_str(&escaped).expect("escaped payload stays valid JSON");
+        assert_eq!(value["files"][0]["path"], "</script><!--<script>alert(1)");
     }
 
     #[test]
