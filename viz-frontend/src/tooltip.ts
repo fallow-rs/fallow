@@ -68,6 +68,8 @@ export interface TipDock {
   nodeX: number;
   nodeY: number;
   canvas: DOMRect;
+  /** Width not covered by an open panel; the dock clamps within it. */
+  usableW: number;
 }
 
 /** The single worst thing to say about a file (one line, or nothing). */
@@ -167,7 +169,7 @@ export const showFileTooltip = (
 
   if (dock) {
     tip.style.display = "block";
-    const rect = fileTipCanvasRect(dock.nodeX, dock.nodeY, dock.canvas.width, dock.canvas.height);
+    const rect = fileTipCanvasRect(dock.nodeX, dock.nodeY, dock.usableW, dock.canvas.height);
     const h = tip.getBoundingClientRect().height;
     tip.style.left = `${dock.canvas.left + rect.x}px`;
     tip.style.top = `${Math.min(dock.canvas.top + rect.y, dock.canvas.bottom - h - 12)}px`;

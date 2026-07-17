@@ -23,6 +23,7 @@ import {
   initGraphNodes,
   nodeScreenPos,
   refitOnResize,
+  usableStageWidth,
   minimapHit,
   minimapPan,
   renderGraph,
@@ -276,12 +277,20 @@ const init = (): void => {
         // never covers the hovered neighborhood; ego mode keeps the
         // cursor-following variant for its list rows.
         const pos = state.selected === null ? nodeScreenPos(state, hovered) : null;
+        const rect = canvas.getBoundingClientRect();
         showFileTooltip(
           state,
           hovered,
           e.clientX,
           e.clientY,
-          pos ? { nodeX: pos.x, nodeY: pos.y, canvas: canvas.getBoundingClientRect() } : undefined,
+          pos
+            ? {
+                nodeX: pos.x,
+                nodeY: pos.y,
+                canvas: rect,
+                usableW: usableStageWidth(state, rect.width),
+              }
+            : undefined,
         );
       } else if (target && target.kind === "road") {
         const facts = roadFacts(state, target.road);
