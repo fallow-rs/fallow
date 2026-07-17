@@ -830,11 +830,34 @@ button {
   z-index: 10;
 }
 
-#tooltip .tip-kind {
-  font-size: 8px;
-  letter-spacing: 0.16em;
+#tooltip .tip-name-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#tooltip .tip-size {
+  font-size: 10px;
   color: var(--text-muted);
-  margin-bottom: 1px;
+  white-space: nowrap;
+}
+
+#tooltip .tip-wires {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface-2);
+  font-size: 11px;
+  color: var(--text-low);
+  white-space: nowrap;
+}
+
+#tooltip .tip-wires .wire-dot {
+  display: inline;
+  color: var(--blue);
+  font-size: 9px;
 }
 
 #tooltip .tip-dir {

@@ -21,6 +21,7 @@ import {
   graphHoverTarget,
   graphPathTrace,
   initGraphNodes,
+  nodeScreenPos,
   refitOnResize,
   minimapHit,
   minimapPan,
@@ -268,7 +269,17 @@ const init = (): void => {
           ? "default"
           : "grab";
       if (hovered !== null && hovered !== state.selected) {
-        showFileTooltip(state, hovered, e.clientX, e.clientY);
+        // In the graph the tooltip docks to the far canvas edge, so it
+        // never covers the hovered neighborhood; ego mode keeps the
+        // cursor-following variant for its list rows.
+        const pos = state.selected === null ? nodeScreenPos(state, hovered) : null;
+        showFileTooltip(
+          state,
+          hovered,
+          e.clientX,
+          e.clientY,
+          pos ? { nodeX: pos.x, nodeY: pos.y, canvas: canvas.getBoundingClientRect() } : undefined,
+        );
       } else if (target && target.kind === "road") {
         const facts = roadFacts(state, target.road);
         showRoadTooltip(

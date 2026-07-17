@@ -29,6 +29,7 @@ import louvain from "graphology-communities-louvain";
 import type { AppState } from "./state";
 import type { RoadSelection, VizFile } from "./types";
 import { basename, dirname, formatCount, legendText, lensColor } from "./data";
+import { fileTipCanvasRect } from "./tooltip";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -1149,7 +1150,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.beginPath();
     hullPath(ctx, cluster.hull);
     ctx.fillStyle = theme.surface2;
-    ctx.globalAlpha = 0.9 * reveal.cluster(cluster);
+    ctx.globalAlpha = 0.9 * reveal.cluster(cluster) * (state.graphHovered !== null ? 0.6 : 1);
     ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -1203,6 +1204,8 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.globalAlpha = 1;
   }
 
+  const hoverDim = state.graphHovered !== null ? 0.35 : 1;
+
   // Roads: tapered ribbons, wide at importer, narrow at imported.
   // At fit zoom the ribbons carry the whole story, so hold a minimum
   // on-screen width and lift the alpha; both relax as the user zooms in.
@@ -1224,7 +1227,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     // but the biggest bundles; keep them recessive so source roads lead.
     const testDim = isTestCluster(clusters[road.src].key) ? 0.4 : 1;
     const trunk = road.count >= trunkFloor && testDim === 1 ? 0.22 : 0;
-    ctx.globalAlpha = (0.3 + 0.18 * roadBoost + trunk) * testDim * reveal.roads;
+    ctx.globalAlpha = (0.3 + 0.18 * roadBoost + trunk) * testDim * reveal.roads * hoverDim;
     ctx.fill();
     ctx.globalAlpha = 1;
 
@@ -1281,15 +1284,22 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.fill();
   }
 
-  // Hover neighborhood.
+  // Hover neighborhood. Direction is dual-encoded: files importing the
+  // hovered one arrive as solid blue ribbons (thick end at the
+  // importer, same rule as roads); its own imports leave as thin
+  // dashed blue lines.
   const hovered = state.graphHovered;
   let neighbors: Set<number> | null = null;
+  const hoverImporters = new Set<number>();
+  const hoverImports = new Set<number>();
   if (hovered !== null) {
     neighbors = new Set([hovered]);
     for (const [from, to] of data.edges) {
       if (from !== hovered && to !== hovered) continue;
       neighbors.add(from);
       neighbors.add(to);
+      if (to === hovered && from !== hovered) hoverImporters.add(from);
+      if (from === hovered && to !== hovered) hoverImports.add(to);
       const a = fileNodes[from];
       const b = fileNodes[to];
       if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) continue;
@@ -1298,12 +1308,29 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
       ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = theme.bg;
       ctx.globalAlpha = 0.9;
-      ctx.lineWidth = 3 / transform.k;
+      ctx.lineWidth = 4 / transform.k;
       ctx.stroke();
-      ctx.strokeStyle = from === hovered ? theme.blue : theme.textLow;
-      ctx.globalAlpha = 0.85;
-      ctx.lineWidth = 1.2 / transform.k;
-      ctx.stroke();
+      if (to === hovered) {
+        const p0 = { x: a.x, y: a.y };
+        const p3 = { x: b.x, y: b.y };
+        const p1 = { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 };
+        const p2 = { x: p0.x + ((p3.x - p0.x) * 2) / 3, y: p0.y + ((p3.y - p0.y) * 2) / 3 };
+        ctx.beginPath();
+        taperedRibbon(ctx, p0, p1, p2, p3, 2.4 / transform.k, 0.6 / transform.k);
+        ctx.fillStyle = theme.blue;
+        ctx.globalAlpha = 0.9;
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = theme.blue;
+        ctx.globalAlpha = 0.45;
+        ctx.lineWidth = 1.1 / transform.k;
+        ctx.setLineDash([4 / transform.k, 3 / transform.k]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -1320,7 +1347,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     const dimmed = neighbors !== null && !isNeighbor;
 
     let alpha = recessive ? 0.82 : 0.95;
-    if (dimmed) alpha = 0.12;
+    if (dimmed) alpha = 0.16;
     if (searching && !matched) alpha = Math.min(alpha, 0.1);
     if (isNeighbor) alpha = 1;
     alpha *= reveal.cluster(clusters[node.cluster]);
@@ -1337,6 +1364,18 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
       Math.PI * 2,
     );
     ctx.fill();
+
+    // Direction ring on hover neighbors, echoing the tooltip prefixes:
+    // solid blue ring = imports the hovered file, quiet ring = imported
+    // by it.
+    if (hoverImporters.has(node.fileIndex) || hoverImports.has(node.fileIndex)) {
+      const importer = hoverImporters.has(node.fileIndex);
+      ctx.strokeStyle = importer ? theme.blue : theme.borderStrong;
+      ctx.lineWidth = (importer ? 1.6 : 1) / transform.k;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.radius + 2.5 / transform.k, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     if (!dimmed) {
       if (state.lens === "deadcode" && file.status === "unused") {
@@ -1390,25 +1429,6 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     drawZoomLabels(state, gvs, w, h);
   }
 
-  // Neighbor labels on hover.
-  if (neighbors !== null) {
-    ctx.font = FONT_SMALL;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    for (const idx of neighbors) {
-      const node = fileNodes[idx];
-      if (!node || node.x == null || node.y == null) continue;
-      const name = basename(files[idx].path);
-      const textW = ctx.measureText(name).width;
-      ctx.fillStyle = theme.bg;
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(node.x - textW / 2 - 2, node.y + node.radius + 1, textW + 4, 12);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = idx === hovered ? theme.textHigh : theme.textLow;
-      ctx.fillText(name, node.x, node.y + node.radius + 2);
-    }
-  }
-
   // Search pulse rings.
   if (gvs.pulseFile !== null) {
     const node = fileNodes[gvs.pulseFile];
@@ -1433,10 +1453,14 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   ctx.restore();
 
   // Labels join once the roads have flowed in (their internal alpha
-  // handling would fight a global fade).
-  if (reveal.labels > 0.35) {
+  // handling would fight a global fade). While a file is hovered the
+  // neighborhood labels own the foreground instead.
+  if (reveal.labels > 0.35 && hovered === null) {
     drawRoadLabels(state, gvs);
     drawClusterLabels(state, gvs);
+  }
+  if (hovered !== null && neighbors !== null) {
+    drawHoverLabels(state, gvs, hovered, hoverImporters, hoverImports, w, h);
   }
   drawAxisMarkers(state, gvs, w, h);
   drawCanvasLegend(state, w, h);
@@ -1564,6 +1588,106 @@ const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): voi
     ctx.fillText(text, w / 2, 28.5);
     ctx.globalAlpha = 1;
   }
+};
+
+/**
+ * Screen-space neighbor labels on hover: fixed 10px regardless of
+ * zoom, halo instead of knockout slabs, greedy occupancy across four
+ * candidate slots with the docked tooltip pre-seeded as an exclusion
+ * zone, and a +N chip for whatever did not fit.
+ */
+const drawHoverLabels = (
+  state: AppState,
+  gvs: GraphViewState,
+  hovered: number,
+  importers: Set<number>,
+  imports: Set<number>,
+  w: number,
+  h: number,
+): void => {
+  const { ctx, theme } = state;
+  const kRel = gvs.transform.k / gvs.fitK;
+  const cap = kRel >= 1.2 ? 12 : 6;
+
+  // Interleave importer and import lists (each degree-sorted) so
+  // neither side monopolizes the cap.
+  const byDegree = (idx: number): number =>
+    state.data.files[idx].importer_count + state.data.files[idx].import_count;
+  const a = [...importers].sort((x, y) => byDegree(y) - byDegree(x));
+  const b = [...imports].sort((x, y) => byDegree(y) - byDegree(x));
+  const ordered: number[] = [];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (i < a.length) ordered.push(a[i]);
+    if (i < b.length) ordered.push(b[i]);
+  }
+
+  const hoveredNode = gvs.fileNodes[hovered];
+  if (!hoveredNode || hoveredNode.x == null || hoveredNode.y == null) return;
+  const hs = worldToScreen(gvs, { x: hoveredNode.x, y: hoveredNode.y });
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [
+    fileTipCanvasRect(hs.x, hs.y, w, h),
+  ];
+
+  ctx.font = FONT_SMALL;
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  let drawn = 0;
+  for (const idx of ordered) {
+    if (drawn >= cap) break;
+    const node = gvs.fileNodes[idx];
+    if (!node || node.x == null || node.y == null) continue;
+    const s = worldToScreen(gvs, { x: node.x, y: node.y });
+    if (s.x < -20 || s.x > w + 20 || s.y < -20 || s.y > h + 20) continue;
+    const name = middleTruncate(ctx, basename(state.data.files[idx].path), 140);
+    const textW = ctx.measureText(name).width;
+    const r = node.radius * gvs.transform.k + 3;
+    const slots: Array<{ x: number; y: number; align: CanvasTextAlign }> = [
+      { x: s.x, y: s.y + r + 9, align: "center" },
+      { x: s.x, y: s.y - r - 9, align: "center" },
+      { x: s.x + r + 5, y: s.y, align: "left" },
+      { x: s.x - r - 5, y: s.y, align: "right" },
+    ];
+    for (const slot of slots) {
+      const left = slot.align === "center" ? slot.x - textW / 2 : slot.align === "left" ? slot.x : slot.x - textW;
+      const rect = { x: left - 4, y: slot.y - 9, w: textW + 8, h: 18 };
+      if (rect.x < 4 || rect.x + rect.w > w - 4 || rect.y < 4 || rect.y + rect.h > h - 4) continue;
+      if (placed.some((p) => rect.x < p.x + p.w && rect.x + rect.w > p.x && rect.y < p.y + p.h && rect.y + rect.h > p.y)) {
+        continue;
+      }
+      ctx.textAlign = slot.align;
+      ctx.strokeStyle = theme.bg;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.92;
+      ctx.strokeText(name, slot.x, slot.y);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = theme.textLow;
+      ctx.fillText(name, slot.x, slot.y);
+      placed.push(rect);
+      drawn++;
+      break;
+    }
+  }
+
+  const total = importers.size + imports.size;
+  if (total > drawn) {
+    const label = `+${formatCount(total - drawn)} more · click for all`;
+    ctx.textAlign = "center";
+    ctx.strokeStyle = theme.bg;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.92;
+    ctx.strokeText(label, hs.x, hs.y + hoveredNode.radius * gvs.transform.k + 24);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = theme.textMuted;
+    ctx.fillText(label, hs.x, hs.y + hoveredNode.radius * gvs.transform.k + 24);
+  }
+};
+
+/** Node position in canvas pixels (for tooltip docking in main). */
+export const nodeScreenPos = (state: AppState, idx: number): { x: number; y: number } | null => {
+  const gvs = getGVS(state);
+  const node = gvs.fileNodes[idx];
+  if (!node || node.x == null || node.y == null) return null;
+  return worldToScreen(gvs, { x: node.x, y: node.y });
 };
 
 /** Any real interaction ends the intro early. */
