@@ -52,6 +52,7 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
   const overlay = el("div");
   overlay.id = "help-overlay";
   overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
   overlay.setAttribute("aria-label", "How to read this map");
 
   const box = el("div", "help-box");
@@ -90,6 +91,26 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
   overlay.appendChild(box);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) handlers.onHelpClose();
+  });
+  // Minimal modal focus trap: Tab cycles between the dialog's
+  // focusable elements instead of escaping into the page behind it.
+  overlay.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const focusables = [
+      ...overlay.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ];
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   });
   return overlay;
 };

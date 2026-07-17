@@ -143,10 +143,17 @@ const init = (): void => {
   app.appendChild(statuslineOf(refs));
 
   // ── Help overlay ──────────────────────────────────────────────
+  // Where focus returns when the modal help dialog closes.
+  let helpReturnFocus: HTMLElement | null = null;
+  const restoreHelpFocus = (): void => {
+    helpReturnFocus?.focus();
+    helpReturnFocus = null;
+  };
   const helpOverlay = buildHelpOverlay({
     onHelpClose: () => {
       state.helpOpen = false;
       helpOverlay.classList.remove("open");
+      restoreHelpFocus();
     },
   });
   document.body.appendChild(helpOverlay);
@@ -154,6 +161,14 @@ const init = (): void => {
   const toggleHelp = (): void => {
     state.helpOpen = !state.helpOpen;
     helpOverlay.classList.toggle("open", state.helpOpen);
+    if (state.helpOpen) {
+      // Move focus into the dialog and remember where it came from.
+      helpReturnFocus =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      helpOverlay.querySelector<HTMLButtonElement>("button.close")?.focus();
+    } else {
+      restoreHelpFocus();
+    }
   };
   refs.helpHandler = toggleHelp;
 
@@ -173,6 +188,7 @@ const init = (): void => {
 
   // ── Navigation shared by panel + views ────────────────────────
   const selectFile = (fileIndex: number | null, reveal = false): void => {
+    const hadSelection = state.selected !== null;
     state.selected = fileIndex;
     if (fileIndex === null) resetEgoTrail(state);
     if (fileIndex !== null && reveal) {
@@ -192,6 +208,16 @@ const init = (): void => {
       }
     }
     requestRender();
+    // Focus follows the panel: opening a selection focuses its close
+    // button (after the render rAF builds the DOM); closing returns
+    // focus to the canvas so keyboard users are never stranded.
+    if (fileIndex !== null) {
+      requestAnimationFrame(() => {
+        panel.querySelector<HTMLButtonElement>("button.close")?.focus();
+      });
+    } else if (hadSelection) {
+      canvas.focus();
+    }
   };
 
   // ── Render loop (rAF-coalesced) ───────────────────────────────
