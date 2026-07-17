@@ -7,7 +7,7 @@
 import { select } from "d3-selection";
 import { zoomIdentity } from "d3-zoom";
 import type { AppState } from "../state";
-import { basename, formatCount, legendText, lensColor } from "../data";
+import { basename, formatCount, legendText, lensColor, lensFindingLevel } from "../data";
 import { fileTipCanvasRect } from "../tooltip";
 import { renderEgoStage, renderGhost } from "./ego";
 import {
@@ -383,6 +383,20 @@ const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): voi
         ctx.setLineDash([3 / transform.k, 3 / transform.k]);
         ctx.strokeStyle = theme.red;
         ctx.lineWidth = 1.4 / transform.k;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // Non-color finding channel, mirroring the treemap hatch: severe
+      // findings ring the dot solidly, mild ones with a dash, so lens
+      // findings survive with the fill color removed. The overview lens
+      // is always level 0 and pays only the switch dispatch.
+      const level = lensFindingLevel(state.lens, state.index, file, node.fileIndex);
+      if (level > 0) {
+        ctx.strokeStyle = theme.textHigh;
+        ctx.lineWidth = 1 / transform.k;
+        if (level === 1) ctx.setLineDash([2 / transform.k, 2 / transform.k]);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + 1.5 / transform.k, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
       }

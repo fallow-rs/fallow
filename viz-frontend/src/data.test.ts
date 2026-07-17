@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { basename, buildIndex, dirname, dupRatio, formatSize, legendText, lensColor, lensFlag } from "./data";
+import {
+  basename,
+  buildIndex,
+  dirname,
+  dupRatio,
+  formatSize,
+  legendText,
+  lensColor,
+  lensFindingLevel,
+} from "./data";
 import { getTheme } from "./theme";
 import type { VizData, VizFile } from "./types";
 
@@ -135,10 +144,29 @@ describe("lens coloring", () => {
     );
   });
 
-  it("flags only unused files in the deadcode lens texture channel", () => {
+  it("grades findings per lens for the non-color texture channel", () => {
     const index = buildIndex(data());
-    expect(lensFlag("deadcode", index, file({ status: "unused" }), 0)).toBe(true);
-    expect(lensFlag("deadcode", index, file(), 0)).toBe(false);
+    // deadcode: unused file severe, unused exports mild, clean none.
+    expect(lensFindingLevel("deadcode", index, file({ status: "unused" }), 0)).toBe(2);
+    expect(lensFindingLevel("deadcode", index, file({ unused_export_count: 2 }), 0)).toBe(1);
+    expect(lensFindingLevel("deadcode", index, file(), 0)).toBe(0);
+    // dupes: >= 30% duplicated lines severe, any duplication mild.
+    expect(lensFindingLevel("dupes", index, file({ size: 340, dup_lines: 9 }), 0)).toBe(2);
+    expect(lensFindingLevel("dupes", index, file({ size: 3400, dup_lines: 1 }), 0)).toBe(1);
+    expect(lensFindingLevel("dupes", index, file(), 0)).toBe(0);
+    // hotspots: cc thresholds match the panel's sev split.
+    expect(lensFindingLevel("hotspots", index, file({ max_cyclomatic: 25 }), 0)).toBe(2);
+    expect(lensFindingLevel("hotspots", index, file({ max_cyclomatic: 12 }), 0)).toBe(1);
+    expect(lensFindingLevel("hotspots", index, file({ max_cyclomatic: 5 }), 0)).toBe(0);
+    // boundaries: violation sources severe; overview always none.
+    const vIndex = buildIndex(
+      data({
+        violations: [{ from: 0, to: 2, from_zone: 0, to_zone: 1, line: 3, specifier: "x" }],
+      }),
+    );
+    expect(lensFindingLevel("boundaries", vIndex, file(), 0)).toBe(2);
+    expect(lensFindingLevel("boundaries", vIndex, file(), 1)).toBe(0);
+    expect(lensFindingLevel("overview", vIndex, file({ status: "unused" }), 0)).toBe(0);
   });
 });
 

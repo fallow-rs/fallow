@@ -214,19 +214,32 @@ export const lensColor = (
   }
 };
 
-/** Whether the file carries a finding under the active lens (drives texture). */
-export const lensFlag = (lens: Lens, index: DataIndex, file: VizFile, fileIdx: number): boolean => {
+/**
+ * Non-color finding channel for the active lens: 2 = severe (dense
+ * hatch in the treemap, double ring in the graph), 1 = mild (light
+ * hatch, dashed ring), 0 = none. Thresholds mirror the panel's
+ * sev-error/sev-warn split so texture and text never disagree.
+ */
+export const lensFindingLevel = (
+  lens: Lens,
+  index: DataIndex,
+  file: VizFile,
+  fileIdx: number,
+): 0 | 1 | 2 => {
   switch (lens) {
     case "overview":
-      return false;
+      return 0;
     case "deadcode":
-      return file.status === "unused";
+      if (file.status === "unused") return 2;
+      return file.unused_export_count > 0 ? 1 : 0;
     case "dupes":
-      return false;
+      if (dupRatio(file) >= 0.3) return 2;
+      return file.dup_lines > 0 ? 1 : 0;
     case "boundaries":
-      return index.violationSources.has(fileIdx);
+      return index.violationSources.has(fileIdx) ? 2 : 0;
     case "hotspots":
-      return false;
+      if (file.max_cyclomatic >= 20) return 2;
+      return file.max_cyclomatic >= 10 ? 1 : 0;
   }
 };
 

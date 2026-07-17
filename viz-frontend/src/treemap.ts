@@ -1,7 +1,7 @@
 import type { AppState } from "./state";
 import type { LayoutCell, TreeNode } from "./types";
 import { contrastText, mix } from "./theme";
-import { formatCount, legendText, lensColor, lensFlag } from "./data";
+import { formatCount, legendText, lensColor, lensFindingLevel } from "./data";
 import { usableStageWidth } from "./graph";
 
 // ── Constants ───────────────────────────────────────────────────
@@ -130,6 +130,8 @@ interface TreemapAnim {
 interface TreemapState {
   anim: TreemapAnim | null;
   hatch: CanvasPattern | null;
+  /** Lighter hatch variant for mild (level 1) findings. */
+  hatchMild: CanvasPattern | null;
   hatchKey: string;
   raf: number;
   revealed: boolean;
@@ -140,7 +142,15 @@ interface TreemapState {
 const getTM = (state: AppState): TreemapState => {
   const ext = state as AppState & { _tm?: TreemapState };
   if (!ext._tm) {
-    ext._tm = { anim: null, hatch: null, hatchKey: "", raf: 0, revealed: false, layoutKey: "" };
+    ext._tm = {
+      anim: null,
+      hatch: null,
+      hatchMild: null,
+      hatchKey: "",
+      raf: 0,
+      revealed: false,
+      layoutKey: "",
+    };
   }
   return ext._tm;
 };
@@ -185,14 +195,14 @@ export const captureLensColors = (state: AppState): Map<number, string> => {
 
 // ── Hatch texture (secondary encoding for findings) ─────────────
 
-const buildHatch = (color: string): CanvasPattern | null => {
+const buildHatch = (color: string, alpha = 0.5): CanvasPattern | null => {
   const c = document.createElement("canvas");
   c.width = 6;
   c.height = 6;
   const pctx = c.getContext("2d");
   if (!pctx) return null;
   pctx.strokeStyle = color;
-  pctx.globalAlpha = 0.5;
+  pctx.globalAlpha = alpha;
   pctx.lineWidth = 1;
   pctx.beginPath();
   pctx.moveTo(-1, 5);
@@ -247,6 +257,7 @@ export const renderTreemap = (state: AppState): void => {
 
   if (tm.hatchKey !== state.theme.red) {
     tm.hatch = buildHatch(state.theme.textHigh);
+    tm.hatchMild = buildHatch(state.theme.textHigh, 0.25);
     tm.hatchKey = state.theme.red;
   }
 
@@ -438,10 +449,15 @@ const renderFileCell = (
     ctx.globalAlpha = alpha;
   }
 
-  // Texture channel: hatch marks findings so color is never the only signal.
+  // Texture channel: hatch marks findings so color is never the only
+  // signal; severe findings get the dense hatch, mild ones a light one.
   const tm = getTM(state);
-  if (tm.hatch && lensFlag(state.lens, index, file, fi)) {
+  const level = lensFindingLevel(state.lens, index, file, fi);
+  if (level === 2 && tm.hatch) {
     ctx.fillStyle = tm.hatch;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+  } else if (level === 1 && tm.hatchMild) {
+    ctx.fillStyle = tm.hatchMild;
     ctx.fillRect(r.x, r.y, r.w, r.h);
   }
 
