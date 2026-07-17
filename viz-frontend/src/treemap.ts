@@ -243,7 +243,8 @@ export const renderTreemap = (state: AppState): void => {
   ctx.fillRect(0, 0, w, h);
 
   const rootNode = state.index.nodesByPath.get(state.drillPath) ?? state.index.tree;
-  const rootRect: Rect = { x: 0, y: 0, w, h };
+  // Reserve a footer gutter so the legend never paints over tiles.
+  const rootRect: Rect = { x: 0, y: 0, w, h: h - 22 };
 
   const zooming = anim && (anim.kind === "zoom-in" || anim.kind === "zoom-out") && animT < 1;
   const t = easeOut(animT);
@@ -420,7 +421,7 @@ const renderCell = (
       ctx.font = FONT_CELL;
       ctx.textBaseline = "top";
       ctx.textAlign = "left";
-      const label = truncate(ctx, cell.node.name, cell.w - 8);
+      const label = cellLabel(ctx, cell.node.name, cell.w - 8);
       ctx.globalAlpha = ctx.globalAlpha * 0.92;
       ctx.fillText(label, cell.x + 4, cell.y + 3);
       ctx.globalAlpha = alpha;
@@ -522,6 +523,24 @@ const countFiles = (node: TreeNode): number => {
   let n = 0;
   for (const c of node.children) n += countFiles(c);
   return n;
+};
+
+/**
+ * File-tile label: prefer dropping the extension over mid-name ellipsis,
+ * and render nothing when fewer than five glyphs would fit; empty beats
+ * unreadable.
+ */
+const cellLabel = (
+  ctx: CanvasRenderingContext2D,
+  name: string,
+  maxWidth: number,
+): string => {
+  if (ctx.measureText(name).width <= maxWidth) return name;
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  if (ctx.measureText(stem).width <= maxWidth) return stem;
+  const cut = truncate(ctx, stem, maxWidth);
+  return cut.length < 5 ? "" : cut;
 };
 
 const truncate = (

@@ -104,7 +104,12 @@ export const renderPanel = (
   panel: HTMLElement,
   navigate: NavigateFn,
   close: () => void,
+  refresh: () => void,
 ): void => {
+  if (state.selected === null && state.selectedClone !== null) {
+    renderClonePanel(state, panel, navigate, refresh);
+    return;
+  }
   if (state.selected === null && state.selectedRoad !== null) {
     renderRoadPanel(state, panel, navigate, close);
     return;
@@ -113,7 +118,7 @@ export const renderPanel = (
     // A finding lens with nothing selected shows its ranked worst-first
     // list, so the lens answers "which ones first", not just "how many".
     if (state.lens !== "overview") {
-      renderLensPanel(state, panel, navigate);
+      renderLensPanel(state, panel, navigate, refresh);
       return;
     }
     panel.classList.remove("open");
@@ -207,7 +212,11 @@ export const renderPanel = (
 
   // Complexity
   if (file.functions && file.functions.length > 0) {
-    const cx = sectionEl("complexity hotspots");
+    const cx = sectionEl(
+      file.fn_count > file.functions.length
+        ? `complexity hotspots · top ${formatCount(file.functions.length)} of ${formatCount(file.fn_count)} functions`
+        : "complexity hotspots",
+    );
     const table = el("table");
     const thead = el("thead");
     const hr = el("tr");
@@ -218,8 +227,8 @@ export const renderPanel = (
     for (const fn of file.functions) {
       const tr = el("tr");
       const nameTd = el("td");
-      nameTd.appendChild(el("span", "fn-name", fn.name));
-      nameTd.appendChild(el("span", "muted", `:${fn.line}`));
+      nameTd.appendChild(el("span", "fn-name", fn.name === "<arrow>" ? "(arrow fn)" : fn.name));
+      nameTd.appendChild(el("span", "muted", ` L${fn.line}`));
       if (fn.hooks > 0 || fn.jsx_depth > 0) {
         const react = el("div", "fn-react");
         const pairs: Array<[string, number]> = [];
@@ -360,6 +369,8 @@ interface RankRow {
   metric: string;
   metricCls: string;
   fileIndex: number;
+  /** Clone group index; rows with this open the clone panel instead. */
+  clone?: number;
 }
 
 const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } => {
@@ -407,6 +418,7 @@ const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: 
             metric: `${formatCount(group.lines)} lines`,
             metricCls: "sev-warn",
             fileIndex: first.file,
+            clone: g,
           };
         });
       return { title: "duplication · biggest blocks first", rows, empty: "no duplicated blocks" };
@@ -434,19 +446,21 @@ const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: 
       return { title: "boundaries · breaks then cycles", rows, empty: "no cycles or layer breaks" };
     }
     case "hotspots": {
+      // Risk = hard to change AND widely depended on, not hardness alone;
+      // that is the "what do we refactor first" ordering a lead wants.
+      const risk = (f: VizFile): number => f.max_cyclomatic * Math.log2(2 + f.importer_count);
       const rows = files
         .map((f, i) => ({ f, i }))
         .filter(({ f }) => f.max_cyclomatic > 0)
-        .sort((a, b) => b.f.max_cyclomatic - a.f.max_cyclomatic)
-        .slice(0, 40)
+        .sort((a, b) => risk(b.f) - risk(a.f))
         .map(({ f, i }) => ({
           label: basename(f.path),
           dir: dirname(f.path),
-          metric: `cc ${formatCount(f.max_cyclomatic)}`,
+          metric: `cc ${formatCount(f.max_cyclomatic)} · used by ${formatCount(f.importer_count)}`,
           metricCls: f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "muted",
           fileIndex: i,
         }));
-      return { title: "complexity · hardest first", rows, empty: "no complex functions" };
+      return { title: "complexity · riskiest first", rows, empty: "no complex functions" };
     }
     default:
       return { title: "", rows: [], empty: "" };
@@ -454,7 +468,12 @@ const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: 
 };
 
 /** Ranked worst-first findings for the active lens (nothing selected). */
-const renderLensPanel = (state: AppState, panel: HTMLElement, navigate: NavigateFn): void => {
+const renderLensPanel = (
+  state: AppState,
+  panel: HTMLElement,
+  navigate: NavigateFn,
+  refresh: () => void,
+): void => {
   const { title, rows, empty } = rankRowsFor(state);
   panel.replaceChildren();
   panel.classList.add("open");
@@ -465,6 +484,22 @@ const renderLensPanel = (state: AppState, panel: HTMLElement, navigate: Navigate
     panel.appendChild(section);
     return;
   }
+  // Leave with the list, not just a feeling: findings as markdown.
+  const copyBtn = el("button", "copy-path", "[ copy as markdown ]") as HTMLButtonElement;
+  copyBtn.type = "button";
+  copyBtn.addEventListener("click", () => {
+    const md = [
+      `# fallow · ${title} · ${state.data.root}`,
+      ...rows.map((r) => `- ${r.dir ? `${r.dir}/` : ""}${r.label} (${r.metric})`),
+    ].join("\n");
+    void navigator.clipboard?.writeText(md).then(() => {
+      copyBtn.textContent = "[ copied ]";
+      setTimeout(() => {
+        copyBtn.textContent = "[ copy as markdown ]";
+      }, 1200);
+    });
+  });
+  section.appendChild(copyBtn);
   const cap = 30;
   const ul = el("ul", "link-list rank-list");
   for (const row of rows.slice(0, cap)) {
@@ -476,7 +511,14 @@ const renderLensPanel = (state: AppState, panel: HTMLElement, navigate: Navigate
     labelBox.appendChild(document.createTextNode(row.label));
     btn.appendChild(labelBox);
     btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
-    btn.addEventListener("click", () => navigate(row.fileIndex));
+    btn.addEventListener("click", () => {
+      if (row.clone !== undefined) {
+        state.selectedClone = row.clone;
+        refresh();
+      } else {
+        navigate(row.fileIndex);
+      }
+    });
     li.appendChild(btn);
     ul.appendChild(li);
   }
@@ -485,9 +527,77 @@ const renderLensPanel = (state: AppState, panel: HTMLElement, navigate: Navigate
   }
   section.appendChild(ul);
   const hint = el("div", "action-hint");
-  hint.append("click a row to focus that file on the map");
+  hint.append(
+    state.lens === "hotspots"
+      ? "cc = cyclomatic complexity · click a row to focus that file"
+      : "click a row to focus that file on the map",
+  );
   section.appendChild(hint);
   panel.appendChild(section);
+};
+
+/** Clone-group drill-down: the preview plus every copy as a jump link. */
+const renderClonePanel = (
+  state: AppState,
+  panel: HTMLElement,
+  navigate: NavigateFn,
+  refresh: () => void,
+): void => {
+  const groupIdx = state.selectedClone;
+  const group = groupIdx !== null ? state.data.clones[groupIdx] : undefined;
+  if (groupIdx === null || !group) return;
+  panel.replaceChildren();
+  panel.classList.add("open");
+
+  const head = el("div", "panel-head");
+  const box = el("div", "file");
+  box.appendChild(el("div", "dir", "duplicated block"));
+  box.appendChild(el("div", "name", `${formatCount(group.lines)} lines × ${formatCount(group.instances.length)} places`));
+  const statusLine = el("div", "status-line");
+  statusLine.appendChild(sev("sev-warn", `${formatCount(group.tokens)} tokens`));
+  box.appendChild(statusLine);
+  head.appendChild(box);
+  const closeBtn = el("button", "close", "×") as HTMLButtonElement;
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Back to the duplication list");
+  closeBtn.addEventListener("click", () => {
+    state.selectedClone = null;
+    refresh();
+  });
+  head.appendChild(closeBtn);
+  panel.appendChild(head);
+
+  const copies = sectionEl(`every copy · ${formatCount(group.instances.length)}`);
+  const ul = el("ul", "link-list");
+  for (const inst of group.instances) {
+    const li = el("li");
+    const btn = el("button") as HTMLButtonElement;
+    btn.type = "button";
+    btn.textContent = `${state.data.files[inst.file].path}:${inst.start_line}-${inst.end_line}`;
+    btn.addEventListener("click", () => navigate(inst.file));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+  copies.appendChild(ul);
+  panel.appendChild(copies);
+
+  if (group.preview) {
+    const prev = sectionEl("the shared code");
+    const pre = el("pre");
+    pre.textContent = group.preview;
+    prev.appendChild(pre);
+    panel.appendChild(prev);
+  }
+
+  const first = group.instances[0];
+  if (first) {
+    const hint = el("div", "action-hint");
+    hint.append(
+      "verify: ",
+      elCode(`fallow dupes --trace ${state.data.files[first.file].path}:${first.start_line}`),
+    );
+    panel.appendChild(hint);
+  }
 };
 
 /** Drill-down panel for an aggregated road: the contributing file pairs. */

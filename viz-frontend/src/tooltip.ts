@@ -127,7 +127,7 @@ export const showFileTooltip = (
       label.textContent = "worst ";
       const fn = document.createElement("span");
       fn.className = "fn";
-      fn.textContent = `${top.name}()`;
+      fn.textContent = top.name === "<arrow>" ? "(arrow fn)" : `${top.name}()`;
       worst.append(label, fn);
       tip.appendChild(worst);
     }

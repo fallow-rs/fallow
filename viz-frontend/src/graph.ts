@@ -139,6 +139,8 @@ interface GraphViewState {
 
 const FONT_SMALL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 const FONT_MICRO = '9px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const FONT_CHIP = '11px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+const FONT_LEGEND = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 const FONT_CARD = '700 13px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 
 const NODE_R_MIN = 2.5;
@@ -1134,17 +1136,23 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   // At fit zoom the ribbons carry the whole story, so hold a minimum
   // on-screen width and lift the alpha; both relax as the user zooms in.
   const roadBoost = Math.min(1, Math.max(0, 1.6 - kRel));
-  const minRoadW = 1.4 / transform.k;
+  const minRoadW = 1.8 / transform.k;
+  // High-traffic roads get promoted a step so the trunk routes survive
+  // a projector; the threshold is the 75th percentile of bundle sizes.
+  const roadCounts = roads.map((r) => r.count).sort((a, b) => a - b);
+  const trunkFloor =
+    roadCounts.length > 0 ? roadCounts[Math.floor(roadCounts.length * 0.75)] : Infinity;
   for (const road of roads) {
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
     const wSrc = Math.max(minRoadW, roadWidth(road.count));
     ctx.beginPath();
-    taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.6, wSrc * 0.3));
+    taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.5, wSrc * 0.22));
     ctx.fillStyle = theme.textLow;
     // Test-to-source imports are the least interesting overview signal
     // but the biggest bundles; keep them recessive so source roads lead.
     const testDim = isTestCluster(clusters[road.src].key) ? 0.4 : 1;
-    ctx.globalAlpha = (0.3 + 0.18 * roadBoost) * testDim * reveal.roads;
+    const trunk = road.count >= trunkFloor && testDim === 1 ? 0.14 : 0;
+    ctx.globalAlpha = (0.3 + 0.18 * roadBoost + trunk) * testDim * reveal.roads;
     ctx.fill();
     ctx.globalAlpha = 1;
 
@@ -1193,6 +1201,12 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.lineDashOffset = 0;
+    // Direction stamp: a filled dot marks the importer end, so the
+    // taper's meaning is confirmable the moment a road is focused.
+    ctx.beginPath();
+    ctx.arc(p0.x, p0.y, 4 / transform.k, 0, Math.PI * 2);
+    ctx.fillStyle = theme.blue;
+    ctx.fill();
   }
 
   // Hover neighborhood.
@@ -1743,7 +1757,7 @@ const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
 
 const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme } = state;
-  ctx.font = FONT_SMALL;
+  ctx.font = FONT_CHIP;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
@@ -1754,9 +1768,10 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
   const kRel = gvs.transform.k / gvs.fitK;
   for (const cluster of ordered) {
     if (cluster.isolated && !getGVS(state).standaloneOpen) continue;
-    // Small clusters keep their chips until mid zoom would only add
-    // collisions at fit zoom; the hulls still show where they are.
-    if (cluster.indices.length < 6 && kRel < 1.5) continue;
+    // Small multi-file clusters wait for mid zoom (their chips only add
+    // collisions at fit); singletons keep their quiet borderless label
+    // so no connected dot floats unexplained.
+    if (cluster.indices.length >= 2 && cluster.indices.length < 6 && kRel < 1.5) continue;
     let topLeft = cluster.hull[0] ?? { x: cluster.cx, y: cluster.cy };
     for (const p of cluster.hull) {
       if (p.y < topLeft.y || (p.y === topLeft.y && p.x < topLeft.x)) topLeft = p;
@@ -1844,14 +1859,14 @@ const drawAxisMarkers = (state: AppState, gvs: GraphViewState, w: number, h: num
   const kRel = gvs.transform.k / gvs.fitK;
   if (kRel > 1.3 || state.selected !== null) return;
   const { ctx, theme } = state;
-  ctx.font = FONT_MICRO;
+  ctx.font = FONT_SMALL;
   ctx.textBaseline = "middle";
-  ctx.fillStyle = theme.textMuted;
-  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = theme.textLow;
+  ctx.globalAlpha = 0.85;
   ctx.textAlign = "left";
-  ctx.fillText("ENTRY CODE ▸", 14, h / 2);
+  ctx.fillText("ENTRY CODE", 14, h / 2);
   ctx.textAlign = "right";
-  ctx.fillText("◂ SHARED FOUNDATIONS", w - 14, h / 2);
+  ctx.fillText("SHARED FOUNDATIONS", w - 14, h / 2);
   ctx.globalAlpha = 1;
 };
 
@@ -1859,16 +1874,16 @@ const drawCanvasLegend = (state: AppState, w: number, h: number): void => {
   const { ctx, theme } = state;
   const text = legendText(state.lens, state.data, "graph");
   if (text === "") return;
-  ctx.font = FONT_MICRO;
+  ctx.font = FONT_LEGEND;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const textW = ctx.measureText(text).width;
   ctx.fillStyle = theme.bg;
   ctx.globalAlpha = 0.85;
-  ctx.fillRect(10, h - 26, textW + 12, 18);
-  ctx.globalAlpha = 0.8;
-  ctx.fillStyle = theme.textMuted;
-  ctx.fillText(text, 16, h - 17);
+  ctx.fillRect(10, h - 27, textW + 12, 19);
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = theme.textLow;
+  ctx.fillText(text, 16, h - 17.5);
   ctx.globalAlpha = 1;
   void w;
 };
@@ -2257,6 +2272,16 @@ const drawStageColumn = (
       if (ctx.measureText(dim).width + nameW > maxTextW) {
         drawDim = tailTruncate(ctx, dim, Math.max(0, maxTextW - nameW));
       }
+      const totalW = nameW + ctx.measureText(drawDim).width;
+      ctx.fillStyle = theme.bg;
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = 0.85 * ease;
+      if (side === "left") {
+        ctx.fillRect(textX - totalW - 2, rowY - 7, totalW + 4, 14);
+      } else {
+        ctx.fillRect(textX - 2, rowY - 7, totalW + 4, 14);
+      }
+      ctx.globalAlpha = prevAlpha;
       if (side === "left") {
         ctx.fillStyle = nameColor;
         ctx.fillText(name, textX, rowY);

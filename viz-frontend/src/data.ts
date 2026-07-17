@@ -248,7 +248,7 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
   if (lens === "overview") {
     return view === "map"
       ? "tile = file · area = bytes on disk · blue outline = entry point"
-      : "dot = file · roads = imports, thick end is the importer";
+      : "dot = file, sized by bytes · blue = entry point · lines = imports, thick end is the importer · zoom in for more labels";
   }
   const lines: Record<Lens, string> = {
     overview: "",

@@ -25,6 +25,8 @@ export interface AppState {
   selected: number | null;
   /** Selected aggregated road (graph overview drill-down). */
   selectedRoad: RoadSelection | null;
+  /** Selected clone group index (duplication lens drill-down). */
+  selectedClone: number | null;
   /** Hovered file index in graph view. */
   graphHovered: number | null;
 
@@ -64,6 +66,7 @@ export const createState = (
     hoveredCell: null,
     selected: null,
     selectedRoad: null,
+    selectedClone: null,
     graphHovered: null,
     search: "",
     searchMatches: new Set(),

@@ -197,7 +197,7 @@ button {
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 24px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-0);
@@ -299,7 +299,7 @@ button {
 }
 
 .seg .badge.sev-zero {
-  color: var(--green-text);
+  color: var(--text-muted);
   font-weight: 400;
 }
 
@@ -327,6 +327,14 @@ button {
 #lens-summary .summary-cmd {
   color: var(--text-muted);
   white-space: nowrap;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+}
+
+#lens-summary .summary-cmd:hover {
+  color: var(--text-high);
 }
 
 #lens-summary.visible {
@@ -335,13 +343,16 @@ button {
 
 /* Search */
 #search {
+  /* Basis below the free space so a wrapping flexbox keeps it on row 1
+     (wrap is decided pre-shrink); it then grows up to max-width. */
+  flex: 1 1 130px;
+  max-width: 260px;
   font-family: inherit;
   font-size: 12px;
   color: var(--text-high);
   background: var(--surface-1);
   border: 1px solid var(--border-default);
   padding: 4px 10px;
-  width: 220px;
   transition: border-color 100ms ease-out;
 }
 
@@ -416,6 +427,10 @@ button {
   letter-spacing: 0.04em;
 }
 
+#panel .rank-list {
+  max-height: none;
+}
+
 #panel .rank-list button {
   display: flex;
   justify-content: space-between;
@@ -424,10 +439,18 @@ button {
   width: 100%;
 }
 
+/* Truncate the dim directory prefix, never the filename. */
 #panel .rank-list .rank-label {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+#panel .rank-list .rank-label .muted {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 2ch;
 }
 
 #panel .rank-list .rank-metric {

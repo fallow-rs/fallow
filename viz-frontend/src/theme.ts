@@ -113,8 +113,8 @@ const light: Theme = {
   blueSubtle: "#edf6ff",
   dirFill: "#f9f9f8",
   dirHeader: "#f2f2f0",
-  cellNeutral: "#dcdbd7",
-  cellEntry: "#c4d6ea",
+  cellNeutral: "#a9a7a0",
+  cellEntry: "#7fb1e8",
   zones: ["#0090ff", "#e35b00", "#12a594", "#5b5bd6", "#d6409f"],
   zoneOther: "#a9a7a0",
 };

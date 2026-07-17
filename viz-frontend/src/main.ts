@@ -90,6 +90,7 @@ const init = (): void => {
     if (state.lens === lens) return;
     const prev = captureLensColors(state);
     state.lens = lens;
+    state.selectedClone = null;
     startLensFade(state, prev);
     requestRender();
   };
@@ -193,10 +194,16 @@ const init = (): void => {
     requestAnimationFrame(() => {
       renderQueued = false;
       rerenderChrome();
-      renderPanel(state, panel, (idx) => selectFile(idx, true), () => {
-        state.selectedRoad = null;
-        selectFile(null);
-      });
+      renderPanel(
+        state,
+        panel,
+        (idx) => selectFile(idx, true),
+        () => {
+          state.selectedRoad = null;
+          selectFile(null);
+        },
+        requestRender,
+      );
       renderView(state);
       syncHash(state);
     });
@@ -368,6 +375,9 @@ const init = (): void => {
       }
       if (state.selected !== null) {
         selectFile(null);
+      } else if (state.selectedClone !== null) {
+        state.selectedClone = null;
+        requestRender();
       } else if (state.selectedRoad !== null || clearGraphFocus(state)) {
         state.selectedRoad = null;
         requestRender();
