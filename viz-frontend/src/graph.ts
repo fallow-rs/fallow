@@ -864,7 +864,7 @@ export const initGraphNodes = (state: AppState): void => {
 
   // Fit-to-view.
   const stageEl = canvas.parentElement;
-  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const w = usableStageWidth(state, stageEl ? stageEl.clientWidth : window.innerWidth);
   const h = stageEl ? stageEl.clientHeight : window.innerHeight;
   let minX = Infinity;
   let minY = Infinity;
@@ -1062,6 +1062,16 @@ const chipRect = (
 
 const roadWidth = (count: number): number =>
   Math.min(8, Math.max(1.5, 1 + Math.floor(Math.log2(count))));
+
+/** Width the graph can actually use: the right panel overlays the stage. */
+const usableStageWidth = (state: AppState, stageW: number): number => {
+  const panelOpen =
+    state.selected !== null ||
+    state.selectedRoad !== null ||
+    state.selectedClone !== null ||
+    state.lens !== "overview";
+  return panelOpen ? Math.max(420, stageW - 380) : stageW;
+};
 
 /** Folder keys whose imports carry little overview signal (test suites). */
 const isTestCluster = (key: string): boolean =>
@@ -1393,7 +1403,9 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
       }
       if (searching && matched) {
         ctx.strokeStyle = theme.amberText;
-        ctx.lineWidth = 1.4 / transform.k;
+        ctx.lineWidth = 2 / transform.k;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + 2 / transform.k, 0, Math.PI * 2);
         ctx.stroke();
       }
       // Hub ring from mid zoom (a bare ring at fit zoom reads as an
@@ -1963,8 +1975,12 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     if (cluster.isolated && !getGVS(state).standaloneOpen) continue;
     // Small multi-file clusters wait for mid zoom (their chips only add
     // collisions at fit); singletons keep their quiet borderless label
-    // so no connected dot floats unexplained.
-    if (cluster.indices.length >= 2 && cluster.indices.length < 6 && kRel < 1.5) continue;
+    // so no connected dot floats unexplained. On small maps every
+    // cluster fits comfortably, so nothing is culled.
+    const manyClusters = gvs.clusters.filter((c) => !c.isolated).length > 10;
+    if (manyClusters && cluster.indices.length >= 2 && cluster.indices.length < 6 && kRel < 1.5) {
+      continue;
+    }
     let topLeft = cluster.hull[0] ?? { x: cluster.cx, y: cluster.cy };
     for (const p of cluster.hull) {
       if (p.y < topLeft.y || (p.y === topLeft.y && p.x < topLeft.x)) topLeft = p;
@@ -1992,6 +2008,7 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
       y += 19;
     }
     placed.push({ x: x - 4, y: y - 10, w: boxW + 3, h: 20 });
+    if (state.search.trim() !== "") ctx.globalAlpha = 0.35;
     chipRect(
       ctx,
       x - 4,
@@ -2008,6 +2025,7 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
       ctx.fillStyle = theme.textMuted;
       ctx.fillText(sub, x + labelW + 8, y + 0.5);
     }
+    ctx.globalAlpha = 1;
   }
 
   // Standalone toggle: a fixed chip docked above the canvas legend so it
@@ -2756,7 +2774,7 @@ export const resetGraphView = (state: AppState): void => {
   if (!gvs.initialized || !gvs.zoomBehavior || state.selected !== null) return;
   // Recompute the fit transform from current cluster bounds.
   const stageEl = state.canvas.parentElement;
-  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const w = usableStageWidth(state, stageEl ? stageEl.clientWidth : window.innerWidth);
   const h = stageEl ? stageEl.clientHeight : window.innerHeight;
   let minX = Infinity;
   let minY = Infinity;

@@ -94,6 +94,9 @@ const init = (): void => {
     state.lens = lens;
     state.selectedClone = null;
     startLensFade(state, prev);
+    // The ranked panel opens or closes with the lens; keep the graph
+    // fitted to the space that remains while the camera is untouched.
+    if (state.view === "graph") refitOnResize(state);
     requestRender();
   };
 

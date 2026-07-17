@@ -424,7 +424,7 @@ const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: 
         rows.push({
           label: `${basename(files[v.from].path)} → ${basename(files[v.to].path)}`,
           dir: dirname(files[v.from].path),
-          metric: state.data.zones[v.to_zone]?.name ?? "zone",
+          metric: `→ ${state.data.zones[v.to_zone]?.name ?? "zone"}`,
           metricCls: "sev-error",
           fileIndex: v.from,
         });

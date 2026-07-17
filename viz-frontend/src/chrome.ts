@@ -343,7 +343,7 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
       text =
         s.circular_deps + s.boundary_violations === 0
           ? "no import cycles or layer violations"
-          : `${formatCount(s.circular_deps)} cycles · ${formatCount(s.boundary_violations)} layer breaks · shown as red and amber connections`;
+          : `${formatCount(s.circular_deps)} cycle${s.circular_deps === 1 ? "" : "s"} · ${formatCount(s.boundary_violations)} layer break${s.boundary_violations === 1 ? "" : "s"} · shown as red and amber connections`;
       break;
     case "hotspots":
       text =
@@ -417,4 +417,7 @@ const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
   refs.searchCount.replaceChildren();
   const n = el("span", "n", formatCount(state.searchMatches.size));
   refs.searchCount.append(n, document.createTextNode(" matches"));
+  if (state.searchMatches.size > 0 && state.view === "graph") {
+    refs.searchCount.appendChild(el("span", "hint", " · enter zooms"));
+  }
 };
