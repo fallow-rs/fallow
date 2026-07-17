@@ -136,6 +136,31 @@ fn escape_payload_json(json: &str) -> String {
     json.replace('<', "\\u003c")
 }
 
+/// Write the rendered HTML, refusing to follow a planted symlink and
+/// creating missing `--out` parent directories.
+fn write_output(path: &Path, html: &str) -> Result<(), String> {
+    if let Ok(meta) = path.symlink_metadata()
+        && meta.file_type().is_symlink()
+    {
+        return Err(format!(
+            "Refusing to write through symlink: {}",
+            path.display()
+        ));
+    }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create output directory {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+    std::fs::write(path, html).map_err(|e| format!("Failed to write HTML: {e}"))
+}
+
 fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duration) -> ExitCode {
     let json = match serde_json::to_string(data) {
         Ok(j) => j,
@@ -174,12 +199,8 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
         .output_path
         .map_or_else(|| opts.root.join("fallow-viz.html"), Path::to_path_buf);
 
-    if let Err(e) = std::fs::write(&output_path, &html) {
-        return emit_error(
-            &format!("Failed to write HTML: {e}"),
-            2,
-            OutputFormat::Human,
-        );
+    if let Err(message) = write_output(&output_path, &html) {
+        return emit_error(&message, 2, OutputFormat::Human);
     }
 
     if !opts.quiet {
@@ -451,5 +472,37 @@ mod tests {
         assert!(mermaid.contains("n0[\"evil  name#93;.ts\"]"));
         assert!(!mermaid.contains("evil\r"));
         assert!(!mermaid.contains("evil\n"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_refuses_symlink_target() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let real = temp.path().join("real.txt");
+        std::fs::write(&real, "secret").expect("write real target");
+        let link = temp.path().join("fallow-viz.html");
+        std::os::unix::fs::symlink(&real, &link).expect("plant symlink");
+
+        let result = write_output(&link, "<html></html>");
+
+        let message = result.expect_err("symlink target must be refused");
+        assert!(message.contains("Refusing to write through symlink"));
+        assert_eq!(
+            std::fs::read_to_string(&real).expect("read real target"),
+            "secret"
+        );
+    }
+
+    #[test]
+    fn write_creates_parent_dirs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("nested/dir/out.html");
+
+        write_output(&target, "<html></html>").expect("write with parent creation");
+
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read output"),
+            "<html></html>"
+        );
     }
 }
