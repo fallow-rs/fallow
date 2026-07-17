@@ -133,15 +133,30 @@ interface TreemapState {
   hatchKey: string;
   raf: number;
   revealed: boolean;
+  /** Geometry key the cached `state.layout` was squarified for ("" = stale). */
+  layoutKey: string;
 }
 
 const getTM = (state: AppState): TreemapState => {
   const ext = state as AppState & { _tm?: TreemapState };
   if (!ext._tm) {
-    ext._tm = { anim: null, hatch: null, hatchKey: "", raf: 0, revealed: false };
+    ext._tm = { anim: null, hatch: null, hatchKey: "", raf: 0, revealed: false, layoutKey: "" };
   }
   return ext._tm;
 };
+
+/**
+ * Geometry inputs of the treemap layout. While this key is unchanged and
+ * no animation is in flight, the cached `state.layout` cells repaint
+ * as-is: pure hover repaints skip the squarify recursion entirely.
+ */
+export const treemapLayoutKey = (
+  drillPath: string,
+  w: number,
+  h: number,
+  usableW: number,
+  dpr: number,
+): string => [drillPath, w, h, usableW, dpr].join("|");
 
 const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 
@@ -272,7 +287,6 @@ export const renderTreemap = (state: AppState): void => {
     }
   }
 
-  state.layout = [];
   const rctx: RenderCtx = {
     state,
     now,
@@ -283,11 +297,25 @@ export const renderTreemap = (state: AppState): void => {
     labels: !zooming,
   };
 
-  const cells = squarify(rootNode.children, insetRect(rootRect, 1));
-  const total = cells.length;
-  let cellSeq = 0;
-  for (const cell of cells) {
-    cellSeq = renderCell(rctx, cell, 0, cellSeq, total);
+  // Layout cache: geometry only changes with drill, stage size, panel
+  // state, or DPR. On a paint-only render (hover, selection ring) the
+  // cached cells repaint without re-running squarify. Any in-flight
+  // animation bypasses the cache; the reveal populates `state.layout`
+  // incrementally and a zoom repaints scaled geometry.
+  const layoutKey = treemapLayoutKey(state.drillPath, w, h, rootRect.w, dpr);
+  if (tm.anim === null && tm.layoutKey === layoutKey && state.layout.length > 0) {
+    repaintFromLayout(rctx);
+  } else {
+    state.layout = [];
+    const cells = squarify(rootNode.children, insetRect(rootRect, 1));
+    const total = cells.length;
+    let cellSeq = 0;
+    for (const cell of cells) {
+      cellSeq = renderCell(rctx, cell, 0, cellSeq, total);
+    }
+    // Only an animation-free hit-test frame produces a complete layout
+    // list; every other frame leaves the cache stale.
+    tm.layoutKey = rctx.hitTest && tm.anim === null ? layoutKey : "";
   }
 
   if (!zooming) {
@@ -468,6 +496,32 @@ const renderDirCell = (
   alpha: number,
   hovered: boolean,
 ): number => {
+  const inner = paintDirChrome(rctx, cell, depth, alpha, hovered);
+  if (inner) {
+    const children = squarify(cell.node.children, inner);
+    let s = nextSeq;
+    for (const child of children) {
+      s = renderCell(rctx, child, depth + 1, s, totalTop);
+    }
+    rctx.state.ctx.globalAlpha = 1;
+    return s;
+  }
+  return nextSeq;
+};
+
+/**
+ * Paint a directory cell's own chrome (summary tile, or fill + border +
+ * header). Returns the inner child area when the cell nests children,
+ * null otherwise; the cached repaint path ignores the return value
+ * because child cells already sit in `state.layout`.
+ */
+const paintDirChrome = (
+  rctx: RenderCtx,
+  cell: LayoutCell,
+  depth: number,
+  alpha: number,
+  hovered: boolean,
+): Rect | null => {
   const { state } = rctx;
   const { ctx, theme } = state;
   // Directory container.
@@ -483,50 +537,64 @@ const renderDirCell = (
       ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
       ctx.globalAlpha = alpha;
     }
-  } else {
-    ctx.fillStyle = theme.dirFill;
-    ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
-    ctx.strokeStyle = depth === 0 ? theme.borderDefault : theme.borderSubtle;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
+    return null;
+  }
+  ctx.fillStyle = theme.dirFill;
+  ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
+  ctx.strokeStyle = depth === 0 ? theme.borderDefault : theme.borderSubtle;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
 
-    const headerH = showHeader ? DIR_HEADER : 0;
-    if (showHeader) {
-      ctx.fillStyle = hovered ? theme.surface3 : theme.dirHeader;
-      ctx.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, headerH - 1);
-      ctx.fillStyle = hovered ? theme.textHigh : theme.textLow;
-      ctx.font = FONT_DIR;
-      ctx.textBaseline = "top";
+  const headerH = showHeader ? DIR_HEADER : 0;
+  if (showHeader) {
+    ctx.fillStyle = hovered ? theme.surface3 : theme.dirHeader;
+    ctx.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, headerH - 1);
+    ctx.fillStyle = hovered ? theme.textHigh : theme.textLow;
+    ctx.font = FONT_DIR;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    const count = countFiles(cell.node);
+    const suffix = cell.w > 150 ? `  ${formatCount(count)}` : "";
+    const label = truncate(ctx, `${cell.node.name}/`, cell.w - 10 - ctx.measureText(suffix).width);
+    ctx.fillText(label, cell.x + 5, cell.y + 4);
+    if (suffix) {
+      ctx.fillStyle = theme.textMuted;
+      ctx.textAlign = "right";
+      ctx.fillText(suffix.trim(), cell.x + cell.w - 5, cell.y + 4);
       ctx.textAlign = "left";
-      const count = countFiles(cell.node);
-      const suffix = cell.w > 150 ? `  ${formatCount(count)}` : "";
-      const label = truncate(ctx, `${cell.node.name}/`, cell.w - 10 - ctx.measureText(suffix).width);
-      ctx.fillText(label, cell.x + 5, cell.y + 4);
-      if (suffix) {
-        ctx.fillStyle = theme.textMuted;
-        ctx.textAlign = "right";
-        ctx.fillText(suffix.trim(), cell.x + cell.w - 5, cell.y + 4);
-        ctx.textAlign = "left";
-      }
-    }
-
-    const inner = {
-      x: cell.x + DIR_PAD,
-      y: cell.y + headerH + DIR_PAD,
-      w: cell.w - DIR_PAD * 2,
-      h: cell.h - headerH - DIR_PAD * 2,
-    };
-    if (inner.w > 6 && inner.h > 6) {
-      const children = squarify(cell.node.children, inner);
-      let s = nextSeq;
-      for (const child of children) {
-        s = renderCell(rctx, child, depth + 1, s, totalTop);
-      }
-      ctx.globalAlpha = 1;
-      return s;
     }
   }
-  return nextSeq;
+
+  const inner = {
+    x: cell.x + DIR_PAD,
+    y: cell.y + headerH + DIR_PAD,
+    w: cell.w - DIR_PAD * 2,
+    h: cell.h - headerH - DIR_PAD * 2,
+  };
+  return inner.w > 6 && inner.h > 6 ? inner : null;
+};
+
+/**
+ * Cache-hit repaint: iterate the cached cells in their original paint
+ * order and repaint chrome, fills, rings, and labels without touching
+ * the layout list. Only runs when no animation is active, so every
+ * reveal/lens/zoom alpha is at its resting value.
+ */
+const repaintFromLayout = (rctx: RenderCtx): void => {
+  const { state } = rctx;
+  const { ctx } = state;
+  const searching = state.search.trim() !== "";
+  for (let i = 0; i < state.layout.length; i++) {
+    const cell = state.layout[i];
+    const hovered = state.hoveredCell === i;
+    ctx.globalAlpha = 1;
+    if (cell.node.fileIndex !== null) {
+      renderFileCell(rctx, cell, 1, hovered, searching);
+    } else {
+      paintDirChrome(rctx, cell, cell.depth, 1, hovered);
+    }
+  }
+  ctx.globalAlpha = 1;
 };
 
 // Worst-severity rollup color for directories too small to nest.
