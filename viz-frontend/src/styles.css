@@ -3,6 +3,11 @@
    semantic accents only (red=error, amber=warn, green=pass, blue=info). */
 
 :root,
+:root {
+  --radius: 6px;
+  --radius-sm: 4px;
+}
+
 :root[data-theme="dark"] {
   --surface-0: #111110;
   --surface-1: #191918;
