@@ -9,7 +9,7 @@ import {
   tailTruncate,
   type ClusterInfo,
 } from "./shared";
-import { assignCoordinates, assignLayers, tarjanSCC, type MetaEdge } from "./build";
+import { assignCoordinates, assignLayers, partitionEdges, tarjanSCC, type MetaEdge } from "./build";
 
 /** Canvas text metrics stub: every glyph is 7px wide. */
 const ctx = {
@@ -105,6 +105,31 @@ describe("layering", () => {
     const layers = assignLayers(3, meta, [0, 1, 2]);
     expect(layers[0]).toBeLessThan(layers[1]);
     expect(layers[1]).toBeLessThan(layers[2]);
+  });
+});
+
+describe("edge partitioning", () => {
+  it("splits intra- from inter-cluster edges and buckets per cluster", () => {
+    const clusterOf = [0, 0, 1];
+    const edges: Array<[number, number, number]> = [
+      [0, 1, 0],
+      [1, 2, 0],
+      [2, 2, 1],
+    ];
+    const p = partitionEdges(edges, clusterOf, 2);
+    expect(p.intra).toEqual([
+      [0, 1],
+      [2, 2],
+    ]);
+    expect(p.inter).toEqual([[1, 2]]);
+    expect(p.byCluster).toEqual([[[0, 1]], [[2, 2]]]);
+  });
+
+  it("skips edges whose endpoints carry no cluster assignment", () => {
+    const p = partitionEdges([[0, 9, 0]], [0], 1);
+    expect(p.intra).toEqual([]);
+    expect(p.inter).toEqual([]);
+    expect(p.byCluster).toEqual([[]]);
   });
 });
 

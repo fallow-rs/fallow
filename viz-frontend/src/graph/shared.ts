@@ -77,6 +77,12 @@ export interface GraphViewState {
   clusters: ClusterInfo[];
   clusterOf: number[];
   roads: Road[];
+  /** Same-cluster [from, to] edges, precomputed once per clustering pass. */
+  intraEdges: Array<[number, number]>;
+  /** Cross-cluster [from, to] edges, precomputed once per clustering pass. */
+  interEdges: Array<[number, number]>;
+  /** Intra-cluster edges bucketed by cluster index, for local layouts. */
+  linksByCluster: Array<Array<[number, number]>>;
   /** Importer-count floor above which a node gets the hub badge. */
   hubFloor: number;
   transform: { x: number; y: number; k: number };
@@ -143,6 +149,9 @@ export const getGVS = (state: AppState): GraphViewState => {
       clusters: [],
       clusterOf: [],
       roads: [],
+      intraEdges: [],
+      interEdges: [],
+      linksByCluster: [],
       hubFloor: Infinity,
       transform: { x: 0, y: 0, k: 1 },
       fitK: 1,

@@ -506,6 +506,39 @@ const placeIsolated = (clusters: ClusterInfo[]): void => {
     rowMax = Math.max(rowMax, c.r * 2);
   }
 };
+// ── Edge partitions ─────────────────────────────────────────────
+
+/**
+ * Split the raw edge list into same-cluster and cross-cluster subsets in
+ * one pass, plus a per-cluster bucket for the local layouts. Rebuilt
+ * whenever clustering reruns (initGraphNodes), so the per-frame edge
+ * passes and per-cluster layouts stop rescanning every edge.
+ */
+export const partitionEdges = (
+  edges: ReadonlyArray<[number, number, number]>,
+  clusterOf: number[],
+  clusterCount: number,
+): {
+  intra: Array<[number, number]>;
+  inter: Array<[number, number]>;
+  byCluster: Array<Array<[number, number]>>;
+} => {
+  const intra: Array<[number, number]> = [];
+  const inter: Array<[number, number]> = [];
+  const byCluster: Array<Array<[number, number]>> = Array.from({ length: clusterCount }, () => []);
+  for (const [from, to] of edges) {
+    const a = clusterOf[from];
+    const b = clusterOf[to];
+    if (a === undefined || b === undefined) continue;
+    if (a === b) {
+      intra.push([from, to]);
+      byCluster[a].push([from, to]);
+    } else {
+      inter.push([from, to]);
+    }
+  }
+  return { intra, inter, byCluster };
+};
 // ── Local per-cluster layouts (frozen, seeded) ──────────────────
 
 const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
@@ -532,7 +565,7 @@ const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
     for (const node of nodes) inCluster.set(node.fileIndex, node);
 
     const links: LocalLink[] = [];
-    for (const [from, to] of state.data.edges) {
+    for (const [from, to] of gvs.linksByCluster[ci]) {
       const a = inCluster.get(from);
       const b = inCluster.get(to);
       if (a && b && a !== b) links.push({ source: a, target: b });
@@ -653,6 +686,11 @@ export const initGraphNodes = (state: AppState): void => {
     });
   }
   gvs.clusters = clusters;
+
+  const partitions = partitionEdges(data.edges, clusterOf, clusters.length);
+  gvs.intraEdges = partitions.intra;
+  gvs.interEdges = partitions.inter;
+  gvs.linksByCluster = partitions.byCluster;
 
   const meta = buildMetaGraph(state, clusterOf, clusters.length);
   const adj: number[][] = Array.from({ length: clusters.length }, () => []);

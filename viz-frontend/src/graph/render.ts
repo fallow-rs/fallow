@@ -261,49 +261,55 @@ const drawRoads = (scene: Scene): void => {
 /** Direction-encoded edges to the hovered file's direct neighbors. */
 const drawHoverNeighborhood = (scene: Scene): HoverContext => {
   const { state, gvs } = scene;
-  const { ctx, theme, data } = state;
+  const { ctx, theme } = state;
   const { transform, fileNodes } = gvs;
   // Hover neighborhood. Direction is dual-encoded: files importing the
   // hovered one arrive as solid blue ribbons (thick end at the
   // importer, same rule as roads); its own imports leave as thin
-  // dashed blue lines.
+  // dashed blue lines. The adjacency index already carries exactly the
+  // hovered file's neighbors per direction: O(degree), not O(edges).
   const hovered = state.graphHovered;
   let neighbors: Set<number> | null = null;
   const hoverImporters = new Set<number>();
   const hoverImports = new Set<number>();
   if (hovered !== null) {
     neighbors = new Set([hovered]);
-    for (const [from, to] of data.edges) {
-      if (from !== hovered && to !== hovered) continue;
+    const target = fileNodes[hovered];
+    for (const from of state.index.importersOf[hovered]) {
+      if (from === hovered) continue;
       neighbors.add(from);
-      neighbors.add(to);
-      if (to === hovered && from !== hovered) hoverImporters.add(from);
-      if (from === hovered && to !== hovered) hoverImports.add(to);
+      hoverImporters.add(from);
       const a = fileNodes[from];
+      if (!a || !target) continue;
+      if (a.x == null || a.y == null || target.x == null || target.y == null) continue;
+      edgeUnderlay(ctx, { x: a.x, y: a.y }, { x: target.x, y: target.y }, theme.bg, 4 / transform.k);
+      const p0 = { x: a.x, y: a.y };
+      const p3 = { x: target.x, y: target.y };
+      const p1 = { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 };
+      const p2 = { x: p0.x + ((p3.x - p0.x) * 2) / 3, y: p0.y + ((p3.y - p0.y) * 2) / 3 };
+      ctx.beginPath();
+      taperedRibbon(ctx, p0, p1, p2, p3, 2.4 / transform.k, 0.6 / transform.k);
+      ctx.fillStyle = theme.blue;
+      ctx.globalAlpha = 0.9;
+      ctx.fill();
+    }
+    for (const to of state.index.importsOf[hovered]) {
+      if (to === hovered) continue;
+      neighbors.add(to);
+      hoverImports.add(to);
       const b = fileNodes[to];
-      if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) continue;
-      edgeUnderlay(ctx, { x: a.x, y: a.y }, { x: b.x, y: b.y }, theme.bg, 4 / transform.k);
-      if (to === hovered) {
-        const p0 = { x: a.x, y: a.y };
-        const p3 = { x: b.x, y: b.y };
-        const p1 = { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 };
-        const p2 = { x: p0.x + ((p3.x - p0.x) * 2) / 3, y: p0.y + ((p3.y - p0.y) * 2) / 3 };
-        ctx.beginPath();
-        taperedRibbon(ctx, p0, p1, p2, p3, 2.4 / transform.k, 0.6 / transform.k);
-        ctx.fillStyle = theme.blue;
-        ctx.globalAlpha = 0.9;
-        ctx.fill();
-      } else {
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = theme.blue;
-        ctx.globalAlpha = 0.45;
-        ctx.lineWidth = 1.1 / transform.k;
-        ctx.setLineDash([4 / transform.k, 3 / transform.k]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
+      if (!target || !b) continue;
+      if (target.x == null || target.y == null || b.x == null || b.y == null) continue;
+      edgeUnderlay(ctx, { x: target.x, y: target.y }, { x: b.x, y: b.y }, theme.bg, 4 / transform.k);
+      ctx.beginPath();
+      ctx.moveTo(target.x, target.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = theme.blue;
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = 1.1 / transform.k;
+      ctx.setLineDash([4 / transform.k, 3 / transform.k]);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
     ctx.globalAlpha = 1;
   }
@@ -537,7 +543,7 @@ const edgeUnderlay = (
   ctx.stroke();
 };
 
-/** One pass of raw file edges, filtered to intra- or inter-cluster. */
+/** One pass of raw file edges from the precomputed cluster partition. */
 const drawFileEdges = (
   state: AppState,
   gvs: GraphViewState,
@@ -545,16 +551,17 @@ const drawFileEdges = (
   alpha: number,
   lineWidth: number,
 ): void => {
-  const { ctx, theme, data } = state;
+  const { ctx, theme } = state;
   const { fileNodes } = gvs;
+  const edges = sameCluster ? gvs.intraEdges : gvs.interEdges;
   ctx.strokeStyle = theme.textMuted;
   ctx.globalAlpha = alpha;
   ctx.lineWidth = lineWidth;
   ctx.beginPath();
-  for (const [from, to] of data.edges) {
+  for (const [from, to] of edges) {
     const a = fileNodes[from];
     const b = fileNodes[to];
-    if (!a || !b || (a.cluster === b.cluster) !== sameCluster) continue;
+    if (!a || !b) continue;
     if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
