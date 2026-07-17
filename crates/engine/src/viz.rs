@@ -30,10 +30,16 @@ const FUNCTION_COGNITIVE_FLOOR: u16 = 10;
 const FUNCTION_HOOK_FLOOR: u16 = 5;
 /// A file counts as a complexity hotspot at or above this cyclomatic score.
 const HOTSPOT_CYCLOMATIC_FLOOR: u16 = 10;
-/// Maximum characters of clone-fragment preview shipped per clone group.
-const CLONE_PREVIEW_MAX_CHARS: usize = 480;
+/// Maximum bytes of clone-fragment preview shipped per clone group. The
+/// budget is measured in bytes, not characters; truncation only ever cuts
+/// at a line boundary, so multi-byte source cannot be sliced mid-character.
+const CLONE_PREVIEW_MAX_BYTES: usize = 480;
 /// Maximum lines of clone-fragment preview shipped per clone group.
 const CLONE_PREVIEW_MAX_LINES: usize = 10;
+/// Maximum clone groups serialized into the payload. Far above any
+/// legitimate report; a guardrail against multi-MB HTML on monorepos.
+/// Groups keep the detector's report order, so the cap keeps the first N.
+const MAX_CLONE_GROUPS: usize = 500;
 /// Edge flag bit: every import of this edge is type-only.
 const EDGE_FLAG_TYPE_ONLY: u32 = 1;
 
@@ -193,6 +199,10 @@ pub struct VizSummary {
     pub boundary_violations: usize,
     /// Files at or above the complexity hotspot floor.
     pub hotspot_files: usize,
+    /// Kept clone groups dropped by the [`MAX_CLONE_GROUPS`] payload cap.
+    /// Present only when the clone payload was truncated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clone_groups_truncated: Option<u32>,
 }
 
 /// One discovered workspace.
@@ -261,7 +271,8 @@ pub fn build_viz_data(input: &VizBuildInput<'_>) -> VizData {
     let index = FileIndex::new(input.files);
     let workspaces = build_workspaces(input.workspaces, root);
     let (zones, zone_by_file) = classify_zones(input, &index);
-    let (clones, clone_groups_by_file, dup_lines_by_file) = build_clones(input.duplication, &index);
+    let (clones, clone_groups_by_file, dup_lines_by_file, clone_groups_truncated) =
+        build_clones(input.duplication, &index, MAX_CLONE_GROUPS);
     let cycles = build_cycles(input.results, &index);
     let violations = build_violations(input.results, &zones, &index);
 
@@ -276,7 +287,14 @@ pub fn build_viz_data(input: &VizBuildInput<'_>) -> VizData {
         },
     );
 
-    let summary = build_summary(input, &files, &clones, &cycles, &violations);
+    let summary = build_summary(
+        input,
+        &files,
+        &clones,
+        &cycles,
+        &violations,
+        clone_groups_truncated,
+    );
 
     VizData {
         root: display_root(root),
@@ -408,16 +426,24 @@ fn classify_zones(
     (zones, zone_by_file)
 }
 
+/// Clone payload maps: kept groups, per-file group ids, per-file duplicated
+/// lines, and how many kept-groups the payload cap dropped.
 type CloneMaps = (
     Vec<VizCloneGroup>,
     FxHashMap<u32, Vec<u32>>,
     FxHashMap<u32, u32>,
+    u32,
 );
 
-fn build_clones(duplication: &DuplicationReport, index: &FileIndex<'_>) -> CloneMaps {
+fn build_clones(
+    duplication: &DuplicationReport,
+    index: &FileIndex<'_>,
+    max_groups: usize,
+) -> CloneMaps {
     let mut clones = Vec::new();
     let mut groups_by_file: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
     let mut dup_lines_by_file: FxHashMap<u32, u32> = FxHashMap::default();
+    let mut truncated: usize = 0;
 
     for group in &duplication.clone_groups {
         let instances: Vec<VizCloneInstance> = group
@@ -434,6 +460,10 @@ fn build_clones(duplication: &DuplicationReport, index: &FileIndex<'_>) -> Clone
             })
             .collect();
         if instances.len() < 2 {
+            continue;
+        }
+        if clones.len() >= max_groups {
+            truncated += 1;
             continue;
         }
 
@@ -461,13 +491,18 @@ fn build_clones(duplication: &DuplicationReport, index: &FileIndex<'_>) -> Clone
         });
     }
 
-    (clones, groups_by_file, dup_lines_by_file)
+    (
+        clones,
+        groups_by_file,
+        dup_lines_by_file,
+        clamp_u32(truncated),
+    )
 }
 
 fn truncate_preview(fragment: &str) -> String {
     let mut out = String::new();
     for (i, line) in fragment.lines().enumerate() {
-        if i >= CLONE_PREVIEW_MAX_LINES || out.len() + line.len() > CLONE_PREVIEW_MAX_CHARS {
+        if i >= CLONE_PREVIEW_MAX_LINES || out.len() + line.len() > CLONE_PREVIEW_MAX_BYTES {
             out.push('\u{2026}');
             break;
         }
@@ -714,6 +749,7 @@ fn build_summary(
     clones: &[VizCloneGroup],
     cycles: &[Vec<u32>],
     violations: &[VizViolation],
+    clone_groups_truncated: u32,
 ) -> VizSummary {
     let results = input.results;
     VizSummary {
@@ -735,6 +771,7 @@ fn build_summary(
             .iter()
             .filter(|f| f.max_cyclomatic >= HOTSPOT_CYCLOMATIC_FLOOR)
             .count(),
+        clone_groups_truncated: (clone_groups_truncated > 0).then_some(clone_groups_truncated),
     }
 }
 
@@ -1030,7 +1067,7 @@ mod tests {
         assert!(out.ends_with('\u{2026}'));
 
         // Byte budget: the second 300-byte line would exceed
-        // CLONE_PREVIEW_MAX_CHARS, so output stops after the first line.
+        // CLONE_PREVIEW_MAX_BYTES, so output stops after the first line.
         let two_long_lines = format!("{}\n{}", "a".repeat(300), "b".repeat(300));
         let out = truncate_preview(&two_long_lines);
         assert_eq!(out, format!("{}\u{2026}", "a".repeat(300)));
@@ -1079,6 +1116,42 @@ mod tests {
         assert_eq!((v.from_zone, v.to_zone), (0, 1));
         assert_eq!(v.line, 2);
         assert_eq!(v.specifier, "../lib/c");
+    }
+
+    #[test]
+    fn clone_group_cap_counts_truncated_groups() {
+        let fx = fixture();
+        let index = FileIndex::new(&fx.files);
+
+        // The fixture report has two keepable groups plus one dropped for
+        // unresolvable instances; a cap of 1 keeps the first keepable group
+        // and counts only the second as truncated (the unresolvable drop is
+        // not a truncation).
+        let (clones, groups_by_file, _dup_lines, truncated) =
+            build_clones(&fx.duplication, &index, 1);
+        assert_eq!(clones.len(), 1);
+        assert_eq!(truncated, 1);
+        assert!(
+            groups_by_file
+                .values()
+                .all(|ids| ids.iter().all(|&id| (id as usize) < clones.len()))
+        );
+
+        // The default cap leaves a small report untouched and unflagged.
+        let data = build_viz_data(&fx.input());
+        assert_eq!(data.clones.len(), 2);
+        assert_eq!(data.summary.clone_groups_truncated, None);
+    }
+
+    #[test]
+    fn summary_flags_clone_truncation_only_when_nonzero() {
+        let fx = fixture();
+        let data = build_viz_data(&fx.input());
+
+        let summary = build_summary(&fx.input(), &data.files, &data.clones, &[], &[], 3);
+        assert_eq!(summary.clone_groups_truncated, Some(3));
+        let summary = build_summary(&fx.input(), &data.files, &data.clones, &[], &[], 0);
+        assert_eq!(summary.clone_groups_truncated, None);
     }
 
     #[test]

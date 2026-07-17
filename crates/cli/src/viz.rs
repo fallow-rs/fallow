@@ -381,6 +381,7 @@ mod tests {
                 duplicated_lines: 0,
                 boundary_violations: 0,
                 hotspot_files: 0,
+                clone_groups_truncated: None,
             },
             workspaces: Vec::new(),
             zones: Vec::new(),
