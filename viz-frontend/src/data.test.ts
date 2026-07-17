@@ -81,6 +81,18 @@ describe("buildIndex", () => {
     expect(index.violationSources.has(1)).toBe(false);
   });
 
+  it("ignores cycle pairs and violations that point outside the file table", () => {
+    const index = buildIndex(
+      data({
+        cycles: [[0, 99]],
+        violations: [{ from: 0, to: 99, from_zone: 0, to_zone: 1, line: 3, specifier: "x" }],
+      }),
+    );
+    expect(index.cycleEdges.size).toBe(0);
+    expect(index.violationSources.has(0)).toBe(false);
+    expect(index.violationEdges.size).toBe(0);
+  });
+
   it("builds a directory tree that survives chain collapsing", () => {
     const index = buildIndex(data());
     expect(index.nodesByPath.has("src")).toBe(true);

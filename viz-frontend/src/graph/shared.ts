@@ -456,6 +456,9 @@ export const fitTransform = (
   h: number,
   b: { minX: number; minY: number; maxX: number; maxY: number },
 ): { x: number; y: number; k: number } => {
+  // An empty include set yields infinite bounds; a NaN camera poisons
+  // every later transform, so fall back to the identity view.
+  if (!Number.isFinite(b.minX)) return { x: 0, y: 0, k: 1 };
   const bboxW = b.maxX - b.minX + FIT_PAD * 2;
   const bboxH = b.maxY - b.minY + FIT_PAD * 2;
   const k = Math.min((w - 200) / bboxW, (h - 60) / bboxH, 1.4);

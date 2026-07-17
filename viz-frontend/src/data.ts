@@ -128,6 +128,7 @@ export const buildIndex = (data: VizData): DataIndex => {
     for (let i = 0; i < cycle.length; i++) {
       const from = cycle[i];
       const to = cycle[(i + 1) % cycle.length];
+      if (from >= n || to >= n) continue;
       cycleEdges.add(packEdge(n, from, to));
       cycleEdges.add(packEdge(n, to, from));
     }
@@ -137,6 +138,7 @@ export const buildIndex = (data: VizData): DataIndex => {
   const violationSources = new Set<number>();
   for (let v = 0; v < data.violations.length; v++) {
     const { from, to } = data.violations[v];
+    if (from >= n || to >= n) continue;
     const key = packEdge(n, from, to);
     const list = violationEdges.get(key);
     if (list) list.push(v);

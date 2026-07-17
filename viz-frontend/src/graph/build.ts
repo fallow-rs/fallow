@@ -712,6 +712,9 @@ export const initGraphNodes = (state: AppState): void => {
   clusters.forEach((c, i) => {
     c.isolated = !connected.has(i);
   });
+  // An edge-free project marks every cluster isolated; the standalone
+  // strip must then open by default or the map renders as an empty canvas.
+  if (!clusters.some((c) => !c.isolated)) gvs.standaloneOpen = true;
 
   const layers = assignLayers(clusters.length, meta, sccOf);
   clusters.forEach((c, i) => {

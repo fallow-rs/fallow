@@ -80,6 +80,13 @@ describe("road and cluster helpers", () => {
     expect(screenRight).toBeLessThanOrEqual(1600);
   });
 
+  it("falls back to a finite identity transform for empty bounds", () => {
+    const fit = fitTransform(1600, 1000, clusterBounds([], () => true));
+    expect(Number.isFinite(fit.x)).toBe(true);
+    expect(Number.isFinite(fit.y)).toBe(true);
+    expect(Number.isFinite(fit.k)).toBe(true);
+  });
+
   it("interpolates a cubic bezier between its endpoints", () => {
     const p = { x: 0, y: 0 };
     const q = { x: 30, y: 0 };

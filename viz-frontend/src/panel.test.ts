@@ -96,6 +96,40 @@ describe("rankRowsFor", () => {
     expect(rows[0].metric).toBe("→ shared");
   });
 
+  it("drops malformed clone groups instead of throwing", () => {
+    const rows = rankRowsFor(
+      stateFor("dupes", [file("src/a.ts")], {
+        clones: [
+          { lines: 9, tokens: 40, instances: [], preview: "" },
+          {
+            lines: 5,
+            tokens: 20,
+            instances: [{ file: 99, start_line: 1, end_line: 5 }],
+            preview: "",
+          },
+          {
+            lines: 3,
+            tokens: 12,
+            instances: [{ file: 0, start_line: 1, end_line: 3 }],
+            preview: "",
+          },
+        ],
+      }),
+    ).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].label).toContain("a.ts");
+  });
+
+  it("skips violations and cycles that point outside the file table", () => {
+    const rows = rankRowsFor(
+      stateFor("boundaries", [file("src/a.ts")], {
+        violations: [{ from: 0, to: 99, from_zone: 0, to_zone: 1, line: 1, specifier: "x" }],
+        cycles: [[], [99]],
+      }),
+    ).rows;
+    expect(rows).toHaveLength(0);
+  });
+
   it("carries the clone group index so rows open the clone panel", () => {
     const rows = rankRowsFor(
       stateFor("dupes", [file("src/a.ts"), file("src/b.ts")], {

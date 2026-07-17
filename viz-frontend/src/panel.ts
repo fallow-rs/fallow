@@ -447,6 +447,12 @@ export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; 
     case "dupes": {
       const rows = [...state.data.clones.keys()]
         .sort((a, b) => state.data.clones[b].lines - state.data.clones[a].lines)
+        .filter((g) => {
+          // Malformed groups (no instances, or an out-of-range file
+          // index) must not kill the whole ranked list.
+          const group = state.data.clones[g];
+          return group.instances.length > 0 && files[group.instances[0].file] !== undefined;
+        })
         .map((g) => {
           const group = state.data.clones[g];
           const first = group.instances[0];
@@ -464,6 +470,7 @@ export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; 
     case "boundaries": {
       const rows: RankRow[] = [];
       for (const v of state.data.violations) {
+        if (files[v.from] === undefined || files[v.to] === undefined) continue;
         rows.push({
           label: `${basename(files[v.from].path)} → ${basename(files[v.to].path)}`,
           dir: dirname(files[v.from].path),
@@ -473,6 +480,7 @@ export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; 
         });
       }
       state.data.cycles.forEach((cycle) => {
+        if (cycle.length === 0 || files[cycle[0]] === undefined) return;
         rows.push({
           label: `cycle · ${formatCount(cycle.length)} files`,
           dir: dirname(files[cycle[0]].path),
