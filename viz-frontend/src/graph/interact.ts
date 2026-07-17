@@ -199,6 +199,10 @@ export const resetGraphView = (state: AppState): void => {
     h,
     clusterBounds(gvs.clusters, (c) => !(c.isolated && anyConnected && !gvs.standaloneOpen)),
   );
+  // Re-anchor the zoom extent and LOD baseline to the refreshed fit,
+  // so min/max zoom stay meaningful after large resizes.
+  gvs.zoomBehavior.scaleExtent([fit.k * 0.4, fit.k * 12]);
+  gvs.fitK = fit.k;
   select(state.canvas).call(
     gvs.zoomBehavior.transform,
     zoomIdentity.translate(fit.x, fit.y).scale(fit.k),

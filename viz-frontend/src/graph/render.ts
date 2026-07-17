@@ -40,9 +40,15 @@ import {
 } from "./shared";
 
 export const renderGraph = (state: AppState): void => {
-  const { canvas, ctx, theme, dpr } = state;
+  const { canvas, ctx, theme } = state;
   const gvs = getGVS(state);
   if (!gvs.initialized) return;
+
+  // Re-read per render: the window can move to a display with a
+  // different pixel ratio mid-session. Keep state.dpr in sync for
+  // any consumer that sizes against the backing store.
+  const dpr = window.devicePixelRatio || 1;
+  state.dpr = dpr;
 
   const stageEl = canvas.parentElement;
   const w = stageEl ? stageEl.clientWidth : window.innerWidth;

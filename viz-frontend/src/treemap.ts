@@ -204,7 +204,12 @@ interface RenderCtx {
 }
 
 export const renderTreemap = (state: AppState): void => {
-  const { canvas, ctx, dpr } = state;
+  const { canvas, ctx } = state;
+  // Re-read per render: the window can move to a display with a
+  // different pixel ratio mid-session. Keep state.dpr in sync for
+  // any consumer that sizes against the backing store.
+  const dpr = window.devicePixelRatio || 1;
+  state.dpr = dpr;
   const tm = getTM(state);
   const stage = canvas.parentElement;
   const w = stage ? stage.clientWidth : window.innerWidth;

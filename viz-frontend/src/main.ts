@@ -165,7 +165,9 @@ const init = (): void => {
       a.href = URL.createObjectURL(blob);
       a.download = `fallow-map-${data.root}-${state.view}-${state.lens}.png`;
       a.click();
-      URL.revokeObjectURL(a.href);
+      // Deferred (macrotask) revoke: a synchronous revoke can cancel
+      // the download before the browser grabs the blob.
+      setTimeout(() => URL.revokeObjectURL(a.href), 0);
     }, "image/png");
   };
 
@@ -453,6 +455,11 @@ const init = (): void => {
 
   window.addEventListener("resize", () => {
     if (state.view === "graph") refitOnResize(state);
+    requestRender();
+  });
+  // Track OS-level motion preference changes mid-session.
+  window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", (e) => {
+    state.reducedMotion = e.matches;
     requestRender();
   });
   window.addEventListener("hashchange", () => {
