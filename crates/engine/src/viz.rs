@@ -743,3 +743,362 @@ fn clamp_u16(value: usize) -> u16 {
 fn clamp_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use fallow_config::{BoundaryConfig, BoundaryZone, FallowConfig};
+    use fallow_graph::graph::ModuleGraph;
+    use fallow_graph::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+    use fallow_types::duplicates::{CloneGroup, CloneInstance};
+    use fallow_types::extract::{ImportInfo, ImportedName};
+    use fallow_types::output_dead_code::{BoundaryViolationFinding, CircularDependencyFinding};
+    use fallow_types::output_format::OutputFormat;
+    use fallow_types::results::{BoundaryViolation, CircularDependency};
+
+    use super::*;
+    use crate::discover::{EntryPoint, EntryPointSource, FileId};
+
+    /// Owned fixture parts backing one [`VizBuildInput`].
+    struct Fixture {
+        config: ResolvedConfig,
+        files: Vec<DiscoveredFile>,
+        results: AnalysisResults,
+        graph: crate::module_graph::RetainedModuleGraph,
+        duplication: DuplicationReport,
+        workspaces: Vec<WorkspaceInfo>,
+    }
+
+    impl Fixture {
+        fn input(&self) -> VizBuildInput<'_> {
+            VizBuildInput {
+                results: &self.results,
+                graph: &self.graph,
+                modules: None,
+                files: &self.files,
+                duplication: &self.duplication,
+                workspaces: &self.workspaces,
+                config: &self.config,
+            }
+        }
+    }
+
+    fn project_root() -> PathBuf {
+        PathBuf::from("/viz-project")
+    }
+
+    fn discovered(id: u32, path: PathBuf, size_bytes: u64) -> DiscoveredFile {
+        DiscoveredFile {
+            id: FileId(id),
+            path,
+            size_bytes,
+        }
+    }
+
+    fn import_of(target: FileId, specifier: &str) -> ResolvedImport {
+        ResolvedImport {
+            info: ImportInfo {
+                source: specifier.to_owned(),
+                imported_name: ImportedName::Named("value".to_owned()),
+                local_name: "value".to_owned(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
+            },
+            target: ResolveResult::InternalModule(target),
+        }
+    }
+
+    fn zone(name: &str, pattern: &str) -> BoundaryZone {
+        BoundaryZone {
+            name: name.to_owned(),
+            patterns: vec![pattern.to_owned()],
+            auto_discover: Vec::new(),
+            root: None,
+        }
+    }
+
+    fn resolved_config(root: &Path) -> ResolvedConfig {
+        let config = FallowConfig {
+            boundaries: BoundaryConfig {
+                zones: vec![zone("app", "src/**"), zone("shared", "lib/**")],
+                ..BoundaryConfig::default()
+            },
+            ..FallowConfig::default()
+        };
+        config.resolve(root.to_path_buf(), OutputFormat::Json, 1, false, true, None)
+    }
+
+    fn cycle_finding(files: Vec<PathBuf>) -> CircularDependencyFinding {
+        let length = files.len();
+        CircularDependencyFinding::with_actions(CircularDependency {
+            files,
+            length,
+            line: 1,
+            col: 0,
+            edges: Vec::new(),
+            is_cross_package: false,
+        })
+    }
+
+    fn violation_finding(from_path: PathBuf, to_path: PathBuf) -> BoundaryViolationFinding {
+        BoundaryViolationFinding::with_actions(BoundaryViolation {
+            from_path,
+            to_path,
+            from_zone: "app".to_owned(),
+            to_zone: "shared".to_owned(),
+            import_specifier: "../lib/c".to_owned(),
+            line: 2,
+            col: 0,
+        })
+    }
+
+    fn clone_instance(file: PathBuf, start_line: usize, end_line: usize) -> CloneInstance {
+        CloneInstance {
+            file,
+            start_line,
+            end_line,
+            start_col: 0,
+            end_col: 0,
+            fragment: "const shared = 1;\nconst repeated = 2;\nconst block = 3;".to_owned(),
+        }
+    }
+
+    fn clone_group(instances: Vec<CloneInstance>) -> CloneGroup {
+        CloneGroup {
+            instances,
+            token_count: 12,
+            line_count: 3,
+        }
+    }
+
+    /// Synthetic project: 3 files, one import edge a to b, one resolvable
+    /// cycle (a, b) plus one unresolvable, one clone group over (a, c) plus a
+    /// dropped and a same-file group, one resolvable boundary violation a to
+    /// c plus one unresolvable, two zones, one workspace over `lib/`.
+    fn fixture_with(extra_graph_file: bool) -> Fixture {
+        let root = project_root();
+        let a = root.join("src/a.ts");
+        let b = root.join("src/b.ts");
+        let c = root.join("lib/c.ts");
+        let missing = root.join("src/missing.ts");
+
+        let files = vec![
+            discovered(0, a.clone(), 100),
+            discovered(1, b.clone(), 50),
+            discovered(2, c.clone(), 25),
+        ];
+
+        let mut graph_files = files.clone();
+        let mut imports = vec![import_of(FileId(1), "./b")];
+        if extra_graph_file {
+            graph_files.push(discovered(3, root.join("src/d.ts"), 10));
+            imports.push(import_of(FileId(3), "./d"));
+        }
+        let resolved = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: a.clone(),
+            resolved_imports: imports,
+            ..ResolvedModule::default()
+        }];
+        let entry_points = vec![EntryPoint {
+            path: a.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let graph = crate::module_graph::RetainedModuleGraph::from(ModuleGraph::build(
+            &resolved,
+            &entry_points,
+            &graph_files,
+        ));
+
+        let results = AnalysisResults {
+            circular_dependencies: vec![
+                cycle_finding(vec![a.clone(), b]),
+                cycle_finding(vec![a.clone(), missing.clone()]),
+            ],
+            boundary_violations: vec![
+                violation_finding(a.clone(), c.clone()),
+                violation_finding(a.clone(), missing),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        let duplication = DuplicationReport {
+            clone_groups: vec![
+                clone_group(vec![
+                    clone_instance(a.clone(), 1, 3),
+                    clone_instance(c, 10, 12),
+                ]),
+                clone_group(vec![
+                    clone_instance(a.clone(), 20, 22),
+                    clone_instance(root.join("outside.ts"), 1, 3),
+                ]),
+                clone_group(vec![
+                    clone_instance(a.clone(), 30, 32),
+                    clone_instance(a, 40, 42),
+                ]),
+            ],
+            ..DuplicationReport::default()
+        };
+
+        let workspaces = vec![WorkspaceInfo {
+            root: root.join("lib"),
+            name: "shared-lib".to_owned(),
+            is_internal_dependency: false,
+        }];
+
+        Fixture {
+            config: resolved_config(&root),
+            files,
+            results,
+            graph,
+            duplication,
+            workspaces,
+        }
+    }
+
+    fn fixture() -> Fixture {
+        fixture_with(false)
+    }
+
+    #[test]
+    fn files_and_edges_use_stable_indices() {
+        let fx = fixture();
+        let data = build_viz_data(&fx.input());
+
+        let paths: Vec<&str> = data.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["src/a.ts", "src/b.ts", "lib/c.ts"]);
+        assert_eq!(data.edges, vec![[0, 1, 0]]);
+        assert!(data.files[0].is_entry);
+        assert!(matches!(data.files[0].status, VizFileStatus::EntryPoint));
+        assert!(matches!(data.files[1].status, VizFileStatus::Clean));
+        assert_eq!(data.files[0].import_count, 1);
+        assert_eq!(data.files[1].importer_count, 1);
+        assert_eq!(data.files[0].workspace, None);
+        assert_eq!(data.files[2].workspace, Some(0));
+        assert_eq!(data.workspaces.len(), 1);
+        assert_eq!(data.workspaces[0].root, "lib");
+    }
+
+    #[test]
+    fn edges_to_files_missing_from_input_are_dropped() {
+        let fx = fixture_with(true);
+        let data = build_viz_data(&fx.input());
+
+        // The graph carries a to b AND a to d, but d is not in `input.files`,
+        // so build_edges drops the second edge instead of emitting a
+        // dangling index.
+        assert_eq!(fx.graph.edge_count(), 2);
+        assert_eq!(data.edges, vec![[0, 1, 0]]);
+    }
+
+    #[test]
+    fn clone_groups_drop_unresolvable_and_dedup_per_file() {
+        let fx = fixture();
+        let data = build_viz_data(&fx.input());
+
+        // The group whose second instance lives outside `input.files` keeps
+        // only 1 resolvable instance and is dropped entirely.
+        assert_eq!(data.clones.len(), 2);
+        assert_eq!(data.clones[0].instances.len(), 2);
+        assert_eq!(data.clones[0].instances[0].file, 0);
+        assert_eq!(data.clones[0].instances[1].file, 2);
+        assert_eq!(data.clones[0].lines, 3);
+        assert_eq!(data.clones[0].tokens, 12);
+        // Two same-file instances in one group dedup to a single group id.
+        assert_eq!(data.files[0].clone_groups, vec![0, 1]);
+        assert_eq!(data.files[2].clone_groups, vec![0]);
+        // dup_lines sums (end minus start plus 1) per resolvable instance.
+        assert_eq!(data.files[0].dup_lines, 9);
+        assert_eq!(data.files[2].dup_lines, 3);
+        assert_eq!(data.files[1].dup_lines, 0);
+    }
+
+    #[test]
+    fn truncate_preview_caps_lines_and_bytes() {
+        // Line cap: 12 lines in, CLONE_PREVIEW_MAX_LINES lines out plus the
+        // ellipsis appended directly after the last kept line.
+        let many_lines = (0..12).map(|i| format!("line {i}")).collect::<Vec<_>>();
+        let out = truncate_preview(&many_lines.join("\n"));
+        assert_eq!(out.matches('\n').count(), CLONE_PREVIEW_MAX_LINES - 1);
+        assert!(out.contains("line 9"));
+        assert!(!out.contains("line 10"));
+        assert!(out.ends_with('\u{2026}'));
+
+        // Byte budget: the second 300-byte line would exceed
+        // CLONE_PREVIEW_MAX_CHARS, so output stops after the first line.
+        let two_long_lines = format!("{}\n{}", "a".repeat(300), "b".repeat(300));
+        let out = truncate_preview(&two_long_lines);
+        assert_eq!(out, format!("{}\u{2026}", "a".repeat(300)));
+
+        // Multi-byte content over budget truncates at a line boundary and
+        // never slices inside a character.
+        let emoji_line = "\u{1f389}".repeat(200);
+        let out = truncate_preview(&emoji_line);
+        assert_eq!(out, "\u{2026}");
+    }
+
+    #[test]
+    fn cycles_drop_when_any_member_unresolved() {
+        let fx = fixture();
+        let data = build_viz_data(&fx.input());
+
+        // The a/b cycle resolves fully; the cycle referencing the missing
+        // file yields no entry at all (not a partial one).
+        assert_eq!(data.cycles, vec![vec![0, 1]]);
+        assert!(data.files[0].in_cycle);
+        assert!(data.files[1].in_cycle);
+        assert!(!data.files[2].in_cycle);
+        // Characterization: the summary still counts the RAW results, so the
+        // dropped cycle is counted anyway. plan 043 changes this.
+        assert_eq!(data.summary.circular_deps, 2);
+    }
+
+    #[test]
+    fn violations_resolve_zone_and_file_indices() {
+        let fx = fixture();
+        let data = build_viz_data(&fx.input());
+
+        assert_eq!(data.zones.len(), 2);
+        assert_eq!(data.zones[0].name, "app");
+        assert_eq!(data.zones[0].files, 2);
+        assert_eq!(data.zones[1].name, "shared");
+        assert_eq!(data.zones[1].files, 1);
+        assert_eq!(data.files[0].zone, Some(0));
+        assert_eq!(data.files[1].zone, Some(0));
+        assert_eq!(data.files[2].zone, Some(1));
+
+        // The violation whose to_path is not in `input.files` is dropped.
+        assert_eq!(data.violations.len(), 1);
+        let v = &data.violations[0];
+        assert_eq!((v.from, v.to), (0, 2));
+        assert_eq!((v.from_zone, v.to_zone), (0, 1));
+        assert_eq!(v.line, 2);
+        assert_eq!(v.specifier, "../lib/c");
+    }
+
+    #[test]
+    fn summary_counts_match_arrays_except_known_quirk() {
+        let fx = fixture();
+        let data = build_viz_data(&fx.input());
+        let s = &data.summary;
+
+        assert_eq!(s.total_files, data.files.len());
+        assert_eq!(s.total_size, 175);
+        assert_eq!(s.total_edges, data.edges.len());
+        assert_eq!(s.clone_groups, data.clones.len());
+        assert_eq!(s.duplicated_lines, 12);
+        assert_eq!(s.hotspot_files, 0);
+        assert_eq!(s.unused_files, 0);
+        assert_eq!(s.unused_exports, 0);
+        // KNOWN QUIRK: these two count the RAW analysis results instead of
+        // the rendered arrays, so unresolvable entries inflate the header
+        // numbers. plan 043 changes this.
+        assert_eq!(s.circular_deps, 2);
+        assert_ne!(s.circular_deps, data.cycles.len());
+        assert_eq!(s.boundary_violations, 2);
+        assert_ne!(s.boundary_violations, data.violations.len());
+    }
+}
