@@ -480,3 +480,23 @@ fn promise_all_map_multi_statement_callback_records_no_element_binding() {
         info.member_accesses,
     );
 }
+
+#[test]
+fn cyclic_object_binding_candidates_terminate() {
+    // A cycle of object literals referencing each other (with a class
+    // instance seeding real binding targets) used to make the
+    // object-binding fixpoint deepen and multiply every copied path per
+    // iteration: exponential time and memory on minified bundles. The
+    // depth and size caps bound it; this test regresses on hang.
+    use std::fmt::Write as _;
+    let mut source = String::from("class C { m() {} }\nconst c = new C();\n");
+    let nodes = 40;
+    for i in 0..nodes {
+        let prev = (i + nodes - 1) % nodes;
+        let _ = writeln!(source, "const n{i} = {{ a: n{prev}, b: n{prev}, s: c }};");
+    }
+    source.push_str("n1.s.m();\n");
+    let info = parse_source(&source);
+    // The direct one-hop path still resolves through the cycle guard.
+    assert!(info.member_accesses.iter().any(|m| m.member == "m"));
+}

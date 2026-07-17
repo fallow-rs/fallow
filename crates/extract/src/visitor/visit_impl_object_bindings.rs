@@ -6,6 +6,25 @@ use oxc_ast::ast::*;
 
 use super::super::{BindingTarget, ModuleInfoExtractor, ObjectBindingCandidate};
 
+/// Deepest `a.b.c` binding path the resolver materializes. Member-usage
+/// analysis reads shallow paths (`obj.member`, at most a few hops through
+/// a namespace); deeper paths contribute no findings. The cap also breaks
+/// the combinatorial blowup of cyclic object-binding candidates
+/// (`const p = { a: q }; const q = { a: p };`), where every fixpoint
+/// iteration would otherwise deepen and multiply each copied path.
+/// Minified bundles hit that shape in practice.
+const MAX_BINDING_PATH_DEPTH: usize = 8;
+
+/// Hard ceiling on resolved binding paths per module: the backstop when
+/// many independent candidates stay under the depth cap. Far above any
+/// legitimate module; only pathological inputs approach it.
+const MAX_BINDING_TARGETS: usize = 65_536;
+
+/// Number of `.`-separated segments in a binding path.
+fn binding_path_depth(binding: &str) -> usize {
+    binding.matches('.').count()
+}
+
 impl ModuleInfoExtractor {
     pub(super) fn extract_angular_inject_target(
         &self,
@@ -24,15 +43,24 @@ impl ModuleInfoExtractor {
         source_binding: &str,
         target_binding: &str,
     ) -> bool {
+        if self.binding_target_names.len() >= MAX_BINDING_TARGETS {
+            return false;
+        }
         let source_prefix = format!("{source_binding}.");
         let target_prefix = format!("{target_binding}.");
+        let target_depth = binding_path_depth(target_binding);
         let copied: Vec<(String, BindingTarget)> = self
             .binding_target_names
             .iter()
             .filter_map(|(binding, target)| {
-                binding
-                    .strip_prefix(&source_prefix)
-                    .map(|suffix| (format!("{target_prefix}{suffix}"), target.clone()))
+                let suffix = binding.strip_prefix(&source_prefix)?;
+                // Depth check before allocating the joined key: the copy
+                // adds the suffix's segments plus the joining dot onto the
+                // target path.
+                if target_depth + binding_path_depth(suffix) + 1 > MAX_BINDING_PATH_DEPTH {
+                    return None;
+                }
+                Some((format!("{target_prefix}{suffix}"), target.clone()))
             })
             .collect();
 
@@ -44,7 +72,15 @@ impl ModuleInfoExtractor {
     }
 
     fn insert_binding_target(&mut self, binding: String, target: BindingTarget) -> bool {
+        if binding_path_depth(&binding) > MAX_BINDING_PATH_DEPTH {
+            return false;
+        }
         if self.binding_target_names.get(&binding) == Some(&target) {
+            return false;
+        }
+        if self.binding_target_names.len() >= MAX_BINDING_TARGETS
+            && !self.binding_target_names.contains_key(&binding)
+        {
             return false;
         }
         self.binding_target_names.insert(binding, target);
