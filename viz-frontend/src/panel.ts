@@ -1,16 +1,10 @@
 import type { AppState } from "./state";
 import type { VizFile } from "./types";
 import { basename, dirname, formatCount, formatSize } from "./data";
+import { closeButton, copyButton, el } from "./dom";
 
 /** Called when the user clicks through to another file. */
 export type NavigateFn = (fileIndex: number) => void;
-
-const el = (tag: string, cls?: string, text?: string): HTMLElement => {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-};
 
 const sectionEl = (title: string): HTMLElement => {
   const section = el("section");
@@ -94,118 +88,8 @@ export const createPanel = (): HTMLElement => {
   return panel;
 };
 
-export const renderPanel = (
-  state: AppState,
-  panel: HTMLElement,
-  navigate: NavigateFn,
-  close: () => void,
-  refresh: () => void,
-): void => {
-  if (state.selected === null && state.selectedClone !== null) {
-    renderClonePanel(state, panel, navigate, refresh);
-    return;
-  }
-  if (state.selected === null && state.selectedRoad !== null) {
-    renderRoadPanel(state, panel, navigate, close);
-    return;
-  }
-  if (state.selected === null) {
-    // A finding lens with nothing selected shows its ranked worst-first
-    // list, so the lens answers "which ones first", not just "how many".
-    if (state.lens !== "overview") {
-      renderLensPanel(state, panel, navigate, refresh);
-      return;
-    }
-    panel.classList.remove("open");
-    return;
-  }
-
-  const fileIdx = state.selected;
-  const file = state.data.files[fileIdx];
-  panel.replaceChildren();
-  panel.classList.add("open");
-
-  // Header
-  const head = el("div", "panel-head");
-  const fileBox = el("div", "file");
-  const dir = dirname(file.path);
-  if (dir) fileBox.appendChild(el("div", "dir", `${dir}/`));
-  fileBox.appendChild(el("div", "name", basename(file.path)));
-  const statusLine = el("div", "status-line");
-  statusLine.appendChild(statusLabel(file));
-  const copyBtn = el("button", "copy-path", "copy path") as HTMLButtonElement;
-  copyBtn.type = "button";
-  copyBtn.addEventListener("click", () => {
-    void navigator.clipboard?.writeText(file.path).then(() => {
-      copyBtn.textContent = "copied";
-      setTimeout(() => {
-        copyBtn.textContent = "copy path";
-      }, 1200);
-    });
-  });
-  statusLine.appendChild(copyBtn);
-  fileBox.appendChild(statusLine);
-  if (file.status === "clean") {
-    fileBox.appendChild(el("div", "status-gloss", "reachable from an entry point"));
-  } else if (file.status === "entryPoint") {
-    fileBox.appendChild(el("div", "status-gloss", "where execution starts; nothing needs to import it"));
-  }
-  head.appendChild(fileBox);
-  const closeBtn = el("button", "close", "×") as HTMLButtonElement;
-  closeBtn.type = "button";
-  closeBtn.setAttribute("aria-label", "Close details");
-  closeBtn.addEventListener("click", close);
-  head.appendChild(closeBtn);
-  panel.appendChild(head);
-
-  // Facts
-  const facts = sectionEl("facts");
-  const pairs: Array<[string, string | HTMLElement]> = [
-    ["size", formatSize(file.size)],
-    ["exports", formatCount(file.export_count)],
-    ["imports", formatCount(file.import_count)],
-    ["imported by", formatCount(file.importer_count)],
-  ];
-  if (file.workspace !== undefined && state.data.workspaces[file.workspace]) {
-    pairs.push(["workspace", state.data.workspaces[file.workspace].name]);
-  }
-  if (file.zone !== undefined && state.data.zones[file.zone]) {
-    pairs.push(["zone", state.data.zones[file.zone].name]);
-  }
-  if (file.fn_count > 0) pairs.push(["functions", formatCount(file.fn_count)]);
-  facts.appendChild(kvEl(pairs));
-  panel.appendChild(facts);
-
-  // Dead code
-  if (file.status === "unused") {
-    const dead = sectionEl("dead code");
-    const msg = el("div", "sev-error");
-    msg.textContent =
-      file.importer_count === 0
-        ? "no file imports this one; nothing reaches it from an entry point."
-        : "unreachable from every entry point.";
-    dead.appendChild(msg);
-    const hint = el("div", "action-hint");
-    hint.append("verify: ", elCode(`fallow dead-code --trace ${file.path}`));
-    dead.appendChild(hint);
-    panel.appendChild(dead);
-  } else if (file.unused_exports && file.unused_exports.length > 0) {
-    const dead = sectionEl("unused exports");
-    const tags = el("div", "tag-list");
-    for (const name of file.unused_exports.slice(0, 20)) {
-      tags.appendChild(el("span", "tag", name));
-    }
-    if (file.unused_exports.length > 20) {
-      tags.appendChild(el("span", "muted", `… ${file.unused_exports.length - 20} more`));
-    }
-    dead.appendChild(tags);
-    const hint = el("div", "action-hint");
-    hint.append("verify: ", elCode(`fallow trace ${file.path}#${file.unused_exports[0]}`));
-    dead.appendChild(hint);
-    panel.appendChild(dead);
-  }
-
-  // Complexity
+/** Per-function complexity table with the React context columns. */
+const complexitySection = (file: VizFile): HTMLElement | null => {
   if (file.functions && file.functions.length > 0) {
     const cx = sectionEl(
       file.fn_count > file.functions.length
@@ -254,10 +138,19 @@ export const renderPanel = (
     table.appendChild(tbody);
     cx.appendChild(table);
     cx.appendChild(el("div", "muted key-line", "cc cyclomatic · cog cognitive · loc lines"));
-    panel.appendChild(cx);
+    return cx;
   }
+  return null;
+};
 
-  // Duplication
+
+/** Clone groups this file participates in, with jump links. */
+const duplicationSection = (
+  state: AppState,
+  file: VizFile,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement | null => {
   if (file.clone_groups && file.clone_groups.length > 0) {
     const dup = sectionEl("duplication");
     dup.appendChild(
@@ -293,10 +186,18 @@ export const renderPanel = (
     const hint = el("div", "action-hint");
     hint.append("explore: ", elCode(`fallow dupes --trace ${file.path}:1`));
     dup.appendChild(hint);
-    panel.appendChild(dup);
+    return dup;
   }
+  return null;
+};
 
-  // Boundary violations from this file
+
+/** Outgoing and incoming boundary violations. */
+const boundariesSection = (
+  state: AppState,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement | null => {
   const outgoing = state.data.violations.filter((v) => v.from === fileIdx);
   const incoming = state.data.violations.filter((v) => v.to === fileIdx);
   if (outgoing.length > 0 || incoming.length > 0) {
@@ -323,10 +224,19 @@ export const renderPanel = (
         el("div", "muted", `imported across a boundary by ${incoming.length} file${incoming.length === 1 ? "" : "s"}`),
       );
     }
-    panel.appendChild(b);
+    return b;
   }
+  return null;
+};
 
-  // Cycle membership
+
+/** Cycle membership with jump links. */
+const cycleSection = (
+  state: AppState,
+  file: VizFile,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement | null => {
   if (file.in_cycle) {
     const cyc = sectionEl("circular dependency");
     const cycles = state.data.cycles.filter((c) => c.includes(fileIdx));
@@ -334,21 +244,154 @@ export const renderPanel = (
       cyc.appendChild(el("div", "sev-warn", `cycle of ${cycle.length} files`));
       cyc.appendChild(linkList(state, cycle.filter((i) => i !== fileIdx), navigate, 8));
     }
-    panel.appendChild(cyc);
+    return cyc;
   }
+  return null;
+};
 
-  // Connections
+
+/** Importer and import link lists. */
+const connectionSections = (
+  state: AppState,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement[] => {
+  const out: HTMLElement[] = [];
   const importers = state.index.importersOf[fileIdx];
   const imports = state.index.importsOf[fileIdx];
   if (importers.length > 0) {
     const s = sectionEl(`imported by ${formatCount(importers.length)}`);
     s.appendChild(linkList(state, importers, navigate));
-    panel.appendChild(s);
+    out.push(s);
   }
   if (imports.length > 0) {
     const s = sectionEl(`imports ${formatCount(imports.length)}`);
     s.appendChild(linkList(state, imports, navigate));
-    panel.appendChild(s);
+    out.push(s);
+  }
+  return out;
+};
+
+/** Size, wiring, workspace, zone, and function-count facts. */
+const factsSection = (state: AppState, file: VizFile): HTMLElement => {
+  const facts = sectionEl("facts");
+  const pairs: Array<[string, string | HTMLElement]> = [
+    ["size", formatSize(file.size)],
+    ["exports", formatCount(file.export_count)],
+    ["imports", formatCount(file.import_count)],
+    ["imported by", formatCount(file.importer_count)],
+  ];
+  if (file.workspace !== undefined && state.data.workspaces[file.workspace]) {
+    pairs.push(["workspace", state.data.workspaces[file.workspace].name]);
+  }
+  if (file.zone !== undefined && state.data.zones[file.zone]) {
+    pairs.push(["zone", state.data.zones[file.zone].name]);
+  }
+  if (file.fn_count > 0) pairs.push(["functions", formatCount(file.fn_count)]);
+  facts.appendChild(kvEl(pairs));
+  return facts;
+};
+
+/** Dead-code evidence: the unused file itself, or its unused exports. */
+const deadCodeSection = (file: VizFile): HTMLElement | null => {
+  if (file.status === "unused") {
+    const dead = sectionEl("dead code");
+    const msg = el("div", "sev-error");
+    msg.textContent =
+      file.importer_count === 0
+        ? "no file imports this one; nothing reaches it from an entry point."
+        : "unreachable from every entry point.";
+    dead.appendChild(msg);
+    const hint = el("div", "action-hint");
+    hint.append("verify: ", elCode(`fallow dead-code --trace ${file.path}`));
+    dead.appendChild(hint);
+    return dead;
+  }
+  if (file.unused_exports && file.unused_exports.length > 0) {
+    const dead = sectionEl("unused exports");
+    const tags = el("div", "tag-list");
+    for (const name of file.unused_exports.slice(0, 20)) {
+      tags.appendChild(el("span", "tag", name));
+    }
+    if (file.unused_exports.length > 20) {
+      tags.appendChild(el("span", "muted", `… ${file.unused_exports.length - 20} more`));
+    }
+    dead.appendChild(tags);
+    const hint = el("div", "action-hint");
+    hint.append("verify: ", elCode(`fallow trace ${file.path}#${file.unused_exports[0]}`));
+    dead.appendChild(hint);
+    return dead;
+  }
+  return null;
+};
+
+/** Path, name, status, and the copy-path affordance. */
+const fileHead = (file: VizFile, close: () => void): HTMLElement => {
+  const head = el("div", "panel-head");
+  const fileBox = el("div", "file");
+  const dir = dirname(file.path);
+  if (dir) fileBox.appendChild(el("div", "dir", `${dir}/`));
+  fileBox.appendChild(el("div", "name", basename(file.path)));
+  const statusLine = el("div", "status-line");
+  statusLine.appendChild(statusLabel(file));
+  statusLine.appendChild(copyButton("copy-path", "copy path", () => file.path));
+  fileBox.appendChild(statusLine);
+  const gloss =
+    file.status === "clean"
+      ? "reachable from an entry point"
+      : file.status === "entryPoint"
+        ? "where execution starts; nothing needs to import it"
+        : null;
+  if (gloss) fileBox.appendChild(el("div", "status-gloss", gloss));
+  head.appendChild(fileBox);
+  head.appendChild(closeButton(close));
+  return head;
+};
+
+export const renderPanel = (
+  state: AppState,
+  panel: HTMLElement,
+  navigate: NavigateFn,
+  close: () => void,
+  refresh: () => void,
+): void => {
+  if (state.selected === null && state.selectedClone !== null) {
+    renderClonePanel(state, panel, navigate, refresh);
+    return;
+  }
+  if (state.selected === null && state.selectedRoad !== null) {
+    renderRoadPanel(state, panel, navigate, close);
+    return;
+  }
+  if (state.selected === null) {
+    // A finding lens with nothing selected shows its ranked worst-first
+    // list, so the lens answers "which ones first", not just "how many".
+    if (state.lens !== "overview") {
+      renderLensPanel(state, panel, navigate, refresh);
+      return;
+    }
+    panel.classList.remove("open");
+    return;
+  }
+
+  const fileIdx = state.selected;
+  const file = state.data.files[fileIdx];
+  panel.replaceChildren();
+  panel.classList.add("open");
+  panel.appendChild(fileHead(file, close));
+  panel.appendChild(factsSection(state, file));
+  const dead = deadCodeSection(file);
+  if (dead) panel.appendChild(dead);
+
+  const sections = [
+    complexitySection(file),
+    duplicationSection(state, file, fileIdx, navigate),
+    boundariesSection(state, fileIdx, navigate),
+    cycleSection(state, file, fileIdx, navigate),
+    ...connectionSections(state, fileIdx, navigate),
+  ];
+  for (const section of sections) {
+    if (section) panel.appendChild(section);
   }
 };
 
@@ -368,7 +411,7 @@ interface RankRow {
   clone?: number;
 }
 
-const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } => {
+export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } => {
   const files = state.data.files;
   switch (state.lens) {
     case "deadcode": {
@@ -480,21 +523,14 @@ const renderLensPanel = (
     return;
   }
   // Leave with the list, not just a feeling: findings as markdown.
-  const copyBtn = el("button", "copy-path", "copy as markdown") as HTMLButtonElement;
-  copyBtn.type = "button";
-  copyBtn.addEventListener("click", () => {
-    const md = [
-      `# fallow · ${title} · ${state.data.root}`,
-      ...rows.map((r) => `- ${r.dir ? `${r.dir}/` : ""}${r.label} (${r.metric})`),
-    ].join("\n");
-    void navigator.clipboard?.writeText(md).then(() => {
-      copyBtn.textContent = "copied";
-      setTimeout(() => {
-        copyBtn.textContent = "copy as markdown";
-      }, 1200);
-    });
-  });
-  section.appendChild(copyBtn);
+  section.appendChild(
+    copyButton("copy-path", "copy as markdown", () =>
+      [
+        `# fallow · ${title} · ${state.data.root}`,
+        ...rows.map((r) => `- ${r.dir ? `${r.dir}/` : ""}${r.label} (${r.metric})`),
+      ].join("\n"),
+    ),
+  );
   const cap = 30;
   const ul = el("ul", "link-list rank-list");
   for (const row of rows.slice(0, cap)) {
@@ -554,26 +590,18 @@ const renderClonePanel = (
   const groupIdx = state.selectedClone;
   const group = groupIdx !== null ? state.data.clones[groupIdx] : undefined;
   if (groupIdx === null || !group) return;
-  panel.replaceChildren();
-  panel.classList.add("open");
-
-  const head = el("div", "panel-head");
-  const box = el("div", "file");
-  box.appendChild(el("div", "dir", "duplicated block"));
-  box.appendChild(el("div", "name", `${formatCount(group.lines)} lines × ${formatCount(group.instances.length)} places`));
+  const box = panelShell(
+    panel,
+    "duplicated block",
+    `${formatCount(group.lines)} lines × ${formatCount(group.instances.length)} places`,
+    () => {
+      state.selectedClone = null;
+      refresh();
+    },
+  );
   const statusLine = el("div", "status-line");
   statusLine.appendChild(sev("sev-warn", `${formatCount(group.tokens)} tokens`));
   box.appendChild(statusLine);
-  head.appendChild(box);
-  const closeBtn = el("button", "close", "×") as HTMLButtonElement;
-  closeBtn.type = "button";
-  closeBtn.setAttribute("aria-label", "Back to the duplication list");
-  closeBtn.addEventListener("click", () => {
-    state.selectedClone = null;
-    refresh();
-  });
-  head.appendChild(closeBtn);
-  panel.appendChild(head);
 
   const copies = sectionEl(`every copy · ${formatCount(group.instances.length)}`);
   const ul = el("ul", "link-list");
@@ -608,6 +636,28 @@ const renderClonePanel = (
   }
 };
 
+/**
+ * Open the panel with the shared head shell (eyebrow + title) used by
+ * the drill-down panels; returns the box for extra status lines.
+ */
+const panelShell = (
+  panel: HTMLElement,
+  eyebrow: string,
+  title: string,
+  onClose: () => void,
+): HTMLElement => {
+  panel.replaceChildren();
+  panel.classList.add("open");
+  const head = el("div", "panel-head");
+  const box = el("div", "file");
+  box.appendChild(el("div", "dir", eyebrow));
+  box.appendChild(el("div", "name", title));
+  head.appendChild(box);
+  head.appendChild(closeButton(onClose));
+  panel.appendChild(head);
+  return box;
+};
+
 /** Drill-down panel for an aggregated road: the contributing file pairs. */
 const renderRoadPanel = (
   state: AppState,
@@ -617,13 +667,7 @@ const renderRoadPanel = (
 ): void => {
   const road = state.selectedRoad;
   if (!road) return;
-  panel.replaceChildren();
-  panel.classList.add("open");
-
-  const head = el("div", "panel-head");
-  const box = el("div", "file");
-  box.appendChild(el("div", "dir", "dependency road"));
-  box.appendChild(el("div", "name", `${road.srcKey} ▸ ${road.dstKey}`));
+  const box = panelShell(panel, "dependency road", `${road.srcKey} ▸ ${road.dstKey}`, close);
   const statusLine = el("div", "status-line");
   statusLine.appendChild(
     sev("sev-info", `${formatCount(road.count)} import${road.count === 1 ? "" : "s"}`),
@@ -637,13 +681,6 @@ const renderRoadPanel = (
     statusLine.appendChild(sev("sev-warn", `${formatCount(road.cycleEdges)} cycle edges`));
   }
   box.appendChild(statusLine);
-  head.appendChild(box);
-  const closeBtn = el("button", "close", "×") as HTMLButtonElement;
-  closeBtn.type = "button";
-  closeBtn.setAttribute("aria-label", "Close details");
-  closeBtn.addEventListener("click", close);
-  head.appendChild(closeBtn);
-  panel.appendChild(head);
 
   const section = sectionEl(`file pairs ${formatCount(road.pairs.length)}`);
   const ul = el("ul", "link-list");

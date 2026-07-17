@@ -1,6 +1,7 @@
 import type { AppState } from "./state";
 import type { Lens } from "./types";
 import { formatCount } from "./data";
+import { button, copyButton, el } from "./dom";
 
 /**
  * HTML chrome around the canvas. One rule carries the affordance story:
@@ -38,21 +39,6 @@ export interface ChromeHandlers {
   onCrumb: (path: string) => void;
   onCluster: (mode: "directory" | "imports") => void;
 }
-
-const el = (tag: string, cls?: string, text?: string): HTMLElement => {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-};
-
-const button = (cls: string, text: string): HTMLButtonElement => {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = cls;
-  b.textContent = text;
-  return b;
-};
 
 interface LensDef {
   id: Lens;
@@ -359,16 +345,8 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
   left.appendChild(el("span", "summary-text", text));
   const cmd = LENS_COMMANDS[state.lens];
   if (cmd !== "") {
-    const chip = button("summary-cmd", `run: ${cmd.slice(2)}`);
+    const chip = copyButton("summary-cmd", `run: ${cmd.slice(2)}`, () => cmd.slice(2));
     chip.title = "copy this command";
-    chip.addEventListener("click", () => {
-      void navigator.clipboard?.writeText(cmd.slice(2)).then(() => {
-        chip.textContent = "copied";
-        setTimeout(() => {
-          chip.textContent = `run: ${cmd.slice(2)}`;
-        }, 1200);
-      });
-    });
     left.appendChild(chip);
   }
   refs.summaryLine.classList.add("visible");

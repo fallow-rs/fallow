@@ -362,9 +362,10 @@ export const tailTruncate = (
   maxWidth: number,
 ): string => {
   if (dir === "" || ctx.measureText(dir).width <= maxWidth) return dir;
+  const tail = dir.endsWith("/") ? "/" : "";
   const parts = dir.split("/").filter((p) => p !== "");
   for (let drop = 1; drop < parts.length; drop++) {
-    const candidate = `…/${parts.slice(drop).join("/")}`;
+    const candidate = `…/${parts.slice(drop).join("/")}${tail}`;
     if (ctx.measureText(candidate).width <= maxWidth) return candidate;
   }
   return ctx.measureText("…/").width <= maxWidth ? "…/" : "";
@@ -414,4 +415,53 @@ export const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): 
     }
   }
   return best;
+};
+
+/** Bounding box of the clusters an include predicate keeps. */
+export const clusterBounds = (
+  clusters: ClusterInfo[],
+  include: (c: ClusterInfo) => boolean,
+): { minX: number; minY: number; maxX: number; maxY: number } => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const c of clusters) {
+    if (!include(c)) continue;
+    minX = Math.min(minX, c.cx - c.r);
+    minY = Math.min(minY, c.cy - c.r);
+    maxX = Math.max(maxX, c.cx + c.r);
+    maxY = Math.max(maxY, c.cy + c.r);
+  }
+  return { minX, minY, maxX, maxY };
+};
+
+const FIT_PAD = 70;
+
+/**
+ * Fit-to-view camera transform for a cluster bounding box, reserving
+ * horizontal room for labels that stick out of hulls.
+ */
+export const fitTransform = (
+  w: number,
+  h: number,
+  b: { minX: number; minY: number; maxX: number; maxY: number },
+): { x: number; y: number; k: number } => {
+  const bboxW = b.maxX - b.minX + FIT_PAD * 2;
+  const bboxH = b.maxY - b.minY + FIT_PAD * 2;
+  const k = Math.min((w - 200) / bboxW, (h - 60) / bboxH, 1.4);
+  return {
+    x: (w - bboxW * k) / 2 - b.minX * k + FIT_PAD * k,
+    y: (h - bboxH * k) / 2 - b.minY * k + FIT_PAD * k,
+    k,
+  };
+};
+
+/** The stage's usable pixel size for the graph camera. */
+export const stageSize = (state: AppState): { w: number; h: number } => {
+  const stageEl = state.canvas.parentElement;
+  return {
+    w: usableStageWidth(state, stageEl ? stageEl.clientWidth : window.innerWidth),
+    h: stageEl ? stageEl.clientHeight : window.innerHeight,
+  };
 };

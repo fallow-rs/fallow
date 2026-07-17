@@ -12,12 +12,14 @@ import {
   type GraphClickResult,
   type GraphHoverTarget,
   type StageRect,
+  clusterBounds,
   cubicPoint,
+  fitTransform,
   getGVS,
-  nodeHitTest,
   markIntroSeen,
+  nodeHitTest,
   roadGeometry,
-  usableStageWidth,
+  stageSize,
   worldToScreen,
 } from "./shared";
 import { renderGraph } from "./render";
@@ -190,30 +192,16 @@ export const resetGraphView = (state: AppState): void => {
   const gvs = getGVS(state);
   if (!gvs.initialized || !gvs.zoomBehavior || state.selected !== null) return;
   // Recompute the fit transform from current cluster bounds.
-  const stageEl = state.canvas.parentElement;
-  const w = usableStageWidth(state, stageEl ? stageEl.clientWidth : window.innerWidth);
-  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
+  const { w, h } = stageSize(state);
   const anyConnected = gvs.clusters.some((c) => !c.isolated);
-  for (const c of gvs.clusters) {
-    if (c.isolated && anyConnected && !gvs.standaloneOpen) continue;
-    minX = Math.min(minX, c.cx - c.r);
-    minY = Math.min(minY, c.cy - c.r);
-    maxX = Math.max(maxX, c.cx + c.r);
-    maxY = Math.max(maxY, c.cy + c.r);
-  }
-  const pad = 70;
-  const bboxW = maxX - minX + pad * 2;
-  const bboxH = maxY - minY + pad * 2;
-  const fitScale = Math.min((w - 200) / bboxW, (h - 60) / bboxH, 1.4);
-  const fitX = (w - bboxW * fitScale) / 2 - minX * fitScale + pad * fitScale;
-  const fitY = (h - bboxH * fitScale) / 2 - minY * fitScale + pad * fitScale;
+  const fit = fitTransform(
+    w,
+    h,
+    clusterBounds(gvs.clusters, (c) => !(c.isolated && anyConnected && !gvs.standaloneOpen)),
+  );
   select(state.canvas).call(
     gvs.zoomBehavior.transform,
-    zoomIdentity.translate(fitX, fitY).scale(fitScale),
+    zoomIdentity.translate(fit.x, fit.y).scale(fit.k),
   );
 };
 

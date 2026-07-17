@@ -24,6 +24,7 @@ import {
   LOD_INTRA,
   LOD_SEVERITY,
   chipRect,
+  clusterBounds,
   cubicPoint,
   easeOut,
   getGVS,
@@ -128,39 +129,13 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.globalAlpha = 1;
   }
 
-  // Intra-cluster edges (LOD).
+  // Individual file edges are LOD-gated: intra-cluster from mid zoom,
+  // inter-cluster only at deep zoom.
   if (kRel >= LOD_INTRA) {
-    ctx.strokeStyle = theme.textMuted;
-    ctx.globalAlpha = 0.12;
-    ctx.lineWidth = 1 / transform.k;
-    ctx.beginPath();
-    for (const [from, to] of data.edges) {
-      const a = fileNodes[from];
-      const b = fileNodes[to];
-      if (!a || !b || a.cluster !== b.cluster) continue;
-      if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+    drawFileEdges(state, gvs, true, 0.12, 1 / transform.k);
   }
-  // Individual inter-cluster edges only at deep zoom.
   if (kRel >= LOD_INTER) {
-    ctx.strokeStyle = theme.textMuted;
-    ctx.globalAlpha = 0.1;
-    ctx.lineWidth = 0.8 / transform.k;
-    ctx.beginPath();
-    for (const [from, to] of data.edges) {
-      const a = fileNodes[from];
-      const b = fileNodes[to];
-      if (!a || !b || a.cluster === b.cluster) continue;
-      if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+    drawFileEdges(state, gvs, false, 0.1, 0.8 / transform.k);
   }
 
   // Hull borders.
@@ -276,13 +251,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
       const a = fileNodes[from];
       const b = fileNodes[to];
       if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) continue;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = theme.bg;
-      ctx.globalAlpha = 0.9;
-      ctx.lineWidth = 4 / transform.k;
-      ctx.stroke();
+      edgeUnderlay(ctx, { x: a.x, y: a.y }, { x: b.x, y: b.y }, theme.bg, 4 / transform.k);
       if (to === hovered) {
         const p0 = { x: a.x, y: a.y };
         const p3 = { x: b.x, y: b.y };
@@ -478,6 +447,49 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     });
   }
 };
+/** Wide background stroke behind a highlighted edge so it pops. */
+const edgeUnderlay = (
+  ctx: CanvasRenderingContext2D,
+  a: Pt,
+  b: Pt,
+  bg: string,
+  width: number,
+): void => {
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = bg;
+  ctx.globalAlpha = 0.9;
+  ctx.lineWidth = width;
+  ctx.stroke();
+};
+
+/** One pass of raw file edges, filtered to intra- or inter-cluster. */
+const drawFileEdges = (
+  state: AppState,
+  gvs: GraphViewState,
+  sameCluster: boolean,
+  alpha: number,
+  lineWidth: number,
+): void => {
+  const { ctx, theme, data } = state;
+  const { fileNodes } = gvs;
+  ctx.strokeStyle = theme.textMuted;
+  ctx.globalAlpha = alpha;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  for (const [from, to] of data.edges) {
+    const a = fileNodes[from];
+    const b = fileNodes[to];
+    if (!a || !b || (a.cluster === b.cluster) !== sameCluster) continue;
+    if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+};
+
 /** Greedy screen-space labels for the highest-degree files in view. */
 const drawZoomLabels = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
   const { ctx, theme, data } = state;
@@ -672,7 +684,7 @@ interface MinimapFrame {
   worldY: number;
 }
 
-const minimapFrame = (
+const minimapFrameAt = (
   state: AppState,
   gvs: GraphViewState,
   w: number,
@@ -681,16 +693,7 @@ const minimapFrame = (
   if (gvs.clusters.length < 2) return null;
   // Keep clear of the detail panel when a road drill-down is open.
   const panelW = state.selectedRoad !== null ? Math.min(380, w * 0.9) : 0;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const c of gvs.clusters) {
-    minX = Math.min(minX, c.cx - c.r);
-    minY = Math.min(minY, c.cy - c.r);
-    maxX = Math.max(maxX, c.cx + c.r);
-    maxY = Math.max(maxY, c.cy + c.r);
-  }
+  const { minX, minY, maxX, maxY } = clusterBounds(gvs.clusters, () => true);
   const worldW = Math.max(1, maxX - minX);
   const worldH = Math.max(1, maxY - minY);
   const scale = Math.min((MINIMAP_W - 12) / worldW, (MINIMAP_H - 12) / worldH);
@@ -705,11 +708,19 @@ const minimapFrame = (
   };
 };
 
+/** The minimap frame at the stage's current size. */
+const minimapFrame = (state: AppState, gvs: GraphViewState): MinimapFrame | null => {
+  const stageEl = state.canvas.parentElement;
+  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
+  return minimapFrameAt(state, gvs, w, h);
+};
+
 const drawMinimap = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
   const { ctx, theme } = state;
   // Only earns pixels once the camera left the fit view.
   if (gvs.transform.k / gvs.fitK < 1.08) return;
-  const frame = minimapFrame(state, gvs, w, h);
+  const frame = minimapFrameAt(state, gvs, w, h);
   if (!frame) return;
 
   ctx.fillStyle = theme.surface1;
@@ -759,10 +770,7 @@ export const minimapHit = (state: AppState, x: number, y: number): boolean => {
   const gvs = getGVS(state);
   if (!gvs.initialized || state.selected !== null) return false;
   if (gvs.transform.k / gvs.fitK < 1.08) return false;
-  const stageEl = state.canvas.parentElement;
-  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
-  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-  const frame = minimapFrame(state, gvs, w, h);
+  const frame = minimapFrame(state, gvs);
   if (!frame) return false;
   return x >= frame.x && x <= frame.x + frame.w && y >= frame.y && y <= frame.y + frame.h;
 };
@@ -771,11 +779,11 @@ export const minimapHit = (state: AppState, x: number, y: number): boolean => {
 export const minimapPan = (state: AppState, x: number, y: number): void => {
   const gvs = getGVS(state);
   if (!gvs.initialized || !gvs.zoomBehavior) return;
+  const frame = minimapFrame(state, gvs);
+  if (!frame) return;
   const stageEl = state.canvas.parentElement;
   const w = stageEl ? stageEl.clientWidth : window.innerWidth;
   const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-  const frame = minimapFrame(state, gvs, w, h);
-  if (!frame) return;
   const worldX = frame.worldX + (x - frame.x) / frame.scale;
   const worldY = frame.worldY + (y - frame.y) / frame.scale;
   const k = gvs.transform.k;

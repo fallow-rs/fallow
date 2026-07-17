@@ -1,0 +1,144 @@
+import { describe, expect, it } from "vitest";
+import { basename, buildIndex, dirname, dupRatio, formatSize, legendText, lensColor, lensFlag } from "./data";
+import { getTheme } from "./theme";
+import type { VizData, VizFile } from "./types";
+
+const file = (over: Partial<VizFile> = {}): VizFile => ({
+  path: "src/a.ts",
+  size: 340,
+  status: "clean",
+  export_count: 1,
+  unused_export_count: 0,
+  is_entry: false,
+  importer_count: 1,
+  import_count: 0,
+  fn_count: 1,
+  max_cyclomatic: 1,
+  max_cognitive: 1,
+  react_hooks: 0,
+  jsx_depth: 0,
+  dup_lines: 0,
+  in_cycle: false,
+  ...over,
+});
+
+const data = (over: Partial<VizData> = {}): VizData => ({
+  root: "demo",
+  files: [
+    file({ path: "src/a.ts" }),
+    file({ path: "src/b.ts" }),
+    file({ path: "lib/c.ts" }),
+  ],
+  edges: [
+    [0, 1, 0],
+    [1, 2, 0],
+  ],
+  summary: {
+    total_files: 3,
+    total_size: 1020,
+    total_edges: 2,
+    unused_files: 0,
+    unused_exports: 0,
+    unused_types: 0,
+    unused_deps: 0,
+    unresolved_imports: 0,
+    circular_deps: 0,
+    clone_groups: 0,
+    duplicated_lines: 0,
+    boundary_violations: 0,
+    hotspot_files: 0,
+  },
+  workspaces: [],
+  zones: [],
+  cycles: [],
+  clones: [],
+  violations: [],
+  ...over,
+});
+
+describe("buildIndex", () => {
+  it("mirrors edges into importer and import lists", () => {
+    const index = buildIndex(data());
+    expect(index.importsOf[0]).toEqual([1]);
+    expect(index.importersOf[1]).toEqual([0]);
+    expect(index.importersOf[0]).toEqual([]);
+  });
+
+  it("marks every directed pair of a cycle in both directions", () => {
+    const index = buildIndex(data({ cycles: [[0, 1]] }));
+    const n = 3;
+    expect(index.cycleEdges.has(0 * n + 1)).toBe(true);
+    expect(index.cycleEdges.has(1 * n + 0)).toBe(true);
+  });
+
+  it("collects violation sources", () => {
+    const index = buildIndex(
+      data({
+        violations: [{ from: 0, to: 2, from_zone: 0, to_zone: 1, line: 3, specifier: "../lib/c" }],
+      }),
+    );
+    expect(index.violationSources.has(0)).toBe(true);
+    expect(index.violationSources.has(1)).toBe(false);
+  });
+
+  it("builds a directory tree that survives chain collapsing", () => {
+    const index = buildIndex(data());
+    expect(index.nodesByPath.has("src")).toBe(true);
+    expect(index.tree.size).toBeGreaterThan(0);
+  });
+});
+
+describe("dupRatio", () => {
+  it("is zero without duplicated lines and capped at one", () => {
+    expect(dupRatio(file())).toBe(0);
+    expect(dupRatio(file({ size: 34, dup_lines: 500 }))).toBe(1);
+  });
+});
+
+describe("legendText", () => {
+  it("explains the neutral map when a finding lens is clean", () => {
+    expect(legendText("deadcode", data(), "graph")).toContain("no findings");
+  });
+
+  it("keeps the color key when findings exist", () => {
+    const d = data();
+    d.summary.unused_files = 2;
+    expect(legendText("deadcode", d, "graph")).toContain("red = never imported");
+  });
+
+  it("describes tiles in map view and dots in graph view", () => {
+    expect(legendText("overview", data(), "map")).toContain("tile = file");
+    expect(legendText("overview", data(), "graph")).toContain("dot = file");
+  });
+});
+
+describe("lens coloring", () => {
+  const theme = getTheme(true);
+
+  it("keeps the overview neutral except entry points", () => {
+    const index = buildIndex(data());
+    expect(lensColor("overview", theme, index, file())).toBe(theme.cellNeutral);
+    expect(lensColor("overview", theme, index, file({ status: "entryPoint" }))).toBe(
+      theme.cellEntry,
+    );
+  });
+
+  it("flags only unused files in the deadcode lens texture channel", () => {
+    const index = buildIndex(data());
+    expect(lensFlag("deadcode", index, file({ status: "unused" }), 0)).toBe(true);
+    expect(lensFlag("deadcode", index, file(), 0)).toBe(false);
+  });
+});
+
+describe("formatting", () => {
+  it("scales byte sizes", () => {
+    expect(formatSize(512)).toBe("512 B");
+    expect(formatSize(2048)).toBe("2.0 KB");
+  });
+
+  it("splits paths", () => {
+    expect(basename("a/b/c.ts")).toBe("c.ts");
+    expect(dirname("a/b/c.ts")).toBe("a/b");
+    expect(dirname("c.ts")).toBe("");
+  });
+});

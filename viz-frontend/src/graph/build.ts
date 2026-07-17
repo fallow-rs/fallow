@@ -29,10 +29,12 @@ import {
   NODE_R_MAX,
   NODE_R_MIN,
   ROW_GAP,
+  clusterBounds,
+  fitTransform,
   getGVS,
   nodeHitTest,
   shouldShowIntro,
-  usableStageWidth,
+  stageSize,
 } from "./shared";
 import { renderGraph } from "./render";
 
@@ -142,7 +144,7 @@ const louvainCluster = (
 };
 // ── Meta-graph, SCC condensation, layering, ordering ────────────
 
-interface MetaEdge {
+export interface MetaEdge {
   src: number;
   dst: number;
   count: number;
@@ -176,7 +178,7 @@ const buildMetaGraph = (
 };
 
 /** Iterative Tarjan SCC over the cluster meta-graph. */
-const tarjanSCC = (count: number, adj: number[][]): number[] => {
+export const tarjanSCC = (count: number, adj: number[][]): number[] => {
   const sccOf = new Array<number>(count).fill(-1);
   const low = new Array<number>(count).fill(0);
   const disc = new Array<number>(count).fill(-1);
@@ -233,7 +235,7 @@ const tarjanSCC = (count: number, adj: number[][]): number[] => {
  * entry clusters (nothing imports them) sit at layer 0 (left) and the
  * most depended-on foundations sit at the highest layer (right).
  */
-const assignLayers = (clusterCount: number, meta: MetaEdge[], sccOf: number[]): number[] => {
+export const assignLayers = (clusterCount: number, meta: MetaEdge[], sccOf: number[]): number[] => {
   const sccCount = sccOf.reduce((max, s) => Math.max(max, s), -1) + 1;
   const succ: Array<Set<number>> = Array.from({ length: sccCount }, () => new Set());
   for (const e of meta) {
@@ -259,14 +261,20 @@ const assignLayers = (clusterCount: number, meta: MetaEdge[], sccOf: number[]): 
   return layers;
 };
 
-/** 4 weighted barycenter sweeps for within-layer ordering. */
-const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
+/** Flowing (non-isolated) clusters grouped by their layer index. */
+const groupByLayer = (clusters: ClusterInfo[]): Map<number, ClusterInfo[]> => {
   const byLayer = new Map<number, ClusterInfo[]>();
   for (const c of clusters) {
     if (c.isolated) continue;
     if (!byLayer.has(c.layer)) byLayer.set(c.layer, []);
     byLayer.get(c.layer)?.push(c);
   }
+  return byLayer;
+};
+
+/** 4 weighted barycenter sweeps for within-layer ordering. */
+const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
+  const byLayer = groupByLayer(clusters);
   for (const list of byLayer.values()) {
     list.sort((a, b) => (a.key < b.key ? -1 : 1));
     list.forEach((c, i) => {
@@ -314,16 +322,8 @@ const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   sweep([...layerKeys].reverse());
 };
 
-/** Coordinate assignment: x per layer, y stacked by order + relaxation. */
-const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
-  const byLayer = new Map<number, ClusterInfo[]>();
-  for (const c of clusters) {
-    if (c.isolated) continue;
-    if (!byLayer.has(c.layer)) byLayer.set(c.layer, []);
-    byLayer.get(c.layer)?.push(c);
-  }
-  const layerKeys = [...byLayer.keys()].sort((a, b) => a - b);
-
+/** Column x per layer, rows stacked by barycenter order. */
+const stackLayers = (byLayer: Map<number, ClusterInfo[]>, layerKeys: number[]): void => {
   let x = 0;
   let prevMaxR = 0;
   layerKeys.forEach((layer, i) => {
@@ -333,7 +333,6 @@ const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
     for (const c of list) c.cx = x;
     prevMaxR = maxR;
   });
-
   for (const layer of layerKeys) {
     const list = (byLayer.get(layer) ?? []).sort((a, b) => a.order - b.order);
     let y = 0;
@@ -342,7 +341,15 @@ const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
       c.cy = y;
     });
   }
+};
 
+/** Pull rows toward their neighbors' weighted mean, keeping row gaps. */
+const relaxRows = (
+  clusters: ClusterInfo[],
+  meta: MetaEdge[],
+  byLayer: Map<number, ClusterInfo[]>,
+  layerKeys: number[],
+): void => {
   const indexOf = new Map<string, number>();
   clusters.forEach((c, i) => indexOf.set(c.key, i));
   const adjacency = new Map<number, Array<{ other: number; w: number }>>();
@@ -370,81 +377,105 @@ const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
       }
     }
   }
+};
 
-  const flowing = clusters.filter((c) => !c.isolated);
+/** Align every layer's midline to the global midline; returns it. */
+const centerLayers = (
+  flowing: ClusterInfo[],
+  byLayer: Map<number, ClusterInfo[]>,
+  layerKeys: number[],
+): number => {
   const globalMid = flowing.reduce((sum, c) => sum + c.cy, 0) / Math.max(1, flowing.length);
   for (const layer of layerKeys) {
     const list = byLayer.get(layer) ?? [];
     const mid = list.reduce((s, c) => s + c.cy, 0) / Math.max(1, list.length);
     for (const c of list) c.cy += globalMid - mid;
   }
+  return globalMid;
+};
 
-  // Import-community clustering collapses into few layers (the
-  // communities import each other), which the rank layout stacks as a
-  // tall column. When the result is portrait, re-wrap the clusters
-  // into rows targeting a wide aspect instead.
-  const tallMinX = Math.min(...flowing.map((c) => c.cx - c.r));
-  const tallMaxX = Math.max(...flowing.map((c) => c.cx + c.r));
-  const tallMinY = Math.min(...flowing.map((c) => c.cy - c.r));
-  const tallMaxY = Math.max(...flowing.map((c) => c.cy + c.r));
-  const tallAspect = (tallMaxX - tallMinX) / Math.max(1, tallMaxY - tallMinY);
-  if (tallAspect < 1 && flowing.length > 3) {
-    const GRID_GAP = 150;
-    const list = [...flowing].sort((a, b) => a.layer - b.layer || a.cy - b.cy);
-    const totalW = list.reduce((sum, c) => sum + c.r * 2 + GRID_GAP, 0);
-    const avgRowH = list.reduce((sum, c) => sum + c.r * 2, 0) / list.length + GRID_GAP;
-    const rowW = Math.max(
-      Math.sqrt(2 * totalW * avgRowH),
-      Math.max(...list.map((c) => c.r * 2 + GRID_GAP)),
-    );
-    let x = 0;
-    let rowTop = 0;
-    let rowMaxR = 0;
-    const flushRow = (row: ClusterInfo[]): void => {
-      for (const c of row) c.cy = rowTop + rowMaxR;
-      rowTop += rowMaxR * 2 + GRID_GAP;
-    };
-    let row: ClusterInfo[] = [];
-    for (const c of list) {
-      if (x + c.r * 2 > rowW && row.length > 0) {
-        flushRow(row);
-        row = [];
-        x = 0;
-        rowMaxR = 0;
-      }
-      c.cx = x + c.r;
-      x += c.r * 2 + GRID_GAP;
-      rowMaxR = Math.max(rowMaxR, c.r);
-      row.push(c);
-    }
-    flushRow(row);
-    return;
-  }
+const bboxAspect = (flowing: ClusterInfo[]): number => {
+  const b = clusterBounds(flowing, () => true);
+  return (b.maxX - b.minX) / Math.max(1, b.maxY - b.minY);
+};
 
-  // The rank layout tends toward a flat ribbon (aspect 4:1+) that leaves
-  // half the viewport empty. Spread rows vertically toward a presentable
-  // aspect and stagger single-cluster layers off the midline; x gaps
-  // between layers make the stagger collision-free.
-  if (flowing.length > 1) {
-    const minX = Math.min(...flowing.map((c) => c.cx - c.r));
-    const maxX = Math.max(...flowing.map((c) => c.cx + c.r));
-    const minY = Math.min(...flowing.map((c) => c.cy - c.r));
-    const maxY = Math.max(...flowing.map((c) => c.cy + c.r));
-    const aspect = (maxX - minX) / Math.max(1, maxY - minY);
-    const TARGET_ASPECT = 2.2;
-    if (aspect > TARGET_ASPECT) {
-      const factor = Math.min(2.6, aspect / TARGET_ASPECT);
-      for (const c of flowing) c.cy = globalMid + (c.cy - globalMid) * factor;
-      let flip = -1;
-      for (const layer of layerKeys) {
-        const list = byLayer.get(layer) ?? [];
-        if (list.length === 1) {
-          list[0].cy += flip * Math.min(240, list[0].r + 100) * Math.min(1, factor - 0.6);
-          flip = -flip;
-        }
-      }
+/**
+ * Re-wrap a portrait layout into rows targeting a wide aspect.
+ * Import-community clustering collapses into few layers (the
+ * communities import each other), which the rank layout would stack
+ * as one tall column. Returns true when it applied.
+ */
+const wrapPortraitRows = (flowing: ClusterInfo[]): boolean => {
+  if (bboxAspect(flowing) >= 1 || flowing.length <= 3) return false;
+  const GRID_GAP = 150;
+  const list = [...flowing].sort((a, b) => a.layer - b.layer || a.cy - b.cy);
+  const totalW = list.reduce((sum, c) => sum + c.r * 2 + GRID_GAP, 0);
+  const avgRowH = list.reduce((sum, c) => sum + c.r * 2, 0) / list.length + GRID_GAP;
+  const rowW = Math.max(
+    Math.sqrt(2 * totalW * avgRowH),
+    Math.max(...list.map((c) => c.r * 2 + GRID_GAP)),
+  );
+  let x = 0;
+  let rowTop = 0;
+  let rowMaxR = 0;
+  const flushRow = (row: ClusterInfo[]): void => {
+    for (const c of row) c.cy = rowTop + rowMaxR;
+    rowTop += rowMaxR * 2 + GRID_GAP;
+  };
+  let row: ClusterInfo[] = [];
+  for (const c of list) {
+    if (x + c.r * 2 > rowW && row.length > 0) {
+      flushRow(row);
+      row = [];
+      x = 0;
+      rowMaxR = 0;
+    }
+    c.cx = x + c.r;
+    x += c.r * 2 + GRID_GAP;
+    rowMaxR = Math.max(rowMaxR, c.r);
+    row.push(c);
+  }
+  flushRow(row);
+  return true;
+};
+
+/**
+ * Spread a flat ribbon (aspect 4:1+) vertically toward a presentable
+ * aspect and stagger single-cluster layers off the midline; x gaps
+ * between layers make the stagger collision-free.
+ */
+const spreadToAspect = (
+  flowing: ClusterInfo[],
+  byLayer: Map<number, ClusterInfo[]>,
+  layerKeys: number[],
+  globalMid: number,
+): void => {
+  if (flowing.length <= 1) return;
+  const aspect = bboxAspect(flowing);
+  const TARGET_ASPECT = 2.2;
+  if (aspect <= TARGET_ASPECT) return;
+  const factor = Math.min(2.6, aspect / TARGET_ASPECT);
+  for (const c of flowing) c.cy = globalMid + (c.cy - globalMid) * factor;
+  let flip = -1;
+  for (const layer of layerKeys) {
+    const list = byLayer.get(layer) ?? [];
+    if (list.length === 1) {
+      list[0].cy += flip * Math.min(240, list[0].r + 100) * Math.min(1, factor - 0.6);
+      flip = -flip;
     }
   }
+};
+
+/** Coordinate assignment: stack, relax, center, then shape the aspect. */
+export const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
+  const byLayer = groupByLayer(clusters);
+  const layerKeys = [...byLayer.keys()].sort((a, b) => a - b);
+  const flowing = clusters.filter((c) => !c.isolated);
+  stackLayers(byLayer, layerKeys);
+  relaxRows(clusters, meta, byLayer, layerKeys);
+  const globalMid = centerLayers(flowing, byLayer, layerKeys);
+  if (wrapPortraitRows(flowing)) return;
+  spreadToAspect(flowing, byLayer, layerKeys, globalMid);
 };
 
 /** Park isolated clusters in a compact strip below the dependency flow. */
@@ -679,35 +710,20 @@ export const initGraphNodes = (state: AppState): void => {
     back: clusters[e.dst].layer <= clusters[e.src].layer,
   }));
 
-  // Fit-to-view.
-  const stageEl = canvas.parentElement;
-  const w = usableStageWidth(state, stageEl ? stageEl.clientWidth : window.innerWidth);
-  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
+  // Fit-to-view. Standalone clusters are hidden until toggled: keep
+  // them out of the fit.
+  const { w, h } = stageSize(state);
   const anyConnected = clusters.some((c) => !c.isolated);
-  for (const c of clusters) {
-    // Standalone clusters are hidden until toggled: keep them out of the fit.
-    if (c.isolated && anyConnected) continue;
-    minX = Math.min(minX, c.cx - c.r);
-    minY = Math.min(minY, c.cy - c.r);
-    maxX = Math.max(maxX, c.cx + c.r);
-    maxY = Math.max(maxY, c.cy + c.r);
-  }
-  const pad = 70;
-  const bboxW = maxX - minX + pad * 2;
-  const bboxH = maxY - minY + pad * 2;
-  // Reserve horizontal screen room for cluster labels that stick out of hulls.
-  const fitScale = Math.min((w - 200) / bboxW, (h - 60) / bboxH, 1.4);
-  const fitX = (w - bboxW * fitScale) / 2 - minX * fitScale + pad * fitScale;
-  const fitY = (h - bboxH * fitScale) / 2 - minY * fitScale + pad * fitScale;
-  gvs.transform = { x: fitX, y: fitY, k: fitScale };
-  gvs.fitK = fitScale;
+  const fit = fitTransform(
+    w,
+    h,
+    clusterBounds(clusters, (c) => !(c.isolated && anyConnected)),
+  );
+  gvs.transform = fit;
+  gvs.fitK = fit.k;
 
   const zoomBehavior = zoom<HTMLCanvasElement, unknown>()
-    .scaleExtent([fitScale * 0.4, fitScale * 12])
+    .scaleExtent([fit.k * 0.4, fit.k * 12])
     .filter((event: MouseEvent | WheelEvent) => {
       if (state.selected !== null) return false; // camera frozen in ego mode
       if (event.type === "wheel") return !event.ctrlKey;
@@ -722,7 +738,7 @@ export const initGraphNodes = (state: AppState): void => {
       gvs.transform = { x: event.transform.x, y: event.transform.y, k: event.transform.k };
       renderGraph(state);
     });
-  const initialTransform = zoomIdentity.translate(fitX, fitY).scale(fitScale);
+  const initialTransform = zoomIdentity.translate(fit.x, fit.y).scale(fit.k);
   select(canvas).call(zoomBehavior).call(zoomBehavior.transform, initialTransform);
   gvs.zoomBehavior = zoomBehavior;
 

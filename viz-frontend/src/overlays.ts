@@ -1,3 +1,4 @@
+import { button, el } from "./dom";
 /**
  * HTML layers over the canvas. Currently the help overlay (how to read
  * the map); styled by the shared design tokens.
@@ -6,21 +7,6 @@
 export interface OverlayHandlers {
   onHelpClose: () => void;
 }
-
-const el = (tag: string, cls?: string, text?: string): HTMLElement => {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-};
-
-const button = (cls: string, text: string): HTMLButtonElement => {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = cls;
-  b.textContent = text;
-  return b;
-};
 
 
 

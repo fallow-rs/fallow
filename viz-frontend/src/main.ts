@@ -225,88 +225,89 @@ const init = (): void => {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
+  const handleMapHover = (e: MouseEvent, x: number, y: number): void => {
+    const hit = treemapHitTest(state, x, y);
+    if (hit !== state.hoveredCell) {
+      state.hoveredCell = hit;
+      requestRender();
+    }
+    if (hit === null) {
+      canvas.style.cursor = "default";
+      hideTooltip();
+      return;
+    }
+    const cell = state.layout[hit];
+    canvas.style.cursor = "pointer";
+    if (cell.node.fileIndex !== null) {
+      showFileTooltip(state, cell.node.fileIndex, e.clientX, e.clientY);
+    } else {
+      showDirTooltip(
+        cell.node.name,
+        countLeaves(cell.node),
+        cell.node.size,
+        countLensFindings(state, cell.node),
+        e.clientX,
+        e.clientY,
+      );
+    }
+  };
+
+  const handleGraphHover = (e: MouseEvent, x: number, y: number): void => {
+    const target = graphHoverTarget(state, x, y);
+    const hovered = target && target.kind === "file" ? target.fileIndex : null;
+    const targetKey = target
+      ? target.kind === "road"
+        ? `road:${target.road}`
+        : target.kind === "file"
+          ? `file:${target.fileIndex}`
+          : "ui"
+      : "";
+    if (hovered !== state.graphHovered || targetKey !== lastGraphTarget) {
+      state.graphHovered = hovered;
+      lastGraphTarget = targetKey;
+      renderGraph(state);
+    }
+    canvas.style.cursor = target ? "pointer" : state.selected !== null ? "default" : "grab";
+    if (hovered !== null && hovered !== state.selected) {
+      // In the graph the tooltip docks to the far canvas edge, so it
+      // never covers the hovered neighborhood; ego mode keeps the
+      // cursor-following variant for its list rows.
+      const pos = state.selected === null ? nodeScreenPos(state, hovered) : null;
+      const rect = canvas.getBoundingClientRect();
+      showFileTooltip(
+        state,
+        hovered,
+        e.clientX,
+        e.clientY,
+        pos
+          ? {
+              nodeX: pos.x,
+              nodeY: pos.y,
+              canvas: rect,
+              usableW: usableStageWidth(state, rect.width),
+            }
+          : undefined,
+      );
+    } else if (target && target.kind === "road") {
+      const facts = roadFacts(state, target.road);
+      showRoadTooltip(
+        facts.srcKey,
+        facts.dstKey,
+        facts.count,
+        facts.violations,
+        facts.cycleEdges,
+        e.clientX,
+        e.clientY,
+      );
+    } else {
+      hideTooltip();
+    }
+  };
+
   canvas.addEventListener("mousemove", (e) => {
     const { x, y } = canvasPoint(e);
-    if (state.view === "map") {
-      const hit = treemapHitTest(state, x, y);
-      if (hit !== state.hoveredCell) {
-        state.hoveredCell = hit;
-        requestRender();
-      }
-      if (hit !== null) {
-        const cell = state.layout[hit];
-        canvas.style.cursor = "pointer";
-        if (cell.node.fileIndex !== null) {
-          showFileTooltip(state, cell.node.fileIndex, e.clientX, e.clientY);
-        } else {
-          showDirTooltip(
-            cell.node.name,
-            countLeaves(cell.node),
-            cell.node.size,
-            countLensFindings(state, cell.node),
-            e.clientX,
-            e.clientY,
-          );
-        }
-      } else {
-        canvas.style.cursor = "default";
-        hideTooltip();
-      }
-    } else {
-      const target = graphHoverTarget(state, x, y);
-      const hovered = target && target.kind === "file" ? target.fileIndex : null;
-      const targetKey = target
-        ? target.kind === "road"
-          ? `road:${target.road}`
-          : target.kind === "file"
-            ? `file:${target.fileIndex}`
-            : "ui"
-        : "";
-      if (hovered !== state.graphHovered || targetKey !== lastGraphTarget) {
-        state.graphHovered = hovered;
-        lastGraphTarget = targetKey;
-        renderGraph(state);
-      }
-      canvas.style.cursor = target
-        ? "pointer"
-        : state.selected !== null
-          ? "default"
-          : "grab";
-      if (hovered !== null && hovered !== state.selected) {
-        // In the graph the tooltip docks to the far canvas edge, so it
-        // never covers the hovered neighborhood; ego mode keeps the
-        // cursor-following variant for its list rows.
-        const pos = state.selected === null ? nodeScreenPos(state, hovered) : null;
-        const rect = canvas.getBoundingClientRect();
-        showFileTooltip(
-          state,
-          hovered,
-          e.clientX,
-          e.clientY,
-          pos
-            ? {
-                nodeX: pos.x,
-                nodeY: pos.y,
-                canvas: rect,
-                usableW: usableStageWidth(state, rect.width),
-              }
-            : undefined,
-        );
-      } else if (target && target.kind === "road") {
-        const facts = roadFacts(state, target.road);
-        showRoadTooltip(
-          facts.srcKey,
-          facts.dstKey,
-          facts.count,
-          facts.violations,
-          facts.cycleEdges,
-          e.clientX,
-          e.clientY,
-        );
-      } else {
-        hideTooltip();
-      }
-    }
+    if (state.view === "map") handleMapHover(e, x, y);
+    else handleGraphHover(e, x, y);
   });
 
   canvas.addEventListener("mouseleave", () => {
