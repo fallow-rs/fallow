@@ -219,6 +219,15 @@ const fn status_color(status: VizFileStatus) -> &'static str {
     }
 }
 
+/// Strip control characters so a hostile file name cannot split a node
+/// definition across lines in the line-oriented DOT and Mermaid outputs.
+fn sanitize_label(path: &str) -> String {
+    path.chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
 fn generate_dot(data: &VizData) -> String {
     let mut out =
         String::from("digraph fallow {\n  rankdir=LR;\n  node [shape=box, style=filled];\n\n");
@@ -229,7 +238,9 @@ fn generate_dot(data: &VizData) -> String {
             VizFileStatus::HasUnusedExports => "#111110",
             _ => "#eeeeec",
         };
-        let escaped_path = f.path.replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped_path = sanitize_label(&f.path)
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
         let _ = writeln!(
             out,
             "  n{i} [label=\"{escaped_path}\", fillcolor=\"{color}\", fontcolor=\"{font}\"];",
@@ -252,7 +263,9 @@ fn generate_mermaid(data: &VizData) -> String {
     let mut out = String::from("graph LR\n");
 
     for (i, f) in data.files.iter().enumerate() {
-        let escaped_path = f.path.replace('"', "#quot;").replace(']', "#93;");
+        let escaped_path = sanitize_label(&f.path)
+            .replace('"', "#quot;")
+            .replace(']', "#93;");
         let _ = writeln!(out, "  n{i}[\"{escaped_path}\"]");
     }
 
@@ -415,5 +428,28 @@ mod tests {
         // Clean files carry no style line; unused + entry do.
         assert!(mermaid.contains("style n1 fill:#e5484d"));
         assert!(mermaid.contains("style n0 fill:#30a46c"));
+    }
+
+    #[test]
+    fn generate_dot_strips_control_characters_from_paths() {
+        let mut data = sample_data();
+        data.files[0].path = "evil\nname\".ts".to_string();
+        let dot = generate_dot(&data);
+        // Newline collapses to a space so the node stays on one line, and
+        // the quote still escapes.
+        assert!(dot.contains(r#"n0 [label="evil name\".ts""#));
+        assert!(!dot.contains("evil\n"));
+    }
+
+    #[test]
+    fn generate_mermaid_strips_control_characters_from_paths() {
+        let mut data = sample_data();
+        data.files[0].path = "evil\r\nname\t].ts".to_string();
+        let mermaid = generate_mermaid(&data);
+        // CR and LF collapse to spaces, other control characters drop, and
+        // the bracket still escapes; the node stays on one line.
+        assert!(mermaid.contains("n0[\"evil  name#93;.ts\"]"));
+        assert!(!mermaid.contains("evil\r"));
+        assert!(!mermaid.contains("evil\n"));
     }
 }
