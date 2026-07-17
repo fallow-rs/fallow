@@ -21,6 +21,7 @@ import {
   graphHoverTarget,
   graphPathTrace,
   initGraphNodes,
+  refitOnResize,
   minimapHit,
   minimapPan,
   renderGraph,
@@ -420,7 +421,10 @@ const init = (): void => {
     }
   });
 
-  window.addEventListener("resize", () => requestRender());
+  window.addEventListener("resize", () => {
+    if (state.view === "graph") refitOnResize(state);
+    requestRender();
+  });
   window.addEventListener("hashchange", () => {
     applyHash(state, window.location.hash);
     requestRender();

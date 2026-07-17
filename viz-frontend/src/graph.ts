@@ -131,6 +131,8 @@ interface GraphViewState {
   standaloneChip: { x: number; y: number; w: number; h: number } | null;
   /** Ego-view "back to map" chip hit rect (screen space). */
   egoBackChip: { x: number; y: number; w: number; h: number } | null;
+  /** True once the user pans/zooms; blocks auto-refit on window resize. */
+  userMoved: boolean;
   /** First-run captions synced to the reveal. */
   showIntro: boolean;
   /** First-render reveal choreography start (0 = pending, -1 = skipped). */
@@ -210,6 +212,7 @@ const getGVS = (state: AppState): GraphViewState => {
       standaloneOpen: false,
       standaloneChip: null,
       egoBackChip: null,
+      userMoved: false,
       showIntro: false,
     };
   }
@@ -855,6 +858,7 @@ export const initGraphNodes = (state: AppState): void => {
       return nodeHitTest(state, px, py) === null;
     })
     .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
+      if (event.sourceEvent) gvs.userMoved = true;
       gvs.transform = { x: event.transform.x, y: event.transform.y, k: event.transform.k };
       renderGraph(state);
     });
@@ -2568,6 +2572,13 @@ export const clearGraphFocus = (state: AppState): boolean => {
   gvs.path = null;
   gvs.pathFrom = null;
   return had;
+};
+
+/** Re-fit after a window resize, but only while the camera is untouched. */
+export const refitOnResize = (state: AppState): void => {
+  const gvs = getGVS(state);
+  if (!gvs.initialized || gvs.userMoved || state.selected !== null) return;
+  resetGraphView(state);
 };
 
 /** Reset the camera to the fit-to-view transform (0 key / after wandering). */

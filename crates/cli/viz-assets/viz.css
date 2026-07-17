@@ -97,11 +97,10 @@ button {
 /* ── Top bar ─────────────────────────────────────────────────── */
 
 #topbar {
-  gap: 24px;
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 10px 16px;
+  gap: 24px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-1);
   flex-wrap: wrap;
@@ -149,7 +148,11 @@ button {
   font-size: 12px;
   text-transform: lowercase;
   letter-spacing: 0.04em;
-  padding: 6px 14px;
+  height: 32px;
+  box-sizing: border-box;
+  min-width: 44px;
+  text-align: center;
+  padding: 0 14px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--text-low);
@@ -201,16 +204,22 @@ button {
   align-items: stretch;
   gap: 2px;
   padding: 2px;
+  height: var(--control-h);
+  box-sizing: border-box;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 
 .seg button {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
   font-size: 12px;
   text-transform: lowercase;
   letter-spacing: 0.04em;
-  padding: 6px 14px;
+  padding: 0 14px;
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -238,12 +247,8 @@ button {
 
 /* Lens tabs: name + count on line 1, plain-language gloss on line 2. */
 .lens-tab {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
   gap: 2px;
   text-align: left;
-  padding: 6px 14px 7px;
 }
 
 .lens-tab .seg-name {
@@ -323,7 +328,9 @@ button {
      (wrap is decided pre-shrink); it then grows up to max-width. */
   flex: 1 1 130px;
   max-width: 260px;
-  border-radius: var(--radius-sm);
+  height: var(--control-h);
+  box-sizing: border-box;
+  border-radius: var(--radius);
   font-family: inherit;
   font-size: 12px;
   color: var(--text-high);
