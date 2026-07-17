@@ -105,30 +105,49 @@ const revealProgress = (
   return { t, cluster: clusterAlpha, roads, labels };
 };
 
-const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
-  const { ctx, theme, data } = state;
-  const { transform, clusters, roads, fileNodes } = gvs;
-  const files = data.files;
-  const searching = state.search.trim() !== "";
-  const kRel = transform.k / gvs.fitK;
-  const reveal = revealProgress(gvs, state.reducedMotion);
+/** Per-frame context every overview phase shares. */
+interface Scene {
+  state: AppState;
+  gvs: GraphViewState;
+  kRel: number;
+  reveal: ReturnType<typeof revealProgress>;
+  searching: boolean;
+}
 
-  ctx.save();
-  ctx.translate(transform.x, transform.y);
-  ctx.scale(transform.k, transform.k);
+/** Direct hover context produced by the neighborhood phase. */
+interface HoverContext {
+  hovered: number | null;
+  neighbors: Set<number> | null;
+  importers: Set<number>;
+  imports: Set<number>;
+}
 
-  // Hull fills.
-  for (const cluster of clusters) {
+/** Guard + path setup shared by every hull pass. */
+const forEachHull = (scene: Scene, draw: (cluster: ClusterInfo) => void): void => {
+  const { state, gvs } = scene;
+  for (const cluster of gvs.clusters) {
     if (cluster.isolated && !gvs.standaloneOpen) continue;
     if (cluster.hull.length < 3) continue;
-    ctx.beginPath();
-    hullPath(ctx, cluster.hull);
+    state.ctx.beginPath();
+    hullPath(state.ctx, cluster.hull);
+    draw(cluster);
+  }
+};
+
+const drawHullFills = (scene: Scene): void => {
+  const { state, reveal } = scene;
+  const { ctx, theme } = state;
+  forEachHull(scene, (cluster) => {
     ctx.fillStyle = theme.surface2;
     ctx.globalAlpha = 0.9 * reveal.cluster(cluster) * (state.graphHovered !== null ? 0.6 : 1);
     ctx.fill();
     ctx.globalAlpha = 1;
-  }
+  });
+};
 
+const drawLodEdges = (scene: Scene): void => {
+  const { state, gvs, kRel } = scene;
+  const { transform } = gvs;
   // Individual file edges are LOD-gated: intra-cluster from mid zoom,
   // inter-cluster only at deep zoom.
   if (kRel >= LOD_INTRA) {
@@ -138,22 +157,27 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     drawFileEdges(state, gvs, false, 0.1, 0.8 / transform.k);
   }
 
-  // Hull borders.
-  for (const cluster of clusters) {
-    if (cluster.isolated && !gvs.standaloneOpen) continue;
-    if (cluster.hull.length < 3) continue;
-    ctx.beginPath();
-    hullPath(ctx, cluster.hull);
+};
+
+const drawHullBorders = (scene: Scene): void => {
+  const { state, gvs, reveal } = scene;
+  const { ctx, theme } = state;
+  forEachHull(scene, (cluster) => {
     const showTangle = cluster.tangle && state.lens === "boundaries";
     ctx.strokeStyle = showTangle ? theme.amber : theme.borderDefault;
     ctx.globalAlpha = (showTangle ? 0.7 : 0.6) * reveal.cluster(cluster);
-    ctx.lineWidth = 1 / transform.k;
+    ctx.lineWidth = 1 / gvs.transform.k;
     ctx.stroke();
     ctx.globalAlpha = 1;
-  }
+  });
+};
 
+/** Roads with severity overdraw, plus the focused road highlight. */
+const drawRoads = (scene: Scene): void => {
+  const { state, gvs, kRel, reveal } = scene;
+  const { ctx, theme } = state;
+  const { transform, clusters, roads } = gvs;
   const hoverDim = state.graphHovered !== null ? 0.35 : 1;
-
   // Roads: tapered ribbons, wide at importer, narrow at imported.
   // At fit zoom the ribbons carry the whole story, so hold a minimum
   // on-screen width and lift the alpha; both relax as the user zooms in.
@@ -232,6 +256,13 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.fill();
   }
 
+};
+
+/** Direction-encoded edges to the hovered file's direct neighbors. */
+const drawHoverNeighborhood = (scene: Scene): HoverContext => {
+  const { state, gvs } = scene;
+  const { ctx, theme, data } = state;
+  const { transform, fileNodes } = gvs;
   // Hover neighborhood. Direction is dual-encoded: files importing the
   // hovered one arrive as solid blue ribbons (thick end at the
   // importer, same rule as roads); its own imports leave as thin
@@ -277,6 +308,16 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     ctx.globalAlpha = 1;
   }
 
+  return { hovered, neighbors, importers: hoverImporters, imports: hoverImports };
+};
+
+/** Every file dot with its lens color, rings, badges, and dim states. */
+const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): void => {
+  const { state, gvs, kRel, reveal, searching } = scene;
+  const { ctx, theme, data } = state;
+  const { transform, clusters, fileNodes } = gvs;
+  const files = data.files;
+  const { neighbors, importers: hoverImporters, imports: hoverImports } = hover;
   // Nodes.
   for (const node of fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
@@ -373,6 +414,12 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     drawZoomLabels(state, gvs, w, h);
   }
 
+};
+
+const drawSearchPulse = (scene: Scene): void => {
+  const { state, gvs } = scene;
+  const { ctx, theme } = state;
+  const { transform, fileNodes } = gvs;
   // Search pulse rings.
   if (gvs.pulseFile !== null) {
     const node = fileNodes[gvs.pulseFile];
@@ -393,18 +440,44 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
       gvs.pulseFile = null;
     }
   }
+};
+
+const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+  const { ctx, theme } = state;
+  const { transform } = gvs;
+  const kRel = transform.k / gvs.fitK;
+  const reveal = revealProgress(gvs, state.reducedMotion);
+  const scene: Scene = {
+    state,
+    gvs,
+    kRel,
+    reveal,
+    searching: state.search.trim() !== "",
+  };
+
+  ctx.save();
+  ctx.translate(transform.x, transform.y);
+  ctx.scale(transform.k, transform.k);
+
+  drawHullFills(scene);
+  drawLodEdges(scene);
+  drawHullBorders(scene);
+  drawRoads(scene);
+  const hover = drawHoverNeighborhood(scene);
+  drawNodes(scene, hover, w, h);
+  drawSearchPulse(scene);
 
   ctx.restore();
 
   // Labels join once the roads have flowed in (their internal alpha
   // handling would fight a global fade). While a file is hovered the
   // neighborhood labels own the foreground instead.
-  if (reveal.labels > 0.35 && hovered === null) {
+  if (reveal.labels > 0.35 && hover.hovered === null) {
     drawRoadLabels(state, gvs);
     drawClusterLabels(state, gvs);
   }
-  if (hovered !== null && neighbors !== null) {
-    drawHoverLabels(state, gvs, hovered, hoverImporters, hoverImports, w, h);
+  if (hover.hovered !== null && hover.neighbors !== null) {
+    drawHoverLabels(state, gvs, hover.hovered, hover.importers, hover.imports, w, h);
   }
   drawAxisMarkers(state, gvs, usableStageWidth(state, w), h);
   drawCanvasLegend(state, w, h);

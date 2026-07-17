@@ -383,39 +383,44 @@ const init = (): void => {
 
   // ── Keyboard ──────────────────────────────────────────────────
   const lensOrder: Lens[] = ["overview", "deadcode", "dupes", "boundaries", "hotspots"];
+  /** One step back per press: help, search, selection, drill, lens. */
+  const handleEscape = (inInput: boolean): void => {
+    if (state.helpOpen) {
+      toggleHelp();
+      return;
+    }
+    if (inInput && refs) {
+      refs.search.value = "";
+      runSearch(state, "");
+      refs.search.blur();
+      requestRender();
+      return;
+    }
+    if (state.selected !== null) {
+      selectFile(null);
+    } else if (state.selectedClone !== null) {
+      state.selectedClone = null;
+      requestRender();
+    } else if (state.selectedRoad !== null || clearGraphFocus(state)) {
+      state.selectedRoad = null;
+      requestRender();
+    } else if (state.search !== "" && refs) {
+      refs.search.value = "";
+      runSearch(state, "");
+      requestRender();
+    } else if (state.view === "map" && drillUp(state)) {
+      requestRender();
+    } else if (state.lens !== "overview") {
+      setLens("overview");
+    }
+  };
+
   window.addEventListener("keydown", (e) => {
     const target = e.target as HTMLElement | null;
     const inInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
 
     if (e.key === "Escape") {
-      if (state.helpOpen) {
-        toggleHelp();
-        return;
-      }
-      if (inInput && refs) {
-        refs.search.value = "";
-        runSearch(state, "");
-        refs.search.blur();
-        requestRender();
-        return;
-      }
-      if (state.selected !== null) {
-        selectFile(null);
-      } else if (state.selectedClone !== null) {
-        state.selectedClone = null;
-        requestRender();
-      } else if (state.selectedRoad !== null || clearGraphFocus(state)) {
-        state.selectedRoad = null;
-        requestRender();
-      } else if (state.search !== "" && refs) {
-        refs.search.value = "";
-        runSearch(state, "");
-        requestRender();
-      } else if (state.view === "map" && drillUp(state)) {
-        requestRender();
-      } else if (state.lens !== "overview") {
-        setLens("overview");
-      }
+      handleEscape(inInput);
       return;
     }
     if (inInput) {

@@ -334,7 +334,7 @@ const renderCell = (
   totalTop: number,
 ): number => {
   const { state } = rctx;
-  const { ctx, theme, data, index } = state;
+  const { ctx } = state;
   const isFile = cell.node.fileIndex !== null;
 
   // Staggered reveal: top-level cells appear like terminal output lines.
@@ -357,137 +357,170 @@ const renderCell = (
   ctx.globalAlpha = alpha;
 
   if (isFile) {
-    const fi = cell.node.fileIndex as number;
-    const file = data.files[fi];
-    // In the overview lens entry points keep a neutral fill with a blue
-    // outline; a solid tint floods test-heavy repos and stops reading
-    // as a marker.
-    const entryOutline = state.lens === "overview" && file.status === "entryPoint";
-    let fill = entryOutline
-      ? theme.cellNeutral
-      : lensColor(state.lens, theme, index, file);
-    if (rctx.prevColors && rctx.lensT < 1) {
-      const prev = rctx.prevColors.get(fi);
-      if (prev && prev !== fill) fill = mix(prev, fill, rctx.lensT);
-    }
+    renderFileCell(rctx, cell, alpha, hovered, searching);
+    ctx.globalAlpha = 1;
+    return nextSeq;
+  }
+  const s = renderDirCell(rctx, cell, depth, nextSeq, totalTop, alpha, hovered);
+  ctx.globalAlpha = 1;
+  return s;
+};
 
-    const matched = !searching || state.searchMatches.has(fi);
-    if (searching && !matched) ctx.globalAlpha = alpha * 0.18;
+/** A file tile: lens fill, finding hatch, rings, and its label. */
+const renderFileCell = (
+  rctx: RenderCtx,
+  cell: LayoutCell,
+  alpha: number,
+  hovered: boolean,
+  searching: boolean,
+): void => {
+  const { state } = rctx;
+  const { ctx, theme, data, index } = state;
+  const fi = cell.node.fileIndex as number;
+  const file = data.files[fi];
+  // In the overview lens entry points keep a neutral fill with a blue
+  // outline; a solid tint floods test-heavy repos and stops reading
+  // as a marker.
+  const entryOutline = state.lens === "overview" && file.status === "entryPoint";
+  let fill = entryOutline
+    ? theme.cellNeutral
+    : lensColor(state.lens, theme, index, file);
+  if (rctx.prevColors && rctx.lensT < 1) {
+    const prev = rctx.prevColors.get(fi);
+    if (prev && prev !== fill) fill = mix(prev, fill, rctx.lensT);
+  }
 
-    const r = { x: cell.x + 0.5, y: cell.y + 0.5, w: cell.w - 1, h: cell.h - 1 };
-    ctx.fillStyle = fill;
+  const matched = !searching || state.searchMatches.has(fi);
+  if (searching && !matched) ctx.globalAlpha = alpha * 0.18;
+
+  const r = { x: cell.x + 0.5, y: cell.y + 0.5, w: cell.w - 1, h: cell.h - 1 };
+  ctx.fillStyle = fill;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+
+  if (entryOutline && cell.w > 6 && cell.h > 6) {
+    ctx.strokeStyle = theme.blue;
+    ctx.globalAlpha = ctx.globalAlpha * 0.55;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    ctx.globalAlpha = alpha;
+  }
+
+  // Texture channel: hatch marks findings so color is never the only signal.
+  const tm = getTM(state);
+  if (tm.hatch && lensFlag(state.lens, index, file, fi)) {
+    ctx.fillStyle = tm.hatch;
     ctx.fillRect(r.x, r.y, r.w, r.h);
+  }
 
-    if (entryOutline && cell.w > 6 && cell.h > 6) {
-      ctx.strokeStyle = theme.blue;
-      ctx.globalAlpha = ctx.globalAlpha * 0.55;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-      ctx.globalAlpha = alpha;
-    }
+  // Hover: inverse-selection wash + strong border.
+  if (hovered) {
+    ctx.fillStyle = theme.textHigh;
+    ctx.globalAlpha = ctx.globalAlpha * 0.18;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = theme.textHigh;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  }
 
-    // Texture channel: hatch marks findings so color is never the only signal.
-    const tm = getTM(state);
-    if (tm.hatch && lensFlag(state.lens, index, file, fi)) {
-      ctx.fillStyle = tm.hatch;
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-    }
+  // Selection ring (blue = interactive, never a severity color).
+  if (state.selected === fi) {
+    ctx.strokeStyle = theme.blue;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+  }
 
-    // Hover: inverse-selection wash + strong border.
+  // Search match ring.
+  if (searching && matched) {
+    ctx.strokeStyle = theme.amberText;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(r.x + 0.75, r.y + 0.75, r.w - 1.5, r.h - 1.5);
+  }
+
+  if (rctx.labels && cell.w > MIN_LABEL_W && cell.h > MIN_LABEL_H) {
+    ctx.fillStyle = contrastText(fill);
+    ctx.font = FONT_CELL;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    const label = cellLabel(ctx, cell.node.name, cell.w - 8);
+    ctx.globalAlpha = ctx.globalAlpha * 0.92;
+    ctx.fillText(label, cell.x + 4, cell.y + 3);
+    ctx.globalAlpha = alpha;
+  }
+};
+
+/**
+ * A directory container: summary tile when tiny, otherwise a header
+ * band plus recursively squarified children. Returns the running
+ * reveal sequence.
+ */
+const renderDirCell = (
+  rctx: RenderCtx,
+  cell: LayoutCell,
+  depth: number,
+  nextSeq: number,
+  totalTop: number,
+  alpha: number,
+  hovered: boolean,
+): number => {
+  const { state } = rctx;
+  const { ctx, theme } = state;
+  // Directory container.
+  const tooSmall = cell.w < 34 || cell.h < 30;
+  const showHeader = !tooSmall && cell.h > DIR_HEADER + 12 && cell.w > 46;
+
+  if (tooSmall) {
+    ctx.fillStyle = dirSummaryColor(rctx, cell.node);
+    ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
     if (hovered) {
       ctx.fillStyle = theme.textHigh;
-      ctx.globalAlpha = ctx.globalAlpha * 0.18;
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = theme.textHigh;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
-    }
-
-    // Selection ring (blue = interactive, never a severity color).
-    if (state.selected === fi) {
-      ctx.strokeStyle = theme.blue;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-    }
-
-    // Search match ring.
-    if (searching && matched) {
-      ctx.strokeStyle = theme.amberText;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(r.x + 0.75, r.y + 0.75, r.w - 1.5, r.h - 1.5);
-    }
-
-    if (rctx.labels && cell.w > MIN_LABEL_W && cell.h > MIN_LABEL_H) {
-      ctx.fillStyle = contrastText(fill);
-      ctx.font = FONT_CELL;
-      ctx.textBaseline = "top";
-      ctx.textAlign = "left";
-      const label = cellLabel(ctx, cell.node.name, cell.w - 8);
-      ctx.globalAlpha = ctx.globalAlpha * 0.92;
-      ctx.fillText(label, cell.x + 4, cell.y + 3);
+      ctx.globalAlpha = alpha * 0.18;
+      ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
       ctx.globalAlpha = alpha;
     }
   } else {
-    // Directory container.
-    const tooSmall = cell.w < 34 || cell.h < 30;
-    const showHeader = !tooSmall && cell.h > DIR_HEADER + 12 && cell.w > 46;
+    ctx.fillStyle = theme.dirFill;
+    ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
+    ctx.strokeStyle = depth === 0 ? theme.borderDefault : theme.borderSubtle;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
 
-    if (tooSmall) {
-      ctx.fillStyle = dirSummaryColor(rctx, cell.node);
-      ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
-      if (hovered) {
-        ctx.fillStyle = theme.textHigh;
-        ctx.globalAlpha = alpha * 0.18;
-        ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
-        ctx.globalAlpha = alpha;
-      }
-    } else {
-      ctx.fillStyle = theme.dirFill;
-      ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
-      ctx.strokeStyle = depth === 0 ? theme.borderDefault : theme.borderSubtle;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
-
-      const headerH = showHeader ? DIR_HEADER : 0;
-      if (showHeader) {
-        ctx.fillStyle = hovered ? theme.surface3 : theme.dirHeader;
-        ctx.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, headerH - 1);
-        ctx.fillStyle = hovered ? theme.textHigh : theme.textLow;
-        ctx.font = FONT_DIR;
-        ctx.textBaseline = "top";
+    const headerH = showHeader ? DIR_HEADER : 0;
+    if (showHeader) {
+      ctx.fillStyle = hovered ? theme.surface3 : theme.dirHeader;
+      ctx.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, headerH - 1);
+      ctx.fillStyle = hovered ? theme.textHigh : theme.textLow;
+      ctx.font = FONT_DIR;
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      const count = countFiles(cell.node);
+      const suffix = cell.w > 150 ? `  ${formatCount(count)}` : "";
+      const label = truncate(ctx, `${cell.node.name}/`, cell.w - 10 - ctx.measureText(suffix).width);
+      ctx.fillText(label, cell.x + 5, cell.y + 4);
+      if (suffix) {
+        ctx.fillStyle = theme.textMuted;
+        ctx.textAlign = "right";
+        ctx.fillText(suffix.trim(), cell.x + cell.w - 5, cell.y + 4);
         ctx.textAlign = "left";
-        const count = countFiles(cell.node);
-        const suffix = cell.w > 150 ? `  ${formatCount(count)}` : "";
-        const label = truncate(ctx, `${cell.node.name}/`, cell.w - 10 - ctx.measureText(suffix).width);
-        ctx.fillText(label, cell.x + 5, cell.y + 4);
-        if (suffix) {
-          ctx.fillStyle = theme.textMuted;
-          ctx.textAlign = "right";
-          ctx.fillText(suffix.trim(), cell.x + cell.w - 5, cell.y + 4);
-          ctx.textAlign = "left";
-        }
-      }
-
-      const inner = {
-        x: cell.x + DIR_PAD,
-        y: cell.y + headerH + DIR_PAD,
-        w: cell.w - DIR_PAD * 2,
-        h: cell.h - headerH - DIR_PAD * 2,
-      };
-      if (inner.w > 6 && inner.h > 6) {
-        const children = squarify(cell.node.children, inner);
-        let s = nextSeq;
-        for (const child of children) {
-          s = renderCell(rctx, child, depth + 1, s, totalTop);
-        }
-        ctx.globalAlpha = 1;
-        return s;
       }
     }
-  }
 
-  ctx.globalAlpha = 1;
+    const inner = {
+      x: cell.x + DIR_PAD,
+      y: cell.y + headerH + DIR_PAD,
+      w: cell.w - DIR_PAD * 2,
+      h: cell.h - headerH - DIR_PAD * 2,
+    };
+    if (inner.w > 6 && inner.h > 6) {
+      const children = squarify(cell.node.children, inner);
+      let s = nextSeq;
+      for (const child of children) {
+        s = renderCell(rctx, child, depth + 1, s, totalTop);
+      }
+      ctx.globalAlpha = 1;
+      return s;
+    }
+  }
   return nextSeq;
 };
 

@@ -277,6 +277,113 @@ export const renderEgoStage = (
   return t < 1 || rowMarching;
 };
 
+/** Geometry a stage row shares between its painters. */
+interface RowGeom {
+  rowY: number;
+  textX: number;
+  dotX: number;
+  dirSign: number;
+  side: "left" | "right";
+  maxTextW: number;
+  ease: number;
+}
+
+/** Bezier connector from the card edge to a row, severity-styled. */
+const drawRowConnector = (
+  state: AppState,
+  row: StageRow,
+  g: RowGeom,
+  cardEdgeX: number,
+  cy: number,
+  endX: number,
+): void => {
+  const { ctx, theme } = state;
+  const hoveredRow =
+    row.kind === "file" && row.fileIndex !== undefined && state.graphHovered === row.fileIndex;
+  ctx.beginPath();
+  ctx.moveTo(cardEdgeX, cy);
+  const dx = endX - cardEdgeX;
+  ctx.bezierCurveTo(cardEdgeX + dx * 0.45, cy, cardEdgeX + dx * 0.55, g.rowY, endX, g.rowY);
+  if (row.violation) {
+    ctx.strokeStyle = theme.red;
+    ctx.lineWidth = hoveredRow ? 2 : 1.4;
+    ctx.setLineDash([]);
+  } else if (row.cycle) {
+    ctx.strokeStyle = theme.amber;
+    ctx.lineWidth = hoveredRow ? 1.8 : 1.1;
+    ctx.setLineDash([4, 3]);
+  } else {
+    ctx.strokeStyle = theme.blue;
+    ctx.lineWidth = hoveredRow ? 2 : 1;
+    ctx.setLineDash([]);
+  }
+  if (hoveredRow && !state.reducedMotion) {
+    ctx.setLineDash([8, 6]);
+    ctx.lineDashOffset = -((performance.now() / 40) % 14);
+  }
+  ctx.globalAlpha = hoveredRow ? g.ease : 0.7 * g.ease;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
+  ctx.globalAlpha = g.ease;
+};
+
+/** A file row's label: dim directory prefix + severity-colored name. */
+const drawFileRowLabel = (state: AppState, row: StageRow, g: RowGeom): void => {
+  const { ctx, theme } = state;
+  const dim = row.dim ? `${row.dim}/` : "";
+  const nameColor = row.violation ? theme.redText : row.cycle ? theme.amberText : theme.textHigh;
+  const name = row.cycle ? `${row.label} ~` : row.label;
+  const nameW = ctx.measureText(name).width;
+  let drawDim = dim;
+  if (ctx.measureText(dim).width + nameW > g.maxTextW) {
+    drawDim = tailTruncate(ctx, dim, Math.max(0, g.maxTextW - nameW));
+  }
+  const totalW = nameW + ctx.measureText(drawDim).width;
+  ctx.fillStyle = theme.bg;
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = 0.85 * g.ease;
+  if (g.side === "left") {
+    ctx.fillRect(g.textX - totalW - 2, g.rowY - 7, totalW + 4, 14);
+  } else {
+    ctx.fillRect(g.textX - 2, g.rowY - 7, totalW + 4, 14);
+  }
+  ctx.globalAlpha = prevAlpha;
+  if (g.side === "left") {
+    ctx.fillStyle = nameColor;
+    ctx.fillText(name, g.textX, g.rowY);
+    ctx.fillStyle = theme.textMuted;
+    ctx.fillText(drawDim, g.textX - nameW, g.rowY);
+  } else {
+    ctx.fillStyle = theme.textMuted;
+    ctx.fillText(drawDim, g.textX, g.rowY);
+    ctx.fillStyle = nameColor;
+    ctx.fillText(name, g.textX + ctx.measureText(drawDim).width, g.rowY);
+  }
+};
+
+/** Faint leader from a row's dot to the file's true map position. */
+const drawRowLeader = (
+  state: AppState,
+  gvs: GraphViewState,
+  row: StageRow,
+  g: RowGeom,
+): void => {
+  if (row.kind !== "file" || row.fileIndex === undefined) return;
+  const node = gvs.fileNodes[row.fileIndex];
+  if (!node || node.x == null || node.y == null) return;
+  const { ctx, theme } = state;
+  const s = worldToScreen(gvs, { x: node.x, y: node.y });
+  ctx.beginPath();
+  ctx.moveTo(g.dotX, g.rowY);
+  ctx.lineTo(s.x, s.y);
+  ctx.strokeStyle = theme.textLow;
+  ctx.globalAlpha = 0.08 * g.ease;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.globalAlpha = g.ease;
+};
+
 const drawStageColumn = (
   state: AppState,
   gvs: GraphViewState,
@@ -297,44 +404,22 @@ const drawStageColumn = (
   const dirSign = side === "left" ? -1 : 1;
   const slide = 14 * (1 - ease) * dirSign;
   const cardEdgeX = centerX + dirSign * 128;
+  const maxTextW = side === "left" ? colX - 44 : stageW - colX - 44;
 
   for (const row of rows) {
-    const rowY = y;
+    const g: RowGeom = {
+      rowY: y,
+      textX: colX + dirSign * 14 + slide,
+      dotX: colX - dirSign * 6 + slide,
+      dirSign,
+      side,
+      maxTextW,
+      ease,
+    };
     y += rowH;
-    const textX = colX + dirSign * 14 + slide;
 
     if (row.kind === "file" || row.kind === "group") {
-      const endX = colX - dirSign * 6 + slide;
-      const hoveredRow =
-        row.kind === "file" &&
-        row.fileIndex !== undefined &&
-        state.graphHovered === row.fileIndex;
-      ctx.beginPath();
-      ctx.moveTo(cardEdgeX, cy);
-      const dx = endX - cardEdgeX;
-      ctx.bezierCurveTo(cardEdgeX + dx * 0.45, cy, cardEdgeX + dx * 0.55, rowY, endX, rowY);
-      if (row.violation) {
-        ctx.strokeStyle = theme.red;
-        ctx.lineWidth = hoveredRow ? 2 : 1.4;
-        ctx.setLineDash([]);
-      } else if (row.cycle) {
-        ctx.strokeStyle = theme.amber;
-        ctx.lineWidth = hoveredRow ? 1.8 : 1.1;
-        ctx.setLineDash([4, 3]);
-      } else {
-        ctx.strokeStyle = theme.blue;
-        ctx.lineWidth = hoveredRow ? 2 : 1;
-        ctx.setLineDash([]);
-      }
-      if (hoveredRow && !state.reducedMotion) {
-        ctx.setLineDash([8, 6]);
-        ctx.lineDashOffset = -((performance.now() / 40) % 14);
-      }
-      ctx.globalAlpha = hoveredRow ? ease : 0.7 * ease;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.lineDashOffset = 0;
-      ctx.globalAlpha = ease;
+      drawRowConnector(state, row, g, cardEdgeX, cy, colX - dirSign * 6 + slide);
     }
 
     ctx.textBaseline = "middle";
@@ -343,78 +428,33 @@ const drawStageColumn = (
     if (row.kind === "header" || row.kind === "more") {
       ctx.font = FONT_MICRO;
       ctx.fillStyle = theme.textMuted;
-      ctx.fillText(row.kind === "header" ? row.label.toUpperCase() : row.label, textX, rowY);
+      ctx.fillText(row.kind === "header" ? row.label.toUpperCase() : row.label, g.textX, g.rowY);
       continue;
     }
 
-    const dotX = colX - dirSign * 6 + slide;
     if (row.kind === "file" && row.fileIndex !== undefined) {
       ctx.fillStyle = lensColor(state.lens, theme, state.index, state.data.files[row.fileIndex]);
     } else {
       ctx.fillStyle = theme.borderStrong;
     }
     ctx.beginPath();
-    ctx.arc(dotX, rowY, 4, 0, Math.PI * 2);
+    ctx.arc(g.dotX, g.rowY, 4, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.font = FONT_SMALL;
-    const maxTextW = side === "left" ? colX - 44 : stageW - colX - 44;
     if (row.kind === "group") {
       const label = `${row.label} (${row.count ?? 0})`;
       ctx.fillStyle = row.violation ? theme.redText : row.cycle ? theme.amberText : theme.textHigh;
-      ctx.fillText(middleTruncate(ctx, label, Math.min(maxTextW, 320)), textX, rowY);
+      ctx.fillText(middleTruncate(ctx, label, Math.min(maxTextW, 320)), g.textX, g.rowY);
     } else {
-      const dim = row.dim ? `${row.dim}/` : "";
-      const nameColor = row.violation ? theme.redText : row.cycle ? theme.amberText : theme.textHigh;
-      const name = row.cycle ? `${row.label} ~` : row.label;
-      const nameW = ctx.measureText(name).width;
-      let drawDim = dim;
-      if (ctx.measureText(dim).width + nameW > maxTextW) {
-        drawDim = tailTruncate(ctx, dim, Math.max(0, maxTextW - nameW));
-      }
-      const totalW = nameW + ctx.measureText(drawDim).width;
-      ctx.fillStyle = theme.bg;
-      const prevAlpha = ctx.globalAlpha;
-      ctx.globalAlpha = 0.85 * ease;
-      if (side === "left") {
-        ctx.fillRect(textX - totalW - 2, rowY - 7, totalW + 4, 14);
-      } else {
-        ctx.fillRect(textX - 2, rowY - 7, totalW + 4, 14);
-      }
-      ctx.globalAlpha = prevAlpha;
-      if (side === "left") {
-        ctx.fillStyle = nameColor;
-        ctx.fillText(name, textX, rowY);
-        ctx.fillStyle = theme.textMuted;
-        ctx.fillText(drawDim, textX - nameW, rowY);
-      } else {
-        ctx.fillStyle = theme.textMuted;
-        ctx.fillText(drawDim, textX, rowY);
-        ctx.fillStyle = nameColor;
-        ctx.fillText(name, textX + ctx.measureText(drawDim).width, rowY);
-      }
+      drawFileRowLabel(state, row, g);
     }
-
-    // Leader line to the true map position (spatial identity).
-    if (row.kind === "file" && row.fileIndex !== undefined) {
-      const node = gvs.fileNodes[row.fileIndex];
-      if (node && node.x != null && node.y != null) {
-        const s = worldToScreen(gvs, { x: node.x, y: node.y });
-        ctx.beginPath();
-        ctx.moveTo(dotX, rowY);
-        ctx.lineTo(s.x, s.y);
-        ctx.strokeStyle = theme.textLow;
-        ctx.globalAlpha = 0.08 * ease;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.globalAlpha = ease;
-      }
-    }
+    drawRowLeader(state, gvs, row, g);
 
     const rectW = Math.min(maxTextW + 40, 460);
     gvs.stageRects.push({
       x: side === "left" ? colX - rectW : colX - 8,
-      y: rowY - rowH / 2,
+      y: g.rowY - rowH / 2,
       w: rectW + 8,
       h: rowH,
       kind: row.kind === "group" ? "group" : "file",
