@@ -131,27 +131,6 @@ button {
   color: var(--text-muted);
 }
 
-.brand .cursor {
-  display: inline-block;
-  width: 8px;
-  height: 15px;
-  background: var(--text-high);
-  align-self: center;
-  animation: blink 1.1s steps(1) infinite;
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .brand .cursor {
-    animation: none;
-  }
-}
-
 .brand .sub {
   color: var(--text-muted);
   font-size: 11px;

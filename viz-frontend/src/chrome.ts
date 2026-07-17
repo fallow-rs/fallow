@@ -126,7 +126,6 @@ export const buildChrome = (
   const brand = el("div", "brand");
   brand.appendChild(el("span", "wordmark", "fallow"));
   brand.appendChild(el("span", "project", state.data.root));
-  brand.appendChild(el("span", "cursor"));
   brand.appendChild(el("span", "sub", "codebase map"));
   topbar.appendChild(brand);
 
@@ -205,7 +204,7 @@ export const buildChrome = (
   const search = document.createElement("input");
   search.id = "search";
   search.type = "search";
-  search.placeholder = "/ search files";
+  search.placeholder = "search files…";
   search.setAttribute("aria-label", "Search files");
   search.addEventListener("input", () => handlers.onSearch(search.value));
   toolbar.appendChild(search);
