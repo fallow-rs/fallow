@@ -14,12 +14,7 @@ const el = (tag: string, cls?: string, text?: string): HTMLElement => {
 
 const sectionEl = (title: string): HTMLElement => {
   const section = el("section");
-  const h = el("h3");
-  const open = el("span", "bracket", "[ ");
-  const label = document.createTextNode(title);
-  const close = el("span", "bracket", " ]");
-  h.append(open, label, close);
-  section.appendChild(h);
+  section.appendChild(el("h3", undefined, title));
   return section;
 };
 
@@ -138,13 +133,13 @@ export const renderPanel = (
   fileBox.appendChild(el("div", "name", basename(file.path)));
   const statusLine = el("div", "status-line");
   statusLine.appendChild(statusLabel(file));
-  const copyBtn = el("button", "copy-path", "[ copy path ]") as HTMLButtonElement;
+  const copyBtn = el("button", "copy-path", "copy path") as HTMLButtonElement;
   copyBtn.type = "button";
   copyBtn.addEventListener("click", () => {
     void navigator.clipboard?.writeText(file.path).then(() => {
-      copyBtn.textContent = "[ copied ]";
+      copyBtn.textContent = "copied";
       setTimeout(() => {
-        copyBtn.textContent = "[ copy path ]";
+        copyBtn.textContent = "copy path";
       }, 1200);
     });
   });
@@ -485,7 +480,7 @@ const renderLensPanel = (
     return;
   }
   // Leave with the list, not just a feeling: findings as markdown.
-  const copyBtn = el("button", "copy-path", "[ copy as markdown ]") as HTMLButtonElement;
+  const copyBtn = el("button", "copy-path", "copy as markdown") as HTMLButtonElement;
   copyBtn.type = "button";
   copyBtn.addEventListener("click", () => {
     const md = [
@@ -493,9 +488,9 @@ const renderLensPanel = (
       ...rows.map((r) => `- ${r.dir ? `${r.dir}/` : ""}${r.label} (${r.metric})`),
     ].join("\n");
     void navigator.clipboard?.writeText(md).then(() => {
-      copyBtn.textContent = "[ copied ]";
+      copyBtn.textContent = "copied";
       setTimeout(() => {
-        copyBtn.textContent = "[ copy as markdown ]";
+        copyBtn.textContent = "copy as markdown";
       }, 1200);
     });
   });
@@ -507,7 +502,20 @@ const renderLensPanel = (
     const btn = el("button") as HTMLButtonElement;
     btn.type = "button";
     const labelBox = el("span", "rank-label");
-    if (row.dir) labelBox.appendChild(el("span", "muted", `${row.dir}/`));
+    if (row.dir) {
+      // Head-truncate the directory in JS (monospace budget), keeping
+      // whole tail segments; CSS rtl tricks reorder path punctuation.
+      const budget = Math.max(8, 34 - row.label.length - row.metric.length / 2);
+      let dir = `${row.dir}/`;
+      if (dir.length > budget) {
+        const parts = row.dir.split("/");
+        while (parts.length > 1 && `…/${parts.join("/")}/`.length > budget) parts.shift();
+        dir = `…/${parts.join("/")}/`;
+      }
+      const dirSpan = el("span", "muted", dir);
+      dirSpan.title = `${row.dir}/${row.label}`;
+      labelBox.appendChild(dirSpan);
+    }
     labelBox.appendChild(document.createTextNode(row.label));
     btn.appendChild(labelBox);
     btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
@@ -529,7 +537,7 @@ const renderLensPanel = (
   const hint = el("div", "action-hint");
   hint.append(
     state.lens === "hotspots"
-      ? "cc = cyclomatic complexity · click a row to focus that file"
+      ? "riskiest first = cyclomatic weighted by files that use it · click a row to focus"
       : "click a row to focus that file on the map",
   );
   section.appendChild(hint);

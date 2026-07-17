@@ -101,16 +101,14 @@ const LENSES: LensDef[] = [
   },
 ];
 
-/** A bracketed switch group: caps prefix + [ segment | segment ] rail. */
+/** A labeled switch group: caps prefix + segmented rail. */
 const switchGroup = (label: string): { group: HTMLElement; rail: HTMLElement } => {
   const group = el("div", "group");
   group.appendChild(el("span", "group-label", label));
-  const open = el("span", "group-bracket", "[");
   const rail = el("div", "seg");
   rail.setAttribute("role", "group");
   rail.setAttribute("aria-label", label.toLowerCase());
-  const close = el("span", "group-bracket", "]");
-  group.append(open, rail, close);
+  group.appendChild(rail);
   return { group, rail };
 };
 
@@ -344,7 +342,9 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
       text =
         s.clone_groups === 0
           ? "no duplicated blocks found"
-          : `${formatCount(s.clone_groups)} duplicated blocks (${formatCount(s.duplicated_lines)} lines) · deeper amber = more duplication · click a row in the list to see every copy`;
+          : state.selectedClone !== null
+            ? `viewing one duplicated block of ${formatCount(s.clone_groups)} · esc returns to the list`
+            : `${formatCount(s.clone_groups)} duplicated blocks (${formatCount(s.duplicated_lines)} lines) · deeper amber = more duplication · click a row in the list to see every copy`;
       break;
     case "boundaries":
       text =

@@ -1,4 +1,4 @@
-/* fallow viz: terminal-brutalist chrome (Mode A dashboard)
+/* fallow viz: developer chrome, dark-first with generous spacing
    Tokens mirror the fallow design system: Radix Sand Dark neutrals,
    semantic accents only (red=error, amber=warn, green=pass, blue=info). */
 
@@ -97,6 +97,7 @@ button {
 /* ── Top bar ─────────────────────────────────────────────────── */
 
 #topbar {
+  gap: 24px;
   display: flex;
   align-items: center;
   gap: 20px;
@@ -168,23 +169,23 @@ button {
 .chip-btn {
   font-size: 12px;
   text-transform: lowercase;
-  letter-spacing: 0.05em;
-  padding: 3px 10px;
-  border: 1px solid var(--border-default);
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   color: var(--text-low);
   background: var(--surface-1);
-  box-shadow: 2px 2px 0 var(--border-default);
-  transition: background 100ms ease-out, color 100ms ease-out;
+  transition: background 100ms ease-out, color 100ms ease-out, border-color 100ms ease-out;
 }
 
 .chip-btn:hover {
-  background: var(--surface-3);
+  background: var(--surface-2);
+  border-color: var(--border-default);
   color: var(--text-high);
 }
 
 .chip-btn:active {
-  transform: translate(1px, 1px);
-  box-shadow: 1px 1px 0 var(--border-default);
+  background: var(--surface-3);
 }
 
 .chip-btn:focus-visible {
@@ -197,8 +198,8 @@ button {
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 8px 16px;
+  gap: 28px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-0);
   flex-wrap: wrap;
@@ -207,47 +208,45 @@ button {
 .group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 .group-label {
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.14em;
   color: var(--text-muted);
-}
-
-.group-bracket {
-  color: var(--border-default);
-  font-size: 14px;
 }
 
 .seg {
   display: flex;
   align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
 }
 
 .seg button {
   font-size: 12px;
   text-transform: lowercase;
-  letter-spacing: 0.05em;
-  padding: 3px 11px;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
   border: none;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   background: transparent;
   transition: background 100ms ease-out, color 100ms ease-out;
 }
 
-.seg button + button {
-  border-left: 1px solid var(--border-subtle);
-}
-
 .seg button:hover {
   color: var(--text-high);
+  background: var(--surface-2);
 }
 
 .seg button[aria-pressed="true"] {
-  background: var(--text-high);
-  color: var(--surface-0);
+  background: var(--surface-3);
+  color: var(--text-high);
   font-weight: 700;
 }
 
@@ -263,8 +262,9 @@ button {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0;
+  gap: 2px;
   text-align: left;
+  padding: 6px 14px 7px;
 }
 
 .lens-tab .seg-name {
@@ -281,8 +281,7 @@ button {
 }
 
 .lens-tab[aria-pressed="true"] .gloss {
-  color: var(--surface-0);
-  opacity: 0.75;
+  color: var(--text-low);
 }
 
 .seg .badge {
@@ -303,9 +302,7 @@ button {
   font-weight: 400;
 }
 
-.seg button[aria-pressed="true"] .badge {
-  color: inherit;
-}
+
 
 .seg .badge:empty {
   display: none;
@@ -317,7 +314,7 @@ button {
   justify-content: space-between;
   align-items: baseline;
   gap: 16px;
-  padding: 5px 16px;
+  padding: 8px 20px;
   font-size: 11px;
   color: var(--text-low);
   background: var(--surface-0);
@@ -347,6 +344,7 @@ button {
      (wrap is decided pre-shrink); it then grows up to max-width. */
   flex: 1 1 130px;
   max-width: 260px;
+  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 12px;
   color: var(--text-high);
@@ -429,6 +427,7 @@ button {
 
 #panel .rank-list {
   max-height: none;
+  padding-bottom: 6px;
 }
 
 #panel .rank-list button {
@@ -544,16 +543,14 @@ button {
 }
 
 #panel section h3 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.05em;
   text-transform: lowercase;
   color: var(--text-low);
   margin-bottom: 8px;
-}
-
-#panel section h3 .bracket {
-  color: var(--border-default);
 }
 
 #panel .kv {
@@ -678,6 +675,7 @@ button {
 }
 
 #panel .link-list button {
+  border-radius: var(--radius-sm);
   color: var(--text-low);
   font-size: 12px;
   text-align: left;
@@ -706,6 +704,9 @@ button {
 }
 
 #panel pre {
+  border-radius: var(--radius-sm);
+  padding-right: 12px;
+  overflow-x: auto;
   background: var(--surface-0);
   border: 1px solid var(--border-subtle);
   padding: 8px 10px;
@@ -748,6 +749,7 @@ button {
 /* ── Tooltip ─────────────────────────────────────────────────── */
 
 #tooltip {
+  border-radius: var(--radius);
   position: fixed;
   display: none;
   background: var(--surface-3);
@@ -858,6 +860,7 @@ button {
 }
 
 #help-overlay .help-box {
+  border-radius: 8px;
   background: var(--surface-1);
   border: 1px solid var(--border-strong);
   max-width: 980px;
@@ -879,10 +882,6 @@ button {
   font-weight: 400;
   letter-spacing: 0.05em;
   color: var(--text-high);
-}
-
-#help-overlay .bracket {
-  color: var(--border-default);
 }
 
 #help-overlay .close {

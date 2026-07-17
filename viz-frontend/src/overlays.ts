@@ -22,11 +22,7 @@ const button = (cls: string, text: string): HTMLButtonElement => {
   return b;
 };
 
-const bracketTitle = (host: HTMLElement, title: string): void => {
-  host.appendChild(el("span", "bracket", "[ "));
-  host.appendChild(document.createTextNode(title));
-  host.appendChild(el("span", "bracket", " ]"));
-};
+
 
 // ── Help overlay ────────────────────────────────────────────────
 
@@ -74,9 +70,7 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
 
   const box = el("div", "help-box");
   const head = el("div", "help-head");
-  const title = el("h2");
-  bracketTitle(title, "how to read this map");
-  head.appendChild(title);
+  head.appendChild(el("h2", undefined, "how to read this map"));
   const close = button("close", "×");
   close.setAttribute("aria-label", "Close help");
   close.addEventListener("click", handlers.onHelpClose);

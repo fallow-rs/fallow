@@ -988,6 +988,31 @@ const roadGeometry = (gvs: GraphViewState, road: Road): { p0: Pt; p1: Pt; p2: Pt
   return { p0, p1, p2, p3 };
 };
 
+/** Rounded chip backing: fill plus 1px border, radius 4. */
+const chipRect = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fill: string,
+  fillAlpha: number,
+  stroke: string | null,
+): void => {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fillStyle = fill;
+  const prev = ctx.globalAlpha;
+  ctx.globalAlpha = prev * fillAlpha;
+  ctx.fill();
+  ctx.globalAlpha = prev;
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+};
+
 const roadWidth = (count: number): number =>
   Math.min(8, Math.max(1.5, 1 + Math.floor(Math.log2(count))));
 
@@ -1077,8 +1102,8 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     if (cluster.hull.length < 3) continue;
     ctx.beginPath();
     hullPath(ctx, cluster.hull);
-    ctx.fillStyle = theme.surface1;
-    ctx.globalAlpha = 0.85 * reveal.cluster(cluster);
+    ctx.fillStyle = theme.surface2;
+    ctx.globalAlpha = 0.9 * reveal.cluster(cluster);
     ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -1126,7 +1151,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     hullPath(ctx, cluster.hull);
     const showTangle = cluster.tangle && state.lens === "boundaries";
     ctx.strokeStyle = showTangle ? theme.amber : theme.borderDefault;
-    ctx.globalAlpha = (showTangle ? 0.7 : 0.45) * reveal.cluster(cluster);
+    ctx.globalAlpha = (showTangle ? 0.7 : 0.6) * reveal.cluster(cluster);
     ctx.lineWidth = 1 / transform.k;
     ctx.stroke();
     ctx.globalAlpha = 1;
@@ -1146,12 +1171,13 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
     const wSrc = Math.max(minRoadW, roadWidth(road.count));
     ctx.beginPath();
-    taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.5, wSrc * 0.22));
+    const thinRatio = road.count >= trunkFloor ? 0.15 : 0.22;
+    taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.5, wSrc * thinRatio));
     ctx.fillStyle = theme.textLow;
     // Test-to-source imports are the least interesting overview signal
     // but the biggest bundles; keep them recessive so source roads lead.
     const testDim = isTestCluster(clusters[road.src].key) ? 0.4 : 1;
-    const trunk = road.count >= trunkFloor && testDim === 1 ? 0.14 : 0;
+    const trunk = road.count >= trunkFloor && testDim === 1 ? 0.22 : 0;
     ctx.globalAlpha = (0.3 + 0.18 * roadBoost + trunk) * testDim * reveal.roads;
     ctx.fill();
     ctx.globalAlpha = 1;
@@ -1487,12 +1513,9 @@ const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): voi
     const textW = ctx.measureText(text).width;
     ctx.globalAlpha = Math.max(0, alpha);
     // Backed chip so the caption reads over cluster labels behind it.
-    ctx.fillStyle = theme.bg;
-    ctx.fillRect(w / 2 - textW / 2 - 14, 12, textW + 28, 30);
-    ctx.strokeStyle = theme.borderSubtle;
-    ctx.strokeRect(w / 2 - textW / 2 - 13.5, 12.5, textW + 27, 29);
+    chipRect(ctx, w / 2 - textW / 2 - 16, 12, textW + 32, 32, theme.bg, 1, theme.borderSubtle);
     ctx.fillStyle = theme.textHigh;
-    ctx.fillText(text, w / 2, 27.5);
+    ctx.fillText(text, w / 2, 28.5);
     ctx.globalAlpha = 1;
   }
 };
@@ -1798,16 +1821,17 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
       if (!overlaps) break;
       y += 19;
     }
-    placed.push({ x: x - 3, y: y - 9, w: boxW + 1, h: 18 });
-    ctx.fillStyle = theme.bg;
-    ctx.globalAlpha = single ? 0.75 : 0.92;
-    ctx.fillRect(x - 3, y - 8, labelW + subW + 16, 16);
-    ctx.globalAlpha = 1;
-    if (!single) {
-      ctx.strokeStyle =
-        cluster.tangle && state.lens === "boundaries" ? theme.amber : theme.borderSubtle;
-      ctx.strokeRect(x - 3.5, y - 8.5, labelW + subW + 17, 17);
-    }
+    placed.push({ x: x - 4, y: y - 10, w: boxW + 3, h: 20 });
+    chipRect(
+      ctx,
+      x - 4,
+      y - 10,
+      labelW + subW + 18,
+      20,
+      theme.bg,
+      single ? 0.75 : 0.92,
+      single ? null : cluster.tangle && state.lens === "boundaries" ? theme.amber : theme.borderSubtle,
+    );
     ctx.fillStyle = cluster.isolated || single ? theme.textMuted : theme.textLow;
     ctx.fillText(label, x + 2, y + 0.5);
     if (sub) {
@@ -1828,20 +1852,15 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     const label = gvs.standaloneOpen
-      ? "[ hide standalone files ]"
-      : `[ standalone · ${formatCount(fileCount)} files · nothing imports them ]`;
+      ? "hide standalone files"
+      : `standalone · ${formatCount(fileCount)} files · nothing imports them`;
     const textW = ctx.measureText(label).width;
-    const cx0 = 10;
-    const cy0 = h - 52;
-    ctx.fillStyle = theme.bg;
-    ctx.globalAlpha = 0.9;
-    ctx.fillRect(cx0, cy0, textW + 12, 20);
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = theme.borderSubtle;
-    ctx.strokeRect(cx0 + 0.5, cy0 + 0.5, textW + 11, 19);
+    const cx0 = 12;
+    const cy0 = h - 56;
+    chipRect(ctx, cx0, cy0, textW + 16, 22, theme.bg, 0.9, theme.borderSubtle);
     ctx.fillStyle = theme.textMuted;
-    ctx.fillText(label, cx0 + 6, cy0 + 10.5);
-    gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 12, h: 20 };
+    ctx.fillText(label, cx0 + 8, cy0 + 11.5);
+    gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 16, h: 22 };
     if (gvs.standaloneOpen) {
       const minX = Math.min(...isolated.map((c) => c.cx - c.r));
       const minY = Math.min(...isolated.map((c) => c.cy - c.r));
@@ -2097,11 +2116,11 @@ const renderEgoStage = (state: AppState, gvs: GraphViewState, w: number, h: numb
   ctx.fillText(`IMPORTS ${formatCount(imports.length)} ▸`, rightX, headerY(rightRows));
   if (importers.length === 0) {
     ctx.textAlign = "right";
-    ctx.fillText("[ nothing imports this file ]", leftX, cy);
+    ctx.fillText("nothing imports this file", leftX, cy);
   }
   if (imports.length === 0) {
     ctx.textAlign = "left";
-    ctx.fillText("[ no imports ]", rightX, cy);
+    ctx.fillText("no imports", rightX, cy);
   }
 
   drawStageColumn(state, gvs, leftRows, "left", leftX, cy, availH, cx, ease, stageW);
@@ -2110,17 +2129,14 @@ const renderEgoStage = (state: AppState, gvs: GraphViewState, w: number, h: numb
   // Escape hatch at the point of attention, not only in the statusbar.
   ctx.font = FONT_MICRO;
   ctx.textAlign = "left";
-  const backLabel = "[ ◂ back to map · esc ]";
+  const backLabel = "◂ back to map · esc";
   const backW = ctx.measureText(backLabel).width;
-  ctx.fillStyle = theme.bg;
   ctx.globalAlpha = 0.9 * ease;
-  ctx.fillRect(12, 12, backW + 12, 20);
+  chipRect(ctx, 12, 12, backW + 20, 24, theme.bg, 1, theme.borderSubtle);
   ctx.globalAlpha = ease;
-  ctx.strokeStyle = theme.borderSubtle;
-  ctx.strokeRect(12.5, 12.5, backW + 11, 19);
   ctx.fillStyle = theme.textLow;
-  ctx.fillText(backLabel, 18, 22.5);
-  gvs.egoBackChip = { x: 12, y: 12, w: backW + 12, h: 20 };
+  ctx.fillText(backLabel, 22, 24.5);
+  gvs.egoBackChip = { x: 12, y: 12, w: backW + 20, h: 24 };
 
   // Center card.
   const cardW = 250;
