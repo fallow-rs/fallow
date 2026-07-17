@@ -35,7 +35,7 @@ import {
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
-import { createPanel, renderPanel } from "./panel";
+import { createPanel, panelRenderKey, renderPanel } from "./panel";
 import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
 import { dirname } from "./data";
 
@@ -196,22 +196,31 @@ const init = (): void => {
 
   // ── Render loop (rAF-coalesced) ───────────────────────────────
   let renderQueued = false;
+  // null forces the very first render to build the panel.
+  let renderedPanelKey: string | null = null;
   const requestRender = (): void => {
     if (renderQueued) return;
     renderQueued = true;
     requestAnimationFrame(() => {
       renderQueued = false;
       rerenderChrome();
-      renderPanel(
-        state,
-        panel,
-        (idx) => selectFile(idx, true),
-        () => {
-          state.selectedRoad = null;
-          selectFile(null);
-        },
-        requestRender,
-      );
+      // Rebuilding the panel DOM on every rAF is wasteful and destroys
+      // transient widget state (the copy button's "copied" flash), so
+      // it only runs when panel-relevant state actually changed.
+      const panelKey = panelRenderKey(state);
+      if (panelKey !== renderedPanelKey) {
+        renderedPanelKey = panelKey;
+        renderPanel(
+          state,
+          panel,
+          (idx) => selectFile(idx, true),
+          () => {
+            state.selectedRoad = null;
+            selectFile(null);
+          },
+          requestRender,
+        );
+      }
       renderView(state);
       syncHash(state);
     });

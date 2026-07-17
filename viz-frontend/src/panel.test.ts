@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rankRowsFor } from "./panel";
+import { panelRenderKey, rankRowsFor } from "./panel";
 import { buildIndex } from "./data";
 import { getTheme } from "./theme";
 import type { AppState } from "./state";
@@ -54,6 +54,41 @@ const stateFor = (lens: Lens, files: VizFile[], over: Partial<VizData> = {}): Ap
   // The ranking only touches data, index, and the active lens.
   return { lens, data, index: buildIndex(data), theme: getTheme(true) } as AppState;
 };
+
+describe("panelRenderKey", () => {
+  it("changes on selection and lens changes, not on hover", () => {
+    const state = stateFor("overview", [file("src/a.ts")]);
+    state.selected = null;
+    state.selectedClone = null;
+    state.selectedRoad = null;
+    const base = panelRenderKey(state);
+    state.graphHovered = 0;
+    expect(panelRenderKey(state)).toBe(base);
+    state.selected = 0;
+    const selectedKey = panelRenderKey(state);
+    expect(selectedKey).not.toBe(base);
+    state.selected = null;
+    state.lens = "deadcode";
+    expect(panelRenderKey(state)).not.toBe(base);
+  });
+
+  it("identifies a selected road by its endpoint keys", () => {
+    const state = stateFor("overview", [file("src/a.ts")]);
+    state.selected = null;
+    state.selectedClone = null;
+    state.selectedRoad = null;
+    const base = panelRenderKey(state);
+    state.selectedRoad = {
+      srcKey: "src",
+      dstKey: "lib",
+      count: 1,
+      violations: 0,
+      cycleEdges: 0,
+      pairs: [],
+    };
+    expect(panelRenderKey(state)).not.toBe(base);
+  });
+});
 
 describe("rankRowsFor", () => {
   it("ranks unused files by size before partially unused files", () => {

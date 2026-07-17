@@ -348,6 +348,20 @@ const fileHead = (file: VizFile, close: () => void): HTMLElement => {
   return head;
 };
 
+/**
+ * Everything the panel renders from besides the static payload
+ * (state.data / state.index): the selection trio and the active lens.
+ * The render loop skips panel rebuilds while this key is unchanged, so
+ * hover-only repaints stop reconstructing the panel DOM.
+ */
+export const panelRenderKey = (state: AppState): string =>
+  [
+    state.selected,
+    state.selectedClone,
+    state.selectedRoad ? `${state.selectedRoad.srcKey}>${state.selectedRoad.dstKey}` : null,
+    state.lens,
+  ].join("|");
+
 export const renderPanel = (
   state: AppState,
   panel: HTMLElement,
