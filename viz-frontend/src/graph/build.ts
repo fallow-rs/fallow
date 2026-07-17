@@ -29,6 +29,7 @@ import {
   NODE_R_MAX,
   NODE_R_MIN,
   ROW_GAP,
+  buildSpatialGrid,
   clusterBounds,
   fitTransform,
   getGVS,
@@ -727,6 +728,8 @@ export const initGraphNodes = (state: AppState): void => {
   gvs.fileNodes = new Array<FileNode>(files.length);
   runLocalLayouts(state, gvs);
   buildHulls(gvs);
+  // Positions are frozen from here on; index them for pointer hit-tests.
+  gvs.grid = buildSpatialGrid(gvs.fileNodes);
 
   // Hub floor: p95 of importer counts, min 25 (spec: badge, never suppress).
   const importerCounts = files

@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSpatialGrid,
   clusterBounds,
   cubicPoint,
   fitTransform,
+  getGVS,
+  gridQuery,
   isTestCluster,
   middleTruncate,
+  nodeHitTest,
   roadWidth,
   tailTruncate,
   type ClusterInfo,
+  type FileNode,
 } from "./shared";
+import type { AppState } from "../state";
 import { assignCoordinates, assignLayers, partitionEdges, tarjanSCC, type MetaEdge } from "./build";
 
 /** Canvas text metrics stub: every glyph is 7px wide. */
@@ -112,6 +118,96 @@ describe("layering", () => {
     const layers = assignLayers(3, meta, [0, 1, 2]);
     expect(layers[0]).toBeLessThan(layers[1]);
     expect(layers[1]).toBeLessThan(layers[2]);
+  });
+});
+
+describe("spatial hit grid", () => {
+  /** Deterministic LCG so failures reproduce byte-for-byte. */
+  const lcg = (seed: number): (() => number) => {
+    let s = seed >>> 0;
+    return () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  };
+
+  const syntheticState = (nodes: FileNode[], k: number): AppState => {
+    const state = {} as AppState;
+    const gvs = getGVS(state);
+    gvs.fileNodes = nodes;
+    gvs.clusters = [cluster({})];
+    gvs.transform = { x: 0, y: 0, k };
+    gvs.grid = buildSpatialGrid(nodes);
+    gvs.standaloneOpen = true;
+    return state;
+  };
+
+  /** Byte-for-byte copy of the pre-grid brute-force hit loop. */
+  const bruteForceHit = (state: AppState, canvasX: number, canvasY: number): number | null => {
+    const gvs = getGVS(state);
+    const { transform, fileNodes, clusters } = gvs;
+    const gx = (canvasX - transform.x) / transform.k;
+    const gy = (canvasY - transform.y) / transform.k;
+    const floor = 9 / transform.k;
+    let best: number | null = null;
+    let bestD = Infinity;
+    for (const node of fileNodes) {
+      if (!node || node.x == null || node.y == null) continue;
+      if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
+      const dx = gx - node.x;
+      const dy = gy - node.y;
+      const d = dx * dx + dy * dy;
+      const r = Math.max(node.radius + 3 / transform.k, floor);
+      if (d <= r * r && d < bestD) {
+        bestD = d;
+        best = node.fileIndex;
+      }
+    }
+    return best;
+  };
+
+  it("matches the brute-force hit test across zoom levels", () => {
+    const rand = lcg(42);
+    const nodes: FileNode[] = Array.from({ length: 200 }, (_, i) => ({
+      fileIndex: i,
+      cluster: 0,
+      radius: 2.5 + rand() * 7.5,
+      x: rand() * 2000,
+      y: rand() * 1200,
+    }));
+    for (const k of [0.5, 1, 4]) {
+      const state = syntheticState(nodes, k);
+      let hits = 0;
+      for (let q = 0; q < 500; q++) {
+        const px = (rand() * 2100 - 50) * k;
+        const py = (rand() * 1300 - 50) * k;
+        const viaGrid = nodeHitTest(state, px, py);
+        expect(viaGrid).toBe(bruteForceHit(state, px, py));
+        if (viaGrid !== null) hits++;
+      }
+      // The query set must actually exercise hits, not just misses.
+      expect(hits).toBeGreaterThan(0);
+    }
+  });
+
+  it("covers both cells when a query point sits exactly on a cell edge", () => {
+    const nodes: FileNode[] = [
+      { fileIndex: 0, cluster: 0, radius: 5, x: 0, y: 0 },
+      { fileIndex: 1, cluster: 0, radius: 5, x: 40, y: 0 },
+    ];
+    const grid = buildSpatialGrid(nodes);
+    expect(grid).not.toBeNull();
+    if (!grid) return;
+    // cell = max(2 * 5, 40) = 40: the nodes sit in adjacent columns.
+    expect(grid.cell).toBe(40);
+    expect([...gridQuery(grid, 40, 0, 1)].sort()).toEqual([0, 1]);
+    expect(gridQuery(grid, 200, 0, 1)).toEqual([]);
+  });
+
+  it("returns null for a node-less project", () => {
+    expect(buildSpatialGrid([])).toBeNull();
+    const state = syntheticState([], 1);
+    expect(nodeHitTest(state, 10, 10)).toBeNull();
   });
 });
 

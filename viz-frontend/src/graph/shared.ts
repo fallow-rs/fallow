@@ -72,6 +72,76 @@ export type GraphClickResult =
   | { kind: "handled" }
   | { kind: "none" };
 
+/** Uniform spatial grid over world coordinates for pointer hit-tests. */
+export interface SpatialGrid {
+  /** World units per cell. */
+  cell: number;
+  cols: number;
+  rows: number;
+  minX: number;
+  minY: number;
+  /** Node indices per cell, row-major. */
+  buckets: number[][];
+  /** Largest node radius in world units. */
+  maxRadius: number;
+}
+
+/**
+ * Index node positions into a uniform grid. Visibility (isolated
+ * clusters, standalone toggle) is NOT baked in because it changes at
+ * runtime; hit loops keep their own per-node visibility checks.
+ */
+export const buildSpatialGrid = (
+  nodes: ReadonlyArray<FileNode | undefined>,
+): SpatialGrid | null => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxRadius = 0;
+  for (const node of nodes) {
+    if (!node || node.x == null || node.y == null) continue;
+    minX = Math.min(minX, node.x);
+    minY = Math.min(minY, node.y);
+    maxX = Math.max(maxX, node.x);
+    maxY = Math.max(maxY, node.y);
+    maxRadius = Math.max(maxRadius, node.radius);
+  }
+  if (!Number.isFinite(minX)) return null;
+  const cell = Math.max(2 * maxRadius, 40);
+  const cols = Math.max(1, Math.floor((maxX - minX) / cell) + 1);
+  const rows = Math.max(1, Math.floor((maxY - minY) / cell) + 1);
+  const buckets: number[][] = Array.from({ length: cols * rows }, () => []);
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (!node || node.x == null || node.y == null) continue;
+    const cx = Math.min(cols - 1, Math.max(0, Math.floor((node.x - minX) / cell)));
+    const cy = Math.min(rows - 1, Math.max(0, Math.floor((node.y - minY) / cell)));
+    buckets[cy * cols + cx].push(i);
+  }
+  return { cell, cols, rows, minX, minY, buckets, maxRadius };
+};
+
+/** Node indices from every cell overlapping the circle (gx, gy, worldRadius). */
+export const gridQuery = (
+  grid: SpatialGrid,
+  gx: number,
+  gy: number,
+  worldRadius: number,
+): number[] => {
+  const minCx = Math.max(0, Math.floor((gx - worldRadius - grid.minX) / grid.cell));
+  const maxCx = Math.min(grid.cols - 1, Math.floor((gx + worldRadius - grid.minX) / grid.cell));
+  const minCy = Math.max(0, Math.floor((gy - worldRadius - grid.minY) / grid.cell));
+  const maxCy = Math.min(grid.rows - 1, Math.floor((gy + worldRadius - grid.minY) / grid.cell));
+  const out: number[] = [];
+  for (let cy = minCy; cy <= maxCy; cy++) {
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (const idx of grid.buckets[cy * grid.cols + cx]) out.push(idx);
+    }
+  }
+  return out;
+};
+
 export interface GraphViewState {
   fileNodes: FileNode[];
   clusters: ClusterInfo[];
@@ -83,6 +153,8 @@ export interface GraphViewState {
   interEdges: Array<[number, number]>;
   /** Intra-cluster edges bucketed by cluster index, for local layouts. */
   linksByCluster: Array<Array<[number, number]>>;
+  /** Spatial hit-test grid over the frozen node positions (null pre-init). */
+  grid: SpatialGrid | null;
   /** Importer-count floor above which a node gets the hub badge. */
   hubFloor: number;
   transform: { x: number; y: number; k: number };
@@ -152,6 +224,7 @@ export const getGVS = (state: AppState): GraphViewState => {
       intraEdges: [],
       interEdges: [],
       linksByCluster: [],
+      grid: null,
       hubFloor: Infinity,
       transform: { x: 0, y: 0, k: 1 },
       fitK: 1,
@@ -403,15 +476,21 @@ export const middleTruncate = (
 
 export const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): number | null => {
   const gvs = getGVS(state);
-  const { transform, fileNodes, clusters } = gvs;
+  const { transform, fileNodes, clusters, grid } = gvs;
+  if (!grid) return null;
   const gx = (canvasX - transform.x) / transform.k;
   const gy = (canvasY - transform.y) / transform.k;
   // Nearest-wins with a 9px screen-space floor so dots stay clickable
   // at fit zoom.
   const floor = 9 / transform.k;
+  // The effective hit radius depends on the current zoom (screen-space
+  // floor and slop), so the grid query radius is computed per call in
+  // world units.
+  const maxWorldRadius = Math.max(grid.maxRadius + 3 / transform.k, floor);
   let best: number | null = null;
   let bestD = Infinity;
-  for (const node of fileNodes) {
+  for (const idx of gridQuery(grid, gx, gy, maxWorldRadius)) {
+    const node = fileNodes[idx];
     if (!node || node.x == null || node.y == null) continue;
     if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
     const dx = gx - node.x;
