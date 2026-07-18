@@ -807,7 +807,13 @@ use crate::MemberKind;
 /// `const ui = createUi(); ui.orders.member` consumer credits the class member.
 /// Warm 234 caches lack the field and the fact, leaving those methods falsely
 /// reported as unused.
-pub(super) const CACHE_VERSION: u32 = 235;
+///
+/// Bumped to 236: nested object-binding target extraction now caps binding-path
+/// depth at `MAX_BINDING_PATH_DEPTH` (8) to bound a cyclic-candidate blowup.
+/// The cap also drops paths deeper than 8 in ordinary acyclic deeply-nested
+/// object literals, so warm 235 caches can retain `member_accesses` entries for
+/// paths a fresh parse under this cap no longer produces; invalidate them.
+pub(super) const CACHE_VERSION: u32 = 236;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
