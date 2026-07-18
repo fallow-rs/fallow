@@ -5,10 +5,12 @@
  * breadcrumbs.
  */
 import { select } from "d3-selection";
+import "d3-transition"; // side-effect: augments selections with .transition()
 import { zoomIdentity } from "d3-zoom";
 import type { AppState } from "../state";
 import { basename, formatCount, legendText, lensColor, lensFindingLevel } from "../data";
 import { fileTipCanvasRect } from "../tooltip";
+import { mix } from "../theme";
 import { renderEgoStage, renderGhost } from "./ego";
 import {
   type ClusterInfo,
@@ -87,6 +89,8 @@ export const renderGraph = (state: AppState): void => {
 /** Opening choreography: layers sweep in left to right, then the roads. */
 const REVEAL_LAYER_MS = 110;
 const REVEAL_FADE_MS = 380;
+/** Graph node lens-color crossfade duration, matching the treemap's. */
+const GRAPH_LENS_MS = 200;
 
 const revealProgress = (
   gvs: GraphViewState,
@@ -118,6 +122,8 @@ interface Scene {
   kRel: number;
   reveal: ReturnType<typeof revealProgress>;
   searching: boolean;
+  /** Lens-color crossfade progress (1 = settled, no fade in flight). */
+  lensT: number;
 }
 
 /** Direct hover context produced by the neighborhood phase. */
@@ -335,7 +341,12 @@ const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): voi
     if (!node || node.x == null || node.y == null) continue;
     if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
     const file = files[node.fileIndex];
-    const color = lensColor(state.lens, theme, state.index, file);
+    let color = lensColor(state.lens, theme, state.index, file);
+    // Crossfade node colors on a lens switch, matching the treemap.
+    if (gvs.lensPrev && scene.lensT < 1) {
+      const prev = gvs.lensPrev.get(node.fileIndex);
+      if (prev && prev !== color) color = mix(prev, color, scene.lensT);
+    }
     const recessive = color === theme.cellNeutral || color === theme.cellEntry;
     const matched = !searching || state.searchMatches.has(node.fileIndex);
     const inReach = searching && state.searchReach.has(node.fileIndex);
@@ -457,6 +468,8 @@ const drawSearchPulse = (scene: Scene): void => {
   const { state, gvs } = scene;
   const { ctx, theme } = state;
   const { transform, fileNodes } = gvs;
+  // Reduced motion gets no expanding rings; the camera still centers.
+  if (state.reducedMotion) return;
   // Search pulse rings.
   if (gvs.pulseFile !== null) {
     const node = fileNodes[gvs.pulseFile];
@@ -484,12 +497,21 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   const { transform } = gvs;
   const kRel = transform.k / gvs.fitK;
   const reveal = revealProgress(gvs, state.reducedMotion);
+  const lensT =
+    state.reducedMotion || gvs.lensFadeAt <= 0
+      ? 1
+      : easeOut(Math.min(1, (performance.now() - gvs.lensFadeAt) / GRAPH_LENS_MS));
+  if (lensT >= 1) {
+    gvs.lensPrev = null;
+    gvs.lensFadeAt = 0;
+  }
   const scene: Scene = {
     state,
     gvs,
     kRel,
     reveal,
     searching: state.search.trim() !== "",
+    lensT,
   };
 
   ctx.save();
@@ -547,7 +569,8 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   // Motion frames while something animates.
   const animating =
     (gvs.hoveredRoad !== null && !state.reducedMotion) ||
-    gvs.pulseFile !== null ||
+    (gvs.pulseFile !== null && !state.reducedMotion) ||
+    scene.lensT < 1 ||
     reveal.t < 1 ||
     gvs.showIntro;
   if (animating) {
@@ -901,10 +924,14 @@ export const minimapPan = (state: AppState, x: number, y: number): void => {
   const worldX = frame.worldX + (x - frame.x) / frame.scale;
   const worldY = frame.worldY + (y - frame.y) / frame.scale;
   const k = gvs.transform.k;
-  select(state.canvas).call(
-    gvs.zoomBehavior.transform,
-    zoomIdentity.translate(w / 2 - worldX * k, h / 2 - worldY * k).scale(k),
-  );
+  const target = zoomIdentity.translate(w / 2 - worldX * k, h / 2 - worldY * k).scale(k);
+  const sel = select(state.canvas);
+  // Glide the recentre so a minimap click reads as a pan, not a jump.
+  if (state.reducedMotion) {
+    sel.call(gvs.zoomBehavior.transform, target);
+  } else {
+    sel.transition("camera").duration(250).ease(easeOut).call(gvs.zoomBehavior.transform, target);
+  }
 };
 /** Path-trace overlay: dim the map, draw the dependency chain on top. */
 const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {

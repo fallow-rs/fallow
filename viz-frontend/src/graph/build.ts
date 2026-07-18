@@ -787,7 +787,14 @@ export const initGraphNodes = (state: AppState): void => {
   gvs.zoomBehavior = zoomBehavior;
 
   gvs.initialized = true;
-  gvs.revealAt = 0;
-  gvs.showIntro = shouldShowIntro() && !state.reducedMotion;
+  if (gvs.hasRevealed) {
+    // A re-arrange (by folder / by imports) is a compare gesture: paint
+    // the new layout immediately instead of replaying the opening sweep.
+    gvs.revealAt = -1;
+  } else {
+    gvs.revealAt = 0;
+    gvs.showIntro = shouldShowIntro() && !state.reducedMotion;
+    gvs.hasRevealed = true;
+  }
   renderGraph(state);
 };

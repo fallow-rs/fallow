@@ -488,6 +488,27 @@ button {
   outline-offset: -2px;
 }
 
+/* Brief opacity dip when the canvas content swaps wholesale (view change,
+   leaving ego mode). JS also guards this on prefers-reduced-motion. */
+@keyframes canvas-swap {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+#canvas.swapping {
+  animation: canvas-swap 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #canvas.swapping {
+    animation: none;
+  }
+}
+
 /* Panel: copy chip, status gloss, ranked lens list */
 #panel .copy-path {
   margin-left: 10px;

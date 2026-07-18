@@ -22,4 +22,5 @@ export {
   resetGraphView,
   roadFacts,
   setClusterMode,
+  startGraphLensFade,
 } from "./interact";

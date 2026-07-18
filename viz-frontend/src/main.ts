@@ -31,6 +31,7 @@ import {
   resetGraphView,
   roadFacts,
   setClusterMode,
+  startGraphLensFade,
 } from "./graph";
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
@@ -84,6 +85,16 @@ const init = (): void => {
       "the right opens any file and shows the worst findings for the current lens.",
   );
 
+  // A brief opacity dip when the canvas content changes wholesale (view
+  // swap, leaving ego mode), so the swap reads as a transition, not a cut.
+  canvas.addEventListener("animationend", () => canvas.classList.remove("swapping"));
+  const flashCanvas = (): void => {
+    if (state.reducedMotion) return;
+    canvas.classList.remove("swapping");
+    void canvas.offsetWidth; // reflow so re-adding restarts the animation
+    canvas.classList.add("swapping");
+  };
+
   // Chrome
   let refs: ChromeRefs | null = null;
   const rerenderChrome = (): void => {
@@ -96,6 +107,8 @@ const init = (): void => {
     state.lens = lens;
     state.selectedClone = null;
     startLensFade(state, prev);
+    // Crossfade the graph nodes too, so 1-5 animates in both views.
+    if (state.view === "graph") startGraphLensFade(state, prev);
     // The ranked panel opens or closes with the lens; keep the graph
     // fitted to the space that remains while the camera is untouched.
     if (state.view === "graph") refitOnResize(state);
@@ -108,6 +121,9 @@ const init = (): void => {
     state.hoveredCell = null;
     state.graphHovered = null;
     hideTooltip();
+    // The two views draw completely different structures; a short dip
+    // makes the swap read as the same data redrawn, not a glitch.
+    flashCanvas();
     requestRender();
   };
 
@@ -195,6 +211,9 @@ const init = (): void => {
     const hadSelection = state.selected !== null;
     state.selected = fileIndex;
     if (fileIndex === null) resetEgoTrail(state);
+    // Leaving the graph ego stage swaps back to the overview; soften that
+    // return the same way as a view swap so it does not read as a reset.
+    if (fileIndex === null && hadSelection && state.view === "graph") flashCanvas();
     if (fileIndex !== null && reveal) {
       if (state.view === "map") {
         const dir = dirname(state.data.files[fileIndex].path);

@@ -193,6 +193,11 @@ export interface GraphViewState {
   showIntro: boolean;
   /** First-render reveal choreography start (0 = pending, -1 = skipped). */
   revealAt: number;
+  /** True once the opening reveal has played; a re-arrange then skips it. */
+  hasRevealed: boolean;
+  /** Graph lens-color crossfade: prior per-file colors, and its start time. */
+  lensPrev: Map<number, string> | null;
+  lensFadeAt: number;
 }
 
 export const FONT_SMALL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
@@ -246,6 +251,9 @@ export const getGVS = (state: AppState): GraphViewState => {
       notice: "",
       noticeAt: 0,
       revealAt: 0,
+      hasRevealed: false,
+      lensPrev: null,
+      lensFadeAt: 0,
       standaloneOpen: false,
       standaloneChip: null,
       egoBackChip: null,

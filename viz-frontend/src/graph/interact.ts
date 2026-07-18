@@ -4,7 +4,8 @@
  * the camera moves (fit, reset, center, search zoom, resize refit).
  */
 import { select } from "d3-selection";
-import { zoomIdentity } from "d3-zoom";
+import "d3-transition"; // side-effect: augments selections with .transition()
+import { zoomIdentity, type ZoomTransform } from "d3-zoom";
 import type { AppState } from "../state";
 import type { RoadSelection } from "../types";
 import {
@@ -14,6 +15,7 @@ import {
   type StageRect,
   clusterBounds,
   cubicPoint,
+  easeOut,
   fitTransform,
   getGVS,
   markIntroSeen,
@@ -27,6 +29,27 @@ import { initGraphNodes } from "./build";
 
 export const getClusterMode = (state: AppState): ClusterMode => getGVS(state).clusterMode;
 
+/** Camera glide duration for programmatic moves (0-key, search, center). */
+const CAMERA_MS = 450;
+
+/**
+ * Apply a zoom transform, gliding there over `duration` ms unless
+ * reduced-motion is on or the duration is 0. Direct manipulation (wheel,
+ * drag) stays on the instant path; only programmatic jumps tween, so the
+ * eye can follow where the camera went. A named transition means a second
+ * call interrupts the first rather than fighting it.
+ */
+export const tweenCamera = (state: AppState, target: ZoomTransform, duration: number): void => {
+  const gvs = getGVS(state);
+  if (!gvs.zoomBehavior) return;
+  const sel = select(state.canvas);
+  if (state.reducedMotion || duration <= 0) {
+    sel.call(gvs.zoomBehavior.transform, target);
+  } else {
+    sel.transition("camera").duration(duration).ease(easeOut).call(gvs.zoomBehavior.transform, target);
+  }
+};
+
 export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
   const gvs = getGVS(state);
   if (gvs.clusterMode === mode) return;
@@ -34,6 +57,14 @@ export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
   gvs.initialized = false;
   initGraphNodes(state);
 };
+/** Seed the graph node lens-color crossfade with the pre-switch colors. */
+export const startGraphLensFade = (state: AppState, prev: Map<number, string>): void => {
+  if (state.reducedMotion) return;
+  const gvs = getGVS(state);
+  gvs.lensPrev = prev;
+  gvs.lensFadeAt = performance.now();
+};
+
 /** Node position in canvas pixels (for tooltip docking in main). */
 export const nodeScreenPos = (state: AppState, idx: number): { x: number; y: number } | null => {
   const gvs = getGVS(state);
@@ -196,11 +227,13 @@ export const clearGraphFocus = (state: AppState): boolean => {
 export const refitOnResize = (state: AppState): void => {
   const gvs = getGVS(state);
   if (!gvs.initialized || gvs.userMoved || state.selected !== null) return;
-  resetGraphView(state);
+  // Keep-fitted, not a user gesture: snap instantly so a resize drag or a
+  // panel open/close does not animate the camera every frame.
+  resetGraphView(state, false);
 };
 
 /** Reset the camera to the fit-to-view transform (0 key / after wandering). */
-export const resetGraphView = (state: AppState): void => {
+export const resetGraphView = (state: AppState, animate = true): void => {
   const gvs = getGVS(state);
   if (!gvs.initialized || !gvs.zoomBehavior || state.selected !== null) return;
   // Recompute the fit transform from current cluster bounds.
@@ -215,9 +248,10 @@ export const resetGraphView = (state: AppState): void => {
   // so min/max zoom stay meaningful after large resizes.
   gvs.zoomBehavior.scaleExtent([fit.k * 0.4, fit.k * 12]);
   gvs.fitK = fit.k;
-  select(state.canvas).call(
-    gvs.zoomBehavior.transform,
+  tweenCamera(
+    state,
     zoomIdentity.translate(fit.x, fit.y).scale(fit.k),
+    animate ? CAMERA_MS : 0,
   );
 };
 
@@ -233,8 +267,11 @@ export const graphFocusSearch = (state: AppState): void => {
   }
   if (best === null) return;
   centerOnFile(state, best);
-  gvs.pulseFile = best;
-  gvs.pulseAt = performance.now();
+  // The camera glide is the reduced-motion feedback; skip the pulse rings.
+  if (!state.reducedMotion) {
+    gvs.pulseFile = best;
+    gvs.pulseAt = performance.now();
+  }
   renderGraph(state);
 };
 
@@ -356,5 +393,5 @@ export const centerOnFile = (state: AppState, fileIndex: number): void => {
   const h = stageEl ? stageEl.clientHeight : window.innerHeight;
   const k = Math.max(gvs.transform.k, gvs.fitK * 1.5);
   const target = zoomIdentity.translate(w / 2 - node.x * k, h / 2 - node.y * k).scale(k);
-  select(state.canvas).call(gvs.zoomBehavior.transform, target);
+  tweenCamera(state, target, CAMERA_MS);
 };
