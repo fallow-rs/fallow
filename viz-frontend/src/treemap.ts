@@ -344,6 +344,23 @@ export const renderTreemap = (state: AppState): void => {
       ctx.fillText(legend, 16, h - 17);
       ctx.globalAlpha = 1;
     }
+    // The treemap's one non-obvious gesture is drilling; teach it at the
+    // root (once drilled, the breadcrumb already shows how to navigate).
+    if (state.drillPath === "") {
+      const hint = "click a folder to zoom in";
+      const right = usableStageWidth(state, w) - 16;
+      ctx.font = FONT_LEGEND;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      const hw = ctx.measureText(hint).width;
+      ctx.fillStyle = state.theme.bg;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(right - hw - 6, h - 26, hw + 12, 18);
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = state.theme.textMuted;
+      ctx.fillText(hint, right, h - 17);
+      ctx.globalAlpha = 1;
+    }
   }
 
   if (zooming) {
