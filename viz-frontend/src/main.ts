@@ -80,7 +80,8 @@ const init = (): void => {
     "aria-label",
     `Interactive map of ${data.summary.total_files} files in ${data.root}. ` +
       "Use the map and graph buttons to switch views, the lens buttons to change " +
-      "what the colors mean, and the search box to find files.",
+      "what the colors mean, and the search box to find files. The ranked list on " +
+      "the right opens any file and shows the worst findings for the current lens.",
   );
 
   // Chrome

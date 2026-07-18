@@ -269,7 +269,7 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
     overview: "",
     deadcode: "red = never imported · amber = has unused exports",
     dupes: "deeper amber = more duplicated lines",
-    boundaries: "red = crosses a boundary rule or joins a cycle · amber outline = tangled folders",
+    boundaries: "red = forbidden import or part of a loop · amber outline = folders that import each other",
     hotspots: "amber → red = harder to change safely",
   };
   return lines[lens];

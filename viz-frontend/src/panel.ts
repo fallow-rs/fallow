@@ -84,7 +84,7 @@ const linkList = (
 export const createPanel = (): HTMLElement => {
   const panel = el("aside");
   panel.id = "panel";
-  panel.setAttribute("aria-label", "File details");
+  panel.setAttribute("aria-label", "file details");
   return panel;
 };
 
@@ -137,7 +137,7 @@ const complexitySection = (file: VizFile): HTMLElement | null => {
     }
     table.appendChild(tbody);
     cx.appendChild(table);
-    cx.appendChild(el("div", "muted key-line", "cc cyclomatic · cog cognitive · loc lines"));
+    cx.appendChild(el("div", "muted key-line", "cc = branch count · cog = how tangled · loc = lines"));
     return cx;
   }
   return null;
@@ -201,7 +201,7 @@ const boundariesSection = (
   const outgoing = state.data.violations.filter((v) => v.from === fileIdx);
   const incoming = state.data.violations.filter((v) => v.to === fileIdx);
   if (outgoing.length > 0 || incoming.length > 0) {
-    const b = sectionEl("boundary violations");
+    const b = sectionEl("forbidden imports");
     for (const v of outgoing.slice(0, 6)) {
       const row = el("div");
       row.appendChild(
@@ -221,7 +221,7 @@ const boundariesSection = (
     }
     if (incoming.length > 0) {
       b.appendChild(
-        el("div", "muted", `imported across a boundary by ${incoming.length} file${incoming.length === 1 ? "" : "s"}`),
+        el("div", "muted", `imported by ${incoming.length} file${incoming.length === 1 ? "" : "s"} from outside its layer`),
       );
     }
     return b;
@@ -238,10 +238,10 @@ const cycleSection = (
   navigate: NavigateFn,
 ): HTMLElement | null => {
   if (file.in_cycle) {
-    const cyc = sectionEl("circular dependency");
+    const cyc = sectionEl("import loop");
     const cycles = state.data.cycles.filter((c) => c.includes(fileIdx));
     for (const cycle of cycles.slice(0, 2)) {
-      cyc.appendChild(el("div", "sev-warn", `cycle of ${cycle.length} files`));
+      cyc.appendChild(el("div", "sev-warn", `loop of ${cycle.length} files`));
       cyc.appendChild(linkList(state, cycle.filter((i) => i !== fileIdx), navigate, 8));
     }
     return cyc;
@@ -275,11 +275,11 @@ const connectionSections = (
 /** Size, wiring, workspace, zone, and function-count facts. */
 const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElement => {
   const facts = sectionEl("facts");
+  // Import counts live in the connection section headers below, so the
+  // facts list carries only what those sections do not repeat.
   const pairs: Array<[string, string | HTMLElement]> = [
     ["size", formatSize(file.size)],
     ["exports", formatCount(file.export_count)],
-    ["imports", formatCount(file.import_count)],
-    ["imported by", formatCount(file.importer_count)],
   ];
   if (file.workspace !== undefined && state.data.workspaces[file.workspace]) {
     pairs.push(["workspace", state.data.workspaces[file.workspace].name]);
@@ -302,7 +302,11 @@ const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElem
     if (reach.length > 0) {
       facts.appendChild(kvEl(reach));
       facts.appendChild(
-        el("div", "muted key-line", "reaches = pulled in · affects = breaks if changed"),
+        el(
+          "div",
+          "muted key-line",
+          "reaches = everything it loads · affects = what breaks if you change it",
+        ),
       );
     }
   }
@@ -406,17 +410,20 @@ export const renderPanel = (
   const file = state.data.files[fileIdx];
   panel.replaceChildren();
   panel.classList.add("open");
+  panel.setAttribute("aria-label", "file details");
   panel.appendChild(fileHead(file, close));
   panel.appendChild(factsSection(state, file, fileIdx));
   const dead = deadCodeSection(file);
   if (dead) panel.appendChild(dead);
 
+  // Wiring first: "who imports this / what it imports" is the map's core
+  // question, so answer it before the finding-specific tables.
   const sections = [
+    ...connectionSections(state, fileIdx, navigate),
     complexitySection(file),
     duplicationSection(state, file, fileIdx, navigate),
     boundariesSection(state, fileIdx, navigate),
     cycleSection(state, file, fileIdx, navigate),
-    ...connectionSections(state, fileIdx, navigate),
   ];
   for (const section of sections) {
     if (section) panel.appendChild(section);
@@ -499,7 +506,7 @@ const rankRowsForLens = (
           metricCls: "muted",
           fileIndex: i,
         }));
-      return { title: "most depended-on · files everything needs", rows, empty: "no shared files" };
+      return { title: "most depended-on files", rows, empty: "no shared files" };
     }
     case "deadcode": {
       const rows: RankRow[] = [];
@@ -529,7 +536,7 @@ const rankRowsForLens = (
           fileIndex: i,
         });
       }
-      return { title: "unused · biggest first", rows, empty: "nothing is unreachable" };
+      return { title: "unused files", rows, empty: "nothing is unreachable" };
     }
     case "dupes": {
       const rows = [...state.data.clones.keys()]
@@ -554,8 +561,8 @@ const rankRowsForLens = (
         });
       const truncated = state.data.summary.clone_groups_truncated;
       const title = truncated
-        ? `duplication · biggest blocks first · +${formatCount(truncated)} not shown`
-        : "duplication · biggest blocks first";
+        ? `duplicated blocks · +${formatCount(truncated)} not shown`
+        : "duplicated blocks";
       return { title, rows, empty: "no duplicated blocks" };
     }
     case "boundaries": {
@@ -573,14 +580,14 @@ const rankRowsForLens = (
       state.data.cycles.forEach((cycle) => {
         if (cycle.length === 0 || files[cycle[0]] === undefined) return;
         rows.push({
-          label: `cycle · ${formatCount(cycle.length)} files`,
+          label: `loop · ${formatCount(cycle.length)} files`,
           dir: dirname(files[cycle[0]].path),
           metric: basename(files[cycle[0]].path),
           metricCls: "sev-warn",
           fileIndex: cycle[0],
         });
       });
-      return { title: "boundaries · breaks then cycles", rows, empty: "no cycles or layer breaks" };
+      return { title: "forbidden imports & loops", rows, empty: "no forbidden imports or loops" };
     }
     case "hotspots": {
       // Risk = hard to change AND widely depended on, not hardness alone;
@@ -597,7 +604,7 @@ const rankRowsForLens = (
           metricCls: f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "muted",
           fileIndex: i,
         }));
-      return { title: "complexity · riskiest first", rows, empty: "no complex functions" };
+      return { title: "complexity hotspots", rows, empty: "no complex functions" };
     }
     default:
       return { title: "", rows: [], empty: "" };
@@ -629,8 +636,8 @@ export const buildMapDigest = (state: AppState): string => {
     `- duplication: ${formatCount(s.clone_groups)} groups${
       s.clone_groups_truncated ? ` (+${formatCount(s.clone_groups_truncated)} not shown)` : ""
     }, ${formatCount(s.duplicated_lines)} lines`,
-    `- boundaries: ${formatCount(s.circular_deps)} cycles, ${formatCount(s.boundary_violations)} layer breaks`,
-    `- complexity: ${formatCount(s.hotspot_files)} files in the top band`,
+    `- boundaries: ${formatCount(s.circular_deps)} loops, ${formatCount(s.boundary_violations)} forbidden imports`,
+    `- complexity: ${formatCount(s.hotspot_files)} files flagged as hardest to change`,
   ];
   const lenses: Lens[] = ["overview", "deadcode", "dupes", "boundaries", "hotspots"];
   for (const lens of lenses) {
@@ -655,6 +662,7 @@ const renderLensPanel = (
   const { title, rows, empty } = rankRowsFor(state);
   panel.replaceChildren();
   panel.classList.add("open");
+  panel.setAttribute("aria-label", `${state.lens} findings`);
 
   const section = sectionEl(title);
   if (rows.length === 0) {
@@ -664,7 +672,7 @@ const renderLensPanel = (
   }
   // Leave with the list, not just a feeling: findings as markdown.
   section.appendChild(
-    copyButton("copy-path", "copy as markdown", () =>
+    copyButton("copy-path", "copy this list", () =>
       [
         `# fallow · ${title} · ${state.data.root}`,
         ...rows.map((r) => `- ${r.dir ? `${r.dir}/` : ""}${r.label} (${r.metric})`),
@@ -713,7 +721,7 @@ const renderLensPanel = (
   const hint = el("div", "action-hint");
   hint.append(
     state.lens === "hotspots"
-      ? "riskiest first = cyclomatic weighted by files that use it · click a row to focus"
+      ? "riskiest first = complexity weighted by how many files use it · click a row to focus"
       : "click a row to focus that file on the map",
   );
   section.appendChild(hint);
@@ -739,6 +747,7 @@ const renderClonePanel = (
       refresh();
     },
   );
+  panel.setAttribute("aria-label", "duplicated block");
   const statusLine = el("div", "status-line");
   statusLine.appendChild(sev("sev-warn", `${formatCount(group.tokens)} tokens`));
   box.appendChild(statusLine);
@@ -806,7 +815,8 @@ const renderRoadPanel = (
 ): void => {
   const road = state.selectedRoad;
   if (!road) return;
-  const box = panelShell(panel, "dependency road", `${road.srcKey} ▸ ${road.dstKey}`, close);
+  const box = panelShell(panel, "imports between folders", `${road.srcKey} → ${road.dstKey}`, close);
+  panel.setAttribute("aria-label", "imports between folders");
   const statusLine = el("div", "status-line");
   statusLine.appendChild(
     sev("sev-info", `${formatCount(road.count)} import${road.count === 1 ? "" : "s"}`),
@@ -821,7 +831,7 @@ const renderRoadPanel = (
   }
   box.appendChild(statusLine);
 
-  const section = sectionEl(`file pairs ${formatCount(road.pairs.length)}`);
+  const section = sectionEl(`every import · ${formatCount(road.pairs.length)}`);
   const ul = el("ul", "link-list");
   ul.style.maxHeight = "none";
   const n = state.data.files.length;
@@ -832,7 +842,7 @@ const renderRoadPanel = (
     const packed = from * n + to;
     const fromName = state.data.files[from].path;
     const toName = basename(state.data.files[to].path);
-    btn.textContent = `${fromName} ▸ ${toName}`;
+    btn.textContent = `${fromName} → ${toName}`;
     if (state.index.violationEdges.has(packed)) btn.classList.add("sev-error");
     else if (state.index.cycleEdges.has(packed)) btn.classList.add("sev-warn");
     btn.addEventListener("click", () => navigate(from));

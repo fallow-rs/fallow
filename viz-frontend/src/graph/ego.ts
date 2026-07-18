@@ -223,9 +223,9 @@ export const renderEgoStage = (
   ctx.textBaseline = "middle";
   ctx.fillStyle = theme.textMuted;
   ctx.textAlign = "right";
-  ctx.fillText(`◂ IMPORTED BY ${formatCount(importers.length)}`, leftX, headerY(leftRows));
+  ctx.fillText(`imported by ${formatCount(importers.length)}`, leftX, headerY(leftRows));
   ctx.textAlign = "left";
-  ctx.fillText(`IMPORTS ${formatCount(imports.length)} ▸`, rightX, headerY(rightRows));
+  ctx.fillText(`imports ${formatCount(imports.length)}`, rightX, headerY(rightRows));
   if (importers.length === 0) {
     ctx.textAlign = "right";
     ctx.fillText("nothing imports this file", leftX, cy);
@@ -516,8 +516,8 @@ const drawCrumbs = (state: AppState, gvs: GraphViewState, stageW: number): void 
     x += textW;
     if (!isLast) {
       ctx.fillStyle = theme.textMuted;
-      ctx.fillText(" ▸ ", x, y);
-      x += ctx.measureText(" ▸ ").width;
+      ctx.fillText(" / ", x, y);
+      x += ctx.measureText(" / ").width;
     }
   });
 };

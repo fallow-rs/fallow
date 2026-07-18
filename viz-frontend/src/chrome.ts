@@ -1,7 +1,7 @@
 import type { AppState } from "./state";
 import type { Lens } from "./types";
 import { formatCount } from "./data";
-import { button, copyButton, el } from "./dom";
+import { announce, button, copyButton, el } from "./dom";
 
 /**
  * HTML chrome around the canvas. One rule carries the affordance story:
@@ -76,7 +76,7 @@ const LENSES: LensDef[] = [
   {
     id: "boundaries",
     name: "boundaries",
-    gloss: "cycles & layer breaks",
+    gloss: "import loops & forbidden imports",
     count: (s) => s.data.summary.circular_deps + s.data.summary.boundary_violations,
     sev: "error",
   },
@@ -119,17 +119,21 @@ export const buildChrome = (
   actions.appendChild(searchWrap);
   const searchCount = el("span");
   searchCount.id = "search-count";
+  // Match counts change only on the DOM side, so announce them politely.
+  searchCount.setAttribute("role", "status");
+  searchCount.setAttribute("aria-live", "polite");
   actions.appendChild(searchCount);
   actions.appendChild(el("span", "divider"));
-  const digestBtn = button("ghost-btn", "copy");
+  const digestBtn = button("ghost-btn", "copy map");
   digestBtn.id = "digest-btn";
   digestBtn.title = "copy a markdown digest of the whole map";
   digestBtn.setAttribute("aria-label", "Copy a markdown digest of the whole map");
   digestBtn.addEventListener("click", () => {
     refs.digestHandler?.();
     digestBtn.textContent = "copied";
+    announce("copied the whole map as markdown");
     setTimeout(() => {
-      digestBtn.textContent = "copy";
+      digestBtn.textContent = "copy map";
     }, 1200);
   });
   actions.appendChild(digestBtn);
@@ -157,29 +161,32 @@ export const buildChrome = (
   toolbar.id = "toolbar";
 
   const tabs = el("div", "lens-tabs");
-  tabs.setAttribute("role", "tablist");
+  // Toolbar, not tablist: a canvas makes tabpanel semantics awkward, so
+  // the rail is a group of pressable buttons (aria-pressed) with roving
+  // arrow-key navigation, like the view segment.
+  tabs.setAttribute("role", "toolbar");
   tabs.setAttribute("aria-label", "lens");
   const lensButtons = new Map<Lens, HTMLButtonElement>();
-  for (const def of LENSES) {
+  LENSES.forEach((def, i) => {
     const b = button("lens-tab", "");
     b.appendChild(el("span", "tab-name", def.name));
     b.appendChild(el("span", "badge"));
-    b.title = def.gloss;
-    b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", String(state.lens === def.id));
+    // Fold the 1-5 shortcut into the tooltip, as the view toggle does.
+    b.title = `${def.gloss} · ${i + 1}`;
+    b.setAttribute("aria-pressed", String(state.lens === def.id));
     // Roving tabindex: only the active tab sits in the tab order.
     b.tabIndex = state.lens === def.id ? 0 : -1;
     b.addEventListener("click", () => handlers.onLens(def.id));
     lensButtons.set(def.id, b);
     tabs.appendChild(b);
-  }
-  // Arrow keys move the lens selection, as tablist semantics promise.
+  });
+  // Arrow keys move the lens selection, as toolbar semantics promise.
   tabs.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
     const ids = LENSES.map((d) => d.id);
     const active = ids.findIndex(
-      (id) => lensButtons.get(id)?.getAttribute("aria-selected") === "true",
+      (id) => lensButtons.get(id)?.getAttribute("aria-pressed") === "true",
     );
     const delta = e.key === "ArrowRight" ? 1 : -1;
     const next = ids[(active + delta + ids.length) % ids.length];
@@ -254,6 +261,7 @@ export const buildChrome = (
     ["t", " treemap"],
     ["0", " reset"],
     ["esc", " back"],
+    ["?", " help"],
   ];
   hintPairs.forEach(([key, label], i) => {
     if (i > 0) hints.appendChild(document.createTextNode(i === 2 ? "–" : " · "));
@@ -299,7 +307,7 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
   for (const def of LENSES) {
     const b = refs.lensButtons.get(def.id);
     if (!b) continue;
-    b.setAttribute("aria-selected", String(state.lens === def.id));
+    b.setAttribute("aria-pressed", String(state.lens === def.id));
     b.tabIndex = state.lens === def.id ? 0 : -1;
     const badge = b.querySelector(".badge");
     if (badge) {
@@ -307,8 +315,10 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
       // Bare tabular numbers; the unit words live in the context strip.
       // Zero stays visible in muted ink so absence is never ambiguous.
       badge.textContent = count !== null ? formatCount(count) : "";
-      badge.className =
-        count === 0 ? "badge zero" : state.lens === def.id ? "badge hot" : "badge warm";
+      // Severity drives the accent: error lenses count in red, warn in
+      // amber, matching the red/amber meaning used across the map.
+      const weight = state.lens === def.id ? "hot" : "warm";
+      badge.className = count === 0 ? "badge zero" : `badge ${weight} ${def.sev}`;
     }
   }
   refs.clusterGroup.style.display = state.view === "graph" ? "" : "none";
@@ -346,7 +356,7 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
       text =
         s.unused_files + s.unused_exports === 0
           ? "nothing unreachable · every file is reachable from an entry point"
-          : `${formatCount(s.unused_files)} files and ${formatCount(s.unused_exports)} exports nothing imports · shown red and amber`;
+          : `${formatCount(s.unused_files)} unused files and ${formatCount(s.unused_exports)} unused exports · shown red and amber`;
       break;
     case "dupes":
       text =
@@ -359,14 +369,14 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
     case "boundaries":
       text =
         s.circular_deps + s.boundary_violations === 0
-          ? "no import cycles or layer violations"
-          : `${formatCount(s.circular_deps)} cycle${s.circular_deps === 1 ? "" : "s"} · ${formatCount(s.boundary_violations)} layer break${s.boundary_violations === 1 ? "" : "s"} · shown as red and amber connections`;
+          ? "no import loops or forbidden imports"
+          : `${formatCount(s.circular_deps)} loop${s.circular_deps === 1 ? "" : "s"} · ${formatCount(s.boundary_violations)} forbidden import${s.boundary_violations === 1 ? "" : "s"} · shown as red and amber connections`;
       break;
     case "hotspots":
       text =
         s.hotspot_files === 0
-          ? "no files in the top complexity band"
-          : `${formatCount(s.hotspot_files)} files in the top band · amber → red = harder to change safely`;
+          ? "no files flagged as complex"
+          : `the ${formatCount(s.hotspot_files)} most complex files · amber → red = harder to change safely`;
       break;
   }
   const left = refs.summaryLine.querySelector(".summary-left");
@@ -432,7 +442,7 @@ const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
   refs.searchCount.append(n, document.createTextNode(" matches"));
   if (state.searchReach.size > 0 && state.view === "graph") {
     const affects = el("span", "hint");
-    affects.append(" · affects ", el("span", "n", formatCount(state.searchReach.size)));
+    affects.append(" · ", el("span", "n", formatCount(state.searchReach.size)), " downstream");
     refs.searchCount.appendChild(affects);
   } else if (state.searchMatches.size > 0 && state.view === "graph") {
     refs.searchCount.appendChild(el("span", "hint", " · enter zooms"));

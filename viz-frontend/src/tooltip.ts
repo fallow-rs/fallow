@@ -110,7 +110,7 @@ const lensLine = (state: AppState, fileIndex: number): HTMLElement | null => {
       file.max_cyclomatic >= 20 ? "sev-error" : file.max_cyclomatic >= 10 ? "sev-warn" : "tip-muted";
     return line(
       `${cls} tip-line`,
-      `cyclomatic ${formatCount(file.max_cyclomatic)} · cognitive ${formatCount(file.max_cognitive)}`,
+      `complexity ${formatCount(file.max_cyclomatic)} · nesting ${formatCount(file.max_cognitive)}`,
     );
   }
   if (state.lens === "boundaries" && file.zone !== undefined) {
@@ -151,7 +151,7 @@ export const showFileTooltip = (
   const importers = document.createElement("span");
   importers.appendChild(line("wire-dot", "●"));
   importers.appendChild(
-    document.createTextNode(` ${formatCount(file.importer_count)} imported by`),
+    document.createTextNode(` ${formatCount(file.importer_count)} importers`),
   );
   wires.appendChild(importers);
   const imports = document.createElement("span");
@@ -164,8 +164,8 @@ export const showFileTooltip = (
   if (sev1) tip.appendChild(sev1);
   const lens1 = lensLine(state, fileIndex);
   if (lens1) tip.appendChild(lens1);
-
-  tip.appendChild(line("tip-muted tip-line", "click for details"));
+  // No generic "click for details" line: the pointer cursor already says
+  // the node is clickable, and the severity/lens lines carry the substance.
 
   if (dock) {
     tip.style.display = "block";
@@ -190,8 +190,8 @@ export const showRoadTooltip = (
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
-  tip.appendChild(line("tip-kind", "IMPORTS"));
-  tip.appendChild(line("tip-name", `${srcKey} ▸ ${dstKey}`));
+  tip.appendChild(line("tip-kind", "imports"));
+  tip.appendChild(line("tip-name", `${srcKey} → ${dstKey}`));
   const stats: Array<{ value: string; label: string; cls?: string }> = [
     { value: formatCount(count), label: "imports" },
   ];
@@ -202,7 +202,7 @@ export const showRoadTooltip = (
     stats.push({ value: formatCount(cycleEdges), label: "cycle edges", cls: "sev-warn" });
   }
   tip.appendChild(statGrid(stats));
-  tip.appendChild(line("tip-muted tip-line", "click to list the file pairs"));
+  tip.appendChild(line("tip-muted tip-line", "click to list every import"));
   position(tip, mouseX, mouseY);
 };
 
@@ -217,7 +217,7 @@ export const showDirTooltip = (
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
-  tip.appendChild(line("tip-kind", "FOLDER"));
+  tip.appendChild(line("tip-kind", "folder"));
   tip.appendChild(line("tip-name", `${name}/`));
   const stats: Stat[] = [
     { value: formatCount(fileCount), label: "files" },

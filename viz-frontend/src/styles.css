@@ -132,9 +132,22 @@ button {
 }
 
 .brand .project::before {
-  content: "▸ ";
+  content: "· ";
   font-weight: 400;
   color: var(--text-muted);
+}
+
+/* Visually hidden, still read by assistive tech (live-region channel). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .brand .sub {
@@ -241,12 +254,12 @@ button {
   background: var(--surface-1);
 }
 
-.lens-tab[aria-selected="true"] {
+.lens-tab[aria-pressed="true"] {
   color: var(--text-high);
   font-weight: 700;
 }
 
-.lens-tab[aria-selected="true"]::after {
+.lens-tab[aria-pressed="true"]::after {
   content: "";
   position: absolute;
   left: 0;
@@ -277,6 +290,15 @@ button {
 
 .lens-tab .badge.warm {
   color: color-mix(in oklab, var(--amber-text) 55%, var(--text-muted));
+}
+
+/* Error-severity lenses (unused, boundaries) count in red, not amber. */
+.lens-tab .badge.hot.error {
+  color: var(--red-text);
+}
+
+.lens-tab .badge.warm.error {
+  color: color-mix(in oklab, var(--red-text) 55%, var(--text-muted));
 }
 
 .lens-tab .badge.zero {

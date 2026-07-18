@@ -531,7 +531,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
       ctx.textBaseline = "top";
       ctx.fillStyle = theme.amberText;
       ctx.globalAlpha = age > 1400 ? 1 - (age - 1400) / 400 : 1;
-      ctx.fillText(gvs.notice, w / 2, 28);
+      ctx.fillText(gvs.notice, usableStageWidth(state, w) / 2, 28);
       ctx.globalAlpha = 1;
       cancelAnimationFrame(gvs.raf);
       gvs.raf = requestAnimationFrame(() => {
@@ -661,9 +661,9 @@ const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): voi
   const elapsed = performance.now() - gvs.revealAt;
   // Three beats: the nouns, the lines, then the verbs (what to do next).
   const captions: Array<[number, number, string]> = [
-    [0, 2600, "Every dot is a file · the shapes are folders"],
-    [2600, 5200, "Lines are imports · the thick end is the importer"],
-    [5200, 8600, "Click any dot for its story · keys 1-5 switch lenses"],
+    [0, 2600, "dots are files, shapes are folders"],
+    [2600, 5200, "lines are imports, thick end points at the importer"],
+    [5200, 8600, "click any dot to open its story"],
   ];
   const total = captions[captions.length - 1][1];
   if (elapsed >= total) {
@@ -680,10 +680,13 @@ const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): voi
     ctx.textBaseline = "middle";
     const textW = ctx.measureText(text).width;
     ctx.globalAlpha = Math.max(0, alpha);
+    // Center on the stage the viewer actually sees: the panel is open on
+    // first paint, so full-canvas w/2 would drift under it.
+    const cx = usableStageWidth(state, w) / 2;
     // Backed chip so the caption reads over cluster labels behind it.
-    chipRect(ctx, w / 2 - textW / 2 - 16, 12, textW + 32, 32, theme.bg, 1, theme.borderSubtle);
+    chipRect(ctx, cx - textW / 2 - 16, 12, textW + 32, 32, theme.bg, 1, theme.borderSubtle);
     ctx.fillStyle = theme.textHigh;
-    ctx.fillText(text, w / 2, 28.5);
+    ctx.fillText(text, cx, 28.5);
     ctx.globalAlpha = 1;
   }
 };

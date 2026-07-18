@@ -19,8 +19,8 @@ const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
       ["overview", "just the structure: folders and their imports, no findings"],
       ["unused", "red = file nothing imports · amber = file with unused exports"],
       ["duplication", "amber intensity = share of copy-pasted lines in the file"],
-      ["boundaries", "color = architecture zone · red road = forbidden import"],
-      ["complexity", "amber to red = hardest files to change (cyclomatic heat)"],
+      ["boundaries", "color = folder layer · red road = forbidden import"],
+      ["complexity", "amber to red = hardest files to change"],
     ],
   },
   {
@@ -38,7 +38,7 @@ const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
     title: "interactions",
     rows: [
       ["click a dot", "facts panel with who imports it and what it imports"],
-      ["click a road", "list every file pair on that road"],
+      ["click a road", "list every import between those two folders"],
       ["shift-click ×2", "trace the shortest dependency path between two files"],
       ["/ then enter", "search, zoom to the best match"],
       ["1 to 5", "switch lens · g graph · t treemap · 0 reset view"],

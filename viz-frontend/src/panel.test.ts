@@ -215,7 +215,7 @@ describe("buildMapDigest", () => {
     expect(md).toContain("most depended-on");
     expect(md).toContain("hub.ts (used by 40)");
     expect(md).toContain("$ fallow health");
-    expect(md).toContain("complexity · riskiest first");
+    expect(md).toContain("complexity hotspots");
   });
 
   it("surfaces the clone-group truncation flag in the duplication line", () => {
