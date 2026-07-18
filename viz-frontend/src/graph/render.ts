@@ -330,37 +330,66 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
 };
 
 /** Every file dot with its lens color, rings, badges, and dim states. */
+/** Color and alpha for one overview node. */
+interface NodeAppearance {
+  color: string;
+  alpha: number;
+  matched: boolean;
+  inReach: boolean;
+  dimmed: boolean;
+}
+
+/**
+ * Resolve a node's color and alpha from the lens, the lens crossfade, the
+ * search state, the hover neighborhood, and the reveal, or null when the
+ * node is effectively invisible and should be skipped. Pure (no drawing),
+ * so the blended-visibility logic is isolated from the paint loop.
+ */
+const nodeAppearance = (
+  scene: Scene,
+  hover: HoverContext,
+  node: FileNode,
+): NodeAppearance | null => {
+  const { state, gvs, reveal, searching } = scene;
+  const { theme } = state;
+  const file = state.data.files[node.fileIndex];
+  let color = lensColor(state.lens, theme, state.index, file);
+  // Crossfade node colors on a lens switch, matching the treemap.
+  if (gvs.lensPrev && scene.lensT < 1) {
+    const prev = gvs.lensPrev.get(node.fileIndex);
+    if (prev && prev !== color) color = mix(prev, color, scene.lensT);
+  }
+  const recessive = color === theme.cellNeutral || color === theme.cellEntry;
+  const matched = !searching || state.searchMatches.has(node.fileIndex);
+  const inReach = searching && state.searchReach.has(node.fileIndex);
+  const isNeighbor = hover.neighbors?.has(node.fileIndex) ?? false;
+  const dimmed = hover.neighbors !== null && !isNeighbor;
+
+  let alpha = recessive ? 0.82 : 0.95;
+  if (dimmed) alpha = 0.16;
+  // Files reachable from the matched set stay legible (the combined blast
+  // radius); everything else recedes.
+  if (searching && !matched) alpha = Math.min(alpha, inReach ? 0.5 : 0.1);
+  if (isNeighbor) alpha = 1;
+  alpha *= reveal.cluster(gvs.clusters[node.cluster]);
+  if (alpha <= 0.01) return null;
+  return { color, alpha, matched, inReach, dimmed };
+};
+
 const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): void => {
-  const { state, gvs, kRel, reveal, searching } = scene;
+  const { state, gvs, kRel, searching } = scene;
   const { ctx, theme, data } = state;
   const { transform, clusters, fileNodes } = gvs;
   const files = data.files;
-  const { neighbors, importers: hoverImporters, imports: hoverImports } = hover;
+  const { importers: hoverImporters, imports: hoverImports } = hover;
   // Nodes.
   for (const node of fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
     if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
+    const look = nodeAppearance(scene, hover, node);
+    if (!look) continue;
     const file = files[node.fileIndex];
-    let color = lensColor(state.lens, theme, state.index, file);
-    // Crossfade node colors on a lens switch, matching the treemap.
-    if (gvs.lensPrev && scene.lensT < 1) {
-      const prev = gvs.lensPrev.get(node.fileIndex);
-      if (prev && prev !== color) color = mix(prev, color, scene.lensT);
-    }
-    const recessive = color === theme.cellNeutral || color === theme.cellEntry;
-    const matched = !searching || state.searchMatches.has(node.fileIndex);
-    const inReach = searching && state.searchReach.has(node.fileIndex);
-    const isNeighbor = neighbors?.has(node.fileIndex) ?? false;
-    const dimmed = neighbors !== null && !isNeighbor;
-
-    let alpha = recessive ? 0.82 : 0.95;
-    if (dimmed) alpha = 0.16;
-    // Files reachable from the matched set stay legible (the combined
-    // blast radius); everything else recedes.
-    if (searching && !matched) alpha = Math.min(alpha, inReach ? 0.5 : 0.1);
-    if (isNeighbor) alpha = 1;
-    alpha *= reveal.cluster(clusters[node.cluster]);
-    if (alpha <= 0.01) continue;
+    const { color, alpha, matched, inReach, dimmed } = look;
 
     ctx.globalAlpha = alpha;
     ctx.fillStyle = color;

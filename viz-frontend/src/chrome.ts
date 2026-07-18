@@ -340,50 +340,49 @@ const LENS_COMMANDS: Record<Lens, string> = {
 };
 
 /**
+ * The one-line "what the active lens just found" summary. Pure and
+ * exported so the wording (empty vs populated, singular vs plural) is
+ * unit-tested without building the DOM. Zero findings explains the
+ * neutral state instead of advertising an absent count.
+ */
+export const lensSummaryText = (state: AppState): string => {
+  const s = state.data.summary;
+  switch (state.lens) {
+    case "overview":
+      return `${formatCount(s.total_files)} files · ${formatCount(s.total_edges)} imports`;
+    case "deadcode":
+      return s.unused_files + s.unused_exports === 0
+        ? "nothing unreachable · every file is reachable from an entry point"
+        : `${formatCount(s.unused_files)} unused files and ${formatCount(s.unused_exports)} unused exports · shown red and amber`;
+    case "dupes":
+      return s.clone_groups === 0
+        ? "no duplicated blocks found"
+        : state.selectedClone !== null
+          ? `viewing one duplicated block of ${formatCount(s.clone_groups)} · esc returns to the list`
+          : `${formatCount(s.clone_groups)} blocks (${formatCount(s.duplicated_lines)} lines) · click a row in the list to see every copy`;
+    case "boundaries":
+      return s.circular_deps + s.boundary_violations === 0
+        ? "no import loops or forbidden imports"
+        : `${formatCount(s.circular_deps)} loop${s.circular_deps === 1 ? "" : "s"} · ${formatCount(s.boundary_violations)} forbidden import${s.boundary_violations === 1 ? "" : "s"} · shown as red and amber connections`;
+    case "hotspots":
+      return s.hotspot_files === 0
+        ? "no files flagged as complex"
+        : `the ${formatCount(s.hotspot_files)} most complex files · amber → red = harder to change safely`;
+  }
+};
+
+/**
  * Context strip under the tabs, always on: the active lens's gloss
  * leads, then what it found, then the CLI that reproduces it. The
  * arrange toggle sits on the strip's right (graph view only).
  */
 const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
-  const s = state.data.summary;
   const gloss = LENSES.find((d) => d.id === state.lens)?.gloss ?? "";
-  let text = "";
-  switch (state.lens) {
-    case "overview":
-      text = `${formatCount(s.total_files)} files · ${formatCount(s.total_edges)} imports`;
-      break;
-    case "deadcode":
-      text =
-        s.unused_files + s.unused_exports === 0
-          ? "nothing unreachable · every file is reachable from an entry point"
-          : `${formatCount(s.unused_files)} unused files and ${formatCount(s.unused_exports)} unused exports · shown red and amber`;
-      break;
-    case "dupes":
-      text =
-        s.clone_groups === 0
-          ? "no duplicated blocks found"
-          : state.selectedClone !== null
-            ? `viewing one duplicated block of ${formatCount(s.clone_groups)} · esc returns to the list`
-            : `${formatCount(s.clone_groups)} blocks (${formatCount(s.duplicated_lines)} lines) · click a row in the list to see every copy`;
-      break;
-    case "boundaries":
-      text =
-        s.circular_deps + s.boundary_violations === 0
-          ? "no import loops or forbidden imports"
-          : `${formatCount(s.circular_deps)} loop${s.circular_deps === 1 ? "" : "s"} · ${formatCount(s.boundary_violations)} forbidden import${s.boundary_violations === 1 ? "" : "s"} · shown as red and amber connections`;
-      break;
-    case "hotspots":
-      text =
-        s.hotspot_files === 0
-          ? "no files flagged as complex"
-          : `the ${formatCount(s.hotspot_files)} most complex files · amber → red = harder to change safely`;
-      break;
-  }
   const left = refs.summaryLine.querySelector(".summary-left");
   if (!left) return;
   left.replaceChildren();
   left.appendChild(el("span", "summary-gloss", gloss));
-  left.appendChild(el("span", "summary-text", text));
+  left.appendChild(el("span", "summary-text", lensSummaryText(state)));
   const cmd = LENS_COMMANDS[state.lens];
   if (cmd !== "") {
     const chip = copyButton("summary-cmd", `run: ${cmd.slice(2)}`, () => cmd.slice(2));

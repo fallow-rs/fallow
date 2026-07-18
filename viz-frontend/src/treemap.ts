@@ -228,6 +228,42 @@ interface RenderCtx {
   labels: boolean;
 }
 
+/** A backed footer chip: a translucent bg rect behind muted legend text. */
+const footerChip = (
+  ctx: CanvasRenderingContext2D,
+  theme: AppState["theme"],
+  text: string,
+  align: "left" | "right",
+  edgeX: number,
+  y: number,
+): void => {
+  ctx.font = FONT_LEGEND;
+  ctx.textAlign = align;
+  ctx.textBaseline = "middle";
+  const tw = ctx.measureText(text).width;
+  const boxX = align === "left" ? edgeX - 6 : edgeX - tw - 6;
+  ctx.fillStyle = theme.bg;
+  ctx.globalAlpha = 0.85;
+  ctx.fillRect(boxX, y - 9, tw + 12, 18);
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = theme.textMuted;
+  ctx.fillText(text, edgeX, y);
+  ctx.globalAlpha = 1;
+};
+
+/** Footer strip: lens legend on the left, and, at the root, the drill hint. */
+const drawTreemapFooter = (state: AppState, w: number, h: number): void => {
+  const { ctx, theme } = state;
+  const y = h - 17;
+  const legend = legendText(state.lens, state.data, "map");
+  if (legend !== "") footerChip(ctx, theme, legend, "left", 16, y);
+  // The treemap's one non-obvious gesture is drilling; teach it at the
+  // root (once drilled, the breadcrumb already shows how to navigate).
+  if (state.drillPath === "") {
+    footerChip(ctx, theme, "click a folder to zoom in", "right", usableStageWidth(state, w) - 16, y);
+  }
+};
+
 export const renderTreemap = (state: AppState): void => {
   const { canvas, ctx } = state;
   // Re-read per render: the window can move to a display with a
@@ -329,39 +365,7 @@ export const renderTreemap = (state: AppState): void => {
     tm.layoutKey = rctx.hitTest && tm.anim === null ? layoutKey : "";
   }
 
-  if (!zooming) {
-    const legend = legendText(state.lens, state.data, "map");
-    if (legend !== "") {
-      ctx.font = FONT_LEGEND;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      const textW = ctx.measureText(legend).width;
-      ctx.fillStyle = state.theme.bg;
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(10, h - 26, textW + 12, 18);
-      ctx.globalAlpha = 0.8;
-      ctx.fillStyle = state.theme.textMuted;
-      ctx.fillText(legend, 16, h - 17);
-      ctx.globalAlpha = 1;
-    }
-    // The treemap's one non-obvious gesture is drilling; teach it at the
-    // root (once drilled, the breadcrumb already shows how to navigate).
-    if (state.drillPath === "") {
-      const hint = "click a folder to zoom in";
-      const right = usableStageWidth(state, w) - 16;
-      ctx.font = FONT_LEGEND;
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-      const hw = ctx.measureText(hint).width;
-      ctx.fillStyle = state.theme.bg;
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(right - hw - 6, h - 26, hw + 12, 18);
-      ctx.globalAlpha = 0.8;
-      ctx.fillStyle = state.theme.textMuted;
-      ctx.fillText(hint, right, h - 17);
-      ctx.globalAlpha = 1;
-    }
-  }
+  if (!zooming) drawTreemapFooter(state, w, h);
 
   if (zooming) {
     ctx.restore();

@@ -39,7 +39,7 @@ const CAMERA_MS = 450;
  * eye can follow where the camera went. A named transition means a second
  * call interrupts the first rather than fighting it.
  */
-export const tweenCamera = (state: AppState, target: ZoomTransform, duration: number): void => {
+const tweenCamera = (state: AppState, target: ZoomTransform, duration: number): void => {
   const gvs = getGVS(state);
   if (!gvs.zoomBehavior) return;
   const sel = select(state.canvas);
