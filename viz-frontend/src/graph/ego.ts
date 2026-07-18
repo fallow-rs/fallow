@@ -5,7 +5,7 @@
  * through to re-root.
  */
 import type { AppState } from "../state";
-import { basename, dirname, formatCount, lensColor } from "../data";
+import { basename, dirname, formatCount, lensColor, reachSet } from "../data";
 import {
   type GraphViewState,
   FONT_CARD,
@@ -37,10 +37,18 @@ export const renderGhost = (state: AppState, gvs: GraphViewState): void => {
     ctx.lineWidth = 1 / transform.k;
     ctx.stroke();
   }
-  ctx.globalAlpha = 0.12;
+  // Blast radius: everything that transitively depends on the selected
+  // file glows blue in the ghost, so the spread beyond the 1-hop ego
+  // fan is visible at a glance.
+  const affected =
+    state.selected !== null ? reachSet(state.index.importersOf, state.selected) : null;
   for (const node of gvs.fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
-    ctx.fillStyle = lensColor(state.lens, theme, state.index, state.data.files[node.fileIndex]);
+    const inBlast = affected?.has(node.fileIndex) ?? false;
+    ctx.globalAlpha = inBlast ? 0.5 : 0.12;
+    ctx.fillStyle = inBlast
+      ? theme.blue
+      : lensColor(state.lens, theme, state.index, state.data.files[node.fileIndex]);
     ctx.beginPath();
     ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
     ctx.fill();

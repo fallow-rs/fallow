@@ -1,6 +1,6 @@
 import type { AppState } from "./state";
 import type { VizFile } from "./types";
-import { basename, dirname, formatCount, formatSize } from "./data";
+import { basename, dirname, formatCount, formatSize, reachSet } from "./data";
 import { closeButton, copyButton, el } from "./dom";
 
 /** Called when the user clicks through to another file. */
@@ -289,6 +289,24 @@ const factsSection = (state: AppState, file: VizFile): HTMLElement => {
   }
   if (file.fn_count > 0) pairs.push(["functions", formatCount(file.fn_count)]);
   facts.appendChild(kvEl(pairs));
+
+  // Transitive reach: the one-look blast-radius answer. "reaches" is
+  // everything this file transitively pulls in; "affects" is everything
+  // that transitively depends on it (what breaks if you change it).
+  const fileIdx = state.data.files.indexOf(file);
+  if (fileIdx >= 0) {
+    const reach: Array<[string, string | HTMLElement]> = [];
+    const down = reachSet(state.index.importsOf, fileIdx).size;
+    const up = reachSet(state.index.importersOf, fileIdx).size;
+    if (down > file.import_count) reach.push(["reaches", `${formatCount(down)} files`]);
+    if (up > file.importer_count) reach.push(["affects", `${formatCount(up)} files`]);
+    if (reach.length > 0) {
+      facts.appendChild(kvEl(reach));
+      facts.appendChild(
+        el("div", "muted key-line", "reaches = pulled in · affects = breaks if changed"),
+      );
+    }
+  }
   return facts;
 };
 

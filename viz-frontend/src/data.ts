@@ -275,6 +275,28 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
   return lines[lens];
 };
 
+/**
+ * Transitive reach over an adjacency list from `start` (the start file
+ * itself is excluded). With `importsOf` this is everything the file
+ * pulls in; with `importersOf` it is the file's blast radius, every
+ * file that transitively depends on it.
+ */
+export const reachSet = (adj: number[][], start: number): Set<number> => {
+  const seen = new Set<number>();
+  const stack: number[] = [start];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    if (cur === undefined) break;
+    for (const nb of adj[cur] ?? []) {
+      if (nb !== start && !seen.has(nb)) {
+        seen.add(nb);
+        stack.push(nb);
+      }
+    }
+  }
+  return seen;
+};
+
 // ── Formatting helpers ──────────────────────────────────────────
 
 export const formatSize = (bytes: number): string => {

@@ -3,6 +3,7 @@ import {
   basename,
   buildIndex,
   dirname,
+  reachSet,
   dupRatio,
   formatSize,
   legendText,
@@ -182,3 +183,26 @@ describe("formatting", () => {
     expect(dirname("c.ts")).toBe("");
   });
 });
+
+describe("reachSet", () => {
+  // Chain a -> b -> c: c is reached from a downstream; a affects c upstream.
+  const adjDown = [[1], [2], []]; // importsOf: a imports b, b imports c
+  const adjUp = [[], [0], [1]]; // importersOf: b imported by a, c imported by b
+
+  it("collects the full transitive downstream set, excluding the start", () => {
+    const r = reachSet(adjDown, 0);
+    expect([...r].sort()).toEqual([1, 2]);
+    expect(r.has(0)).toBe(false);
+  });
+
+  it("collects the full transitive upstream (blast radius) set", () => {
+    expect([...reachSet(adjUp, 2)].sort()).toEqual([0, 1]);
+    expect(reachSet(adjUp, 0).size).toBe(0);
+  });
+
+  it("terminates on a cycle instead of looping forever", () => {
+    const cyclic = [[1], [0]];
+    expect([...reachSet(cyclic, 0)].sort()).toEqual([1]);
+  });
+});
+
