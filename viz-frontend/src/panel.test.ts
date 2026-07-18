@@ -185,3 +185,18 @@ describe("rankRowsFor", () => {
     expect(rows[0].metric).toBe("12 lines");
   });
 });
+
+describe("rankRowsFor overview", () => {
+  it("ranks the most depended-on files first", () => {
+    const rows = rankRowsFor(
+      stateFor("overview", [
+        file("src/a.ts", { importer_count: 2 }),
+        file("src/hub.ts", { importer_count: 40 }),
+        file("src/leaf.ts", { importer_count: 0 }),
+      ]),
+    ).rows;
+    expect(rows[0].label).toBe("hub.ts");
+    expect(rows[0].metric).toBe("used by 40");
+    expect(rows.some((r) => r.label === "leaf.ts")).toBe(false);
+  });
+});

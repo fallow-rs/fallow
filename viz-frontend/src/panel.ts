@@ -396,13 +396,10 @@ export const renderPanel = (
     return;
   }
   if (state.selected === null) {
-    // A finding lens with nothing selected shows its ranked worst-first
-    // list, so the lens answers "which ones first", not just "how many".
-    if (state.lens !== "overview") {
-      renderLensPanel(state, panel, navigate, refresh);
-      return;
-    }
-    panel.classList.remove("open");
+    // Nothing selected: every lens shows a ranked list. Finding lenses
+    // rank worst-first; overview ranks the most depended-on files, the
+    // newcomer's entry point.
+    renderLensPanel(state, panel, navigate, refresh);
     return;
   }
 
@@ -482,6 +479,22 @@ interface RankRow {
 export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } => {
   const files = state.data.files;
   switch (state.lens) {
+    case "overview": {
+      // The newcomer's "what should I read first": files the rest of the
+      // codebase leans on hardest, ranked by how many import them.
+      const rows = files
+        .map((f, i) => ({ f, i }))
+        .filter(({ f }) => f.importer_count > 0)
+        .sort((a, b) => b.f.importer_count - a.f.importer_count)
+        .map(({ f, i }) => ({
+          label: basename(f.path),
+          dir: dirname(f.path),
+          metric: `used by ${formatCount(f.importer_count)}`,
+          metricCls: "muted",
+          fileIndex: i,
+        }));
+      return { title: "most depended-on · files everything needs", rows, empty: "no shared files" };
+    }
     case "deadcode": {
       const rows: RankRow[] = [];
       const unused = files

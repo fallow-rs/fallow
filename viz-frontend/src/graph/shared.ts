@@ -409,12 +409,10 @@ export const roadWidth = (count: number): number =>
 
 /** Width the canvas can actually use: the right panel overlays the stage. */
 export const usableStageWidth = (state: AppState, stageW: number): number => {
-  const panelOpen =
-    state.selected !== null ||
-    state.selectedRoad !== null ||
-    state.selectedClone !== null ||
-    state.lens !== "overview";
-  return panelOpen ? Math.max(420, stageW - 380) : stageW;
+  // A panel is always present now: a selection, a road/clone drill-down,
+  // or the per-lens ranked list (overview included). Reserve its width.
+  void state;
+  return Math.max(420, stageW - 380);
 };
 
 /** Folder keys whose imports carry little overview signal (test suites). */
