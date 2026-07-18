@@ -87,7 +87,11 @@ describe("road and cluster helpers", () => {
   });
 
   it("falls back to a finite identity transform for empty bounds", () => {
-    const fit = fitTransform(1600, 1000, clusterBounds([], () => true));
+    const fit = fitTransform(
+      1600,
+      1000,
+      clusterBounds([], () => true),
+    );
     expect(Number.isFinite(fit.x)).toBe(true);
     expect(Number.isFinite(fit.y)).toBe(true);
     expect(Number.isFinite(fit.k)).toBe(true);

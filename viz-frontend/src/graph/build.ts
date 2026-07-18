@@ -4,14 +4,7 @@
  * seeded per-cluster force layouts, hulls, and the one-time init that
  * wires the zoom camera.
  */
-import {
-  forceCollide,
-  forceLink,
-  forceManyBody,
-  forceSimulation,
-  forceX,
-  forceY,
-} from "d3-force";
+import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from "d3-force";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type D3ZoomEvent } from "d3-zoom";
 import Graph from "graphology";
@@ -136,7 +129,9 @@ const louvainCluster = (
       const dir = parts.length > 1 ? parts.slice(0, 2).join("/") : parts[0];
       dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
     }
-    const sorted = [...dirCounts.entries()].toSorted((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    const sorted = [...dirCounts.entries()].toSorted(
+      (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1),
+    );
     let name = sorted[0]?.[0] ?? "misc";
     while (result.has(name)) name = `${name}*`;
     result.set(name, indices);
@@ -153,11 +148,7 @@ export interface MetaEdge {
   cycleEdges: number;
 }
 
-const buildMetaGraph = (
-  state: AppState,
-  clusterOf: number[],
-  clusterCount: number,
-): MetaEdge[] => {
+const buildMetaGraph = (state: AppState, clusterOf: number[], clusterCount: number): MetaEdge[] => {
   const n = state.data.files.length;
   const buckets = new Map<number, MetaEdge>();
   for (const [from, to] of state.data.edges) {
@@ -310,7 +301,9 @@ const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
         }
         return { c, bary: den > 0 ? num / den : c.order };
       });
-      const orderedScored = scored.toSorted((a, b) => a.bary - b.bary || (a.c.key < b.c.key ? -1 : 1));
+      const orderedScored = scored.toSorted(
+        (a, b) => a.bary - b.bary || (a.c.key < b.c.key ? -1 : 1),
+      );
       orderedScored.forEach((s, i) => {
         s.c.order = i;
       });
@@ -576,7 +569,10 @@ const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
       .randomSource(rand)
       .force("link", forceLink<FileNode, LocalLink>(links).distance(24).strength(0.3))
       .force("charge", forceManyBody<FileNode>().strength(-30).theta(0.9).distanceMax(240))
-      .force("collide", forceCollide<FileNode>((d) => d.radius + 2))
+      .force(
+        "collide",
+        forceCollide<FileNode>((d) => d.radius + 2),
+      )
       .force("x", forceX<FileNode>(cluster.cx).strength(0.15))
       .force("y", forceY<FileNode>(cluster.cy).strength(0.15))
       .alphaDecay(0.028)
@@ -738,7 +734,9 @@ export const initGraphNodes = (state: AppState): void => {
     .toSorted((a, b) => a - b);
   const p95 =
     importerCounts.length > 0
-      ? importerCounts[Math.min(importerCounts.length - 1, Math.floor(importerCounts.length * 0.95))]
+      ? importerCounts[
+          Math.min(importerCounts.length - 1, Math.floor(importerCounts.length * 0.95))
+        ]
       : Infinity;
   gvs.hubFloor = Math.max(25, p95);
 

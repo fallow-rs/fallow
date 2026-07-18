@@ -31,11 +31,7 @@ const asciiBar = (value: number, max: number, dangerAt: number): HTMLElement => 
   const slots = 8;
   const filled = Math.max(0, Math.min(slots, Math.round((value / max) * slots)));
   const bar = el("span", "bar");
-  const fill = el(
-    "span",
-    value >= dangerAt ? "fill-error" : "fill-warn",
-    "█".repeat(filled),
-  );
+  const fill = el("span", value >= dangerAt ? "fill-error" : "fill-warn", "█".repeat(filled));
   bar.append(fill, document.createTextNode("░".repeat(slots - filled)));
   return bar;
 };
@@ -48,7 +44,10 @@ const statusLabel = (file: VizFile): HTMLElement => {
       break;
     case "hasUnusedExports":
       wrap.appendChild(
-        sev("sev-warn", `${formatCount(file.unused_export_count)} unused export${file.unused_export_count === 1 ? "" : "s"}`),
+        sev(
+          "sev-warn",
+          `${formatCount(file.unused_export_count)} unused export${file.unused_export_count === 1 ? "" : "s"}`,
+        ),
       );
       break;
     case "entryPoint":
@@ -124,10 +123,20 @@ const complexitySection = (file: VizFile): HTMLElement | null => {
       }
       tr.appendChild(nameTd);
       const ccTd = el("td", "num");
-      ccTd.appendChild(sev(fn.cyclomatic >= 20 ? "sev-error" : fn.cyclomatic >= 10 ? "sev-warn" : "", String(fn.cyclomatic)));
+      ccTd.appendChild(
+        sev(
+          fn.cyclomatic >= 20 ? "sev-error" : fn.cyclomatic >= 10 ? "sev-warn" : "",
+          String(fn.cyclomatic),
+        ),
+      );
       tr.appendChild(ccTd);
       const cogTd = el("td", "num");
-      cogTd.appendChild(sev(fn.cognitive >= 25 ? "sev-error" : fn.cognitive >= 15 ? "sev-warn" : "", String(fn.cognitive)));
+      cogTd.appendChild(
+        sev(
+          fn.cognitive >= 25 ? "sev-error" : fn.cognitive >= 15 ? "sev-warn" : "",
+          String(fn.cognitive),
+        ),
+      );
       tr.appendChild(cogTd);
       tr.appendChild(el("td", "num", String(fn.lines)));
       const barTd = el("td");
@@ -137,12 +146,13 @@ const complexitySection = (file: VizFile): HTMLElement | null => {
     }
     table.appendChild(tbody);
     cx.appendChild(table);
-    cx.appendChild(el("div", "muted key-line", "cc = branch count · cog = how tangled · loc = lines"));
+    cx.appendChild(
+      el("div", "muted key-line", "cc = branch count · cog = how tangled · loc = lines"),
+    );
     return cx;
   }
   return null;
 };
-
 
 /** Clone groups this file participates in, with jump links. */
 const duplicationSection = (
@@ -163,9 +173,7 @@ const duplicationSection = (
       const headLine = el("div", "clone-head");
       const n = el("span", "n", `${group.lines} lines`);
       headLine.appendChild(n);
-      headLine.appendChild(
-        document.createTextNode(` × ${group.instances.length} places`),
-      );
+      headLine.appendChild(document.createTextNode(` × ${group.instances.length} places`));
       row.appendChild(headLine);
       const others = group.instances
         .filter((inst) => inst.file !== fileIdx)
@@ -191,7 +199,6 @@ const duplicationSection = (
   return null;
 };
 
-
 /** Outgoing and incoming boundary violations. */
 const boundariesSection = (
   state: AppState,
@@ -210,7 +217,11 @@ const boundariesSection = (
           `${state.data.zones[v.from_zone]?.name ?? "?"} → ${state.data.zones[v.to_zone]?.name ?? "?"} `,
         ),
       );
-      const btn = el("button", undefined, basename(state.data.files[v.to].path)) as HTMLButtonElement;
+      const btn = el(
+        "button",
+        undefined,
+        basename(state.data.files[v.to].path),
+      ) as HTMLButtonElement;
       btn.type = "button";
       btn.className = "";
       btn.style.textDecoration = "underline";
@@ -221,14 +232,17 @@ const boundariesSection = (
     }
     if (incoming.length > 0) {
       b.appendChild(
-        el("div", "muted", `imported by ${incoming.length} file${incoming.length === 1 ? "" : "s"} from outside its layer`),
+        el(
+          "div",
+          "muted",
+          `imported by ${incoming.length} file${incoming.length === 1 ? "" : "s"} from outside its layer`,
+        ),
       );
     }
     return b;
   }
   return null;
 };
-
 
 /** Cycle membership with jump links. */
 const cycleSection = (
@@ -242,13 +256,19 @@ const cycleSection = (
     const cycles = state.data.cycles.filter((c) => c.includes(fileIdx));
     for (const cycle of cycles.slice(0, 2)) {
       cyc.appendChild(el("div", "sev-warn", `loop of ${cycle.length} files`));
-      cyc.appendChild(linkList(state, cycle.filter((i) => i !== fileIdx), navigate, 8));
+      cyc.appendChild(
+        linkList(
+          state,
+          cycle.filter((i) => i !== fileIdx),
+          navigate,
+          8,
+        ),
+      );
     }
     return cyc;
   }
   return null;
 };
-
 
 /** Importer and import link lists. */
 const connectionSections = (
@@ -432,12 +452,54 @@ export const renderPanel = (
 
 /** Keywords the preview highlighter tints as language syntax. */
 const CODE_KEYWORDS = new Set([
-  "const", "let", "var", "function", "return", "if", "else", "for", "while",
-  "do", "switch", "case", "break", "continue", "new", "class", "extends",
-  "super", "this", "import", "export", "from", "default", "async", "await",
-  "yield", "typeof", "instanceof", "in", "of", "void", "delete", "try",
-  "catch", "finally", "throw", "null", "true", "false", "undefined", "as",
-  "interface", "type", "enum", "public", "private", "readonly", "static",
+  "const",
+  "let",
+  "var",
+  "function",
+  "return",
+  "if",
+  "else",
+  "for",
+  "while",
+  "do",
+  "switch",
+  "case",
+  "break",
+  "continue",
+  "new",
+  "class",
+  "extends",
+  "super",
+  "this",
+  "import",
+  "export",
+  "from",
+  "default",
+  "async",
+  "await",
+  "yield",
+  "typeof",
+  "instanceof",
+  "in",
+  "of",
+  "void",
+  "delete",
+  "try",
+  "catch",
+  "finally",
+  "throw",
+  "null",
+  "true",
+  "false",
+  "undefined",
+  "as",
+  "interface",
+  "type",
+  "enum",
+  "public",
+  "private",
+  "readonly",
+  "static",
 ]);
 
 /**
@@ -482,9 +544,8 @@ interface RankRow {
   clone?: number;
 }
 
-export const rankRowsFor = (
-  state: AppState,
-): { title: string; rows: RankRow[]; empty: string } => rankRowsForLens(state, state.lens);
+export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } =>
+  rankRowsForLens(state, state.lens);
 
 const rankRowsForLens = (
   state: AppState,
@@ -601,7 +662,8 @@ const rankRowsForLens = (
           label: basename(f.path),
           dir: dirname(f.path),
           metric: `cc ${formatCount(f.max_cyclomatic)} · used by ${formatCount(f.importer_count)}`,
-          metricCls: f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "muted",
+          metricCls:
+            f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "muted",
           fileIndex: i,
         }));
       return { title: "complexity hotspots", rows, empty: "no complex functions" };
@@ -815,7 +877,12 @@ const renderRoadPanel = (
 ): void => {
   const road = state.selectedRoad;
   if (!road) return;
-  const box = panelShell(panel, "imports between folders", `${road.srcKey} → ${road.dstKey}`, close);
+  const box = panelShell(
+    panel,
+    "imports between folders",
+    `${road.srcKey} → ${road.dstKey}`,
+    close,
+  );
   panel.setAttribute("aria-label", "imports between folders");
   const statusLine = el("div", "status-line");
   statusLine.appendChild(

@@ -219,7 +219,11 @@ const init = (): void => {
         const dir = dirname(state.data.files[fileIndex].path);
         // Drill to the nearest ancestor directory that exists as a node and
         // contains the file, so the selection is visible.
-        if (!state.data.files[fileIndex].path.startsWith(state.drillPath === "" ? "" : `${state.drillPath}/`)) {
+        if (
+          !state.data.files[fileIndex].path.startsWith(
+            state.drillPath === "" ? "" : `${state.drillPath}/`,
+          )
+        ) {
           let target = dir;
           while (target !== "" && !state.index.nodesByPath.has(target)) {
             target = dirname(target);
@@ -541,7 +545,10 @@ const init = (): void => {
   }
 };
 
-const countLeaves = (node: { children: Array<{ children: unknown[]; fileIndex: number | null }>; fileIndex: number | null }): number => {
+const countLeaves = (node: {
+  children: Array<{ children: unknown[]; fileIndex: number | null }>;
+  fileIndex: number | null;
+}): number => {
   if (node.fileIndex !== null) return 1;
   let n = 0;
   for (const child of node.children) {

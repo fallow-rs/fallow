@@ -204,7 +204,8 @@ export const FONT_SMALL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, 
 export const FONT_MICRO = '9px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 export const FONT_CHIP = '11px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 export const FONT_LEGEND = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_CARD = '700 13px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+export const FONT_CARD =
+  '700 13px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 
 export const NODE_R_MIN = 2.5;
 export const NODE_R_MAX = 10;
@@ -354,7 +355,10 @@ export const taperedRibbon = (
   ctx.closePath();
 };
 
-export const roadGeometry = (gvs: GraphViewState, road: Road): { p0: Pt; p1: Pt; p2: Pt; p3: Pt } => {
+export const roadGeometry = (
+  gvs: GraphViewState,
+  road: Road,
+): { p0: Pt; p1: Pt; p2: Pt; p3: Pt } => {
   const src = gvs.clusters[road.src];
   const dst = gvs.clusters[road.dst];
   let p0 = gatePoint(src, { x: dst.cx, y: dst.cy });

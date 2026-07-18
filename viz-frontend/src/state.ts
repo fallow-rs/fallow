@@ -47,10 +47,7 @@ export interface AppState {
   requestRender: () => void;
 }
 
-export const createState = (
-  data: VizData,
-  canvas: HTMLCanvasElement,
-): AppState | null => {
+export const createState = (data: VizData, canvas: HTMLCanvasElement): AppState | null => {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   // Mode A dashboards are dark-first; the toggle switches to the light

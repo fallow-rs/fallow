@@ -113,7 +113,9 @@ const buildColumn = (
     const cluster = gvs.clusters.find((c) => c.key === dir || c.key.startsWith(`${dir}/`));
     return cluster ? cluster.layer * 1000 + cluster.order : 999999;
   };
-  const groupKeys = [...groups.keys()].toSorted((a, b) => layerOf(a) - layerOf(b) || (a < b ? -1 : 1));
+  const groupKeys = [...groups.keys()].toSorted(
+    (a, b) => layerOf(a) - layerOf(b) || (a < b ? -1 : 1),
+  );
 
   const fileRow = (idx: number): StageRow => ({
     kind: "file",
@@ -386,12 +388,7 @@ const drawFileRowLabel = (state: AppState, row: StageRow, g: RowGeom): void => {
 };
 
 /** Faint leader from a row's dot to the file's true map position. */
-const drawRowLeader = (
-  state: AppState,
-  gvs: GraphViewState,
-  row: StageRow,
-  g: RowGeom,
-): void => {
+const drawRowLeader = (state: AppState, gvs: GraphViewState, row: StageRow, g: RowGeom): void => {
   if (row.kind !== "file" || row.fileIndex === undefined) return;
   const node = gvs.fileNodes[row.fileIndex];
   if (!node || node.x == null || node.y == null) return;

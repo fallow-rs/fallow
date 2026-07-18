@@ -36,11 +36,7 @@ const file = (over: Partial<VizFile> = {}): VizFile => ({
 
 const data = (over: Partial<VizData> = {}): VizData => ({
   root: "demo",
-  files: [
-    file({ path: "src/a.ts" }),
-    file({ path: "src/b.ts" }),
-    file({ path: "lib/c.ts" }),
-  ],
+  files: [file({ path: "src/a.ts" }), file({ path: "src/b.ts" }), file({ path: "lib/c.ts" })],
   edges: [
     [0, 1, 0],
     [1, 2, 0],

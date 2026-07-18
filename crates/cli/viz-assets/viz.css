@@ -33,8 +33,9 @@
   --blue: #0090ff;
   --blue-text: #70b8ff;
   --blue-subtle: #0d2847;
-  --font-mono: "Martian Mono", "JetBrains Mono", "Cascadia Code", "SF Mono",
-    ui-monospace, Menlo, Consolas, monospace;
+  --font-mono:
+    "Martian Mono", "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas,
+    monospace;
 }
 
 :root[data-theme="light"] {
@@ -201,7 +202,9 @@ button {
   font-size: 12px;
   color: var(--text-low);
   background: transparent;
-  transition: background 100ms ease-out, color 100ms ease-out;
+  transition:
+    background 100ms ease-out,
+    color 100ms ease-out;
 }
 
 .ghost-btn:hover {
@@ -246,7 +249,9 @@ button {
   text-transform: lowercase;
   color: var(--text-muted);
   position: relative;
-  transition: color 100ms ease-out, background 100ms ease-out;
+  transition:
+    color 100ms ease-out,
+    background 100ms ease-out;
 }
 
 .lens-tab:hover {
@@ -329,7 +334,9 @@ button {
   text-transform: lowercase;
   color: var(--text-muted);
   background: transparent;
-  transition: background 100ms ease-out, color 100ms ease-out;
+  transition:
+    background 100ms ease-out,
+    color 100ms ease-out;
 }
 
 .seg button:hover {
@@ -586,7 +593,9 @@ button {
   background: var(--surface-1);
   border-left: 1px solid var(--border-default);
   transform: translateX(100%);
-  transition: transform 200ms ease-out, visibility 200ms;
+  transition:
+    transform 200ms ease-out,
+    visibility 200ms;
   overflow-y: auto;
   z-index: 4;
   visibility: hidden;
@@ -821,10 +830,19 @@ button {
 }
 
 /* Syntax highlighting for the clone-preview snippet. */
-#panel pre .tok-kw { color: var(--blue-text); }
-#panel pre .tok-str { color: var(--green-text); }
-#panel pre .tok-num { color: var(--amber-text); }
-#panel pre .tok-com { color: var(--text-muted); font-style: italic; }
+#panel pre .tok-kw {
+  color: var(--blue-text);
+}
+#panel pre .tok-str {
+  color: var(--green-text);
+}
+#panel pre .tok-num {
+  color: var(--amber-text);
+}
+#panel pre .tok-com {
+  color: var(--text-muted);
+  font-style: italic;
+}
 
 #panel pre {
   border-radius: var(--radius-sm);

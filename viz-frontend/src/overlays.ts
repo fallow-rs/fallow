@@ -8,8 +8,6 @@ export interface OverlayHandlers {
   onHelpClose: () => void;
 }
 
-
-
 // ── Help overlay ────────────────────────────────────────────────
 
 const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [

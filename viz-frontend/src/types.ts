@@ -35,11 +35,7 @@ export interface VizFile {
   in_cycle: boolean;
 }
 
-export type VizFileStatus =
-  | "clean"
-  | "hasUnusedExports"
-  | "unused"
-  | "entryPoint";
+export type VizFileStatus = "clean" | "hasUnusedExports" | "unused" | "entryPoint";
 
 export interface VizFunction {
   name: string;

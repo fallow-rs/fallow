@@ -169,7 +169,6 @@ const drawLodEdges = (scene: Scene): void => {
   if (kRel >= LOD_INTER) {
     drawFileEdges(state, gvs, false, 0.1, 0.8 / transform.k);
   }
-
 };
 
 const drawHullBorders = (scene: Scene): void => {
@@ -218,7 +217,10 @@ const drawRoads = (scene: Scene): void => {
 
     // Severity overdraw parallel to the road (boundaries lens only;
     // the overview stays neutral until the user asks a question).
-    if (state.lens === "boundaries" && (road.violations > 0 || (road.bidi && road.cycleEdges > 0))) {
+    if (
+      state.lens === "boundaries" &&
+      (road.violations > 0 || (road.bidi && road.cycleEdges > 0))
+    ) {
       ctx.beginPath();
       ctx.moveTo(p0.x, p0.y + 4);
       ctx.bezierCurveTo(p1.x, p1.y + 4, p2.x, p2.y + 4, p3.x, p3.y + 4);
@@ -268,7 +270,6 @@ const drawRoads = (scene: Scene): void => {
     ctx.fillStyle = theme.blue;
     ctx.fill();
   }
-
 };
 
 /** Direction-encoded edges to the hovered file's direct neighbors. */
@@ -295,7 +296,13 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
       const a = fileNodes[from];
       if (!a || !target) continue;
       if (a.x == null || a.y == null || target.x == null || target.y == null) continue;
-      edgeUnderlay(ctx, { x: a.x, y: a.y }, { x: target.x, y: target.y }, theme.bg, 4 / transform.k);
+      edgeUnderlay(
+        ctx,
+        { x: a.x, y: a.y },
+        { x: target.x, y: target.y },
+        theme.bg,
+        4 / transform.k,
+      );
       const p0 = { x: a.x, y: a.y };
       const p3 = { x: target.x, y: target.y };
       const p1 = { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 };
@@ -313,7 +320,13 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
       const b = fileNodes[to];
       if (!target || !b) continue;
       if (target.x == null || target.y == null || b.x == null || b.y == null) continue;
-      edgeUnderlay(ctx, { x: target.x, y: target.y }, { x: b.x, y: b.y }, theme.bg, 4 / transform.k);
+      edgeUnderlay(
+        ctx,
+        { x: target.x, y: target.y },
+        { x: b.x, y: b.y },
+        theme.bg,
+        4 / transform.k,
+      );
       ctx.beginPath();
       ctx.moveTo(target.x, target.y);
       ctx.lineTo(b.x, b.y);
@@ -491,7 +504,6 @@ const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): voi
   if (kRel >= 2 && state.graphHovered === null) {
     drawZoomLabels(state, gvs, w, h);
   }
-
 };
 
 const drawSearchPulse = (scene: Scene): void => {
@@ -686,7 +698,8 @@ const drawZoomLabels = (state: AppState, gvs: GraphViewState, w: number, h: numb
     const sy = y * transform.k + transform.y;
     const rect = { x: sx - textW / 2 - 2, y: sy, w: textW + 4, h: 13 };
     const overlaps = placed.some(
-      (r) => rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y,
+      (r) =>
+        rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y,
     );
     if (overlaps) continue;
     placed.push(rect);
@@ -801,10 +814,23 @@ const drawHoverLabels = (
       { x: s.x - r - 5, y: s.y, align: "right" },
     ];
     for (const slot of slots) {
-      const left = slot.align === "center" ? slot.x - textW / 2 : slot.align === "left" ? slot.x : slot.x - textW;
+      const left =
+        slot.align === "center"
+          ? slot.x - textW / 2
+          : slot.align === "left"
+            ? slot.x
+            : slot.x - textW;
       const rect = { x: left - 4, y: slot.y - 9, w: textW + 8, h: 18 };
       if (rect.x < 4 || rect.x + rect.w > w - 4 || rect.y < 4 || rect.y + rect.h > h - 4) continue;
-      if (placed.some((p) => rect.x < p.x + p.w && rect.x + rect.w > p.x && rect.y < p.y + p.h && rect.y + rect.h > p.y)) {
+      if (
+        placed.some(
+          (p) =>
+            rect.x < p.x + p.w &&
+            rect.x + rect.w > p.x &&
+            rect.y < p.y + p.h &&
+            rect.y + rect.h > p.y,
+        )
+      ) {
         continue;
       }
       ctx.textAlign = slot.align;
@@ -1066,7 +1092,8 @@ const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
     ctx.lineWidth = 1;
     ctx.strokeRect(mid.x - textW / 2 - 3.5, mid.y - 7.5, textW + 7, 15);
     if (state.lens === "boundaries" && road.violations > 0) ctx.fillStyle = theme.redText;
-    else if (state.lens === "boundaries" && road.bidi && road.cycleEdges > 0) ctx.fillStyle = theme.amberText;
+    else if (state.lens === "boundaries" && road.bidi && road.cycleEdges > 0)
+      ctx.fillStyle = theme.amberText;
     else ctx.fillStyle = theme.textLow;
     ctx.fillText(label, mid.x, mid.y + 0.5);
   }
@@ -1101,9 +1128,7 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     // Single-file clusters: just the filename, borderless dim text. The
     // full path lives in the tooltip; quiet labels collide far less.
     const single = cluster.indices.length === 1;
-    const raw = single
-      ? basename(state.data.files[cluster.indices[0]].path)
-      : cluster.key;
+    const raw = single ? basename(state.data.files[cluster.indices[0]].path) : cluster.key;
     const label = middleTruncate(ctx, raw.toUpperCase(), 210);
     const sub = single ? "" : `${formatCount(cluster.indices.length)} files`;
     const labelW = ctx.measureText(label).width;
@@ -1132,7 +1157,11 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
       20,
       theme.bg,
       single ? 0.75 : 0.92,
-      single ? null : cluster.tangle && state.lens === "boundaries" ? theme.amber : theme.borderSubtle,
+      single
+        ? null
+        : cluster.tangle && state.lens === "boundaries"
+          ? theme.amber
+          : theme.borderSubtle,
     );
     ctx.fillStyle = cluster.isolated || single ? theme.textMuted : theme.textLow;
     ctx.fillText(label, x + 2, y + 0.5);

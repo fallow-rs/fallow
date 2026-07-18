@@ -102,9 +102,7 @@ const worstAspect = (
   rect: Rect,
 ): number => {
   const isWide = rect.w >= rect.h;
-  const rowLength = isWide
-    ? (rowSize / totalSize) * rect.w
-    : (rowSize / totalSize) * rect.h;
+  const rowLength = isWide ? (rowSize / totalSize) * rect.w : (rowSize / totalSize) * rect.h;
   if (rowLength === 0) return Infinity;
 
   let worst = 0;
@@ -260,7 +258,14 @@ const drawTreemapFooter = (state: AppState, w: number, h: number): void => {
   // The treemap's one non-obvious gesture is drilling; teach it at the
   // root (once drilled, the breadcrumb already shows how to navigate).
   if (state.drillPath === "") {
-    footerChip(ctx, theme, "click a folder to zoom in", "right", usableStageWidth(state, w) - 16, y);
+    footerChip(
+      ctx,
+      theme,
+      "click a folder to zoom in",
+      "right",
+      usableStageWidth(state, w) - 16,
+      y,
+    );
   }
 };
 
@@ -447,9 +452,7 @@ const renderFileCell = (
   // outline; a solid tint floods test-heavy repos and stops reading
   // as a marker.
   const entryOutline = state.lens === "overview" && file.status === "entryPoint";
-  let fill = entryOutline
-    ? theme.cellNeutral
-    : lensColor(state.lens, theme, index, file);
+  let fill = entryOutline ? theme.cellNeutral : lensColor(state.lens, theme, index, file);
   if (rctx.prevColors && rctx.lensT < 1) {
     const prev = rctx.prevColors.get(fi);
     if (prev && prev !== fill) fill = mix(prev, fill, rctx.lensT);
@@ -677,11 +680,7 @@ const countFiles = (node: TreeNode): number => {
  * and render nothing when fewer than five glyphs would fit; empty beats
  * unreadable.
  */
-const cellLabel = (
-  ctx: CanvasRenderingContext2D,
-  name: string,
-  maxWidth: number,
-): string => {
+const cellLabel = (ctx: CanvasRenderingContext2D, name: string, maxWidth: number): string => {
   if (ctx.measureText(name).width <= maxWidth) return name;
   const dot = name.lastIndexOf(".");
   const stem = dot > 0 ? name.slice(0, dot) : name;
@@ -690,11 +689,7 @@ const cellLabel = (
   return cut.length < 5 ? "" : cut;
 };
 
-const truncate = (
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-): string => {
+const truncate = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string => {
   if (maxWidth <= 8) return "";
   if (ctx.measureText(text).width <= maxWidth) return text;
   let lo = 0;
@@ -720,10 +715,7 @@ export const treemapHitTest = (state: AppState, x: number, y: number): number | 
     const c = state.layout[i];
     if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
       const isDirHeader =
-        c.node.fileIndex === null &&
-        y <= c.y + DIR_HEADER &&
-        c.w >= 34 &&
-        c.h >= 30;
+        c.node.fileIndex === null && y <= c.y + DIR_HEADER && c.w >= 34 && c.h >= 30;
       const area = c.w * c.h;
       if (c.node.fileIndex !== null || isDirHeader || c.w < 34 || c.h < 30) {
         if (area < hitArea) {

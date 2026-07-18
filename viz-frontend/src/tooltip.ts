@@ -107,7 +107,11 @@ const lensLine = (state: AppState, fileIndex: number): HTMLElement | null => {
   }
   if (state.lens === "hotspots" && file.max_cyclomatic > 0) {
     const cls =
-      file.max_cyclomatic >= 20 ? "sev-error" : file.max_cyclomatic >= 10 ? "sev-warn" : "tip-muted";
+      file.max_cyclomatic >= 20
+        ? "sev-error"
+        : file.max_cyclomatic >= 10
+          ? "sev-warn"
+          : "tip-muted";
     return line(
       `${cls} tip-line`,
       `complexity ${formatCount(file.max_cyclomatic)} · nesting ${formatCount(file.max_cognitive)}`,
@@ -150,9 +154,7 @@ export const showFileTooltip = (
   const wires = line("tip-wires", "");
   const importers = document.createElement("span");
   importers.appendChild(line("wire-dot", "●"));
-  importers.appendChild(
-    document.createTextNode(` ${formatCount(file.importer_count)} importers`),
-  );
+  importers.appendChild(document.createTextNode(` ${formatCount(file.importer_count)} importers`));
   wires.appendChild(importers);
   const imports = document.createElement("span");
   imports.appendChild(line("wire-dot", "○"));

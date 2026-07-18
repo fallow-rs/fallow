@@ -24,8 +24,7 @@ const stateFor = (
   lens: Lens,
   over: Partial<VizSummary> = {},
   selectedClone: number | null = null,
-): AppState =>
-  ({ lens, selectedClone, data: { summary: summary(over) } }) as unknown as AppState;
+): AppState => ({ lens, selectedClone, data: { summary: summary(over) } }) as unknown as AppState;
 
 describe("lensSummaryText", () => {
   it("counts files and imports for the overview lens", () => {

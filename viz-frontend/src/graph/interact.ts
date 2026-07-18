@@ -47,7 +47,11 @@ const tweenCamera = (state: AppState, target: ZoomTransform, duration: number): 
   if (state.reducedMotion || duration <= 0) {
     sel.call(gvs.zoomBehavior.transform, target);
   } else {
-    sel.transition("camera").duration(duration).ease(easeOut).call(gvs.zoomBehavior.transform, target);
+    sel
+      .transition("camera")
+      .duration(duration)
+      .ease(easeOut)
+      .call(gvs.zoomBehavior.transform, target);
   }
 };
 
@@ -178,11 +182,7 @@ const shortestPath = (state: AppState, from: number, to: number): number[] | nul
     }
     return null;
   };
-  return (
-    bfs(from, to, state.index.importsOf) ??
-    bfs(to, from, state.index.importsOf) ??
-    null
-  );
+  return bfs(from, to, state.index.importsOf) ?? bfs(to, from, state.index.importsOf) ?? null;
 };
 
 /** Start or complete a shift-click dependency trace. Returns true when handled. */
@@ -216,8 +216,7 @@ export const graphPathTrace = (state: AppState, x: number, y: number): boolean =
 /** Clear road selection / path trace (esc, click-away, view switches). */
 export const clearGraphFocus = (state: AppState): boolean => {
   const gvs = getGVS(state);
-  const had =
-    gvs.selectedRoad !== null || gvs.path !== null || gvs.pathFrom !== null;
+  const had = gvs.selectedRoad !== null || gvs.path !== null || gvs.pathFrom !== null;
   gvs.selectedRoad = null;
   gvs.path = null;
   gvs.pathFrom = null;
@@ -249,11 +248,7 @@ export const resetGraphView = (state: AppState, animate = true): void => {
   // so min/max zoom stay meaningful after large resizes.
   gvs.zoomBehavior.scaleExtent([fit.k * 0.4, fit.k * 12]);
   gvs.fitK = fit.k;
-  tweenCamera(
-    state,
-    zoomIdentity.translate(fit.x, fit.y).scale(fit.k),
-    animate ? CAMERA_MS : 0,
-  );
+  tweenCamera(state, zoomIdentity.translate(fit.x, fit.y).scale(fit.k), animate ? CAMERA_MS : 0);
 };
 
 /** Zoom to the first search match and pulse it (Enter in the search box). */

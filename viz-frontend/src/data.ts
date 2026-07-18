@@ -90,7 +90,11 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
   const collapse = (node: TreeNode): void => {
     for (let i = 0; i < node.children.length; i++) {
       let child = node.children[i];
-      while (child.fileIndex === null && child.children.length === 1 && child.children[0].fileIndex === null) {
+      while (
+        child.fileIndex === null &&
+        child.children.length === 1 &&
+        child.children[0].fileIndex === null
+      ) {
         const grand = child.children[0];
         grand.name = `${child.name}/${grand.name}`;
         grand.parent = node;
@@ -146,12 +150,8 @@ export const buildIndex = (data: VizData): DataIndex => {
     violationSources.add(from);
   }
 
-  const dupRatios = data.files
-    .filter((f) => f.dup_lines > 0)
-    .map((f) => dupRatio(f));
-  const heats = data.files
-    .filter((f) => f.max_cyclomatic > 0)
-    .map((f) => f.max_cyclomatic);
+  const dupRatios = data.files.filter((f) => f.dup_lines > 0).map((f) => dupRatio(f));
+  const heats = data.files.filter((f) => f.max_cyclomatic > 0).map((f) => f.max_cyclomatic);
 
   const { root, byPath } = buildTree(data.files);
 
@@ -179,12 +179,7 @@ export const dupRatio = (file: VizFile): number => {
 // ── Lens coloring ───────────────────────────────────────────────
 
 /** Fill color for one file under the active lens. */
-export const lensColor = (
-  lens: Lens,
-  theme: Theme,
-  index: DataIndex,
-  file: VizFile,
-): string => {
+export const lensColor = (lens: Lens, theme: Theme, index: DataIndex, file: VizFile): string => {
   switch (lens) {
     case "overview":
       return file.status === "entryPoint" ? theme.cellEntry : theme.cellNeutral;
@@ -269,7 +264,8 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
     overview: "",
     deadcode: "red = never imported · amber = has unused exports",
     dupes: "deeper amber = more duplicated lines",
-    boundaries: "red = forbidden import or part of a loop · amber outline = folders that import each other",
+    boundaries:
+      "red = forbidden import or part of a loop · amber outline = folders that import each other",
     hotspots: "amber → red = harder to change safely",
   };
   return lines[lens];

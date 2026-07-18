@@ -45,7 +45,10 @@ const stateFor = (lens: Lens, files: VizFile[], over: Partial<VizData> = {}): Ap
       hotspot_files: 0,
     },
     workspaces: [],
-    zones: [{ name: "app", files: 1 }, { name: "shared", files: 1 }],
+    zones: [
+      { name: "app", files: 1 },
+      { name: "shared", files: 1 },
+    ],
     cycles: [],
     clones: [],
     violations: [],
@@ -117,15 +120,9 @@ describe("rankRowsFor", () => {
 
   it("writes boundary crossings as an arrow into the target zone", () => {
     const rows = rankRowsFor(
-      stateFor(
-        "boundaries",
-        [file("src/a.ts"), file("lib/b.ts")],
-        {
-          violations: [
-            { from: 0, to: 1, from_zone: 0, to_zone: 1, line: 5, specifier: "../lib/b" },
-          ],
-        },
-      ),
+      stateFor("boundaries", [file("src/a.ts"), file("lib/b.ts")], {
+        violations: [{ from: 0, to: 1, from_zone: 0, to_zone: 1, line: 5, specifier: "../lib/b" }],
+      }),
     ).rows;
     expect(rows[0].label).toBe("a.ts → b.ts");
     expect(rows[0].metric).toBe("→ shared");
