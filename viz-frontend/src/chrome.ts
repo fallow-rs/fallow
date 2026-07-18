@@ -401,11 +401,15 @@ const updateCrumbs = (state: AppState, refs: ChromeRefs): void => {
       acc = acc ? `${acc}/${part}` : part;
       if (i === parts.length - 1) {
         refs.crumbs.appendChild(el("span", "current", part));
-      } else {
+      } else if (state.index.nodesByPath.has(acc)) {
         const target = acc;
         const b = button("", part);
         b.addEventListener("click", () => refs.crumbHandler?.(target));
         refs.crumbs.appendChild(b);
+      } else {
+        // Segment collapsed into a single-child directory chain: there is
+        // no node to drill to, so render it as static text, not a dead link.
+        refs.crumbs.appendChild(el("span", "collapsed", part));
       }
     });
   }

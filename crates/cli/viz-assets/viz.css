@@ -1088,6 +1088,11 @@ button {
   padding: 0 3px;
 }
 
+#crumbs .collapsed {
+  color: var(--text-muted);
+  padding: 0 3px;
+}
+
 #status-info {
   margin-left: auto;
   color: var(--text-muted);

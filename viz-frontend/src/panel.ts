@@ -273,7 +273,7 @@ const connectionSections = (
 };
 
 /** Size, wiring, workspace, zone, and function-count facts. */
-const factsSection = (state: AppState, file: VizFile): HTMLElement => {
+const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElement => {
   const facts = sectionEl("facts");
   const pairs: Array<[string, string | HTMLElement]> = [
     ["size", formatSize(file.size)],
@@ -293,7 +293,6 @@ const factsSection = (state: AppState, file: VizFile): HTMLElement => {
   // Transitive reach: the one-look blast-radius answer. "reaches" is
   // everything this file transitively pulls in; "affects" is everything
   // that transitively depends on it (what breaks if you change it).
-  const fileIdx = state.data.files.indexOf(file);
   if (fileIdx >= 0) {
     const reach: Array<[string, string | HTMLElement]> = [];
     const down = reachSet(state.index.importsOf, fileIdx).size;
@@ -408,7 +407,7 @@ export const renderPanel = (
   panel.replaceChildren();
   panel.classList.add("open");
   panel.appendChild(fileHead(file, close));
-  panel.appendChild(factsSection(state, file));
+  panel.appendChild(factsSection(state, file, fileIdx));
   const dead = deadCodeSection(file);
   if (dead) panel.appendChild(dead);
 

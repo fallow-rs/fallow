@@ -470,6 +470,13 @@ const init = (): void => {
       return;
     }
 
+    if (state.helpOpen) {
+      // With the modal open, only "?" (toggle closed) acts; lens/view
+      // shortcuts must not mutate the map behind the dialog.
+      if (e.key === "?") toggleHelp();
+      return;
+    }
+
     if (e.key === "/") {
       e.preventDefault();
       refs?.search.focus();

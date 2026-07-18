@@ -22,6 +22,21 @@ import {
 
 // ── Ghost layer (ego mode background) ───────────────────────────
 
+// Per-selection memo for the transitive blast radius. Invalidated when
+// the selected file changes or a new dataset swaps the adjacency array.
+let blastCache: { sel: number; adj: number[][]; set: Set<number> } | null = null;
+
+const blastRadius = (state: AppState): Set<number> | null => {
+  if (state.selected === null) return null;
+  const adj = state.index.importersOf;
+  if (blastCache && blastCache.sel === state.selected && blastCache.adj === adj) {
+    return blastCache.set;
+  }
+  const set = reachSet(adj, state.selected);
+  blastCache = { sel: state.selected, adj, set };
+  return set;
+};
+
 export const renderGhost = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme } = state;
   const { transform } = gvs;
@@ -39,9 +54,9 @@ export const renderGhost = (state: AppState, gvs: GraphViewState): void => {
   }
   // Blast radius: everything that transitively depends on the selected
   // file glows blue in the ghost, so the spread beyond the 1-hop ego
-  // fan is visible at a glance.
-  const affected =
-    state.selected !== null ? reachSet(state.index.importersOf, state.selected) : null;
+  // fan is visible at a glance. Memoized per selection so the enter
+  // animation and row-hover marching do not re-run the BFS each frame.
+  const affected = blastRadius(state);
   for (const node of gvs.fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
     const inBlast = affected?.has(node.fileIndex) ?? false;
