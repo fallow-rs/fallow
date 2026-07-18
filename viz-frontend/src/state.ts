@@ -2,7 +2,7 @@ import type { ActiveView, Lens, LayoutCell, RoadSelection, VizData } from "./typ
 import type { DataIndex } from "./data";
 import type { Theme } from "./theme";
 import { getTheme, prefersReducedMotion } from "./theme";
-import { buildIndex } from "./data";
+import { buildIndex, reachSet } from "./data";
 
 export interface AppState {
   data: VizData;
@@ -32,6 +32,9 @@ export interface AppState {
 
   search: string;
   searchMatches: Set<number>;
+  /** Union upstream reach of all current matches: the combined blast
+   *  radius of a multi-file query (a PR's changed set). Capped. */
+  searchReach: Set<number>;
 
   dark: boolean;
   theme: Theme;
@@ -70,6 +73,7 @@ export const createState = (
     graphHovered: null,
     search: "",
     searchMatches: new Set(),
+    searchReach: new Set(),
     dark,
     theme: getTheme(dark),
     reducedMotion: prefersReducedMotion(),
@@ -87,12 +91,22 @@ export const setDarkMode = (state: AppState, dark: boolean): void => {
 export const runSearch = (state: AppState, query: string): void => {
   state.search = query;
   state.searchMatches.clear();
+  state.searchReach.clear();
   const q = query.trim().toLowerCase();
   if (q === "") return;
   for (let i = 0; i < state.data.files.length; i++) {
     if (state.data.files[i].path.toLowerCase().includes(q)) {
       state.searchMatches.add(i);
     }
+  }
+  // Combined blast radius of the matched set: who transitively depends
+  // on any match. Skipped when the match set is too broad to be a
+  // meaningful "PR touched these files" query.
+  if (state.searchMatches.size > 0 && state.searchMatches.size <= 40) {
+    for (const m of state.searchMatches) {
+      for (const up of reachSet(state.index.importersOf, m)) state.searchReach.add(up);
+    }
+    for (const m of state.searchMatches) state.searchReach.delete(m);
   }
 };
 

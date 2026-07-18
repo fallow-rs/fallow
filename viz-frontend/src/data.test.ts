@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { runSearch } from "./state";
+import type { AppState } from "./state";
 import {
   basename,
   buildIndex,
@@ -203,6 +205,35 @@ describe("reachSet", () => {
   it("terminates on a cycle instead of looping forever", () => {
     const cyclic = [[1], [0]];
     expect([...reachSet(cyclic, 0)].sort()).toEqual([1]);
+  });
+});
+
+describe("runSearch combined blast radius", () => {
+  it("collects the union upstream reach of every matched file", () => {
+    // a-alpha.ts imported by b, which is imported by c: searching "alpha"
+    // should mark b and c as affected.
+    const d = data({
+      files: [
+        file({ path: "src/alpha.ts" }),
+        file({ path: "src/b.ts" }),
+        file({ path: "src/c.ts" }),
+      ],
+      edges: [
+        [1, 0, 0],
+        [2, 1, 0],
+      ],
+    });
+    const state = {
+      data: d,
+      index: buildIndex(d),
+      search: "",
+      searchMatches: new Set<number>(),
+      searchReach: new Set<number>(),
+    } as unknown as AppState;
+    runSearch(state, "alpha");
+    expect(state.searchMatches.has(0)).toBe(true);
+    expect([...state.searchReach].sort()).toEqual([1, 2]);
+    expect(state.searchReach.has(0)).toBe(false);
   });
 });
 

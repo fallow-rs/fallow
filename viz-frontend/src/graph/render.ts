@@ -338,12 +338,15 @@ const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): voi
     const color = lensColor(state.lens, theme, state.index, file);
     const recessive = color === theme.cellNeutral || color === theme.cellEntry;
     const matched = !searching || state.searchMatches.has(node.fileIndex);
+    const inReach = searching && state.searchReach.has(node.fileIndex);
     const isNeighbor = neighbors?.has(node.fileIndex) ?? false;
     const dimmed = neighbors !== null && !isNeighbor;
 
     let alpha = recessive ? 0.82 : 0.95;
     if (dimmed) alpha = 0.16;
-    if (searching && !matched) alpha = Math.min(alpha, 0.1);
+    // Files reachable from the matched set stay legible (the combined
+    // blast radius); everything else recedes.
+    if (searching && !matched) alpha = Math.min(alpha, inReach ? 0.5 : 0.1);
     if (isNeighbor) alpha = 1;
     alpha *= reveal.cluster(clusters[node.cluster]);
     if (alpha <= 0.01) continue;
@@ -406,6 +409,14 @@ const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): voi
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius + 2 / transform.k, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (inReach) {
+        ctx.strokeStyle = theme.blue;
+        ctx.globalAlpha = 0.6;
+        ctx.lineWidth = 1 / transform.k;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + 1.5 / transform.k, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = alpha;
       }
       // Hub ring from mid zoom (a bare ring at fit zoom reads as an
       // artifact); the xN count joins once there is room.

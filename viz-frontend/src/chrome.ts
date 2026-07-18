@@ -426,7 +426,11 @@ const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
   refs.searchCount.replaceChildren();
   const n = el("span", "n", formatCount(state.searchMatches.size));
   refs.searchCount.append(n, document.createTextNode(" matches"));
-  if (state.searchMatches.size > 0 && state.view === "graph") {
+  if (state.searchReach.size > 0 && state.view === "graph") {
+    const affects = el("span", "hint");
+    affects.append(" · affects ", el("span", "n", formatCount(state.searchReach.size)));
+    refs.searchCount.appendChild(affects);
+  } else if (state.searchMatches.size > 0 && state.view === "graph") {
     refs.searchCount.appendChild(el("span", "hint", " · enter zooms"));
   }
 };
