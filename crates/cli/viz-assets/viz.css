@@ -492,8 +492,12 @@ button {
   letter-spacing: 0.04em;
 }
 
-#panel .rank-list {
+/* Compound selector beats the later `.link-list { max-height: 180px }`
+   rule, so the ranked list fills the panel and the whole panel scrolls
+   as one, instead of a short internal scrollbox over dead space. */
+#panel .link-list.rank-list {
   max-height: none;
+  overflow: visible;
   padding-bottom: 6px;
 }
 
