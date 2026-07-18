@@ -193,18 +193,18 @@ describe("reachSet", () => {
 
   it("collects the full transitive downstream set, excluding the start", () => {
     const r = reachSet(adjDown, 0);
-    expect([...r].sort()).toEqual([1, 2]);
+    expect([...r].toSorted()).toEqual([1, 2]);
     expect(r.has(0)).toBe(false);
   });
 
   it("collects the full transitive upstream (blast radius) set", () => {
-    expect([...reachSet(adjUp, 2)].sort()).toEqual([0, 1]);
+    expect([...reachSet(adjUp, 2)].toSorted()).toEqual([0, 1]);
     expect(reachSet(adjUp, 0).size).toBe(0);
   });
 
   it("terminates on a cycle instead of looping forever", () => {
     const cyclic = [[1], [0]];
-    expect([...reachSet(cyclic, 0)].sort()).toEqual([1]);
+    expect([...reachSet(cyclic, 0)].toSorted()).toEqual([1]);
   });
 });
 
@@ -232,7 +232,7 @@ describe("runSearch combined blast radius", () => {
     } as unknown as AppState;
     runSearch(state, "alpha");
     expect(state.searchMatches.has(0)).toBe(true);
-    expect([...state.searchReach].sort()).toEqual([1, 2]);
+    expect([...state.searchReach].toSorted()).toEqual([1, 2]);
     expect(state.searchReach.has(0)).toBe(false);
   });
 });

@@ -28,7 +28,7 @@ const packEdge = (n: number, from: number, to: number): number => from * n + to;
 
 const percentile = (values: number[], p: number): number => {
   if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
+  const sorted = [...values].toSorted((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
   return sorted[idx];
 };
@@ -81,7 +81,7 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
   const rollup = (node: TreeNode): number => {
     if (node.fileIndex !== null) return node.size;
     node.size = node.children.reduce((sum, c) => sum + rollup(c), 0);
-    node.children.sort((a, b) => b.size - a.size);
+    node.children = node.children.toSorted((a, b) => b.size - a.size);
     return node.size;
   };
   rollup(root);

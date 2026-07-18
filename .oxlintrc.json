@@ -83,6 +83,12 @@
       "rules": {
         "unicorn/prefer-node-protocol": "off"
       }
+    },
+    {
+      "files": ["viz-frontend/**/*.ts"],
+      "rules": {
+        "unicorn/no-new-array": "off"
+      }
     }
   ]
 }

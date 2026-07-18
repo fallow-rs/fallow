@@ -200,7 +200,7 @@ describe("spatial hit grid", () => {
     if (!grid) return;
     // cell = max(2 * 5, 40) = 40: the nodes sit in adjacent columns.
     expect(grid.cell).toBe(40);
-    expect([...gridQuery(grid, 40, 0, 1)].sort()).toEqual([0, 1]);
+    expect([...gridQuery(grid, 40, 0, 1)].toSorted()).toEqual([0, 1]);
     expect(gridQuery(grid, 200, 0, 1)).toEqual([]);
   });
 
@@ -268,7 +268,7 @@ describe("coordinate assignment", () => {
     const clusters = grid(8, (i) => i % 4);
     assignCoordinates(clusters, []);
     for (const layer of [0, 1, 2, 3]) {
-      const rows = clusters.filter((c) => c.layer === layer).sort((a, b) => a.cy - b.cy);
+      const rows = clusters.filter((c) => c.layer === layer).toSorted((a, b) => a.cy - b.cy);
       for (let i = 1; i < rows.length; i++) {
         expect(rows[i].cy - rows[i - 1].cy).toBeGreaterThanOrEqual(rows[i].r + rows[i - 1].r);
       }

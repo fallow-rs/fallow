@@ -498,7 +498,7 @@ const rankRowsForLens = (
       const rows = files
         .map((f, i) => ({ f, i }))
         .filter(({ f }) => f.importer_count > 0)
-        .sort((a, b) => b.f.importer_count - a.f.importer_count)
+        .toSorted((a, b) => b.f.importer_count - a.f.importer_count)
         .map(({ f, i }) => ({
           label: basename(f.path),
           dir: dirname(f.path),
@@ -513,7 +513,7 @@ const rankRowsForLens = (
       const unused = files
         .map((f, i) => ({ f, i }))
         .filter(({ f }) => f.status === "unused")
-        .sort((a, b) => b.f.size - a.f.size);
+        .toSorted((a, b) => b.f.size - a.f.size);
       for (const { f, i } of unused) {
         rows.push({
           label: basename(f.path),
@@ -526,7 +526,7 @@ const rankRowsForLens = (
       const partial = files
         .map((f, i) => ({ f, i }))
         .filter(({ f }) => f.status !== "unused" && f.unused_export_count > 0)
-        .sort((a, b) => b.f.unused_export_count - a.f.unused_export_count);
+        .toSorted((a, b) => b.f.unused_export_count - a.f.unused_export_count);
       for (const { f, i } of partial) {
         rows.push({
           label: basename(f.path),
@@ -540,7 +540,7 @@ const rankRowsForLens = (
     }
     case "dupes": {
       const rows = [...state.data.clones.keys()]
-        .sort((a, b) => state.data.clones[b].lines - state.data.clones[a].lines)
+        .toSorted((a, b) => state.data.clones[b].lines - state.data.clones[a].lines)
         .filter((g) => {
           // Malformed groups (no instances, or an out-of-range file
           // index) must not kill the whole ranked list.
@@ -596,7 +596,7 @@ const rankRowsForLens = (
       const rows = files
         .map((f, i) => ({ f, i }))
         .filter(({ f }) => f.max_cyclomatic > 0)
-        .sort((a, b) => risk(b.f) - risk(a.f))
+        .toSorted((a, b) => risk(b.f) - risk(a.f))
         .map(({ f, i }) => ({
           label: basename(f.path),
           dir: dirname(f.path),

@@ -100,7 +100,7 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
   }
 
   const result = new Map<string, number[]>();
-  for (const key of [...clusters.keys()].sort()) {
+  for (const key of [...clusters.keys()].toSorted()) {
     const entry = clusters.get(key);
     if (entry) result.set(key, entry.indices);
   }
@@ -136,12 +136,12 @@ const louvainCluster = (
       const dir = parts.length > 1 ? parts.slice(0, 2).join("/") : parts[0];
       dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
     }
-    const sorted = [...dirCounts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    const sorted = [...dirCounts.entries()].toSorted((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
     let name = sorted[0]?.[0] ?? "misc";
     while (result.has(name)) name = `${name}*`;
     result.set(name, indices);
   }
-  return new Map([...result.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+  return new Map([...result.entries()].toSorted((a, b) => (a[0] < b[0] ? -1 : 1)));
 };
 // ── Meta-graph, SCC condensation, layering, ordering ────────────
 
@@ -175,7 +175,7 @@ const buildMetaGraph = (
     if (state.index.violationEdges.has(packed)) edge.violations++;
     if (state.index.cycleEdges.has(packed)) edge.cycleEdges++;
   }
-  return [...buckets.values()].sort((a, b) => a.src - b.src || a.dst - b.dst);
+  return [...buckets.values()].toSorted((a, b) => a.src - b.src || a.dst - b.dst);
 };
 
 /** Iterative Tarjan SCC over the cluster meta-graph. */
@@ -277,8 +277,8 @@ const groupByLayer = (clusters: ClusterInfo[]): Map<number, ClusterInfo[]> => {
 const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   const byLayer = groupByLayer(clusters);
   for (const list of byLayer.values()) {
-    list.sort((a, b) => (a.key < b.key ? -1 : 1));
-    list.forEach((c, i) => {
+    const sorted = list.toSorted((a, b) => (a.key < b.key ? -1 : 1));
+    sorted.forEach((c, i) => {
       c.order = i;
     });
   }
@@ -290,7 +290,7 @@ const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
     neighbors.get(e.dst)?.push({ other: e.src, w: e.count });
   }
 
-  const layerKeys = [...byLayer.keys()].sort((a, b) => a - b);
+  const layerKeys = [...byLayer.keys()].toSorted((a, b) => a - b);
   const indexOf = new Map<string, number>();
   clusters.forEach((c, i) => indexOf.set(c.key, i));
 
@@ -310,17 +310,17 @@ const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
         }
         return { c, bary: den > 0 ? num / den : c.order };
       });
-      scored.sort((a, b) => a.bary - b.bary || (a.c.key < b.c.key ? -1 : 1));
-      scored.forEach((s, i) => {
+      const orderedScored = scored.toSorted((a, b) => a.bary - b.bary || (a.c.key < b.c.key ? -1 : 1));
+      orderedScored.forEach((s, i) => {
         s.c.order = i;
       });
     }
   };
 
   sweep(layerKeys);
-  sweep([...layerKeys].reverse());
+  sweep(layerKeys.toReversed());
   sweep(layerKeys);
-  sweep([...layerKeys].reverse());
+  sweep(layerKeys.toReversed());
 };
 
 /** Column x per layer, rows stacked by barycenter order. */
@@ -335,7 +335,7 @@ const stackLayers = (byLayer: Map<number, ClusterInfo[]>, layerKeys: number[]): 
     prevMaxR = maxR;
   });
   for (const layer of layerKeys) {
-    const list = (byLayer.get(layer) ?? []).sort((a, b) => a.order - b.order);
+    const list = (byLayer.get(layer) ?? []).toSorted((a, b) => a.order - b.order);
     let y = 0;
     list.forEach((c, i) => {
       if (i > 0) y += list[i - 1].r + c.r + ROW_GAP;
@@ -361,7 +361,7 @@ const relaxRows = (
   }
   for (let pass = 0; pass < 3; pass++) {
     for (const layer of layerKeys) {
-      const list = (byLayer.get(layer) ?? []).sort((a, b) => a.order - b.order);
+      const list = (byLayer.get(layer) ?? []).toSorted((a, b) => a.order - b.order);
       for (const c of list) {
         const idx = indexOf.get(c.key) ?? 0;
         let num = 0;
@@ -409,7 +409,7 @@ const bboxAspect = (flowing: ClusterInfo[]): number => {
 const wrapPortraitRows = (flowing: ClusterInfo[]): boolean => {
   if (bboxAspect(flowing) >= 1 || flowing.length <= 3) return false;
   const GRID_GAP = 150;
-  const list = [...flowing].sort((a, b) => a.layer - b.layer || a.cy - b.cy);
+  const list = [...flowing].toSorted((a, b) => a.layer - b.layer || a.cy - b.cy);
   const totalW = list.reduce((sum, c) => sum + c.r * 2 + GRID_GAP, 0);
   const avgRowH = list.reduce((sum, c) => sum + c.r * 2, 0) / list.length + GRID_GAP;
   const rowW = Math.max(
@@ -470,7 +470,7 @@ const spreadToAspect = (
 /** Coordinate assignment: stack, relax, center, then shape the aspect. */
 export const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   const byLayer = groupByLayer(clusters);
-  const layerKeys = [...byLayer.keys()].sort((a, b) => a - b);
+  const layerKeys = [...byLayer.keys()].toSorted((a, b) => a - b);
   const flowing = clusters.filter((c) => !c.isolated);
   stackLayers(byLayer, layerKeys);
   relaxRows(clusters, meta, byLayer, layerKeys);
@@ -481,7 +481,7 @@ export const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): vo
 
 /** Park isolated clusters in a compact strip below the dependency flow. */
 const placeIsolated = (clusters: ClusterInfo[]): void => {
-  const isolated = clusters.filter((c) => c.isolated).sort((a, b) => (a.key < b.key ? -1 : 1));
+  const isolated = clusters.filter((c) => c.isolated).toSorted((a, b) => (a.key < b.key ? -1 : 1));
   if (isolated.length === 0) return;
   const flowing = clusters.filter((c) => !c.isolated);
   let minX = 0;
@@ -589,7 +589,7 @@ const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
   }
 };
 const convexHull = (pts: Pt[]): Pt[] => {
-  const sorted = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+  const sorted = [...pts].toSorted((a, b) => a.x - b.x || a.y - b.y);
   if (sorted.length < 3) return sorted;
   const cross = (o: Pt, a: Pt, b: Pt): number =>
     (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
@@ -735,7 +735,7 @@ export const initGraphNodes = (state: AppState): void => {
   const importerCounts = files
     .map((f) => f.importer_count)
     .filter((c) => c > 0)
-    .sort((a, b) => a - b);
+    .toSorted((a, b) => a - b);
   const p95 =
     importerCounts.length > 0
       ? importerCounts[Math.min(importerCounts.length - 1, Math.floor(importerCounts.length * 0.95))]

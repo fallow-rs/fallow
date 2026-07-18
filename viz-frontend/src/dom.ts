@@ -48,13 +48,15 @@ export const copyButton = (
 ): HTMLButtonElement => {
   const b = button(cls, label);
   b.addEventListener("click", () => {
-    void navigator.clipboard?.writeText(getText()).then(() => {
+    void (async () => {
+      if (!navigator.clipboard) return;
+      await navigator.clipboard.writeText(getText());
       b.textContent = "copied";
       announce("copied to clipboard");
       setTimeout(() => {
         b.textContent = label;
       }, 1200);
-    });
+    })();
   });
   return b;
 };

@@ -5,7 +5,8 @@
  * breadcrumbs.
  */
 import { select } from "d3-selection";
-import "d3-transition"; // side-effect: augments selections with .transition()
+// oxlint-disable-next-line import/no-unassigned-import -- augments selections with .transition()
+import "d3-transition";
 import { zoomIdentity } from "d3-zoom";
 import type { AppState } from "../state";
 import { basename, formatCount, legendText, lensColor, lensFindingLevel } from "../data";
@@ -197,7 +198,7 @@ const drawRoads = (scene: Scene): void => {
   const minRoadW = 1.8 / transform.k;
   // High-traffic roads get promoted a step so the trunk routes survive
   // a projector; the threshold is the 75th percentile of bundle sizes.
-  const roadCounts = roads.map((r) => r.count).sort((a, b) => a - b);
+  const roadCounts = roads.map((r) => r.count).toSorted((a, b) => a - b);
   const trunkFloor =
     roadCounts.length > 0 ? roadCounts[Math.floor(roadCounts.length * 0.75)] : Infinity;
   for (const road of roads) {
@@ -666,14 +667,14 @@ const drawZoomLabels = (state: AppState, gvs: GraphViewState, w: number, h: numb
     const file = data.files[node.fileIndex];
     candidates.push({ node, degree: file.importer_count + file.import_count });
   }
-  candidates.sort((a, b) => b.degree - a.degree);
+  const ordered = candidates.toSorted((a, b) => b.degree - a.degree);
 
   ctx.font = FONT_SMALL;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
   let drawn = 0;
-  for (const { node } of candidates) {
+  for (const { node } of ordered) {
     if (drawn >= 40) break;
     if (node.x == null || node.y == null) continue;
     const name = basename(data.files[node.fileIndex].path);
@@ -765,8 +766,8 @@ const drawHoverLabels = (
   // neither side monopolizes the cap.
   const byDegree = (idx: number): number =>
     state.data.files[idx].importer_count + state.data.files[idx].import_count;
-  const a = [...importers].sort((x, y) => byDegree(y) - byDegree(x));
-  const b = [...imports].sort((x, y) => byDegree(y) - byDegree(x));
+  const a = [...importers].toSorted((x, y) => byDegree(y) - byDegree(x));
+  const b = [...imports].toSorted((x, y) => byDegree(y) - byDegree(x));
   const ordered: number[] = [];
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     if (i < a.length) ordered.push(a[i]);
@@ -1078,7 +1079,7 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
   ctx.textBaseline = "middle";
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
   // Bigger clusters claim their spot first; smaller ones move below on overlap.
-  const ordered = [...gvs.clusters].sort(
+  const ordered = gvs.clusters.toSorted(
     (a, b) => b.indices.length - a.indices.length || (a.key < b.key ? -1 : 1),
   );
   const kRel = gvs.transform.k / gvs.fitK;

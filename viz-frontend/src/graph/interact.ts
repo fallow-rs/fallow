@@ -4,7 +4,8 @@
  * the camera moves (fit, reset, center, search zoom, resize refit).
  */
 import { select } from "d3-selection";
-import "d3-transition"; // side-effect: augments selections with .transition()
+// oxlint-disable-next-line import/no-unassigned-import -- augments selections with .transition()
+import "d3-transition";
 import { zoomIdentity, type ZoomTransform } from "d3-zoom";
 import type { AppState } from "../state";
 import type { RoadSelection } from "../types";
@@ -132,7 +133,7 @@ const buildRoadSelection = (state: AppState, roadIndex: number): RoadSelection =
       pairs.push([from, to]);
     }
   }
-  pairs.sort(
+  const sortedPairs = pairs.toSorted(
     (a, b) =>
       (state.data.files[a[0]].path < state.data.files[b[0]].path ? -1 : 1) ||
       (state.data.files[a[1]].path < state.data.files[b[1]].path ? -1 : 1),
@@ -143,7 +144,7 @@ const buildRoadSelection = (state: AppState, roadIndex: number): RoadSelection =
     count: road.count,
     violations: road.violations,
     cycleEdges: road.cycleEdges,
-    pairs,
+    pairs: sortedPairs,
   };
 };
 
@@ -164,7 +165,7 @@ const shortestPath = (state: AppState, from: number, to: number): number[] | nul
             path.push(cur);
             cur = prev.get(cur) ?? -1;
           }
-          return path.reverse();
+          return path.toReversed();
         }
         for (const w of adj[v]) {
           if (!prev.has(w)) {

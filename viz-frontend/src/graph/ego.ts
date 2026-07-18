@@ -113,7 +113,7 @@ const buildColumn = (
     const cluster = gvs.clusters.find((c) => c.key === dir || c.key.startsWith(`${dir}/`));
     return cluster ? cluster.layer * 1000 + cluster.order : 999999;
   };
-  const groupKeys = [...groups.keys()].sort((a, b) => layerOf(a) - layerOf(b) || (a < b ? -1 : 1));
+  const groupKeys = [...groups.keys()].toSorted((a, b) => layerOf(a) - layerOf(b) || (a < b ? -1 : 1));
 
   const fileRow = (idx: number): StageRow => ({
     kind: "file",
@@ -125,7 +125,7 @@ const buildColumn = (
   });
 
   const sortIndices = (list: number[]): number[] =>
-    [...list].sort((a, b) => {
+    list.toSorted((a, b) => {
       const sevA = (isViolation(a) ? 2 : 0) + (isCycle(a) ? 1 : 0);
       const sevB = (isViolation(b) ? 2 : 0) + (isCycle(b) ? 1 : 0);
       if (sevA !== sevB) return sevB - sevA;
