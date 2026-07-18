@@ -35,7 +35,7 @@ import {
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
-import { createPanel, panelRenderKey, renderPanel } from "./panel";
+import { buildMapDigest, createPanel, panelRenderKey, renderPanel } from "./panel";
 import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
 import { dirname } from "./data";
 
@@ -173,6 +173,9 @@ const init = (): void => {
   refs.helpHandler = toggleHelp;
 
   // PNG export of the current canvas (map or graph, current lens state).
+  refs.digestHandler = () => {
+    void navigator.clipboard?.writeText(buildMapDigest(state));
+  };
   refs.exportHandler = () => {
     canvas.toBlob((blob) => {
       if (!blob) return;

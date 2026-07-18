@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { panelRenderKey, rankRowsFor } from "./panel";
+import { buildMapDigest, panelRenderKey, rankRowsFor } from "./panel";
 import { buildIndex } from "./data";
 import { getTheme } from "./theme";
 import type { AppState } from "./state";
@@ -198,5 +198,23 @@ describe("rankRowsFor overview", () => {
     expect(rows[0].label).toBe("hub.ts");
     expect(rows[0].metric).toBe("used by 40");
     expect(rows.some((r) => r.label === "leaf.ts")).toBe(false);
+  });
+});
+
+describe("buildMapDigest", () => {
+  it("assembles headline totals and per-lens sections into one markdown block", () => {
+    const state = stateFor("overview", [
+      file("src/hub.ts", { importer_count: 40 }),
+      file("src/dead.ts", { status: "unused", size: 900 }),
+      file("src/hot.ts", { max_cyclomatic: 22, importer_count: 5 }),
+    ]);
+    state.data.summary.hotspot_files = 1;
+    state.data.summary.unused_files = 1;
+    const md = buildMapDigest(state);
+    expect(md).toContain("# fallow map · demo");
+    expect(md).toContain("most depended-on");
+    expect(md).toContain("hub.ts (used by 40)");
+    expect(md).toContain("$ fallow health");
+    expect(md).toContain("complexity · riskiest first");
   });
 });

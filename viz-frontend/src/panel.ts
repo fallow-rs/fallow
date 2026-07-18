@@ -1,5 +1,5 @@
 import type { AppState } from "./state";
-import type { VizFile } from "./types";
+import type { Lens, VizFile } from "./types";
 import { basename, dirname, formatCount, formatSize, reachSet } from "./data";
 import { closeButton, copyButton, el } from "./dom";
 
@@ -476,9 +476,16 @@ interface RankRow {
   clone?: number;
 }
 
-export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } => {
+export const rankRowsFor = (
+  state: AppState,
+): { title: string; rows: RankRow[]; empty: string } => rankRowsForLens(state, state.lens);
+
+const rankRowsForLens = (
+  state: AppState,
+  lens: Lens,
+): { title: string; rows: RankRow[]; empty: string } => {
   const files = state.data.files;
-  switch (state.lens) {
+  switch (lens) {
     case "overview": {
       // The newcomer's "what should I read first": files the rest of the
       // codebase leans on hardest, ranked by how many import them.
@@ -592,6 +599,45 @@ export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; 
     default:
       return { title: "", rows: [], empty: "" };
   }
+};
+
+/** Per-lens CLI that reproduces its findings, mirroring the summary chip. */
+const DIGEST_COMMANDS: Record<Lens, string> = {
+  overview: "fallow",
+  deadcode: "fallow dead-code",
+  dupes: "fallow dupes",
+  boundaries: "fallow dead-code --circular-deps --boundary-violations",
+  hotspots: "fallow health",
+};
+
+/**
+ * One markdown block covering the whole map: headline totals, then the
+ * top rows of every lens with the command that verifies each. The single
+ * paste an agent (or a quarterly report) wants, assembled from data
+ * already in memory.
+ */
+export const buildMapDigest = (state: AppState): string => {
+  const s = state.data.summary;
+  const lines: string[] = [
+    `# fallow map · ${state.data.root}`,
+    "",
+    `${formatCount(s.total_files)} files · ${formatCount(s.total_edges)} imports`,
+    `- unused: ${formatCount(s.unused_files)} files, ${formatCount(s.unused_exports)} exports`,
+    `- duplication: ${formatCount(s.clone_groups)} groups, ${formatCount(s.duplicated_lines)} lines`,
+    `- boundaries: ${formatCount(s.circular_deps)} cycles, ${formatCount(s.boundary_violations)} layer breaks`,
+    `- complexity: ${formatCount(s.hotspot_files)} files in the top band`,
+  ];
+  const lenses: Lens[] = ["overview", "deadcode", "dupes", "boundaries", "hotspots"];
+  for (const lens of lenses) {
+    const { title, rows } = rankRowsForLens(state, lens);
+    if (rows.length === 0) continue;
+    lines.push("", `## ${title}`, `\`$ ${DIGEST_COMMANDS[lens]}\``, "");
+    for (const row of rows.slice(0, 15)) {
+      lines.push(`- ${row.dir ? `${row.dir}/` : ""}${row.label} (${row.metric})`);
+    }
+    if (rows.length > 15) lines.push(`- … ${formatCount(rows.length - 15)} more`);
+  }
+  return lines.join("\n");
 };
 
 /** Ranked worst-first findings for the active lens (nothing selected). */

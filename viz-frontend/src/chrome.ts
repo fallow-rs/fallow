@@ -29,6 +29,8 @@ export interface ChromeRefs {
   helpHandler?: () => void;
   /** Wired by main.ts after chrome build (PNG export of the canvas). */
   exportHandler?: () => void;
+  /** Wired by main.ts after chrome build (copy the whole-map markdown digest). */
+  digestHandler?: () => void;
 }
 
 export interface ChromeHandlers {
@@ -119,6 +121,18 @@ export const buildChrome = (
   searchCount.id = "search-count";
   actions.appendChild(searchCount);
   actions.appendChild(el("span", "divider"));
+  const digestBtn = button("ghost-btn", "copy");
+  digestBtn.id = "digest-btn";
+  digestBtn.title = "copy a markdown digest of the whole map";
+  digestBtn.setAttribute("aria-label", "Copy a markdown digest of the whole map");
+  digestBtn.addEventListener("click", () => {
+    refs.digestHandler?.();
+    digestBtn.textContent = "copied";
+    setTimeout(() => {
+      digestBtn.textContent = "copy";
+    }, 1200);
+  });
+  actions.appendChild(digestBtn);
   const exportBtn = button("ghost-btn", "png");
   exportBtn.id = "export-btn";
   exportBtn.title = "export this view as an image";
