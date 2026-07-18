@@ -66,6 +66,8 @@ export interface VizSummary {
   duplicated_lines: number;
   boundary_violations: number;
   hotspot_files: number;
+  /** Clone groups dropped by the payload cap; absent when nothing was truncated. */
+  clone_groups_truncated?: number;
 }
 
 export interface VizWorkspace {

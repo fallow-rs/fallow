@@ -553,7 +553,11 @@ const rankRowsForLens = (
             clone: g,
           };
         });
-      return { title: "duplication · biggest blocks first", rows, empty: "no duplicated blocks" };
+      const truncated = state.data.summary.clone_groups_truncated;
+      const title = truncated
+        ? `duplication · biggest blocks first · +${formatCount(truncated)} not shown`
+        : "duplication · biggest blocks first";
+      return { title, rows, empty: "no duplicated blocks" };
     }
     case "boundaries": {
       const rows: RankRow[] = [];
@@ -623,7 +627,9 @@ export const buildMapDigest = (state: AppState): string => {
     "",
     `${formatCount(s.total_files)} files · ${formatCount(s.total_edges)} imports`,
     `- unused: ${formatCount(s.unused_files)} files, ${formatCount(s.unused_exports)} exports`,
-    `- duplication: ${formatCount(s.clone_groups)} groups, ${formatCount(s.duplicated_lines)} lines`,
+    `- duplication: ${formatCount(s.clone_groups)} groups${
+      s.clone_groups_truncated ? ` (+${formatCount(s.clone_groups_truncated)} not shown)` : ""
+    }, ${formatCount(s.duplicated_lines)} lines`,
     `- boundaries: ${formatCount(s.circular_deps)} cycles, ${formatCount(s.boundary_violations)} layer breaks`,
     `- complexity: ${formatCount(s.hotspot_files)} files in the top band`,
   ];

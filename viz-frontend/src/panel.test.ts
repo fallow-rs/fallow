@@ -217,4 +217,20 @@ describe("buildMapDigest", () => {
     expect(md).toContain("$ fallow health");
     expect(md).toContain("complexity · riskiest first");
   });
+
+  it("surfaces the clone-group truncation flag in the duplication line", () => {
+    const state = stateFor("overview", [file("src/a.ts")]);
+    state.data.summary.clone_groups = 500;
+    state.data.summary.clone_groups_truncated = 37;
+    const md = buildMapDigest(state);
+    expect(md).toContain("duplication: 500 groups (+37 not shown)");
+  });
+
+  it("omits the truncation note when nothing was dropped", () => {
+    const state = stateFor("overview", [file("src/a.ts")]);
+    state.data.summary.clone_groups = 12;
+    const md = buildMapDigest(state);
+    expect(md).toContain("duplication: 12 groups, ");
+    expect(md).not.toContain("not shown");
+  });
 });

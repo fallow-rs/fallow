@@ -236,4 +236,3 @@ describe("runSearch combined blast radius", () => {
     expect(state.searchReach.has(0)).toBe(false);
   });
 });
-

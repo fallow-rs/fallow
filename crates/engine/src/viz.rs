@@ -199,7 +199,7 @@ pub struct VizSummary {
     pub boundary_violations: usize,
     /// Files at or above the complexity hotspot floor.
     pub hotspot_files: usize,
-    /// Kept clone groups dropped by the [`MAX_CLONE_GROUPS`] payload cap.
+    /// Kept clone groups dropped by the `MAX_CLONE_GROUPS` payload cap.
     /// Present only when the clone payload was truncated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clone_groups_truncated: Option<u32>,
