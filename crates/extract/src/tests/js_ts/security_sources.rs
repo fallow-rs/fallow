@@ -481,3 +481,37 @@ fn tainted_binding_recording_is_bounded_on_dense_source() {
         info.tainted_bindings.len()
     );
 }
+
+/// Issue #1843 follow-up: the object-binding fixed-point could blow up on a real
+/// minified bundle full of nested object maps (a 2.1 MB oxfmt bundle hung the
+/// parse for over 90s). The prefix index plus the per-module size and pass caps
+/// bound it. Without them, this input's fixed-point runs candidate-count passes
+/// over an unbounded, growing `binding_target_names` (tens of seconds); with
+/// them it completes near-instantly.
+#[test]
+fn object_binding_resolution_is_bounded_on_dense_source() {
+    use std::fmt::Write as _;
+    use std::time::Instant;
+    let mut src = String::from("class K {}\n");
+    // large binding_target_names seed
+    for i in 0..4000 {
+        let _ = writeln!(src, "declare const t{i}: K;");
+    }
+    // wide object literal + a deep rebinding chain (the fixed-point driver)
+    src.push_str("const a0 = { ");
+    for i in 0..200 {
+        let _ = write!(src, "p{i}: t{i}, ");
+    }
+    src.push_str("};\n");
+    for k in 1..4000 {
+        let _ = writeln!(src, "const a{k} = {{ p: a{} }};", k - 1);
+    }
+    let start = Instant::now();
+    let _ = parse_ts(&src);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 20,
+        "object-binding resolution must stay bounded on dense source (took {elapsed:?}); \
+         without the caps this input runs for well over a minute"
+    );
+}

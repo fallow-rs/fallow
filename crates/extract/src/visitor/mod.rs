@@ -286,6 +286,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// cached `ModuleInfo` field. See issue #1793.
     local_function_return_types: FxHashMap<String, String>,
     object_binding_candidates: Vec<ObjectBindingCandidate>,
+    /// Working state for the object-binding fixed-point (issue #1843 follow-up):
+    /// an ancestor-prefix index over `binding_target_names`, mapping every proper
+    /// dotted prefix `P` of a key to the keys that start with `P.`. Built once per
+    /// `resolve_object_binding_candidates` run and kept current as that pass
+    /// inserts. `copy_nested_binding_targets` uses it to enumerate keys under a
+    /// source prefix in O(matches) instead of scanning all of
+    /// `binding_target_names`. `None` outside the pass. NOT persisted.
+    binding_target_prefix_index: Option<FxHashMap<String, Vec<String>>>,
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
@@ -2264,8 +2272,37 @@ impl ModuleInfoExtractor {
             return;
         }
 
+        // Bound the fixed-point (issue #1843 follow-up). Two costs explode on a
+        // pathological minified bundle: per-pass copy work (bounded by the prefix
+        // index below plus the `MAX_BINDING_TARGET_NAMES` size cap in
+        // `insert_binding_target`) and the PASS COUNT. The loop otherwise runs up
+        // to `candidates.len()` passes to resolve a rebinding chain, but real
+        // chains are a few levels deep, so a small pass cap keeps every real case
+        // while turning the crafted / minified worst case into K passes. A chain
+        // deeper than the cap stops propagating (a false negative, matching the
+        // FN-preferring `MAX_BINDING_PATH_DEPTH` / `MAX_TAINT_BINDING_HOPS`
+        // doctrine).
+        const MAX_RESOLUTION_PASSES: usize = 8;
+
+        // Build the ancestor-prefix index once so `copy_nested_binding_targets`
+        // enumerates keys under a source prefix in O(matches) rather than scanning
+        // all of `binding_target_names`. Kept current by `insert_binding_target`.
+        let mut index: FxHashMap<String, Vec<String>> = FxHashMap::default();
+        for key in self.binding_target_names.keys() {
+            for (dot, _) in key.match_indices('.') {
+                index
+                    .entry(key[..dot].to_string())
+                    .or_default()
+                    .push(key.clone());
+            }
+        }
+        self.binding_target_prefix_index = Some(index);
+
         let candidates = self.object_binding_candidates.clone();
-        let max_iterations = candidates.len().saturating_add(1);
+        let max_iterations = candidates
+            .len()
+            .saturating_add(1)
+            .min(MAX_RESOLUTION_PASSES);
         for _ in 0..max_iterations {
             let mut changed = false;
             for candidate in &candidates {
@@ -2275,6 +2312,8 @@ impl ModuleInfoExtractor {
                 break;
             }
         }
+
+        self.binding_target_prefix_index = None;
     }
 
     fn collect_namespace_object_aliases(&self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {

@@ -45,15 +45,35 @@ impl ModuleInfoExtractor {
         }
         let source_prefix = format!("{source_binding}.");
         let target_prefix = format!("{target_binding}.");
-        let copied: Vec<(String, BindingTarget)> = self
-            .binding_target_names
-            .iter()
-            .filter_map(|(binding, target)| {
-                binding
-                    .strip_prefix(&source_prefix)
-                    .map(|suffix| (format!("{target_prefix}{suffix}"), target.clone()))
-            })
-            .collect();
+        // Prefix-index fast-path (issue #1843 follow-up): during the object-binding
+        // fixed-point, enumerate the keys under `source_binding.` in O(matches) via
+        // the index instead of scanning all of `binding_target_names`, which is
+        // what made a real minified bundle full of nested object maps take tens of
+        // seconds. Outside the pass (`None`) the map is small and the full scan is
+        // used. Both branches produce the same `(binding, target)` set.
+        let copied: Vec<(String, BindingTarget)> =
+            if let Some(index) = &self.binding_target_prefix_index {
+                index
+                    .get(source_binding)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|key| {
+                        self.binding_target_names.get(key).map(|target| {
+                            let suffix = &key[source_prefix.len()..];
+                            (format!("{target_prefix}{suffix}"), target.clone())
+                        })
+                    })
+                    .collect()
+            } else {
+                self.binding_target_names
+                    .iter()
+                    .filter_map(|(binding, target)| {
+                        binding
+                            .strip_prefix(&source_prefix)
+                            .map(|suffix| (format!("{target_prefix}{suffix}"), target.clone()))
+                    })
+                    .collect()
+            };
 
         let mut changed = false;
         for (binding, target) in copied {
@@ -65,6 +85,32 @@ impl ModuleInfoExtractor {
     fn insert_binding_target(&mut self, binding: String, target: BindingTarget) -> bool {
         if self.binding_target_names.get(&binding) == Some(&target) {
             return false;
+        }
+        // Hard size cap on the object-binding fixed-point's growth (issue #1843
+        // follow-up). A pathological minified bundle (huge object maps copied
+        // across many bindings) makes the fixed-point multiply
+        // `binding_target_names` without bound, taking tens of seconds. Once the
+        // map reaches the cap, stop recording NEW keys (an over-cap chain degrades
+        // to a false negative, matching the FN-preferring doctrine); updates to an
+        // already-present key still apply. Only reached via the fixed-point (the
+        // index is `Some`), so the walk-time member crediting is unaffected.
+        const MAX_BINDING_TARGET_NAMES: usize = 8192;
+        if self.binding_target_prefix_index.is_some()
+            && self.binding_target_names.len() >= MAX_BINDING_TARGET_NAMES
+            && !self.binding_target_names.contains_key(&binding)
+        {
+            return false;
+        }
+        // Keep the ancestor-prefix index current for inserts made during the
+        // fixed-point (issue #1843 follow-up), so a key added this pass is visible
+        // to a later `copy_nested_binding_targets` call under every prefix.
+        if let Some(index) = self.binding_target_prefix_index.as_mut() {
+            for (dot, _) in binding.match_indices('.') {
+                index
+                    .entry(binding[..dot].to_string())
+                    .or_default()
+                    .push(binding.clone());
+            }
         }
         self.binding_target_names.insert(binding, target);
         true

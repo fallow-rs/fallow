@@ -821,7 +821,15 @@ use crate::MemberKind;
 /// bounds its accumulator. A file exceeding a cap now persists fewer candidates,
 /// so its resolved `member_accesses` can change; warm 236 caches can carry
 /// over-cap entries; invalidate them.
-pub(super) const CACHE_VERSION: u32 = 237;
+///
+/// Bumped to 238 (issue #1843 follow-up): the object-binding resolution
+/// fixed-point is now additionally bounded by a `binding_target_names` size cap
+/// (8192) and a pass cap (8), because a real minified bundle full of nested
+/// object maps drove it to tens of seconds even under the candidate cap. A file
+/// that hits either bound now resolves fewer nested bindings, so its
+/// `member_accesses` can change; warm 237 caches can carry the fuller set;
+/// invalidate them.
+pub(super) const CACHE_VERSION: u32 = 238;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

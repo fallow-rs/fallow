@@ -49,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pathologically nested input), and the health-time line-number and mask
   scanners. Analysis output is unchanged on ordinary code. (#1843)
 
+- **A real minified vendor bundle no longer stalls analysis for minutes.** The
+  object-binding member-resolution pass could grow super-linearly on a large
+  minified bundle full of nested object maps (a 2 MB bundle stalled the parse
+  for over a minute). It is now bounded by a prefix index plus size and pass
+  caps, so such files analyze in a fraction of a second. Output is unchanged on
+  ordinary code. (#1843)
+
 ## [3.6.0] - 2026-07-15
 
 ### Changed
