@@ -5,7 +5,8 @@
  */
 export { usableStageWidth } from "./shared";
 export { initGraphNodes } from "./build";
-export { minimapHit, minimapPan, renderGraph } from "./render";
+export { renderGraph } from "./render";
+export { minimapHit, minimapPan } from "./minimap";
 export {
   centerOnFile,
   clearGraphFocus,
