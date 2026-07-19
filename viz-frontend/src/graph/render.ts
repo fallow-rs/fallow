@@ -762,6 +762,59 @@ const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): voi
  * candidate slots with the docked tooltip pre-seeded as an exclusion
  * zone, and a +N chip for whatever did not fit.
  */
+interface LabelSlot {
+  x: number;
+  y: number;
+  align: CanvasTextAlign;
+}
+type PlacedRect = { x: number; y: number; w: number; h: number };
+
+/**
+ * Interleave the importer and import lists, each degree-sorted, so neither
+ * side monopolizes the label cap.
+ */
+const interleaveByDegree = (
+  state: AppState,
+  importers: Set<number>,
+  imports: Set<number>,
+): number[] => {
+  const byDegree = (idx: number): number =>
+    state.data.files[idx].importer_count + state.data.files[idx].import_count;
+  const a = [...importers].toSorted((x, y) => byDegree(y) - byDegree(x));
+  const b = [...imports].toSorted((x, y) => byDegree(y) - byDegree(x));
+  const ordered: number[] = [];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (i < a.length) ordered.push(a[i]);
+    if (i < b.length) ordered.push(b[i]);
+  }
+  return ordered;
+};
+
+/**
+ * The first candidate slot whose label rect fits inside the viewport and
+ * clears every already-placed rect, or null if the label cannot be placed.
+ */
+const findLabelSlot = (
+  slots: LabelSlot[],
+  textW: number,
+  w: number,
+  h: number,
+  placed: PlacedRect[],
+): { slot: LabelSlot; rect: PlacedRect } | null => {
+  for (const slot of slots) {
+    const left =
+      slot.align === "center" ? slot.x - textW / 2 : slot.align === "left" ? slot.x : slot.x - textW;
+    const rect = { x: left - 4, y: slot.y - 9, w: textW + 8, h: 18 };
+    if (rect.x < 4 || rect.x + rect.w > w - 4 || rect.y < 4 || rect.y + rect.h > h - 4) continue;
+    const overlaps = placed.some(
+      (p) =>
+        rect.x < p.x + p.w && rect.x + rect.w > p.x && rect.y < p.y + p.h && rect.y + rect.h > p.y,
+    );
+    if (!overlaps) return { slot, rect };
+  }
+  return null;
+};
+
 const drawHoverLabels = (
   state: AppState,
   gvs: GraphViewState,
@@ -774,18 +827,7 @@ const drawHoverLabels = (
   const { ctx, theme } = state;
   const kRel = gvs.transform.k / gvs.fitK;
   const cap = kRel >= 1.2 ? 12 : 6;
-
-  // Interleave importer and import lists (each degree-sorted) so
-  // neither side monopolizes the cap.
-  const byDegree = (idx: number): number =>
-    state.data.files[idx].importer_count + state.data.files[idx].import_count;
-  const a = [...importers].toSorted((x, y) => byDegree(y) - byDegree(x));
-  const b = [...imports].toSorted((x, y) => byDegree(y) - byDegree(x));
-  const ordered: number[] = [];
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if (i < a.length) ordered.push(a[i]);
-    if (i < b.length) ordered.push(b[i]);
-  }
+  const ordered = interleaveByDegree(state, importers, imports);
 
   const hoveredNode = gvs.fileNodes[hovered];
   if (!hoveredNode || hoveredNode.x == null || hoveredNode.y == null) return;
@@ -807,44 +849,24 @@ const drawHoverLabels = (
     const name = middleTruncate(ctx, basename(state.data.files[idx].path), 140);
     const textW = ctx.measureText(name).width;
     const r = node.radius * gvs.transform.k + 3;
-    const slots: Array<{ x: number; y: number; align: CanvasTextAlign }> = [
+    const slots: LabelSlot[] = [
       { x: s.x, y: s.y + r + 9, align: "center" },
       { x: s.x, y: s.y - r - 9, align: "center" },
       { x: s.x + r + 5, y: s.y, align: "left" },
       { x: s.x - r - 5, y: s.y, align: "right" },
     ];
-    for (const slot of slots) {
-      const left =
-        slot.align === "center"
-          ? slot.x - textW / 2
-          : slot.align === "left"
-            ? slot.x
-            : slot.x - textW;
-      const rect = { x: left - 4, y: slot.y - 9, w: textW + 8, h: 18 };
-      if (rect.x < 4 || rect.x + rect.w > w - 4 || rect.y < 4 || rect.y + rect.h > h - 4) continue;
-      if (
-        placed.some(
-          (p) =>
-            rect.x < p.x + p.w &&
-            rect.x + rect.w > p.x &&
-            rect.y < p.y + p.h &&
-            rect.y + rect.h > p.y,
-        )
-      ) {
-        continue;
-      }
-      ctx.textAlign = slot.align;
-      ctx.strokeStyle = theme.bg;
-      ctx.lineWidth = 3;
-      ctx.globalAlpha = 0.92;
-      ctx.strokeText(name, slot.x, slot.y);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = theme.textLow;
-      ctx.fillText(name, slot.x, slot.y);
-      placed.push(rect);
-      drawn++;
-      break;
-    }
+    const found = findLabelSlot(slots, textW, w, h, placed);
+    if (!found) continue;
+    ctx.textAlign = found.slot.align;
+    ctx.strokeStyle = theme.bg;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.92;
+    ctx.strokeText(name, found.slot.x, found.slot.y);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = theme.textLow;
+    ctx.fillText(name, found.slot.x, found.slot.y);
+    placed.push(found.rect);
+    drawn++;
   }
 
   const total = importers.size + imports.size;
@@ -1099,6 +1121,42 @@ const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
   }
 };
 
+/**
+ * Fixed standalone-strip toggle chip, docked above the canvas legend so
+ * it never floats orphaned in world space. When open, a caption sits by
+ * the revealed strip itself. Also records the chip's hit rect on gvs.
+ */
+const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
+  const { ctx, theme } = state;
+  const isolated = gvs.clusters.filter((c) => c.isolated);
+  gvs.standaloneChip = null;
+  if (isolated.length === 0) return;
+  const h = state.canvas.clientHeight;
+  const fileCount = isolated.reduce((sum, c) => sum + c.indices.length, 0);
+  ctx.font = FONT_MICRO;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const label = gvs.standaloneOpen
+    ? "hide standalone files"
+    : `standalone · ${formatCount(fileCount)} files · nothing imports them`;
+  const textW = ctx.measureText(label).width;
+  const cx0 = 12;
+  const cy0 = h - 56;
+  chipRect(ctx, cx0, cy0, textW + 16, 22, theme.bg, 0.9, theme.borderSubtle);
+  ctx.fillStyle = theme.textMuted;
+  ctx.fillText(label, cx0 + 8, cy0 + 11.5);
+  gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 16, h: 22 };
+  if (gvs.standaloneOpen) {
+    const minX = Math.min(...isolated.map((c) => c.cx - c.r));
+    const minY = Math.min(...isolated.map((c) => c.cy - c.r));
+    const s = worldToScreen(gvs, { x: minX, y: minY });
+    ctx.fillStyle = theme.textMuted;
+    ctx.globalAlpha = 0.7;
+    ctx.fillText("STANDALONE · configs & CI · nothing imports them", s.x, s.y - 26);
+    ctx.globalAlpha = 1;
+  }
+};
+
 const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme } = state;
   ctx.font = FONT_CHIP;
@@ -1172,37 +1230,7 @@ const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
     ctx.globalAlpha = 1;
   }
 
-  // Standalone toggle: a fixed chip docked above the canvas legend so it
-  // never floats orphaned in world space. When open, a caption sits by
-  // the revealed strip itself.
-  const isolated = gvs.clusters.filter((c) => c.isolated);
-  gvs.standaloneChip = null;
-  if (isolated.length > 0) {
-    const h = state.canvas.clientHeight;
-    const fileCount = isolated.reduce((sum, c) => sum + c.indices.length, 0);
-    ctx.font = FONT_MICRO;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    const label = gvs.standaloneOpen
-      ? "hide standalone files"
-      : `standalone · ${formatCount(fileCount)} files · nothing imports them`;
-    const textW = ctx.measureText(label).width;
-    const cx0 = 12;
-    const cy0 = h - 56;
-    chipRect(ctx, cx0, cy0, textW + 16, 22, theme.bg, 0.9, theme.borderSubtle);
-    ctx.fillStyle = theme.textMuted;
-    ctx.fillText(label, cx0 + 8, cy0 + 11.5);
-    gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 16, h: 22 };
-    if (gvs.standaloneOpen) {
-      const minX = Math.min(...isolated.map((c) => c.cx - c.r));
-      const minY = Math.min(...isolated.map((c) => c.cy - c.r));
-      const s = worldToScreen(gvs, { x: minX, y: minY });
-      ctx.fillStyle = theme.textMuted;
-      ctx.globalAlpha = 0.7;
-      ctx.fillText("STANDALONE · configs & CI · nothing imports them", s.x, s.y - 26);
-      ctx.globalAlpha = 1;
-    }
-  }
+  drawStandaloneChip(state, gvs);
 };
 
 /** Screen-space axis endpoints: the one annotation that explains the x layout. */
