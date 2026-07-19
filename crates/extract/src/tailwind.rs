@@ -39,14 +39,24 @@ pub struct TailwindArbitraryUse {
 #[must_use]
 pub fn scan_tailwind_arbitrary_values(source: &str) -> Vec<TailwindArbitraryUse> {
     let mut out = Vec::new();
+    // Incremental line counter: `find_iter` yields matches in source order, so
+    // count only the newlines between the previous match and this one instead of
+    // rescanning the whole prefix per match (issue #1843 follow-up: the naive
+    // `source[..m.start()]` rescan is O(matches * source_len), worst on a single
+    // long line with no newlines).
+    let mut last_pos = 0usize;
+    let mut last_line = 1usize;
     for m in ARBITRARY_VALUE_RE.find_iter(source) {
         if is_arbitrary_variant_match(source.as_bytes(), m.end()) {
             continue;
         }
-        let line = 1 + source[..m.start()].bytes().filter(|&b| b == b'\n').count();
+        last_line += source
+            .get(last_pos..m.start())
+            .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
+        last_pos = m.start();
         out.push(TailwindArbitraryUse {
             value: m.as_str().to_owned(),
-            line: u32::try_from(line).unwrap_or(u32::MAX),
+            line: u32::try_from(last_line).unwrap_or(u32::MAX),
         });
     }
     out
@@ -130,5 +140,42 @@ mod tests {
     fn keeps_arbitrary_value_modifiers() {
         let v = values(r#"<div class="bg-[#fff]/50 ring-[3px]">x</div>"#);
         assert_eq!(v, vec!["bg-[#fff]", "ring-[3px]"]);
+    }
+
+    #[test]
+    fn line_numbers_match_naive_reference_on_dense_line() {
+        // Many arbitrary-value tokens packed onto a single long line (the
+        // pathological zero-newline prefix): the incremental line counter must
+        // agree byte-for-byte with the naive per-match prefix rescan.
+        use std::fmt::Write as _;
+        let mut src = String::from("<div class=\"");
+        for i in 0..500 {
+            let _ = write!(src, "w-[{i}px] ");
+        }
+        src.push_str("\">x</div>\n<span class=\"h-[3px]\"></span>");
+
+        let got: Vec<(String, u32)> = scan_tailwind_arbitrary_values(&src)
+            .into_iter()
+            .map(|u| (u.value, u.line))
+            .collect();
+
+        // Reference: recompute each match's line via a full prefix rescan.
+        let want: Vec<(String, u32)> = ARBITRARY_VALUE_RE
+            .find_iter(&src)
+            .filter(|m| !is_arbitrary_variant_match(src.as_bytes(), m.end()))
+            .map(|m| {
+                let line = 1 + src[..m.start()].bytes().filter(|&b| b == b'\n').count();
+                (
+                    m.as_str().to_owned(),
+                    u32::try_from(line).unwrap_or(u32::MAX),
+                )
+            })
+            .collect();
+
+        assert_eq!(got, want);
+        assert!(got.len() > 500, "expected the dense line plus the trailer");
+        // The trailer sits on line 2; the packed tokens all sit on line 1.
+        assert_eq!(got.last().map(|(_, l)| *l), Some(2));
+        assert!(got[..got.len() - 1].iter().all(|(_, l)| *l == 1));
     }
 }

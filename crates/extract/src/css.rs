@@ -383,6 +383,13 @@ pub fn extract_css_var_reads_located(source: &str) -> Vec<(String, u32)> {
     }
     let in_theme = |offset: usize| theme_bodies.iter().any(|&(s, e)| offset >= s && offset < e);
     let mut out = Vec::new();
+    // Incremental line counter: `captures_iter` yields matches in source order, so
+    // advance from the previous read's offset instead of rescanning the whole
+    // prefix per read (issue #1843 follow-up). Masking preserves byte offsets 1:1,
+    // but newlines are counted over `source` (comment masking blanks newlines in
+    // `masked`), matching the original `line_at_offset(source, ..)`.
+    let mut last_pos = 0usize;
+    let mut last_line = 1u32;
     for cap in CSS_VAR_REF_RE.captures_iter(&masked) {
         let (Some(whole), Some(name)) = (cap.get(0), cap.get(1)) else {
             continue;
@@ -390,10 +397,10 @@ pub fn extract_css_var_reads_located(source: &str) -> Vec<(String, u32)> {
         if in_theme(whole.start()) {
             continue;
         }
-        out.push((
-            name.as_str().to_owned(),
-            line_at_offset(source, whole.start()),
-        ));
+        let offset = whole.start();
+        last_line = last_line.saturating_add(newlines_between(source, last_pos, offset));
+        last_pos = offset;
+        out.push((name.as_str().to_owned(), last_line));
     }
     out
 }
@@ -435,6 +442,12 @@ fn collect_theme_var_reads(
     let Some(body) = masked.get(body_start..body_end) else {
         return;
     };
+    // Incremental line counter: matches arrive in source order, so advance from
+    // the previous read's offset instead of rescanning the whole prefix per read
+    // (issue #1843 follow-up). Starting from offset 0 keeps the first read's line
+    // identical to `line_at_offset(source, offset)`.
+    let mut last_pos = 0usize;
+    let mut last_line = 1u32;
     for cap in CSS_VAR_REF_RE.captures_iter(body) {
         let (Some(whole), Some(name)) = (cap.get(0), cap.get(1)) else {
             continue;
@@ -442,7 +455,9 @@ fn collect_theme_var_reads(
         // Absolute byte offset of the `var(` token start in the original source
         // (masking preserves byte offsets 1:1).
         let offset = body_start + whole.start();
-        out.push((name.as_str().to_owned(), line_at_offset(source, offset)));
+        last_line = last_line.saturating_add(newlines_between(source, last_pos, offset));
+        last_pos = offset;
+        out.push((name.as_str().to_owned(), last_line));
     }
 }
 
@@ -453,6 +468,18 @@ fn line_at_offset(source: &str, offset: usize) -> u32 {
         .get(..offset)
         .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
     u32::try_from(1 + count).unwrap_or(u32::MAX)
+}
+
+/// Count the `\n` bytes in `source[from..to]`, returning 0 for a reversed or
+/// out-of-range span. Feeds an incremental 1-based line counter across regex
+/// matches that arrive in source order, replacing the O(matches * n) per-match
+/// `source[..offset]` prefix rescan (issue #1843 follow-up: worst on a single
+/// long line with no newlines).
+fn newlines_between(source: &str, from: usize, to: usize) -> u32 {
+    let count = source
+        .get(from..to)
+        .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
+    u32::try_from(count).unwrap_or(u32::MAX)
 }
 
 /// Walk a masked `@theme` body collecting top-level `--ident: value` declarations
@@ -1844,6 +1871,41 @@ mod tests {
                 .is_empty(),
             "a @theme-interior-only var() read is not a css-var consumer"
         );
+    }
+
+    #[test]
+    fn css_var_reads_line_match_naive_reference_on_dense_line() {
+        // Many `var()` reads packed onto a single long line (the pathological
+        // zero-newline prefix) plus one trailing read on the next line: the
+        // incremental line counter must agree byte-for-byte with the naive
+        // per-match prefix rescan. No `@theme`, comments, strings, or `url()`,
+        // so masking is identity and every read is a css-var read.
+        use std::fmt::Write as _;
+        let mut src = String::from(".x {");
+        for i in 0..500 {
+            let _ = write!(src, " color: var(--t{i});");
+        }
+        src.push_str(" }\n.y { color: var(--tail); }\n");
+
+        let got = extract_css_var_reads_located(&src);
+
+        // Reference: recompute each read's line via a full prefix rescan.
+        let want: Vec<(String, u32)> = CSS_VAR_REF_RE
+            .captures_iter(&src)
+            .filter_map(|cap| cap.get(0).zip(cap.get(1)))
+            .map(|(whole, name)| {
+                (
+                    name.as_str().to_owned(),
+                    line_at_offset(&src, whole.start()),
+                )
+            })
+            .collect();
+
+        assert_eq!(got, want);
+        assert!(got.len() > 500, "expected the dense line plus the trailer");
+        // The trailer sits on line 2; the packed reads all sit on line 1.
+        assert_eq!(got.last().map(|(_, l)| *l), Some(2));
+        assert!(got[..got.len() - 1].iter().all(|(_, l)| *l == 1));
     }
 
     #[test]

@@ -6,6 +6,20 @@ use oxc_ast::ast::*;
 
 use super::super::{BindingTarget, ModuleInfoExtractor, ObjectBindingCandidate};
 
+/// Per-module breadth cap on recorded object-binding candidates (issue #1843
+/// follow-up): the companion to `MAX_TAINTED_BINDINGS_PER_MODULE` for the
+/// `const obj = { key: ident }` object-binding channel. `object_binding_candidates`
+/// grows once per identifier-valued property (recursively through nested object
+/// literals) and is resolved by a fixpoint pass whose iteration bound is the
+/// candidate count, so an O(n^2) worst case. A dense machine-generated bundle
+/// with a huge object literal drove the working set (and that fixpoint) super-
+/// linearly. Past the cap no NEW candidate is recorded, degrading an over-cap
+/// file to module-level reachability instead of an object-binding member-access
+/// claim, matching the false-negative-preferring direction of the taint caps.
+/// Deliberately a constant, not a config knob: real hand-written modules stay
+/// far below it.
+const MAX_OBJECT_BINDING_CANDIDATES: usize = 4096;
+
 impl ModuleInfoExtractor {
     pub(super) fn extract_angular_inject_target(
         &self,
@@ -24,6 +38,11 @@ impl ModuleInfoExtractor {
         source_binding: &str,
         target_binding: &str,
     ) -> bool {
+        // Nothing to copy from an empty map: skip the two `format!` allocations
+        // and the no-op scan/collect below.
+        if self.binding_target_names.is_empty() {
+            return false;
+        }
         let source_prefix = format!("{source_binding}.");
         let target_prefix = format!("{target_binding}.");
         let copied: Vec<(String, BindingTarget)> = self
@@ -98,7 +117,14 @@ impl ModuleInfoExtractor {
 
             let binding_path = format!("{object_path}.{key_name}");
             match &prop.value {
-                Expression::Identifier(ident) => {
+                // Per-module breadth cap (issue #1843 follow-up): the guard stops
+                // recording once at capacity so a pathological object literal
+                // cannot grow the candidate set (and its O(n^2) fixpoint resolver)
+                // without bound. At capacity the arm falls through to the no-op
+                // `_ =>` arm, identical to skipping the push.
+                Expression::Identifier(ident)
+                    if self.object_binding_candidates.len() < MAX_OBJECT_BINDING_CANDIDATES =>
+                {
                     self.object_binding_candidates.push(ObjectBindingCandidate {
                         binding_path,
                         source_name: ident.name.to_string(),
@@ -110,5 +136,53 @@ impl ModuleInfoExtractor {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::MAX_OBJECT_BINDING_CANDIDATES;
+    use crate::visitor::ModuleInfoExtractor;
+    use oxc_allocator::Allocator;
+    use oxc_ast_visit::Visit;
+    use oxc_parser::Parser;
+    use oxc_span::SourceType;
+
+    /// A single object literal with far more identifier-valued properties than
+    /// the per-module cap must not grow `object_binding_candidates` past the cap.
+    /// Mirrors `tainted_binding_recording_is_bounded_on_dense_source`: the
+    /// object-binding channel has the same super-linear failure mode (an O(n^2)
+    /// fixpoint resolver over an unbounded candidate set) on dense machine-
+    /// generated source, and the cap degrades over-cap files to module-level
+    /// reachability rather than OOMing. See issue #1843 follow-up.
+    #[test]
+    fn object_binding_candidate_recording_is_bounded_on_dense_source() {
+        use std::fmt::Write as _;
+
+        let over_cap = MAX_OBJECT_BINDING_CANDIDATES + 1000;
+        let mut props = String::new();
+        for k in 0..over_cap {
+            // Each identifier-valued property seeds one object-binding candidate.
+            let _ = write!(props, "k{k}: v{k}, ");
+        }
+        let source = format!("const big = {{ {props} }};");
+
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &source, SourceType::ts()).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.visit_program(&parser_return.program);
+
+        // The cap must engage (input deterministically exceeds it) but never
+        // zero out recording.
+        assert!(
+            !extractor.object_binding_candidates.is_empty(),
+            "the cap must not zero out object-binding recording"
+        );
+        assert!(
+            extractor.object_binding_candidates.len() <= MAX_OBJECT_BINDING_CANDIDATES,
+            "object-binding candidate recording must stay bounded at the \
+             per-module cap on dense source (got {})",
+            extractor.object_binding_candidates.len()
+        );
     }
 }

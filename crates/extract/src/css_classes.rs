@@ -92,6 +92,13 @@ pub fn scan_markup_class_tokens(source: &str) -> MarkupClassScan {
     let mut static_tokens = Vec::new();
     let mut any_interpolated = false;
 
+    // Incremental line counter: `captures_iter` yields matches in source order, so
+    // count only the newlines between the previous match and this one instead of
+    // rescanning the whole prefix per match (issue #1843 follow-up: the naive
+    // `source[..m.start()]` rescan is O(matches * source_len), worst on a single
+    // long line with no newlines).
+    let mut last_pos = 0usize;
+    let mut last_line = 1usize;
     for caps in STATIC_CLASS_ATTR_RE.captures_iter(source) {
         let Some(m) = caps.get(0) else { continue };
         let value = caps
@@ -102,8 +109,11 @@ pub fn scan_markup_class_tokens(source: &str) -> MarkupClassScan {
             any_interpolated = true;
             continue;
         }
-        let line = 1 + source[..m.start()].bytes().filter(|&b| b == b'\n').count();
-        let line = u32::try_from(line).unwrap_or(u32::MAX);
+        last_line += source
+            .get(last_pos..m.start())
+            .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
+        last_pos = m.start();
+        let line = u32::try_from(last_line).unwrap_or(u32::MAX);
         for token in value.split_whitespace() {
             if is_plausible_class_token(token) {
                 static_tokens.push(MarkupClassToken {
@@ -331,5 +341,52 @@ mod tests {
         assert!(!is_typo_edit("button", "buttons"));
         assert!(!is_typo_edit("buttons", "button"));
         assert!(!is_typo_edit("card", "cards"));
+    }
+
+    #[test]
+    fn class_token_lines_match_naive_reference_on_dense_line() {
+        // Many static class attributes packed onto a single long line (the
+        // pathological zero-newline prefix) plus one on the next line: the
+        // incremental line counter must agree byte-for-byte with the naive
+        // per-match prefix rescan.
+        use std::fmt::Write as _;
+        let mut src = String::from("<div>");
+        for i in 0..500 {
+            let _ = write!(src, "<i class=\"c{i}\"></i>");
+        }
+        src.push_str("</div>\n<span class=\"tail\"></span>");
+
+        let got: Vec<(String, u32)> = scan_markup_class_tokens(&src)
+            .static_tokens
+            .into_iter()
+            .map(|t| (t.value, t.line))
+            .collect();
+
+        // Reference: recompute each attribute's line via a full prefix rescan,
+        // tokenizing the captured value exactly as the scanner does.
+        let mut want: Vec<(String, u32)> = Vec::new();
+        for caps in STATIC_CLASS_ATTR_RE.captures_iter(&src) {
+            let Some(m) = caps.get(0) else { continue };
+            let value = caps
+                .get(1)
+                .or_else(|| caps.get(2))
+                .map_or("", |g| g.as_str());
+            if value_is_interpolated(value) {
+                continue;
+            }
+            let line = u32::try_from(1 + src[..m.start()].bytes().filter(|&b| b == b'\n').count())
+                .unwrap_or(u32::MAX);
+            for token in value.split_whitespace() {
+                if is_plausible_class_token(token) {
+                    want.push((token.to_owned(), line));
+                }
+            }
+        }
+
+        assert_eq!(got, want);
+        assert!(got.len() > 500, "expected the dense line plus the trailer");
+        // The trailer sits on line 2; the packed tokens all sit on line 1.
+        assert_eq!(got.last().map(|(_, l)| *l), Some(2));
+        assert!(got[..got.len() - 1].iter().all(|(_, l)| *l == 1));
     }
 }

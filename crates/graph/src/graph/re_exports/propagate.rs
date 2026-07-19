@@ -96,14 +96,20 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         .iter()
         .any(|re| re.exported_name == "*");
 
+    let matching_exports_by_name = build_named_export_index(&modules[source_idx]);
+
     let mut changed = false;
     let mut existing_files: FxHashSet<FileId> = FxHashSet::default();
     let source = &mut modules[source_idx];
     for (name, refs) in &refs_by_name {
+        let matching_exports: &[usize] = matching_exports_by_name
+            .get(name.as_str())
+            .map_or(&[], Vec::as_slice);
         changed |= apply_star_refs_to_source(ApplyStarRefs {
             source: &mut *source,
             name,
             refs,
+            matching_exports,
             source_id,
             module_by_id,
             triggering_is_type_only,
@@ -113,6 +119,27 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         });
     }
     changed
+}
+
+/// Index the source module's named exports by name so the per-re-exported-name
+/// star propagation can look up matching exports in O(1) instead of rescanning
+/// `source.exports` once per name.
+///
+/// Issue #1843 follow-up: the removed per-name scan was O(names x source_exports)
+/// and re-ran on every fixpoint visit, dominating wide-barrel re-export
+/// resolution. The map is built once over the module's pre-existing exports;
+/// synthetic exports appended during propagation are always named after the name
+/// currently being processed (each name is visited exactly once), so they never
+/// need to appear in a later name's lookup. The result is therefore byte-identical
+/// to the exact-`ExportName::Named`-match, ascending-index scan it replaces.
+fn build_named_export_index(source: &ModuleNode) -> FxHashMap<String, Vec<usize>> {
+    let mut index: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+    for (idx, export) in source.exports.iter().enumerate() {
+        if let ExportName::Named(name) = &export.name {
+            index.entry(name.clone()).or_default().push(idx);
+        }
+    }
+    index
 }
 
 /// Collect the per-name references that must propagate through a star
@@ -292,6 +319,9 @@ struct ApplyStarRefs<'a> {
     source: &'a mut ModuleNode,
     name: &'a str,
     refs: &'a [StarReference],
+    /// Indices into `source.exports` whose name exactly matches `name`, prebuilt
+    /// once per source module by `build_named_export_index` (issue #1843 follow-up).
+    matching_exports: &'a [usize],
     source_id: FileId,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     triggering_is_type_only: bool,
@@ -308,6 +338,7 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
         source,
         name,
         refs,
+        matching_exports,
         source_id,
         module_by_id,
         triggering_is_type_only,
@@ -320,15 +351,6 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
         return false;
     }
 
-    let export_name = ExportName::Named(name.to_string());
-
-    let matching_exports: Vec<usize> = source
-        .exports
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, export)| (export.name == export_name).then_some(idx))
-        .collect();
-
     if !matching_exports.is_empty() {
         apply_star_refs_to_matching_exports(ApplyMatchingStarRefs {
             source,
@@ -338,7 +360,7 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
             module_by_id,
             triggering_is_type_only,
             source_has_star_re_exports,
-            matching_exports: &matching_exports,
+            matching_exports,
             existing_files,
             synthetic_stubs,
         })
@@ -346,7 +368,7 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
         create_synthetic_exports_for_refs(CreateSyntheticExports {
             source,
             name,
-            export_name,
+            export_name: ExportName::Named(name.to_string()),
             refs,
             source_id,
             module_by_id,
@@ -935,4 +957,82 @@ fn propagate_entry_point_named(
         }
     }
     changed
+}
+
+#[cfg(test)]
+mod star_index_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn named(name: &str) -> ExportSymbol {
+        export_symbol(ExportName::Named(name.to_string()))
+    }
+
+    fn export_symbol(name: ExportName) -> ExportSymbol {
+        ExportSymbol {
+            name,
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 0),
+            references: Vec::new(),
+            members: Vec::new(),
+        }
+    }
+
+    fn module_with(exports: Vec<ExportSymbol>) -> ModuleNode {
+        ModuleNode {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/source.ts"),
+            edge_range: 0..0,
+            exports,
+            re_exports: Vec::new(),
+            flags: 0,
+        }
+    }
+
+    /// The prebuilt name -> indices map must reproduce, byte-for-byte, the indices
+    /// the removed per-name `source.exports` scan produced: exact
+    /// `ExportName::Named` matching, ascending index order, `Default` excluded.
+    /// This pins the behavior-preserving contract for a wide-barrel source module.
+    #[test]
+    fn named_export_index_matches_reference_scan() {
+        // A wide barrel source: many named exports, a duplicate name, and a
+        // Default export interleaved to prove index alignment survives it.
+        let module = module_with(vec![
+            named("a"),
+            named("b"),
+            export_symbol(ExportName::Default),
+            named("c"),
+            named("b"), // duplicate name at a later index
+            named("d"),
+        ]);
+
+        let index = build_named_export_index(&module);
+
+        // Reference computation mirrors the old inline scan for each candidate name.
+        let reference = |name: &str| -> Vec<usize> {
+            let export_name = ExportName::Named(name.to_string());
+            module
+                .exports
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, export)| (export.name == export_name).then_some(idx))
+                .collect()
+        };
+
+        for name in ["a", "b", "c", "d"] {
+            let looked_up = index.get(name).cloned().unwrap_or_default();
+            assert_eq!(looked_up, reference(name), "index mismatch for `{name}`");
+        }
+
+        // A repeated name keeps both indices in ascending order (the `Default`
+        // export at index 2 is skipped, so the second `b` lands at index 4).
+        assert_eq!(index.get("b").map(Vec::as_slice), Some(&[1usize, 4][..]));
+
+        // Default is never keyed as a named export, and an absent name is empty.
+        assert!(!index.contains_key("default"));
+        assert!(!index.contains_key("missing"));
+    }
 }

@@ -116,6 +116,19 @@ const ITERABLE_ELEMENT_CALLBACK_METHODS: &[&str] = &[
 const ROUTE_LOADER_DATA_SOURCES: &[&str] =
     &["react-router", "react-router-dom", "@remix-run/react"];
 
+/// Per-module breadth cap on recorded factory-return candidates (issue #1843
+/// follow-up): the companion to `MAX_TAINTED_BINDINGS_PER_MODULE` for the
+/// `const local = callee(...)` factory-return channel. `factory_return_candidates`
+/// grows once per bare-callee assignment in the module and is resolved by an
+/// O(n) finalize pass, so a dense machine-generated bundle that emits tens of
+/// thousands of such assignments drove the working set (and the finalize scan)
+/// super-linearly. Past the cap no NEW candidate is recorded, degrading an
+/// over-cap file to the pre-existing module-level reachability instead of an
+/// arg-level factory-return claim, matching the false-negative-preferring
+/// direction of the depth/breadth taint caps. Deliberately a constant, not a
+/// config knob: real hand-written modules stay far below it.
+const MAX_FACTORY_RETURN_CANDIDATES: usize = 4096;
+
 fn is_css_module_import_source(source: &str) -> bool {
     let path = source.split(['?', '#']).next().unwrap_or(source);
     let Some(file_name) = path.rsplit('/').next() else {
@@ -243,7 +256,13 @@ impl ModuleInfoExtractor {
         };
 
         match &declarator.id {
-            BindingPattern::BindingIdentifier(id) => {
+            // Per-module breadth cap (issue #1843 follow-up): the guard stops
+            // recording once at capacity so a pathological bundle cannot grow the
+            // candidate set (and its finalize scan) without bound. At capacity the
+            // arm falls through to the no-op `_ =>` arm, identical to skipping.
+            BindingPattern::BindingIdentifier(id)
+                if self.factory_return_candidates.len() < MAX_FACTORY_RETURN_CANDIDATES =>
+            {
                 self.factory_return_candidates
                     .push(super::FactoryReturnCandidate {
                         local_name: id.name.to_string(),

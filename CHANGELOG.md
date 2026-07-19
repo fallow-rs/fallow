@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   taint recording is now capped, so these repos analyze in normal time and
   memory. (#1843)
 
+- **Analysis is more robust on large, generated, and minified codebases.** A
+  follow-up hardening pass to the taint-memory fix bounds or linearizes several
+  other paths that could grow super-linearly on adversarial input: duplicate
+  export and class heritage grouping, star re-export propagation, object-binding
+  and factory-return candidate resolution, JSDoc import scanning, template and
+  CSS-in-JS expression scanning (now depth-guarded against stack overflow on
+  pathologically nested input), and the health-time line-number and mask
+  scanners. Analysis output is unchanged on ordinary code. (#1843)
+
 ## [3.6.0] - 2026-07-15
 
 ### Changed

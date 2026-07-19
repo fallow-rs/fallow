@@ -780,9 +780,18 @@ fn extract_jsdoc_import_types(imports: &mut Vec<ImportInfo>, comments: &[Comment
 fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
     let bytes = body.as_bytes();
     let mut cursor = 0;
+    // Brace-nesting stack (byte offsets of currently-open `{`) maintained
+    // incrementally as the cursor advances, so each `import(` occurrence reuses
+    // the enclosing-brace position instead of rescanning the whole prefix from
+    // offset 0. issue #1843 follow-up: turns the per-occurrence O(prefix) rescan
+    // in the old `enclosing_jsdoc_brace_start` into a single O(body) forward
+    // pass over the comment while staying byte-identical.
+    let mut brace_stack: Vec<usize> = Vec::new();
+    let mut scanned = 0;
     while let Some(rel) = body[cursor..].find("import(") {
         let import_pos = cursor + rel;
-        if !is_inside_jsdoc_type_brace_group(bytes, import_pos) {
+        advance_jsdoc_brace_stack(bytes, &mut brace_stack, &mut scanned, import_pos);
+        if !is_inside_jsdoc_type_brace_group(bytes, import_pos, brace_stack.last().copied()) {
             cursor = import_pos + "import(".len();
             continue;
         }
@@ -907,9 +916,11 @@ fn jsdoc_type_import(
 
 /// Returns true when byte index `pos` falls inside a JSDoc type-expression
 /// brace group. Prose examples can contain ordinary JavaScript braces, so the
-/// enclosing brace must be tied to a JSDoc type tag.
-fn is_inside_jsdoc_type_brace_group(body: &[u8], pos: usize) -> bool {
-    let Some(open_brace) = enclosing_jsdoc_brace_start(body, pos) else {
+/// enclosing brace must be tied to a JSDoc type tag. `open_brace` is the
+/// innermost enclosing `{` offset (or `None` when `pos` is at brace depth zero),
+/// supplied by the caller's incrementally-maintained brace stack.
+fn is_inside_jsdoc_type_brace_group(body: &[u8], pos: usize, open_brace: Option<usize>) -> bool {
+    let Some(open_brace) = open_brace else {
         return false;
     };
 
@@ -923,19 +934,32 @@ fn is_inside_jsdoc_type_brace_group(body: &[u8], pos: usize) -> bool {
         && has_only_jsdoc_spacing_between(body, open_brace + 1, pos)
 }
 
-fn enclosing_jsdoc_brace_start(body: &[u8], pos: usize) -> Option<usize> {
-    let mut stack = Vec::new();
-    let limit = pos.min(body.len());
-    for (idx, &b) in body[..limit].iter().enumerate() {
-        match b {
-            b'{' => stack.push(idx),
+/// Advance the incrementally-maintained JSDoc brace stack from `*scanned` up to
+/// (but not including) `up_to`, pushing the offset of every `{` and popping on
+/// every `}`. Afterwards `stack.last()` is the innermost enclosing brace of
+/// `up_to`, identical to a fresh scan of `body[..up_to]` but amortized across
+/// every `import(` occurrence in the comment instead of rescanning each prefix
+/// from offset zero (issue #1843 follow-up).
+///
+/// `up_to` must not regress (the caller's `import(` cursor only moves forward);
+/// a non-advancing call is a no-op.
+fn advance_jsdoc_brace_stack(
+    body: &[u8],
+    stack: &mut Vec<usize>,
+    scanned: &mut usize,
+    up_to: usize,
+) {
+    let up_to = up_to.min(body.len());
+    while *scanned < up_to {
+        match body[*scanned] {
+            b'{' => stack.push(*scanned),
             b'}' => {
                 stack.pop();
             }
             _ => {}
         }
+        *scanned += 1;
     }
-    stack.pop()
 }
 
 fn line_prefix_before(body: &[u8], pos: usize) -> &str {
@@ -1182,8 +1206,8 @@ pub fn compute_import_binding_usage(
 #[cfg(test)]
 mod tests {
     use super::{
-        has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag, parse_source_to_module,
-        scan_jsdoc_imports_in,
+        advance_jsdoc_brace_stack, has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag,
+        parse_source_to_module, scan_jsdoc_imports_in,
     };
     use fallow_types::discover::FileId;
     use fallow_types::extract::{ImportInfo, ImportedName};
@@ -1621,5 +1645,79 @@ mod tests {
     fn scan_jsdoc_empty_member_name_is_skipped() {
         let imports = scan(" * @type {import('./x').}");
         assert!(imports.is_empty());
+    }
+
+    #[test]
+    fn scan_jsdoc_many_imports_incremental_brace_stack_is_identical() {
+        // Regression for the issue #1843 follow-up: the enclosing-brace lookup
+        // is maintained incrementally across the whole comment rather than
+        // rescanning every prefix. A comment packed with many `import(...)` type
+        // refs must still extract exactly one import per `{...}` type group, in
+        // order, with the same paths and member names as before.
+        use std::fmt::Write as _;
+        let mut body = String::from("/**\n");
+        for i in 0..200 {
+            let _ = writeln!(body, " * @param a{i} {{import('./m{i}').T{i}}} description");
+        }
+        // A prose `import(` outside any type brace group and a nested brace
+        // must not add spurious imports or shift the enclosing-brace tracking.
+        body.push_str(" * @remarks import('./ignored') appears in prose here\n");
+        body.push_str(" * @typedef {{ nested: { deep: import('./deep').D } }} Obj\n");
+        body.push_str(" */\n");
+
+        let imports = scan(&body);
+        assert_eq!(imports.len(), 201, "got: {imports:?}");
+        for (i, import) in imports.iter().take(200).enumerate() {
+            assert_eq!(import.source, format!("./m{i}"));
+            assert_eq!(import.imported_name, ImportedName::Named(format!("T{i}")));
+            assert!(import.is_type_only);
+            assert!(import.local_name.is_empty());
+        }
+        // The nested-brace occurrence still resolves against its enclosing group.
+        assert_eq!(imports[200].source, "./deep");
+        assert_eq!(
+            imports[200].imported_name,
+            ImportedName::Named("D".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_brace_stack_matches_offset_zero_rescan() {
+        // Cross-checks the incremental brace stack against an independent
+        // offset-zero rescan over the full prefix, on inputs where the
+        // `import(` cursor skips over intervening braces (issue #1843 follow-up).
+        let cases = [
+            " * @type {import('./a').A} and {plain} then {import('./b').B}",
+            " * @remarks { import('./skip') } @param x {import('./c').C}",
+            " * text } stray close { import('./d').D } trailing",
+            " * @type {{ a: import('./e').E, b: { c: import('./f').F } }}",
+        ];
+        for body in cases {
+            let bytes = body.as_bytes();
+            let mut cursor = 0;
+            while let Some(rel) = body[cursor..].find("import(") {
+                let import_pos = cursor + rel;
+                // Independent offset-zero rescan reproducing the old helper.
+                let mut fresh = Vec::new();
+                for (idx, &b) in bytes[..import_pos].iter().enumerate() {
+                    match b {
+                        b'{' => fresh.push(idx),
+                        b'}' => {
+                            fresh.pop();
+                        }
+                        _ => {}
+                    }
+                }
+                let mut stack = Vec::new();
+                let mut scanned = 0;
+                advance_jsdoc_brace_stack(bytes, &mut stack, &mut scanned, import_pos);
+                assert_eq!(
+                    stack.last().copied(),
+                    fresh.last().copied(),
+                    "enclosing brace mismatch at {import_pos} in {body:?}"
+                );
+                cursor = import_pos + "import(".len();
+            }
+        }
     }
 }

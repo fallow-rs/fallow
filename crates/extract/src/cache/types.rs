@@ -813,7 +813,15 @@ use crate::MemberKind;
 /// super-linear memory blowup on dense minified bundles. A file that previously
 /// recorded more than the cap now persists a truncated `tainted_bindings`
 /// vector, so warm 235 caches can carry over-cap entries; invalidate them.
-pub(super) const CACHE_VERSION: u32 = 236;
+///
+/// Bumped to 237 (issue #1843 follow-up): object-binding and factory-return
+/// candidate recording now cap the per-module set at
+/// `MAX_OBJECT_BINDING_CANDIDATES` / `MAX_FACTORY_RETURN_CANDIDATES` (4096),
+/// bounding the object-binding resolution fixed-point the same way the taint cap
+/// bounds its accumulator. A file exceeding a cap now persists fewer candidates,
+/// so its resolved `member_accesses` can change; warm 236 caches can carry
+/// over-cap entries; invalidate them.
+pub(super) const CACHE_VERSION: u32 = 237;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
