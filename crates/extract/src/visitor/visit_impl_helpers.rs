@@ -41,6 +41,23 @@ pub(super) const DIRECT_TAINT_HOP: u8 = 1;
 /// intended long-term substrate for deeper flows.
 pub(super) const MAX_TAINT_BINDING_HOPS: u8 = 3;
 
+/// Per-module breadth cap on recorded tainted bindings (issue #1843): the
+/// companion to the `MAX_TAINT_BINDING_HOPS` depth cap. The tainted-binding set
+/// is module-wide and name-keyed (a `const e = ...` in one function shares the
+/// `e` bucket with every other), so dense MINIFIED bundles that reuse short
+/// identifiers across thousands of scopes drove it super-linearly: the O(n)
+/// dedup scan in `push_tainted_binding` and the per-ident full-vector scan in
+/// `chained_bindings_for_idents` compounded into runaway memory (tens of GiB,
+/// no output) on a plain `fallow dead-code` run over ~1 MB single-line editor
+/// bundles that the 5 MB `--max-file-size` gate does not catch. Past the cap,
+/// no NEW binding is recorded and the scan-heavy recorders short-circuit, so an
+/// over-cap flow degrades to module-level reachability instead of an arg-level
+/// claim, matching the false-negative-preferring security-candidate doctrine.
+/// Deliberately a constant, not a config knob: real hand-written modules stay
+/// far below it (a source-backed binding is one member-access-initialized local
+/// declaration), so the cap only ever engages on machine-generated density.
+pub(super) const MAX_TAINTED_BINDINGS_PER_MODULE: usize = 4096;
+
 pub(super) type StaticPackageStringBindings = FxHashMap<String, Vec<String>>;
 pub(super) type StaticPackageObjectBindings = FxHashMap<String, FxHashMap<String, Vec<String>>>;
 pub(super) type StaticPackageLoopBindings =

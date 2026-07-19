@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content is read, while links to regular files inside the project remain
   supported under their visible paths.
 
+- **Large minified bundles no longer exhaust memory during analysis.** Dense
+  single-line bundles (precompiled editor assets such as ProseMirror) could
+  drive taint-tracking memory up without bound, so `fallow dead-code` climbed
+  to tens of GiB and produced no output on repos that ship them. Per-module
+  taint recording is now capped, so these repos analyze in normal time and
+  memory. (#1843)
+
 ## [3.6.0] - 2026-07-15
 
 ### Changed

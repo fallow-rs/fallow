@@ -10,14 +10,14 @@ use fallow_types::extract::TaintedBinding;
 use super::super::{ModuleInfoExtractor, extract_destructured_names};
 use super::{
     DIRECT_TAINT_HOP, FRAMEWORK_REQUEST_SOURCE, GRAPHQL_ARGS_SOURCE, MAX_TAINT_BINDING_HOPS,
-    MCP_TOOL_INPUT_SOURCE, NEXT_FORM_DATA_SOURCE, NEXT_REQUEST_SOURCE, QUEUE_JOB_SOURCE,
-    TRPC_INPUT_SOURCE, apply_source_return_path, binding_source_path_candidates, callback_params,
-    callee_method_name, collect_chained_taint_idents, destructure_source_path,
-    extract_function_body_final_return_expr, extract_object_pattern_bindings, flatten_callee_path,
-    function_body_has_use_server, function_like_params, is_framework_route_receiver_path,
-    is_http_route_handler_name, is_route_registration_method, is_trpc_procedure_callee,
-    is_trpc_procedure_method, last_callback_params, route_callback_params, source_returning_helper,
-    unwrap_parens,
+    MAX_TAINTED_BINDINGS_PER_MODULE, MCP_TOOL_INPUT_SOURCE, NEXT_FORM_DATA_SOURCE,
+    NEXT_REQUEST_SOURCE, QUEUE_JOB_SOURCE, TRPC_INPUT_SOURCE, apply_source_return_path,
+    binding_source_path_candidates, callback_params, callee_method_name,
+    collect_chained_taint_idents, destructure_source_path, extract_function_body_final_return_expr,
+    extract_object_pattern_bindings, flatten_callee_path, function_body_has_use_server,
+    function_like_params, is_framework_route_receiver_path, is_http_route_handler_name,
+    is_route_registration_method, is_trpc_procedure_callee, is_trpc_procedure_method,
+    last_callback_params, route_callback_params, source_returning_helper, unwrap_parens,
 };
 
 impl ModuleInfoExtractor {
@@ -41,8 +41,27 @@ impl ModuleInfoExtractor {
             self.tainted_binding_hops[index] = self.tainted_binding_hops[index].min(hop);
             return;
         }
+        // Hard breadth cap (issue #1843): never grow the module-wide binding set
+        // past `MAX_TAINTED_BINDINGS_PER_MODULE`. This is the universal memory
+        // backstop: every recorder already gates on `tainted_bindings_at_capacity`
+        // at entry, so in practice nothing reaches here at capacity (a re-record
+        // of an existing pair is skipped by that entry guard too, not min-merged),
+        // but routing every push through this check keeps the bound guaranteed
+        // even if a future caller forgets the entry guard. The min-merge above
+        // still runs for any call that reaches here below the cap.
+        if self.tainted_bindings.len() >= MAX_TAINTED_BINDINGS_PER_MODULE {
+            return;
+        }
         self.tainted_bindings.push(binding);
         self.tainted_binding_hops.push(hop);
+    }
+
+    /// Whether the module-wide tainted-binding set has reached its breadth cap.
+    /// At capacity `push_tainted_binding` rejects every new pair, so the record
+    /// entry points and the per-ident chain scan short-circuit instead of doing
+    /// bounded-but-wasted O(n) work per subsequent declarator (issue #1843).
+    fn tainted_bindings_at_capacity(&self) -> bool {
+        self.tainted_bindings.len() >= MAX_TAINTED_BINDINGS_PER_MODULE
     }
 
     /// Record tainted-source bindings for `const <name> = <object>.<prop>` and
@@ -54,6 +73,9 @@ impl ModuleInfoExtractor {
     /// Captured at any scope (no `is_module_scope` gate): a sink inside a route
     /// handler reading a function-local source is exactly the target case.
     pub(super) fn record_tainted_source_binding(&mut self, name: &str, expr: &Expression<'_>) {
+        if self.tainted_bindings_at_capacity() {
+            return;
+        }
         for source_path in binding_source_path_candidates(expr) {
             self.push_tainted_binding(
                 TaintedBinding {
@@ -69,6 +91,9 @@ impl ModuleInfoExtractor {
     }
 
     fn record_tainted_param_binding(&mut self, name: &str, source_path: &'static str) {
+        if self.tainted_bindings_at_capacity() {
+            return;
+        }
         self.push_tainted_binding(
             TaintedBinding {
                 local: name.to_string(),
@@ -93,6 +118,9 @@ impl ModuleInfoExtractor {
     /// flows and cross-SFC-block chains are silent false negatives by design
     /// (FN-preferring, matching the #885 doctrine).
     pub(super) fn record_chained_tainted_binding(&mut self, name: &str, init: &Expression<'_>) {
+        if self.tainted_bindings_at_capacity() {
+            return;
+        }
         let mut idents = Vec::new();
         collect_chained_taint_idents(init, &mut idents);
         if idents.is_empty() {
@@ -114,6 +142,12 @@ impl ModuleInfoExtractor {
         name: &str,
         idents: &[String],
     ) -> Vec<(TaintedBinding, u8)> {
+        // At capacity every produced binding would be rejected by
+        // `push_tainted_binding`, so skip the per-ident full-vector scan
+        // entirely rather than compute a list only to drop it (issue #1843).
+        if self.tainted_bindings_at_capacity() {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         for ident in idents {
             // No `nested_scope_shadows` guard on the referenced ident: tainted
@@ -165,6 +199,9 @@ impl ModuleInfoExtractor {
         obj_pat: &ObjectPattern<'_>,
         init: &Expression<'_>,
     ) {
+        if self.tainted_bindings_at_capacity() {
+            return;
+        }
         let Expression::Identifier(ident) = unwrap_parens(init) else {
             return;
         };
@@ -326,6 +363,9 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_tainted_helper_call_binding(&mut self, name: &str, expr: &Expression<'_>) {
+        if self.tainted_bindings_at_capacity() {
+            return;
+        }
         let Expression::CallExpression(call) = unwrap_parens(expr) else {
             return;
         };
@@ -410,6 +450,9 @@ impl ModuleInfoExtractor {
         obj_pat: &ObjectPattern<'_>,
         expr: &Expression<'_>,
     ) {
+        if self.tainted_bindings_at_capacity() {
+            return;
+        }
         let Some(source_path) = destructure_source_path(expr) else {
             return;
         };

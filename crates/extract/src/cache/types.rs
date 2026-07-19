@@ -807,7 +807,13 @@ use crate::MemberKind;
 /// `const ui = createUi(); ui.orders.member` consumer credits the class member.
 /// Warm 234 caches lack the field and the fact, leaving those methods falsely
 /// reported as unused.
-pub(super) const CACHE_VERSION: u32 = 235;
+///
+/// Bumped to 236 (issue #1843): tainted-binding recording now caps the
+/// per-module set at `MAX_TAINTED_BINDINGS_PER_MODULE` (4096) to bound a
+/// super-linear memory blowup on dense minified bundles. A file that previously
+/// recorded more than the cap now persists a truncated `tainted_bindings`
+/// vector, so warm 235 caches can carry over-cap entries; invalidate them.
+pub(super) const CACHE_VERSION: u32 = 236;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
