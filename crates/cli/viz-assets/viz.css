@@ -585,14 +585,14 @@ button {
 /* Truncate the dim directory prefix, never the filename. The label
    grows to fill the row so it stays left-aligned (space-between would
    otherwise center it between the bullet and the metric). */
-#panel .rank-list .rank-label {
+#panel .rank-label {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
   white-space: nowrap;
 }
 
-#panel .rank-list .rank-label .muted {
+#panel .rank-label .muted {
   overflow: hidden;
   text-overflow: ellipsis;
   flex-shrink: 1;
@@ -601,7 +601,7 @@ button {
 
 /* The filename truncates as a last resort (after the dir prefix), so a
    long name ellipsizes instead of colliding with the metric column. */
-#panel .rank-list .rank-label .rank-name {
+#panel .rank-label .rank-name {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
@@ -785,6 +785,47 @@ button {
 
 #panel .fn-react .pair + .pair {
   margin-left: 12px;
+}
+
+/* Ranked hotspots as a table: the file column takes the slack and
+   ellipsizes, the two numeric columns stay fixed-width and right-aligned. */
+#panel table.rank-table {
+  table-layout: fixed;
+}
+
+#panel .rank-table th.col-cc,
+#panel .rank-table td.col-cc {
+  width: 3rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#panel .rank-table th.col-used,
+#panel .rank-table td.col-used {
+  width: 5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#panel .rank-table td.col-file {
+  overflow: hidden;
+}
+
+#panel .rank-table td.col-file button {
+  display: flex;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+#panel .rank-table td.col-file button:hover .rank-name {
+  text-decoration: underline;
 }
 
 #panel .sev-error {

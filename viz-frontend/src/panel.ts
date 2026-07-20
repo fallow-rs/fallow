@@ -756,33 +756,40 @@ export const buildMapDigest = (state: AppState): string => {
  * directory head-truncated to a monospace budget and a right-aligned
  * metric. Used by both the lens list and the search-results panel.
  */
+/**
+ * The dir-prefixed, truncating filename label shared by the ranked list
+ * and the hotspots table: a head-truncated dim directory plus the
+ * filename in its own span so it can ellipsize when the row is narrow.
+ */
+const rankLabelEl = (row: RankRow): HTMLElement => {
+  const labelBox = el("span", "rank-label");
+  if (row.dir) {
+    // Head-truncate the directory in JS (monospace budget), keeping
+    // whole tail segments; CSS rtl tricks reorder path punctuation.
+    const budget = Math.max(8, 34 - row.label.length - row.metric.length / 2);
+    let dir = `${row.dir}/`;
+    if (dir.length > budget) {
+      const parts = row.dir.split("/");
+      while (parts.length > 1 && `…/${parts.join("/")}/`.length > budget) parts.shift();
+      dir = `…/${parts.join("/")}/`;
+    }
+    const dirSpan = el("span", "muted", dir);
+    dirSpan.title = `${row.dir}/${row.label}`;
+    labelBox.appendChild(dirSpan);
+  }
+  const nameSpan = el("span", "rank-name", row.label);
+  nameSpan.title = `${row.dir ? `${row.dir}/` : ""}${row.label}`;
+  labelBox.appendChild(nameSpan);
+  return labelBox;
+};
+
 const rankListEl = (rows: RankRow[], cap: number, onPick: (row: RankRow) => void): HTMLElement => {
   const ul = el("ul", "link-list rank-list");
   for (const row of rows.slice(0, cap)) {
     const li = el("li");
     const btn = el("button") as HTMLButtonElement;
     btn.type = "button";
-    const labelBox = el("span", "rank-label");
-    if (row.dir) {
-      // Head-truncate the directory in JS (monospace budget), keeping
-      // whole tail segments; CSS rtl tricks reorder path punctuation.
-      const budget = Math.max(8, 34 - row.label.length - row.metric.length / 2);
-      let dir = `${row.dir}/`;
-      if (dir.length > budget) {
-        const parts = row.dir.split("/");
-        while (parts.length > 1 && `…/${parts.join("/")}/`.length > budget) parts.shift();
-        dir = `…/${parts.join("/")}/`;
-      }
-      const dirSpan = el("span", "muted", dir);
-      dirSpan.title = `${row.dir}/${row.label}`;
-      labelBox.appendChild(dirSpan);
-    }
-    // The filename lives in its own span so it can ellipsis-truncate when
-    // it is long, instead of overrunning the pinned metric on the right.
-    const nameSpan = el("span", "rank-name", row.label);
-    nameSpan.title = `${row.dir ? `${row.dir}/` : ""}${row.label}`;
-    labelBox.appendChild(nameSpan);
-    btn.appendChild(labelBox);
+    btn.appendChild(rankLabelEl(row));
     btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
     btn.addEventListener("click", () => onPick(row));
     li.appendChild(btn);
@@ -792,6 +799,51 @@ const rankListEl = (rows: RankRow[], cap: number, onPick: (row: RankRow) => void
     ul.appendChild(el("li", "muted", `… ${formatCount(rows.length - cap)} more`));
   }
   return ul;
+};
+
+/**
+ * The hotspots findings as a compact table (file, cc, used-by) mirroring
+ * the per-file complexity table, so the two numbers line up in columns
+ * instead of trailing each row as free text. Rows stay clickable.
+ */
+const renderHotspotsTable = (
+  state: AppState,
+  rows: RankRow[],
+  cap: number,
+  navigate: NavigateFn,
+): HTMLElement => {
+  const table = el("table", "rank-table");
+  const thead = el("thead");
+  const hr = el("tr");
+  hr.appendChild(el("th", "col-file", "file"));
+  hr.appendChild(el("th", "col-cc", "cc"));
+  hr.appendChild(el("th", "col-used", "used by"));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const row of rows.slice(0, cap)) {
+    const f = state.data.files[row.fileIndex];
+    const tr = el("tr");
+    const fileTd = el("td", "col-file");
+    const btn = el("button") as HTMLButtonElement;
+    btn.type = "button";
+    btn.appendChild(rankLabelEl(row));
+    btn.addEventListener("click", () => navigate(row.fileIndex));
+    fileTd.appendChild(btn);
+    tr.appendChild(fileTd);
+    const ccTd = el("td", "col-cc");
+    ccTd.appendChild(
+      sev(
+        f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "",
+        formatCount(f.max_cyclomatic),
+      ),
+    );
+    tr.appendChild(ccTd);
+    tr.appendChild(el("td", "col-used", formatCount(f.importer_count)));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
 };
 
 /** RankRows for a set of file indices, labelled with their importer count. */
@@ -834,15 +886,31 @@ const renderLensPanel = (
       ].join("\n"),
     ),
   );
-  const ul = rankListEl(rows, 100, (row) => {
-    if (row.clone !== undefined) {
-      state.selectedClone = row.clone;
-      refresh();
-    } else {
-      navigate(row.fileIndex);
+  const cap = 100;
+  if (state.lens === "hotspots") {
+    section.appendChild(renderHotspotsTable(state, rows, cap, navigate));
+    section.appendChild(
+      el(
+        "div",
+        "muted key-line",
+        "cc = branches in the file's hardest function, higher is harder to change · used by = how many files import it",
+      ),
+    );
+    if (rows.length > cap) {
+      section.appendChild(el("div", "muted", `… ${formatCount(rows.length - cap)} more`));
     }
-  });
-  section.appendChild(ul);
+  } else {
+    section.appendChild(
+      rankListEl(rows, cap, (row) => {
+        if (row.clone !== undefined) {
+          state.selectedClone = row.clone;
+          refresh();
+        } else {
+          navigate(row.fileIndex);
+        }
+      }),
+    );
+  }
   const hint = el("div", "action-hint");
   hint.append(
     state.lens === "hotspots"
