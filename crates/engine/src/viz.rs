@@ -33,9 +33,11 @@ const HOTSPOT_CYCLOMATIC_FLOOR: u16 = 10;
 /// Maximum bytes of clone-fragment preview shipped per clone group. The
 /// budget is measured in bytes, not characters; truncation only ever cuts
 /// at a line boundary, so multi-byte source cannot be sliced mid-character.
-const CLONE_PREVIEW_MAX_BYTES: usize = 480;
-/// Maximum lines of clone-fragment preview shipped per clone group.
-const CLONE_PREVIEW_MAX_LINES: usize = 10;
+const CLONE_PREVIEW_MAX_BYTES: usize = 2000;
+/// Maximum lines of clone-fragment preview shipped per clone group. The
+/// preview grows to its content in the panel (no inner scroll), so this can
+/// be generous; big blocks still truncate, keeping the leading context.
+const CLONE_PREVIEW_MAX_LINES: usize = 32;
 /// Source lines of context included on each side of the duplicated block
 /// in a clone preview. A fixed window is universal: clones are frequently
 /// not functions (interface fields, object literals, type aliases), so no
@@ -557,18 +559,21 @@ fn build_clone_preview(inst: &CloneInstance) -> (String, u32, u32) {
     let mut before = block_start.min(CLONE_PREVIEW_CONTEXT);
     let mut after = (total - block_end).min(CLONE_PREVIEW_CONTEXT);
 
-    // Line cap: trim context symmetrically first; only cut into the block
-    // when the block alone still exceeds the cap.
-    if block_lines >= CLONE_PREVIEW_MAX_LINES {
-        before = 0;
-        after = 0;
-        block_lines = CLONE_PREVIEW_MAX_LINES;
-    } else {
-        trim_context(
-            &mut before,
-            &mut after,
-            CLONE_PREVIEW_MAX_LINES - block_lines,
-        );
+    // Line cap: when the block plus its context fits, trim context
+    // symmetrically to fit. When the block alone fills the cap, keep the
+    // leading context (so the highlight always reads against some dimmed
+    // lines) and truncate the block's tail, always keeping >= 1 block line.
+    if before + block_lines + after > CLONE_PREVIEW_MAX_LINES {
+        if before + block_lines >= CLONE_PREVIEW_MAX_LINES {
+            after = 0;
+            block_lines = CLONE_PREVIEW_MAX_LINES.saturating_sub(before).max(1);
+        } else {
+            trim_context(
+                &mut before,
+                &mut after,
+                CLONE_PREVIEW_MAX_LINES - block_lines,
+            );
+        }
     }
 
     enforce_byte_cap(
@@ -1185,24 +1190,28 @@ mod tests {
 
     #[test]
     fn truncate_preview_caps_lines_and_bytes() {
-        // Line cap: 12 lines in, CLONE_PREVIEW_MAX_LINES lines out plus the
-        // ellipsis appended directly after the last kept line.
-        let many_lines = (0..12).map(|i| format!("line {i}")).collect::<Vec<_>>();
+        // Line cap: more lines than the cap in, CLONE_PREVIEW_MAX_LINES out
+        // plus the ellipsis appended directly after the last kept line.
+        let last_kept = CLONE_PREVIEW_MAX_LINES - 1;
+        let many_lines = (0..CLONE_PREVIEW_MAX_LINES + 5)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>();
         let out = truncate_preview(&many_lines.join("\n"));
         assert_eq!(out.matches('\n').count(), CLONE_PREVIEW_MAX_LINES - 1);
-        assert!(out.contains("line 9"));
-        assert!(!out.contains("line 10"));
+        assert!(out.contains(&format!("line {last_kept}")));
+        assert!(!out.contains(&format!("line {CLONE_PREVIEW_MAX_LINES}")));
         assert!(out.ends_with('\u{2026}'));
 
-        // Byte budget: the second 300-byte line would exceed
-        // CLONE_PREVIEW_MAX_BYTES, so output stops after the first line.
-        let two_long_lines = format!("{}\n{}", "a".repeat(300), "b".repeat(300));
+        // Byte budget: the second big line would exceed CLONE_PREVIEW_MAX_BYTES,
+        // so output stops after the first line.
+        let big = CLONE_PREVIEW_MAX_BYTES * 3 / 4;
+        let two_long_lines = format!("{}\n{}", "a".repeat(big), "b".repeat(big));
         let out = truncate_preview(&two_long_lines);
-        assert_eq!(out, format!("{}\u{2026}", "a".repeat(300)));
+        assert_eq!(out, format!("{}\u{2026}", "a".repeat(big)));
 
         // Multi-byte content over budget truncates at a line boundary and
-        // never slices inside a character.
-        let emoji_line = "\u{1f389}".repeat(200);
+        // never slices inside a character (4 bytes per emoji, well over budget).
+        let emoji_line = "\u{1f389}".repeat(CLONE_PREVIEW_MAX_BYTES);
         let out = truncate_preview(&emoji_line);
         assert_eq!(out, "\u{2026}");
     }
@@ -1223,12 +1232,12 @@ mod tests {
         let (preview, highlight_start, highlight_lines) = build_clone_preview(&inst);
         let preview_lines: Vec<&str> = preview.lines().collect();
 
-        // Four lines of context each side would overflow the 10-line cap, so
-        // context is trimmed symmetrically to 3 + 3 around the 4-line block.
-        assert_eq!(preview_lines.len(), CLONE_PREVIEW_MAX_LINES);
-        assert_eq!(highlight_start, 3);
+        // Block (4 lines) plus 4 lines of context each side fits the cap, so
+        // the full window is kept: 4 dimmed + 4 highlighted + 4 dimmed.
+        assert_eq!(preview_lines.len(), 12);
+        assert_eq!(highlight_start, 4);
         assert_eq!(highlight_lines, 4);
-        assert_eq!(preview_lines.first(), Some(&"line 5"));
+        assert_eq!(preview_lines.first(), Some(&"line 4"));
         let start = highlight_start as usize;
         let end = start + highlight_lines as usize;
         assert_eq!(
@@ -1237,6 +1246,38 @@ mod tests {
         );
         // The line directly above the block is dimmed context, not copied.
         assert_eq!(preview_lines[start - 1], "line 7");
+    }
+
+    #[test]
+    fn clone_preview_keeps_leading_context_when_the_block_fills_the_cap() {
+        use std::io::Write as _;
+
+        // A block far larger than the cap. The old logic zeroed the context
+        // and highlighted the whole (truncated) window; the fix keeps the
+        // leading context dimmed so the highlight still reads against it.
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        let body = (1..=200)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        file.write_all(body.as_bytes()).expect("write source");
+        let inst = clone_instance(file.path().to_path_buf(), 50, 150);
+
+        let (preview, highlight_start, highlight_lines) = build_clone_preview(&inst);
+        let preview_lines: Vec<&str> = preview.lines().collect();
+
+        assert_eq!(highlight_start, CLONE_PREVIEW_CONTEXT as u32);
+        assert!(
+            highlight_start > 0,
+            "leading context must survive a huge block"
+        );
+        assert_eq!(preview_lines.len(), CLONE_PREVIEW_MAX_LINES);
+        assert_eq!(
+            highlight_lines as usize,
+            CLONE_PREVIEW_MAX_LINES - CLONE_PREVIEW_CONTEXT,
+        );
+        assert_eq!(preview_lines[highlight_start as usize - 1], "line 49");
+        assert_eq!(preview_lines[highlight_start as usize], "line 50");
     }
 
     #[test]
