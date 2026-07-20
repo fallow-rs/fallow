@@ -293,6 +293,30 @@ export const reachSet = (adj: number[][], start: number): Set<number> => {
   return seen;
 };
 
+/**
+ * Union transitive reach over `adj` from every index in `starts`, in a
+ * single multi-source traversal (the seeds themselves are excluded from
+ * the result). One O(V+E) pass no matter how many seeds, so it replaces
+ * looping `reachSet` per match with no per-match cap. With `importersOf`
+ * this is the combined blast radius of the whole matched set.
+ */
+export const reachSetMulti = (adj: number[][], starts: Iterable<number>): Set<number> => {
+  const seeds = new Set<number>(starts);
+  const seen = new Set<number>();
+  const stack: number[] = [...seeds];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    if (cur === undefined) break;
+    for (const nb of adj[cur] ?? []) {
+      if (!seeds.has(nb) && !seen.has(nb)) {
+        seen.add(nb);
+        stack.push(nb);
+      }
+    }
+  }
+  return seen;
+};
+
 // ── Formatting helpers ──────────────────────────────────────────
 
 export const formatSize = (bytes: number): string => {

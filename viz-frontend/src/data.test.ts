@@ -6,6 +6,7 @@ import {
   buildIndex,
   dirname,
   reachSet,
+  reachSetMulti,
   dupRatio,
   formatSize,
   legendText,
@@ -204,6 +205,29 @@ describe("reachSet", () => {
   });
 });
 
+describe("reachSetMulti", () => {
+  // Diamond: 3 and 4 both import 1 and 2; 1 and 2 both import 0.
+  const adjUp = [[1, 2], [3, 4], [3, 4], [], []]; // importersOf
+  const seeds = [1, 2];
+
+  it("matches the union of the per-seed reachSet, minus the seeds", () => {
+    const union = new Set([...reachSet(adjUp, 1), ...reachSet(adjUp, 2)]);
+    for (const s of seeds) union.delete(s);
+    expect([...reachSetMulti(adjUp, seeds)].toSorted()).toEqual([...union].toSorted());
+    expect([...reachSetMulti(adjUp, seeds)].toSorted()).toEqual([3, 4]);
+  });
+
+  it("excludes every seed even when one seed is reachable from another", () => {
+    // 1 imports 0, and 0 is also a seed: 0 must not appear in the reach.
+    const adj = [[1], [], []]; // importersOf: 0 imported by 1
+    expect([...reachSetMulti(adj, [0, 1])].toSorted()).toEqual([]);
+  });
+
+  it("returns an empty set for empty seeds", () => {
+    expect(reachSetMulti(adjUp, []).size).toBe(0);
+  });
+});
+
 describe("runSearch combined blast radius", () => {
   it("collects the union upstream reach of every matched file", () => {
     // a-alpha.ts imported by b, which is imported by c: searching "alpha"
@@ -230,5 +254,25 @@ describe("runSearch combined blast radius", () => {
     expect(state.searchMatches.has(0)).toBe(true);
     expect([...state.searchReach].toSorted()).toEqual([1, 2]);
     expect(state.searchReach.has(0)).toBe(false);
+  });
+
+  it("computes the blast radius even for match sets past the old 40-file cap", () => {
+    // 50 matches (over the retired cap) all imported by one consumer: the
+    // multi-source traversal must still surface that consumer.
+    const widgets = Array.from({ length: 50 }, (_, i) => file({ path: `src/widget-${i}.ts` }));
+    const files = [...widgets, file({ path: "src/app.ts" })];
+    const consumer = files.length - 1;
+    const edges: [number, number, number][] = widgets.map((_, i) => [consumer, i, 0]);
+    const d = data({ files, edges });
+    const state = {
+      data: d,
+      index: buildIndex(d),
+      search: "",
+      searchMatches: new Set<number>(),
+      searchReach: new Set<number>(),
+    } as unknown as AppState;
+    runSearch(state, "widget");
+    expect(state.searchMatches.size).toBe(50);
+    expect(state.searchReach.has(consumer)).toBe(true);
   });
 });

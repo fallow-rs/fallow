@@ -2,7 +2,7 @@ import type { ActiveView, Lens, LayoutCell, RoadSelection, VizData } from "./typ
 import type { DataIndex } from "./data";
 import type { Theme } from "./theme";
 import { getTheme, prefersReducedMotion } from "./theme";
-import { buildIndex, reachSet } from "./data";
+import { buildIndex, reachSetMulti } from "./data";
 
 export interface AppState {
   data: VizData;
@@ -33,7 +33,8 @@ export interface AppState {
   search: string;
   searchMatches: Set<number>;
   /** Union upstream reach of all current matches: the combined blast
-   *  radius of a multi-file query (a PR's changed set). Capped. */
+   *  radius of a multi-file query (a PR's changed set). Empty for
+   *  queries under two characters (too broad to be a meaningful set). */
   searchReach: Set<number>;
 
   dark: boolean;
@@ -96,14 +97,16 @@ export const runSearch = (state: AppState, query: string): void => {
       state.searchMatches.add(i);
     }
   }
-  // Combined blast radius of the matched set: who transitively depends
-  // on any match. Skipped when the match set is too broad to be a
-  // meaningful "PR touched these files" query.
-  if (state.searchMatches.size > 0 && state.searchMatches.size <= 40) {
-    for (const m of state.searchMatches) {
-      for (const up of reachSet(state.index.importersOf, m)) state.searchReach.add(up);
+  // Combined blast radius of the matched set: everything that
+  // transitively depends on any match. One multi-source traversal, so it
+  // scales to broad subsystem queries (e.g. all "calendar" files) without
+  // the per-match cap the old per-file loop needed. Skipped for one-char
+  // queries, which match too much to be a meaningful set and would walk
+  // the whole graph on every keystroke of a large monorepo.
+  if (state.searchMatches.size > 0 && q.length >= 2) {
+    for (const up of reachSetMulti(state.index.importersOf, state.searchMatches)) {
+      state.searchReach.add(up);
     }
-    for (const m of state.searchMatches) state.searchReach.delete(m);
   }
 };
 

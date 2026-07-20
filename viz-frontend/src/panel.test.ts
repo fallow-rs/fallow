@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildMapDigest, panelRenderKey, rankRowsFor } from "./panel";
+import {
+  buildMapDigest,
+  buildSearchDigest,
+  panelRenderKey,
+  rankRowsFor,
+  searchPanelModel,
+} from "./panel";
 import { buildIndex } from "./data";
 import { getTheme } from "./theme";
 import type { AppState } from "./state";
@@ -72,6 +78,17 @@ describe("panelRenderKey", () => {
     expect(selectedKey).not.toBe(base);
     state.selected = null;
     state.lens = "deadcode";
+    expect(panelRenderKey(state)).not.toBe(base);
+  });
+
+  it("changes when the search query changes", () => {
+    const state = stateFor("overview", [file("src/a.ts")]);
+    state.selected = null;
+    state.selectedClone = null;
+    state.selectedRoad = null;
+    state.search = "";
+    const base = panelRenderKey(state);
+    state.search = "cal";
     expect(panelRenderKey(state)).not.toBe(base);
   });
 
@@ -195,6 +212,65 @@ describe("rankRowsFor overview", () => {
     expect(rows[0].label).toBe("hub.ts");
     expect(rows[0].metric).toBe("used by 40");
     expect(rows.some((r) => r.label === "leaf.ts")).toBe(false);
+  });
+});
+
+describe("searchPanelModel", () => {
+  it("ranks matches and affected files most-depended-on first", () => {
+    const state = stateFor("overview", [
+      file("src/calendar/grid.ts", { importer_count: 3 }),
+      file("src/calendar/index.ts", { importer_count: 30 }),
+      file("src/app.ts", { importer_count: 0 }),
+    ]);
+    state.search = "calendar";
+    state.searchMatches = new Set([0, 1]);
+    state.searchReach = new Set([2]);
+    const model = searchPanelModel(state);
+    expect(model.query).toBe("calendar");
+    // index.ts (used by 30) ranks before grid.ts (used by 3).
+    expect(model.matches).toEqual([1, 0]);
+    expect(model.affected).toEqual([2]);
+  });
+
+  it("trims the query and reports an empty match set", () => {
+    const state = stateFor("overview", [file("src/a.ts")]);
+    state.search = "  none  ";
+    state.searchMatches = new Set();
+    state.searchReach = new Set();
+    const model = searchPanelModel(state);
+    expect(model.query).toBe("none");
+    expect(model.matches).toEqual([]);
+    expect(model.affected).toEqual([]);
+  });
+});
+
+describe("buildSearchDigest", () => {
+  it("lists matched files with importer counts and the affects headline", () => {
+    const state = stateFor("overview", [
+      file("src/calendar/index.ts", { importer_count: 30 }),
+      file("src/app.ts", { importer_count: 0 }),
+    ]);
+    state.search = "  calendar  ";
+    state.searchMatches = new Set([0]);
+    state.searchReach = new Set([1]);
+    const md = buildSearchDigest(state);
+    expect(md).toContain('# fallow: search "calendar" in demo');
+    expect(md).toContain("1 matched file, 1 affected");
+    expect(md).toContain("## matched files");
+    expect(md).toContain("- src/calendar/index.ts (used by 30)");
+    // The digest enumerates the affected files it headlines, not just the count.
+    expect(md).toContain("## affected files");
+    expect(md).toContain("- src/app.ts (used by 0)");
+  });
+
+  it("drops the affects clause when nothing depends on the matches", () => {
+    const state = stateFor("overview", [file("src/calendar/index.ts", { importer_count: 0 })]);
+    state.search = "calendar";
+    state.searchMatches = new Set([0]);
+    state.searchReach = new Set();
+    const md = buildSearchDigest(state);
+    expect(md).toContain("1 matched file");
+    expect(md).not.toContain("affects");
   });
 });
 

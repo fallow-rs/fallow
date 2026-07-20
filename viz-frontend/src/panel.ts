@@ -431,6 +431,7 @@ export const panelRenderKey = (state: AppState): string =>
     state.selectedClone,
     state.selectedRoad ? `${state.selectedRoad.srcKey}>${state.selectedRoad.dstKey}` : null,
     state.lens,
+    state.search,
   ].join("|");
 
 export const renderPanel = (
@@ -446,6 +447,12 @@ export const renderPanel = (
   }
   if (state.selected === null && state.selectedRoad !== null) {
     renderRoadPanel(state, panel, navigate, close);
+    return;
+  }
+  if (state.selected === null && state.search.trim() !== "") {
+    // An active query owns the sidebar: the matched files and their
+    // combined blast radius, not the lens list they'd otherwise see.
+    renderSearchPanel(state, panel, navigate);
     return;
   }
   if (state.selected === null) {
@@ -744,6 +751,58 @@ export const buildMapDigest = (state: AppState): string => {
   return lines.join("\n");
 };
 
+/**
+ * The shared `rank-list` builder: one clickable row per RankRow, with the
+ * directory head-truncated to a monospace budget and a right-aligned
+ * metric. Used by both the lens list and the search-results panel.
+ */
+const rankListEl = (rows: RankRow[], cap: number, onPick: (row: RankRow) => void): HTMLElement => {
+  const ul = el("ul", "link-list rank-list");
+  for (const row of rows.slice(0, cap)) {
+    const li = el("li");
+    const btn = el("button") as HTMLButtonElement;
+    btn.type = "button";
+    const labelBox = el("span", "rank-label");
+    if (row.dir) {
+      // Head-truncate the directory in JS (monospace budget), keeping
+      // whole tail segments; CSS rtl tricks reorder path punctuation.
+      const budget = Math.max(8, 34 - row.label.length - row.metric.length / 2);
+      let dir = `${row.dir}/`;
+      if (dir.length > budget) {
+        const parts = row.dir.split("/");
+        while (parts.length > 1 && `…/${parts.join("/")}/`.length > budget) parts.shift();
+        dir = `…/${parts.join("/")}/`;
+      }
+      const dirSpan = el("span", "muted", dir);
+      dirSpan.title = `${row.dir}/${row.label}`;
+      labelBox.appendChild(dirSpan);
+    }
+    labelBox.appendChild(document.createTextNode(row.label));
+    btn.appendChild(labelBox);
+    btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
+    btn.addEventListener("click", () => onPick(row));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+  if (rows.length > cap) {
+    ul.appendChild(el("li", "muted", `… ${formatCount(rows.length - cap)} more`));
+  }
+  return ul;
+};
+
+/** RankRows for a set of file indices, labelled with their importer count. */
+const fileRankRows = (state: AppState, indices: number[]): RankRow[] =>
+  indices.map((i) => {
+    const f = state.data.files[i];
+    return {
+      label: basename(f.path),
+      dir: dirname(f.path),
+      metric: `used by ${formatCount(f.importer_count)}`,
+      metricCls: "muted",
+      fileIndex: i,
+    };
+  });
+
 /** Ranked worst-first findings for the active lens (nothing selected). */
 const renderLensPanel = (
   state: AppState,
@@ -771,44 +830,14 @@ const renderLensPanel = (
       ].join("\n"),
     ),
   );
-  const cap = 100;
-  const ul = el("ul", "link-list rank-list");
-  for (const row of rows.slice(0, cap)) {
-    const li = el("li");
-    const btn = el("button") as HTMLButtonElement;
-    btn.type = "button";
-    const labelBox = el("span", "rank-label");
-    if (row.dir) {
-      // Head-truncate the directory in JS (monospace budget), keeping
-      // whole tail segments; CSS rtl tricks reorder path punctuation.
-      const budget = Math.max(8, 34 - row.label.length - row.metric.length / 2);
-      let dir = `${row.dir}/`;
-      if (dir.length > budget) {
-        const parts = row.dir.split("/");
-        while (parts.length > 1 && `…/${parts.join("/")}/`.length > budget) parts.shift();
-        dir = `…/${parts.join("/")}/`;
-      }
-      const dirSpan = el("span", "muted", dir);
-      dirSpan.title = `${row.dir}/${row.label}`;
-      labelBox.appendChild(dirSpan);
+  const ul = rankListEl(rows, 100, (row) => {
+    if (row.clone !== undefined) {
+      state.selectedClone = row.clone;
+      refresh();
+    } else {
+      navigate(row.fileIndex);
     }
-    labelBox.appendChild(document.createTextNode(row.label));
-    btn.appendChild(labelBox);
-    btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
-    btn.addEventListener("click", () => {
-      if (row.clone !== undefined) {
-        state.selectedClone = row.clone;
-        refresh();
-      } else {
-        navigate(row.fileIndex);
-      }
-    });
-    li.appendChild(btn);
-    ul.appendChild(li);
-  }
-  if (rows.length > cap) {
-    ul.appendChild(el("li", "muted", `… ${formatCount(rows.length - cap)} more`));
-  }
+  });
   section.appendChild(ul);
   const hint = el("div", "action-hint");
   hint.append(
@@ -818,6 +847,109 @@ const renderLensPanel = (
   );
   section.appendChild(hint);
   panel.appendChild(section);
+};
+
+/**
+ * Pure model behind the search panel: the matched file indices and their
+ * combined blast radius (every file that transitively imports a match),
+ * each ranked most-depended-on first. Split out from the renderer so the
+ * ranking is testable without a DOM, mirroring `rankRowsFor`.
+ */
+export const searchPanelModel = (
+  state: AppState,
+): { query: string; matches: number[]; affected: number[] } => {
+  const files = state.data.files;
+  const byImporters = (a: number, b: number): number =>
+    files[b].importer_count - files[a].importer_count;
+  return {
+    query: state.search.trim(),
+    matches: [...state.searchMatches].toSorted(byImporters),
+    affected: [...state.searchReach].toSorted(byImporters),
+  };
+};
+
+/** Markdown of the current search: the matched files and the files that
+ *  depend on them. Both sections are listed so the paste never names a
+ *  count (", N affected") it does not then enumerate. The affected list
+ *  is capped to keep the paste bounded. */
+export const buildSearchDigest = (state: AppState): string => {
+  const { query, matches, affected } = searchPanelModel(state);
+  const files = state.data.files;
+  const row = (i: number): string => `- ${files[i].path} (used by ${files[i].importer_count})`;
+  const lines = [
+    `# fallow: search "${query}" in ${state.data.root}`,
+    `${matches.length} matched file${matches.length === 1 ? "" : "s"}${
+      affected.length > 0 ? `, ${affected.length} affected` : ""
+    }`,
+    "",
+    "## matched files",
+    ...matches.map(row),
+  ];
+  if (affected.length > 0) {
+    const cap = 30;
+    lines.push("", "## affected files (depend on the matches)", ...affected.slice(0, cap).map(row));
+    if (affected.length > cap) lines.push(`- … ${affected.length - cap} more`);
+  }
+  return lines.join("\n");
+};
+
+/**
+ * Active-search view: the matched files ranked by how depended-on they
+ * are, then the combined blast radius of the whole matched set (the "what
+ * a PR touching these would ripple into" answer). Shown whenever a query
+ * is live and no file is selected, in place of the lens list.
+ */
+const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: NavigateFn): void => {
+  panel.replaceChildren();
+  panel.classList.add("open");
+  panel.setAttribute("aria-label", "search matches");
+
+  const { query, matches, affected } = searchPanelModel(state);
+
+  const head = el("div", "panel-head");
+  const box = el("div", "file");
+  box.appendChild(el("div", "dir", `matches for "${query}"`));
+  box.appendChild(
+    el("div", "name", `${formatCount(matches.length)} file${matches.length === 1 ? "" : "s"}`),
+  );
+  if (affected.length > 0) {
+    const statusLine = el("div", "status-line");
+    statusLine.appendChild(sev("sev-info", `affects ${formatCount(affected.length)}`));
+    box.appendChild(statusLine);
+    box.appendChild(
+      el("div", "status-gloss", "files that depend on these, directly or transitively"),
+    );
+  }
+  head.appendChild(box);
+  panel.appendChild(head);
+
+  if (matches.length === 0) {
+    const empty = sectionEl("no matches");
+    empty.appendChild(el("div", "muted", "no file path contains that text"));
+    panel.appendChild(empty);
+    return;
+  }
+
+  const section = sectionEl("matched files");
+  section.appendChild(copyButton("copy-path", "copy this list", () => buildSearchDigest(state)));
+  section.appendChild(
+    rankListEl(fileRankRows(state, matches), 100, (row) => navigate(row.fileIndex)),
+  );
+  const matchHint = el("div", "action-hint");
+  matchHint.append("Ranked by how many files import them. Click a row to focus.");
+  section.appendChild(matchHint);
+  panel.appendChild(section);
+
+  if (affected.length > 0) {
+    const aff = sectionEl(`affected files (${formatCount(affected.length)})`);
+    aff.appendChild(
+      rankListEl(fileRankRows(state, affected), 100, (row) => navigate(row.fileIndex)),
+    );
+    const hint = el("div", "action-hint");
+    hint.append("Everything that transitively imports a match. Click a row to focus.");
+    aff.appendChild(hint);
+    panel.appendChild(aff);
+  }
 };
 
 /** Clone-group drill-down: the preview plus every copy as a jump link. */
