@@ -549,6 +549,39 @@ export const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): 
   return best;
 };
 
+export const roadHitTest = (state: AppState, x: number, y: number): number | null => {
+  const gvs = getGVS(state);
+  const threshold = 10;
+  const { transform } = gvs;
+  const gx = (x - transform.x) / transform.k;
+  const gy = (y - transform.y) / transform.k;
+  const pad = threshold / transform.k;
+  let best: number | null = null;
+  let bestDist = threshold;
+  for (let ri = 0; ri < gvs.roads.length; ri++) {
+    const road = gvs.roads[ri];
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
+    // Coarse bounding-box prefilter over the bezier's control points (the
+    // curve stays within their hull), so the 17-point sampling is skipped
+    // only for roads the pointer truly cannot be on. An endpoint-circle
+    // prefilter would leave the middle of long roads unhittable.
+    const minX = Math.min(p0.x, p1.x, p2.x, p3.x);
+    const maxX = Math.max(p0.x, p1.x, p2.x, p3.x);
+    const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
+    const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
+    if (gx < minX - pad || gx > maxX + pad || gy < minY - pad || gy > maxY + pad) continue;
+    for (let i = 0; i <= 16; i++) {
+      const p = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, i / 16));
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = ri;
+      }
+    }
+  }
+  return best;
+};
+
 /** Bounding box of the clusters an include predicate keeps. */
 export const clusterBounds = (
   clusters: ClusterInfo[],

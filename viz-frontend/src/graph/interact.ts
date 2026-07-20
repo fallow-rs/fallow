@@ -15,13 +15,12 @@ import {
   type GraphHoverTarget,
   type StageRect,
   clusterBounds,
-  cubicPoint,
   easeOut,
   fitTransform,
   getGVS,
   markIntroSeen,
   nodeHitTest,
-  roadGeometry,
+  roadHitTest,
   stageSize,
   worldToScreen,
 } from "./shared";
@@ -96,39 +95,6 @@ const stageHitTest = (state: AppState, x: number, y: number): StageRect | null =
 };
 
 /** Distance-to-bezier road hit test in screen space (overview only). */
-const roadHitTest = (state: AppState, x: number, y: number): number | null => {
-  const gvs = getGVS(state);
-  const threshold = 10;
-  const { transform } = gvs;
-  const gx = (x - transform.x) / transform.k;
-  const gy = (y - transform.y) / transform.k;
-  const pad = threshold / transform.k;
-  let best: number | null = null;
-  let bestDist = threshold;
-  for (let ri = 0; ri < gvs.roads.length; ri++) {
-    const road = gvs.roads[ri];
-    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
-    // Coarse bounding-box prefilter over the bezier's control points (the
-    // curve stays within their hull), so the 17-point sampling is skipped
-    // only for roads the pointer truly cannot be on. The old endpoint-circle
-    // prefilter left the middle of long roads unclickable.
-    const minX = Math.min(p0.x, p1.x, p2.x, p3.x);
-    const maxX = Math.max(p0.x, p1.x, p2.x, p3.x);
-    const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
-    const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
-    if (gx < minX - pad || gx > maxX + pad || gy < minY - pad || gy > maxY + pad) continue;
-    for (let i = 0; i <= 16; i++) {
-      const p = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, i / 16));
-      const d = Math.hypot(p.x - x, p.y - y);
-      if (d < bestDist) {
-        bestDist = d;
-        best = ri;
-      }
-    }
-  }
-  return best;
-};
-
 /** Resolve a road to its contributing file pairs for the panel. */
 const buildRoadSelection = (state: AppState, roadIndex: number): RoadSelection => {
   const gvs = getGVS(state);

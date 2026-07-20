@@ -27,6 +27,7 @@ import {
   fitTransform,
   getGVS,
   nodeHitTest,
+  roadHitTest,
   shouldShowIntro,
   stageSize,
 } from "./shared";
@@ -837,7 +838,10 @@ export const initGraphNodes = (state: AppState): void => {
       const rect = canvas.getBoundingClientRect();
       const px = (event as MouseEvent).clientX - rect.left;
       const py = (event as MouseEvent).clientY - rect.top;
-      return nodeHitTest(state, px, py) === null;
+      // Don't start a pan on a node OR a road; otherwise d3-zoom claims the
+      // gesture and its mouseup (stopImmediatePropagation) swallows the click
+      // before our handler can select the node/road.
+      return nodeHitTest(state, px, py) === null && roadHitTest(state, px, py) === null;
     })
     .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
       if (event.sourceEvent) gvs.userMoved = true;
