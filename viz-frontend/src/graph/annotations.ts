@@ -460,8 +460,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
     const single = cluster.indices.length === 1;
     const raw = single ? basename(state.data.files[cluster.indices[0]].path) : cluster.key;
     // Natural case: folder names like `Sidebar`/`Calendar` carry meaning in
-    // their casing, so keep it. Only terrain markers (ENTRY CODE / SHARED
-    // FOUNDATIONS) stay uppercased. Multi-file keys are directory paths whose
+    // their casing, so keep it. Multi-file keys are directory paths whose
     // last segment identifies them, so drop leading segments and keep whole
     // trailing ones; single-file labels are bare filenames, where the middle
     // is the safest thing to cut.
@@ -527,30 +526,6 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
   }
 
   drawStandaloneChip(state, gvs);
-};
-
-/** Screen-space axis endpoints: the one annotation that explains the x layout. */
-export const drawAxisMarkers = (
-  state: AppState,
-  gvs: GraphViewState,
-  w: number,
-  h: number,
-): void => {
-  // The entry-to-shared axis only describes the folder rank layout;
-  // import communities carry no left-right meaning.
-  if (gvs.clusterMode === "imports") return;
-  const kRel = gvs.transform.k / gvs.fitK;
-  if (kRel > 1.3 || state.selected !== null) return;
-  const { ctx, theme } = state;
-  ctx.font = FONT_SMALL;
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = theme.textLow;
-  ctx.globalAlpha = 0.85;
-  ctx.textAlign = "left";
-  ctx.fillText("ENTRY CODE", 14, h / 2);
-  ctx.textAlign = "right";
-  ctx.fillText("SHARED FOUNDATIONS", w - 14, h / 2);
-  ctx.globalAlpha = 1;
 };
 
 export const drawCanvasLegend = (state: AppState, w: number, h: number): void => {

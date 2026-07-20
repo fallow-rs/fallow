@@ -154,6 +154,9 @@ const init = (): void => {
   };
 
   stage.appendChild(canvas);
+  // The arrange toggle floats over the map (top-right, graph view only);
+  // chrome builds it but leaves mounting to the stage here.
+  stage.appendChild(refs.clusterGroup);
   const panel = createPanel();
   stage.appendChild(panel);
   app.appendChild(stage);

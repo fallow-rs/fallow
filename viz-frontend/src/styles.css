@@ -5,6 +5,7 @@
 :root {
   --radius: 6px;
   --radius-sm: 4px;
+  --panel-width: 420px;
 
   /* Theme-independent: only the palette flips per theme, never the face. */
   --font-mono:
@@ -414,14 +415,25 @@ button {
   color: var(--text-high);
 }
 
-#lens-summary .arrange {
+/* Arrange toggle floats at the top-right of the map (graph view only),
+   just left of the detail panel. It only changes the map layout, so it
+   lives on the map rather than in the lens header. */
+#stage .arrange {
+  position: absolute;
+  top: 12px;
+  right: calc(var(--panel-width) + 12px);
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+  padding: 5px 10px;
+  background: color-mix(in oklab, var(--surface-1) 88%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
 }
 
-#lens-summary .arrange button {
+#stage .arrange button {
   border: none;
   background: none;
   padding: 2px 4px;
@@ -430,16 +442,16 @@ button {
   color: var(--text-muted);
 }
 
-#lens-summary .arrange button:hover {
+#stage .arrange button:hover {
   color: var(--text-low);
 }
 
-#lens-summary .arrange button[aria-pressed="true"] {
+#stage .arrange button[aria-pressed="true"] {
   color: var(--text-high);
 }
 
 /* A rule, not a glyph: the divider is layout, so it stays out of the copy. */
-#lens-summary .arrange .arrange-sep {
+#stage .arrange .arrange-sep {
   display: inline-block;
   width: 1px;
   height: 10px;
@@ -619,7 +631,7 @@ button {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 420px;
+  width: var(--panel-width);
   max-width: 90vw;
   background: var(--surface-1);
   border-left: 1px solid var(--border-default);

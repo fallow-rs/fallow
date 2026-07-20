@@ -278,7 +278,8 @@ export const buildChrome = (
   summaryLine.id = "lens-summary";
   const summaryLeft = el("div", "summary-left");
   summaryLine.appendChild(summaryLeft);
-  summaryLine.appendChild(clusterGroup);
+  // clusterGroup is not in the lens header: main.ts mounts it as a
+  // top-right overlay on the map, since it only changes the map layout.
 
   app.appendChild(topbar);
   app.appendChild(toolbar);

@@ -10,7 +10,6 @@ import { mix } from "../theme";
 import { renderEgoStage, renderGhost } from "./ego";
 import { drawMinimap } from "./minimap";
 import {
-  drawAxisMarkers,
   drawCanvasLegend,
   drawClusterLabels,
   drawHoverLabels,
@@ -608,7 +607,6 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   if (hover.hovered !== null && hover.neighbors !== null) {
     drawHoverLabels(state, gvs, hover.hovered, hover.importers, hover.imports, w, h);
   }
-  drawAxisMarkers(state, gvs, usableStageWidth(state, w), h);
   drawCanvasLegend(state, w, h);
   drawPathTrace(state, gvs, w, h);
 
