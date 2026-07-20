@@ -414,6 +414,8 @@ jobs:
         run: npm run lint:js
       - name: oxfmt --check
         run: npm run fmt:js:check
+      - name: Narrator comment guard
+        run: node scripts/check-comment-quality.mjs --all
       - name: Script tests
         run: node --test scripts/*.test.mjs
 

@@ -20,6 +20,11 @@ if command -v python3 &> /dev/null; then
   python3 scripts/scan-hidden-unicode.py --mode committed --staged
 fi
 
+if command -v node &> /dev/null; then
+  echo "Running narrator-comment check..."
+  node scripts/check-comment-quality.mjs --staged
+fi
+
 # Run oxlint + oxfmt --check only when this commit touches a JS/TS file
 # inside one of the lintable scopes. Keeps pure-Rust commits fast.
 #

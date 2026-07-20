@@ -27,6 +27,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node \"$root/scripts/check-comment-quality.mjs\" --working-tree --claude-hook",
+            "statusMessage": "Checking added comments for routine narration..."
+          }
+        ]
+      }
     ]
   }
 }

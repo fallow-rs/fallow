@@ -120,3 +120,13 @@ test("FALLOW_FORMAT docs include every GitHub-native format", () => {
     assert.ok(documentedFormats.has(format), `FALLOW_FORMAT docs are missing ${format}`);
   }
 });
+
+test("narrator comment guard runs for commits, Claude, and CI", () => {
+  const preCommit = readFileSync(".githooks/pre-commit", "utf8");
+  const claudeSettings = readFileSync(".claude/settings.json", "utf8");
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+
+  assert.match(preCommit, /check-comment-quality\.mjs --staged/u);
+  assert.match(claudeSettings, /check-comment-quality\.mjs.*--working-tree.*--claude-hook/u);
+  assert.match(ci, /node scripts\/check-comment-quality\.mjs --all/u);
+});
