@@ -939,6 +939,13 @@ button {
   background: var(--amber-subtle);
   box-shadow: inset 2px 0 0 var(--amber);
 }
+#panel pre .more-line {
+  display: block;
+  padding-left: 6px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-style: italic;
+}
 
 #panel pre {
   border-radius: var(--radius-sm);

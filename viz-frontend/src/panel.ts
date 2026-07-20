@@ -578,6 +578,12 @@ const clonePreviewEl = (group: VizCloneGroup): HTMLElement => {
     highlightCode(lineEl, line);
     pre.appendChild(lineEl);
   });
+  // Big blocks are truncated to the preview cap: mark the cut so a clone
+  // reads as "continues below", not as if the duplication ends here.
+  const hidden = group.lines - group.highlight_lines;
+  if (hasRange && hidden > 0) {
+    pre.appendChild(el("span", "more-line", `… ${formatCount(hidden)} more duplicated lines`));
+  }
   return pre;
 };
 
