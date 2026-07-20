@@ -205,12 +205,12 @@ export interface GraphViewState {
   lensFadeAt: number;
 }
 
-export const FONT_SMALL = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_MICRO = '9px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_CHIP = '11px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_LEGEND = '10px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+export const FONT_SMALL = '12px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+export const FONT_MICRO = '11px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+export const FONT_CHIP = '13px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+export const FONT_LEGEND = '12px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 export const FONT_CARD =
-  '700 13px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+  '700 15px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
 
 export const NODE_R_MIN = 2.5;
 export const NODE_R_MAX = 10;

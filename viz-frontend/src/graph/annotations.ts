@@ -62,7 +62,7 @@ export const drawZoomLabels = (
     // Occupancy check in screen space.
     const sx = x * transform.k + transform.x;
     const sy = y * transform.k + transform.y;
-    const rect = { x: sx - textW / 2 - 2, y: sy, w: textW + 4, h: 13 };
+    const rect = { x: sx - textW / 2 - 2, y: sy, w: textW + 4, h: 15 };
     const overlaps = placed.some(
       (r) =>
         rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y,
@@ -72,7 +72,7 @@ export const drawZoomLabels = (
     drawn++;
     // Draw in world space (crisper under the active transform); halo
     // instead of a knockout slab, matching the hover labels.
-    const worldFont = 10 / transform.k;
+    const worldFont = 12 / transform.k;
     ctx.font = `${worldFont}px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace`;
     ctx.strokeStyle = theme.bg;
     ctx.lineWidth = 3 / transform.k;

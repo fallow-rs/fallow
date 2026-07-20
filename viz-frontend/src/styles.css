@@ -2,10 +2,24 @@
    Tokens mirror the fallow design system: Radix Sand Dark neutrals,
    semantic accents only (red=error, amber=warn, green=pass, blue=info). */
 
-:root,
 :root {
   --radius: 6px;
   --radius-sm: 4px;
+
+  /* Theme-independent: only the palette flips per theme, never the face. */
+  --font-mono:
+    "Martian Mono", "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas,
+    monospace;
+
+  /* Type scale. One step per role, so a global size change is one edit.
+     Tuned for reading a dense map on a large display, not for density. */
+  --fs-micro: 10px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-base: 15px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
 }
 
 :root[data-theme="dark"] {
@@ -33,9 +47,6 @@
   --blue: #0090ff;
   --blue-text: #70b8ff;
   --blue-subtle: #0d2847;
-  --font-mono:
-    "Martian Mono", "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas,
-    monospace;
 }
 
 :root[data-theme="light"] {
@@ -81,7 +92,7 @@ body {
   background: var(--surface-0);
   color: var(--text-high);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
@@ -107,7 +118,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  height: 48px;
+  height: 54px;
   box-sizing: border-box;
   padding: 0 20px;
   background: var(--surface-0);
@@ -115,19 +126,33 @@ button {
 
 .brand {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   white-space: nowrap;
 }
 
+.brand .mark {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: block;
+  color: var(--text-high);
+}
+
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .brand .wordmark {
-  font-size: 14px;
+  font-size: var(--fs-xl);
   font-weight: 700;
   color: var(--text-high);
 }
 
 .brand .project {
-  font-size: 14px;
+  font-size: var(--fs-lg);
   font-weight: 500;
   color: var(--text-high);
 }
@@ -152,7 +177,7 @@ button {
 }
 
 .brand .sub {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -175,7 +200,7 @@ button {
   top: 50%;
   transform: translateY(-50%);
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   line-height: 1;
   padding: 2px 5px;
@@ -193,13 +218,13 @@ button {
 }
 
 .ghost-btn {
-  height: 28px;
-  min-width: 28px;
+  height: 32px;
+  min-width: 32px;
   box-sizing: border-box;
   padding: 0 8px;
   border: none;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--text-low);
   background: transparent;
   transition:
@@ -224,7 +249,7 @@ button {
   align-items: stretch;
   justify-content: space-between;
   gap: 24px;
-  height: 40px;
+  height: 46px;
   box-sizing: border-box;
   padding: 0 20px;
   background: var(--surface-0);
@@ -244,7 +269,7 @@ button {
   padding: 0 12px;
   border: none;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 400;
   text-transform: lowercase;
   color: var(--text-muted);
@@ -280,7 +305,7 @@ button {
 }
 
 .lens-tab .badge {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -317,7 +342,7 @@ button {
   align-self: center;
   gap: 2px;
   padding: 2px;
-  height: 28px;
+  height: 32px;
   box-sizing: border-box;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
@@ -330,7 +355,7 @@ button {
   padding: 0 10px;
   border: none;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--fs-md);
   text-transform: lowercase;
   color: var(--text-muted);
   background: transparent;
@@ -363,10 +388,10 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 32px;
+  height: 36px;
   box-sizing: border-box;
   padding: 0 20px;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-low);
   background: var(--surface-0);
   border-bottom: 1px solid var(--border-subtle);
@@ -401,7 +426,7 @@ button {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 #lens-summary .summary-cmd:hover {
@@ -419,7 +444,7 @@ button {
   border: none;
   background: none;
   padding: 2px 4px;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   text-transform: lowercase;
   color: var(--text-muted);
 }
@@ -443,11 +468,11 @@ button {
 
 /* Search (row 1) */
 #search {
-  width: 240px;
-  height: 28px;
+  width: 260px;
+  height: 32px;
   box-sizing: border-box;
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--text-high);
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
@@ -470,7 +495,7 @@ button {
 }
 
 #search-count {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   min-width: 0;
 }
@@ -524,7 +549,7 @@ button {
 /* Panel: copy chip, status gloss, ranked lens list */
 #panel .copy-path {
   margin-left: 10px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   background: none;
   border: none;
@@ -537,7 +562,7 @@ button {
 
 #panel .status-gloss {
   margin-top: 2px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
@@ -601,7 +626,7 @@ button {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 380px;
+  width: 420px;
   max-width: 90vw;
   background: var(--surface-1);
   border-left: 1px solid var(--border-default);
@@ -645,23 +670,23 @@ button {
 
 #panel .panel-head .name {
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--fs-lg);
   color: var(--text-high);
 }
 
 #panel .panel-head .dir {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
 #panel .panel-head .status-line {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   margin-top: 4px;
 }
 
 #panel .close {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--fs-lg);
   padding: 2px 6px;
   border: 1px solid transparent;
 }
@@ -684,7 +709,7 @@ button {
 #panel section h3 {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
   font-weight: 400;
   letter-spacing: 0.05em;
   text-transform: lowercase;
@@ -696,7 +721,7 @@ button {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 2px 16px;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 #panel .kv dt {
@@ -714,7 +739,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 #panel .tag {
@@ -726,7 +751,7 @@ button {
 #panel table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 #panel th {
@@ -734,7 +759,7 @@ button {
   font-weight: 400;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-muted);
   padding: 2px 8px 2px 0;
   border-bottom: 1px solid var(--border-subtle);
@@ -762,7 +787,7 @@ button {
 }
 
 #panel .fn-react {
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 #panel .fn-react .pair + .pair {
@@ -804,7 +829,7 @@ button {
 
 #panel .link-list {
   list-style: none;
-  font-size: 12px;
+  font-size: var(--fs-md);
   max-height: 180px;
   overflow-y: auto;
 }
@@ -816,7 +841,7 @@ button {
 #panel .link-list button {
   border-radius: var(--radius-sm);
   color: var(--text-low);
-  font-size: 12px;
+  font-size: var(--fs-md);
   text-align: left;
   overflow-wrap: anywhere;
   transition: color 100ms ease-out;
@@ -864,7 +889,7 @@ button {
   background: var(--surface-0);
   border: 1px solid var(--border-subtle);
   padding: 8px 10px;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   overflow-x: auto;
   color: var(--text-low);
@@ -878,7 +903,7 @@ button {
 }
 
 #panel .clone-row .clone-head {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-low);
 }
 
@@ -888,7 +913,7 @@ button {
 }
 
 #panel .action-hint {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   margin-top: 6px;
   overflow-wrap: anywhere;
@@ -910,7 +935,7 @@ button {
   color: var(--text-high);
   border: 1px solid var(--border-strong);
   padding: 9px 12px;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   max-width: 380px;
   pointer-events: none;
@@ -925,7 +950,7 @@ button {
 }
 
 #tooltip .tip-size {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -936,7 +961,7 @@ button {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--surface-2);
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-low);
   white-space: nowrap;
 }
@@ -944,18 +969,18 @@ button {
 #tooltip .tip-wires .wire-dot {
   display: inline;
   color: var(--blue);
-  font-size: 9px;
+  font-size: var(--fs-micro);
 }
 
 #tooltip .tip-dir {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   overflow-wrap: anywhere;
 }
 
 #tooltip .tip-name {
   font-weight: 700;
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   overflow-wrap: anywhere;
 }
 
@@ -966,7 +991,7 @@ button {
 }
 
 #tooltip .tip-stat .v {
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text-high);
   font-variant-numeric: tabular-nums;
@@ -981,7 +1006,7 @@ button {
 }
 
 #tooltip .tip-stat .l {
-  font-size: 8px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--text-muted);
@@ -1055,7 +1080,7 @@ button {
 }
 
 #help-overlay h2 {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 400;
   letter-spacing: 0.05em;
   color: var(--text-high);
@@ -1063,7 +1088,7 @@ button {
 
 #help-overlay .close {
   color: var(--text-muted);
-  font-size: 16px;
+  font-size: var(--fs-xl);
   padding: 0 6px;
 }
 
@@ -1079,7 +1104,7 @@ button {
 }
 
 #help-overlay h3 {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 400;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -1095,13 +1120,13 @@ button {
 }
 
 #help-overlay dt {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--amber-text);
   white-space: nowrap;
 }
 
 #help-overlay dd {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-low);
   line-height: 1.5;
 }
@@ -1109,7 +1134,7 @@ button {
 #help-overlay .help-foot {
   padding: 10px 20px 14px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -1123,7 +1148,7 @@ button {
   padding: 5px 16px;
   border-top: 1px solid var(--border-subtle);
   background: var(--surface-1);
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-low);
   white-space: nowrap;
   overflow: hidden;
@@ -1139,7 +1164,7 @@ button {
 
 #crumbs button {
   color: var(--text-low);
-  font-size: 11px;
+  font-size: var(--fs-sm);
   padding: 0 3px;
 }
 

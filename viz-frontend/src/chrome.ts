@@ -89,6 +89,45 @@ const LENSES: LensDef[] = [
   },
 ];
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * The fallow f-wing mark, inlined so the single-file HTML report stays
+ * self-contained (no external asset fetch). Drawn in currentColor so it
+ * tracks the chrome's text colour in both themes.
+ */
+const MARK_PATH =
+  "M9990 9649 c-41 -10 -147 -29 -235 -41 -160 -22 -161 -22 -2055 -28 -1685 -6 -1906 -8 -1995" +
+  " -23 -531 -86 -976 -282 -1344 -593 -103 -87 -268 -253 -347 -349 -185 -227 -358 -552 -449" +
+  " -845 -77 -251 -84 -328 -85 -935 -1 -286 -1 -524 0 -530 1 -5 14 31 29 80 36 119 112 307 171" +
+  " 425 250 499 602 860 1065 1093 280 141 506 211 870 268 47 8 523 14 1445 19 1230 6 1384 9" +
+  " 1460 24 218 43 352 86 515 167 376 186 605 452 951 1100 52 97 94 179 94 183 0 8 1 8 -90" +
+  " -15z M8488 7584 c-229 -45 -282 -47 -1603 -54 -1095 -6 -1272 -9 -1355 -23 -310 -53 -533" +
+  " -123 -785 -247 -473 -231 -838 -591 -1060 -1045 -100 -204 -170 -427 -194 -620 -12 -93 -21" +
+  " -1235 -10 -1235 3 0 13 28 23 63 9 34 42 125 73 202 200 505 505 904 882 1153 216 143 417" +
+  " 232 666 297 256 67 261 67 1115 75 738 6 780 7 886 28 519 101 872 352 1166 829 89 143 308" +
+  " 563 308 589 0 7 -43 2 -112 -12z M5345 5475 c-335 -45 -612 -150 -915 -350 -538 -356 -913" +
+  " -998 -955 -1639 l-8 -109 154 6 c346 15 624 83 914 227 241 119 401 237 600 441 246 253 430" +
+  " 547 578 924 46 116 125 373 151 488 l6 27 -212 -1 c-117 -1 -258 -7 -313 -14z";
+
+const brandMark = (): SVGSVGElement => {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "mark");
+  svg.setAttribute("viewBox", "273.96 198.32 806.79 806.79");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  const group = document.createElementNS(SVG_NS, "g");
+  group.setAttribute("transform", "translate(0,1254) scale(0.1,-0.1)");
+  group.setAttribute("fill", "currentColor");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", MARK_PATH);
+  group.appendChild(path);
+  svg.appendChild(group);
+
+  return svg;
+};
+
 // ── Build ───────────────────────────────────────────────────────
 
 export const buildChrome = (
@@ -101,9 +140,12 @@ export const buildChrome = (
   topbar.id = "topbar";
 
   const brand = el("div", "brand");
-  brand.appendChild(el("span", "wordmark", "fallow"));
-  brand.appendChild(el("span", "project", state.data.root));
-  brand.appendChild(el("span", "sub", "codebase map"));
+  brand.appendChild(brandMark());
+  const brandText = el("div", "brand-text");
+  brandText.appendChild(el("span", "wordmark", "fallow"));
+  brandText.appendChild(el("span", "project", state.data.root));
+  brandText.appendChild(el("span", "sub", "codebase map"));
+  brand.appendChild(brandText);
   topbar.appendChild(brand);
 
   const actions = el("div", "topbar-actions");
@@ -446,7 +488,7 @@ const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
   refs.searchCount.append(n, document.createTextNode(" matches"));
   if (state.searchReach.size > 0 && state.view === "graph") {
     const affects = el("span", "hint");
-    affects.append(", ", el("span", "n", formatCount(state.searchReach.size)), " downstream");
+    affects.append(", ", el("span", "n", formatCount(state.searchReach.size)), " affected");
     refs.searchCount.appendChild(affects);
   } else if (state.searchMatches.size > 0 && state.view === "graph") {
     refs.searchCount.appendChild(el("span", "hint", ", press enter to zoom"));
