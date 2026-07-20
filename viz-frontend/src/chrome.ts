@@ -54,35 +54,35 @@ interface LensDef {
 const LENSES: LensDef[] = [
   {
     id: "overview",
-    name: "overview",
+    name: "Overview",
     gloss: "Folders & imports",
     count: () => null,
     sev: "warn",
   },
   {
     id: "deadcode",
-    name: "unused",
+    name: "Unused",
     gloss: "Dead files & exports",
     count: (state) => state.data.summary.unused_files + state.data.summary.unused_exports,
     sev: "error",
   },
   {
     id: "dupes",
-    name: "duplication",
+    name: "Duplication",
     gloss: "Copy-pasted code",
     count: (state) => state.data.summary.clone_groups,
     sev: "warn",
   },
   {
     id: "boundaries",
-    name: "boundaries",
+    name: "Boundaries",
     gloss: "Import loops & forbidden imports",
     count: (state) => state.data.summary.circular_deps + state.data.summary.boundary_violations,
     sev: "error",
   },
   {
     id: "hotspots",
-    name: "complexity",
+    name: "Complexity",
     gloss: "Hardest files to change",
     count: (state) => state.data.summary.hotspot_files,
     sev: "warn",
@@ -144,7 +144,7 @@ export const buildChrome = (
   const brandText = el("div", "brand-text");
   brandText.appendChild(el("span", "wordmark", "fallow"));
   brandText.appendChild(el("span", "project", state.data.root));
-  brandText.appendChild(el("span", "sub", "codebase map"));
+  brandText.appendChild(el("span", "sub", "Codebase map"));
   brand.appendChild(brandText);
   topbar.appendChild(brand);
 
@@ -153,7 +153,7 @@ export const buildChrome = (
   const search = document.createElement("input");
   search.id = "search";
   search.type = "search";
-  search.placeholder = "search files…";
+  search.placeholder = "Search files…";
   search.setAttribute("aria-label", "Search files");
   search.addEventListener("input", () => handlers.onSearch(search.value));
   searchWrap.appendChild(search);
@@ -166,32 +166,32 @@ export const buildChrome = (
   searchCount.setAttribute("aria-live", "polite");
   actions.appendChild(searchCount);
   actions.appendChild(el("span", "divider"));
-  const digestBtn = button("ghost-btn", "copy map");
+  const digestBtn = button("ghost-btn", "Copy map");
   digestBtn.id = "digest-btn";
-  digestBtn.title = "copy a markdown digest of the whole map";
+  digestBtn.title = "Copy a markdown digest of the whole map";
   digestBtn.setAttribute("aria-label", "Copy a markdown digest of the whole map");
   digestBtn.addEventListener("click", () => {
     refs.digestHandler?.();
-    digestBtn.textContent = "copied";
-    announce("copied the whole map as markdown");
+    digestBtn.textContent = "Copied";
+    announce("Copied the whole map as markdown");
     setTimeout(() => {
-      digestBtn.textContent = "copy map";
+      digestBtn.textContent = "Copy map";
     }, 1200);
   });
   actions.appendChild(digestBtn);
-  const exportBtn = button("ghost-btn", "png");
+  const exportBtn = button("ghost-btn", "PNG");
   exportBtn.id = "export-btn";
-  exportBtn.title = "export this view as an image";
+  exportBtn.title = "Export this view as an image";
   exportBtn.setAttribute("aria-label", "Export the current view as PNG");
   actions.appendChild(exportBtn);
   const helpBtn = button("ghost-btn", "?");
   helpBtn.id = "help-btn";
-  helpBtn.title = "how to read this map";
+  helpBtn.title = "How to read this map";
   helpBtn.setAttribute("aria-label", "How to read this map");
   actions.appendChild(helpBtn);
   const themeToggle = button("ghost-btn", "◐");
   themeToggle.id = "theme-toggle";
-  themeToggle.title = "switch theme";
+  themeToggle.title = "Switch theme";
   themeToggle.setAttribute("aria-label", "Toggle color theme");
   themeToggle.addEventListener("click", handlers.onTheme);
   actions.appendChild(themeToggle);
@@ -242,8 +242,8 @@ export const buildChrome = (
   viewSeg.setAttribute("aria-label", "view");
   const viewButtons = new Map<string, HTMLButtonElement>();
   const viewDefs: Array<{ id: "graph" | "map"; name: string; gloss: string }> = [
-    { id: "graph", name: "graph", gloss: "folders connected by imports (press g)" },
-    { id: "map", name: "treemap", gloss: "nested boxes sized by file size (press t)" },
+    { id: "graph", name: "Graph", gloss: "Folders connected by imports (press g)" },
+    { id: "map", name: "Treemap", gloss: "Nested boxes sized by file size (press t)" },
   ];
   for (const def of viewDefs) {
     const viewButton = button("", def.name);
@@ -260,8 +260,8 @@ export const buildChrome = (
   const clusterGroup = el("div", "seg arrange");
   const clusterButtons = new Map<string, HTMLButtonElement>();
   const clusterDefs: Array<{ id: "directory" | "imports"; name: string; gloss: string }> = [
-    { id: "directory", name: "by folder", gloss: "group files by their folder" },
-    { id: "imports", name: "by imports", gloss: "group files that import each other" },
+    { id: "directory", name: "By folder", gloss: "Group files by their folder" },
+    { id: "imports", name: "By imports", gloss: "Group files that import each other" },
   ];
   clusterDefs.forEach((def) => {
     const clusterButton = button("", def.name);
@@ -298,13 +298,13 @@ export const buildChrome = (
   // Keycaps and their action, one chip each. Spacing separates them, so
   // no punctuation has to.
   const hintPairs: Array<[keys: string[], label: string]> = [
-    [["/"], "search"],
-    [["1", "5"], "lens"],
-    [["g"], "graph"],
-    [["t"], "treemap"],
-    [["0"], "reset"],
-    [["esc"], "back"],
-    [["?"], "help"],
+    [["/"], "Search"],
+    [["1", "5"], "Lens"],
+    [["g"], "Graph"],
+    [["t"], "Treemap"],
+    [["0"], "Reset"],
+    [["esc"], "Back"],
+    [["?"], "Help"],
   ];
   for (const [keys, label] of hintPairs) {
     const item = el("span", "hint-item");
@@ -368,8 +368,11 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
       badge.className = count === 0 ? "badge zero" : `badge ${weight} ${def.sev}`;
     }
   }
-  refs.clusterGroup.style.display = state.view === "graph" ? "" : "none";
-  refs.themeToggle.title = state.dark ? "switch to light" : "switch to dark";
+  // Arrange configures the full-graph layout, so it is irrelevant in the ego
+  // stage (a focused file) and would collide with the ego breadcrumb; hide it
+  // whenever a file is selected.
+  refs.clusterGroup.style.display = state.view === "graph" && state.selected === null ? "" : "none";
+  refs.themeToggle.title = state.dark ? "Switch to light" : "Switch to dark";
 
   updateSummaryLine(state, refs);
   updateCrumbs(state, refs);
@@ -394,7 +397,7 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
 const updateCrumbs = (state: AppState, refs: ChromeRefs): void => {
   refs.crumbs.replaceChildren();
   if (state.view !== "map") {
-    refs.crumbs.appendChild(el("span", "current", "import graph"));
+    refs.crumbs.appendChild(el("span", "current", "Import graph"));
     return;
   }
   const rootBtn = button("", state.data.root);

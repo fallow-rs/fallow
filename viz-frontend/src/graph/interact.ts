@@ -163,7 +163,7 @@ export const graphPathTrace = (state: AppState, x: number, y: number): boolean =
   const node = nodeHitTest(state, x, y);
   if (node === null) {
     // Shift-click is trace-only: a miss never falls through to selection.
-    gvs.notice = "shift-click a file dot to trace";
+    gvs.notice = "Shift-click a file dot to trace";
     gvs.noticeAt = performance.now();
     renderGraph(state);
     return true;
@@ -176,7 +176,7 @@ export const graphPathTrace = (state: AppState, x: number, y: number): boolean =
     if (gvs.path) {
       gvs.pathFrom = null;
     } else {
-      gvs.notice = "no dependency path between these files";
+      gvs.notice = "No dependency path between these files";
       gvs.noticeAt = performance.now();
     }
   }

@@ -261,7 +261,7 @@ const drawTreemapFooter = (state: AppState, width: number, height: number): void
     footerChip(
       ctx,
       theme,
-      "click a folder to zoom in",
+      "Click a folder to zoom in",
       "right",
       usableStageWidth(state, width) - 16,
       y,

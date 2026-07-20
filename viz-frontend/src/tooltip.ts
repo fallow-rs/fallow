@@ -76,7 +76,7 @@ export interface TipDock {
 const severityLine = (state: AppState, fileIndex: number): HTMLElement | null => {
   const file = state.data.files[fileIndex];
   if (file.status === "unused") {
-    return line("sev-error tip-line", "unused, nothing imports this file");
+    return line("sev-error tip-line", "Unused, nothing imports this file");
   }
   if (state.index.violationSources.has(fileIndex)) {
     const count = state.data.violations.filter((violation) => violation.from === fileIndex).length;
@@ -85,14 +85,14 @@ const severityLine = (state: AppState, fileIndex: number): HTMLElement | null =>
       `${formatCount(count)} boundary violation${count === 1 ? "" : "s"}`,
     );
   }
-  if (file.in_cycle) return line("sev-warn tip-line", "part of a dependency cycle");
+  if (file.in_cycle) return line("sev-warn tip-line", "Part of a dependency cycle");
   if (file.unused_export_count > 0) {
     return line(
       "sev-warn tip-line",
       `${formatCount(file.unused_export_count)} unused export${file.unused_export_count === 1 ? "" : "s"}`,
     );
   }
-  if (file.status === "entryPoint") return line("sev-info tip-line", "entry point");
+  if (file.status === "entryPoint") return line("sev-info tip-line", "Entry point");
   return null;
 };
 
@@ -114,12 +114,12 @@ const lensLine = (state: AppState, fileIndex: number): HTMLElement | null => {
           : "tip-muted";
     return line(
       `${cls} tip-line`,
-      `complexity ${formatCount(file.max_cyclomatic)}, nesting ${formatCount(file.max_cognitive)}`,
+      `Complexity ${formatCount(file.max_cyclomatic)}, nesting ${formatCount(file.max_cognitive)}`,
     );
   }
   if (state.lens === "boundaries" && file.zone !== undefined) {
     const zone = state.data.zones[file.zone]?.name;
-    return zone ? line("tip-muted tip-line", `zone ${zone}`) : null;
+    return zone ? line("tip-muted tip-line", `Zone ${zone}`) : null;
   }
   return null;
 };
@@ -192,7 +192,7 @@ export const showRoadTooltip = (
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
-  tip.appendChild(line("tip-kind", "imports"));
+  tip.appendChild(line("tip-kind", "Imports"));
   tip.appendChild(line("tip-name", `${srcKey} → ${dstKey}`));
   const stats: Array<{ value: string; label: string; cls?: string }> = [
     { value: formatCount(count), label: "imports" },
@@ -204,7 +204,7 @@ export const showRoadTooltip = (
     stats.push({ value: formatCount(cycleEdges), label: "cycle edges", cls: "sev-warn" });
   }
   tip.appendChild(statGrid(stats));
-  tip.appendChild(line("tip-muted tip-line", "click to list every import"));
+  tip.appendChild(line("tip-muted tip-line", "Click to list every import"));
   position(tip, mouseX, mouseY);
 };
 
@@ -219,7 +219,7 @@ export const showDirTooltip = (
 ): void => {
   const tip = getTip();
   tip.replaceChildren();
-  tip.appendChild(line("tip-kind", "folder"));
+  tip.appendChild(line("tip-kind", "Folder"));
   tip.appendChild(line("tip-name", `${name}/`));
   const stats: Stat[] = [
     { value: formatCount(fileCount), label: "files" },
@@ -233,7 +233,7 @@ export const showDirTooltip = (
     });
   }
   tip.appendChild(statGrid(stats));
-  tip.appendChild(line("tip-muted tip-line", "click to zoom in"));
+  tip.appendChild(line("tip-muted tip-line", "Click to zoom in"));
   position(tip, mouseX, mouseY);
 };
 

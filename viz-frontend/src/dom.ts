@@ -51,8 +51,8 @@ export const copyButton = (
     void (async () => {
       if (!navigator.clipboard) return;
       await navigator.clipboard.writeText(getText());
-      buttonEl.textContent = "copied";
-      announce("copied to clipboard");
+      buttonEl.textContent = "Copied";
+      announce("Copied to clipboard");
       setTimeout(() => {
         buttonEl.textContent = label;
       }, 1200);

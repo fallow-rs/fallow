@@ -38,6 +38,7 @@ import { buildChrome, statuslineOf, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
 import { buildMapDigest, createPanel, panelRenderKey, renderPanel } from "./panel";
 import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
+import { installHintTips } from "./hint";
 import { dirname } from "./data";
 
 const renderView = (state: AppState): void => {
@@ -161,6 +162,10 @@ const init = (): void => {
   stage.appendChild(panel);
   app.appendChild(stage);
   app.appendChild(statuslineOf(refs));
+
+  // Floating [data-tip] hints: one body-level element, delegated globally so
+  // it survives panel rebuilds and escapes the panel's overflow clip.
+  installHintTips();
 
   // ── Help overlay ──────────────────────────────────────────────
   // Where focus returns when the modal help dialog closes.

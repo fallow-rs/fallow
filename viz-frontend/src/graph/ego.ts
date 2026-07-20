@@ -227,16 +227,16 @@ export const renderEgoStage = (
   ctx.textBaseline = "middle";
   ctx.fillStyle = theme.textMuted;
   ctx.textAlign = "right";
-  ctx.fillText(`imported by ${formatCount(importers.length)}`, leftX, headerY(leftRows));
+  ctx.fillText(`Imported by ${formatCount(importers.length)}`, leftX, headerY(leftRows));
   ctx.textAlign = "left";
-  ctx.fillText(`imports ${formatCount(imports.length)}`, rightX, headerY(rightRows));
+  ctx.fillText(`Imports ${formatCount(imports.length)}`, rightX, headerY(rightRows));
   if (importers.length === 0) {
     ctx.textAlign = "right";
-    ctx.fillText("nothing imports this file", leftX, cy);
+    ctx.fillText("Nothing imports this file", leftX, cy);
   }
   if (imports.length === 0) {
     ctx.textAlign = "left";
-    ctx.fillText("no imports", rightX, cy);
+    ctx.fillText("No imports", rightX, cy);
   }
 
   drawStageColumn(state, gvs, leftRows, "left", leftX, cy, availH, cx, ease, stageW);
@@ -273,7 +273,7 @@ export const renderEgoStage = (
   ctx.font = FONT_MICRO;
   ctx.fillStyle = theme.textLow;
   ctx.fillText(
-    `imported by ${formatCount(importers.length)}, imports ${formatCount(imports.length)}`,
+    `Imported by ${formatCount(importers.length)}, imports ${formatCount(imports.length)}`,
     cx,
     cy + 19,
   );

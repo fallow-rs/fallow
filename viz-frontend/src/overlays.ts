@@ -12,39 +12,39 @@ export interface OverlayHandlers {
 
 const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
   {
-    title: "lenses",
+    title: "Lenses",
     rows: [
-      ["overview", "just the structure: folders and their imports, no findings"],
-      ["unused", "red for a file nothing imports, amber for one with unused exports"],
-      ["duplication", "deeper amber means more copy-pasted lines in the file"],
-      ["boundaries", "color is the folder layer, a red road is a forbidden import"],
-      ["complexity", "amber through red marks the hardest files to change"],
+      ["Overview", "Just the structure: folders and their imports, no findings"],
+      ["Unused", "Red for a file nothing imports, amber for one with unused exports"],
+      ["Duplication", "Deeper amber means more copy-pasted lines in the file"],
+      ["Boundaries", "Color is the folder layer, a red road is a forbidden import"],
+      ["Complexity", "Amber through red marks the hardest files to change"],
     ],
   },
   {
-    title: "reading the picture",
+    title: "Reading the picture",
     rows: [
-      ["dot", "one file, sized by bytes; shapes group files by folder"],
-      ["road", "bundled imports between folders; the thick end is the importer"],
-      ["left to right", "entry code on the left, shared foundations right"],
-      ["×N ring", "a hub file, imported by N files"],
-      ["standalone", "chip bottom-left lists files no project code imports"],
-      ["treemap view", "same files as nested rectangles, drill into folders"],
-      ["zoom", "more file labels appear the further you zoom in"],
+      ["Dot", "One file, sized by bytes; shapes group files by folder"],
+      ["Road", "Bundled imports between folders; the thick end is the importer"],
+      ["Left to right", "Entry code on the left, shared foundations right"],
+      ["×N ring", "A hub file, imported by N files"],
+      ["Standalone", "Chip bottom-left lists files no project code imports"],
+      ["Treemap view", "Same files as nested rectangles, drill into folders"],
+      ["Zoom", "More file labels appear the further you zoom in"],
     ],
   },
   {
-    title: "interactions",
+    title: "Interactions",
     rows: [
-      ["click a dot", "facts panel with who imports it and what it imports"],
-      ["click a road", "list every import between those two folders"],
-      ["shift-click ×2", "trace the shortest dependency path between two files"],
-      ["/ then enter", "search, zoom to the best match"],
-      ["1 to 5", "switch lens"],
-      ["g or t", "graph view or treemap view"],
-      ["0", "reset the view"],
-      ["png", "export this view for a slide or doc"],
-      ["esc", "back out of anything"],
+      ["Click a dot", "Facts panel with who imports it and what it imports"],
+      ["Click a road", "List every import between those two folders"],
+      ["Shift-click ×2", "Trace the shortest dependency path between two files"],
+      ["/ then enter", "Search, zoom to the best match"],
+      ["1 to 5", "Switch lens"],
+      ["g or t", "Graph view or treemap view"],
+      ["0", "Reset the view"],
+      ["PNG", "Export this view for a slide or doc"],
+      ["esc", "Back out of anything"],
     ],
   },
 ];
@@ -58,7 +58,7 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
 
   const box = el("div", "help-box");
   const head = el("div", "help-head");
-  head.appendChild(el("h2", undefined, "how to read this map"));
+  head.appendChild(el("h2", undefined, "How to read this map"));
   const close = button("close", "×");
   close.setAttribute("aria-label", "Close help");
   close.addEventListener("click", handlers.onHelpClose);
@@ -84,7 +84,7 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
     el(
       "span",
       undefined,
-      "every number on this map is a deterministic fact from fallow's static analysis; verify any finding with the fallow command shown in its panel",
+      "Every number on this map is a deterministic fact from fallow's static analysis; verify any finding with the fallow command shown in its panel",
     ),
   );
   box.appendChild(foot);
