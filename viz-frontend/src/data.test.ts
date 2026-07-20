@@ -117,18 +117,18 @@ describe("dupRatio", () => {
 
 describe("legendText", () => {
   it("explains the neutral map when a finding lens is clean", () => {
-    expect(legendText("deadcode", data(), "graph")).toContain("no findings");
+    expect(legendText("deadcode", data(), "graph")).toContain("No findings");
   });
 
   it("keeps the color key when findings exist", () => {
     const d = data();
     d.summary.unused_files = 2;
-    expect(legendText("deadcode", d, "graph")).toContain("red = never imported");
+    expect(legendText("deadcode", d, "graph")).toContain("Red is never imported");
   });
 
   it("describes tiles in map view and dots in graph view", () => {
-    expect(legendText("overview", data(), "map")).toContain("tile = file");
-    expect(legendText("overview", data(), "graph")).toContain("dot = file");
+    expect(legendText("overview", data(), "map")).toContain("Each tile is a file");
+    expect(legendText("overview", data(), "graph")).toContain("Each dot is a file");
   });
 });
 

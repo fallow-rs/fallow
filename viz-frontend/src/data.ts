@@ -253,20 +253,20 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
     hotspots: s.hotspot_files,
   };
   if (findings[lens] === 0) {
-    return "no findings in this lens · the map keeps its neutral colors";
+    return "No findings in this lens, so the map keeps its neutral colors.";
   }
   if (lens === "overview") {
     return view === "map"
-      ? "tile = file · area = bytes on disk · blue outline = entry point"
-      : "dot = file, sized by bytes · blue = entry point · lines = imports, thick end is the importer · zoom in for more labels";
+      ? "Each tile is a file, sized by bytes on disk. A blue outline marks an entry point."
+      : "Each dot is a file, sized by bytes. Blue marks an entry point; a line's thick end is the importer.";
   }
   const lines: Record<Lens, string> = {
     overview: "",
-    deadcode: "red = never imported · amber = has unused exports",
-    dupes: "deeper amber = more duplicated lines",
+    deadcode: "Red is never imported, amber has unused exports.",
+    dupes: "Deeper amber means more duplicated lines.",
     boundaries:
-      "red = forbidden import or part of a loop · amber outline = folders that import each other",
-    hotspots: "amber → red = harder to change safely",
+      "Red is a forbidden import or part of a loop. An amber outline marks folders that import each other.",
+    hotspots: "Amber through red: harder to change safely.",
   };
   return lines[lens];
 };

@@ -29,41 +29,43 @@ const stateFor = (
 describe("lensSummaryText", () => {
   it("counts files and imports for the overview lens", () => {
     expect(lensSummaryText(stateFor("overview", { total_files: 12, total_edges: 34 }))).toBe(
-      "12 files · 34 imports",
+      "12 files, 34 imports",
     );
   });
 
   it("explains the neutral state vs the finding count for dead code", () => {
-    expect(lensSummaryText(stateFor("deadcode"))).toContain("nothing unreachable");
+    expect(lensSummaryText(stateFor("deadcode"))).toContain("Every file is reachable");
     expect(lensSummaryText(stateFor("deadcode", { unused_files: 3, unused_exports: 5 }))).toBe(
-      "3 unused files and 5 unused exports · shown red and amber",
+      "3 unused files and 5 unused exports, shown in red and amber.",
     );
   });
 
   it("pluralizes loops and forbidden imports independently", () => {
     expect(
       lensSummaryText(stateFor("boundaries", { circular_deps: 1, boundary_violations: 1 })),
-    ).toContain("1 loop · 1 forbidden import ·");
+    ).toContain("1 loop and 1 forbidden import,");
     expect(
       lensSummaryText(stateFor("boundaries", { circular_deps: 2, boundary_violations: 3 })),
-    ).toContain("2 loops · 3 forbidden imports");
-    expect(lensSummaryText(stateFor("boundaries"))).toBe("no import loops or forbidden imports");
+    ).toContain("2 loops and 3 forbidden imports");
+    expect(lensSummaryText(stateFor("boundaries"))).toBe("Every import stays inside its layer.");
   });
 
   it("switches the dupes summary between empty, list, and drilled states", () => {
-    expect(lensSummaryText(stateFor("dupes"))).toBe("no duplicated blocks found");
+    expect(lensSummaryText(stateFor("dupes"))).toBe("No block of code appears twice.");
     expect(lensSummaryText(stateFor("dupes", { clone_groups: 4, duplicated_lines: 40 }))).toContain(
-      "4 blocks (40 lines)",
+      "4 blocks, 40 duplicated lines",
     );
     expect(lensSummaryText(stateFor("dupes", { clone_groups: 4 }, 2))).toContain(
-      "viewing one duplicated block",
+      "Viewing 1 of 4 duplicated blocks",
     );
   });
 
   it("names the most complex files for the hotspots lens", () => {
-    expect(lensSummaryText(stateFor("hotspots"))).toBe("no files flagged as complex");
+    expect(lensSummaryText(stateFor("hotspots"))).toBe(
+      "No file crosses the complexity thresholds.",
+    );
     expect(lensSummaryText(stateFor("hotspots", { hotspot_files: 7 }))).toContain(
-      "7 most complex files",
+      "The 7 most complex files",
     );
   });
 });

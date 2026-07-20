@@ -76,7 +76,7 @@ export interface TipDock {
 const severityLine = (state: AppState, fileIndex: number): HTMLElement | null => {
   const file = state.data.files[fileIndex];
   if (file.status === "unused") {
-    return line("sev-error tip-line", "unused · nothing imports this file");
+    return line("sev-error tip-line", "unused, nothing imports this file");
   }
   if (state.index.violationSources.has(fileIndex)) {
     const count = state.data.violations.filter((v) => v.from === fileIndex).length;
@@ -102,7 +102,7 @@ const lensLine = (state: AppState, fileIndex: number): HTMLElement | null => {
   if (state.lens === "dupes" && file.dup_lines > 0) {
     return line(
       "sev-warn tip-line",
-      `${formatCount(file.dup_lines)} duplicated lines · ${Math.round(dupRatio(file) * 100)}% of the file`,
+      `${formatCount(file.dup_lines)} duplicated lines, ${Math.round(dupRatio(file) * 100)}% of the file`,
     );
   }
   if (state.lens === "hotspots" && file.max_cyclomatic > 0) {
@@ -114,7 +114,7 @@ const lensLine = (state: AppState, fileIndex: number): HTMLElement | null => {
           : "tip-muted";
     return line(
       `${cls} tip-line`,
-      `complexity ${formatCount(file.max_cyclomatic)} · nesting ${formatCount(file.max_cognitive)}`,
+      `complexity ${formatCount(file.max_cyclomatic)}, nesting ${formatCount(file.max_cognitive)}`,
     );
   }
   if (state.lens === "boundaries" && file.zone !== undefined) {

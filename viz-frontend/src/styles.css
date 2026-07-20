@@ -432,8 +432,13 @@ button {
   color: var(--text-high);
 }
 
+/* A rule, not a glyph: the divider is layout, so it stays out of the copy. */
 #lens-summary .arrange .arrange-sep {
-  color: var(--border-default);
+  display: inline-block;
+  width: 1px;
+  height: 10px;
+  margin: 0 2px;
+  background: var(--border-default);
 }
 
 /* Search (row 1) */
@@ -536,10 +541,18 @@ button {
   color: var(--text-muted);
 }
 
-#panel .key-line {
-  margin-top: 4px;
-  font-size: 9px;
-  letter-spacing: 0.04em;
+/* Terms that carry their definition in a `title` tooltip: the dotted
+   underline is the only hint the panel spends space on. */
+#panel .hinted {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--border-default);
+  text-underline-offset: 3px;
+}
+
+#panel .hinted:hover {
+  color: var(--text-high);
+  text-decoration-color: var(--text-muted);
 }
 
 /* Compound selector beats the later `.link-list { max-height: 180px }`
@@ -1159,7 +1172,11 @@ button {
   color: var(--text-muted);
 }
 
+/* Keycap chips separated by space alone; no interpunct between them. */
 #hints {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
   color: var(--text-muted);
   letter-spacing: 0.03em;
 }

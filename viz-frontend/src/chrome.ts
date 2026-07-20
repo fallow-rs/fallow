@@ -172,7 +172,7 @@ export const buildChrome = (
     b.appendChild(el("span", "tab-name", def.name));
     b.appendChild(el("span", "badge"));
     // Fold the 1-5 shortcut into the tooltip, as the view toggle does.
-    b.title = `${def.gloss} · ${i + 1}`;
+    b.title = `${def.gloss} (press ${i + 1})`;
     b.setAttribute("aria-pressed", String(state.lens === def.id));
     // Roving tabindex: only the active tab sits in the tab order.
     b.tabIndex = state.lens === def.id ? 0 : -1;
@@ -200,8 +200,8 @@ export const buildChrome = (
   viewSeg.setAttribute("aria-label", "view");
   const viewButtons = new Map<string, HTMLButtonElement>();
   const viewDefs: Array<{ id: "graph" | "map"; name: string; gloss: string }> = [
-    { id: "graph", name: "graph", gloss: "folders connected by imports · g" },
-    { id: "map", name: "treemap", gloss: "nested boxes sized by file size · t" },
+    { id: "graph", name: "graph", gloss: "folders connected by imports (press g)" },
+    { id: "map", name: "treemap", gloss: "nested boxes sized by file size (press t)" },
   ];
   for (const def of viewDefs) {
     const b = button("", def.name);
@@ -222,7 +222,7 @@ export const buildChrome = (
     { id: "imports", name: "by imports", gloss: "group files that import each other" },
   ];
   clusterDefs.forEach((def, i) => {
-    if (i > 0) clusterGroup.appendChild(el("span", "arrange-sep", "·"));
+    if (i > 0) clusterGroup.appendChild(el("span", "arrange-sep"));
     const b = button("", def.name);
     b.title = def.gloss;
     b.setAttribute("aria-pressed", String(def.id === "directory"));
@@ -253,21 +253,26 @@ export const buildChrome = (
   statusline.appendChild(statusInfo);
   const hints = el("span");
   hints.id = "hints";
-  const hintPairs: Array<[string, string]> = [
-    ["/", " search"],
-    ["1", ""],
-    ["5", " lens"],
-    ["g", " graph"],
-    ["t", " treemap"],
-    ["0", " reset"],
-    ["esc", " back"],
-    ["?", " help"],
+  // Keycaps and their action, one chip each. Spacing separates them, so
+  // no punctuation has to.
+  const hintPairs: Array<[keys: string[], label: string]> = [
+    [["/"], "search"],
+    [["1", "5"], "lens"],
+    [["g"], "graph"],
+    [["t"], "treemap"],
+    [["0"], "reset"],
+    [["esc"], "back"],
+    [["?"], "help"],
   ];
-  hintPairs.forEach(([key, label], i) => {
-    if (i > 0) hints.appendChild(document.createTextNode(i === 2 ? "–" : " · "));
-    hints.appendChild(el("b", undefined, key));
-    if (label) hints.appendChild(document.createTextNode(label));
-  });
+  for (const [keys, label] of hintPairs) {
+    const item = el("span", "hint-item");
+    keys.forEach((key, i) => {
+      if (i > 0) item.appendChild(document.createTextNode("–"));
+      item.appendChild(el("b", undefined, key));
+    });
+    item.appendChild(document.createTextNode(` ${label}`));
+    hints.appendChild(item);
+  }
   statusline.appendChild(hints);
 
   const refs: ChromeRefs = {
@@ -349,25 +354,25 @@ export const lensSummaryText = (state: AppState): string => {
   const s = state.data.summary;
   switch (state.lens) {
     case "overview":
-      return `${formatCount(s.total_files)} files · ${formatCount(s.total_edges)} imports`;
+      return `${formatCount(s.total_files)} files, ${formatCount(s.total_edges)} imports`;
     case "deadcode":
       return s.unused_files + s.unused_exports === 0
-        ? "nothing unreachable · every file is reachable from an entry point"
-        : `${formatCount(s.unused_files)} unused files and ${formatCount(s.unused_exports)} unused exports · shown red and amber`;
+        ? "Every file is reachable from an entry point."
+        : `${formatCount(s.unused_files)} unused files and ${formatCount(s.unused_exports)} unused exports, shown in red and amber.`;
     case "dupes":
       return s.clone_groups === 0
-        ? "no duplicated blocks found"
+        ? "No block of code appears twice."
         : state.selectedClone !== null
-          ? `viewing one duplicated block of ${formatCount(s.clone_groups)} · esc returns to the list`
-          : `${formatCount(s.clone_groups)} blocks (${formatCount(s.duplicated_lines)} lines) · click a row in the list to see every copy`;
+          ? `Viewing 1 of ${formatCount(s.clone_groups)} duplicated blocks. Press esc to return to the list.`
+          : `${formatCount(s.clone_groups)} blocks, ${formatCount(s.duplicated_lines)} duplicated lines. Click a row in the list to see every copy.`;
     case "boundaries":
       return s.circular_deps + s.boundary_violations === 0
-        ? "no import loops or forbidden imports"
-        : `${formatCount(s.circular_deps)} loop${s.circular_deps === 1 ? "" : "s"} · ${formatCount(s.boundary_violations)} forbidden import${s.boundary_violations === 1 ? "" : "s"} · shown as red and amber connections`;
+        ? "Every import stays inside its layer."
+        : `${formatCount(s.circular_deps)} loop${s.circular_deps === 1 ? "" : "s"} and ${formatCount(s.boundary_violations)} forbidden import${s.boundary_violations === 1 ? "" : "s"}, shown as red and amber connections.`;
     case "hotspots":
       return s.hotspot_files === 0
-        ? "no files flagged as complex"
-        : `the ${formatCount(s.hotspot_files)} most complex files · amber → red = harder to change safely`;
+        ? "No file crosses the complexity thresholds."
+        : `The ${formatCount(s.hotspot_files)} most complex files, ranked hardest first.`;
   }
 };
 
@@ -428,7 +433,7 @@ const updateStatusInfo = (state: AppState, refs: ChromeRefs): void => {
   const s = state.data.summary;
   const stamp = new Date(document.lastModified);
   const day = Number.isNaN(stamp.getTime()) ? "" : ` ${stamp.toISOString().slice(0, 10)}`;
-  refs.statusInfo.textContent = `${formatCount(s.total_files)} files · ${formatCount(s.total_edges)} imports · generated${day} by fallow`;
+  refs.statusInfo.textContent = `${formatCount(s.total_files)} files, ${formatCount(s.total_edges)} imports, generated${day} by fallow`;
 };
 
 const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
@@ -441,9 +446,9 @@ const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
   refs.searchCount.append(n, document.createTextNode(" matches"));
   if (state.searchReach.size > 0 && state.view === "graph") {
     const affects = el("span", "hint");
-    affects.append(" · ", el("span", "n", formatCount(state.searchReach.size)), " downstream");
+    affects.append(", ", el("span", "n", formatCount(state.searchReach.size)), " downstream");
     refs.searchCount.appendChild(affects);
   } else if (state.searchMatches.size > 0 && state.view === "graph") {
-    refs.searchCount.appendChild(el("span", "hint", " · enter zooms"));
+    refs.searchCount.appendChild(el("span", "hint", ", press enter to zoom"));
   }
 };

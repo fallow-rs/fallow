@@ -270,7 +270,7 @@ export const drawHoverLabels = (
 
   const total = importers.size + imports.size;
   if (total > drawn) {
-    const label = `+${formatCount(total - drawn)} more · click for all`;
+    const label = `+${formatCount(total - drawn)} more, click for all`;
     ctx.textAlign = "center";
     ctx.strokeStyle = theme.bg;
     ctx.lineWidth = 3;
@@ -301,7 +301,7 @@ export const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillStyle = theme.blueText;
-      ctx.fillText("trace from here · shift-click a target", s.x, s.y + 16);
+      ctx.fillText("trace from here, shift-click a target", s.x, s.y + 16);
     }
     return;
   }
@@ -356,7 +356,7 @@ export const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h
   ctx.textBaseline = "top";
   ctx.fillStyle = theme.blueText;
   ctx.fillText(
-    `dependency trace · ${path.length - 1} hop${path.length === 2 ? "" : "s"} · esc to clear`,
+    `dependency trace, ${path.length - 1} hop${path.length === 2 ? "" : "s"}, esc to clear`,
     14,
     28,
   );
@@ -409,7 +409,7 @@ const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
   ctx.textBaseline = "middle";
   const label = gvs.standaloneOpen
     ? "hide standalone files"
-    : `standalone · ${formatCount(fileCount)} files · nothing imports them`;
+    : `${formatCount(fileCount)} standalone files, nothing imports them`;
   const textW = ctx.measureText(label).width;
   const cx0 = 12;
   const cy0 = h - 56;
@@ -423,7 +423,7 @@ const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
     const s = worldToScreen(gvs, { x: minX, y: minY });
     ctx.fillStyle = theme.textMuted;
     ctx.globalAlpha = 0.7;
-    ctx.fillText("STANDALONE · configs & CI · nothing imports them", s.x, s.y - 26);
+    ctx.fillText("STANDALONE: configs and CI that nothing imports", s.x, s.y - 26);
     ctx.globalAlpha = 1;
   }
 };

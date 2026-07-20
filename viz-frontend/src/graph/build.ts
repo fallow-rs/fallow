@@ -162,10 +162,10 @@ const louvainCluster = (
   // import group, not a folder, so the plurality folder only names it honestly
   // when it is a real MAJORITY (Charts, Calendar, email): then use that folder
   // directly. When no folder reaches a majority the community is genuinely
-  // cross-cutting, so label it by its top-level area with a `· mixed` marker
-  // (`src/components · mixed`) rather than let a 9%-of-the-files folder imply
+  // cross-cutting, so label it by its top-level area with a `(mixed)` marker
+  // (`src/components (mixed)`) rather than let a 9%-of-the-files folder imply
   // it owns all 128. Two mixed areas that collide promote to their biggest
-  // slice (`src/features/ai · mixed`) so the labels stay distinct.
+  // slice (`src/features/ai (mixed)`) so the labels stay distinct.
   const comms = [...communityMap.values()];
   const MAJORITY = 0.5;
   const dominantFolder = (indices: number[], depth: number): { name: string; count: number } => {
@@ -187,7 +187,7 @@ const louvainCluster = (
     if (specific.count / total >= MAJORITY)
       return { preferred: specific.name, fallback: specific.name };
     const area = dominantFolder(indices, 2).name;
-    return { preferred: `${area} · mixed`, fallback: `${specific.name} · mixed` };
+    return { preferred: `${area} (mixed)`, fallback: `${specific.name} (mixed)` };
   });
   const preferredCount = new Map<string, number>();
   for (const l of labels)

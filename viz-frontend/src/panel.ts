@@ -12,10 +12,21 @@ const sectionEl = (title: string): HTMLElement => {
   return section;
 };
 
-const kvEl = (pairs: Array<[string, string | HTMLElement]>): HTMLElement => {
+/**
+ * One row of the facts list. The optional third slot is the term's
+ * definition: it hangs off a hover tooltip instead of a glossary line,
+ * so the panel shows numbers and explains itself only when asked.
+ */
+type KvPair = [key: string, value: string | HTMLElement, hint?: string];
+
+const kvEl = (pairs: KvPair[]): HTMLElement => {
   const dl = el("dl", "kv");
-  for (const [k, v] of pairs) {
+  for (const [k, v, hint] of pairs) {
     const dt = el("dt", undefined, k);
+    if (hint) {
+      dt.classList.add("hinted");
+      dt.title = hint;
+    }
     const dd = el("dd");
     if (typeof v === "string") dd.textContent = v;
     else dd.appendChild(v);
@@ -87,18 +98,37 @@ export const createPanel = (): HTMLElement => {
   return panel;
 };
 
+/**
+ * What the abbreviated complexity columns mean. Kept on the headers as
+ * hover tooltips so the table stays a table instead of carrying a
+ * glossary line under it.
+ */
+const COLUMN_HINTS: Record<string, string> = {
+  cc: "Cyclomatic complexity: how many branches the function has.",
+  cog: "Cognitive complexity: how tangled the function is to follow.",
+  loc: "Lines of code in the function.",
+};
+
 /** Per-function complexity table with the React context columns. */
 const complexitySection = (file: VizFile): HTMLElement | null => {
   if (file.functions && file.functions.length > 0) {
     const cx = sectionEl(
       file.fn_count > file.functions.length
-        ? `complexity hotspots · top ${formatCount(file.functions.length)} of ${formatCount(file.fn_count)} functions`
+        ? `complexity hotspots: top ${formatCount(file.functions.length)} of ${formatCount(file.fn_count)} functions`
         : "complexity hotspots",
     );
     const table = el("table");
     const thead = el("thead");
     const hr = el("tr");
-    for (const th of ["function", "cc", "cog", "loc", ""]) hr.appendChild(el("th", undefined, th));
+    for (const th of ["function", "cc", "cog", "loc", ""]) {
+      const cell = el("th", undefined, th);
+      const hint = COLUMN_HINTS[th];
+      if (hint) {
+        cell.classList.add("hinted");
+        cell.title = hint;
+      }
+      hr.appendChild(cell);
+    }
     thead.appendChild(hr);
     table.appendChild(thead);
     const tbody = el("tbody");
@@ -146,9 +176,6 @@ const complexitySection = (file: VizFile): HTMLElement | null => {
     }
     table.appendChild(tbody);
     cx.appendChild(table);
-    cx.appendChild(
-      el("div", "muted key-line", "cc = branch count · cog = how tangled · loc = lines"),
-    );
     return cx;
   }
   return null;
@@ -297,7 +324,7 @@ const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElem
   const facts = sectionEl("facts");
   // Import counts live in the connection section headers below, so the
   // facts list carries only what those sections do not repeat.
-  const pairs: Array<[string, string | HTMLElement]> = [
+  const pairs: KvPair[] = [
     ["size", formatSize(file.size)],
     ["exports", formatCount(file.export_count)],
   ];
@@ -314,21 +341,24 @@ const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElem
   // everything this file transitively pulls in; "affects" is everything
   // that transitively depends on it (what breaks if you change it).
   if (fileIdx >= 0) {
-    const reach: Array<[string, string | HTMLElement]> = [];
+    const reach: KvPair[] = [];
     const down = reachSet(state.index.importsOf, fileIdx).size;
     const up = reachSet(state.index.importersOf, fileIdx).size;
-    if (down > file.import_count) reach.push(["reaches", `${formatCount(down)} files`]);
-    if (up > file.importer_count) reach.push(["affects", `${formatCount(up)} files`]);
-    if (reach.length > 0) {
-      facts.appendChild(kvEl(reach));
-      facts.appendChild(
-        el(
-          "div",
-          "muted key-line",
-          "reaches = everything it loads · affects = what breaks if you change it",
-        ),
-      );
+    if (down > file.import_count) {
+      reach.push([
+        "reaches",
+        `${formatCount(down)} files`,
+        "Everything this file loads, directly or through the files it imports.",
+      ]);
     }
+    if (up > file.importer_count) {
+      reach.push([
+        "affects",
+        `${formatCount(up)} files`,
+        "Everything that could break if you change this file.",
+      ]);
+    }
+    if (reach.length > 0) facts.appendChild(kvEl(reach));
   }
   return facts;
 };
@@ -622,7 +652,7 @@ const rankRowsForLens = (
         });
       const truncated = state.data.summary.clone_groups_truncated;
       const title = truncated
-        ? `duplicated blocks · +${formatCount(truncated)} not shown`
+        ? `duplicated blocks (+${formatCount(truncated)} not shown)`
         : "duplicated blocks";
       return { title, rows, empty: "no duplicated blocks" };
     }
@@ -641,7 +671,7 @@ const rankRowsForLens = (
       state.data.cycles.forEach((cycle) => {
         if (cycle.length === 0 || files[cycle[0]] === undefined) return;
         rows.push({
-          label: `loop · ${formatCount(cycle.length)} files`,
+          label: `loop of ${formatCount(cycle.length)} files`,
           dir: dirname(files[cycle[0]].path),
           metric: basename(files[cycle[0]].path),
           metricCls: "sev-warn",
@@ -661,7 +691,7 @@ const rankRowsForLens = (
         .map(({ f, i }) => ({
           label: basename(f.path),
           dir: dirname(f.path),
-          metric: `cc ${formatCount(f.max_cyclomatic)} · used by ${formatCount(f.importer_count)}`,
+          metric: `cc ${formatCount(f.max_cyclomatic)}, used by ${formatCount(f.importer_count)}`,
           metricCls:
             f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "muted",
           fileIndex: i,
@@ -691,9 +721,9 @@ const DIGEST_COMMANDS: Record<Lens, string> = {
 export const buildMapDigest = (state: AppState): string => {
   const s = state.data.summary;
   const lines: string[] = [
-    `# fallow map · ${state.data.root}`,
+    `# fallow map: ${state.data.root}`,
     "",
-    `${formatCount(s.total_files)} files · ${formatCount(s.total_edges)} imports`,
+    `${formatCount(s.total_files)} files, ${formatCount(s.total_edges)} imports`,
     `- unused: ${formatCount(s.unused_files)} files, ${formatCount(s.unused_exports)} exports`,
     `- duplication: ${formatCount(s.clone_groups)} groups${
       s.clone_groups_truncated ? ` (+${formatCount(s.clone_groups_truncated)} not shown)` : ""
@@ -736,7 +766,7 @@ const renderLensPanel = (
   section.appendChild(
     copyButton("copy-path", "copy this list", () =>
       [
-        `# fallow · ${title} · ${state.data.root}`,
+        `# fallow: ${title} in ${state.data.root}`,
         ...rows.map((r) => `- ${r.dir ? `${r.dir}/` : ""}${r.label} (${r.metric})`),
       ].join("\n"),
     ),
@@ -783,8 +813,8 @@ const renderLensPanel = (
   const hint = el("div", "action-hint");
   hint.append(
     state.lens === "hotspots"
-      ? "riskiest first = complexity weighted by how many files use it · click a row to focus"
-      : "click a row to focus that file on the map",
+      ? "Riskiest first: complexity weighted by how many files use it. Click a row to focus."
+      : "Click a row to focus that file on the map.",
   );
   section.appendChild(hint);
   panel.appendChild(section);
@@ -814,7 +844,7 @@ const renderClonePanel = (
   statusLine.appendChild(sev("sev-warn", `${formatCount(group.tokens)} tokens`));
   box.appendChild(statusLine);
 
-  const copies = sectionEl(`every copy · ${formatCount(group.instances.length)}`);
+  const copies = sectionEl(`every copy (${formatCount(group.instances.length)})`);
   const ul = el("ul", "link-list");
   for (const inst of group.instances) {
     const li = el("li");
@@ -898,7 +928,7 @@ const renderRoadPanel = (
   }
   box.appendChild(statusLine);
 
-  const section = sectionEl(`every import · ${formatCount(road.pairs.length)}`);
+  const section = sectionEl(`every import (${formatCount(road.pairs.length)})`);
   const ul = el("ul", "link-list");
   ul.style.maxHeight = "none";
   const n = state.data.files.length;

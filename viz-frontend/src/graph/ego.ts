@@ -243,7 +243,7 @@ export const renderEgoStage = (
   // Escape hatch at the point of attention, not only in the statusbar.
   ctx.font = FONT_MICRO;
   ctx.textAlign = "left";
-  const backLabel = "◂ back to map · esc";
+  const backLabel = "◂ back to map (esc)";
   const backW = ctx.measureText(backLabel).width;
   ctx.globalAlpha = 0.9 * ease;
   chipRect(ctx, 12, 12, backW + 20, 24, theme.bg, 1, theme.borderSubtle);
@@ -271,7 +271,7 @@ export const renderEgoStage = (
   ctx.font = FONT_MICRO;
   ctx.fillStyle = theme.textLow;
   ctx.fillText(
-    `imported by ${formatCount(importers.length)} · imports ${formatCount(imports.length)}`,
+    `imported by ${formatCount(importers.length)}, imports ${formatCount(imports.length)}`,
     cx,
     cy + 19,
   );

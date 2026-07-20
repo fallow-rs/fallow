@@ -208,7 +208,7 @@ describe("buildMapDigest", () => {
     state.data.summary.hotspot_files = 1;
     state.data.summary.unused_files = 1;
     const md = buildMapDigest(state);
-    expect(md).toContain("# fallow map · demo");
+    expect(md).toContain("# fallow map: demo");
     expect(md).toContain("most depended-on");
     expect(md).toContain("hub.ts (used by 40)");
     expect(md).toContain("$ fallow health");
