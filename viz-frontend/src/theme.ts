@@ -84,7 +84,7 @@ const dark: Theme = {
   dirHeader: "#222221",
   cellNeutral: "#45443f",
   cellEntry: "#2b3f56",
-  zones: ["#0090ff", "#e35b00", "#12a594", "#5b5bd6", "#d6409f"],
+  zones: ["#0090ff", "#e35b00", "#12a594", "#5b5bd6", "#d6409f", "#4c9a2a", "#a855c9", "#64748b"],
   zoneOther: "#62605b",
 };
 
@@ -115,7 +115,7 @@ const light: Theme = {
   dirHeader: "#f2f2f0",
   cellNeutral: "#a9a7a0",
   cellEntry: "#7fb1e8",
-  zones: ["#0090ff", "#e35b00", "#12a594", "#5b5bd6", "#d6409f"],
+  zones: ["#0090ff", "#e35b00", "#12a594", "#5b5bd6", "#d6409f", "#4c9a2a", "#a855c9", "#64748b"],
   zoneOther: "#a9a7a0",
 };
 

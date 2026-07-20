@@ -247,6 +247,14 @@ export const lensFindingLevel = (
  */
 export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): string => {
   const summary = data.summary;
+  // Boundaries colors every node by its architecture zone, so it is never
+  // "neutral" even with zero violations; the graph view draws a zone color key
+  // (see drawZoneLegend), and this is the treemap-view / fallback wording.
+  if (lens === "boundaries") {
+    return summary.circular_deps + summary.boundary_violations > 0
+      ? "Each color is an architecture layer. Red marks a forbidden import or a loop."
+      : "Each color is an architecture layer.";
+  }
   const findings: Record<Lens, number> = {
     overview: -1,
     deadcode: summary.unused_files + summary.unused_exports,

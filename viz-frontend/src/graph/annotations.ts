@@ -6,7 +6,8 @@
  * and paints over the finished scene; none touches the Scene render context.
  */
 import type { AppState } from "../state";
-import { basename, formatCount, legendText } from "../data";
+import { basename, formatCount } from "../data";
+import { dupRamp, heatRamp, zoneColor } from "../theme";
 import { fileTipCanvasRect } from "../tooltip";
 import {
   type FileNode,
@@ -96,9 +97,9 @@ export const drawIntroCaptions = (state: AppState, gvs: GraphViewState, width: n
   const elapsed = performance.now() - gvs.revealAt;
   // Three beats: the nouns, the lines, then the verbs (what to do next).
   const captions: Array<[number, number, string]> = [
-    [0, 2600, "dots are files, shapes are folders"],
-    [2600, 5200, "lines are imports, thick end points at the importer"],
-    [5200, 8600, "click any dot to open its story"],
+    [0, 2600, "Dots are files, shapes are folders"],
+    [2600, 5200, "Lines are imports, thick end points at the importer"],
+    [5200, 8600, "Click any dot to open its story"],
   ];
   const total = captions[captions.length - 1][1];
   if (elapsed >= total) {
@@ -316,7 +317,7 @@ export const drawPathTrace = (
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillStyle = theme.blueText;
-      ctx.fillText("trace from here, shift-click a target", screen.x, screen.y + 16);
+      ctx.fillText("Trace from here, shift-click a target", screen.x, screen.y + 16);
     }
     return;
   }
@@ -371,7 +372,7 @@ export const drawPathTrace = (
   ctx.textBaseline = "top";
   ctx.fillStyle = theme.blueText;
   ctx.fillText(
-    `dependency trace, ${path.length - 1} hop${path.length === 2 ? "" : "s"}, esc to clear`,
+    `Dependency trace, ${path.length - 1} hop${path.length === 2 ? "" : "s"}, esc to clear`,
     14,
     28,
   );
@@ -423,11 +424,13 @@ const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const label = gvs.standaloneOpen
-    ? "hide standalone files"
+    ? "Hide standalone files"
     : `${formatCount(fileCount)} standalone files, nothing imports them`;
   const textW = ctx.measureText(label).width;
   const cx0 = 12;
-  const cy0 = canvasHeight - 56;
+  // Dock just above the legend box (which sits at the bottom-left and grows
+  // taller with more keys), so the two never overlap.
+  const cy0 = canvasHeight - 12 - legendBoxHeight(state) - 8 - 22;
   chipRect(ctx, cx0, cy0, textW + 16, 22, theme.bg, 0.9, theme.borderSubtle);
   ctx.fillStyle = theme.textMuted;
   ctx.fillText(label, cx0 + 8, cy0 + 11.5);
@@ -547,20 +550,186 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
   drawStandaloneChip(state, gvs);
 };
 
+/** One key on the legend: a visual mark plus the word it means. */
+type LegendMark =
+  | { kind: "dot"; color: string }
+  | { kind: "ring"; color: string; dash?: boolean }
+  | { kind: "ramp"; from: string; to: string }
+  | { kind: "line"; color: string };
+
+interface LegendEntry {
+  mark: LegendMark;
+  label: string;
+}
+
+const LEGEND_ROW_H = 19;
+const LEGEND_PAD_Y = 8;
+/** Max zones listed before the boundaries key folds the rest into "+N". */
+const MAX_ZONE_LEGEND = 8;
+
+/** What the active lens actually draws on the map, as a real key: color dots,
+ *  gradient ramps, and the tapered import line, each with a one-word gloss. */
+const legendEntries = (state: AppState): LegendEntry[] => {
+  const { theme, data } = state;
+  // The map also outlines flagged nodes as a color-blind-safe shape channel:
+  // a dashed ring is a milder finding, a solid ring a more severe one. Keyed
+  // as two rows so both outlines are shown, not just described.
+  const outlineMild: LegendEntry = {
+    mark: { kind: "ring", color: theme.textHigh, dash: true },
+    label: "milder finding",
+  };
+  const outlineSevere: LegendEntry = {
+    mark: { kind: "ring", color: theme.textHigh },
+    label: "severe finding",
+  };
+  switch (state.lens) {
+    case "overview":
+      return [
+        { mark: { kind: "line", color: theme.textMuted }, label: "import (thick = importer)" },
+        { mark: { kind: "dot", color: theme.cellEntry }, label: "entry point" },
+      ];
+    case "deadcode":
+      return [
+        { mark: { kind: "dot", color: theme.red }, label: "unused file" },
+        { mark: { kind: "dot", color: theme.amber }, label: "unused export" },
+        outlineMild,
+        outlineSevere,
+      ];
+    case "dupes":
+      return [
+        {
+          mark: { kind: "ramp", from: dupRamp(theme, 0.2), to: dupRamp(theme, 1) },
+          label: "more duplicated",
+        },
+        outlineMild,
+        outlineSevere,
+      ];
+    case "boundaries": {
+      const shown = data.zones.slice(0, MAX_ZONE_LEGEND);
+      const entries: LegendEntry[] = shown.map((zone, index) => ({
+        mark: { kind: "dot", color: zoneColor(theme, index) },
+        label: zone.name,
+      }));
+      const hidden = data.zones.length - shown.length;
+      if (hidden > 0) {
+        entries.push({
+          mark: { kind: "dot", color: theme.zoneOther },
+          label: `+${formatCount(hidden)} more zones`,
+        });
+      }
+      // The amber hull / label outline marks a folder caught in a cluster-level
+      // import cycle (folders that import each other); key it only when present.
+      if (getGVS(state).clusters.some((cluster) => cluster.tangle)) {
+        entries.push({
+          mark: { kind: "ring", color: theme.amber },
+          label: "folder in an import loop",
+        });
+      }
+      if (data.summary.boundary_violations + data.summary.circular_deps > 0) {
+        entries.push({
+          mark: { kind: "ring", color: theme.red, dash: true },
+          label: "forbidden import / loop",
+        });
+      }
+      return entries;
+    }
+    case "hotspots":
+      return [
+        {
+          mark: { kind: "ramp", from: heatRamp(theme, 0.2), to: heatRamp(theme, 1) },
+          label: "harder to change",
+        },
+        outlineMild,
+        outlineSevere,
+      ];
+    default:
+      return [];
+  }
+};
+
+/** Pixel height of the legend box, so the standalone chip can dock above it. */
+export const legendBoxHeight = (state: AppState): number => {
+  const count = legendEntries(state).length;
+  return count === 0 ? 0 : LEGEND_PAD_Y * 2 + count * LEGEND_ROW_H;
+};
+
+/** Draw one legend mark centered at `cy`, spanning `[x, x + width]`. */
+const drawLegendMark = (
+  ctx: CanvasRenderingContext2D,
+  mark: LegendMark,
+  x: number,
+  cy: number,
+  width: number,
+): void => {
+  const cx = x + width / 2;
+  switch (mark.kind) {
+    case "dot":
+      ctx.fillStyle = mark.color;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case "ring":
+      ctx.strokeStyle = mark.color;
+      ctx.lineWidth = 1.5;
+      if (mark.dash) ctx.setLineDash([2.5, 2.5]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      break;
+    case "ramp": {
+      const gradient = ctx.createLinearGradient(x, cy, x + width, cy);
+      gradient.addColorStop(0, mark.from);
+      gradient.addColorStop(1, mark.to);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x, cy - 4, width, 8);
+      break;
+    }
+    case "line":
+      // Tapered like the map's import ribbons: thick at the importer end.
+      ctx.fillStyle = mark.color;
+      ctx.beginPath();
+      ctx.moveTo(x, cy - 3);
+      ctx.lineTo(x + width, cy - 0.75);
+      ctx.lineTo(x + width, cy + 0.75);
+      ctx.lineTo(x, cy + 3);
+      ctx.closePath();
+      ctx.fill();
+      break;
+  }
+};
+
 export const drawCanvasLegend = (state: AppState, width: number, height: number): void => {
+  const entries = legendEntries(state);
+  if (entries.length === 0) return;
   const { ctx, theme } = state;
-  const text = legendText(state.lens, state.data, "graph");
-  if (text === "") return;
   ctx.font = FONT_LEGEND;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  const textW = ctx.measureText(text).width;
+  const markWidth = 22;
+  const markGap = 9;
+  const padX = 10;
+  let maxLabelWidth = 0;
+  for (const entry of entries) {
+    maxLabelWidth = Math.max(maxLabelWidth, ctx.measureText(entry.label).width);
+  }
+  const boxWidth = padX + markWidth + markGap + maxLabelWidth + padX;
+  const boxHeight = legendBoxHeight(state);
+  const boxX = 10;
+  const boxY = height - 12 - boxHeight;
   ctx.fillStyle = theme.bg;
-  ctx.globalAlpha = 0.85;
-  ctx.fillRect(10, height - 27, textW + 12, 19);
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = theme.textLow;
-  ctx.fillText(text, 16, height - 17.5);
+  ctx.globalAlpha = 0.88;
+  ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
   ctx.globalAlpha = 1;
+  ctx.strokeStyle = theme.borderSubtle;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(boxX + 0.5, boxY + 0.5, boxWidth - 1, boxHeight - 1);
+  entries.forEach((entry, index) => {
+    const cy = boxY + LEGEND_PAD_Y + LEGEND_ROW_H * index + LEGEND_ROW_H / 2;
+    drawLegendMark(ctx, entry.mark, boxX + padX, cy, markWidth);
+    ctx.fillStyle = theme.textLow;
+    ctx.fillText(entry.label, boxX + padX + markWidth + markGap, cy);
+  });
   void width;
 };
