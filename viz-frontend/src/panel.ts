@@ -777,7 +777,11 @@ const rankListEl = (rows: RankRow[], cap: number, onPick: (row: RankRow) => void
       dirSpan.title = `${row.dir}/${row.label}`;
       labelBox.appendChild(dirSpan);
     }
-    labelBox.appendChild(document.createTextNode(row.label));
+    // The filename lives in its own span so it can ellipsis-truncate when
+    // it is long, instead of overrunning the pinned metric on the right.
+    const nameSpan = el("span", "rank-name", row.label);
+    nameSpan.title = `${row.dir ? `${row.dir}/` : ""}${row.label}`;
+    labelBox.appendChild(nameSpan);
     btn.appendChild(labelBox);
     btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
     btn.addEventListener("click", () => onPick(row));

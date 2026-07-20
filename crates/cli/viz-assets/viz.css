@@ -599,6 +599,14 @@ button {
   min-width: 2ch;
 }
 
+/* The filename truncates as a last resort (after the dir prefix), so a
+   long name ellipsizes instead of colliding with the metric column. */
+#panel .rank-list .rank-label .rank-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 #panel .rank-list .rank-metric {
   white-space: nowrap;
   flex-shrink: 0;
