@@ -495,9 +495,13 @@ button {
 }
 
 #search-count {
+  /* Render left of the fixed-width search box (not right of it), so the
+     live count grows leftward into the gap toward the brand instead of
+     widening the right-anchored actions group and sliding the box. */
+  order: -1;
   font-size: var(--fs-sm);
   color: var(--text-muted);
-  min-width: 0;
+  white-space: nowrap;
 }
 
 #search-count .n {
