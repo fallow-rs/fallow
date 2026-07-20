@@ -661,6 +661,9 @@ interface RankColumn {
   hint: string;
 }
 
+/** The importer-count column shared by every used-by ranked list. */
+const usedByColumns: RankColumn[] = [{ header: "used by", hint: "How many files import this one." }];
+
 /** The shared shape a ranked table renders from. */
 interface RankView {
   rows: RankRow[];
@@ -694,7 +697,7 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         rows,
         empty: "No shared files",
         labelHead: "file",
-        columns: [{ header: "used by", hint: "How many files import this one." }],
+        columns: usedByColumns,
       };
     }
     case "deadcode": {
@@ -1000,23 +1003,14 @@ const renderRankTable = (
   return table;
 };
 
-/** A plain numbered file list rendered as a table (rank + filename, no metric
- *  column), so importers, imports, loop members, and clone copies all read as
- *  the same numbered table. Rendered in full; the panel is the only scroll. */
+/** A numbered file list rendered as a table (rank + filename + importer count),
+ *  so importers, imports, loop members, and clone copies all read as the same
+ *  used-by table and carry the same "how depended-on is each" signal. Rendered
+ *  in full; the panel is the only scroll. */
 const fileTable = (state: AppState, indices: number[], navigate: NavigateFn): HTMLElement =>
   renderRankTable(
     state,
-    {
-      rows: indices.map((index) => ({
-        label: basename(state.data.files[index].path),
-        dir: dirname(state.data.files[index].path),
-        metric: "",
-        cells: [],
-        fileIndex: index,
-      })),
-      labelHead: "file",
-      columns: [],
-    },
+    { rows: fileRankRows(state, indices), labelHead: "file", columns: usedByColumns },
     (row) => navigate(row.fileIndex),
   );
 
@@ -1143,7 +1137,6 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
     return;
   }
 
-  const usedByColumns = [{ header: "used by", hint: "How many files import this one." }];
   const section = sectionEl("Matched files");
   section.appendChild(
     renderRankTable(
