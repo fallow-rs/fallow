@@ -79,8 +79,10 @@ const linkList = (
   const ul = el("ul", "link-list");
   for (const idx of indices.slice(0, cap)) {
     const li = el("li");
-    const btn = el("button", undefined, state.data.files[idx].path) as HTMLButtonElement;
+    const btn = el("button") as HTMLButtonElement;
     btn.type = "button";
+    const path = state.data.files[idx].path;
+    btn.appendChild(rankLabelEl(basename(path), dirname(path), 0));
     btn.addEventListener("click", () => navigate(idx));
     li.appendChild(btn);
     ul.appendChild(li);

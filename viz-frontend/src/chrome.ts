@@ -257,14 +257,13 @@ export const buildChrome = (
 
   // Arrange lives in the context strip: it configures the graph canvas
   // and vanishes with it.
-  const clusterGroup = el("div", "arrange");
+  const clusterGroup = el("div", "seg arrange");
   const clusterButtons = new Map<string, HTMLButtonElement>();
   const clusterDefs: Array<{ id: "directory" | "imports"; name: string; gloss: string }> = [
     { id: "directory", name: "by folder", gloss: "group files by their folder" },
     { id: "imports", name: "by imports", gloss: "group files that import each other" },
   ];
-  clusterDefs.forEach((def, i) => {
-    if (i > 0) clusterGroup.appendChild(el("span", "arrange-sep"));
+  clusterDefs.forEach((def) => {
     const b = button("", def.name);
     b.title = def.gloss;
     b.setAttribute("aria-pressed", String(def.id === "directory"));

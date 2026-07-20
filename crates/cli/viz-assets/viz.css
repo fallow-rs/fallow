@@ -417,46 +417,13 @@ button {
 
 /* Arrange toggle floats at the top-right of the map (graph view only),
    just left of the detail panel. It only changes the map layout, so it
-   lives on the map rather than in the lens header. */
+   lives on the map rather than in the lens header, and reuses the .seg
+   segmented-control styling for parity with the graph/treemap toggle. */
 #stage .arrange {
   position: absolute;
   top: 12px;
   right: calc(var(--panel-width) + 12px);
   z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-  padding: 5px 10px;
-  background: color-mix(in oklab, var(--surface-1) 88%, transparent);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-}
-
-#stage .arrange button {
-  border: none;
-  background: none;
-  padding: 2px 4px;
-  font-size: var(--fs-sm);
-  text-transform: lowercase;
-  color: var(--text-muted);
-}
-
-#stage .arrange button:hover {
-  color: var(--text-low);
-}
-
-#stage .arrange button[aria-pressed="true"] {
-  color: var(--text-high);
-}
-
-/* A rule, not a glyph: the divider is layout, so it stays out of the copy. */
-#stage .arrange .arrange-sep {
-  display: inline-block;
-  width: 1px;
-  height: 10px;
-  margin: 0 2px;
-  background: var(--border-default);
 }
 
 /* Search (row 1) */
@@ -917,27 +884,22 @@ button {
 }
 
 #panel .link-list button {
+  display: flex;
+  width: 100%;
   border-radius: var(--radius-sm);
   color: var(--text-low);
   font-size: var(--fs-md);
   text-align: left;
-  overflow-wrap: anywhere;
+  cursor: pointer;
   transition: color 100ms ease-out;
 }
 
-#panel .link-list button::before {
-  content: "· ";
-  color: var(--text-muted);
-}
-
 #panel .link-list button:hover {
-  color: var(--blue-text);
-  text-decoration: underline;
+  color: var(--text-high);
 }
 
-#panel .link-list button:hover::before {
-  content: "> ";
-  color: var(--blue-text);
+#panel .link-list button:hover .rank-name {
+  text-decoration: underline;
 }
 
 #panel .link-list button:focus-visible {
