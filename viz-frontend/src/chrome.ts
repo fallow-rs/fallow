@@ -1,7 +1,7 @@
 import type { AppState } from "./state";
 import type { Lens } from "./types";
 import { formatCount } from "./data";
-import { announce, button, copyButton, el } from "./dom";
+import { announce, button, el } from "./dom";
 
 /**
  * HTML chrome around the canvas. One rule carries the affordance story:
@@ -55,35 +55,35 @@ const LENSES: LensDef[] = [
   {
     id: "overview",
     name: "overview",
-    gloss: "folders & imports",
+    gloss: "Folders & imports",
     count: () => null,
     sev: "warn",
   },
   {
     id: "deadcode",
     name: "unused",
-    gloss: "dead files & exports",
+    gloss: "Dead files & exports",
     count: (s) => s.data.summary.unused_files + s.data.summary.unused_exports,
     sev: "error",
   },
   {
     id: "dupes",
     name: "duplication",
-    gloss: "copy-pasted code",
+    gloss: "Copy-pasted code",
     count: (s) => s.data.summary.clone_groups,
     sev: "warn",
   },
   {
     id: "boundaries",
     name: "boundaries",
-    gloss: "import loops & forbidden imports",
+    gloss: "Import loops & forbidden imports",
     count: (s) => s.data.summary.circular_deps + s.data.summary.boundary_violations,
     sev: "error",
   },
   {
     id: "hotspots",
     name: "complexity",
-    gloss: "hardest files to change",
+    gloss: "Hardest files to change",
     count: (s) => s.data.summary.hotspot_files,
     sev: "warn",
   },
@@ -377,51 +377,10 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
   updateSearchCount(state, refs);
 };
 
-/** The CLI that reproduces the active lens's findings in the terminal. */
-const LENS_COMMANDS: Record<Lens, string> = {
-  overview: "",
-  deadcode: "$ fallow dead-code",
-  dupes: "$ fallow dupes",
-  boundaries: "$ fallow dead-code --circular-deps --boundary-violations",
-  hotspots: "$ fallow health",
-};
-
 /**
- * The one-line "what the active lens just found" summary. Pure and
- * exported so the wording (empty vs populated, singular vs plural) is
- * unit-tested without building the DOM. Zero findings explains the
- * neutral state instead of advertising an absent count.
- */
-export const lensSummaryText = (state: AppState): string => {
-  const s = state.data.summary;
-  switch (state.lens) {
-    case "overview":
-      return `${formatCount(s.total_files)} files, ${formatCount(s.total_edges)} imports`;
-    case "deadcode":
-      return s.unused_files + s.unused_exports === 0
-        ? "Every file is reachable from an entry point."
-        : `${formatCount(s.unused_files)} unused files and ${formatCount(s.unused_exports)} unused exports, shown in red and amber.`;
-    case "dupes":
-      return s.clone_groups === 0
-        ? "No block of code appears twice."
-        : state.selectedClone !== null
-          ? `Viewing 1 of ${formatCount(s.clone_groups)} duplicated blocks. Press esc to return to the list.`
-          : `${formatCount(s.clone_groups)} blocks, ${formatCount(s.duplicated_lines)} duplicated lines. Click a row in the list to see every copy.`;
-    case "boundaries":
-      return s.circular_deps + s.boundary_violations === 0
-        ? "Every import stays inside its layer."
-        : `${formatCount(s.circular_deps)} loop${s.circular_deps === 1 ? "" : "s"} and ${formatCount(s.boundary_violations)} forbidden import${s.boundary_violations === 1 ? "" : "s"}, shown as red and amber connections.`;
-    case "hotspots":
-      return s.hotspot_files === 0
-        ? "No file crosses the complexity thresholds."
-        : `The ${formatCount(s.hotspot_files)} most complex files, ranked hardest first.`;
-  }
-};
-
-/**
- * Context strip under the tabs, always on: the active lens's gloss
- * leads, then what it found, then the CLI that reproduces it. The
- * arrange toggle sits on the strip's right (graph view only).
+ * Context strip under the tabs, always on: the active lens's gloss names
+ * what it surfaces. The arrange toggle sits on the strip's right (graph
+ * view only).
  */
 const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
   const gloss = LENSES.find((d) => d.id === state.lens)?.gloss ?? "";
@@ -429,13 +388,6 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
   if (!left) return;
   left.replaceChildren();
   left.appendChild(el("span", "summary-gloss", gloss));
-  left.appendChild(el("span", "summary-text", lensSummaryText(state)));
-  const cmd = LENS_COMMANDS[state.lens];
-  if (cmd !== "") {
-    const chip = copyButton("summary-cmd", `run: ${cmd.slice(2)}`, () => cmd.slice(2));
-    chip.title = "copy this command";
-    left.appendChild(chip);
-  }
   refs.summaryLine.classList.add("visible");
 };
 

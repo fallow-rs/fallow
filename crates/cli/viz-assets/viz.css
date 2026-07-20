@@ -414,25 +414,6 @@ button {
   color: var(--text-high);
 }
 
-#lens-summary .summary-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#lens-summary .summary-cmd {
-  color: var(--text-muted);
-  white-space: nowrap;
-  background: var(--surface-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  font-size: var(--fs-sm);
-}
-
-#lens-summary .summary-cmd:hover {
-  color: var(--text-high);
-}
-
 #lens-summary .arrange {
   display: flex;
   align-items: center;
