@@ -49,8 +49,114 @@ const TOOL_DIRECTIVE =
   /\b(?:fallow-ignore|eslint|oxlint|prettier|rustfmt|clippy|ts-expect-error|ts-ignore|istanbul ignore|c8 ignore)\b/iu;
 const EXPLANATION_SIGNAL =
   /\b(?:because|since|so that|otherwise|avoid|prevent|workaround|compatib\w*|invariant|safety|performance|protocol)\b/iu;
+const JAVASCRIPT_EXTENSIONS = new Set([
+  ".astro",
+  ".cjs",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".svelte",
+  ".ts",
+  ".tsx",
+  ".vue",
+]);
 
 const isSourcePath = (path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase());
+
+const multilineOpener = (path, line, start) => {
+  const extension = extname(path).toLowerCase();
+  const candidates = [];
+
+  if (JAVASCRIPT_EXTENSIONS.has(extension)) {
+    const index = line.indexOf("`", start);
+    if (index !== -1) {
+      candidates.push({ index, length: 1, delimiter: "`", escaped: true });
+    }
+  }
+
+  if (extension === ".py") {
+    for (const delimiter of ['"""', "'''"]) {
+      const index = line.indexOf(delimiter, start);
+      if (index !== -1) {
+        candidates.push({ index, length: delimiter.length, delimiter, escaped: false });
+      }
+    }
+  }
+
+  if (extension === ".rs") {
+    const rawString = /(?:br|r)(#*)"/gu;
+    rawString.lastIndex = start;
+    for (const match of line.matchAll(rawString)) {
+      if (match.index > 0 && /[A-Za-z0-9_]/u.test(line[match.index - 1])) {
+        continue;
+      }
+      candidates.push({
+        index: match.index,
+        length: match[0].length,
+        delimiter: `"${match[1]}`,
+        escaped: false,
+      });
+      break;
+    }
+  }
+
+  return candidates.toSorted((left, right) => left.index - right.index)[0] ?? null;
+};
+
+const closingDelimiterIndex = (line, delimiter, start, escaped) => {
+  let index = line.indexOf(delimiter, start);
+  if (!escaped) {
+    return index;
+  }
+
+  while (index !== -1) {
+    let backslashes = 0;
+    for (let cursor = index - 1; cursor >= 0 && line[cursor] === "\\"; cursor -= 1) {
+      backslashes += 1;
+    }
+    if (backslashes % 2 === 0) {
+      return index;
+    }
+    index = line.indexOf(delimiter, index + delimiter.length);
+  }
+  return index;
+};
+
+const maskMultilineStrings = (path, line, initialState) => {
+  const masked = [...line];
+  let state = initialState;
+  let cursor = 0;
+
+  while (cursor < line.length) {
+    if (state === null) {
+      const opener = multilineOpener(path, line, cursor);
+      if (opener === null) {
+        break;
+      }
+      const contentStart = opener.index + opener.length;
+      const close = closingDelimiterIndex(line, opener.delimiter, contentStart, opener.escaped);
+      const end = close === -1 ? line.length : close + opener.delimiter.length;
+      masked.fill(" ", opener.index, end);
+      if (close === -1) {
+        state = { delimiter: opener.delimiter, escaped: opener.escaped };
+        break;
+      }
+      cursor = end;
+      continue;
+    }
+
+    const close = closingDelimiterIndex(line, state.delimiter, cursor, state.escaped);
+    const end = close === -1 ? line.length : close + state.delimiter.length;
+    masked.fill(" ", cursor, end);
+    if (close === -1) {
+      break;
+    }
+    state = null;
+    cursor = end;
+  }
+
+  return { line: masked.join(""), state };
+};
 
 const hasClosingQuote = (line, start, quote) => {
   for (let index = start + 1; index < line.length; index += 1) {
@@ -140,8 +246,11 @@ export const scanSourceText = (path, source) => {
   }
 
   const findings = [];
+  let multilineState = null;
   for (const [index, line] of source.split(/\r?\n/u).entries()) {
-    if (isNarratorComment(line)) {
+    const masked = maskMultilineStrings(path, line, multilineState);
+    multilineState = masked.state;
+    if (isNarratorComment(masked.line)) {
       findings.push({ path, line: index + 1, text: line.trim() });
     }
   }
@@ -204,7 +313,20 @@ const scanUntrackedFiles = () => {
   );
 };
 
-const scanDiff = (args) => scanUnifiedDiff(git(["diff", "--no-ext-diff", "--unified=0", ...args]));
+const scanDiff = (args, readSource) => {
+  const candidates = scanUnifiedDiff(git(["diff", "--no-ext-diff", "--unified=0", ...args]));
+  const findingLines = new Map();
+
+  return candidates.filter((candidate) => {
+    if (!findingLines.has(candidate.path)) {
+      findingLines.set(
+        candidate.path,
+        new Set(scanSourceText(candidate.path, readSource(candidate.path)).map(({ line }) => line)),
+      );
+    }
+    return findingLines.get(candidate.path).has(candidate.line);
+  });
+};
 
 const usage = () => {
   console.error(
@@ -241,9 +363,12 @@ const run = () => {
   if (modes[0] === "--all") {
     findings = scanTrackedFiles();
   } else if (modes[0] === "--staged") {
-    findings = scanDiff(["--cached", "--diff-filter=ACMR"]);
+    findings = scanDiff(["--cached", "--diff-filter=ACMR"], (path) => git(["show", `:${path}`]));
   } else {
-    findings = [...scanDiff(["HEAD", "--diff-filter=ACMR"]), ...scanUntrackedFiles()];
+    findings = [
+      ...scanDiff(["HEAD", "--diff-filter=ACMR"], (path) => readFileSync(path, "utf8")),
+      ...scanUntrackedFiles(),
+    ];
   }
 
   if (findings.length === 0) {

@@ -46,6 +46,23 @@ test("source scan preserves documentation and explanatory comments", () => {
   assert.deepEqual(scanSourceText("src/lib.rs", source), []);
 });
 
+test("source scan ignores narrator-shaped text inside multiline strings", () => {
+  const template = [
+    "const example = `",
+    "// Now we show the example.",
+    "`;",
+    "// Finally we run the example.",
+  ].join("\n");
+  const rustRaw = ['let example = r#"', "// Now we show the example.", '"#;', ""].join("\n");
+  const pythonTriple = ['example = """', "# Step 2: show the example", '"""', ""].join("\n");
+
+  assert.deepEqual(scanSourceText("src/example.ts", template), [
+    { path: "src/example.ts", line: 4, text: "// Finally we run the example." },
+  ]);
+  assert.deepEqual(scanSourceText("src/example.rs", rustRaw), []);
+  assert.deepEqual(scanSourceText("scripts/example.py", pythonTriple), []);
+});
+
 test("source scan ignores unsupported and non-comment files", () => {
   assert.deepEqual(scanSourceText("docs/guide.md", "// Here we explain the guide.\n"), []);
   assert.deepEqual(scanSourceText("assets/message.txt", "# First we prepare.\n"), []);
@@ -109,7 +126,8 @@ test("CLI modes enforce staged and working-tree additions", () => {
   try {
     git("init", "--quiet");
     writeFileSync(join(root, "main.rs"), "fn main() {}\n");
-    git("add", "main.rs");
+    writeFileSync(join(root, "example.ts"), "const example = `\nold value\n`;\n");
+    git("add", "main.rs", "example.ts");
     git(
       "-c",
       "user.name=Comment Guard Test",
@@ -125,11 +143,13 @@ test("CLI modes enforce staged and working-tree additions", () => {
     );
 
     writeFileSync(join(root, "main.rs"), "// Here we start the program.\nfn main() {}\n");
-    git("add", "main.rs");
+    writeFileSync(join(root, "example.ts"), "const example = `\n// Now we show the example.\n`;\n");
+    git("add", "main.rs", "example.ts");
 
     const staged = run(["--staged"]);
     assert.equal(staged.status, 1, staged.stderr);
     assert.match(staged.stderr, /main\.rs:1/u);
+    assert.doesNotMatch(staged.stderr, /example\.ts/u);
 
     writeFileSync(join(root, "task.py"), "# Step 2: process the result\n");
     const workingTree = run(
