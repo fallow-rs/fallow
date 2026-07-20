@@ -1,5 +1,5 @@
 import type { AppState } from "./state";
-import type { Lens, VizFile } from "./types";
+import type { Lens, VizCloneGroup, VizFile } from "./types";
 import { basename, dirname, formatCount, formatSize, reachSet } from "./data";
 import { closeButton, copyButton, el } from "./dom";
 
@@ -211,9 +211,7 @@ const duplicationSection = (
         row.appendChild(linkList(state, [...new Set(others)], navigate, 5));
       }
       if (group.preview) {
-        const pre = el("pre");
-        pre.textContent = group.preview;
-        row.appendChild(pre);
+        row.appendChild(clonePreviewEl(group));
       }
       dup.appendChild(row);
     }
@@ -559,6 +557,28 @@ const highlightCode = (pre: HTMLElement, code: string): void => {
     last = m.index + text.length;
   }
   if (last < code.length) pre.appendChild(document.createTextNode(code.slice(last)));
+};
+
+/**
+ * A clone-code preview rendered line by line: the copied lines get the
+ * "dup-line" highlight, the surrounding source lines are dimmed "ctx-line"
+ * context, and each line keeps its syntax highlighting. A missing or zero
+ * highlight range means the whole preview is the block (nothing dimmed).
+ * Shared by the clone drill-down panel and the per-file duplication section.
+ */
+const clonePreviewEl = (group: VizCloneGroup): HTMLElement => {
+  const pre = el("pre");
+  const lines = group.preview.split("\n");
+  const hasRange = group.highlight_lines > 0;
+  const hlStart = hasRange ? group.highlight_start : 0;
+  const hlEnd = hasRange ? hlStart + group.highlight_lines : lines.length;
+  lines.forEach((line, i) => {
+    const isDup = i >= hlStart && i < hlEnd;
+    const lineEl = el("span", isDup ? "dup-line" : "ctx-line");
+    highlightCode(lineEl, line);
+    pre.appendChild(lineEl);
+  });
+  return pre;
 };
 
 /** A neat, copyable command row: a label, the command (ellipsized to fit),
@@ -1106,22 +1126,7 @@ const renderClonePanel = (
 
   const shared = sectionEl("the shared code");
   if (group.preview) {
-    const pre = el("pre");
-    // Render the context window line by line: the copied lines get the
-    // "dup-line" treatment, the surrounding source lines are dimmed
-    // "ctx-line" context. A missing or zero highlight range means the
-    // whole preview is the block, so nothing is dimmed.
-    const lines = group.preview.split("\n");
-    const hasRange = group.highlight_lines > 0;
-    const hlStart = hasRange ? group.highlight_start : 0;
-    const hlEnd = hasRange ? hlStart + group.highlight_lines : lines.length;
-    lines.forEach((line, i) => {
-      const isDup = i >= hlStart && i < hlEnd;
-      const lineEl = el("span", isDup ? "dup-line" : "ctx-line");
-      highlightCode(lineEl, line);
-      pre.appendChild(lineEl);
-    });
-    shared.appendChild(pre);
+    shared.appendChild(clonePreviewEl(group));
   }
   const first = group.instances[0];
   if (first) {
