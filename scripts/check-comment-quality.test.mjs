@@ -14,6 +14,8 @@ test("source scan finds high-signal narrator comments", () => {
     ...scanSourceText("src/main.rs", "// Here we parse the input.\nlet value = parse();\n"),
     ...scanSourceText("scripts/build.py", "# Step 2: build the package\nbuild()\n"),
     ...scanSourceText("src/view.ts", "/* Next we render the result. */\nrender();\n"),
+    ...scanSourceText("src/check.ts", "validate(); // Now we report the result.\n"),
+    ...scanSourceText("src/lib.rs", "let value: &'a str = input; // Let's return it.\n"),
   ];
 
   assert.deepEqual(
@@ -22,6 +24,8 @@ test("source scan finds high-signal narrator comments", () => {
       ["src/main.rs", 1],
       ["scripts/build.py", 1],
       ["src/view.ts", 1],
+      ["src/check.ts", 1],
+      ["src/lib.rs", 1],
     ],
   );
 });
@@ -36,6 +40,7 @@ test("source scan preserves documentation and explanatory comments", () => {
     "// Here we NOTE the compatibility constraint.",
     "// Step 2: fallow-ignore the generated binding.",
     "const text = '// Finally we render';",
+    'const text = "prefix // Now we render";',
   ].join("\n");
 
   assert.deepEqual(scanSourceText("src/lib.rs", source), []);
@@ -94,10 +99,11 @@ test("diff scan handles new files and multiple hunks", () => {
 test("CLI modes enforce staged and working-tree additions", () => {
   const root = mkdtempSync(join(tmpdir(), "fallow-comment-quality-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
-  const run = (...args) =>
+  const run = (args, input = "") =>
     spawnSync(process.execPath, [SCRIPT_PATH, ...args], {
       cwd: root,
       encoding: "utf8",
+      input,
     });
 
   try {
@@ -121,14 +127,24 @@ test("CLI modes enforce staged and working-tree additions", () => {
     writeFileSync(join(root, "main.rs"), "// Here we start the program.\nfn main() {}\n");
     git("add", "main.rs");
 
-    const staged = run("--staged");
+    const staged = run(["--staged"]);
     assert.equal(staged.status, 1, staged.stderr);
     assert.match(staged.stderr, /main\.rs:1/u);
 
     writeFileSync(join(root, "task.py"), "# Step 2: process the result\n");
-    const workingTree = run("--working-tree", "--claude-hook");
+    const workingTree = run(
+      ["--working-tree", "--claude-hook"],
+      JSON.stringify({ stop_hook_active: false }),
+    );
     assert.equal(workingTree.status, 2, workingTree.stderr);
     assert.match(workingTree.stderr, /task\.py:1/u);
+
+    const repeatedStop = run(
+      ["--working-tree", "--claude-hook"],
+      JSON.stringify({ stop_hook_active: true }),
+    );
+    assert.equal(repeatedStop.status, 0, repeatedStop.stderr);
+    assert.equal(repeatedStop.stderr, "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

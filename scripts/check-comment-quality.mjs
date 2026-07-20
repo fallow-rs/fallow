@@ -52,30 +52,87 @@ const EXPLANATION_SIGNAL =
 
 const isSourcePath = (path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase());
 
-const commentBody = (line) => {
-  const trimmed = line.trimStart();
-  if (
-    trimmed.startsWith("///") ||
-    trimmed.startsWith("//!") ||
-    trimmed.startsWith("/**") ||
-    trimmed.startsWith("/*!") ||
-    trimmed.startsWith("*")
-  ) {
-    return null;
+const hasClosingQuote = (line, start, quote) => {
+  for (let index = start + 1; index < line.length; index += 1) {
+    if (line[index] === "\\") {
+      index += 1;
+    } else if (line[index] === quote) {
+      return true;
+    }
   }
-
-  const match = trimmed.match(/^(?:\/\/|#|\/\*+|<!--)\s*(.*?)(?:\s*\*\/|\s*-->)?$/u);
-  return match?.[1]?.trim() ?? null;
+  return false;
 };
 
-const isNarratorComment = (line) => {
-  const body = commentBody(line);
-  if (body === null || (!NARRATOR_START.test(body) && !STEP_START.test(body))) {
+const isRustLifetime = (line, index) => {
+  if (line[index] !== "'") {
+    return false;
+  }
+
+  const name = line.slice(index + 1).match(/^[A-Za-z_][A-Za-z0-9_]*/u)?.[0];
+  if (name === undefined || line[index + name.length + 1] === "'") {
+    return false;
+  }
+
+  const previous = line[index - 1];
+  return previous === "&" || previous === "<" || previous === ",";
+};
+
+const lineCommentBodies = (line) => {
+  const bodies = [];
+  let quote = null;
+
+  for (let index = 0; index < line.length - 1; index += 1) {
+    const character = line[index];
+    if (quote !== null) {
+      if (character === "\\") {
+        index += 1;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (
+      (character === '"' || character === "'" || character === "`") &&
+      !isRustLifetime(line, index) &&
+      hasClosingQuote(line, index, character)
+    ) {
+      quote = character;
+      continue;
+    }
+
+    if (character === "/" && line[index + 1] === "/") {
+      const directComment = line.slice(0, index).trim().length === 0;
+      if (directComment && (line.startsWith("///", index) || line.startsWith("//!", index))) {
+        return [];
+      }
+      bodies.push(line.slice(index + 2).trim());
+      index += 1;
+    }
+  }
+
+  return bodies;
+};
+
+const commentBodies = (line) => {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith("/**") || trimmed.startsWith("/*!") || trimmed.startsWith("*")) {
+    return [];
+  }
+
+  const direct = trimmed.match(/^(?:#|\/\*+|<!--)\s*(.*?)(?:\s*\*\/|\s*-->)?$/u);
+  return [...(direct === null ? [] : [direct[1].trim()]), ...lineCommentBodies(line)];
+};
+
+const isNarratorBody = (body) => {
+  if (!NARRATOR_START.test(body) && !STEP_START.test(body)) {
     return false;
   }
 
   return !KEEPER_KEYWORD.test(body) && !TOOL_DIRECTIVE.test(body) && !EXPLANATION_SIGNAL.test(body);
 };
+
+const isNarratorComment = (line) => commentBodies(line).some(isNarratorBody);
 
 export const scanSourceText = (path, source) => {
   if (!isSourcePath(path)) {
@@ -155,6 +212,15 @@ const usage = () => {
   );
 };
 
+const repeatedClaudeStop = () => {
+  try {
+    const input = readFileSync(0, "utf8").trim();
+    return input.length > 0 && JSON.parse(input).stop_hook_active === true;
+  } catch {
+    return false;
+  }
+};
+
 const run = () => {
   const args = new Set(process.argv.slice(2));
   const modes = ["--all", "--staged", "--working-tree"].filter((mode) => args.has(mode));
@@ -164,6 +230,10 @@ const run = () => {
   if (modes.length !== 1 || unknown.length > 0) {
     usage();
     process.exitCode = 2;
+    return;
+  }
+
+  if (args.has("--claude-hook") && repeatedClaudeStop()) {
     return;
   }
 
