@@ -510,7 +510,11 @@ const drawCrumbs = (state: AppState, gvs: GraphViewState, stageW: number): void 
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   let x = 14;
-  const y = 14;
+  // Sits below the back chip (y 12..36), not on top of it: the trail only
+  // appears once there are 2+ crumbs, so the single-file ego view never
+  // reveals the collision. Baseline picked so the whitespace under the chip
+  // matches the 12px gap above it (chip top to the header rule).
+  const y = 53;
   shown.forEach((fileIndex, index) => {
     const name = basename(data.files[fileIndex].path);
     const isLast = index === shown.length - 1;
