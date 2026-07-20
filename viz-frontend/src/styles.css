@@ -787,27 +787,10 @@ button {
   margin-left: 12px;
 }
 
-/* Ranked hotspots as a table: the file column takes the slack and
-   ellipsizes, the two numeric columns stay fixed-width and right-aligned. */
-#panel table.rank-table {
-  table-layout: fixed;
-}
-
-#panel .rank-table th.col-cc,
-#panel .rank-table td.col-cc {
-  width: 3rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-#panel .rank-table th.col-used,
-#panel .rank-table td.col-used {
-  width: 5rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
+/* Ranked findings as a table: the label column takes the slack and
+   ellipsizes, the value columns stay narrow and right-aligned. */
 #panel .rank-table td.col-file {
+  max-width: 0;
   overflow: hidden;
 }
 
@@ -826,6 +809,55 @@ button {
 
 #panel .rank-table td.col-file button:hover .rank-name {
   text-decoration: underline;
+}
+
+#panel .rank-table th.col-val,
+#panel .rank-table td.col-val {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-left: 14px;
+}
+
+/* Column and term descriptions as an instant styled tooltip (native title
+   is slow and OS-styled). Opens below the element and rightward by default;
+   pointer-events off so it never blocks a click. Used by table headers and
+   the facts-panel hinted terms alike. */
+#panel [data-tip] {
+  position: relative;
+  cursor: help;
+}
+
+#panel [data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 5;
+  width: max-content;
+  max-width: 220px;
+  padding: 7px 9px;
+  white-space: normal;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-low);
+  background: var(--surface-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* Value-column headers sit at the panel's right edge: anchor the tip to
+   the right so it opens leftward and stays in view. */
+#panel .rank-table th[data-tip]:hover::after {
+  left: auto;
+  right: 0;
 }
 
 #panel .sev-error {

@@ -25,7 +25,7 @@ const kvEl = (pairs: KvPair[]): HTMLElement => {
     const dt = el("dt", undefined, k);
     if (hint) {
       dt.classList.add("hinted");
-      dt.title = hint;
+      dt.dataset.tip = hint;
     }
     const dd = el("dd");
     if (typeof v === "string") dd.textContent = v;
@@ -575,19 +575,34 @@ interface RankRow {
   label: string;
   dir?: string;
   metric: string;
-  metricCls: string;
+  cells: { value: string; cls: string }[];
   fileIndex: number;
   /** Clone group index; rows with this open the clone panel instead. */
   clone?: number;
 }
 
-export const rankRowsFor = (state: AppState): { title: string; rows: RankRow[]; empty: string } =>
-  rankRowsForLens(state, state.lens);
+interface RankColumn {
+  header: string;
+  /** Column meaning, shown on the header as a `title` tooltip. */
+  hint: string;
+}
 
-const rankRowsForLens = (
-  state: AppState,
-  lens: Lens,
-): { title: string; rows: RankRow[]; empty: string } => {
+/** The shared shape a ranked table renders from. */
+interface RankView {
+  rows: RankRow[];
+  labelHead: string;
+  columns: RankColumn[];
+}
+
+/** A lens's ranked findings plus its section title and empty-state copy. */
+interface RankLensView extends RankView {
+  title: string;
+  empty: string;
+}
+
+export const rankRowsFor = (state: AppState): RankLensView => rankRowsForLens(state, state.lens);
+
+const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
   const files = state.data.files;
   switch (lens) {
     case "overview": {
@@ -601,10 +616,16 @@ const rankRowsForLens = (
           label: basename(f.path),
           dir: dirname(f.path),
           metric: `used by ${formatCount(f.importer_count)}`,
-          metricCls: "muted",
+          cells: [{ value: formatCount(f.importer_count), cls: "muted" }],
           fileIndex: i,
         }));
-      return { title: "most depended-on files", rows, empty: "no shared files" };
+      return {
+        title: "most depended-on files",
+        rows,
+        empty: "no shared files",
+        labelHead: "file",
+        columns: [{ header: "used by", hint: "How many files import this one." }],
+      };
     }
     case "deadcode": {
       const rows: RankRow[] = [];
@@ -617,7 +638,7 @@ const rankRowsForLens = (
           label: basename(f.path),
           dir: dirname(f.path),
           metric: formatSize(f.size),
-          metricCls: "sev-error",
+          cells: [{ value: formatSize(f.size), cls: "sev-error" }],
           fileIndex: i,
         });
       }
@@ -630,11 +651,22 @@ const rankRowsForLens = (
           label: basename(f.path),
           dir: dirname(f.path),
           metric: `${formatCount(f.unused_export_count)} exports`,
-          metricCls: "sev-warn",
+          cells: [{ value: `${formatCount(f.unused_export_count)} exports`, cls: "sev-warn" }],
           fileIndex: i,
         });
       }
-      return { title: "unused files", rows, empty: "nothing is unreachable" };
+      return {
+        title: "unused files",
+        rows,
+        empty: "nothing is unreachable",
+        labelHead: "file",
+        columns: [
+          {
+            header: "unused",
+            hint: "The whole file, shown as its size on disk, or how many of its exports are never imported.",
+          },
+        ],
+      };
     }
     case "dupes": {
       const rows = [...state.data.clones.keys()]
@@ -652,7 +684,7 @@ const rankRowsForLens = (
             label: `${basename(files[first.file].path)} ×${group.instances.length}`,
             dir: dirname(files[first.file].path),
             metric: `${formatCount(group.lines)} lines`,
-            metricCls: "sev-warn",
+            cells: [{ value: formatCount(group.lines), cls: "sev-warn" }],
             fileIndex: first.file,
             clone: g,
           };
@@ -661,17 +693,24 @@ const rankRowsForLens = (
       const title = truncated
         ? `duplicated blocks (+${formatCount(truncated)} not shown)`
         : "duplicated blocks";
-      return { title, rows, empty: "no duplicated blocks" };
+      return {
+        title,
+        rows,
+        empty: "no duplicated blocks",
+        labelHead: "block",
+        columns: [{ header: "lines", hint: "Number of duplicated lines in the block." }],
+      };
     }
     case "boundaries": {
       const rows: RankRow[] = [];
       for (const v of state.data.violations) {
         if (files[v.from] === undefined || files[v.to] === undefined) continue;
+        const zoneName = state.data.zones[v.to_zone]?.name ?? "zone";
         rows.push({
           label: `${basename(files[v.from].path)} → ${basename(files[v.to].path)}`,
           dir: dirname(files[v.from].path),
-          metric: `→ ${state.data.zones[v.to_zone]?.name ?? "zone"}`,
-          metricCls: "sev-error",
+          metric: `→ ${zoneName}`,
+          cells: [{ value: `→ ${zoneName}`, cls: "sev-error" }],
           fileIndex: v.from,
         });
       }
@@ -681,11 +720,22 @@ const rankRowsForLens = (
           label: `loop of ${formatCount(cycle.length)} files`,
           dir: dirname(files[cycle[0]].path),
           metric: basename(files[cycle[0]].path),
-          metricCls: "sev-warn",
+          cells: [{ value: basename(files[cycle[0]].path), cls: "sev-warn" }],
           fileIndex: cycle[0],
         });
       });
-      return { title: "forbidden imports & loops", rows, empty: "no forbidden imports or loops" };
+      return {
+        title: "forbidden imports & loops",
+        rows,
+        empty: "no forbidden imports or loops",
+        labelHead: "import",
+        columns: [
+          {
+            header: "detail",
+            hint: "The layer a forbidden import reaches into, or a file in the import loop.",
+          },
+        ],
+      };
     }
     case "hotspots": {
       // Risk = hard to change AND widely depended on, not hardness alone;
@@ -699,14 +749,31 @@ const rankRowsForLens = (
           label: basename(f.path),
           dir: dirname(f.path),
           metric: `cc ${formatCount(f.max_cyclomatic)}, used by ${formatCount(f.importer_count)}`,
-          metricCls:
-            f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "muted",
+          cells: [
+            {
+              value: formatCount(f.max_cyclomatic),
+              cls: f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "",
+            },
+            { value: formatCount(f.importer_count), cls: "muted" },
+          ],
           fileIndex: i,
         }));
-      return { title: "complexity hotspots", rows, empty: "no complex functions" };
+      return {
+        title: "complexity hotspots",
+        rows,
+        empty: "no complex functions",
+        labelHead: "file",
+        columns: [
+          {
+            header: "cc",
+            hint: "Branches in the file's hardest function; higher is harder to change.",
+          },
+          { header: "used by", hint: "How many files import this one." },
+        ],
+      };
     }
     default:
-      return { title: "", rows: [], empty: "" };
+      return { title: "", rows: [], empty: "", labelHead: "", columns: [] };
   }
 };
 
@@ -752,14 +819,9 @@ export const buildMapDigest = (state: AppState): string => {
 };
 
 /**
- * The shared `rank-list` builder: one clickable row per RankRow, with the
- * directory head-truncated to a monospace budget and a right-aligned
- * metric. Used by both the lens list and the search-results panel.
- */
-/**
- * The dir-prefixed, truncating filename label shared by the ranked list
- * and the hotspots table: a head-truncated dim directory plus the
- * filename in its own span so it can ellipsize when the row is narrow.
+ * The dir-prefixed, truncating filename label shared by every ranked
+ * table: a head-truncated dim directory plus the filename in its own
+ * span so it can ellipsize when the row is narrow.
  */
 const rankLabelEl = (row: RankRow): HTMLElement => {
   const labelBox = el("span", "rank-label");
@@ -783,63 +845,58 @@ const rankLabelEl = (row: RankRow): HTMLElement => {
   return labelBox;
 };
 
-const rankListEl = (rows: RankRow[], cap: number, onPick: (row: RankRow) => void): HTMLElement => {
-  const ul = el("ul", "link-list rank-list");
-  for (const row of rows.slice(0, cap)) {
-    const li = el("li");
-    const btn = el("button") as HTMLButtonElement;
-    btn.type = "button";
-    btn.appendChild(rankLabelEl(row));
-    btn.appendChild(el("span", `rank-metric ${row.metricCls}`, row.metric));
-    btn.addEventListener("click", () => onPick(row));
-    li.appendChild(btn);
-    ul.appendChild(li);
-  }
-  if (rows.length > cap) {
-    ul.appendChild(el("li", "muted", `… ${formatCount(rows.length - cap)} more`));
-  }
-  return ul;
-};
-
 /**
- * The hotspots findings as a compact table (file, cc, used-by) mirroring
- * the per-file complexity table, so the two numbers line up in columns
- * instead of trailing each row as free text. Rows stay clickable.
+ * The generic ranked table: a truncating label column plus one narrow,
+ * right-aligned value column per definition, each carrying its meaning
+ * as a header `title` tooltip. Rows stay clickable, dispatching to the
+ * caller's `onPick`. Used by every lens and the search panel, so the
+ * two-number complexity view and the one-number lists line up the same
+ * way. Overflow past `cap` collapses to a trailing "… N more" row.
  */
-const renderHotspotsTable = (
-  state: AppState,
-  rows: RankRow[],
+const renderRankTable = (
+  _state: AppState,
+  view: RankView,
   cap: number,
-  navigate: NavigateFn,
+  onPick: (row: RankRow) => void,
 ): HTMLElement => {
+  const { rows, labelHead, columns } = view;
   const table = el("table", "rank-table");
   const thead = el("thead");
   const hr = el("tr");
-  hr.appendChild(el("th", "col-file", "file"));
-  hr.appendChild(el("th", "col-cc", "cc"));
-  hr.appendChild(el("th", "col-used", "used by"));
+  hr.appendChild(el("th", "col-file", labelHead));
+  for (const col of columns) {
+    const th = el("th", "col-val", col.header);
+    th.dataset.tip = col.hint;
+    hr.appendChild(th);
+  }
   thead.appendChild(hr);
   table.appendChild(thead);
   const tbody = el("tbody");
   for (const row of rows.slice(0, cap)) {
-    const f = state.data.files[row.fileIndex];
     const tr = el("tr");
     const fileTd = el("td", "col-file");
     const btn = el("button") as HTMLButtonElement;
     btn.type = "button";
     btn.appendChild(rankLabelEl(row));
-    btn.addEventListener("click", () => navigate(row.fileIndex));
+    btn.addEventListener("click", () => onPick(row));
     fileTd.appendChild(btn);
     tr.appendChild(fileTd);
-    const ccTd = el("td", "col-cc");
-    ccTd.appendChild(
-      sev(
-        f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "",
-        formatCount(f.max_cyclomatic),
-      ),
-    );
-    tr.appendChild(ccTd);
-    tr.appendChild(el("td", "col-used", formatCount(f.importer_count)));
+    for (const cell of row.cells) {
+      const td = el("td", "col-val");
+      td.appendChild(sev(cell.cls, cell.value));
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  if (rows.length > cap) {
+    const tr = el("tr");
+    const td = el(
+      "td",
+      "muted",
+      `… ${formatCount(rows.length - cap)} more`,
+    ) as HTMLTableCellElement;
+    td.colSpan = 1 + columns.length;
+    tr.appendChild(td);
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
@@ -854,7 +911,7 @@ const fileRankRows = (state: AppState, indices: number[]): RankRow[] =>
       label: basename(f.path),
       dir: dirname(f.path),
       metric: `used by ${formatCount(f.importer_count)}`,
-      metricCls: "muted",
+      cells: [{ value: formatCount(f.importer_count), cls: "muted" }],
       fileIndex: i,
     };
   });
@@ -866,7 +923,7 @@ const renderLensPanel = (
   navigate: NavigateFn,
   refresh: () => void,
 ): void => {
-  const { title, rows, empty } = rankRowsFor(state);
+  const { title, rows, empty, labelHead, columns } = rankRowsFor(state);
   panel.replaceChildren();
   panel.classList.add("open");
   panel.setAttribute("aria-label", `${state.lens} findings`);
@@ -877,40 +934,16 @@ const renderLensPanel = (
     panel.appendChild(section);
     return;
   }
-  // Leave with the list, not just a feeling: findings as markdown.
   section.appendChild(
-    copyButton("copy-path", "copy this list", () =>
-      [
-        `# fallow: ${title} in ${state.data.root}`,
-        ...rows.map((r) => `- ${r.dir ? `${r.dir}/` : ""}${r.label} (${r.metric})`),
-      ].join("\n"),
-    ),
+    renderRankTable(state, { rows, labelHead, columns }, 100, (row) => {
+      if (row.clone !== undefined) {
+        state.selectedClone = row.clone;
+        refresh();
+      } else {
+        navigate(row.fileIndex);
+      }
+    }),
   );
-  const cap = 100;
-  if (state.lens === "hotspots") {
-    section.appendChild(renderHotspotsTable(state, rows, cap, navigate));
-    section.appendChild(
-      el(
-        "div",
-        "muted key-line",
-        "cc = branches in the file's hardest function, higher is harder to change · used by = how many files import it",
-      ),
-    );
-    if (rows.length > cap) {
-      section.appendChild(el("div", "muted", `… ${formatCount(rows.length - cap)} more`));
-    }
-  } else {
-    section.appendChild(
-      rankListEl(rows, cap, (row) => {
-        if (row.clone !== undefined) {
-          state.selectedClone = row.clone;
-          refresh();
-        } else {
-          navigate(row.fileIndex);
-        }
-      }),
-    );
-  }
   const hint = el("div", "action-hint");
   hint.append(
     state.lens === "hotspots"
@@ -938,31 +971,6 @@ export const searchPanelModel = (
     matches: [...state.searchMatches].toSorted(byImporters),
     affected: [...state.searchReach].toSorted(byImporters),
   };
-};
-
-/** Markdown of the current search: the matched files and the files that
- *  depend on them. Both sections are listed so the paste never names a
- *  count (", N affected") it does not then enumerate. The affected list
- *  is capped to keep the paste bounded. */
-export const buildSearchDigest = (state: AppState): string => {
-  const { query, matches, affected } = searchPanelModel(state);
-  const files = state.data.files;
-  const row = (i: number): string => `- ${files[i].path} (used by ${files[i].importer_count})`;
-  const lines = [
-    `# fallow: search "${query}" in ${state.data.root}`,
-    `${matches.length} matched file${matches.length === 1 ? "" : "s"}${
-      affected.length > 0 ? `, ${affected.length} affected` : ""
-    }`,
-    "",
-    "## matched files",
-    ...matches.map(row),
-  ];
-  if (affected.length > 0) {
-    const cap = 30;
-    lines.push("", "## affected files (depend on the matches)", ...affected.slice(0, cap).map(row));
-    if (affected.length > cap) lines.push(`- … ${affected.length - cap} more`);
-  }
-  return lines.join("\n");
 };
 
 /**
@@ -1002,10 +1010,15 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
     return;
   }
 
+  const usedByColumns = [{ header: "used by", hint: "How many files import this one." }];
   const section = sectionEl("matched files");
-  section.appendChild(copyButton("copy-path", "copy this list", () => buildSearchDigest(state)));
   section.appendChild(
-    rankListEl(fileRankRows(state, matches), 100, (row) => navigate(row.fileIndex)),
+    renderRankTable(
+      state,
+      { rows: fileRankRows(state, matches), labelHead: "file", columns: usedByColumns },
+      100,
+      (row) => navigate(row.fileIndex),
+    ),
   );
   const matchHint = el("div", "action-hint");
   matchHint.append("Ranked by how many files import them. Click a row to focus.");
@@ -1015,7 +1028,12 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
   if (affected.length > 0) {
     const aff = sectionEl(`affected files (${formatCount(affected.length)})`);
     aff.appendChild(
-      rankListEl(fileRankRows(state, affected), 100, (row) => navigate(row.fileIndex)),
+      renderRankTable(
+        state,
+        { rows: fileRankRows(state, affected), labelHead: "file", columns: usedByColumns },
+        100,
+        (row) => navigate(row.fileIndex),
+      ),
     );
     const hint = el("div", "action-hint");
     hint.append("Everything that transitively imports a match. Click a row to focus.");

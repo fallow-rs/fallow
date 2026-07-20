@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildMapDigest,
-  buildSearchDigest,
-  panelRenderKey,
-  rankRowsFor,
-  searchPanelModel,
-} from "./panel";
+import { buildMapDigest, panelRenderKey, rankRowsFor, searchPanelModel } from "./panel";
 import { buildIndex } from "./data";
 import { getTheme } from "./theme";
 import type { AppState } from "./state";
@@ -241,36 +235,6 @@ describe("searchPanelModel", () => {
     expect(model.query).toBe("none");
     expect(model.matches).toEqual([]);
     expect(model.affected).toEqual([]);
-  });
-});
-
-describe("buildSearchDigest", () => {
-  it("lists matched files with importer counts and the affects headline", () => {
-    const state = stateFor("overview", [
-      file("src/calendar/index.ts", { importer_count: 30 }),
-      file("src/app.ts", { importer_count: 0 }),
-    ]);
-    state.search = "  calendar  ";
-    state.searchMatches = new Set([0]);
-    state.searchReach = new Set([1]);
-    const md = buildSearchDigest(state);
-    expect(md).toContain('# fallow: search "calendar" in demo');
-    expect(md).toContain("1 matched file, 1 affected");
-    expect(md).toContain("## matched files");
-    expect(md).toContain("- src/calendar/index.ts (used by 30)");
-    // The digest enumerates the affected files it headlines, not just the count.
-    expect(md).toContain("## affected files");
-    expect(md).toContain("- src/app.ts (used by 0)");
-  });
-
-  it("drops the affects clause when nothing depends on the matches", () => {
-    const state = stateFor("overview", [file("src/calendar/index.ts", { importer_count: 0 })]);
-    state.search = "calendar";
-    state.searchMatches = new Set([0]);
-    state.searchReach = new Set();
-    const md = buildSearchDigest(state);
-    expect(md).toContain("1 matched file");
-    expect(md).not.toContain("affects");
   });
 });
 
