@@ -80,7 +80,13 @@ export interface VizCloneGroup {
   lines: number;
   tokens: number;
   instances: VizCloneInstance[];
+  /** Context window around the copied block: the copied lines flanked by
+   *  a few surrounding source lines on each side. */
   preview: string;
+  /** 0-based index, among `preview` lines, of the first copied line. */
+  highlight_start: number;
+  /** Number of copied lines in `preview`; the rest are dimmed context. */
+  highlight_lines: number;
 }
 
 export interface VizCloneInstance {

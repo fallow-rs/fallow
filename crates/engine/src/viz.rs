@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_types::discover::DiscoveredFile;
-use fallow_types::duplicates::DuplicationReport;
+use fallow_types::duplicates::{CloneInstance, DuplicationReport};
 use fallow_types::extract::{FunctionComplexity, ModuleInfo};
 use fallow_types::results::AnalysisResults;
 
@@ -36,6 +36,11 @@ const HOTSPOT_CYCLOMATIC_FLOOR: u16 = 10;
 const CLONE_PREVIEW_MAX_BYTES: usize = 480;
 /// Maximum lines of clone-fragment preview shipped per clone group.
 const CLONE_PREVIEW_MAX_LINES: usize = 10;
+/// Source lines of context included on each side of the duplicated block
+/// in a clone preview. A fixed window is universal: clones are frequently
+/// not functions (interface fields, object literals, type aliases), so no
+/// enclosing-scope detection is attempted.
+const CLONE_PREVIEW_CONTEXT: usize = 4;
 /// Maximum clone groups serialized into the payload. Far above any
 /// legitimate report; a guardrail against multi-MB HTML on monorepos.
 /// Groups keep the detector's report order, so the cap keeps the first N.
@@ -232,8 +237,17 @@ pub struct VizCloneGroup {
     pub tokens: usize,
     /// Where the duplicated block appears.
     pub instances: Vec<VizCloneInstance>,
-    /// Truncated source preview of the duplicated block.
+    /// Source preview: a context window around the duplicated block, the
+    /// copied lines flanked by up to `CLONE_PREVIEW_CONTEXT` surrounding
+    /// source lines on each side.
     pub preview: String,
+    /// 0-based index, among the lines of `preview`, of the first copied
+    /// line. Lines before it are dimmed context.
+    pub highlight_start: u32,
+    /// Number of copied lines present in `preview`. The frontend highlights
+    /// `preview` lines `[highlight_start, highlight_start + highlight_lines)`
+    /// and dims the rest.
+    pub highlight_lines: u32,
 }
 
 /// One location of a duplicated block.
@@ -477,10 +491,10 @@ fn build_clones(
                 inst.end_line.saturating_sub(inst.start_line) + 1;
         }
 
-        let preview = group
+        let (preview, highlight_start, highlight_lines) = group
             .instances
             .first()
-            .map(|inst| truncate_preview(&inst.fragment))
+            .map(build_clone_preview)
             .unwrap_or_default();
 
         clones.push(VizCloneGroup {
@@ -488,6 +502,8 @@ fn build_clones(
             tokens: group.token_count,
             instances,
             preview,
+            highlight_start,
+            highlight_lines,
         });
     }
 
@@ -512,6 +528,118 @@ fn truncate_preview(fragment: &str) -> String {
         out.push_str(line);
     }
     out
+}
+
+/// Build the representative clone preview: a context window around the
+/// duplicated block, with the highlight range located within it. Returns
+/// `(preview, highlight_start, highlight_lines)` where `highlight_start`
+/// is the 0-based index of the first copied line among the preview lines
+/// and `highlight_lines` is the copied line count present in `preview`.
+///
+/// Falls back to the bare fragment with the whole block highlighted on
+/// any read failure, empty source, or an out-of-range line span. Never
+/// panics.
+fn build_clone_preview(inst: &CloneInstance) -> (String, u32, u32) {
+    let Ok(source) = std::fs::read_to_string(&inst.file) else {
+        return fragment_fallback(&inst.fragment);
+    };
+    let lines: Vec<&str> = source.lines().collect();
+    let total = lines.len();
+    if total == 0 || inst.start_line == 0 || inst.start_line > total {
+        return fragment_fallback(&inst.fragment);
+    }
+
+    // Block bounds as a 0-based `[block_start, block_end)` range, clamped
+    // to the file and guaranteed to hold at least one line.
+    let block_start = inst.start_line - 1;
+    let block_end = inst.end_line.min(total).max(inst.start_line);
+    let mut block_lines = block_end - block_start;
+    let mut before = block_start.min(CLONE_PREVIEW_CONTEXT);
+    let mut after = (total - block_end).min(CLONE_PREVIEW_CONTEXT);
+
+    // Line cap: trim context symmetrically first; only cut into the block
+    // when the block alone still exceeds the cap.
+    if block_lines >= CLONE_PREVIEW_MAX_LINES {
+        before = 0;
+        after = 0;
+        block_lines = CLONE_PREVIEW_MAX_LINES;
+    } else {
+        trim_context(
+            &mut before,
+            &mut after,
+            CLONE_PREVIEW_MAX_LINES - block_lines,
+        );
+    }
+
+    enforce_byte_cap(
+        &lines,
+        block_start,
+        &mut before,
+        &mut after,
+        &mut block_lines,
+    );
+
+    let win_start = block_start - before;
+    let win_end = win_start + before + block_lines + after;
+    let preview = lines[win_start..win_end].join("\n");
+    (preview, clamp_u32(before), clamp_u32(block_lines))
+}
+
+/// Fallback preview: the bare fragment, capped, with the whole block
+/// highlighted (nothing dimmed).
+fn fragment_fallback(fragment: &str) -> (String, u32, u32) {
+    let preview = truncate_preview(fragment);
+    let highlight_lines = if preview.is_empty() {
+        0
+    } else {
+        preview.lines().count()
+    };
+    (preview, 0, clamp_u32(highlight_lines))
+}
+
+/// Reduce `before`/`after` so their sum fits `budget`, dropping from the
+/// larger side first (ties favor keeping `after`) so the two flanks stay
+/// balanced. Deterministic.
+fn trim_context(before: &mut usize, after: &mut usize, budget: usize) {
+    while *before + *after > budget {
+        if *before >= *after {
+            *before -= 1;
+        } else {
+            *after -= 1;
+        }
+    }
+}
+
+/// Trim the preview window to `CLONE_PREVIEW_MAX_BYTES`, dropping context
+/// lines (larger side first) before ever cutting into the highlighted
+/// block. If the block alone still overflows, its tail lines are dropped,
+/// but at least one line is always kept.
+fn enforce_byte_cap(
+    lines: &[&str],
+    block_start: usize,
+    before: &mut usize,
+    after: &mut usize,
+    block_lines: &mut usize,
+) {
+    let window_bytes = |before: usize, after: usize, block_lines: usize| -> usize {
+        let start = block_start - before;
+        let end = start + before + block_lines + after;
+        let separators = (end - start).saturating_sub(1);
+        lines[start..end].iter().map(|l| l.len()).sum::<usize>() + separators
+    };
+    while window_bytes(*before, *after, *block_lines) > CLONE_PREVIEW_MAX_BYTES {
+        if *before + *after > 0 {
+            if *before >= *after {
+                *before -= 1;
+            } else {
+                *after -= 1;
+            }
+        } else if *block_lines > 1 {
+            *block_lines -= 1;
+        } else {
+            break;
+        }
+    }
 }
 
 fn build_cycles(results: &AnalysisResults, index: &FileIndex<'_>) -> Vec<Vec<u32>> {
@@ -1077,6 +1205,66 @@ mod tests {
         let emoji_line = "\u{1f389}".repeat(200);
         let out = truncate_preview(&emoji_line);
         assert_eq!(out, "\u{2026}");
+    }
+
+    #[test]
+    fn clone_preview_windows_context_around_the_block() {
+        use std::io::Write as _;
+
+        // 20 numbered source lines; the copied block covers lines 8..=11.
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        let body = (1..=20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        file.write_all(body.as_bytes()).expect("write source");
+        let inst = clone_instance(file.path().to_path_buf(), 8, 11);
+
+        let (preview, highlight_start, highlight_lines) = build_clone_preview(&inst);
+        let preview_lines: Vec<&str> = preview.lines().collect();
+
+        // Four lines of context each side would overflow the 10-line cap, so
+        // context is trimmed symmetrically to 3 + 3 around the 4-line block.
+        assert_eq!(preview_lines.len(), CLONE_PREVIEW_MAX_LINES);
+        assert_eq!(highlight_start, 3);
+        assert_eq!(highlight_lines, 4);
+        assert_eq!(preview_lines.first(), Some(&"line 5"));
+        let start = highlight_start as usize;
+        let end = start + highlight_lines as usize;
+        assert_eq!(
+            &preview_lines[start..end],
+            ["line 8", "line 9", "line 10", "line 11"],
+        );
+        // The line directly above the block is dimmed context, not copied.
+        assert_eq!(preview_lines[start - 1], "line 7");
+    }
+
+    #[test]
+    fn clone_preview_clamps_context_at_file_start() {
+        use std::io::Write as _;
+
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        file.write_all(b"line 1\nline 2\nline 3\nline 4\nline 5")
+            .expect("write source");
+        // Block at the very top: no context fits above it, so the highlight
+        // starts at index 0 and the trailing lines are dimmed context.
+        let inst = clone_instance(file.path().to_path_buf(), 1, 2);
+
+        let (preview, highlight_start, highlight_lines) = build_clone_preview(&inst);
+        assert_eq!(highlight_start, 0);
+        assert_eq!(highlight_lines, 2);
+        assert_eq!(preview, "line 1\nline 2\nline 3\nline 4\nline 5");
+    }
+
+    #[test]
+    fn clone_preview_falls_back_when_source_is_unreadable() {
+        // A missing file forces the fragment fallback: the whole block is
+        // highlighted so nothing is dimmed.
+        let inst = clone_instance(project_root().join("does-not-exist.ts"), 1, 3);
+        let (preview, highlight_start, highlight_lines) = build_clone_preview(&inst);
+        assert_eq!(preview, inst.fragment);
+        assert_eq!(highlight_start, 0);
+        assert_eq!(highlight_lines as usize, preview.lines().count());
     }
 
     #[test]

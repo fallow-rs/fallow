@@ -1107,7 +1107,20 @@ const renderClonePanel = (
   const shared = sectionEl("the shared code");
   if (group.preview) {
     const pre = el("pre");
-    highlightCode(pre, group.preview);
+    // Render the context window line by line: the copied lines get the
+    // "dup-line" treatment, the surrounding source lines are dimmed
+    // "ctx-line" context. A missing or zero highlight range means the
+    // whole preview is the block, so nothing is dimmed.
+    const lines = group.preview.split("\n");
+    const hasRange = group.highlight_lines > 0;
+    const hlStart = hasRange ? group.highlight_start : 0;
+    const hlEnd = hasRange ? hlStart + group.highlight_lines : lines.length;
+    lines.forEach((line, i) => {
+      const isDup = i >= hlStart && i < hlEnd;
+      const lineEl = el("span", isDup ? "dup-line" : "ctx-line");
+      highlightCode(lineEl, line);
+      pre.appendChild(lineEl);
+    });
     shared.appendChild(pre);
   }
   const first = group.instances[0];

@@ -143,18 +143,29 @@ describe("rankRowsFor", () => {
     const rows = rankRowsFor(
       stateFor("dupes", [file("src/a.ts")], {
         clones: [
-          { lines: 9, tokens: 40, instances: [], preview: "" },
+          {
+            lines: 9,
+            tokens: 40,
+            instances: [],
+            preview: "",
+            highlight_start: 0,
+            highlight_lines: 0,
+          },
           {
             lines: 5,
             tokens: 20,
             instances: [{ file: 99, start_line: 1, end_line: 5 }],
             preview: "",
+            highlight_start: 0,
+            highlight_lines: 0,
           },
           {
             lines: 3,
             tokens: 12,
             instances: [{ file: 0, start_line: 1, end_line: 3 }],
             preview: "",
+            highlight_start: 0,
+            highlight_lines: 0,
           },
         ],
       }),
@@ -185,6 +196,8 @@ describe("rankRowsFor", () => {
               { file: 1, start_line: 4, end_line: 15 },
             ],
             preview: "",
+            highlight_start: 0,
+            highlight_lines: 0,
           },
         ],
       }),

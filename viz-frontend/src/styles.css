@@ -922,6 +922,24 @@ button {
   font-style: italic;
 }
 
+/* Context-window clone preview: each source line is a full-width block
+   row. Copied lines are highlighted with a faint amber wash and a left
+   accent bar; surrounding context lines are dimmed. min-height keeps
+   blank lines from collapsing away. */
+#panel pre .dup-line,
+#panel pre .ctx-line {
+  display: block;
+  min-height: 1.5em;
+  padding-left: 6px;
+}
+#panel pre .ctx-line {
+  opacity: 0.55;
+}
+#panel pre .dup-line {
+  background: var(--amber-subtle);
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+
 #panel pre {
   border-radius: var(--radius-sm);
   background: var(--surface-0);
