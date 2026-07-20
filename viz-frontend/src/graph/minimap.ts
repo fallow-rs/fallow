@@ -27,19 +27,19 @@ interface MinimapFrame {
 const minimapFrameAt = (
   state: AppState,
   gvs: GraphViewState,
-  w: number,
-  h: number,
+  width: number,
+  height: number,
 ): MinimapFrame | null => {
   if (gvs.clusters.length < 2) return null;
   // Keep clear of the detail panel when a road drill-down is open.
-  const panelW = state.selectedRoad !== null ? Math.min(380, w * 0.9) : 0;
+  const panelW = state.selectedRoad !== null ? Math.min(380, width * 0.9) : 0;
   const { minX, minY, maxX, maxY } = clusterBounds(gvs.clusters, () => true);
   const worldW = Math.max(1, maxX - minX);
   const worldH = Math.max(1, maxY - minY);
   const scale = Math.min((MINIMAP_W - 12) / worldW, (MINIMAP_H - 12) / worldH);
   return {
-    x: w - panelW - MINIMAP_W - MINIMAP_MARGIN,
-    y: h - MINIMAP_H - MINIMAP_MARGIN - 24,
+    x: width - panelW - MINIMAP_W - MINIMAP_MARGIN,
+    y: height - MINIMAP_H - MINIMAP_MARGIN - 24,
     w: MINIMAP_W,
     h: MINIMAP_H,
     scale,
@@ -51,16 +51,21 @@ const minimapFrameAt = (
 /** The minimap frame at the stage's current size. */
 const minimapFrame = (state: AppState, gvs: GraphViewState): MinimapFrame | null => {
   const stageEl = state.canvas.parentElement;
-  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
-  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-  return minimapFrameAt(state, gvs, w, h);
+  const width = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const height = stageEl ? stageEl.clientHeight : window.innerHeight;
+  return minimapFrameAt(state, gvs, width, height);
 };
 
-export const drawMinimap = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+export const drawMinimap = (
+  state: AppState,
+  gvs: GraphViewState,
+  width: number,
+  height: number,
+): void => {
   const { ctx, theme } = state;
   // Only earns pixels once the camera left the fit view.
   if (gvs.transform.k / gvs.fitK < 1.08) return;
-  const frame = minimapFrameAt(state, gvs, w, h);
+  const frame = minimapFrameAt(state, gvs, width, height);
   if (!frame) return;
 
   ctx.fillStyle = theme.surface1;
@@ -71,17 +76,17 @@ export const drawMinimap = (state: AppState, gvs: GraphViewState, w: number, h: 
   ctx.lineWidth = 1;
   ctx.strokeRect(frame.x + 0.5, frame.y + 0.5, frame.w - 1, frame.h - 1);
 
-  const toMini = (p: Pt): Pt => ({
-    x: frame.x + (p.x - frame.worldX) * frame.scale,
-    y: frame.y + (p.y - frame.worldY) * frame.scale,
+  const toMini = (point: Pt): Pt => ({
+    x: frame.x + (point.x - frame.worldX) * frame.scale,
+    y: frame.y + (point.y - frame.worldY) * frame.scale,
   });
 
   // Cluster footprints, tangles in amber.
   for (const cluster of gvs.clusters) {
-    const c = toMini({ x: cluster.cx, y: cluster.cy });
-    const r = Math.max(1.5, cluster.r * frame.scale);
+    const center = toMini({ x: cluster.cx, y: cluster.cy });
+    const radius = Math.max(1.5, cluster.r * frame.scale);
     ctx.beginPath();
-    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.fillStyle = cluster.tangle ? theme.amber : theme.borderStrong;
     ctx.globalAlpha = cluster.tangle ? 0.55 : 0.4;
     ctx.fill();
@@ -92,8 +97,8 @@ export const drawMinimap = (state: AppState, gvs: GraphViewState, w: number, h: 
   const { transform } = gvs;
   const topLeft = toMini({ x: -transform.x / transform.k, y: -transform.y / transform.k });
   const bottomRight = toMini({
-    x: (w - transform.x) / transform.k,
-    y: (h - transform.y) / transform.k,
+    x: (width - transform.x) / transform.k,
+    y: (height - transform.y) / transform.k,
   });
   ctx.strokeStyle = theme.blue;
   ctx.lineWidth = 1;
@@ -122,12 +127,14 @@ export const minimapPan = (state: AppState, x: number, y: number): void => {
   const frame = minimapFrame(state, gvs);
   if (!frame) return;
   const stageEl = state.canvas.parentElement;
-  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
-  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
+  const width = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const height = stageEl ? stageEl.clientHeight : window.innerHeight;
   const worldX = frame.worldX + (x - frame.x) / frame.scale;
   const worldY = frame.worldY + (y - frame.y) / frame.scale;
-  const k = gvs.transform.k;
-  const target = zoomIdentity.translate(w / 2 - worldX * k, h / 2 - worldY * k).scale(k);
+  const zoomScale = gvs.transform.k;
+  const target = zoomIdentity
+    .translate(width / 2 - worldX * zoomScale, height / 2 - worldY * zoomScale)
+    .scale(zoomScale);
   const sel = select(state.canvas);
   // Glide the recentre so a minimap click reads as a pan, not a jump.
   if (state.reducedMotion) {

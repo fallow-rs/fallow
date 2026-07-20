@@ -962,10 +962,9 @@ button {
   overflow-wrap: anywhere;
 }
 
-/* Quieter, themed scrollbars across the panel and its code preview,
+/* Quieter, themed scrollbars for the panel and its scrollable lists,
    replacing the default heavy OS bars. */
-#panel,
-#panel pre {
+#panel {
   scrollbar-width: thin;
   scrollbar-color: var(--border-default) transparent;
 }
@@ -1057,12 +1056,6 @@ button {
   font-size: var(--fs-sm);
   color: var(--text-muted);
   margin-top: 6px;
-  overflow-wrap: anywhere;
-}
-
-#panel .action-hint code {
-  color: var(--green-text);
-  font-family: inherit;
   overflow-wrap: anywhere;
 }
 

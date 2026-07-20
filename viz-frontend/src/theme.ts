@@ -139,35 +139,35 @@ const hexToRgb = (hex: string): Rgb => ({
   b: parseInt(hex.slice(5, 7), 16),
 });
 
-const rgbToHex = ({ r, g, b }: Rgb): string =>
-  `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+const rgbToHex = ({ r: red, g: green, b: blue }: Rgb): string =>
+  `#${[red, green, blue].map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
 
-export const mix = (a: string, b: string, t: number): string => {
-  const ca = hexToRgb(a);
-  const cb = hexToRgb(b);
+export const mix = (fromColor: string, toColor: string, ratio: number): string => {
+  const fromRgb = hexToRgb(fromColor);
+  const toRgb = hexToRgb(toColor);
   return rgbToHex({
-    r: ca.r + (cb.r - ca.r) * t,
-    g: ca.g + (cb.g - ca.g) * t,
-    b: ca.b + (cb.b - ca.b) * t,
+    r: fromRgb.r + (toRgb.r - fromRgb.r) * ratio,
+    g: fromRgb.g + (toRgb.g - fromRgb.g) * ratio,
+    b: fromRgb.b + (toRgb.b - fromRgb.b) * ratio,
   });
 };
 
 /**
  * Sequential single-hue ramp for the duplication lens: neutral → amber.
- * `t` in [0, 1].
+ * `intensity` in [0, 1].
  */
-export const dupRamp = (theme: Theme, t: number): string => {
-  if (t <= 0) return theme.cellNeutral;
-  return mix(mix(theme.amberSubtle, theme.amber, 0.25), theme.amber, Math.min(1, t));
+export const dupRamp = (theme: Theme, intensity: number): string => {
+  if (intensity <= 0) return theme.cellNeutral;
+  return mix(mix(theme.amberSubtle, theme.amber, 0.25), theme.amber, Math.min(1, intensity));
 };
 
 /**
  * Two-stop warm ramp for the hotspot lens: neutral → amber → red
- * (matches the design system's severity gradient). `t` in [0, 1].
+ * (matches the design system's severity gradient). `intensity` in [0, 1].
  */
-export const heatRamp = (theme: Theme, t: number): string => {
-  if (t <= 0) return theme.cellNeutral;
-  const clamped = Math.min(1, t);
+export const heatRamp = (theme: Theme, intensity: number): string => {
+  if (intensity <= 0) return theme.cellNeutral;
+  const clamped = Math.min(1, intensity);
   if (clamped < 0.5) {
     return mix(mix(theme.amberSubtle, theme.amber, 0.3), theme.amber, clamped * 2);
   }
@@ -182,7 +182,7 @@ export const zoneColor = (theme: Theme, zone: number | undefined): string => {
 
 /** Text color that contrasts with an arbitrary hex fill. */
 export const contrastText = (hex: string): string => {
-  const { r, g, b } = hexToRgb(hex);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const { r: red, g: green, b: blue } = hexToRgb(hex);
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
   return luminance > 0.55 ? "#111110" : "#eeeeec";
 };

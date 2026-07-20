@@ -21,15 +21,15 @@ type KvPair = [key: string, value: string | HTMLElement, hint?: string];
 
 const kvEl = (pairs: KvPair[]): HTMLElement => {
   const dl = el("dl", "kv");
-  for (const [k, v, hint] of pairs) {
-    const dt = el("dt", undefined, k);
+  for (const [key, value, hint] of pairs) {
+    const dt = el("dt", undefined, key);
     if (hint) {
       dt.classList.add("hinted");
       dt.dataset.tip = hint;
     }
     const dd = el("dd");
-    if (typeof v === "string") dd.textContent = v;
-    else dd.appendChild(v);
+    if (typeof value === "string") dd.textContent = value;
+    else dd.appendChild(value);
     dl.append(dt, dd);
   }
   return dl;
@@ -77,13 +77,13 @@ const linkList = (
   cap = 30,
 ): HTMLElement => {
   const ul = el("ul", "link-list");
-  for (const idx of indices.slice(0, cap)) {
+  for (const fileIndex of indices.slice(0, cap)) {
     const li = el("li");
     const btn = el("button") as HTMLButtonElement;
     btn.type = "button";
-    const path = state.data.files[idx].path;
+    const path = state.data.files[fileIndex].path;
     btn.appendChild(rankLabelEl(basename(path), dirname(path), 0));
-    btn.addEventListener("click", () => navigate(idx));
+    btn.addEventListener("click", () => navigate(fileIndex));
     li.appendChild(btn);
     ul.appendChild(li);
   }
@@ -200,8 +200,8 @@ const duplicationSection = (
       if (!group) continue;
       const row = el("div", "clone-row");
       const headLine = el("div", "clone-head");
-      const n = el("span", "n", `${group.lines} lines`);
-      headLine.appendChild(n);
+      const linesEl = el("span", "n", `${group.lines} lines`);
+      headLine.appendChild(linesEl);
       headLine.appendChild(document.createTextNode(` × ${group.instances.length} places`));
       row.appendChild(headLine);
       const others = group.instances
@@ -230,33 +230,33 @@ const boundariesSection = (
   fileIdx: number,
   navigate: NavigateFn,
 ): HTMLElement | null => {
-  const outgoing = state.data.violations.filter((v) => v.from === fileIdx);
-  const incoming = state.data.violations.filter((v) => v.to === fileIdx);
+  const outgoing = state.data.violations.filter((violation) => violation.from === fileIdx);
+  const incoming = state.data.violations.filter((violation) => violation.to === fileIdx);
   if (outgoing.length > 0 || incoming.length > 0) {
-    const b = sectionEl("forbidden imports");
-    for (const v of outgoing.slice(0, 6)) {
+    const section = sectionEl("forbidden imports");
+    for (const violation of outgoing.slice(0, 6)) {
       const row = el("div");
       row.appendChild(
         sev(
           "sev-error",
-          `${state.data.zones[v.from_zone]?.name ?? "?"} → ${state.data.zones[v.to_zone]?.name ?? "?"} `,
+          `${state.data.zones[violation.from_zone]?.name ?? "?"} → ${state.data.zones[violation.to_zone]?.name ?? "?"} `,
         ),
       );
       const btn = el(
         "button",
         undefined,
-        basename(state.data.files[v.to].path),
+        basename(state.data.files[violation.to].path),
       ) as HTMLButtonElement;
       btn.type = "button";
       btn.className = "";
       btn.style.textDecoration = "underline";
-      btn.addEventListener("click", () => navigate(v.to));
+      btn.addEventListener("click", () => navigate(violation.to));
       row.appendChild(btn);
-      row.appendChild(el("span", "muted", ` :${v.line}`));
-      b.appendChild(row);
+      row.appendChild(el("span", "muted", ` :${violation.line}`));
+      section.appendChild(row);
     }
     if (incoming.length > 0) {
-      b.appendChild(
+      section.appendChild(
         el(
           "div",
           "muted",
@@ -264,7 +264,7 @@ const boundariesSection = (
         ),
       );
     }
-    return b;
+    return section;
   }
   return null;
 };
@@ -278,13 +278,13 @@ const cycleSection = (
 ): HTMLElement | null => {
   if (file.in_cycle) {
     const cyc = sectionEl("import loop");
-    const cycles = state.data.cycles.filter((c) => c.includes(fileIdx));
+    const cycles = state.data.cycles.filter((cycle) => cycle.includes(fileIdx));
     for (const cycle of cycles.slice(0, 2)) {
       cyc.appendChild(el("div", "sev-warn", `loop of ${cycle.length} files`));
       cyc.appendChild(
         linkList(
           state,
-          cycle.filter((i) => i !== fileIdx),
+          cycle.filter((memberIdx) => memberIdx !== fileIdx),
           navigate,
           8,
         ),
@@ -305,14 +305,14 @@ const connectionSections = (
   const importers = state.index.importersOf[fileIdx];
   const imports = state.index.importsOf[fileIdx];
   if (importers.length > 0) {
-    const s = sectionEl(`imported by ${formatCount(importers.length)}`);
-    s.appendChild(linkList(state, importers, navigate));
-    out.push(s);
+    const section = sectionEl(`imported by ${formatCount(importers.length)}`);
+    section.appendChild(linkList(state, importers, navigate));
+    out.push(section);
   }
   if (imports.length > 0) {
-    const s = sectionEl(`imports ${formatCount(imports.length)}`);
-    s.appendChild(linkList(state, imports, navigate));
-    out.push(s);
+    const section = sectionEl(`imports ${formatCount(imports.length)}`);
+    section.appendChild(linkList(state, imports, navigate));
+    out.push(section);
   }
   return out;
 };
@@ -544,9 +544,9 @@ const CODE_TOKEN =
 
 const highlightCode = (pre: HTMLElement, code: string): void => {
   let last = 0;
-  for (let m = CODE_TOKEN.exec(code); m !== null; m = CODE_TOKEN.exec(code)) {
-    if (m.index > last) pre.appendChild(document.createTextNode(code.slice(last, m.index)));
-    const [text, comment, str, num, ident] = m;
+  for (let match = CODE_TOKEN.exec(code); match !== null; match = CODE_TOKEN.exec(code)) {
+    if (match.index > last) pre.appendChild(document.createTextNode(code.slice(last, match.index)));
+    const [text, comment, str, num, ident] = match;
     let cls = "";
     if (comment !== undefined) cls = "tok-com";
     else if (str !== undefined) cls = "tok-str";
@@ -554,7 +554,7 @@ const highlightCode = (pre: HTMLElement, code: string): void => {
     else if (ident !== undefined && CODE_KEYWORDS.has(ident)) cls = "tok-kw";
     if (cls) pre.appendChild(el("span", cls, text));
     else pre.appendChild(document.createTextNode(text));
-    last = m.index + text.length;
+    last = match.index + text.length;
   }
   if (last < code.length) pre.appendChild(document.createTextNode(code.slice(last)));
 };
@@ -572,8 +572,8 @@ const clonePreviewEl = (group: VizCloneGroup): HTMLElement => {
   const hasRange = group.highlight_lines > 0;
   const hlStart = hasRange ? group.highlight_start : 0;
   const hlEnd = hasRange ? hlStart + group.highlight_lines : lines.length;
-  lines.forEach((line, i) => {
-    const isDup = i >= hlStart && i < hlEnd;
+  lines.forEach((line, lineIndex) => {
+    const isDup = lineIndex >= hlStart && lineIndex < hlEnd;
     const lineEl = el("span", isDup ? "dup-line" : "ctx-line");
     highlightCode(lineEl, line);
     pre.appendChild(lineEl);
@@ -638,15 +638,15 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
       // The newcomer's "what should I read first": files the rest of the
       // codebase leans on hardest, ranked by how many import them.
       const rows = files
-        .map((f, i) => ({ f, i }))
-        .filter(({ f }) => f.importer_count > 0)
-        .toSorted((a, b) => b.f.importer_count - a.f.importer_count)
-        .map(({ f, i }) => ({
-          label: basename(f.path),
-          dir: dirname(f.path),
-          metric: `used by ${formatCount(f.importer_count)}`,
-          cells: [{ value: formatCount(f.importer_count), cls: "muted" }],
-          fileIndex: i,
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) => file.importer_count > 0)
+        .toSorted((left, right) => right.file.importer_count - left.file.importer_count)
+        .map(({ file, index }) => ({
+          label: basename(file.path),
+          dir: dirname(file.path),
+          metric: `used by ${formatCount(file.importer_count)}`,
+          cells: [{ value: formatCount(file.importer_count), cls: "muted" }],
+          fileIndex: index,
         }));
       return {
         title: "most depended-on files",
@@ -659,29 +659,29 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
     case "deadcode": {
       const rows: RankRow[] = [];
       const unused = files
-        .map((f, i) => ({ f, i }))
-        .filter(({ f }) => f.status === "unused")
-        .toSorted((a, b) => b.f.size - a.f.size);
-      for (const { f, i } of unused) {
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) => file.status === "unused")
+        .toSorted((left, right) => right.file.size - left.file.size);
+      for (const { file, index } of unused) {
         rows.push({
-          label: basename(f.path),
-          dir: dirname(f.path),
-          metric: formatSize(f.size),
-          cells: [{ value: formatSize(f.size), cls: "sev-error" }],
-          fileIndex: i,
+          label: basename(file.path),
+          dir: dirname(file.path),
+          metric: formatSize(file.size),
+          cells: [{ value: formatSize(file.size), cls: "sev-error" }],
+          fileIndex: index,
         });
       }
       const partial = files
-        .map((f, i) => ({ f, i }))
-        .filter(({ f }) => f.status !== "unused" && f.unused_export_count > 0)
-        .toSorted((a, b) => b.f.unused_export_count - a.f.unused_export_count);
-      for (const { f, i } of partial) {
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) => file.status !== "unused" && file.unused_export_count > 0)
+        .toSorted((left, right) => right.file.unused_export_count - left.file.unused_export_count);
+      for (const { file, index } of partial) {
         rows.push({
-          label: basename(f.path),
-          dir: dirname(f.path),
-          metric: `${formatCount(f.unused_export_count)} exports`,
-          cells: [{ value: `${formatCount(f.unused_export_count)} exports`, cls: "sev-warn" }],
-          fileIndex: i,
+          label: basename(file.path),
+          dir: dirname(file.path),
+          metric: `${formatCount(file.unused_export_count)} exports`,
+          cells: [{ value: `${formatCount(file.unused_export_count)} exports`, cls: "sev-warn" }],
+          fileIndex: index,
         });
       }
       return {
@@ -699,15 +699,15 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
     }
     case "dupes": {
       const rows = [...state.data.clones.keys()]
-        .toSorted((a, b) => state.data.clones[b].lines - state.data.clones[a].lines)
-        .filter((g) => {
+        .toSorted((left, right) => state.data.clones[right].lines - state.data.clones[left].lines)
+        .filter((groupIdx) => {
           // Malformed groups (no instances, or an out-of-range file
           // index) must not kill the whole ranked list.
-          const group = state.data.clones[g];
+          const group = state.data.clones[groupIdx];
           return group.instances.length > 0 && files[group.instances[0].file] !== undefined;
         })
-        .map((g) => {
-          const group = state.data.clones[g];
+        .map((groupIdx) => {
+          const group = state.data.clones[groupIdx];
           const first = group.instances[0];
           return {
             label: `${basename(files[first.file].path)} ×${group.instances.length}`,
@@ -715,7 +715,7 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
             metric: `${formatCount(group.lines)} lines`,
             cells: [{ value: formatCount(group.lines), cls: "sev-warn" }],
             fileIndex: first.file,
-            clone: g,
+            clone: groupIdx,
           };
         });
       const truncated = state.data.summary.clone_groups_truncated;
@@ -732,15 +732,15 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
     }
     case "boundaries": {
       const rows: RankRow[] = [];
-      for (const v of state.data.violations) {
-        if (files[v.from] === undefined || files[v.to] === undefined) continue;
-        const zoneName = state.data.zones[v.to_zone]?.name ?? "zone";
+      for (const violation of state.data.violations) {
+        if (files[violation.from] === undefined || files[violation.to] === undefined) continue;
+        const zoneName = state.data.zones[violation.to_zone]?.name ?? "zone";
         rows.push({
-          label: `${basename(files[v.from].path)} → ${basename(files[v.to].path)}`,
-          dir: dirname(files[v.from].path),
+          label: `${basename(files[violation.from].path)} → ${basename(files[violation.to].path)}`,
+          dir: dirname(files[violation.from].path),
           metric: `→ ${zoneName}`,
           cells: [{ value: `→ ${zoneName}`, cls: "sev-error" }],
-          fileIndex: v.from,
+          fileIndex: violation.from,
         });
       }
       state.data.cycles.forEach((cycle) => {
@@ -769,23 +769,29 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
     case "hotspots": {
       // Risk = hard to change AND widely depended on, not hardness alone;
       // that is the "what do we refactor first" ordering a lead wants.
-      const risk = (f: VizFile): number => f.max_cyclomatic * Math.log2(2 + f.importer_count);
+      const risk = (file: VizFile): number =>
+        file.max_cyclomatic * Math.log2(2 + file.importer_count);
       const rows = files
-        .map((f, i) => ({ f, i }))
-        .filter(({ f }) => f.max_cyclomatic > 0)
-        .toSorted((a, b) => risk(b.f) - risk(a.f))
-        .map(({ f, i }) => ({
-          label: basename(f.path),
-          dir: dirname(f.path),
-          metric: `cc ${formatCount(f.max_cyclomatic)}, used by ${formatCount(f.importer_count)}`,
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) => file.max_cyclomatic > 0)
+        .toSorted((left, right) => risk(right.file) - risk(left.file))
+        .map(({ file, index }) => ({
+          label: basename(file.path),
+          dir: dirname(file.path),
+          metric: `cc ${formatCount(file.max_cyclomatic)}, used by ${formatCount(file.importer_count)}`,
           cells: [
             {
-              value: formatCount(f.max_cyclomatic),
-              cls: f.max_cyclomatic >= 20 ? "sev-error" : f.max_cyclomatic >= 10 ? "sev-warn" : "",
+              value: formatCount(file.max_cyclomatic),
+              cls:
+                file.max_cyclomatic >= 20
+                  ? "sev-error"
+                  : file.max_cyclomatic >= 10
+                    ? "sev-warn"
+                    : "",
             },
-            { value: formatCount(f.importer_count), cls: "muted" },
+            { value: formatCount(file.importer_count), cls: "muted" },
           ],
-          fileIndex: i,
+          fileIndex: index,
         }));
       return {
         title: "complexity hotspots",
@@ -822,17 +828,19 @@ const DIGEST_COMMANDS: Record<Lens, string> = {
  * already in memory.
  */
 export const buildMapDigest = (state: AppState): string => {
-  const s = state.data.summary;
+  const summary = state.data.summary;
   const lines: string[] = [
     `# fallow map: ${state.data.root}`,
     "",
-    `${formatCount(s.total_files)} files, ${formatCount(s.total_edges)} imports`,
-    `- unused: ${formatCount(s.unused_files)} files, ${formatCount(s.unused_exports)} exports`,
-    `- duplication: ${formatCount(s.clone_groups)} groups${
-      s.clone_groups_truncated ? ` (+${formatCount(s.clone_groups_truncated)} not shown)` : ""
-    }, ${formatCount(s.duplicated_lines)} lines`,
-    `- boundaries: ${formatCount(s.circular_deps)} loops, ${formatCount(s.boundary_violations)} forbidden imports`,
-    `- complexity: ${formatCount(s.hotspot_files)} files flagged as hardest to change`,
+    `${formatCount(summary.total_files)} files, ${formatCount(summary.total_edges)} imports`,
+    `- unused: ${formatCount(summary.unused_files)} files, ${formatCount(summary.unused_exports)} exports`,
+    `- duplication: ${formatCount(summary.clone_groups)} groups${
+      summary.clone_groups_truncated
+        ? ` (+${formatCount(summary.clone_groups_truncated)} not shown)`
+        : ""
+    }, ${formatCount(summary.duplicated_lines)} lines`,
+    `- boundaries: ${formatCount(summary.circular_deps)} loops, ${formatCount(summary.boundary_violations)} forbidden imports`,
+    `- complexity: ${formatCount(summary.hotspot_files)} files flagged as hardest to change`,
   ];
   const lenses: Lens[] = ["overview", "deadcode", "dupes", "boundaries", "hotspots"];
   for (const lens of lenses) {
@@ -946,14 +954,14 @@ const renderRankTable = (
 
 /** RankRows for a set of file indices, labelled with their importer count. */
 const fileRankRows = (state: AppState, indices: number[]): RankRow[] =>
-  indices.map((i) => {
-    const f = state.data.files[i];
+  indices.map((index) => {
+    const file = state.data.files[index];
     return {
-      label: basename(f.path),
-      dir: dirname(f.path),
-      metric: `used by ${formatCount(f.importer_count)}`,
-      cells: [{ value: formatCount(f.importer_count), cls: "muted" }],
-      fileIndex: i,
+      label: basename(file.path),
+      dir: dirname(file.path),
+      metric: `used by ${formatCount(file.importer_count)}`,
+      cells: [{ value: formatCount(file.importer_count), cls: "muted" }],
+      fileIndex: index,
     };
   });
 
@@ -1005,8 +1013,8 @@ export const searchPanelModel = (
   state: AppState,
 ): { query: string; matches: number[]; affected: number[] } => {
   const files = state.data.files;
-  const byImporters = (a: number, b: number): number =>
-    files[b].importer_count - files[a].importer_count;
+  const byImporters = (leftIdx: number, rightIdx: number): number =>
+    files[rightIdx].importer_count - files[leftIdx].importer_count;
   return {
     query: state.search.trim(),
     matches: [...state.searchMatches].toSorted(byImporters),
@@ -1207,10 +1215,10 @@ const renderRoadPanel = (
   importsHead.appendChild(importsHr);
   importsTable.appendChild(importsHead);
   const importsBody = el("tbody");
-  const n = state.data.files.length;
+  const fileCount = state.data.files.length;
   const cap = 80;
   for (const [from, to] of road.pairs.slice(0, cap)) {
-    const packed = from * n + to;
+    const packed = from * fileCount + to;
     const fromPath = state.data.files[from].path;
     const toName = basename(state.data.files[to].path);
     const cls = state.index.violationEdges.has(packed)

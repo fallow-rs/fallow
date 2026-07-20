@@ -24,13 +24,13 @@ export interface DataIndex {
   heatCeiling: number;
 }
 
-const packEdge = (n: number, from: number, to: number): number => from * n + to;
+const packEdge = (fileCount: number, from: number, to: number): number => from * fileCount + to;
 
-const percentile = (values: number[], p: number): number => {
+const percentile = (values: number[], fraction: number): number => {
   if (values.length === 0) return 0;
-  const sorted = [...values].toSorted((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
-  return sorted[idx];
+  const sorted = [...values].toSorted((left, right) => left - right);
+  const sampleIndex = Math.min(sorted.length - 1, Math.floor(sorted.length * fraction));
+  return sorted[sampleIndex];
 };
 
 const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, TreeNode> } => {
@@ -45,16 +45,16 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
   const byPath = new Map<string, TreeNode>();
   byPath.set("", root);
 
-  for (let i = 0; i < files.length; i++) {
-    const parts = files[i].path.split("/");
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const parts = files[fileIndex].path.split("/");
     let node = root;
     let prefix = "";
-    for (let d = 0; d < parts.length - 1; d++) {
-      prefix = prefix ? `${prefix}/${parts[d]}` : parts[d];
+    for (let depth = 0; depth < parts.length - 1; depth++) {
+      prefix = prefix ? `${prefix}/${parts[depth]}` : parts[depth];
       let child = byPath.get(prefix);
       if (!child) {
         child = {
-          name: parts[d],
+          name: parts[depth],
           path: prefix,
           size: 0,
           children: [],
@@ -68,10 +68,10 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
     }
     const leaf: TreeNode = {
       name: parts[parts.length - 1],
-      path: files[i].path,
-      size: Math.max(1, files[i].size),
+      path: files[fileIndex].path,
+      size: Math.max(1, files[fileIndex].size),
       children: [],
-      fileIndex: i,
+      fileIndex,
       parent: node,
     };
     node.children.push(leaf);
@@ -80,16 +80,16 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
   // Roll up sizes bottom-up and sort children by size (largest first).
   const rollup = (node: TreeNode): number => {
     if (node.fileIndex !== null) return node.size;
-    node.size = node.children.reduce((sum, c) => sum + rollup(c), 0);
-    node.children = node.children.toSorted((a, b) => b.size - a.size);
+    node.size = node.children.reduce((sum, child) => sum + rollup(child), 0);
+    node.children = node.children.toSorted((nodeA, nodeB) => nodeB.size - nodeA.size);
     return node.size;
   };
   rollup(root);
 
   // Collapse single-child directory chains (src -> src/components).
   const collapse = (node: TreeNode): void => {
-    for (let i = 0; i < node.children.length; i++) {
-      let child = node.children[i];
+    for (let childIndex = 0; childIndex < node.children.length; childIndex++) {
+      let child = node.children[childIndex];
       while (
         child.fileIndex === null &&
         child.children.length === 1 &&
@@ -98,10 +98,10 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
         const grand = child.children[0];
         grand.name = `${child.name}/${grand.name}`;
         grand.parent = node;
-        node.children[i] = grand;
+        node.children[childIndex] = grand;
         child = grand;
       }
-      collapse(node.children[i]);
+      collapse(node.children[childIndex]);
     }
   };
   collapse(root);
@@ -118,40 +118,42 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
 };
 
 export const buildIndex = (data: VizData): DataIndex => {
-  const n = data.files.length;
-  const importersOf: number[][] = Array.from({ length: n }, () => []);
-  const importsOf: number[][] = Array.from({ length: n }, () => []);
+  const fileCount = data.files.length;
+  const importersOf: number[][] = Array.from({ length: fileCount }, () => []);
+  const importsOf: number[][] = Array.from({ length: fileCount }, () => []);
   for (const [from, to] of data.edges) {
-    if (from >= n || to >= n) continue;
+    if (from >= fileCount || to >= fileCount) continue;
     importsOf[from].push(to);
     importersOf[to].push(from);
   }
 
   const cycleEdges = new Set<number>();
   for (const cycle of data.cycles) {
-    for (let i = 0; i < cycle.length; i++) {
-      const from = cycle[i];
-      const to = cycle[(i + 1) % cycle.length];
-      if (from >= n || to >= n) continue;
-      cycleEdges.add(packEdge(n, from, to));
-      cycleEdges.add(packEdge(n, to, from));
+    for (let index = 0; index < cycle.length; index++) {
+      const from = cycle[index];
+      const to = cycle[(index + 1) % cycle.length];
+      if (from >= fileCount || to >= fileCount) continue;
+      cycleEdges.add(packEdge(fileCount, from, to));
+      cycleEdges.add(packEdge(fileCount, to, from));
     }
   }
 
   const violationEdges = new Map<number, number[]>();
   const violationSources = new Set<number>();
-  for (let v = 0; v < data.violations.length; v++) {
-    const { from, to } = data.violations[v];
-    if (from >= n || to >= n) continue;
-    const key = packEdge(n, from, to);
+  for (let violationIndex = 0; violationIndex < data.violations.length; violationIndex++) {
+    const { from, to } = data.violations[violationIndex];
+    if (from >= fileCount || to >= fileCount) continue;
+    const key = packEdge(fileCount, from, to);
     const list = violationEdges.get(key);
-    if (list) list.push(v);
-    else violationEdges.set(key, [v]);
+    if (list) list.push(violationIndex);
+    else violationEdges.set(key, [violationIndex]);
     violationSources.add(from);
   }
 
-  const dupRatios = data.files.filter((f) => f.dup_lines > 0).map((f) => dupRatio(f));
-  const heats = data.files.filter((f) => f.max_cyclomatic > 0).map((f) => f.max_cyclomatic);
+  const dupRatios = data.files.filter((file) => file.dup_lines > 0).map((file) => dupRatio(file));
+  const heats = data.files
+    .filter((file) => file.max_cyclomatic > 0)
+    .map((file) => file.max_cyclomatic);
 
   const { root, byPath } = buildTree(data.files);
 
@@ -203,8 +205,8 @@ export const lensColor = (lens: Lens, theme: Theme, index: DataIndex, file: VizF
     case "hotspots": {
       // Floor at cc 3 so trivial functions stay neutral and real
       // complexity glows.
-      const t = (file.max_cyclomatic - 3) / Math.max(1, index.heatCeiling - 3);
-      return t > 0 ? heatRamp(theme, t) : theme.cellNeutral;
+      const intensity = (file.max_cyclomatic - 3) / Math.max(1, index.heatCeiling - 3);
+      return intensity > 0 ? heatRamp(theme, intensity) : theme.cellNeutral;
     }
   }
 };
@@ -244,13 +246,13 @@ export const lensFindingLevel = (
  * neutral map instead of advertising absent colors.
  */
 export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): string => {
-  const s = data.summary;
+  const summary = data.summary;
   const findings: Record<Lens, number> = {
     overview: -1,
-    deadcode: s.unused_files + s.unused_exports,
-    dupes: s.clone_groups,
-    boundaries: s.circular_deps + s.boundary_violations,
-    hotspots: s.hotspot_files,
+    deadcode: summary.unused_files + summary.unused_exports,
+    dupes: summary.clone_groups,
+    boundaries: summary.circular_deps + summary.boundary_violations,
+    hotspots: summary.hotspot_files,
   };
   if (findings[lens] === 0) {
     return "No findings in this lens, so the map keeps its neutral colors.";
@@ -283,10 +285,10 @@ export const reachSet = (adj: number[][], start: number): Set<number> => {
   while (stack.length > 0) {
     const cur = stack.pop();
     if (cur === undefined) break;
-    for (const nb of adj[cur] ?? []) {
-      if (nb !== start && !seen.has(nb)) {
-        seen.add(nb);
-        stack.push(nb);
+    for (const neighbor of adj[cur] ?? []) {
+      if (neighbor !== start && !seen.has(neighbor)) {
+        seen.add(neighbor);
+        stack.push(neighbor);
       }
     }
   }
@@ -307,10 +309,10 @@ export const reachSetMulti = (adj: number[][], starts: Iterable<number>): Set<nu
   while (stack.length > 0) {
     const cur = stack.pop();
     if (cur === undefined) break;
-    for (const nb of adj[cur] ?? []) {
-      if (!seeds.has(nb) && !seen.has(nb)) {
-        seen.add(nb);
-        stack.push(nb);
+    for (const neighbor of adj[cur] ?? []) {
+      if (!seeds.has(neighbor) && !seen.has(neighbor)) {
+        seen.add(neighbor);
+        stack.push(neighbor);
       }
     }
   }
@@ -325,11 +327,11 @@ export const formatSize = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-export const formatCount = (n: number): string => n.toLocaleString("en-US");
+export const formatCount = (count: number): string => count.toLocaleString("en-US");
 
 export const basename = (path: string): string => path.split("/").pop() ?? path;
 
 export const dirname = (path: string): string => {
-  const idx = path.lastIndexOf("/");
-  return idx === -1 ? "" : path.slice(0, idx);
+  const slashIndex = path.lastIndexOf("/");
+  return slashIndex === -1 ? "" : path.slice(0, slashIndex);
 };

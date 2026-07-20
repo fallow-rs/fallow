@@ -90,13 +90,13 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
   box.appendChild(foot);
 
   overlay.appendChild(box);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) handlers.onHelpClose();
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) handlers.onHelpClose();
   });
   // Minimal modal focus trap: Tab cycles between the dialog's
   // focusable elements instead of escaping into the page behind it.
-  overlay.addEventListener("keydown", (e) => {
-    if (e.key !== "Tab") return;
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
     const focusables = [
       ...overlay.querySelectorAll<HTMLElement>(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
@@ -105,11 +105,11 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
     if (focusables.length === 0) return;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
       first.focus();
     }
   });

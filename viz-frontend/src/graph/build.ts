@@ -33,23 +33,23 @@ import { renderGraph } from "./render";
 
 // ── Deterministic randomness ────────────────────────────────────
 
-const fnv1a = (s: string): number => {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
+const fnv1a = (text: string): number => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
   }
-  return h >>> 0;
+  return hash >>> 0;
 };
 
 const mulberry32 = (seed: number): (() => number) => {
-  let a = seed >>> 0;
+  let seedState = seed >>> 0;
   return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    seedState |= 0;
+    seedState = (seedState + 0x6d2b79f5) | 0;
+    let temp = Math.imul(seedState ^ (seedState >>> 15), 1 | seedState);
+    temp = (temp + Math.imul(temp ^ (temp >>> 7), 61 | temp)) ^ temp;
+    return ((temp ^ (temp >>> 14)) >>> 0) / 4294967296;
   };
 };
 
@@ -91,12 +91,12 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
       return;
     }
     const groups = new Map<string, number[]>();
-    for (const i of indices) {
-      const parts = files[i].path.split("/");
+    for (const index of indices) {
+      const parts = files[index].path.split("/");
       const key = depth < parts.length - 1 ? `${prefix}/${parts[depth]}` : prefix;
       const bucket = groups.get(key);
-      if (bucket) bucket.push(i);
-      else groups.set(key, [i]);
+      if (bucket) bucket.push(index);
+      else groups.set(key, [index]);
     }
     // Nothing to gain: one child, or everything sits directly in `prefix`.
     if (groups.size <= 1) {
@@ -107,9 +107,9 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
     // small children fold into one residual bucket under the container.
     const substantial: Array<[string, number[]]> = [];
     const residual: number[] = [];
-    for (const [key, idx] of groups) {
-      if (key !== prefix && idx.length >= MIN_CHILD) substantial.push([key, idx]);
-      else residual.push(...idx);
+    for (const [key, groupIndices] of groups) {
+      if (key !== prefix && groupIndices.length >= MIN_CHILD) substantial.push([key, groupIndices]);
+      else residual.push(...groupIndices);
     }
     if (substantial.length === 0) {
       emit(prefix, indices);
@@ -118,45 +118,48 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
     // Largest children first so the biggest containers split before the
     // cluster budget runs out; a child that is itself a container recurses.
     const ordered = substantial.toSorted(
-      (a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1),
+      (left, right) => right[1].length - left[1].length || (left[0] < right[0] ? -1 : 1),
     );
-    for (const [key, idx] of ordered) split(idx, key, depth + 1);
+    for (const [key, childIndices] of ordered) split(childIndices, key, depth + 1);
     emit(prefix, residual);
   };
   const top = new Map<string, number[]>();
-  for (let i = 0; i < files.length; i++) {
-    const seg = files[i].path.split("/")[0];
-    const bucket = top.get(seg);
-    if (bucket) bucket.push(i);
-    else top.set(seg, [i]);
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const segment = files[fileIndex].path.split("/")[0];
+    const bucket = top.get(segment);
+    if (bucket) bucket.push(fileIndex);
+    else top.set(segment, [fileIndex]);
   }
   const orderedTop = [...top.entries()].toSorted(
-    (a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1),
+    (left, right) => right[1].length - left[1].length || (left[0] < right[0] ? -1 : 1),
   );
-  for (const [seg, idx] of orderedTop) split(idx, seg, 1);
-  return new Map([...result.entries()].toSorted((a, b) => (a[0] < b[0] ? -1 : 1)));
+  for (const [segment, segmentIndices] of orderedTop) split(segmentIndices, segment, 1);
+  return new Map([...result.entries()].toSorted((left, right) => (left[0] < right[0] ? -1 : 1)));
 };
 
 const louvainCluster = (
   files: VizFile[],
   edges: [number, number, number][],
 ): Map<string, number[]> => {
-  const g = new Graph({ type: "undirected" });
-  for (let i = 0; i < files.length; i++) g.addNode(String(i));
+  const graph = new Graph({ type: "undirected" });
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) graph.addNode(String(fileIndex));
   const seen = new Set<string>();
   for (const [src, tgt] of edges) {
     if (src >= files.length || tgt >= files.length || src === tgt) continue;
     const key = src < tgt ? `${src}-${tgt}` : `${tgt}-${src}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    g.addEdge(String(src), String(tgt));
+    graph.addEdge(String(src), String(tgt));
   }
-  const communities = louvain(g, { resolution: 1.2, rng: mulberry32(fnv1a("fallow-louvain")) });
+  const communities = louvain(graph, {
+    resolution: 1.2,
+    rng: mulberry32(fnv1a("fallow-louvain")),
+  });
   const communityMap = new Map<number, number[]>();
-  for (let i = 0; i < files.length; i++) {
-    const comm = communities[String(i)] ?? 0;
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const comm = communities[String(fileIndex)] ?? 0;
     if (!communityMap.has(comm)) communityMap.set(comm, []);
-    communityMap.get(comm)?.push(i);
+    communityMap.get(comm)?.push(fileIndex);
   }
   // Name each community by the folder that dominates it. A community is an
   // import group, not a folder, so the plurality folder only names it honestly
@@ -170,13 +173,15 @@ const louvainCluster = (
   const MAJORITY = 0.5;
   const dominantFolder = (indices: number[], depth: number): { name: string; count: number } => {
     const counts = new Map<string, number>();
-    for (const idx of indices) {
-      const parts = files[idx].path.split("/");
+    for (const index of indices) {
+      const parts = files[index].path.split("/");
       const dirs = parts.length > 1 ? parts.slice(0, -1) : parts;
       const key = dirs.slice(0, depth).join("/");
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    const sorted = [...counts.entries()].toSorted((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    const sorted = [...counts.entries()].toSorted(
+      (left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1),
+    );
     return { name: sorted[0]?.[0] ?? "misc", count: sorted[0]?.[1] ?? 0 };
   };
   // Each community wants a `preferred` label, falling back to a more specific
@@ -190,16 +195,18 @@ const louvainCluster = (
     return { preferred: `${area} (mixed)`, fallback: `${specific.name} (mixed)` };
   });
   const preferredCount = new Map<string, number>();
-  for (const l of labels)
-    preferredCount.set(l.preferred, (preferredCount.get(l.preferred) ?? 0) + 1);
+  for (const label of labels)
+    preferredCount.set(label.preferred, (preferredCount.get(label.preferred) ?? 0) + 1);
   const result = new Map<string, number[]>();
-  comms.forEach((indices, i) => {
+  comms.forEach((indices, index) => {
     let name =
-      (preferredCount.get(labels[i].preferred) ?? 0) > 1 ? labels[i].fallback : labels[i].preferred;
+      (preferredCount.get(labels[index].preferred) ?? 0) > 1
+        ? labels[index].fallback
+        : labels[index].preferred;
     while (result.has(name)) name = `${name}*`;
     result.set(name, indices);
   });
-  return new Map([...result.entries()].toSorted((a, b) => (a[0] < b[0] ? -1 : 1)));
+  return new Map([...result.entries()].toSorted((left, right) => (left[0] < right[0] ? -1 : 1)));
 };
 // ── Meta-graph, SCC condensation, layering, ordering ────────────
 
@@ -212,24 +219,26 @@ export interface MetaEdge {
 }
 
 const buildMetaGraph = (state: AppState, clusterOf: number[], clusterCount: number): MetaEdge[] => {
-  const n = state.data.files.length;
+  const fileCount = state.data.files.length;
   const buckets = new Map<number, MetaEdge>();
   for (const [from, to] of state.data.edges) {
-    const a = clusterOf[from];
-    const b = clusterOf[to];
-    if (a === undefined || b === undefined || a === b) continue;
-    const key = a * clusterCount + b;
+    const srcCluster = clusterOf[from];
+    const dstCluster = clusterOf[to];
+    if (srcCluster === undefined || dstCluster === undefined || srcCluster === dstCluster) continue;
+    const key = srcCluster * clusterCount + dstCluster;
     let edge = buckets.get(key);
     if (!edge) {
-      edge = { src: a, dst: b, count: 0, violations: 0, cycleEdges: 0 };
+      edge = { src: srcCluster, dst: dstCluster, count: 0, violations: 0, cycleEdges: 0 };
       buckets.set(key, edge);
     }
     edge.count++;
-    const packed = from * n + to;
+    const packed = from * fileCount + to;
     if (state.index.violationEdges.has(packed)) edge.violations++;
     if (state.index.cycleEdges.has(packed)) edge.cycleEdges++;
   }
-  return [...buckets.values()].toSorted((a, b) => a.src - b.src || a.dst - b.dst);
+  return [...buckets.values()].toSorted(
+    (left, right) => left.src - right.src || left.dst - right.dst,
+  );
 };
 
 /** Iterative Tarjan SCC over the cluster meta-graph. */
@@ -247,38 +256,38 @@ export const tarjanSCC = (count: number, adj: number[][]): number[] => {
     const work: Array<[number, number]> = [[start, 0]];
     while (work.length > 0) {
       const frame = work[work.length - 1];
-      const v = frame[0];
+      const node = frame[0];
       if (frame[1] === 0) {
-        disc[v] = low[v] = time++;
-        stack.push(v);
-        onStack[v] = true;
+        disc[node] = low[node] = time++;
+        stack.push(node);
+        onStack[node] = true;
       }
       let advanced = false;
-      while (frame[1] < adj[v].length) {
-        const w = adj[v][frame[1]];
+      while (frame[1] < adj[node].length) {
+        const neighbor = adj[node][frame[1]];
         frame[1]++;
-        if (disc[w] === -1) {
-          work.push([w, 0]);
+        if (disc[neighbor] === -1) {
+          work.push([neighbor, 0]);
           advanced = true;
           break;
         }
-        if (onStack[w]) low[v] = Math.min(low[v], disc[w]);
+        if (onStack[neighbor]) low[node] = Math.min(low[node], disc[neighbor]);
       }
       if (advanced) continue;
-      if (low[v] === disc[v]) {
+      if (low[node] === disc[node]) {
         for (;;) {
-          const w = stack.pop();
-          if (w === undefined) break;
-          onStack[w] = false;
-          sccOf[w] = sccCount;
-          if (w === v) break;
+          const member = stack.pop();
+          if (member === undefined) break;
+          onStack[member] = false;
+          sccOf[member] = sccCount;
+          if (member === node) break;
         }
         sccCount++;
       }
       work.pop();
       if (work.length > 0) {
         const parent = work[work.length - 1][0];
-        low[parent] = Math.min(low[parent], low[v]);
+        low[parent] = Math.min(low[parent], low[node]);
       }
     }
   }
@@ -291,27 +300,27 @@ export const tarjanSCC = (count: number, adj: number[][]): number[] => {
  * most depended-on foundations sit at the highest layer (right).
  */
 export const assignLayers = (clusterCount: number, meta: MetaEdge[], sccOf: number[]): number[] => {
-  const sccCount = sccOf.reduce((max, s) => Math.max(max, s), -1) + 1;
+  const sccCount = sccOf.reduce((max, sccId) => Math.max(max, sccId), -1) + 1;
   const succ: Array<Set<number>> = Array.from({ length: sccCount }, () => new Set());
-  for (const e of meta) {
-    const a = sccOf[e.src];
-    const b = sccOf[e.dst];
-    if (a !== b) succ[a].add(b);
+  for (const edge of meta) {
+    const srcScc = sccOf[edge.src];
+    const dstScc = sccOf[edge.dst];
+    if (srcScc !== dstScc) succ[srcScc].add(dstScc);
   }
   const memo = new Array<number>(sccCount).fill(-1);
-  const depth = (s: number): number => {
-    if (memo[s] !== -1) return memo[s];
-    memo[s] = 0; // provisional (condensation is acyclic; guards reentry)
+  const depth = (sccId: number): number => {
+    if (memo[sccId] !== -1) return memo[sccId];
+    memo[sccId] = 0; // provisional (condensation is acyclic; guards reentry)
     let best = 0;
-    for (const t of succ[s]) best = Math.max(best, 1 + depth(t));
-    memo[s] = best;
+    for (const successor of succ[sccId]) best = Math.max(best, 1 + depth(successor));
+    memo[sccId] = best;
     return best;
   };
   let maxLayer = 0;
-  for (let s = 0; s < sccCount; s++) maxLayer = Math.max(maxLayer, depth(s));
+  for (let sccId = 0; sccId < sccCount; sccId++) maxLayer = Math.max(maxLayer, depth(sccId));
   const layers = new Array<number>(clusterCount);
-  for (let c = 0; c < clusterCount; c++) {
-    layers[c] = maxLayer - memo[sccOf[c]];
+  for (let clusterIndex = 0; clusterIndex < clusterCount; clusterIndex++) {
+    layers[clusterIndex] = maxLayer - memo[sccOf[clusterIndex]];
   }
   return layers;
 };
@@ -319,10 +328,10 @@ export const assignLayers = (clusterCount: number, meta: MetaEdge[], sccOf: numb
 /** Flowing (non-isolated) clusters grouped by their layer index. */
 const groupByLayer = (clusters: ClusterInfo[]): Map<number, ClusterInfo[]> => {
   const byLayer = new Map<number, ClusterInfo[]>();
-  for (const c of clusters) {
-    if (c.isolated) continue;
-    if (!byLayer.has(c.layer)) byLayer.set(c.layer, []);
-    byLayer.get(c.layer)?.push(c);
+  for (const cluster of clusters) {
+    if (cluster.isolated) continue;
+    if (!byLayer.has(cluster.layer)) byLayer.set(cluster.layer, []);
+    byLayer.get(cluster.layer)?.push(cluster);
   }
   return byLayer;
 };
@@ -331,44 +340,44 @@ const groupByLayer = (clusters: ClusterInfo[]): Map<number, ClusterInfo[]> => {
 const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   const byLayer = groupByLayer(clusters);
   for (const list of byLayer.values()) {
-    const sorted = list.toSorted((a, b) => (a.key < b.key ? -1 : 1));
-    sorted.forEach((c, i) => {
-      c.order = i;
+    const sorted = list.toSorted((left, right) => (left.key < right.key ? -1 : 1));
+    sorted.forEach((cluster, index) => {
+      cluster.order = index;
     });
   }
 
-  const neighbors = new Map<number, Array<{ other: number; w: number }>>();
-  clusters.forEach((_, i) => neighbors.set(i, []));
-  for (const e of meta) {
-    neighbors.get(e.src)?.push({ other: e.dst, w: e.count });
-    neighbors.get(e.dst)?.push({ other: e.src, w: e.count });
+  const neighbors = new Map<number, Array<{ other: number; weight: number }>>();
+  clusters.forEach((_, index) => neighbors.set(index, []));
+  for (const edge of meta) {
+    neighbors.get(edge.src)?.push({ other: edge.dst, weight: edge.count });
+    neighbors.get(edge.dst)?.push({ other: edge.src, weight: edge.count });
   }
 
-  const layerKeys = [...byLayer.keys()].toSorted((a, b) => a - b);
+  const layerKeys = [...byLayer.keys()].toSorted((left, right) => left - right);
   const indexOf = new Map<string, number>();
-  clusters.forEach((c, i) => indexOf.set(c.key, i));
+  clusters.forEach((cluster, index) => indexOf.set(cluster.key, index));
 
   const sweep = (keys: number[]): void => {
     for (const layer of keys) {
       const list = byLayer.get(layer);
       if (!list || list.length < 2) continue;
-      const scored = list.map((c) => {
-        const idx = indexOf.get(c.key) ?? 0;
+      const scored = list.map((cluster) => {
+        const clusterIndex = indexOf.get(cluster.key) ?? 0;
         let num = 0;
         let den = 0;
-        for (const nb of neighbors.get(idx) ?? []) {
+        for (const nb of neighbors.get(clusterIndex) ?? []) {
           const other = clusters[nb.other];
           if (Math.abs(other.layer - layer) !== 1) continue;
-          num += nb.w * other.order;
-          den += nb.w;
+          num += nb.weight * other.order;
+          den += nb.weight;
         }
-        return { c, bary: den > 0 ? num / den : c.order };
+        return { cluster, bary: den > 0 ? num / den : cluster.order };
       });
       const orderedScored = scored.toSorted(
-        (a, b) => a.bary - b.bary || (a.c.key < b.c.key ? -1 : 1),
+        (left, right) => left.bary - right.bary || (left.cluster.key < right.cluster.key ? -1 : 1),
       );
-      orderedScored.forEach((s, i) => {
-        s.c.order = i;
+      orderedScored.forEach((entry, index) => {
+        entry.cluster.order = index;
       });
     }
   };
@@ -383,19 +392,19 @@ const orderWithinLayers = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
 const stackLayers = (byLayer: Map<number, ClusterInfo[]>, layerKeys: number[]): void => {
   let x = 0;
   let prevMaxR = 0;
-  layerKeys.forEach((layer, i) => {
+  layerKeys.forEach((layer, index) => {
     const list = byLayer.get(layer) ?? [];
-    const maxR = list.reduce((max, c) => Math.max(max, c.r), 30);
-    if (i > 0) x += prevMaxR + maxR + LAYER_GAP;
-    for (const c of list) c.cx = x;
+    const maxR = list.reduce((max, cluster) => Math.max(max, cluster.r), 30);
+    if (index > 0) x += prevMaxR + maxR + LAYER_GAP;
+    for (const cluster of list) cluster.cx = x;
     prevMaxR = maxR;
   });
   for (const layer of layerKeys) {
-    const list = (byLayer.get(layer) ?? []).toSorted((a, b) => a.order - b.order);
+    const list = (byLayer.get(layer) ?? []).toSorted((left, right) => left.order - right.order);
     let y = 0;
-    list.forEach((c, i) => {
-      if (i > 0) y += list[i - 1].r + c.r + ROW_GAP;
-      c.cy = y;
+    list.forEach((cluster, index) => {
+      if (index > 0) y += list[index - 1].r + cluster.r + ROW_GAP;
+      cluster.cy = y;
     });
   }
 };
@@ -408,29 +417,29 @@ const relaxRows = (
   layerKeys: number[],
 ): void => {
   const indexOf = new Map<string, number>();
-  clusters.forEach((c, i) => indexOf.set(c.key, i));
-  const adjacency = new Map<number, Array<{ other: number; w: number }>>();
-  clusters.forEach((_, i) => adjacency.set(i, []));
-  for (const e of meta) {
-    adjacency.get(e.src)?.push({ other: e.dst, w: e.count });
-    adjacency.get(e.dst)?.push({ other: e.src, w: e.count });
+  clusters.forEach((cluster, index) => indexOf.set(cluster.key, index));
+  const adjacency = new Map<number, Array<{ other: number; weight: number }>>();
+  clusters.forEach((_, index) => adjacency.set(index, []));
+  for (const edge of meta) {
+    adjacency.get(edge.src)?.push({ other: edge.dst, weight: edge.count });
+    adjacency.get(edge.dst)?.push({ other: edge.src, weight: edge.count });
   }
   for (let pass = 0; pass < 3; pass++) {
     for (const layer of layerKeys) {
-      const list = (byLayer.get(layer) ?? []).toSorted((a, b) => a.order - b.order);
-      for (const c of list) {
-        const idx = indexOf.get(c.key) ?? 0;
+      const list = (byLayer.get(layer) ?? []).toSorted((left, right) => left.order - right.order);
+      for (const cluster of list) {
+        const clusterIndex = indexOf.get(cluster.key) ?? 0;
         let num = 0;
         let den = 0;
-        for (const nb of adjacency.get(idx) ?? []) {
-          num += nb.w * clusters[nb.other].cy;
-          den += nb.w;
+        for (const nb of adjacency.get(clusterIndex) ?? []) {
+          num += nb.weight * clusters[nb.other].cy;
+          den += nb.weight;
         }
-        if (den > 0) c.cy = (c.cy + num / den) / 2;
+        if (den > 0) cluster.cy = (cluster.cy + num / den) / 2;
       }
-      for (let i = 1; i < list.length; i++) {
-        const minY = list[i - 1].cy + list[i - 1].r + list[i].r + ROW_GAP;
-        if (list[i].cy < minY) list[i].cy = minY;
+      for (let index = 1; index < list.length; index++) {
+        const minY = list[index - 1].cy + list[index - 1].r + list[index].r + ROW_GAP;
+        if (list[index].cy < minY) list[index].cy = minY;
       }
     }
   }
@@ -442,18 +451,19 @@ const centerLayers = (
   byLayer: Map<number, ClusterInfo[]>,
   layerKeys: number[],
 ): number => {
-  const globalMid = flowing.reduce((sum, c) => sum + c.cy, 0) / Math.max(1, flowing.length);
+  const globalMid =
+    flowing.reduce((sum, cluster) => sum + cluster.cy, 0) / Math.max(1, flowing.length);
   for (const layer of layerKeys) {
     const list = byLayer.get(layer) ?? [];
-    const mid = list.reduce((s, c) => s + c.cy, 0) / Math.max(1, list.length);
-    for (const c of list) c.cy += globalMid - mid;
+    const mid = list.reduce((sum, cluster) => sum + cluster.cy, 0) / Math.max(1, list.length);
+    for (const cluster of list) cluster.cy += globalMid - mid;
   }
   return globalMid;
 };
 
 const bboxAspect = (flowing: ClusterInfo[]): number => {
-  const b = clusterBounds(flowing, () => true);
-  return (b.maxX - b.minX) / Math.max(1, b.maxY - b.minY);
+  const bounds = clusterBounds(flowing, () => true);
+  return (bounds.maxX - bounds.minX) / Math.max(1, bounds.maxY - bounds.minY);
 };
 
 /**
@@ -465,32 +475,34 @@ const bboxAspect = (flowing: ClusterInfo[]): number => {
 const wrapPortraitRows = (flowing: ClusterInfo[]): boolean => {
   if (bboxAspect(flowing) >= 1 || flowing.length <= 3) return false;
   const GRID_GAP = 150;
-  const list = [...flowing].toSorted((a, b) => a.layer - b.layer || a.cy - b.cy);
-  const totalW = list.reduce((sum, c) => sum + c.r * 2 + GRID_GAP, 0);
-  const avgRowH = list.reduce((sum, c) => sum + c.r * 2, 0) / list.length + GRID_GAP;
+  const list = [...flowing].toSorted(
+    (left, right) => left.layer - right.layer || left.cy - right.cy,
+  );
+  const totalW = list.reduce((sum, cluster) => sum + cluster.r * 2 + GRID_GAP, 0);
+  const avgRowH = list.reduce((sum, cluster) => sum + cluster.r * 2, 0) / list.length + GRID_GAP;
   const rowW = Math.max(
     Math.sqrt(2 * totalW * avgRowH),
-    Math.max(...list.map((c) => c.r * 2 + GRID_GAP)),
+    Math.max(...list.map((cluster) => cluster.r * 2 + GRID_GAP)),
   );
   let x = 0;
   let rowTop = 0;
   let rowMaxR = 0;
   const flushRow = (row: ClusterInfo[]): void => {
-    for (const c of row) c.cy = rowTop + rowMaxR;
+    for (const cluster of row) cluster.cy = rowTop + rowMaxR;
     rowTop += rowMaxR * 2 + GRID_GAP;
   };
   let row: ClusterInfo[] = [];
-  for (const c of list) {
-    if (x + c.r * 2 > rowW && row.length > 0) {
+  for (const cluster of list) {
+    if (x + cluster.r * 2 > rowW && row.length > 0) {
       flushRow(row);
       row = [];
       x = 0;
       rowMaxR = 0;
     }
-    c.cx = x + c.r;
-    x += c.r * 2 + GRID_GAP;
-    rowMaxR = Math.max(rowMaxR, c.r);
-    row.push(c);
+    cluster.cx = x + cluster.r;
+    x += cluster.r * 2 + GRID_GAP;
+    rowMaxR = Math.max(rowMaxR, cluster.r);
+    row.push(cluster);
   }
   flushRow(row);
   return true;
@@ -512,7 +524,7 @@ const spreadToAspect = (
   const TARGET_ASPECT = 2.2;
   if (aspect <= TARGET_ASPECT) return;
   const factor = Math.min(2.6, aspect / TARGET_ASPECT);
-  for (const c of flowing) c.cy = globalMid + (c.cy - globalMid) * factor;
+  for (const cluster of flowing) cluster.cy = globalMid + (cluster.cy - globalMid) * factor;
   let flip = -1;
   for (const layer of layerKeys) {
     const list = byLayer.get(layer) ?? [];
@@ -526,8 +538,8 @@ const spreadToAspect = (
 /** Coordinate assignment: stack, relax, center, then shape the aspect. */
 export const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   const byLayer = groupByLayer(clusters);
-  const layerKeys = [...byLayer.keys()].toSorted((a, b) => a - b);
-  const flowing = clusters.filter((c) => !c.isolated);
+  const layerKeys = [...byLayer.keys()].toSorted((left, right) => left - right);
+  const flowing = clusters.filter((cluster) => !cluster.isolated);
   stackLayers(byLayer, layerKeys);
   relaxRows(clusters, meta, byLayer, layerKeys);
   const globalMid = centerLayers(flowing, byLayer, layerKeys);
@@ -537,30 +549,32 @@ export const assignCoordinates = (clusters: ClusterInfo[], meta: MetaEdge[]): vo
 
 /** Park isolated clusters in a compact strip below the dependency flow. */
 const placeIsolated = (clusters: ClusterInfo[]): void => {
-  const isolated = clusters.filter((c) => c.isolated).toSorted((a, b) => (a.key < b.key ? -1 : 1));
+  const isolated = clusters
+    .filter((cluster) => cluster.isolated)
+    .toSorted((left, right) => (left.key < right.key ? -1 : 1));
   if (isolated.length === 0) return;
-  const flowing = clusters.filter((c) => !c.isolated);
+  const flowing = clusters.filter((cluster) => !cluster.isolated);
   let minX = 0;
   let maxX = 800;
   let maxY = 0;
   if (flowing.length > 0) {
-    minX = Math.min(...flowing.map((c) => c.cx - c.r));
-    maxX = Math.max(...flowing.map((c) => c.cx + c.r));
-    maxY = Math.max(...flowing.map((c) => c.cy + c.r));
+    minX = Math.min(...flowing.map((cluster) => cluster.cx - cluster.r));
+    maxX = Math.max(...flowing.map((cluster) => cluster.cx + cluster.r));
+    maxY = Math.max(...flowing.map((cluster) => cluster.cy + cluster.r));
   }
   let x = minX;
   let y = maxY + 200;
   let rowMax = 0;
-  for (const c of isolated) {
-    if (x + c.r * 2 > maxX && x > minX) {
+  for (const cluster of isolated) {
+    if (x + cluster.r * 2 > maxX && x > minX) {
       x = minX;
       y += rowMax + 90;
       rowMax = 0;
     }
-    c.cx = x + c.r;
-    c.cy = y + c.r;
-    x += c.r * 2 + 120;
-    rowMax = Math.max(rowMax, c.r * 2);
+    cluster.cx = x + cluster.r;
+    cluster.cy = y + cluster.r;
+    x += cluster.r * 2 + 120;
+    rowMax = Math.max(rowMax, cluster.r * 2);
   }
 };
 // ── Edge partitions ─────────────────────────────────────────────
@@ -584,12 +598,12 @@ export const partitionEdges = (
   const inter: Array<[number, number]> = [];
   const byCluster: Array<Array<[number, number]>> = Array.from({ length: clusterCount }, () => []);
   for (const [from, to] of edges) {
-    const a = clusterOf[from];
-    const b = clusterOf[to];
-    if (a === undefined || b === undefined) continue;
-    if (a === b) {
+    const srcCluster = clusterOf[from];
+    const dstCluster = clusterOf[to];
+    if (srcCluster === undefined || dstCluster === undefined) continue;
+    if (srcCluster === dstCluster) {
       intra.push([from, to]);
-      byCluster[a].push([from, to]);
+      byCluster[srcCluster].push([from, to]);
     } else {
       inter.push([from, to]);
     }
@@ -600,19 +614,19 @@ export const partitionEdges = (
 
 const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
   const files = state.data.files;
-  const maxSize = files.reduce((max, f) => Math.max(max, f.size), 1);
+  const maxSize = files.reduce((max, file) => Math.max(max, file.size), 1);
 
-  for (let ci = 0; ci < gvs.clusters.length; ci++) {
-    const cluster = gvs.clusters[ci];
+  for (let clusterIndex = 0; clusterIndex < gvs.clusters.length; clusterIndex++) {
+    const cluster = gvs.clusters[clusterIndex];
     const rand = mulberry32(fnv1a(cluster.key));
-    const nodes: FileNode[] = cluster.indices.map((fileIndex, i) => {
+    const nodes: FileNode[] = cluster.indices.map((fileIndex, memberIndex) => {
       // Phyllotaxis init in path-sorted member order: deterministic.
-      const angle = i * 2.399963229728653;
-      const radius = 6 * Math.sqrt(i + 0.5);
+      const angle = memberIndex * 2.399963229728653;
+      const radius = 6 * Math.sqrt(memberIndex + 0.5);
       const sizeRatio = Math.log(files[fileIndex].size + 1) / Math.log(maxSize + 1);
       return {
         fileIndex,
-        cluster: ci,
+        cluster: clusterIndex,
         radius: NODE_R_MIN + sizeRatio * (NODE_R_MAX - NODE_R_MIN),
         x: cluster.cx + Math.cos(angle) * radius,
         y: cluster.cy + Math.sin(angle) * radius,
@@ -622,10 +636,11 @@ const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
     for (const node of nodes) inCluster.set(node.fileIndex, node);
 
     const links: LocalLink[] = [];
-    for (const [from, to] of gvs.linksByCluster[ci]) {
-      const a = inCluster.get(from);
-      const b = inCluster.get(to);
-      if (a && b && a !== b) links.push({ source: a, target: b });
+    for (const [from, to] of gvs.linksByCluster[clusterIndex]) {
+      const sourceNode = inCluster.get(from);
+      const targetNode = inCluster.get(to);
+      if (sourceNode && targetNode && sourceNode !== targetNode)
+        links.push({ source: sourceNode, target: targetNode });
     }
 
     const sim = forceSimulation(nodes)
@@ -634,38 +649,44 @@ const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
       .force("charge", forceManyBody<FileNode>().strength(-30).theta(0.9).distanceMax(240))
       .force(
         "collide",
-        forceCollide<FileNode>((d) => d.radius + 2),
+        forceCollide<FileNode>((node) => node.radius + 2),
       )
       .force("x", forceX<FileNode>(cluster.cx).strength(0.15))
       .force("y", forceY<FileNode>(cluster.cy).strength(0.15))
       .alphaDecay(0.028)
       .stop();
     const ticks = Math.min(300, 120 + cluster.indices.length * 2);
-    for (let t = 0; t < ticks; t++) sim.tick();
+    for (let tick = 0; tick < ticks; tick++) sim.tick();
     sim.stop();
 
     for (const node of nodes) gvs.fileNodes[node.fileIndex] = node;
   }
 };
 const convexHull = (pts: Pt[]): Pt[] => {
-  const sorted = [...pts].toSorted((a, b) => a.x - b.x || a.y - b.y);
+  const sorted = [...pts].toSorted((left, right) => left.x - right.x || left.y - right.y);
   if (sorted.length < 3) return sorted;
-  const cross = (o: Pt, a: Pt, b: Pt): number =>
-    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const cross = (origin: Pt, pointA: Pt, pointB: Pt): number =>
+    (pointA.x - origin.x) * (pointB.y - origin.y) - (pointA.y - origin.y) * (pointB.x - origin.x);
   const lower: Pt[] = [];
-  for (const p of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+  for (const point of sorted) {
+    while (
+      lower.length >= 2 &&
+      cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0
+    ) {
       lower.pop();
     }
-    lower.push(p);
+    lower.push(point);
   }
   const upper: Pt[] = [];
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const p = sorted[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+  for (let index = sorted.length - 1; index >= 0; index--) {
+    const point = sorted[index];
+    while (
+      upper.length >= 2 &&
+      cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0
+    ) {
       upper.pop();
     }
-    upper.push(p);
+    upper.push(point);
   }
   lower.pop();
   upper.pop();
@@ -675,14 +696,14 @@ const convexHull = (pts: Pt[]): Pt[] => {
 const buildHulls = (gvs: GraphViewState): void => {
   for (const cluster of gvs.clusters) {
     const pts = cluster.indices
-      .map((i) => gvs.fileNodes[i])
+      .map((fileIndex) => gvs.fileNodes[fileIndex])
       .filter((node) => node && node.x != null && node.y != null)
       .map((node) => ({ x: node.x ?? 0, y: node.y ?? 0 }));
     let cx = 0;
     let cy = 0;
-    for (const p of pts) {
-      cx += p.x;
-      cy += p.y;
+    for (const point of pts) {
+      cx += point.x;
+      cy += point.y;
     }
     cx /= Math.max(1, pts.length);
     cy /= Math.max(1, pts.length);
@@ -692,23 +713,23 @@ const buildHulls = (gvs: GraphViewState): void => {
     let hull: Pt[];
     if (pts.length < 3) {
       hull = [];
-      const r = cluster.r * 0.5 + 20;
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2;
-        hull.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+      const radius = cluster.r * 0.5 + 20;
+      for (let index = 0; index < 8; index++) {
+        const angle = (index / 8) * Math.PI * 2;
+        hull.push({ x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
       }
     } else {
-      hull = convexHull(pts).map((p) => {
-        const dx = p.x - cx;
-        const dy = p.y - cy;
-        const d = Math.max(1, Math.hypot(dx, dy));
+      hull = convexHull(pts).map((point) => {
+        const dx = point.x - cx;
+        const dy = point.y - cy;
+        const dist = Math.max(1, Math.hypot(dx, dy));
         const pad = 20;
-        return { x: cx + dx * ((d + pad) / d), y: cy + dy * ((d + pad) / d) };
+        return { x: cx + dx * ((dist + pad) / dist), y: cy + dy * ((dist + pad) / dist) };
       });
     }
     cluster.hull = hull;
     let maxD = 0;
-    for (const p of hull) maxD = Math.max(maxD, Math.hypot(p.x - cx, p.y - cy));
+    for (const point of hull) maxD = Math.max(maxD, Math.hypot(point.x - cx, point.y - cy));
     cluster.r = maxD;
   }
 };
@@ -730,8 +751,8 @@ export const initGraphNodes = (state: AppState): void => {
   gvs.clusterOf = clusterOf;
   const clusters: ClusterInfo[] = [];
   for (const [key, indices] of groupMap) {
-    const ci = clusters.length;
-    for (const idx of indices) clusterOf[idx] = ci;
+    const clusterIndex = clusters.length;
+    for (const index of indices) clusterOf[index] = clusterIndex;
     clusters.push({
       key,
       indices,
@@ -754,31 +775,31 @@ export const initGraphNodes = (state: AppState): void => {
 
   const meta = buildMetaGraph(state, clusterOf, clusters.length);
   const adj: number[][] = Array.from({ length: clusters.length }, () => []);
-  for (const e of meta) adj[e.src].push(e.dst);
+  for (const edge of meta) adj[edge.src].push(edge.dst);
   const sccOf = tarjanSCC(clusters.length, adj);
   const sccSize = new Map<number, number>();
-  for (const s of sccOf) sccSize.set(s, (sccSize.get(s) ?? 0) + 1);
-  clusters.forEach((c, i) => {
-    c.tangle = (sccSize.get(sccOf[i]) ?? 1) > 1;
+  for (const sccId of sccOf) sccSize.set(sccId, (sccSize.get(sccId) ?? 0) + 1);
+  clusters.forEach((cluster, index) => {
+    cluster.tangle = (sccSize.get(sccOf[index]) ?? 1) > 1;
   });
   // Clusters with no inter-cluster imports at all sit outside the flow:
   // park them in a standalone strip below the map instead of polluting
   // the entry/shared columns.
   const connected = new Set<number>();
-  for (const e of meta) {
-    connected.add(e.src);
-    connected.add(e.dst);
+  for (const edge of meta) {
+    connected.add(edge.src);
+    connected.add(edge.dst);
   }
-  clusters.forEach((c, i) => {
-    c.isolated = !connected.has(i);
+  clusters.forEach((cluster, index) => {
+    cluster.isolated = !connected.has(index);
   });
   // An edge-free project marks every cluster isolated; the standalone
   // strip must then open by default or the map renders as an empty canvas.
-  if (!clusters.some((c) => !c.isolated)) gvs.standaloneOpen = true;
+  if (!clusters.some((cluster) => !cluster.isolated)) gvs.standaloneOpen = true;
 
   const layers = assignLayers(clusters.length, meta, sccOf);
-  clusters.forEach((c, i) => {
-    c.layer = layers[i];
+  clusters.forEach((cluster, index) => {
+    cluster.layer = layers[index];
   });
   orderWithinLayers(clusters, meta);
   assignCoordinates(clusters, meta);
@@ -792,9 +813,9 @@ export const initGraphNodes = (state: AppState): void => {
 
   // Hub floor: p95 of importer counts, min 25 (spec: badge, never suppress).
   const importerCounts = files
-    .map((f) => f.importer_count)
-    .filter((c) => c > 0)
-    .toSorted((a, b) => a - b);
+    .map((file) => file.importer_count)
+    .filter((count) => count > 0)
+    .toSorted((left, right) => left - right);
   const p95 =
     importerCounts.length > 0
       ? importerCounts[
@@ -804,25 +825,25 @@ export const initGraphNodes = (state: AppState): void => {
   gvs.hubFloor = Math.max(25, p95);
 
   const pairSet = new Set<number>();
-  for (const e of meta) pairSet.add(e.src * clusters.length + e.dst);
-  gvs.roads = meta.map((e) => ({
-    src: e.src,
-    dst: e.dst,
-    count: e.count,
-    violations: e.violations,
-    cycleEdges: e.cycleEdges,
-    bidi: pairSet.has(e.dst * clusters.length + e.src),
-    back: clusters[e.dst].layer <= clusters[e.src].layer,
+  for (const edge of meta) pairSet.add(edge.src * clusters.length + edge.dst);
+  gvs.roads = meta.map((edge) => ({
+    src: edge.src,
+    dst: edge.dst,
+    count: edge.count,
+    violations: edge.violations,
+    cycleEdges: edge.cycleEdges,
+    bidi: pairSet.has(edge.dst * clusters.length + edge.src),
+    back: clusters[edge.dst].layer <= clusters[edge.src].layer,
   }));
 
   // Fit-to-view. Standalone clusters are hidden until toggled: keep
   // them out of the fit.
-  const { w, h } = stageSize(state);
-  const anyConnected = clusters.some((c) => !c.isolated);
+  const { w: width, h: height } = stageSize(state);
+  const anyConnected = clusters.some((cluster) => !cluster.isolated);
   const fit = fitTransform(
-    w,
-    h,
-    clusterBounds(clusters, (c) => !(c.isolated && anyConnected)),
+    width,
+    height,
+    clusterBounds(clusters, (cluster) => !(cluster.isolated && anyConnected)),
   );
   gvs.transform = fit;
   gvs.fitK = fit.k;

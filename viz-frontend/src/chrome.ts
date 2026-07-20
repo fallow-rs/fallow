@@ -63,28 +63,28 @@ const LENSES: LensDef[] = [
     id: "deadcode",
     name: "unused",
     gloss: "Dead files & exports",
-    count: (s) => s.data.summary.unused_files + s.data.summary.unused_exports,
+    count: (state) => state.data.summary.unused_files + state.data.summary.unused_exports,
     sev: "error",
   },
   {
     id: "dupes",
     name: "duplication",
     gloss: "Copy-pasted code",
-    count: (s) => s.data.summary.clone_groups,
+    count: (state) => state.data.summary.clone_groups,
     sev: "warn",
   },
   {
     id: "boundaries",
     name: "boundaries",
     gloss: "Import loops & forbidden imports",
-    count: (s) => s.data.summary.circular_deps + s.data.summary.boundary_violations,
+    count: (state) => state.data.summary.circular_deps + state.data.summary.boundary_violations,
     sev: "error",
   },
   {
     id: "hotspots",
     name: "complexity",
     gloss: "Hardest files to change",
-    count: (s) => s.data.summary.hotspot_files,
+    count: (state) => state.data.summary.hotspot_files,
     sev: "warn",
   },
 ];
@@ -209,28 +209,28 @@ export const buildChrome = (
   tabs.setAttribute("role", "toolbar");
   tabs.setAttribute("aria-label", "lens");
   const lensButtons = new Map<Lens, HTMLButtonElement>();
-  LENSES.forEach((def, i) => {
-    const b = button("lens-tab", "");
-    b.appendChild(el("span", "tab-name", def.name));
-    b.appendChild(el("span", "badge"));
+  LENSES.forEach((def, index) => {
+    const tabButton = button("lens-tab", "");
+    tabButton.appendChild(el("span", "tab-name", def.name));
+    tabButton.appendChild(el("span", "badge"));
     // Fold the 1-5 shortcut into the tooltip, as the view toggle does.
-    b.title = `${def.gloss} (press ${i + 1})`;
-    b.setAttribute("aria-pressed", String(state.lens === def.id));
+    tabButton.title = `${def.gloss} (press ${index + 1})`;
+    tabButton.setAttribute("aria-pressed", String(state.lens === def.id));
     // Roving tabindex: only the active tab sits in the tab order.
-    b.tabIndex = state.lens === def.id ? 0 : -1;
-    b.addEventListener("click", () => handlers.onLens(def.id));
-    lensButtons.set(def.id, b);
-    tabs.appendChild(b);
+    tabButton.tabIndex = state.lens === def.id ? 0 : -1;
+    tabButton.addEventListener("click", () => handlers.onLens(def.id));
+    lensButtons.set(def.id, tabButton);
+    tabs.appendChild(tabButton);
   });
   // Arrow keys move the lens selection, as toolbar semantics promise.
-  tabs.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const ids = LENSES.map((d) => d.id);
+  tabs.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const ids = LENSES.map((def) => def.id);
     const active = ids.findIndex(
       (id) => lensButtons.get(id)?.getAttribute("aria-pressed") === "true",
     );
-    const delta = e.key === "ArrowRight" ? 1 : -1;
+    const delta = event.key === "ArrowRight" ? 1 : -1;
     const next = ids[(active + delta + ids.length) % ids.length];
     handlers.onLens(next);
     lensButtons.get(next)?.focus();
@@ -246,12 +246,12 @@ export const buildChrome = (
     { id: "map", name: "treemap", gloss: "nested boxes sized by file size (press t)" },
   ];
   for (const def of viewDefs) {
-    const b = button("", def.name);
-    b.title = def.gloss;
-    b.setAttribute("aria-pressed", String(state.view === def.id));
-    b.addEventListener("click", () => handlers.onView(def.id));
-    viewButtons.set(def.id, b);
-    viewSeg.appendChild(b);
+    const viewButton = button("", def.name);
+    viewButton.title = def.gloss;
+    viewButton.setAttribute("aria-pressed", String(state.view === def.id));
+    viewButton.addEventListener("click", () => handlers.onView(def.id));
+    viewButtons.set(def.id, viewButton);
+    viewSeg.appendChild(viewButton);
   }
   toolbar.appendChild(viewSeg);
 
@@ -264,12 +264,12 @@ export const buildChrome = (
     { id: "imports", name: "by imports", gloss: "group files that import each other" },
   ];
   clusterDefs.forEach((def) => {
-    const b = button("", def.name);
-    b.title = def.gloss;
-    b.setAttribute("aria-pressed", String(def.id === "directory"));
-    b.addEventListener("click", () => handlers.onCluster(def.id));
-    clusterButtons.set(def.id, b);
-    clusterGroup.appendChild(b);
+    const clusterButton = button("", def.name);
+    clusterButton.title = def.gloss;
+    clusterButton.setAttribute("aria-pressed", String(def.id === "directory"));
+    clusterButton.addEventListener("click", () => handlers.onCluster(def.id));
+    clusterButtons.set(def.id, clusterButton);
+    clusterGroup.appendChild(clusterButton);
   });
 
   // One dim line that says what the active lens just did.
@@ -308,8 +308,8 @@ export const buildChrome = (
   ];
   for (const [keys, label] of hintPairs) {
     const item = el("span", "hint-item");
-    keys.forEach((key, i) => {
-      if (i > 0) item.appendChild(document.createTextNode("–"));
+    keys.forEach((key, index) => {
+      if (index > 0) item.appendChild(document.createTextNode("–"));
       item.appendChild(el("b", undefined, key));
     });
     item.appendChild(document.createTextNode(` ${label}`));
@@ -348,15 +348,15 @@ export const statuslineOf = (refs: ChromeRefs): HTMLElement => {
 // ── Per-render updates ──────────────────────────────────────────
 
 export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
-  for (const [view, b] of refs.viewButtons) {
-    b.setAttribute("aria-pressed", String(state.view === view));
+  for (const [view, viewButton] of refs.viewButtons) {
+    viewButton.setAttribute("aria-pressed", String(state.view === view));
   }
   for (const def of LENSES) {
-    const b = refs.lensButtons.get(def.id);
-    if (!b) continue;
-    b.setAttribute("aria-pressed", String(state.lens === def.id));
-    b.tabIndex = state.lens === def.id ? 0 : -1;
-    const badge = b.querySelector(".badge");
+    const lensButton = refs.lensButtons.get(def.id);
+    if (!lensButton) continue;
+    lensButton.setAttribute("aria-pressed", String(state.lens === def.id));
+    lensButton.tabIndex = state.lens === def.id ? 0 : -1;
+    const badge = lensButton.querySelector(".badge");
     if (badge) {
       const count = def.count(state);
       // Bare tabular numbers; the unit words live in the context strip.
@@ -383,7 +383,7 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
  * view only).
  */
 const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
-  const gloss = LENSES.find((d) => d.id === state.lens)?.gloss ?? "";
+  const gloss = LENSES.find((def) => def.id === state.lens)?.gloss ?? "";
   const left = refs.summaryLine.querySelector(".summary-left");
   if (!left) return;
   left.replaceChildren();
@@ -404,16 +404,16 @@ const updateCrumbs = (state: AppState, refs: ChromeRefs): void => {
   if (state.drillPath !== "") {
     const parts = state.drillPath.split("/");
     let acc = "";
-    parts.forEach((part, i) => {
+    parts.forEach((part, index) => {
       refs.crumbs.appendChild(el("span", "sep", "/"));
       acc = acc ? `${acc}/${part}` : part;
-      if (i === parts.length - 1) {
+      if (index === parts.length - 1) {
         refs.crumbs.appendChild(el("span", "current", part));
       } else if (state.index.nodesByPath.has(acc)) {
         const target = acc;
-        const b = button("", part);
-        b.addEventListener("click", () => refs.crumbHandler?.(target));
-        refs.crumbs.appendChild(b);
+        const crumbButton = button("", part);
+        crumbButton.addEventListener("click", () => refs.crumbHandler?.(target));
+        refs.crumbs.appendChild(crumbButton);
       } else {
         // Segment collapsed into a single-child directory chain: there is
         // no node to drill to, so render it as static text, not a dead link.
@@ -424,10 +424,10 @@ const updateCrumbs = (state: AppState, refs: ChromeRefs): void => {
 };
 
 const updateStatusInfo = (state: AppState, refs: ChromeRefs): void => {
-  const s = state.data.summary;
+  const summary = state.data.summary;
   const stamp = new Date(document.lastModified);
   const day = Number.isNaN(stamp.getTime()) ? "" : ` ${stamp.toISOString().slice(0, 10)}`;
-  refs.statusInfo.textContent = `${formatCount(s.total_files)} files, ${formatCount(s.total_edges)} imports, generated${day} by fallow`;
+  refs.statusInfo.textContent = `${formatCount(summary.total_files)} files, ${formatCount(summary.total_edges)} imports, generated${day} by fallow`;
 };
 
 const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
@@ -436,8 +436,8 @@ const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
     return;
   }
   refs.searchCount.replaceChildren();
-  const n = el("span", "n", formatCount(state.searchMatches.size));
-  refs.searchCount.append(n, document.createTextNode(" matches"));
+  const matchCountEl = el("span", "n", formatCount(state.searchMatches.size));
+  refs.searchCount.append(matchCountEl, document.createTextNode(" matches"));
   if (state.searchReach.size > 0 && state.view === "graph") {
     const affects = el("span", "hint");
     affects.append(", ", el("span", "n", formatCount(state.searchReach.size)), " affected");

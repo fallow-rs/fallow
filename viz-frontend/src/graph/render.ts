@@ -50,26 +50,26 @@ export const renderGraph = (state: AppState): void => {
   state.dpr = dpr;
 
   const stageEl = canvas.parentElement;
-  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
-  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-  const pw = Math.round(w * dpr);
-  const ph = Math.round(h * dpr);
+  const width = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const height = stageEl ? stageEl.clientHeight : window.innerHeight;
+  const pw = Math.round(width * dpr);
+  const ph = Math.round(height * dpr);
   if (canvas.width !== pw || canvas.height !== ph) {
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     canvas.width = pw;
     canvas.height = ph;
   }
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = theme.bg;
-  ctx.fillRect(0, 0, w, h);
+  ctx.fillRect(0, 0, width, height);
 
   if (state.selected !== null && gvs.fileNodes[state.selected]) {
     renderGhost(state, gvs);
     // The stage reports whether its choreography still runs; this
     // module owns the animation loop.
-    if (renderEgoStage(state, gvs, w, h)) {
+    if (renderEgoStage(state, gvs, width, height)) {
       cancelAnimationFrame(gvs.raf);
       gvs.raf = requestAnimationFrame(() => {
         if (state.view === "graph") renderGraph(state);
@@ -78,7 +78,7 @@ export const renderGraph = (state: AppState): void => {
   } else {
     gvs.stageRects = [];
     gvs.lastRoot = null;
-    renderOverview(state, gvs, w, h);
+    renderOverview(state, gvs, width, height);
   }
 };
 // ── Overview ────────────────────────────────────────────────────
@@ -92,24 +92,32 @@ const GRAPH_LENS_MS = 200;
 const revealProgress = (
   gvs: GraphViewState,
   reduced: boolean,
-): { t: number; cluster: (c: ClusterInfo) => number; roads: number; labels: number } => {
+): {
+  progress: number;
+  cluster: (cluster: ClusterInfo) => number;
+  roads: number;
+  labels: number;
+} => {
   if (gvs.revealAt === 0) gvs.revealAt = reduced ? -1 : performance.now();
   if (gvs.revealAt < 0) {
-    return { t: 1, cluster: () => 1, roads: 1, labels: 1 };
+    return { progress: 1, cluster: () => 1, roads: 1, labels: 1 };
   }
   const elapsed = performance.now() - gvs.revealAt;
-  const maxLayer = gvs.clusters.reduce((max, c) => Math.max(max, c.isolated ? 0 : c.layer), 0);
+  const maxLayer = gvs.clusters.reduce(
+    (max, cluster) => Math.max(max, cluster.isolated ? 0 : cluster.layer),
+    0,
+  );
   const total = (maxLayer + 1) * REVEAL_LAYER_MS + REVEAL_FADE_MS + 420;
-  const t = Math.min(1, elapsed / total);
-  const clusterAlpha = (c: ClusterInfo): number => {
-    const start = (c.isolated ? maxLayer + 1 : c.layer) * REVEAL_LAYER_MS;
+  const progress = Math.min(1, elapsed / total);
+  const clusterAlpha = (cluster: ClusterInfo): number => {
+    const start = (cluster.isolated ? maxLayer + 1 : cluster.layer) * REVEAL_LAYER_MS;
     return easeOut(Math.min(1, Math.max(0, (elapsed - start) / REVEAL_FADE_MS)));
   };
   const roadsStart = (maxLayer + 1) * REVEAL_LAYER_MS * 0.6;
   const roads = easeOut(Math.min(1, Math.max(0, (elapsed - roadsStart) / (REVEAL_FADE_MS + 200))));
   const labelsStart = roadsStart + 180;
   const labels = easeOut(Math.min(1, Math.max(0, (elapsed - labelsStart) / REVEAL_FADE_MS)));
-  return { t, cluster: clusterAlpha, roads, labels };
+  return { progress, cluster: clusterAlpha, roads, labels };
 };
 
 /** Per-frame context every overview phase shares. */
@@ -197,7 +205,7 @@ const drawRoads = (scene: Scene): void => {
   const minRoadW = 1.8 / transform.k;
   // High-traffic roads get promoted a step so the trunk routes survive
   // a projector; the threshold is the 75th percentile of bundle sizes.
-  const roadCounts = roads.map((r) => r.count).toSorted((a, b) => a - b);
+  const roadCounts = roads.map((road) => road.count).toSorted((left, right) => left - right);
   const trunkFloor =
     roadCounts.length > 0 ? roadCounts[Math.floor(roadCounts.length * 0.75)] : Infinity;
   // With many clusters the pairwise roads become a mesh at fit zoom, so show
@@ -316,17 +324,18 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
       if (from === hovered) continue;
       neighbors.add(from);
       hoverImporters.add(from);
-      const a = fileNodes[from];
-      if (!a || !target) continue;
-      if (a.x == null || a.y == null || target.x == null || target.y == null) continue;
+      const importerNode = fileNodes[from];
+      if (!importerNode || !target) continue;
+      if (importerNode.x == null || importerNode.y == null || target.x == null || target.y == null)
+        continue;
       edgeUnderlay(
         ctx,
-        { x: a.x, y: a.y },
+        { x: importerNode.x, y: importerNode.y },
         { x: target.x, y: target.y },
         theme.bg,
         4 / transform.k,
       );
-      const p0 = { x: a.x, y: a.y };
+      const p0 = { x: importerNode.x, y: importerNode.y };
       const p3 = { x: target.x, y: target.y };
       const p1 = { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 };
       const p2 = { x: p0.x + ((p3.x - p0.x) * 2) / 3, y: p0.y + ((p3.y - p0.y) * 2) / 3 };
@@ -340,19 +349,20 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
       if (to === hovered) continue;
       neighbors.add(to);
       hoverImports.add(to);
-      const b = fileNodes[to];
-      if (!target || !b) continue;
-      if (target.x == null || target.y == null || b.x == null || b.y == null) continue;
+      const importedNode = fileNodes[to];
+      if (!target || !importedNode) continue;
+      if (target.x == null || target.y == null || importedNode.x == null || importedNode.y == null)
+        continue;
       edgeUnderlay(
         ctx,
         { x: target.x, y: target.y },
-        { x: b.x, y: b.y },
+        { x: importedNode.x, y: importedNode.y },
         theme.bg,
         4 / transform.k,
       );
       ctx.beginPath();
       ctx.moveTo(target.x, target.y);
-      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(importedNode.x, importedNode.y);
       ctx.strokeStyle = theme.blue;
       ctx.globalAlpha = 0.45;
       ctx.lineWidth = 1.1 / transform.k;
@@ -413,7 +423,7 @@ const nodeAppearance = (
   return { color, alpha, matched, inReach, dimmed };
 };
 
-const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): void => {
+const drawNodes = (scene: Scene, hover: HoverContext, width: number, height: number): void => {
   const { state, gvs, kRel, searching } = scene;
   const { ctx, theme, data } = state;
   const { transform, clusters, fileNodes } = gvs;
@@ -525,7 +535,7 @@ const drawNodes = (scene: Scene, hover: HoverContext, w: number, h: number): voi
 
   // Deep-zoom file labels: name the important dots once there is room.
   if (kRel >= 2 && state.graphHovered === null) {
-    drawZoomLabels(state, gvs, w, h);
+    drawZoomLabels(state, gvs, width, height);
   }
 };
 
@@ -541,12 +551,12 @@ const drawSearchPulse = (scene: Scene): void => {
     const age = performance.now() - gvs.pulseAt;
     if (node && node.x != null && node.y != null && age < 1200) {
       for (const phase of [0, 400]) {
-        const t = (age - phase) / 800;
-        if (t < 0 || t > 1) continue;
+        const progress = (age - phase) / 800;
+        if (progress < 0 || progress > 1) continue;
         ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius + 4 + t * 26, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, node.radius + 4 + progress * 26, 0, Math.PI * 2);
         ctx.strokeStyle = theme.blue;
-        ctx.globalAlpha = 0.8 * (1 - t);
+        ctx.globalAlpha = 0.8 * (1 - progress);
         ctx.lineWidth = 2 / transform.k;
         ctx.stroke();
       }
@@ -557,7 +567,12 @@ const drawSearchPulse = (scene: Scene): void => {
   }
 };
 
-const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+const renderOverview = (
+  state: AppState,
+  gvs: GraphViewState,
+  width: number,
+  height: number,
+): void => {
   const { ctx, theme } = state;
   const { transform } = gvs;
   const kRel = transform.k / gvs.fitK;
@@ -592,7 +607,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   drawHullBorders(scene);
   drawIntraEdges(scene);
   const hover = drawHoverNeighborhood(scene);
-  drawNodes(scene, hover, w, h);
+  drawNodes(scene, hover, width, height);
   drawSearchPulse(scene);
 
   ctx.restore();
@@ -605,12 +620,12 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     drawClusterLabels(state, gvs);
   }
   if (hover.hovered !== null && hover.neighbors !== null) {
-    drawHoverLabels(state, gvs, hover.hovered, hover.importers, hover.imports, w, h);
+    drawHoverLabels(state, gvs, hover.hovered, hover.importers, hover.imports, width, height);
   }
-  drawCanvasLegend(state, w, h);
-  drawPathTrace(state, gvs, w, h);
+  drawCanvasLegend(state, width, height);
+  drawPathTrace(state, gvs, width, height);
 
-  drawMinimap(state, gvs, w, h);
+  drawMinimap(state, gvs, width, height);
 
   // Transient notice (fades after 1.8s).
   if (gvs.notice !== "") {
@@ -621,7 +636,7 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
       ctx.textBaseline = "top";
       ctx.fillStyle = theme.amberText;
       ctx.globalAlpha = age > 1400 ? 1 - (age - 1400) / 400 : 1;
-      ctx.fillText(gvs.notice, usableStageWidth(state, w) / 2, 28);
+      ctx.fillText(gvs.notice, usableStageWidth(state, width) / 2, 28);
       ctx.globalAlpha = 1;
       cancelAnimationFrame(gvs.raf);
       gvs.raf = requestAnimationFrame(() => {
@@ -632,14 +647,14 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
     }
   }
 
-  drawIntroCaptions(state, gvs, w);
+  drawIntroCaptions(state, gvs, width);
 
   // Motion frames while something animates.
   const animating =
     (gvs.hoveredRoad !== null && !state.reducedMotion) ||
     (gvs.pulseFile !== null && !state.reducedMotion) ||
     scene.lensT < 1 ||
-    reveal.t < 1 ||
+    reveal.progress < 1 ||
     gvs.showIntro;
   if (animating) {
     cancelAnimationFrame(gvs.raf);
@@ -651,14 +666,14 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
 /** Wide background stroke behind a highlighted edge so it pops. */
 const edgeUnderlay = (
   ctx: CanvasRenderingContext2D,
-  a: Pt,
-  b: Pt,
+  start: Pt,
+  end: Pt,
   bg: string,
   width: number,
 ): void => {
   ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(b.x, b.y);
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
   ctx.strokeStyle = bg;
   ctx.globalAlpha = 0.9;
   ctx.lineWidth = width;
@@ -681,12 +696,12 @@ const drawFileEdges = (
   ctx.lineWidth = lineWidth;
   ctx.beginPath();
   for (const [from, to] of edges) {
-    const a = fileNodes[from];
-    const b = fileNodes[to];
-    if (!a || !b) continue;
-    if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    const fromNode = fileNodes[from];
+    const toNode = fileNodes[to];
+    if (!fromNode || !toNode) continue;
+    if (fromNode.x == null || fromNode.y == null || toNode.x == null || toNode.y == null) continue;
+    ctx.moveTo(fromNode.x, fromNode.y);
+    ctx.lineTo(toNode.x, toNode.y);
   }
   ctx.stroke();
   ctx.globalAlpha = 1;
@@ -694,27 +709,35 @@ const drawFileEdges = (
 
 const drawSeverityEdges = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme, data } = state;
-  const n = data.files.length;
-  const k = gvs.transform.k;
+  const fileCount = data.files.length;
+  const scale = gvs.transform.k;
   for (const [from, to] of data.edges) {
-    const packed = from * n + to;
+    const packed = from * fileCount + to;
     const isViolation = state.index.violationEdges.has(packed);
     const isCycle = state.index.cycleEdges.has(packed);
     if (!isViolation && !isCycle) continue;
-    const a = gvs.fileNodes[from];
-    const b = gvs.fileNodes[to];
-    if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) continue;
+    const fromNode = gvs.fileNodes[from];
+    const toNode = gvs.fileNodes[to];
+    if (
+      !fromNode ||
+      !toNode ||
+      fromNode.x == null ||
+      fromNode.y == null ||
+      toNode.x == null ||
+      toNode.y == null
+    )
+      continue;
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(fromNode.x, fromNode.y);
+    ctx.lineTo(toNode.x, toNode.y);
     ctx.strokeStyle = theme.bg;
-    ctx.lineWidth = 3 / k;
+    ctx.lineWidth = 3 / scale;
     ctx.globalAlpha = 0.9;
     ctx.setLineDash([]);
     ctx.stroke();
     ctx.strokeStyle = isViolation ? theme.red : theme.amber;
-    ctx.lineWidth = 1.4 / k;
-    if (isCycle && !isViolation) ctx.setLineDash([4 / k, 3 / k]);
+    ctx.lineWidth = 1.4 / scale;
+    if (isCycle && !isViolation) ctx.setLineDash([4 / scale, 3 / scale]);
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;

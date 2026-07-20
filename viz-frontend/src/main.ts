@@ -141,8 +141,8 @@ const init = (): void => {
     onCrumb: () => {},
     onCluster: (mode) => {
       if (refs) {
-        for (const [m, b] of refs.clusterButtons) {
-          b.setAttribute("aria-pressed", String(m === mode));
+        for (const [clusterMode, button] of refs.clusterButtons) {
+          button.setAttribute("aria-pressed", String(clusterMode === mode));
         }
       }
       setClusterMode(state, mode);
@@ -199,13 +199,13 @@ const init = (): void => {
   refs.exportHandler = () => {
     canvas.toBlob((blob) => {
       if (!blob) return;
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `fallow-map-${data.root}-${state.view}-${state.lens}.png`;
-      a.click();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `fallow-map-${data.root}-${state.view}-${state.lens}.png`;
+      link.click();
       // Deferred (macrotask) revoke: a synchronous revoke can cancel
       // the download before the browser grabs the blob.
-      setTimeout(() => URL.revokeObjectURL(a.href), 0);
+      setTimeout(() => URL.revokeObjectURL(link.href), 0);
     }, "image/png");
   };
 
@@ -269,7 +269,7 @@ const init = (): void => {
         renderPanel(
           state,
           panel,
-          (idx) => selectFile(idx, true),
+          (fileIndex) => selectFile(fileIndex, true),
           () => {
             state.selectedRoad = null;
             selectFile(null);
@@ -286,12 +286,12 @@ const init = (): void => {
   // ── Canvas interactions ───────────────────────────────────────
   let lastGraphTarget = "";
 
-  const canvasPoint = (e: MouseEvent): { x: number; y: number } => {
+  const canvasPoint = (event: MouseEvent): { x: number; y: number } => {
     const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
 
-  const handleMapHover = (e: MouseEvent, x: number, y: number): void => {
+  const handleMapHover = (event: MouseEvent, x: number, y: number): void => {
     const hit = treemapHitTest(state, x, y);
     if (hit !== state.hoveredCell) {
       state.hoveredCell = hit;
@@ -305,20 +305,20 @@ const init = (): void => {
     const cell = state.layout[hit];
     canvas.style.cursor = "pointer";
     if (cell.node.fileIndex !== null) {
-      showFileTooltip(state, cell.node.fileIndex, e.clientX, e.clientY);
+      showFileTooltip(state, cell.node.fileIndex, event.clientX, event.clientY);
     } else {
       showDirTooltip(
         cell.node.name,
         countLeaves(cell.node),
         cell.node.size,
         countLensFindings(state, cell.node),
-        e.clientX,
-        e.clientY,
+        event.clientX,
+        event.clientY,
       );
     }
   };
 
-  const handleGraphHover = (e: MouseEvent, x: number, y: number): void => {
+  const handleGraphHover = (event: MouseEvent, x: number, y: number): void => {
     const target = graphHoverTarget(state, x, y);
     const hovered = target && target.kind === "file" ? target.fileIndex : null;
     const targetKey = target
@@ -345,8 +345,8 @@ const init = (): void => {
       showFileTooltip(
         state,
         hovered,
-        e.clientX,
-        e.clientY,
+        event.clientX,
+        event.clientY,
         pos
           ? {
               nodeX: pos.x,
@@ -364,18 +364,18 @@ const init = (): void => {
         facts.count,
         facts.violations,
         facts.cycleEdges,
-        e.clientX,
-        e.clientY,
+        event.clientX,
+        event.clientY,
       );
     } else {
       hideTooltip();
     }
   };
 
-  canvas.addEventListener("mousemove", (e) => {
-    const { x, y } = canvasPoint(e);
-    if (state.view === "map") handleMapHover(e, x, y);
-    else handleGraphHover(e, x, y);
+  canvas.addEventListener("mousemove", (event) => {
+    const { x, y } = canvasPoint(event);
+    if (state.view === "map") handleMapHover(event, x, y);
+    else handleGraphHover(event, x, y);
   });
 
   canvas.addEventListener("mouseleave", () => {
@@ -392,8 +392,8 @@ const init = (): void => {
     }
   });
 
-  canvas.addEventListener("mousedown", (e) => {
-    if (e.button === 0) dismissIntro(state);
+  canvas.addEventListener("mousedown", (event) => {
+    if (event.button === 0) dismissIntro(state);
   });
 
   // Selection runs on the native `click`, not mouseup. d3-zoom owns the drag
@@ -401,9 +401,9 @@ const init = (): void => {
   // road) and, via clickDistance, lets a genuine click's `click` event through
   // while suppressing it after a real drag. So a click here is always a click,
   // never a pan.
-  canvas.addEventListener("click", (e) => {
-    if (e.button !== 0) return;
-    const { x, y } = canvasPoint(e);
+  canvas.addEventListener("click", (event) => {
+    if (event.button !== 0) return;
+    const { x, y } = canvasPoint(event);
     if (state.view === "graph" && minimapHit(state, x, y)) {
       minimapPan(state, x, y);
       return;
@@ -422,7 +422,7 @@ const init = (): void => {
       }
       return;
     }
-    if (e.shiftKey && graphPathTrace(state, x, y)) return;
+    if (event.shiftKey && graphPathTrace(state, x, y)) return;
     const result = graphHandleClick(state, x, y);
     if (result.kind === "file") {
       state.selectedRoad = null;
@@ -475,16 +475,16 @@ const init = (): void => {
     }
   };
 
-  window.addEventListener("keydown", (e) => {
-    const target = e.target as HTMLElement | null;
+  window.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement | null;
     const inInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
 
-    if (e.key === "Escape") {
+    if (event.key === "Escape") {
       handleEscape(inInput);
       return;
     }
     if (inInput) {
-      if (e.key === "Enter" && state.view === "graph" && state.search.trim() !== "") {
+      if (event.key === "Enter" && state.view === "graph" && state.search.trim() !== "") {
         graphFocusSearch(state);
       }
       return;
@@ -493,22 +493,22 @@ const init = (): void => {
     if (state.helpOpen) {
       // With the modal open, only "?" (toggle closed) acts; lens/view
       // shortcuts must not mutate the map behind the dialog.
-      if (e.key === "?") toggleHelp();
+      if (event.key === "?") toggleHelp();
       return;
     }
 
-    if (e.key === "/") {
-      e.preventDefault();
+    if (event.key === "/") {
+      event.preventDefault();
       refs?.search.focus();
-    } else if (e.key === "?") {
+    } else if (event.key === "?") {
       toggleHelp();
-    } else if (e.key >= "1" && e.key <= "5") {
-      setLens(lensOrder[Number(e.key) - 1]);
-    } else if (e.key === "t" || e.key === "m") {
+    } else if (event.key >= "1" && event.key <= "5") {
+      setLens(lensOrder[Number(event.key) - 1]);
+    } else if (event.key === "t" || event.key === "m") {
       setView("map");
-    } else if (e.key === "g") {
+    } else if (event.key === "g") {
       setView("graph");
-    } else if (e.key === "0") {
+    } else if (event.key === "0") {
       if (state.view === "graph") {
         resetGraphView(state);
       } else {
@@ -523,8 +523,8 @@ const init = (): void => {
     requestRender();
   });
   // Track OS-level motion preference changes mid-session.
-  window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", (e) => {
-    state.reducedMotion = e.matches;
+  window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", (event) => {
+    state.reducedMotion = event.matches;
     requestRender();
   });
   window.addEventListener("hashchange", () => {
@@ -536,8 +536,8 @@ const init = (): void => {
   requestRender();
 
   // Keep the cluster segment in sync with the actual mode at boot.
-  for (const [m, b] of refs.clusterButtons) {
-    b.setAttribute("aria-pressed", String(m === getClusterMode(state)));
+  for (const [clusterMode, button] of refs.clusterButtons) {
+    button.setAttribute("aria-pressed", String(clusterMode === getClusterMode(state)));
   }
 };
 
@@ -546,11 +546,11 @@ const countLeaves = (node: {
   fileIndex: number | null;
 }): number => {
   if (node.fileIndex !== null) return 1;
-  let n = 0;
+  let count = 0;
   for (const child of node.children) {
-    n += countLeaves(child as typeof node);
+    count += countLeaves(child as typeof node);
   }
-  return n;
+  return count;
 };
 
 /** Count the active lens's findings under a treemap directory node. */
@@ -560,9 +560,9 @@ const countLensFindings = (
 ): { value: number; label: string } | null => {
   if (state.lens === "overview") return null;
   let value = 0;
-  const walk = (n: TreeNode): void => {
-    if (n.fileIndex !== null) {
-      const file = state.data.files[n.fileIndex];
+  const walk = (current: TreeNode): void => {
+    if (current.fileIndex !== null) {
+      const file = state.data.files[current.fileIndex];
       switch (state.lens) {
         case "overview":
           break;
@@ -573,7 +573,7 @@ const countLensFindings = (
           if (file.dup_lines > 0) value++;
           break;
         case "boundaries":
-          if (state.index.violationSources.has(n.fileIndex)) value++;
+          if (state.index.violationSources.has(current.fileIndex)) value++;
           break;
         case "hotspots":
           if (file.max_cyclomatic >= 10) value++;
@@ -581,7 +581,7 @@ const countLensFindings = (
       }
       return;
     }
-    for (const child of n.children) walk(child);
+    for (const child of current.children) walk(child);
   };
   walk(node);
   const labels: Record<Lens, string> = {

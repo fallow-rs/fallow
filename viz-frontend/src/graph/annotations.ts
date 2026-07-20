@@ -31,8 +31,8 @@ import {
 export const drawZoomLabels = (
   state: AppState,
   gvs: GraphViewState,
-  w: number,
-  h: number,
+  width: number,
+  height: number,
 ): void => {
   const { ctx, theme, data } = state;
   const { transform } = gvs;
@@ -41,11 +41,11 @@ export const drawZoomLabels = (
     if (!node || node.x == null || node.y == null) continue;
     const sx = node.x * transform.k + transform.x;
     const sy = node.y * transform.k + transform.y;
-    if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) continue;
+    if (sx < -20 || sx > width + 20 || sy < -20 || sy > height + 20) continue;
     const file = data.files[node.fileIndex];
     candidates.push({ node, degree: file.importer_count + file.import_count });
   }
-  const ordered = candidates.toSorted((a, b) => b.degree - a.degree);
+  const ordered = candidates.toSorted((left, right) => right.degree - left.degree);
 
   ctx.font = FONT_SMALL;
   ctx.textAlign = "center";
@@ -64,8 +64,11 @@ export const drawZoomLabels = (
     const sy = y * transform.k + transform.y;
     const rect = { x: sx - textW / 2 - 2, y: sy, w: textW + 4, h: 15 };
     const overlaps = placed.some(
-      (r) =>
-        rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y,
+      (placedRect) =>
+        rect.x < placedRect.x + placedRect.w &&
+        rect.x + rect.w > placedRect.x &&
+        rect.y < placedRect.y + placedRect.h &&
+        rect.y + rect.h > placedRect.y,
     );
     if (overlaps) continue;
     placed.push(rect);
@@ -87,7 +90,7 @@ export const drawZoomLabels = (
   }
 };
 /** Three staged captions that teach the map during the opening reveal. */
-export const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: number): void => {
+export const drawIntroCaptions = (state: AppState, gvs: GraphViewState, width: number): void => {
   if (!gvs.showIntro || gvs.revealAt <= 0) return;
   const { ctx, theme } = state;
   const elapsed = performance.now() - gvs.revealAt;
@@ -114,7 +117,7 @@ export const drawIntroCaptions = (state: AppState, gvs: GraphViewState, w: numbe
     ctx.globalAlpha = Math.max(0, alpha);
     // Center on the stage the viewer actually sees: the panel is open on
     // first paint, so full-canvas w/2 would drift under it.
-    const cx = usableStageWidth(state, w) / 2;
+    const cx = usableStageWidth(state, width) / 2;
     // Backed chip so the caption reads over cluster labels behind it.
     chipRect(ctx, cx - textW / 2 - 16, 12, textW + 32, 32, theme.bg, 1, theme.borderSubtle);
     ctx.fillStyle = theme.textHigh;
@@ -144,14 +147,16 @@ const interleaveByDegree = (
   importers: Set<number>,
   imports: Set<number>,
 ): number[] => {
-  const byDegree = (idx: number): number =>
-    state.data.files[idx].importer_count + state.data.files[idx].import_count;
-  const a = [...importers].toSorted((x, y) => byDegree(y) - byDegree(x));
-  const b = [...imports].toSorted((x, y) => byDegree(y) - byDegree(x));
+  const byDegree = (fileIndex: number): number =>
+    state.data.files[fileIndex].importer_count + state.data.files[fileIndex].import_count;
+  const sortedImporters = [...importers].toSorted(
+    (left, right) => byDegree(right) - byDegree(left),
+  );
+  const sortedImports = [...imports].toSorted((left, right) => byDegree(right) - byDegree(left));
   const ordered: number[] = [];
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if (i < a.length) ordered.push(a[i]);
-    if (i < b.length) ordered.push(b[i]);
+  for (let index = 0; index < Math.max(sortedImporters.length, sortedImports.length); index++) {
+    if (index < sortedImporters.length) ordered.push(sortedImporters[index]);
+    if (index < sortedImports.length) ordered.push(sortedImports[index]);
   }
   return ordered;
 };
@@ -163,8 +168,8 @@ const interleaveByDegree = (
 const findLabelSlot = (
   slots: LabelSlot[],
   textW: number,
-  w: number,
-  h: number,
+  width: number,
+  height: number,
   placed: PlacedRect[],
 ): { slot: LabelSlot; rect: PlacedRect } | null => {
   for (const slot of slots) {
@@ -175,10 +180,14 @@ const findLabelSlot = (
           ? slot.x
           : slot.x - textW;
     const rect = { x: left - 4, y: slot.y - 9, w: textW + 8, h: 18 };
-    if (rect.x < 4 || rect.x + rect.w > w - 4 || rect.y < 4 || rect.y + rect.h > h - 4) continue;
+    if (rect.x < 4 || rect.x + rect.w > width - 4 || rect.y < 4 || rect.y + rect.h > height - 4)
+      continue;
     const overlaps = placed.some(
-      (p) =>
-        rect.x < p.x + p.w && rect.x + rect.w > p.x && rect.y < p.y + p.h && rect.y + rect.h > p.y,
+      (placedRect) =>
+        rect.x < placedRect.x + placedRect.w &&
+        rect.x + rect.w > placedRect.x &&
+        rect.y < placedRect.y + placedRect.h &&
+        rect.y + rect.h > placedRect.y,
     );
     if (!overlaps) return { slot, rect };
   }
@@ -191,8 +200,8 @@ export const drawHoverLabels = (
   hovered: number,
   importers: Set<number>,
   imports: Set<number>,
-  w: number,
-  h: number,
+  width: number,
+  height: number,
 ): void => {
   const { ctx, theme } = state;
   const kRel = gvs.transform.k / gvs.fitK;
@@ -202,7 +211,7 @@ export const drawHoverLabels = (
   const hoveredNode = gvs.fileNodes[hovered];
   if (!hoveredNode || hoveredNode.x == null || hoveredNode.y == null) return;
   const hs = worldToScreen(gvs, { x: hoveredNode.x, y: hoveredNode.y });
-  const tipRect = fileTipCanvasRect(hs.x, hs.y, usableStageWidth(state, w), h);
+  const tipRect = fileTipCanvasRect(hs.x, hs.y, usableStageWidth(state, width), height);
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [tipRect];
 
   // Faint leader from the hovered node to the docked tooltip's near edge, so
@@ -239,22 +248,23 @@ export const drawHoverLabels = (
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
   let drawn = 0;
-  for (const idx of ordered) {
+  for (const fileIndex of ordered) {
     if (drawn >= cap) break;
-    const node = gvs.fileNodes[idx];
+    const node = gvs.fileNodes[fileIndex];
     if (!node || node.x == null || node.y == null) continue;
-    const s = worldToScreen(gvs, { x: node.x, y: node.y });
-    if (s.x < -20 || s.x > w + 20 || s.y < -20 || s.y > h + 20) continue;
-    const name = middleTruncate(ctx, basename(state.data.files[idx].path), 140);
+    const screen = worldToScreen(gvs, { x: node.x, y: node.y });
+    if (screen.x < -20 || screen.x > width + 20 || screen.y < -20 || screen.y > height + 20)
+      continue;
+    const name = middleTruncate(ctx, basename(state.data.files[fileIndex].path), 140);
     const textW = ctx.measureText(name).width;
-    const r = node.radius * gvs.transform.k + 3;
+    const radius = node.radius * gvs.transform.k + 3;
     const slots: LabelSlot[] = [
-      { x: s.x, y: s.y + r + 9, align: "center" },
-      { x: s.x, y: s.y - r - 9, align: "center" },
-      { x: s.x + r + 5, y: s.y, align: "left" },
-      { x: s.x - r - 5, y: s.y, align: "right" },
+      { x: screen.x, y: screen.y + radius + 9, align: "center" },
+      { x: screen.x, y: screen.y - radius - 9, align: "center" },
+      { x: screen.x + radius + 5, y: screen.y, align: "left" },
+      { x: screen.x - radius - 5, y: screen.y, align: "right" },
     ];
-    const found = findLabelSlot(slots, textW, w, h, placed);
+    const found = findLabelSlot(slots, textW, width, height, placed);
     if (!found) continue;
     ctx.textAlign = found.slot.align;
     ctx.strokeStyle = theme.bg;
@@ -283,15 +293,20 @@ export const drawHoverLabels = (
 };
 
 /** Path-trace overlay: dim the map, draw the dependency chain on top. */
-export const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h: number): void => {
+export const drawPathTrace = (
+  state: AppState,
+  gvs: GraphViewState,
+  width: number,
+  height: number,
+): void => {
   const { ctx, theme, data } = state;
 
   if (gvs.pathFrom !== null && gvs.path === null) {
     const node = gvs.fileNodes[gvs.pathFrom];
     if (node && node.x != null && node.y != null) {
-      const s = worldToScreen(gvs, { x: node.x, y: node.y });
+      const screen = worldToScreen(gvs, { x: node.x, y: node.y });
       ctx.beginPath();
-      ctx.arc(s.x, s.y, 10, 0, Math.PI * 2);
+      ctx.arc(screen.x, screen.y, 10, 0, Math.PI * 2);
       ctx.strokeStyle = theme.blue;
       ctx.lineWidth = 2;
       ctx.setLineDash([4, 3]);
@@ -301,7 +316,7 @@ export const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillStyle = theme.blueText;
-      ctx.fillText("trace from here, shift-click a target", s.x, s.y + 16);
+      ctx.fillText("trace from here, shift-click a target", screen.x, screen.y + 16);
     }
     return;
   }
@@ -312,18 +327,18 @@ export const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h
   // Dim everything under the trace.
   ctx.fillStyle = theme.bg;
   ctx.globalAlpha = 0.62;
-  ctx.fillRect(0, 0, w, h);
+  ctx.fillRect(0, 0, width, height);
   ctx.globalAlpha = 1;
 
   const pts = path
-    .map((idx) => gvs.fileNodes[idx])
-    .filter((n) => n && n.x != null && n.y != null)
-    .map((n) => worldToScreen(gvs, { x: n.x ?? 0, y: n.y ?? 0 }));
+    .map((fileIndex) => gvs.fileNodes[fileIndex])
+    .filter((node) => node && node.x != null && node.y != null)
+    .map((node) => worldToScreen(gvs, { x: node.x ?? 0, y: node.y ?? 0 }));
   if (pts.length < 2) return;
 
   ctx.beginPath();
   ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  for (let index = 1; index < pts.length; index++) ctx.lineTo(pts[index].x, pts[index].y);
   ctx.strokeStyle = theme.bg;
   ctx.lineWidth = 6;
   ctx.stroke();
@@ -334,21 +349,21 @@ export const drawPathTrace = (state: AppState, gvs: GraphViewState, w: number, h
   ctx.font = FONT_SMALL;
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
-  path.forEach((idx, i) => {
-    const p = pts[i];
-    if (!p) return;
+  path.forEach((fileIndex, index) => {
+    const point = pts[index];
+    if (!point) return;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = i === 0 || i === path.length - 1 ? theme.blue : theme.textHigh;
+    ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = index === 0 || index === path.length - 1 ? theme.blue : theme.textHigh;
     ctx.fill();
-    const name = basename(data.files[idx].path);
+    const name = basename(data.files[fileIndex].path);
     const textW = ctx.measureText(name).width;
     ctx.fillStyle = theme.bg;
     ctx.globalAlpha = 0.9;
-    ctx.fillRect(p.x - textW / 2 - 3, p.y - 24, textW + 6, 14);
+    ctx.fillRect(point.x - textW / 2 - 3, point.y - 24, textW + 6, 14);
     ctx.globalAlpha = 1;
     ctx.fillStyle = theme.textHigh;
-    ctx.fillText(name, p.x, p.y - 11);
+    ctx.fillText(name, point.x, point.y - 11);
   });
 
   ctx.font = FONT_MICRO;
@@ -399,11 +414,11 @@ export const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
  */
 const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme } = state;
-  const isolated = gvs.clusters.filter((c) => c.isolated);
+  const isolated = gvs.clusters.filter((cluster) => cluster.isolated);
   gvs.standaloneChip = null;
   if (isolated.length === 0) return;
-  const h = state.canvas.clientHeight;
-  const fileCount = isolated.reduce((sum, c) => sum + c.indices.length, 0);
+  const canvasHeight = state.canvas.clientHeight;
+  const fileCount = isolated.reduce((sum, cluster) => sum + cluster.indices.length, 0);
   ctx.font = FONT_MICRO;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
@@ -412,18 +427,18 @@ const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
     : `${formatCount(fileCount)} standalone files, nothing imports them`;
   const textW = ctx.measureText(label).width;
   const cx0 = 12;
-  const cy0 = h - 56;
+  const cy0 = canvasHeight - 56;
   chipRect(ctx, cx0, cy0, textW + 16, 22, theme.bg, 0.9, theme.borderSubtle);
   ctx.fillStyle = theme.textMuted;
   ctx.fillText(label, cx0 + 8, cy0 + 11.5);
   gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 16, h: 22 };
   if (gvs.standaloneOpen) {
-    const minX = Math.min(...isolated.map((c) => c.cx - c.r));
-    const minY = Math.min(...isolated.map((c) => c.cy - c.r));
-    const s = worldToScreen(gvs, { x: minX, y: minY });
+    const minX = Math.min(...isolated.map((cluster) => cluster.cx - cluster.r));
+    const minY = Math.min(...isolated.map((cluster) => cluster.cy - cluster.r));
+    const screen = worldToScreen(gvs, { x: minX, y: minY });
     ctx.fillStyle = theme.textMuted;
     ctx.globalAlpha = 0.7;
-    ctx.fillText("STANDALONE: configs and CI that nothing imports", s.x, s.y - 26);
+    ctx.fillText("STANDALONE: configs and CI that nothing imports", screen.x, screen.y - 26);
     ctx.globalAlpha = 1;
   }
 };
@@ -437,7 +452,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
   gvs.clusterLabels = [];
   // Bigger clusters claim their spot first; smaller ones move below on overlap.
   const ordered = gvs.clusters.toSorted(
-    (a, b) => b.indices.length - a.indices.length || (a.key < b.key ? -1 : 1),
+    (left, right) => right.indices.length - left.indices.length || (left.key < right.key ? -1 : 1),
   );
   const kRel = gvs.transform.k / gvs.fitK;
   for (const cluster of ordered) {
@@ -446,15 +461,15 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
     // collisions at fit); singletons keep their quiet borderless label
     // so no connected dot floats unexplained. On small maps every
     // cluster fits comfortably, so nothing is culled.
-    const manyClusters = gvs.clusters.filter((c) => !c.isolated).length > 10;
+    const manyClusters = gvs.clusters.filter((otherCluster) => !otherCluster.isolated).length > 10;
     if (manyClusters && cluster.indices.length >= 2 && cluster.indices.length < 6 && kRel < 1.5) {
       continue;
     }
     let topLeft = cluster.hull[0] ?? { x: cluster.cx, y: cluster.cy };
-    for (const p of cluster.hull) {
-      if (p.y < topLeft.y || (p.y === topLeft.y && p.x < topLeft.x)) topLeft = p;
+    for (const point of cluster.hull) {
+      if (point.y < topLeft.y || (point.y === topLeft.y && point.x < topLeft.x)) topLeft = point;
     }
-    const s = worldToScreen(gvs, topLeft);
+    const screen = worldToScreen(gvs, topLeft);
     // Single-file clusters: just the filename, borderless dim text. The
     // full path lives in the tooltip; quiet labels collide far less.
     const single = cluster.indices.length === 1;
@@ -479,13 +494,17 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
     const boxW = labelW + subW + 17;
     // Clamp inside the viewport so edge clusters keep readable chips.
     const x = Math.min(
-      Math.max(6, s.x - 4),
+      Math.max(6, screen.x - 4),
       usableStageWidth(state, state.canvas.clientWidth) - boxW - 8,
     );
-    let y = s.y - 12;
+    let y = screen.y - 12;
     for (let tries = 0; tries < 6; tries++) {
       const overlaps = placed.some(
-        (r) => x < r.x + r.w && x + boxW > r.x && y - 9 < r.y + r.h && y + 9 > r.y,
+        (placedRect) =>
+          x < placedRect.x + placedRect.w &&
+          x + boxW > placedRect.x &&
+          y - 9 < placedRect.y + placedRect.h &&
+          y + 9 > placedRect.y,
       );
       if (!overlaps) break;
       y += 19;
@@ -528,7 +547,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
   drawStandaloneChip(state, gvs);
 };
 
-export const drawCanvasLegend = (state: AppState, w: number, h: number): void => {
+export const drawCanvasLegend = (state: AppState, width: number, height: number): void => {
   const { ctx, theme } = state;
   const text = legendText(state.lens, state.data, "graph");
   if (text === "") return;
@@ -538,10 +557,10 @@ export const drawCanvasLegend = (state: AppState, w: number, h: number): void =>
   const textW = ctx.measureText(text).width;
   ctx.fillStyle = theme.bg;
   ctx.globalAlpha = 0.85;
-  ctx.fillRect(10, h - 27, textW + 12, 19);
+  ctx.fillRect(10, height - 27, textW + 12, 19);
   ctx.globalAlpha = 0.9;
   ctx.fillStyle = theme.textLow;
-  ctx.fillText(text, 16, h - 17.5);
+  ctx.fillText(text, 16, height - 17.5);
   ctx.globalAlpha = 1;
-  void w;
+  void width;
 };

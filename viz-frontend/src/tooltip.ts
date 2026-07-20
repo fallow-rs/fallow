@@ -33,13 +33,13 @@ const statGrid = (stats: Stat[]): HTMLElement => {
   for (const stat of stats) {
     const tile = document.createElement("div");
     tile.className = "tip-stat";
-    const v = document.createElement("div");
-    v.className = stat.cls ? `v ${stat.cls}` : "v";
-    v.textContent = stat.value;
-    const l = document.createElement("div");
-    l.className = "l";
-    l.textContent = stat.label;
-    tile.append(v, l);
+    const valueEl = document.createElement("div");
+    valueEl.className = stat.cls ? `v ${stat.cls}` : "v";
+    valueEl.textContent = stat.value;
+    const labelEl = document.createElement("div");
+    labelEl.className = "l";
+    labelEl.textContent = stat.label;
+    tile.append(valueEl, labelEl);
     grid.appendChild(tile);
   }
   return grid;
@@ -79,7 +79,7 @@ const severityLine = (state: AppState, fileIndex: number): HTMLElement | null =>
     return line("sev-error tip-line", "unused, nothing imports this file");
   }
   if (state.index.violationSources.has(fileIndex)) {
-    const count = state.data.violations.filter((v) => v.from === fileIndex).length;
+    const count = state.data.violations.filter((violation) => violation.from === fileIndex).length;
     return line(
       "sev-error tip-line",
       `${formatCount(count)} boundary violation${count === 1 ? "" : "s"}`,
@@ -172,9 +172,9 @@ export const showFileTooltip = (
   if (dock) {
     tip.style.display = "block";
     const rect = fileTipCanvasRect(dock.nodeX, dock.nodeY, dock.usableW, dock.canvas.height);
-    const h = tip.getBoundingClientRect().height;
+    const height = tip.getBoundingClientRect().height;
     tip.style.left = `${dock.canvas.left + rect.x}px`;
-    tip.style.top = `${Math.min(dock.canvas.top + rect.y, dock.canvas.bottom - h - 12)}px`;
+    tip.style.top = `${Math.min(dock.canvas.top + rect.y, dock.canvas.bottom - height - 12)}px`;
   } else {
     position(tip, mouseX, mouseY);
   }

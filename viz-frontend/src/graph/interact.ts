@@ -70,9 +70,12 @@ export const startGraphLensFade = (state: AppState, prev: Map<number, string>): 
 };
 
 /** Node position in canvas pixels (for tooltip docking in main). */
-export const nodeScreenPos = (state: AppState, idx: number): { x: number; y: number } | null => {
+export const nodeScreenPos = (
+  state: AppState,
+  fileIndex: number,
+): { x: number; y: number } | null => {
   const gvs = getGVS(state);
-  const node = gvs.fileNodes[idx];
+  const node = gvs.fileNodes[fileIndex];
   if (!node || node.x == null || node.y == null) return null;
   return worldToScreen(gvs, { x: node.x, y: node.y });
 };
@@ -106,9 +109,9 @@ const buildRoadSelection = (state: AppState, roadIndex: number): RoadSelection =
     }
   }
   const sortedPairs = pairs.toSorted(
-    (a, b) =>
-      (state.data.files[a[0]].path < state.data.files[b[0]].path ? -1 : 1) ||
-      (state.data.files[a[1]].path < state.data.files[b[1]].path ? -1 : 1),
+    (left, right) =>
+      (state.data.files[left[0]].path < state.data.files[right[0]].path ? -1 : 1) ||
+      (state.data.files[left[1]].path < state.data.files[right[1]].path ? -1 : 1),
   );
   return {
     srcKey: gvs.clusters[road.src].key,
@@ -129,8 +132,8 @@ const shortestPath = (state: AppState, from: number, to: number): number[] | nul
     let frontier = [start];
     while (frontier.length > 0) {
       const next: number[] = [];
-      for (const v of frontier) {
-        if (v === goal) {
+      for (const node of frontier) {
+        if (node === goal) {
           const path: number[] = [];
           let cur = goal;
           while (cur !== -1) {
@@ -139,10 +142,10 @@ const shortestPath = (state: AppState, from: number, to: number): number[] | nul
           }
           return path.toReversed();
         }
-        for (const w of adj[v]) {
-          if (!prev.has(w)) {
-            prev.set(w, v);
-            next.push(w);
+        for (const neighbor of adj[node]) {
+          if (!prev.has(neighbor)) {
+            prev.set(neighbor, node);
+            next.push(neighbor);
           }
         }
       }
@@ -205,12 +208,15 @@ export const resetGraphView = (state: AppState, animate = true): void => {
   const gvs = getGVS(state);
   if (!gvs.initialized || !gvs.zoomBehavior || state.selected !== null) return;
   // Recompute the fit transform from current cluster bounds.
-  const { w, h } = stageSize(state);
-  const anyConnected = gvs.clusters.some((c) => !c.isolated);
+  const { w: width, h: height } = stageSize(state);
+  const anyConnected = gvs.clusters.some((cluster) => !cluster.isolated);
   const fit = fitTransform(
-    w,
-    h,
-    clusterBounds(gvs.clusters, (c) => !(c.isolated && anyConnected && !gvs.standaloneOpen)),
+    width,
+    height,
+    clusterBounds(
+      gvs.clusters,
+      (cluster) => !(cluster.isolated && anyConnected && !gvs.standaloneOpen),
+    ),
   );
   // Re-anchor the zoom extent and LOD baseline to the refreshed fit,
   // so min/max zoom stay meaningful after large resizes.
@@ -224,9 +230,12 @@ export const graphFocusSearch = (state: AppState): void => {
   const gvs = getGVS(state);
   if (!gvs.initialized || state.searchMatches.size === 0) return;
   let best: number | null = null;
-  for (const idx of state.searchMatches) {
-    if (best === null || state.data.files[idx].path.length < state.data.files[best].path.length) {
-      best = idx;
+  for (const fileIndex of state.searchMatches) {
+    if (
+      best === null ||
+      state.data.files[fileIndex].path.length < state.data.files[best].path.length
+    ) {
+      best = fileIndex;
     }
   }
   if (best === null) return;
@@ -273,7 +282,11 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
   }
   // A cluster label lights up every road into/out of that cluster.
   const label = gvs.clusterLabels.find(
-    (c) => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h,
+    (clusterLabel) =>
+      x >= clusterLabel.x &&
+      x <= clusterLabel.x + clusterLabel.w &&
+      y >= clusterLabel.y &&
+      y <= clusterLabel.y + clusterLabel.h,
   );
   if (label) {
     gvs.hoveredRoad = null;
@@ -367,9 +380,11 @@ export const centerOnFile = (state: AppState, fileIndex: number): void => {
   const node = gvs.fileNodes[fileIndex];
   if (!node || node.x == null || node.y == null) return;
   const stageEl = state.canvas.parentElement;
-  const w = stageEl ? stageEl.clientWidth : window.innerWidth;
-  const h = stageEl ? stageEl.clientHeight : window.innerHeight;
-  const k = Math.max(gvs.transform.k, gvs.fitK * 1.5);
-  const target = zoomIdentity.translate(w / 2 - node.x * k, h / 2 - node.y * k).scale(k);
+  const width = stageEl ? stageEl.clientWidth : window.innerWidth;
+  const height = stageEl ? stageEl.clientHeight : window.innerHeight;
+  const scale = Math.max(gvs.transform.k, gvs.fitK * 1.5);
+  const target = zoomIdentity
+    .translate(width / 2 - node.x * scale, height / 2 - node.y * scale)
+    .scale(scale);
   tweenCamera(state, target, CAMERA_MS);
 };

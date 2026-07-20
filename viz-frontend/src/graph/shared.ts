@@ -113,12 +113,12 @@ export const buildSpatialGrid = (
   const cols = Math.max(1, Math.floor((maxX - minX) / cell) + 1);
   const rows = Math.max(1, Math.floor((maxY - minY) / cell) + 1);
   const buckets: number[][] = Array.from({ length: cols * rows }, () => []);
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
+  for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+    const node = nodes[nodeIndex];
     if (!node || node.x == null || node.y == null) continue;
     const cx = Math.min(cols - 1, Math.max(0, Math.floor((node.x - minX) / cell)));
     const cy = Math.min(rows - 1, Math.max(0, Math.floor((node.y - minY) / cell)));
-    buckets[cy * cols + cx].push(i);
+    buckets[cy * cols + cx].push(nodeIndex);
   }
   return { cell, cols, rows, minX, minY, buckets, maxRadius };
 };
@@ -137,7 +137,7 @@ export const gridQuery = (
   const out: number[] = [];
   for (let cy = minCy; cy <= maxCy; cy++) {
     for (let cx = minCx; cx <= maxCx; cx++) {
-      for (const idx of grid.buckets[cy * grid.cols + cx]) out.push(idx);
+      for (const nodeIndex of grid.buckets[cy * grid.cols + cx]) out.push(nodeIndex);
     }
   }
   return out;
@@ -303,28 +303,36 @@ const segIntersect = (a1: Pt, a2: Pt, b1: Pt, b2: Pt): Pt | null => {
   const d2y = b2.y - b1.y;
   const denom = d1x * d2y - d1y * d2x;
   if (Math.abs(denom) < 1e-9) return null;
-  const t = ((b1.x - a1.x) * d2y - (b1.y - a1.y) * d2x) / denom;
-  const u = ((b1.x - a1.x) * d1y - (b1.y - a1.y) * d1x) / denom;
-  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
-  return { x: a1.x + t * d1x, y: a1.y + t * d1y };
+  const alongA = ((b1.x - a1.x) * d2y - (b1.y - a1.y) * d2x) / denom;
+  const alongB = ((b1.x - a1.x) * d1y - (b1.y - a1.y) * d1x) / denom;
+  if (alongA < 0 || alongA > 1 || alongB < 0 || alongB > 1) return null;
+  return { x: a1.x + alongA * d1x, y: a1.y + alongA * d1y };
 };
 
 /** Where the segment from a cluster's centre toward `toward` leaves its hull. */
 const gatePoint = (cluster: ClusterInfo, toward: Pt): Pt => {
   const from = { x: cluster.cx, y: cluster.cy };
   const hull = cluster.hull;
-  for (let i = 0; i < hull.length; i++) {
-    const hit = segIntersect(from, toward, hull[i], hull[(i + 1) % hull.length]);
+  for (let index = 0; index < hull.length; index++) {
+    const hit = segIntersect(from, toward, hull[index], hull[(index + 1) % hull.length]);
     if (hit) return hit;
   }
   return from;
 };
 
-export const cubicPoint = (p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: number): Pt => {
-  const u = 1 - t;
+export const cubicPoint = (p0: Pt, p1: Pt, p2: Pt, p3: Pt, progress: number): Pt => {
+  const inverse = 1 - progress;
   return {
-    x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
-    y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+    x:
+      inverse * inverse * inverse * p0.x +
+      3 * inverse * inverse * progress * p1.x +
+      3 * inverse * progress * progress * p2.x +
+      progress * progress * progress * p3.x,
+    y:
+      inverse * inverse * inverse * p0.y +
+      3 * inverse * inverse * progress * p1.y +
+      3 * inverse * progress * progress * p2.y +
+      progress * progress * progress * p3.y,
   };
 };
 
@@ -340,25 +348,28 @@ export const taperedRibbon = (
 ): void => {
   const SAMPLES = 20;
   const centers: Pt[] = [];
-  for (let i = 0; i <= SAMPLES; i++) centers.push(cubicPoint(p0, p1, p2, p3, i / SAMPLES));
+  for (let sampleIndex = 0; sampleIndex <= SAMPLES; sampleIndex++)
+    centers.push(cubicPoint(p0, p1, p2, p3, sampleIndex / SAMPLES));
   const left: Pt[] = [];
   const right: Pt[] = [];
-  for (let i = 0; i <= SAMPLES; i++) {
-    const t = i / SAMPLES;
-    const prev = centers[Math.max(0, i - 1)];
-    const next = centers[Math.min(SAMPLES, i + 1)];
+  for (let sampleIndex = 0; sampleIndex <= SAMPLES; sampleIndex++) {
+    const progress = sampleIndex / SAMPLES;
+    const prev = centers[Math.max(0, sampleIndex - 1)];
+    const next = centers[Math.min(SAMPLES, sampleIndex + 1)];
     const dx = next.x - prev.x;
     const dy = next.y - prev.y;
     const len = Math.max(1e-6, Math.hypot(dx, dy));
     const nx = -dy / len;
     const ny = dx / len;
-    const hw = (wSrc * (1 - t) + wDst * t) / 2;
-    left.push({ x: centers[i].x + nx * hw, y: centers[i].y + ny * hw });
-    right.push({ x: centers[i].x - nx * hw, y: centers[i].y - ny * hw });
+    const hw = (wSrc * (1 - progress) + wDst * progress) / 2;
+    left.push({ x: centers[sampleIndex].x + nx * hw, y: centers[sampleIndex].y + ny * hw });
+    right.push({ x: centers[sampleIndex].x - nx * hw, y: centers[sampleIndex].y - ny * hw });
   }
   ctx.moveTo(left[0].x, left[0].y);
-  for (let i = 1; i <= SAMPLES; i++) ctx.lineTo(left[i].x, left[i].y);
-  for (let i = SAMPLES; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+  for (let sampleIndex = 1; sampleIndex <= SAMPLES; sampleIndex++)
+    ctx.lineTo(left[sampleIndex].x, left[sampleIndex].y);
+  for (let sampleIndex = SAMPLES; sampleIndex >= 0; sampleIndex--)
+    ctx.lineTo(right[sampleIndex].x, right[sampleIndex].y);
   ctx.closePath();
 };
 
@@ -415,14 +426,14 @@ export const chipRect = (
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  w: number,
-  h: number,
+  width: number,
+  height: number,
   fill: string,
   fillAlpha: number,
   stroke: string | null,
 ): void => {
   ctx.beginPath();
-  ctx.roundRect(x, y, w, h, 4);
+  ctx.roundRect(x, y, width, height, 4);
   ctx.fillStyle = fill;
   const prev = ctx.globalAlpha;
   ctx.globalAlpha = prev * fillAlpha;
@@ -451,31 +462,34 @@ export const isTestCluster = (key: string): boolean =>
   /(^|\/)(tests?|__tests__|e2e|spec)($|\/)/.test(key);
 // ── Rendering ───────────────────────────────────────────────────
 
-export const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
+export const easeOut = (progress: number): number => 1 - (1 - progress) * (1 - progress);
 export const hullPath = (ctx: CanvasRenderingContext2D, hull: Pt[]): void => {
-  const n = hull.length;
-  if (n < 3) {
+  const pointCount = hull.length;
+  if (pointCount < 3) {
     ctx.moveTo(hull[0].x, hull[0].y);
-    for (let i = 1; i < n; i++) ctx.lineTo(hull[i].x, hull[i].y);
+    for (let index = 1; index < pointCount; index++) ctx.lineTo(hull[index].x, hull[index].y);
     ctx.closePath();
     return;
   }
   // Rounded corners: run each edge to its midpoint, then a quadratic through
   // the vertex to the next edge's midpoint. The curve stays inside the convex
   // hull, so a cluster reads as a smooth blob rather than a hard polygon.
-  const start = { x: (hull[n - 1].x + hull[0].x) / 2, y: (hull[n - 1].y + hull[0].y) / 2 };
+  const start = {
+    x: (hull[pointCount - 1].x + hull[0].x) / 2,
+    y: (hull[pointCount - 1].y + hull[0].y) / 2,
+  };
   ctx.moveTo(start.x, start.y);
-  for (let i = 0; i < n; i++) {
-    const curr = hull[i];
-    const next = hull[(i + 1) % n];
+  for (let index = 0; index < pointCount; index++) {
+    const curr = hull[index];
+    const next = hull[(index + 1) % pointCount];
     ctx.quadraticCurveTo(curr.x, curr.y, (curr.x + next.x) / 2, (curr.y + next.y) / 2);
   }
   ctx.closePath();
 };
 
-export const worldToScreen = (gvs: GraphViewState, p: Pt): Pt => ({
-  x: p.x * gvs.transform.k + gvs.transform.x,
-  y: p.y * gvs.transform.k + gvs.transform.y,
+export const worldToScreen = (gvs: GraphViewState, point: Pt): Pt => ({
+  x: point.x * gvs.transform.k + gvs.transform.x,
+  y: point.y * gvs.transform.k + gvs.transform.y,
 });
 
 /**
@@ -489,7 +503,7 @@ export const tailTruncate = (
 ): string => {
   if (dir === "" || ctx.measureText(dir).width <= maxWidth) return dir;
   const tail = dir.endsWith("/") ? "/" : "";
-  const parts = dir.split("/").filter((p) => p !== "");
+  const parts = dir.split("/").filter((part) => part !== "");
   for (let drop = 1; drop < parts.length; drop++) {
     const candidate = `…/${parts.slice(drop).join("/")}${tail}`;
     if (ctx.measureText(candidate).width <= maxWidth) return candidate;
@@ -533,16 +547,16 @@ export const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): 
   const maxWorldRadius = Math.max(grid.maxRadius + 3 / transform.k, floor);
   let best: number | null = null;
   let bestD = Infinity;
-  for (const idx of gridQuery(grid, gx, gy, maxWorldRadius)) {
-    const node = fileNodes[idx];
+  for (const nodeIndex of gridQuery(grid, gx, gy, maxWorldRadius)) {
+    const node = fileNodes[nodeIndex];
     if (!node || node.x == null || node.y == null) continue;
     if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
     const dx = gx - node.x;
     const dy = gy - node.y;
-    const d = dx * dx + dy * dy;
-    const r = Math.max(node.radius + 3 / transform.k, floor);
-    if (d <= r * r && d < bestD) {
-      bestD = d;
+    const distSq = dx * dx + dy * dy;
+    const radius = Math.max(node.radius + 3 / transform.k, floor);
+    if (distSq <= radius * radius && distSq < bestD) {
+      bestD = distSq;
       best = node.fileIndex;
     }
   }
@@ -570,11 +584,11 @@ export const roadHitTest = (state: AppState, x: number, y: number): number | nul
     const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
     const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
     if (gx < minX - pad || gx > maxX + pad || gy < minY - pad || gy > maxY + pad) continue;
-    for (let i = 0; i <= 16; i++) {
-      const p = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, i / 16));
-      const d = Math.hypot(p.x - x, p.y - y);
-      if (d < bestDist) {
-        bestDist = d;
+    for (let sampleIndex = 0; sampleIndex <= 16; sampleIndex++) {
+      const point = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, sampleIndex / 16));
+      const dist = Math.hypot(point.x - x, point.y - y);
+      if (dist < bestDist) {
+        bestDist = dist;
         best = ri;
       }
     }
@@ -585,18 +599,18 @@ export const roadHitTest = (state: AppState, x: number, y: number): number | nul
 /** Bounding box of the clusters an include predicate keeps. */
 export const clusterBounds = (
   clusters: ClusterInfo[],
-  include: (c: ClusterInfo) => boolean,
+  include: (cluster: ClusterInfo) => boolean,
 ): { minX: number; minY: number; maxX: number; maxY: number } => {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const c of clusters) {
-    if (!include(c)) continue;
-    minX = Math.min(minX, c.cx - c.r);
-    minY = Math.min(minY, c.cy - c.r);
-    maxX = Math.max(maxX, c.cx + c.r);
-    maxY = Math.max(maxY, c.cy + c.r);
+  for (const cluster of clusters) {
+    if (!include(cluster)) continue;
+    minX = Math.min(minX, cluster.cx - cluster.r);
+    minY = Math.min(minY, cluster.cy - cluster.r);
+    maxX = Math.max(maxX, cluster.cx + cluster.r);
+    maxY = Math.max(maxY, cluster.cy + cluster.r);
   }
   return { minX, minY, maxX, maxY };
 };
@@ -608,20 +622,20 @@ const FIT_PAD = 70;
  * horizontal room for labels that stick out of hulls.
  */
 export const fitTransform = (
-  w: number,
-  h: number,
-  b: { minX: number; minY: number; maxX: number; maxY: number },
+  width: number,
+  height: number,
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
 ): { x: number; y: number; k: number } => {
   // An empty include set yields infinite bounds; a NaN camera poisons
   // every later transform, so fall back to the identity view.
-  if (!Number.isFinite(b.minX)) return { x: 0, y: 0, k: 1 };
-  const bboxW = b.maxX - b.minX + FIT_PAD * 2;
-  const bboxH = b.maxY - b.minY + FIT_PAD * 2;
-  const k = Math.min((w - 200) / bboxW, (h - 60) / bboxH, 1.4);
+  if (!Number.isFinite(bounds.minX)) return { x: 0, y: 0, k: 1 };
+  const bboxW = bounds.maxX - bounds.minX + FIT_PAD * 2;
+  const bboxH = bounds.maxY - bounds.minY + FIT_PAD * 2;
+  const scale = Math.min((width - 200) / bboxW, (height - 60) / bboxH, 1.4);
   return {
-    x: (w - bboxW * k) / 2 - b.minX * k + FIT_PAD * k,
-    y: (h - bboxH * k) / 2 - b.minY * k + FIT_PAD * k,
-    k,
+    x: (width - bboxW * scale) / 2 - bounds.minX * scale + FIT_PAD * scale,
+    y: (height - bboxH * scale) / 2 - bounds.minY * scale + FIT_PAD * scale,
+    k: scale,
   };
 };
 

@@ -27,7 +27,7 @@ interface Rect {
 // ── Squarify ────────────────────────────────────────────────────
 
 const squarify = (nodes: TreeNode[], rect: Rect): LayoutCell[] => {
-  const total = nodes.reduce((sum, n) => sum + n.size, 0);
+  const total = nodes.reduce((sum, node) => sum + node.size, 0);
   const result: LayoutCell[] = [];
   if (total > 0) layoutStrip(nodes, rect, total, result);
   return result;
@@ -51,16 +51,16 @@ const layoutStrip = (
   let row: TreeNode[] = [];
   let rowSize = 0;
   let bestAspect = Infinity;
-  let i = 0;
+  let index = 0;
 
-  while (i < nodes.length) {
-    const testSize = rowSize + nodes[i].size;
-    const testAspect = worstAspect(row.concat(nodes[i]), testSize, side, totalSize, rect);
+  while (index < nodes.length) {
+    const testSize = rowSize + nodes[index].size;
+    const testAspect = worstAspect(row.concat(nodes[index]), testSize, side, totalSize, rect);
     if (testAspect <= bestAspect || row.length === 0) {
-      row.push(nodes[i]);
+      row.push(nodes[index]);
       rowSize = testSize;
       bestAspect = testAspect;
-      i++;
+      index++;
     } else {
       break;
     }
@@ -75,17 +75,17 @@ const layoutStrip = (
   for (const node of row) {
     const fraction = node.size / rowSize;
     if (isWide) {
-      const h = rowRect.h * fraction;
-      result.push({ x: rowRect.x, y: rowRect.y + offset, w: rowRect.w, h, node, depth: 0 });
-      offset += h;
+      const height = rowRect.h * fraction;
+      result.push({ x: rowRect.x, y: rowRect.y + offset, w: rowRect.w, h: height, node, depth: 0 });
+      offset += height;
     } else {
-      const w = rowRect.w * fraction;
-      result.push({ x: rowRect.x + offset, y: rowRect.y, w, h: rowRect.h, node, depth: 0 });
-      offset += w;
+      const width = rowRect.w * fraction;
+      result.push({ x: rowRect.x + offset, y: rowRect.y, w: width, h: rowRect.h, node, depth: 0 });
+      offset += width;
     }
   }
 
-  const remaining = nodes.slice(i);
+  const remaining = nodes.slice(index);
   if (remaining.length > 0) {
     const remainRect: Rect = isWide
       ? { x: rect.x + rowRect.w, y: rect.y, w: rect.w - rowRect.w, h: rect.h }
@@ -160,13 +160,13 @@ const getTM = (state: AppState): TreemapState => {
  */
 export const treemapLayoutKey = (
   drillPath: string,
-  w: number,
-  h: number,
+  width: number,
+  height: number,
   usableW: number,
   dpr: number,
-): string => [drillPath, w, h, usableW, dpr].join("|");
+): string => [drillPath, width, height, usableW, dpr].join("|");
 
-const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
+const easeOut = (progress: number): number => 1 - (1 - progress) * (1 - progress);
 
 /** Kick a zoom transition; `rect` is the drilled cell in viewport coords. */
 const startZoom = (state: AppState, rect: Rect, dir: "in" | "out"): void => {
@@ -185,8 +185,8 @@ export const startLensFade = (state: AppState, prevColors: Map<number, string>):
 /** Capture the current lens colors of all files (for the crossfade). */
 export const captureLensColors = (state: AppState): Map<number, string> => {
   const colors = new Map<number, string>();
-  for (let i = 0; i < state.data.files.length; i++) {
-    colors.set(i, lensColor(state.lens, state.theme, state.index, state.data.files[i]));
+  for (let index = 0; index < state.data.files.length; index++) {
+    colors.set(index, lensColor(state.lens, state.theme, state.index, state.data.files[index]));
   }
   return colors;
 };
@@ -194,10 +194,10 @@ export const captureLensColors = (state: AppState): Map<number, string> => {
 // ── Hatch texture (secondary encoding for findings) ─────────────
 
 const buildHatch = (color: string, alpha = 0.5): CanvasPattern | null => {
-  const c = document.createElement("canvas");
-  c.width = 6;
-  c.height = 6;
-  const pctx = c.getContext("2d");
+  const canvas = document.createElement("canvas");
+  canvas.width = 6;
+  canvas.height = 6;
+  const pctx = canvas.getContext("2d");
   if (!pctx) return null;
   pctx.strokeStyle = color;
   pctx.globalAlpha = alpha;
@@ -209,7 +209,7 @@ const buildHatch = (color: string, alpha = 0.5): CanvasPattern | null => {
   pctx.lineTo(7, 3);
   pctx.stroke();
   const ctx2 = document.createElement("canvas").getContext("2d");
-  return ctx2 ? ctx2.createPattern(c, "repeat") : null;
+  return ctx2 ? ctx2.createPattern(canvas, "repeat") : null;
 };
 
 // ── Rendering ───────────────────────────────────────────────────
@@ -250,9 +250,9 @@ const footerChip = (
 };
 
 /** Footer strip: lens legend on the left, and, at the root, the drill hint. */
-const drawTreemapFooter = (state: AppState, w: number, h: number): void => {
+const drawTreemapFooter = (state: AppState, width: number, height: number): void => {
   const { ctx, theme } = state;
-  const y = h - 17;
+  const y = height - 17;
   const legend = legendText(state.lens, state.data, "map");
   if (legend !== "") footerChip(ctx, theme, legend, "left", 16, y);
   // The treemap's one non-obvious gesture is drilling; teach it at the
@@ -263,7 +263,7 @@ const drawTreemapFooter = (state: AppState, w: number, h: number): void => {
       theme,
       "click a folder to zoom in",
       "right",
-      usableStageWidth(state, w) - 16,
+      usableStageWidth(state, width) - 16,
       y,
     );
   }
@@ -278,14 +278,14 @@ export const renderTreemap = (state: AppState): void => {
   state.dpr = dpr;
   const tm = getTM(state);
   const stage = canvas.parentElement;
-  const w = stage ? stage.clientWidth : window.innerWidth;
-  const h = stage ? stage.clientHeight : window.innerHeight;
+  const width = stage ? stage.clientWidth : window.innerWidth;
+  const height = stage ? stage.clientHeight : window.innerHeight;
 
-  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
   }
 
   // First render: start the staggered reveal.
@@ -313,38 +313,41 @@ export const renderTreemap = (state: AppState): void => {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = state.theme.bg;
-  ctx.fillRect(0, 0, w, h);
+  ctx.fillRect(0, 0, width, height);
 
   const rootNode = state.index.nodesByPath.get(state.drillPath) ?? state.index.tree;
   // Reserve a footer gutter for the legend and keep tiles clear of an
   // open right panel.
-  const rootRect: Rect = { x: 0, y: 0, w: usableStageWidth(state, w), h: h - 22 };
+  const rootRect: Rect = { x: 0, y: 0, w: usableStageWidth(state, width), h: height - 22 };
 
   const zooming = anim && (anim.kind === "zoom-in" || anim.kind === "zoom-out") && animT < 1;
-  const t = easeOut(animT);
+  const easedProgress = easeOut(animT);
 
   if (zooming && anim) {
     ctx.save();
     if (anim.kind === "zoom-in" && anim.rect) {
       // The drilled cell expands to fill the viewport: render the new layout
       // inside an interpolated rect that grows from the cell to full size.
-      const r = anim.rect;
-      ctx.translate(r.x * (1 - t), r.y * (1 - t));
-      ctx.scale(r.w / w + (1 - r.w / w) * t, r.h / h + (1 - r.h / h) * t);
+      const rect = anim.rect;
+      ctx.translate(rect.x * (1 - easedProgress), rect.y * (1 - easedProgress));
+      ctx.scale(
+        rect.w / width + (1 - rect.w / width) * easedProgress,
+        rect.h / height + (1 - rect.h / height) * easedProgress,
+      );
     } else {
       // Zoom out: the parent view settles back from slightly zoomed-in.
-      const s = 1.08 - 0.08 * t;
-      ctx.translate((w - w * s) / 2, (h - h * s) / 2);
-      ctx.scale(s, s);
+      const scale = 1.08 - 0.08 * easedProgress;
+      ctx.translate((width - width * scale) / 2, (height - height * scale) / 2);
+      ctx.scale(scale, scale);
     }
   }
 
   const rctx: RenderCtx = {
     state,
     now,
-    lensT: anim?.kind === "lens" ? t : 1,
+    lensT: anim?.kind === "lens" ? easedProgress : 1,
     prevColors: anim?.kind === "lens" ? (anim.prevColors ?? null) : null,
-    revealT: anim?.kind === "reveal" ? t : 1,
+    revealT: anim?.kind === "reveal" ? easedProgress : 1,
     hitTest: !zooming,
     labels: !zooming,
   };
@@ -354,7 +357,7 @@ export const renderTreemap = (state: AppState): void => {
   // cached cells repaint without re-running squarify. Any in-flight
   // animation bypasses the cache; the reveal populates `state.layout`
   // incrementally and a zoom repaints scaled geometry.
-  const layoutKey = treemapLayoutKey(state.drillPath, w, h, rootRect.w, dpr);
+  const layoutKey = treemapLayoutKey(state.drillPath, width, height, rootRect.w, dpr);
   if (tm.anim === null && tm.layoutKey === layoutKey && state.layout.length > 0) {
     repaintFromLayout(rctx);
   } else {
@@ -370,7 +373,7 @@ export const renderTreemap = (state: AppState): void => {
     tm.layoutKey = rctx.hitTest && tm.anim === null ? layoutKey : "";
   }
 
-  if (!zooming) drawTreemapFooter(state, w, h);
+  if (!zooming) drawTreemapFooter(state, width, height);
 
   if (zooming) {
     ctx.restore();
@@ -388,11 +391,11 @@ const scheduleFrame = (state: AppState): void => {
   });
 };
 
-const insetRect = (r: Rect, by: number): Rect => ({
-  x: r.x + by,
-  y: r.y + by,
-  w: Math.max(0, r.w - by * 2),
-  h: Math.max(0, r.h - by * 2),
+const insetRect = (rect: Rect, by: number): Rect => ({
+  x: rect.x + by,
+  y: rect.y + by,
+  w: Math.max(0, rect.w - by * 2),
+  h: Math.max(0, rect.h - by * 2),
 });
 
 /** Recursively render one cell; returns the running sequence counter. */
@@ -431,9 +434,9 @@ const renderCell = (
     ctx.globalAlpha = 1;
     return nextSeq;
   }
-  const s = renderDirCell(rctx, cell, depth, nextSeq, totalTop, alpha, hovered);
+  const dirSeq = renderDirCell(rctx, cell, depth, nextSeq, totalTop, alpha, hovered);
   ctx.globalAlpha = 1;
-  return s;
+  return dirSeq;
 };
 
 /** A file tile: lens fill, finding hatch, rings, and its label. */
@@ -461,15 +464,15 @@ const renderFileCell = (
   const matched = !searching || state.searchMatches.has(fi);
   if (searching && !matched) ctx.globalAlpha = alpha * 0.18;
 
-  const r = { x: cell.x + 0.5, y: cell.y + 0.5, w: cell.w - 1, h: cell.h - 1 };
+  const rect = { x: cell.x + 0.5, y: cell.y + 0.5, w: cell.w - 1, h: cell.h - 1 };
   ctx.fillStyle = fill;
-  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
 
   if (entryOutline && cell.w > 6 && cell.h > 6) {
     ctx.strokeStyle = theme.blue;
     ctx.globalAlpha = ctx.globalAlpha * 0.55;
     ctx.lineWidth = 1;
-    ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
     ctx.globalAlpha = alpha;
   }
 
@@ -479,35 +482,35 @@ const renderFileCell = (
   const level = lensFindingLevel(state.lens, index, file, fi);
   if (level === 2 && tm.hatch) {
     ctx.fillStyle = tm.hatch;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   } else if (level === 1 && tm.hatchMild) {
     ctx.fillStyle = tm.hatchMild;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   }
 
   // Hover: inverse-selection wash + strong border.
   if (hovered) {
     ctx.fillStyle = theme.textHigh;
     ctx.globalAlpha = ctx.globalAlpha * 0.18;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
     ctx.globalAlpha = alpha;
     ctx.strokeStyle = theme.textHigh;
     ctx.lineWidth = 1;
-    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
   }
 
   // Selection ring (blue = interactive, never a severity color).
   if (state.selected === fi) {
     ctx.strokeStyle = theme.blue;
     ctx.lineWidth = 2;
-    ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
   }
 
   // Search match ring.
   if (searching && matched) {
     ctx.strokeStyle = theme.amberText;
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(r.x + 0.75, r.y + 0.75, r.w - 1.5, r.h - 1.5);
+    ctx.strokeRect(rect.x + 0.75, rect.y + 0.75, rect.w - 1.5, rect.h - 1.5);
   }
 
   if (rctx.labels && cell.w > MIN_LABEL_W && cell.h > MIN_LABEL_H) {
@@ -539,12 +542,12 @@ const renderDirCell = (
   const inner = paintDirChrome(rctx, cell, depth, alpha, hovered);
   if (inner) {
     const children = squarify(cell.node.children, inner);
-    let s = nextSeq;
+    let childSeq = nextSeq;
     for (const child of children) {
-      s = renderCell(rctx, child, depth + 1, s, totalTop);
+      childSeq = renderCell(rctx, child, depth + 1, childSeq, totalTop);
     }
     rctx.state.ctx.globalAlpha = 1;
-    return s;
+    return childSeq;
   }
   return nextSeq;
 };
@@ -624,9 +627,9 @@ const repaintFromLayout = (rctx: RenderCtx): void => {
   const { state } = rctx;
   const { ctx } = state;
   const searching = state.search.trim() !== "";
-  for (let i = 0; i < state.layout.length; i++) {
-    const cell = state.layout[i];
-    const hovered = state.hoveredCell === i;
+  for (let index = 0; index < state.layout.length; index++) {
+    const cell = state.layout[index];
+    const hovered = state.hoveredCell === index;
     ctx.globalAlpha = 1;
     if (cell.node.fileIndex !== null) {
       renderFileCell(rctx, cell, 1, hovered, searching);
@@ -642,9 +645,14 @@ const dirSummaryColor = (rctx: RenderCtx, node: TreeNode): string => {
   const { state } = rctx;
   let best = state.theme.cellNeutral;
   let bestRank = -1;
-  const walk = (n: TreeNode): void => {
-    if (n.fileIndex !== null) {
-      const color = lensColor(state.lens, state.theme, state.index, state.data.files[n.fileIndex]);
+  const walk = (current: TreeNode): void => {
+    if (current.fileIndex !== null) {
+      const color = lensColor(
+        state.lens,
+        state.theme,
+        state.index,
+        state.data.files[current.fileIndex],
+      );
       const rank = colorRank(state, color);
       if (rank > bestRank) {
         bestRank = rank;
@@ -652,7 +660,7 @@ const dirSummaryColor = (rctx: RenderCtx, node: TreeNode): string => {
       }
       return;
     }
-    for (const c of n.children) walk(c);
+    for (const child of current.children) walk(child);
   };
   walk(node);
   return best;
@@ -670,9 +678,9 @@ const colorRank = (state: AppState, color: string): number => {
 
 const countFiles = (node: TreeNode): number => {
   if (node.fileIndex !== null) return 1;
-  let n = 0;
-  for (const c of node.children) n += countFiles(c);
-  return n;
+  let count = 0;
+  for (const child of node.children) count += countFiles(child);
+  return count;
 };
 
 /**
@@ -711,16 +719,16 @@ const truncate = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 export const treemapHitTest = (state: AppState, x: number, y: number): number | null => {
   let hit: number | null = null;
   let hitArea = Infinity;
-  for (let i = 0; i < state.layout.length; i++) {
-    const c = state.layout[i];
-    if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
+  for (let index = 0; index < state.layout.length; index++) {
+    const cell = state.layout[index];
+    if (x >= cell.x && x <= cell.x + cell.w && y >= cell.y && y <= cell.y + cell.h) {
       const isDirHeader =
-        c.node.fileIndex === null && y <= c.y + DIR_HEADER && c.w >= 34 && c.h >= 30;
-      const area = c.w * c.h;
-      if (c.node.fileIndex !== null || isDirHeader || c.w < 34 || c.h < 30) {
+        cell.node.fileIndex === null && y <= cell.y + DIR_HEADER && cell.w >= 34 && cell.h >= 30;
+      const area = cell.w * cell.h;
+      if (cell.node.fileIndex !== null || isDirHeader || cell.w < 34 || cell.h < 30) {
         if (area < hitArea) {
           hitArea = area;
-          hit = i;
+          hit = index;
         }
       }
     }

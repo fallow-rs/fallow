@@ -90,11 +90,11 @@ export const runSearch = (state: AppState, query: string): void => {
   state.search = query;
   state.searchMatches.clear();
   state.searchReach.clear();
-  const q = query.trim().toLowerCase();
-  if (q === "") return;
-  for (let i = 0; i < state.data.files.length; i++) {
-    if (state.data.files[i].path.toLowerCase().includes(q)) {
-      state.searchMatches.add(i);
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery === "") return;
+  for (let fileIndex = 0; fileIndex < state.data.files.length; fileIndex++) {
+    if (state.data.files[fileIndex].path.toLowerCase().includes(normalizedQuery)) {
+      state.searchMatches.add(fileIndex);
     }
   }
   // Combined blast radius of the matched set: everything that
@@ -103,7 +103,7 @@ export const runSearch = (state: AppState, query: string): void => {
   // the per-match cap the old per-file loop needed. Skipped for one-char
   // queries, which match too much to be a meaningful set and would walk
   // the whole graph on every keystroke of a large monorepo.
-  if (state.searchMatches.size > 0 && q.length >= 2) {
+  if (state.searchMatches.size > 0 && normalizedQuery.length >= 2) {
     for (const up of reachSetMulti(state.index.importersOf, state.searchMatches)) {
       state.searchReach.add(up);
     }
@@ -139,8 +139,8 @@ export const applyHash = (state: AppState, hash: string): void => {
   if (path && state.index.nodesByPath.has(path)) state.drillPath = path;
   const file = params.get("file");
   if (file) {
-    const idx = state.data.files.findIndex((f) => f.path === file);
-    if (idx !== -1) state.selected = idx;
+    const fileIndex = state.data.files.findIndex((fileEntry) => fileEntry.path === file);
+    if (fileIndex !== -1) state.selected = fileIndex;
   }
 };
 
