@@ -159,51 +159,44 @@ const louvainCluster = (
     if (!communityMap.has(comm)) communityMap.set(comm, []);
     communityMap.get(comm)?.push(i);
   }
-  // Name each community by its dominant directory prefix. When several
-  // communities share the same shallow prefix (e.g. four import groups all
-  // dominated by `src/features`), deepen the colliding ones one folder at a
-  // time so the distinguishing segment (`src/features/savings`) shows through
-  // instead of an opaque `src/features*` disambiguation suffix.
+  // Name each community by the folder that dominates it. A community is an
+  // import group, not a folder, so the plurality folder only names it honestly
+  // when it is a real MAJORITY (Charts, Calendar, email): then use that folder
+  // directly. When no folder reaches a majority the community is genuinely
+  // cross-cutting, so label it by its top-level area with a `· mixed` marker
+  // (`src/components · mixed`) rather than let a 9%-of-the-files folder imply
+  // it owns all 128. Two mixed areas that collide promote to their biggest
+  // slice (`src/features/ai · mixed`) so the labels stay distinct.
   const comms = [...communityMap.values()];
-  const dominantPrefix = (indices: number[], depth: number): string => {
+  const MAJORITY = 0.5;
+  const dominantFolder = (indices: number[], depth: number): { name: string; count: number } => {
     const counts = new Map<string, number>();
     for (const idx of indices) {
       const parts = files[idx].path.split("/");
       const dirs = parts.length > 1 ? parts.slice(0, -1) : parts;
-      counts.set(
-        dirs.slice(0, depth).join("/"),
-        (counts.get(dirs.slice(0, depth).join("/")) ?? 0) + 1,
-      );
+      const key = dirs.slice(0, depth).join("/");
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const sorted = [...counts.entries()].toSorted((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
-    return sorted[0]?.[0] ?? "misc";
+    return { name: sorted[0]?.[0] ?? "misc", count: sorted[0]?.[1] ?? 0 };
   };
-  const depths = comms.map(() => 2);
-  for (let pass = 0; pass < 6; pass++) {
-    const byName = new Map<string, number[]>();
-    comms.forEach((indices, i) => {
-      const name = dominantPrefix(indices, depths[i]);
-      const group = byName.get(name);
-      if (group) group.push(i);
-      else byName.set(name, [i]);
-    });
-    let deepened = false;
-    for (const [, group] of byName) {
-      if (group.length < 2) continue;
-      // A community whose prefix stops growing has bottomed out; deepening it
-      // further is wasted, so only advance ones that can still get specific.
-      for (const i of group) {
-        if (dominantPrefix(comms[i], depths[i] + 1) !== dominantPrefix(comms[i], depths[i])) {
-          depths[i]++;
-          deepened = true;
-        }
-      }
-    }
-    if (!deepened) break;
-  }
+  // Each community wants a `preferred` label, falling back to a more specific
+  // `fallback` only when the preferred one collides with another community.
+  const labels = comms.map((indices) => {
+    const total = indices.length || 1;
+    const specific = dominantFolder(indices, 3);
+    if (specific.count / total >= MAJORITY)
+      return { preferred: specific.name, fallback: specific.name };
+    const area = dominantFolder(indices, 2).name;
+    return { preferred: `${area} · mixed`, fallback: `${specific.name} · mixed` };
+  });
+  const preferredCount = new Map<string, number>();
+  for (const l of labels)
+    preferredCount.set(l.preferred, (preferredCount.get(l.preferred) ?? 0) + 1);
   const result = new Map<string, number[]>();
   comms.forEach((indices, i) => {
-    let name = dominantPrefix(indices, depths[i]);
+    let name =
+      (preferredCount.get(labels[i].preferred) ?? 0) > 1 ? labels[i].fallback : labels[i].preferred;
     while (result.has(name)) name = `${name}*`;
     result.set(name, indices);
   });
