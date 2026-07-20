@@ -26,13 +26,10 @@ import {
   clusterBounds,
   fitTransform,
   getGVS,
-  nodeHitTest,
-  roadHitTest,
   shouldShowIntro,
   stageSize,
 } from "./shared";
 import { renderGraph } from "./render";
-import { minimapHit } from "./minimap";
 
 // ── Deterministic randomness ────────────────────────────────────
 
@@ -832,26 +829,18 @@ export const initGraphNodes = (state: AppState): void => {
 
   const zoomBehavior = zoom<HTMLCanvasElement, unknown>()
     .scaleExtent([fit.k * 0.4, fit.k * 12])
+    // A drag pans from ANYWHERE (including a node or road); selection runs on
+    // the native `click` in main.ts. clickDistance lets a genuine click's
+    // `click` event through while d3 suppresses it after a real drag, so d3
+    // owning the gesture no longer swallows clicks.
+    .clickDistance(4)
     .filter((event: MouseEvent | WheelEvent) => {
       // Only the graph view pans/zooms via d3; the treemap has its own drill,
-      // so leaving d3 active there would let its mouseup swallow treemap clicks.
+      // and the ego camera is frozen.
       if (state.view !== "graph") return false;
-      if (state.selected !== null) return false; // camera frozen in ego mode
+      if (state.selected !== null) return false;
       if (event.type === "wheel") return !event.ctrlKey;
-      if ((event as MouseEvent).button !== 0) return true;
-      const rect = canvas.getBoundingClientRect();
-      const px = (event as MouseEvent).clientX - rect.left;
-      const py = (event as MouseEvent).clientY - rect.top;
-      // Never start a pan on an interactive target: d3-zoom would claim the
-      // gesture and its mouseup (stopImmediatePropagation) swallows the click
-      // before our handler can act. Covers the minimap, the standalone-strip
-      // chip, nodes, and roads.
-      if (minimapHit(state, px, py)) return false;
-      const chip = gvs.standaloneChip;
-      if (chip && px >= chip.x && px <= chip.x + chip.w && py >= chip.y && py <= chip.y + chip.h) {
-        return false;
-      }
-      return nodeHitTest(state, px, py) === null && roadHitTest(state, px, py) === null;
+      return !(event as MouseEvent).button;
     })
     .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
       if (event.sourceEvent) gvs.userMoved = true;

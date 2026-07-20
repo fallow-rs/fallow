@@ -281,7 +281,6 @@ const init = (): void => {
   state.requestRender = requestRender;
 
   // ── Canvas interactions ───────────────────────────────────────
-  let mouseDownAt: { x: number; y: number } | null = null;
   let lastGraphTarget = "";
 
   const canvasPoint = (e: MouseEvent): { x: number; y: number } => {
@@ -391,27 +390,21 @@ const init = (): void => {
   });
 
   canvas.addEventListener("mousedown", (e) => {
+    if (e.button === 0) dismissIntro(state);
+  });
+
+  // Selection runs on the native `click`, not mouseup. d3-zoom owns the drag
+  // gesture (so the user can pan by dragging from ANYWHERE, including a node or
+  // road) and, via clickDistance, lets a genuine click's `click` event through
+  // while suppressing it after a real drag. So a click here is always a click,
+  // never a pan.
+  canvas.addEventListener("click", (e) => {
     if (e.button !== 0) return;
-    dismissIntro(state);
     const { x, y } = canvasPoint(e);
     if (state.view === "graph" && minimapHit(state, x, y)) {
       minimapPan(state, x, y);
-      mouseDownAt = null;
       return;
     }
-    mouseDownAt = { x, y };
-  });
-
-  window.addEventListener("mouseup", (e) => {
-    if (!mouseDownAt) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const moved = Math.abs(x - mouseDownAt.x) > 4 || Math.abs(y - mouseDownAt.y) > 4;
-    mouseDownAt = null;
-    if (moved || e.target !== canvas) return;
-
-    // Treat as a click.
     if (state.view === "map") {
       const hit = treemapHitTest(state, x, y);
       if (hit === null) return;
@@ -424,26 +417,24 @@ const init = (): void => {
         drillInto(state, cell);
         requestRender();
       }
+      return;
+    }
+    if (e.shiftKey && graphPathTrace(state, x, y)) return;
+    const result = graphHandleClick(state, x, y);
+    if (result.kind === "file") {
+      state.selectedRoad = null;
+      hideTooltip();
+      selectFile(result.fileIndex);
+    } else if (result.kind === "road") {
+      state.selectedRoad = result.road;
+      state.selected = null;
+      hideTooltip();
+      requestRender();
+    } else if (result.kind === "none") {
+      state.selectedRoad = null;
+      selectFile(null);
     } else {
-      if (e.shiftKey && graphPathTrace(state, x, y)) {
-        return;
-      }
-      const result = graphHandleClick(state, x, y);
-      if (result.kind === "file") {
-        state.selectedRoad = null;
-        hideTooltip();
-        selectFile(result.fileIndex);
-      } else if (result.kind === "road") {
-        state.selectedRoad = result.road;
-        state.selected = null;
-        hideTooltip();
-        requestRender();
-      } else if (result.kind === "none") {
-        state.selectedRoad = null;
-        selectFile(null);
-      } else {
-        requestRender();
-      }
+      requestRender();
     }
   });
 
