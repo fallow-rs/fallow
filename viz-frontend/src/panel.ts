@@ -37,21 +37,66 @@ const kvEl = (pairs: KvPair[]): HTMLElement => {
 
 const sev = (cls: string, text: string): HTMLElement => el("span", cls, text);
 
-/** ASCII severity bar: `████░░░░` colored by threshold. */
-const asciiBar = (value: number, max: number, dangerAt: number): HTMLElement => {
+/** Which ink fills a meter: warn/error track the severity ramp; neutral is a
+ *  calm fill for magnitudes that are not defects (how depended-on a file is,
+ *  a query's footprint), so they never borrow the amber/red severity meaning. */
+type MeterTone = "warn" | "error" | "neutral";
+
+/** A meter specification: a value against a max, plus the ink to fill it. */
+interface MeterSpec {
+  value: number;
+  max: number;
+  tone: MeterTone;
+}
+
+const meterSpec = (value: number, max: number, tone: MeterTone): MeterSpec => ({
+  value,
+  max,
+  tone,
+});
+
+/** An 8-slot text meter: a filled run (`█`) over a dotted track (`░`). The same
+ *  motif the per-function complexity bar uses, generalized so ranked lists,
+ *  blast-radius facts, and search totals can reuse it. */
+const meterBar = (value: number, max: number, tone: MeterTone): HTMLElement => {
   const slots = 8;
-  const filled = Math.max(0, Math.min(slots, Math.round((value / max) * slots)));
+  const filled = max > 0 ? Math.max(0, Math.min(slots, Math.round((value / max) * slots))) : 0;
   const bar = el("span", "bar");
-  const fill = el("span", value >= dangerAt ? "fill-error" : "fill-warn", "█".repeat(filled));
+  const fillClass =
+    tone === "error" ? "fill-error" : tone === "neutral" ? "fill-neutral" : "fill-warn";
+  const fill = el("span", fillClass, "█".repeat(filled));
   bar.append(fill, document.createTextNode("░".repeat(slots - filled)));
   return bar;
+};
+
+/** ASCII severity bar: the meter, red past the danger line. */
+const asciiBar = (value: number, max: number, dangerAt: number): HTMLElement =>
+  meterBar(value, max, value >= dangerAt ? "error" : "warn");
+
+/** A count paired with a neutral meter of it against `max`. Shared by the
+ *  facts blast-radius rows and the search totals. */
+const countWithBar = (
+  count: number,
+  max: number,
+  label: string,
+  tone: MeterTone,
+  labelWidthCh?: number,
+): HTMLElement => {
+  const wrap = el("span", "meter");
+  wrap.appendChild(meterBar(count, max, tone));
+  const num = el("span", "meter-num", label);
+  // A fixed label width right-aligns the numbers and pins every bar to the
+  // same x, so stacked rows (reaches/affects) read as an aligned mini chart.
+  if (labelWidthCh !== undefined) num.style.minWidth = `${labelWidthCh}ch`;
+  wrap.appendChild(num);
+  return wrap;
 };
 
 const statusLabel = (file: VizFile): HTMLElement => {
   const wrap = el("span");
   switch (file.status) {
     case "unused":
-      wrap.appendChild(sev("sev-error", "unused file"));
+      wrap.appendChild(sev("sev-error", "Unused file"));
       break;
     case "hasUnusedExports":
       wrap.appendChild(
@@ -61,36 +106,21 @@ const statusLabel = (file: VizFile): HTMLElement => {
         ),
       );
       break;
-    case "entryPoint":
-      wrap.appendChild(sev("sev-info", "entry point"));
+    case "entryPoint": {
+      // The old always-on gloss ("Where execution starts…") was redundant with
+      // the label; keep the explanation on hover instead of on its own line.
+      const entry = sev("sev-info", "Entry point");
+      entry.dataset.tip = "Where execution starts; nothing needs to import it.";
+      wrap.appendChild(entry);
       break;
-    default:
-      wrap.appendChild(sev("sev-ok", "in use"));
+    }
+    default: {
+      const inUse = sev("sev-ok", "In use");
+      inUse.dataset.tip = "Reachable from an entry point.";
+      wrap.appendChild(inUse);
+    }
   }
   return wrap;
-};
-
-const linkList = (
-  state: AppState,
-  indices: number[],
-  navigate: NavigateFn,
-  cap = 30,
-): HTMLElement => {
-  const ul = el("ul", "link-list");
-  for (const fileIndex of indices.slice(0, cap)) {
-    const li = el("li");
-    const btn = el("button") as HTMLButtonElement;
-    btn.type = "button";
-    const path = state.data.files[fileIndex].path;
-    btn.appendChild(rankLabelEl(basename(path), dirname(path), 0));
-    btn.addEventListener("click", () => navigate(fileIndex));
-    li.appendChild(btn);
-    ul.appendChild(li);
-  }
-  if (indices.length > cap) {
-    ul.appendChild(el("li", "muted", `… ${formatCount(indices.length - cap)} more`));
-  }
-  return ul;
 };
 
 export const createPanel = (): HTMLElement => {
@@ -113,17 +143,20 @@ const COLUMN_HINTS: Record<string, string> = {
 
 /** Per-function complexity table with the React context columns. */
 const complexitySection = (file: VizFile): HTMLElement | null => {
-  if (file.functions && file.functions.length > 0) {
-    const cx = sectionEl(
-      file.fn_count > file.functions.length
-        ? `complexity hotspots: top ${formatCount(file.functions.length)} of ${formatCount(file.fn_count)} functions`
-        : "complexity hotspots",
-    );
+  const named = file.functions ?? [];
+  // Anonymous arrow/callback functions are folded into a single count, not
+  // listed row by row (a test file has dozens of them and they drown the
+  // named functions out). fn_count is the file total; named is what's shown.
+  const anonCount = Math.max(0, file.fn_count - named.length);
+  if (named.length === 0 && anonCount === 0) return null;
+  const cx = sectionEl("Functions");
+  if (named.length > 0) {
     const table = el("table");
     const thead = el("thead");
     const hr = el("tr");
     for (const th of ["function", "cc", "cog", "loc", ""]) {
-      const cell = el("th", undefined, th);
+      // Numeric headers align right, over the right-aligned number cells.
+      const cell = el("th", th === "cc" || th === "cog" || th === "loc" ? "num" : undefined, th);
       const hint = COLUMN_HINTS[th];
       if (hint) {
         cell.classList.add("hinted");
@@ -134,10 +167,10 @@ const complexitySection = (file: VizFile): HTMLElement | null => {
     thead.appendChild(hr);
     table.appendChild(thead);
     const tbody = el("tbody");
-    for (const fn of file.functions) {
+    for (const fn of named) {
       const tr = el("tr");
       const nameTd = el("td");
-      nameTd.appendChild(el("span", "fn-name", fn.name === "<arrow>" ? "(arrow fn)" : fn.name));
+      nameTd.appendChild(el("span", "fn-name", fn.name));
       nameTd.appendChild(el("span", "muted", ` L${fn.line}`));
       if (fn.hooks > 0 || fn.jsx_depth > 0) {
         const react = el("div", "fn-react");
@@ -178,9 +211,17 @@ const complexitySection = (file: VizFile): HTMLElement | null => {
     }
     table.appendChild(tbody);
     cx.appendChild(table);
-    return cx;
   }
-  return null;
+  if (anonCount > 0) {
+    cx.appendChild(
+      el(
+        "div",
+        "muted",
+        `+ ${formatCount(anonCount)} anonymous function${anonCount === 1 ? "" : "s"}`,
+      ),
+    );
+  }
+  return cx;
 };
 
 /** Clone groups this file participates in, with jump links. */
@@ -191,10 +232,16 @@ const duplicationSection = (
   navigate: NavigateFn,
 ): HTMLElement | null => {
   if (file.clone_groups && file.clone_groups.length > 0) {
-    const dup = sectionEl("duplication");
-    dup.appendChild(
-      el("div", "muted", `${formatCount(file.dup_lines)} duplicated lines in this file`),
+    const dup = sectionEl("Duplication");
+    // Relative to the most-duplicated file, so the bar reads "how copy-pasted
+    // is this file" against the worst offender in the codebase.
+    const maxDupLines = state.data.files.reduce((max, other) => Math.max(max, other.dup_lines), 0);
+    const density = el("div", "meter");
+    density.appendChild(meterBar(file.dup_lines, maxDupLines, "warn"));
+    density.appendChild(
+      el("span", "muted", `${formatCount(file.dup_lines)} duplicated lines in this file`),
     );
+    dup.appendChild(density);
     for (const groupIdx of file.clone_groups.slice(0, 4)) {
       const group = state.data.clones[groupIdx];
       if (!group) continue;
@@ -208,7 +255,7 @@ const duplicationSection = (
         .filter((inst) => inst.file !== fileIdx)
         .map((inst) => inst.file);
       if (others.length > 0) {
-        row.appendChild(linkList(state, [...new Set(others)], navigate, 5));
+        row.appendChild(fileTable(state, [...new Set(others)], navigate));
       }
       if (group.preview) {
         row.appendChild(clonePreviewEl(group));
@@ -218,7 +265,7 @@ const duplicationSection = (
     if (file.clone_groups.length > 4) {
       dup.appendChild(el("div", "muted", `… ${file.clone_groups.length - 4} more clone groups`));
     }
-    dup.appendChild(commandHint("explore", `fallow dupes --trace ${file.path}:1`));
+    dup.appendChild(commandHint("Explore", `fallow dupes --trace ${file.path}:1`));
     return dup;
   }
   return null;
@@ -233,7 +280,7 @@ const boundariesSection = (
   const outgoing = state.data.violations.filter((violation) => violation.from === fileIdx);
   const incoming = state.data.violations.filter((violation) => violation.to === fileIdx);
   if (outgoing.length > 0 || incoming.length > 0) {
-    const section = sectionEl("forbidden imports");
+    const section = sectionEl("Forbidden imports");
     for (const violation of outgoing.slice(0, 6)) {
       const row = el("div");
       row.appendChild(
@@ -260,7 +307,7 @@ const boundariesSection = (
         el(
           "div",
           "muted",
-          `imported by ${incoming.length} file${incoming.length === 1 ? "" : "s"} from outside its layer`,
+          `Imported by ${incoming.length} file${incoming.length === 1 ? "" : "s"} from outside its layer`,
         ),
       );
     }
@@ -277,16 +324,15 @@ const cycleSection = (
   navigate: NavigateFn,
 ): HTMLElement | null => {
   if (file.in_cycle) {
-    const cyc = sectionEl("import loop");
+    const cyc = sectionEl("Import loop");
     const cycles = state.data.cycles.filter((cycle) => cycle.includes(fileIdx));
     for (const cycle of cycles.slice(0, 2)) {
-      cyc.appendChild(el("div", "sev-warn", `loop of ${cycle.length} files`));
+      cyc.appendChild(el("div", "sev-warn", `Loop of ${cycle.length} files`));
       cyc.appendChild(
-        linkList(
+        fileTable(
           state,
           cycle.filter((memberIdx) => memberIdx !== fileIdx),
           navigate,
-          8,
         ),
       );
     }
@@ -305,13 +351,13 @@ const connectionSections = (
   const importers = state.index.importersOf[fileIdx];
   const imports = state.index.importsOf[fileIdx];
   if (importers.length > 0) {
-    const section = sectionEl(`imported by ${formatCount(importers.length)}`);
-    section.appendChild(linkList(state, importers, navigate));
+    const section = sectionEl(`Imported by ${formatCount(importers.length)}`);
+    section.appendChild(fileTable(state, importers, navigate));
     out.push(section);
   }
   if (imports.length > 0) {
-    const section = sectionEl(`imports ${formatCount(imports.length)}`);
-    section.appendChild(linkList(state, imports, navigate));
+    const section = sectionEl(`Imports ${formatCount(imports.length)}`);
+    section.appendChild(fileTable(state, imports, navigate));
     out.push(section);
   }
   return out;
@@ -319,20 +365,20 @@ const connectionSections = (
 
 /** Size, wiring, workspace, zone, and function-count facts. */
 const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElement => {
-  const facts = sectionEl("facts");
+  const facts = sectionEl("Facts");
   // Import counts live in the connection section headers below, so the
   // facts list carries only what those sections do not repeat.
   const pairs: KvPair[] = [
-    ["size", formatSize(file.size)],
-    ["exports", formatCount(file.export_count)],
+    ["Size", formatSize(file.size)],
+    ["Exports", formatCount(file.export_count)],
   ];
   if (file.workspace !== undefined && state.data.workspaces[file.workspace]) {
-    pairs.push(["workspace", state.data.workspaces[file.workspace].name]);
+    pairs.push(["Workspace", state.data.workspaces[file.workspace].name]);
   }
   if (file.zone !== undefined && state.data.zones[file.zone]) {
-    pairs.push(["zone", state.data.zones[file.zone].name]);
+    pairs.push(["Zone", state.data.zones[file.zone].name]);
   }
-  if (file.fn_count > 0) pairs.push(["functions", formatCount(file.fn_count)]);
+  if (file.fn_count > 0) pairs.push(["Functions", formatCount(file.fn_count)]);
   facts.appendChild(kvEl(pairs));
 
   // Transitive reach: the one-look blast-radius answer. "reaches" is
@@ -340,19 +386,23 @@ const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElem
   // that transitively depends on it (what breaks if you change it).
   if (fileIdx >= 0) {
     const reach: KvPair[] = [];
+    const totalFiles = state.data.files.length;
+    // Both rows share the width of the largest possible label (the whole
+    // codebase), so their numbers right-align and their bars line up.
+    const labelWidthCh = `${formatCount(totalFiles)} files`.length;
     const down = reachSet(state.index.importsOf, fileIdx).size;
     const up = reachSet(state.index.importersOf, fileIdx).size;
     if (down > file.import_count) {
       reach.push([
-        "reaches",
-        `${formatCount(down)} files`,
+        "Reaches",
+        countWithBar(down, totalFiles, `${formatCount(down)} files`, "neutral", labelWidthCh),
         "Everything this file loads, directly or through the files it imports.",
       ]);
     }
     if (up > file.importer_count) {
       reach.push([
-        "affects",
-        `${formatCount(up)} files`,
+        "Affects",
+        countWithBar(up, totalFiles, `${formatCount(up)} files`, "neutral", labelWidthCh),
         "Everything that could break if you change this file.",
       ]);
     }
@@ -364,18 +414,18 @@ const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElem
 /** Dead-code evidence: the unused file itself, or its unused exports. */
 const deadCodeSection = (file: VizFile): HTMLElement | null => {
   if (file.status === "unused") {
-    const dead = sectionEl("dead code");
+    const dead = sectionEl("Dead code");
     const msg = el("div", "sev-error");
     msg.textContent =
       file.importer_count === 0
-        ? "no file imports this one; nothing reaches it from an entry point."
-        : "unreachable from every entry point.";
+        ? "No file imports this one; nothing reaches it from an entry point."
+        : "Unreachable from every entry point.";
     dead.appendChild(msg);
-    dead.appendChild(commandHint("verify", `fallow dead-code --trace ${file.path}`));
+    dead.appendChild(commandHint("Verify", `fallow dead-code --trace ${file.path}`));
     return dead;
   }
   if (file.unused_exports && file.unused_exports.length > 0) {
-    const dead = sectionEl("unused exports");
+    const dead = sectionEl("Unused exports");
     const tags = el("div", "tag-list");
     for (const name of file.unused_exports.slice(0, 20)) {
       tags.appendChild(el("span", "tag", name));
@@ -384,7 +434,7 @@ const deadCodeSection = (file: VizFile): HTMLElement | null => {
       tags.appendChild(el("span", "muted", `… ${file.unused_exports.length - 20} more`));
     }
     dead.appendChild(tags);
-    dead.appendChild(commandHint("verify", `fallow trace ${file.path}#${file.unused_exports[0]}`));
+    dead.appendChild(commandHint("Verify", `fallow trace ${file.path}#${file.unused_exports[0]}`));
     return dead;
   }
   return null;
@@ -399,15 +449,8 @@ const fileHead = (file: VizFile, close: () => void): HTMLElement => {
   fileBox.appendChild(el("div", "name", basename(file.path)));
   const statusLine = el("div", "status-line");
   statusLine.appendChild(statusLabel(file));
-  statusLine.appendChild(copyButton("copy-path", "copy path", () => file.path));
+  statusLine.appendChild(copyButton("copy-path", "Copy path", () => file.path));
   fileBox.appendChild(statusLine);
-  const gloss =
-    file.status === "clean"
-      ? "reachable from an entry point"
-      : file.status === "entryPoint"
-        ? "where execution starts; nothing needs to import it"
-        : null;
-  if (gloss) fileBox.appendChild(el("div", "status-gloss", gloss));
   head.appendChild(fileBox);
   head.appendChild(closeButton(close));
   return head;
@@ -596,7 +639,7 @@ const commandHint = (label: string, command: string): HTMLElement => {
   code.textContent = command;
   code.title = command;
   row.appendChild(code);
-  row.appendChild(copyButton("cmd-copy", "copy", () => command));
+  row.appendChild(copyButton("cmd-copy", "Copy", () => command));
   return row;
 };
 
@@ -608,6 +651,8 @@ interface RankRow {
   fileIndex: number;
   /** Clone group index; rows with this open the clone panel instead. */
   clone?: number;
+  /** Optional magnitude meter, drawn between the label and the value cells. */
+  bar?: MeterSpec;
 }
 
 interface RankColumn {
@@ -637,21 +682,24 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
     case "overview": {
       // The newcomer's "what should I read first": files the rest of the
       // codebase leans on hardest, ranked by how many import them.
-      const rows = files
+      const ranked = files
         .map((file, index) => ({ file, index }))
         .filter(({ file }) => file.importer_count > 0)
-        .toSorted((left, right) => right.file.importer_count - left.file.importer_count)
-        .map(({ file, index }) => ({
-          label: basename(file.path),
-          dir: dirname(file.path),
-          metric: `used by ${formatCount(file.importer_count)}`,
-          cells: [{ value: formatCount(file.importer_count), cls: "muted" }],
-          fileIndex: index,
-        }));
+        .toSorted((left, right) => right.file.importer_count - left.file.importer_count);
+      const maxImporters = ranked.length > 0 ? ranked[0].file.importer_count : 0;
+      const rows = ranked.map(({ file, index }) => ({
+        label: basename(file.path),
+        dir: dirname(file.path),
+        metric: `used by ${formatCount(file.importer_count)}`,
+        cells: [{ value: formatCount(file.importer_count), cls: "muted" }],
+        fileIndex: index,
+        // Neutral: a hub is heavily used, not defective.
+        bar: meterSpec(file.importer_count, maxImporters, "neutral"),
+      }));
       return {
-        title: "most depended-on files",
+        title: "Most depended-on files",
         rows,
-        empty: "no shared files",
+        empty: "No shared files",
         labelHead: "file",
         columns: [{ header: "used by", hint: "How many files import this one." }],
       };
@@ -662,6 +710,7 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         .map((file, index) => ({ file, index }))
         .filter(({ file }) => file.status === "unused")
         .toSorted((left, right) => right.file.size - left.file.size);
+      const maxUnusedSize = unused.length > 0 ? unused[0].file.size : 0;
       for (const { file, index } of unused) {
         rows.push({
           label: basename(file.path),
@@ -669,12 +718,14 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
           metric: formatSize(file.size),
           cells: [{ value: formatSize(file.size), cls: "sev-error" }],
           fileIndex: index,
+          bar: meterSpec(file.size, maxUnusedSize, "error"),
         });
       }
       const partial = files
         .map((file, index) => ({ file, index }))
         .filter(({ file }) => file.status !== "unused" && file.unused_export_count > 0)
         .toSorted((left, right) => right.file.unused_export_count - left.file.unused_export_count);
+      const maxPartial = partial.length > 0 ? partial[0].file.unused_export_count : 0;
       for (const { file, index } of partial) {
         rows.push({
           label: basename(file.path),
@@ -682,12 +733,13 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
           metric: `${formatCount(file.unused_export_count)} exports`,
           cells: [{ value: `${formatCount(file.unused_export_count)} exports`, cls: "sev-warn" }],
           fileIndex: index,
+          bar: meterSpec(file.unused_export_count, maxPartial, "warn"),
         });
       }
       return {
-        title: "unused files",
+        title: "Unused files",
         rows,
-        empty: "nothing is unreachable",
+        empty: "Nothing is unreachable",
         labelHead: "file",
         columns: [
           {
@@ -698,34 +750,36 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
       };
     }
     case "dupes": {
-      const rows = [...state.data.clones.keys()]
+      const groupIndices = [...state.data.clones.keys()]
         .toSorted((left, right) => state.data.clones[right].lines - state.data.clones[left].lines)
         .filter((groupIdx) => {
           // Malformed groups (no instances, or an out-of-range file
           // index) must not kill the whole ranked list.
           const group = state.data.clones[groupIdx];
           return group.instances.length > 0 && files[group.instances[0].file] !== undefined;
-        })
-        .map((groupIdx) => {
-          const group = state.data.clones[groupIdx];
-          const first = group.instances[0];
-          return {
-            label: `${basename(files[first.file].path)} ×${group.instances.length}`,
-            dir: dirname(files[first.file].path),
-            metric: `${formatCount(group.lines)} lines`,
-            cells: [{ value: formatCount(group.lines), cls: "sev-warn" }],
-            fileIndex: first.file,
-            clone: groupIdx,
-          };
         });
+      const maxCloneLines = groupIndices.length > 0 ? state.data.clones[groupIndices[0]].lines : 0;
+      const rows = groupIndices.map((groupIdx) => {
+        const group = state.data.clones[groupIdx];
+        const first = group.instances[0];
+        return {
+          label: `${basename(files[first.file].path)} ×${group.instances.length}`,
+          dir: dirname(files[first.file].path),
+          metric: `${formatCount(group.lines)} lines`,
+          cells: [{ value: formatCount(group.lines), cls: "sev-warn" }],
+          fileIndex: first.file,
+          clone: groupIdx,
+          bar: meterSpec(group.lines, maxCloneLines, "warn"),
+        };
+      });
       const truncated = state.data.summary.clone_groups_truncated;
       const title = truncated
-        ? `duplicated blocks (+${formatCount(truncated)} not shown)`
-        : "duplicated blocks";
+        ? `Duplicated blocks (+${formatCount(truncated)} not shown)`
+        : "Duplicated blocks";
       return {
         title,
         rows,
-        empty: "no duplicated blocks",
+        empty: "No duplicated blocks",
         labelHead: "block",
         columns: [{ header: "lines", hint: "Number of duplicated lines in the block." }],
       };
@@ -746,7 +800,7 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
       state.data.cycles.forEach((cycle) => {
         if (cycle.length === 0 || files[cycle[0]] === undefined) return;
         rows.push({
-          label: `loop of ${formatCount(cycle.length)} files`,
+          label: `Loop of ${formatCount(cycle.length)} files`,
           dir: dirname(files[cycle[0]].path),
           metric: basename(files[cycle[0]].path),
           cells: [{ value: basename(files[cycle[0]].path), cls: "sev-warn" }],
@@ -754,9 +808,9 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         });
       });
       return {
-        title: "forbidden imports & loops",
+        title: "Forbidden imports & loops",
         rows,
-        empty: "no forbidden imports or loops",
+        empty: "No forbidden imports or loops",
         labelHead: "import",
         columns: [
           {
@@ -792,11 +846,13 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
             { value: formatCount(file.importer_count), cls: "muted" },
           ],
           fileIndex: index,
+          // Same 0-30 scale as the per-function bar; red past the danger line.
+          bar: meterSpec(file.max_cyclomatic, 30, file.max_cyclomatic >= 20 ? "error" : "warn"),
         }));
       return {
-        title: "complexity hotspots",
+        title: "Complexity hotspots",
         rows,
-        empty: "no complex functions",
+        empty: "No complex functions",
         labelHead: "file",
         columns: [
           {
@@ -911,14 +967,16 @@ const fileCell = (
 const renderRankTable = (
   _state: AppState,
   view: RankView,
-  cap: number,
   onPick: (row: RankRow) => void,
 ): HTMLElement => {
   const { rows, labelHead, columns } = view;
+  const hasBar = rows.some((row) => row.bar !== undefined);
   const table = el("table", "rank-table");
   const thead = el("thead");
   const hr = el("tr");
+  hr.appendChild(el("th", "col-rank", "#"));
   hr.appendChild(el("th", "col-file", labelHead));
+  if (hasBar) hr.appendChild(el("th", "col-bar"));
   for (const col of columns) {
     const th = el("th", "col-val", col.header);
     th.dataset.tip = col.hint;
@@ -927,34 +985,55 @@ const renderRankTable = (
   thead.appendChild(hr);
   table.appendChild(thead);
   const tbody = el("tbody");
-  for (const row of rows.slice(0, cap)) {
+  // Every row is rendered: the panel is the only scroller, so lists never
+  // hide behind an inner scrollbox or a "… N more" cutoff.
+  rows.forEach((row, index) => {
     const tr = el("tr");
+    tr.appendChild(el("td", "col-rank", formatCount(index + 1)));
     tr.appendChild(fileCell(row.label, row.dir ?? "", row.metric.length / 2, () => onPick(row)));
+    if (hasBar) {
+      const barTd = el("td", "col-bar");
+      if (row.bar) barTd.appendChild(meterBar(row.bar.value, row.bar.max, row.bar.tone));
+      tr.appendChild(barTd);
+    }
     for (const cell of row.cells) {
       const td = el("td", "col-val");
       td.appendChild(sev(cell.cls, cell.value));
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
-  }
-  if (rows.length > cap) {
-    const tr = el("tr");
-    const td = el(
-      "td",
-      "muted",
-      `… ${formatCount(rows.length - cap)} more`,
-    ) as HTMLTableCellElement;
-    td.colSpan = 1 + columns.length;
-    tr.appendChild(td);
-    tbody.appendChild(tr);
-  }
+  });
   table.appendChild(tbody);
   return table;
 };
 
+/** A plain numbered file list rendered as a table (rank + filename, no metric
+ *  column), so importers, imports, loop members, and clone copies all read as
+ *  the same numbered table. Rendered in full; the panel is the only scroll. */
+const fileTable = (state: AppState, indices: number[], navigate: NavigateFn): HTMLElement =>
+  renderRankTable(
+    state,
+    {
+      rows: indices.map((index) => ({
+        label: basename(state.data.files[index].path),
+        dir: dirname(state.data.files[index].path),
+        metric: "",
+        cells: [],
+        fileIndex: index,
+      })),
+      labelHead: "file",
+      columns: [],
+    },
+    (row) => navigate(row.fileIndex),
+  );
+
 /** RankRows for a set of file indices, labelled with their importer count. */
-const fileRankRows = (state: AppState, indices: number[]): RankRow[] =>
-  indices.map((index) => {
+const fileRankRows = (state: AppState, indices: number[]): RankRow[] => {
+  const maxImporters = indices.reduce(
+    (max, index) => Math.max(max, state.data.files[index].importer_count),
+    0,
+  );
+  return indices.map((index) => {
     const file = state.data.files[index];
     return {
       label: basename(file.path),
@@ -962,8 +1041,10 @@ const fileRankRows = (state: AppState, indices: number[]): RankRow[] =>
       metric: `used by ${formatCount(file.importer_count)}`,
       cells: [{ value: formatCount(file.importer_count), cls: "muted" }],
       fileIndex: index,
+      bar: meterSpec(file.importer_count, maxImporters, "neutral"),
     };
   });
+};
 
 /** Ranked worst-first findings for the active lens (nothing selected). */
 const renderLensPanel = (
@@ -984,7 +1065,7 @@ const renderLensPanel = (
     return;
   }
   section.appendChild(
-    renderRankTable(state, { rows, labelHead, columns }, 100, (row) => {
+    renderRankTable(state, { rows, labelHead, columns }, (row) => {
       if (row.clone !== undefined) {
         state.selectedClone = row.clone;
         refresh();
@@ -1037,35 +1118,44 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
 
   const head = el("div", "panel-head");
   const box = el("div", "file");
-  box.appendChild(el("div", "dir", `matches for "${query}"`));
+  const totalFiles = state.data.files.length;
+  box.appendChild(el("div", "dir", `Matches for "${query}"`));
   box.appendChild(
     el("div", "name", `${formatCount(matches.length)} file${matches.length === 1 ? "" : "s"}`),
   );
+  if (matches.length > 0) {
+    const matchMeter = el("div", "meter");
+    matchMeter.appendChild(meterBar(matches.length, totalFiles, "neutral"));
+    matchMeter.appendChild(el("span", "muted", `of ${formatCount(totalFiles)} files`));
+    box.appendChild(matchMeter);
+  }
   if (affected.length > 0) {
     const statusLine = el("div", "status-line");
-    statusLine.appendChild(sev("sev-info", `affects ${formatCount(affected.length)}`));
+    const affectMeter = el("span", "meter");
+    affectMeter.appendChild(meterBar(affected.length, totalFiles, "neutral"));
+    affectMeter.appendChild(sev("sev-info", `Affects ${formatCount(affected.length)}`));
+    statusLine.appendChild(affectMeter);
     box.appendChild(statusLine);
     box.appendChild(
-      el("div", "status-gloss", "files that depend on these, directly or transitively"),
+      el("div", "status-gloss", "Files that depend on these, directly or transitively"),
     );
   }
   head.appendChild(box);
   panel.appendChild(head);
 
   if (matches.length === 0) {
-    const empty = sectionEl("no matches");
-    empty.appendChild(el("div", "muted", "no file path contains that text"));
+    const empty = sectionEl("No matches");
+    empty.appendChild(el("div", "muted", "No file path contains that text"));
     panel.appendChild(empty);
     return;
   }
 
   const usedByColumns = [{ header: "used by", hint: "How many files import this one." }];
-  const section = sectionEl("matched files");
+  const section = sectionEl("Matched files");
   section.appendChild(
     renderRankTable(
       state,
       { rows: fileRankRows(state, matches), labelHead: "file", columns: usedByColumns },
-      100,
       (row) => navigate(row.fileIndex),
     ),
   );
@@ -1075,12 +1165,11 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
   panel.appendChild(section);
 
   if (affected.length > 0) {
-    const aff = sectionEl(`affected files (${formatCount(affected.length)})`);
+    const aff = sectionEl(`Affected files (${formatCount(affected.length)})`);
     aff.appendChild(
       renderRankTable(
         state,
         { rows: fileRankRows(state, affected), labelHead: "file", columns: usedByColumns },
-        100,
         (row) => navigate(row.fileIndex),
       ),
     );
@@ -1103,7 +1192,7 @@ const renderClonePanel = (
   if (groupIdx === null || !group) return;
   const box = panelShell(
     panel,
-    "duplicated block",
+    "Duplicated block",
     `${formatCount(group.lines)} lines × ${formatCount(group.instances.length)} places`,
     () => {
       state.selectedClone = null;
@@ -1115,30 +1204,32 @@ const renderClonePanel = (
   statusLine.appendChild(sev("sev-warn", `${formatCount(group.tokens)} tokens`));
   box.appendChild(statusLine);
 
-  const copies = sectionEl(`every copy (${formatCount(group.instances.length)})`);
+  const copies = sectionEl(`Every copy (${formatCount(group.instances.length)})`);
   const copiesTable = el("table", "rank-table");
   const copiesHead = el("thead");
   const copiesHr = el("tr");
+  copiesHr.appendChild(el("th", "col-rank", "#"));
   copiesHr.appendChild(el("th", "col-file", "file"));
   copiesHr.appendChild(el("th", "col-val", "lines"));
   copiesHead.appendChild(copiesHr);
   copiesTable.appendChild(copiesHead);
   const copiesBody = el("tbody");
-  for (const inst of group.instances) {
+  group.instances.forEach((inst, index) => {
     const path = state.data.files[inst.file].path;
     const range = `${inst.start_line}-${inst.end_line}`;
     const tr = el("tr");
+    tr.appendChild(el("td", "col-rank", formatCount(index + 1)));
     tr.appendChild(
       fileCell(basename(path), dirname(path), range.length / 2, () => navigate(inst.file)),
     );
     tr.appendChild(el("td", "col-val", range));
     copiesBody.appendChild(tr);
-  }
+  });
   copiesTable.appendChild(copiesBody);
   copies.appendChild(copiesTable);
   panel.appendChild(copies);
 
-  const shared = sectionEl("the shared code");
+  const shared = sectionEl("The shared code");
   if (group.preview) {
     shared.appendChild(clonePreviewEl(group));
   }
@@ -1146,7 +1237,7 @@ const renderClonePanel = (
   if (first) {
     shared.appendChild(
       commandHint(
-        "verify",
+        "Verify",
         `fallow dupes --trace ${state.data.files[first.file].path}:${first.start_line}`,
       ),
     );
@@ -1187,7 +1278,7 @@ const renderRoadPanel = (
   if (!road) return;
   const box = panelShell(
     panel,
-    "imports between folders",
+    "Imports between folders",
     `${road.srcKey} → ${road.dstKey}`,
     close,
   );
@@ -1206,18 +1297,18 @@ const renderRoadPanel = (
   }
   box.appendChild(statusLine);
 
-  const section = sectionEl(`every import (${formatCount(road.pairs.length)})`);
+  const section = sectionEl(`Every import (${formatCount(road.pairs.length)})`);
   const importsTable = el("table", "rank-table");
   const importsHead = el("thead");
   const importsHr = el("tr");
+  importsHr.appendChild(el("th", "col-rank", "#"));
   importsHr.appendChild(el("th", "col-file", "importer"));
   importsHr.appendChild(el("th", "col-val", "imports"));
   importsHead.appendChild(importsHr);
   importsTable.appendChild(importsHead);
   const importsBody = el("tbody");
   const fileCount = state.data.files.length;
-  const cap = 80;
-  for (const [from, to] of road.pairs.slice(0, cap)) {
+  road.pairs.forEach(([from, to], index) => {
     const packed = from * fileCount + to;
     const fromPath = state.data.files[from].path;
     const toName = basename(state.data.files[to].path);
@@ -1227,6 +1318,7 @@ const renderRoadPanel = (
         ? "sev-warn"
         : "";
     const tr = el("tr");
+    tr.appendChild(el("td", "col-rank", formatCount(index + 1)));
     tr.appendChild(
       fileCell(basename(fromPath), dirname(fromPath), toName.length / 2, () => navigate(from)),
     );
@@ -1234,18 +1326,7 @@ const renderRoadPanel = (
     toTd.appendChild(sev(cls, toName));
     tr.appendChild(toTd);
     importsBody.appendChild(tr);
-  }
-  if (road.pairs.length > cap) {
-    const tr = el("tr");
-    const td = el(
-      "td",
-      "muted",
-      `… ${formatCount(road.pairs.length - cap)} more`,
-    ) as HTMLTableCellElement;
-    td.colSpan = 2;
-    tr.appendChild(td);
-    importsBody.appendChild(tr);
-  }
+  });
   importsTable.appendChild(importsBody);
   section.appendChild(importsTable);
   panel.appendChild(section);

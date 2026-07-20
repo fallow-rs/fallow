@@ -262,10 +262,10 @@ describe("buildMapDigest", () => {
     state.data.summary.unused_files = 1;
     const md = buildMapDigest(state);
     expect(md).toContain("# fallow map: demo");
-    expect(md).toContain("most depended-on");
+    expect(md).toContain("Most depended-on");
     expect(md).toContain("hub.ts (used by 40)");
     expect(md).toContain("$ fallow health");
-    expect(md).toContain("complexity hotspots");
+    expect(md).toContain("Complexity hotspots");
   });
 
   it("surfaces the clone-group truncation flag in the duplication line", () => {
