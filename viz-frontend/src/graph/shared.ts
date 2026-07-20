@@ -63,6 +63,7 @@ export type ClusterMode = "directory" | "imports";
 export type GraphHoverTarget =
   | { kind: "file"; fileIndex: number }
   | { kind: "road"; road: number }
+  | { kind: "cluster"; cluster: number }
   | { kind: "ui" }
   | null;
 
@@ -171,6 +172,10 @@ export interface GraphViewState {
   raf: number;
   /** Hovered road index (overview). */
   hoveredRoad: number | null;
+  /** Hovered cluster index (label hover lights up its roads). */
+  hoveredCluster: number | null;
+  /** Cluster-label hit rects (screen space), rebuilt each label pass. */
+  clusterLabels: Array<{ cluster: number; x: number; y: number; w: number; h: number }>;
   /** Selected road index (overview drill-down). */
   selectedRoad: number | null;
   /** Path-trace mode: pending start, and the traced path. */
@@ -209,7 +214,7 @@ export const FONT_CARD =
 
 export const NODE_R_MIN = 2.5;
 export const NODE_R_MAX = 10;
-export const MAX_CLUSTERS = 40;
+export const MAX_CLUSTERS = 60;
 export const LAYER_GAP = 170;
 export const ROW_GAP = 56;
 export const STAGE_ENTER_MS = 220;
@@ -244,6 +249,8 @@ export const getGVS = (state: AppState): GraphViewState => {
       lastRoot: null,
       raf: 0,
       hoveredRoad: null,
+      hoveredCluster: null,
+      clusterLabels: [],
       selectedRoad: null,
       pathFrom: null,
       path: null,
@@ -375,19 +382,31 @@ export const roadGeometry = (
     p3 = { x: p3.x + nx, y: p3.y + ny };
   }
 
-  const dx = p3.x - p0.x;
+  const chord = Math.hypot(p3.x - p0.x, p3.y - p0.y) || 1;
+  const ux = (p3.x - p0.x) / chord;
+  const uy = (p3.y - p0.y) / chord;
+  // Perpendicular to the chord, biased to arc toward the top of the canvas.
+  let px = -uy;
+  let py = ux;
+  if (py > 0) {
+    px = -px;
+    py = -py;
+  }
   let bow = 0;
-  const chord = Math.hypot(p3.x - p0.x, p3.y - p0.y);
   if (road.back) {
-    bow = -0.18 * chord; // back-edges arc above the fabric
+    bow = 0.18 * chord; // back-edges arc off the fabric
   } else {
     const span = Math.abs(gvs.clusters[road.dst].layer - gvs.clusters[road.src].layer);
     // Long hops bow gently over intermediate layers instead of cutting
     // through their hulls.
-    if (span >= 2) bow = -0.06 * chord;
+    if (span >= 2) bow = 0.06 * chord;
   }
-  const p1 = { x: p0.x + dx * 0.45, y: p0.y + bow };
-  const p2 = { x: p3.x - dx * 0.45, y: p3.y + bow };
+  // Handles run ALONG the chord so each road leaves its cluster pointing at
+  // the other (a natural radiating fan), then the perpendicular bow lifts
+  // long and back hops off the fabric.
+  const handle = chord * 0.4;
+  const p1 = { x: p0.x + ux * handle + px * bow, y: p0.y + uy * handle + py * bow };
+  const p2 = { x: p3.x - ux * handle + px * bow, y: p3.y - uy * handle + py * bow };
   return { p0, p1, p2, p3 };
 };
 
@@ -434,8 +453,23 @@ export const isTestCluster = (key: string): boolean =>
 
 export const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 export const hullPath = (ctx: CanvasRenderingContext2D, hull: Pt[]): void => {
-  ctx.moveTo(hull[0].x, hull[0].y);
-  for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i].x, hull[i].y);
+  const n = hull.length;
+  if (n < 3) {
+    ctx.moveTo(hull[0].x, hull[0].y);
+    for (let i = 1; i < n; i++) ctx.lineTo(hull[i].x, hull[i].y);
+    ctx.closePath();
+    return;
+  }
+  // Rounded corners: run each edge to its midpoint, then a quadratic through
+  // the vertex to the next edge's midpoint. The curve stays inside the convex
+  // hull, so a cluster reads as a smooth blob rather than a hard polygon.
+  const start = { x: (hull[n - 1].x + hull[0].x) / 2, y: (hull[n - 1].y + hull[0].y) / 2 };
+  ctx.moveTo(start.x, start.y);
+  for (let i = 0; i < n; i++) {
+    const curr = hull[i];
+    const next = hull[(i + 1) % n];
+    ctx.quadraticCurveTo(curr.x, curr.y, (curr.x + next.x) / 2, (curr.y + next.y) / 2);
+  }
   ctx.closePath();
 };
 

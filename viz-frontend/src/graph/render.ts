@@ -155,16 +155,20 @@ const drawHullFills = (scene: Scene): void => {
   });
 };
 
-const drawLodEdges = (scene: Scene): void => {
+// Individual file edges are LOD-gated. Inter-cluster edges (deep zoom) join
+// the roads BEHIND the hulls; a cluster's own intra-cluster edges (mid zoom)
+// draw on top of its hull so the internal wiring stays visible.
+const drawInterEdges = (scene: Scene): void => {
   const { state, gvs, kRel } = scene;
-  const { transform } = gvs;
-  // Individual file edges are LOD-gated: intra-cluster from mid zoom,
-  // inter-cluster only at deep zoom.
-  if (kRel >= LOD_INTRA) {
-    drawFileEdges(state, gvs, true, 0.12, 1 / transform.k);
-  }
   if (kRel >= LOD_INTER) {
-    drawFileEdges(state, gvs, false, 0.1, 0.8 / transform.k);
+    drawFileEdges(state, gvs, false, 0.1, 0.8 / gvs.transform.k);
+  }
+};
+
+const drawIntraEdges = (scene: Scene): void => {
+  const { state, gvs, kRel } = scene;
+  if (kRel >= LOD_INTRA) {
+    drawFileEdges(state, gvs, true, 0.12, 1 / gvs.transform.k);
   }
 };
 
@@ -197,18 +201,41 @@ const drawRoads = (scene: Scene): void => {
   const roadCounts = roads.map((r) => r.count).toSorted((a, b) => a - b);
   const trunkFloor =
     roadCounts.length > 0 ? roadCounts[Math.floor(roadCounts.length * 0.75)] : Infinity;
+  // With many clusters the pairwise roads become a mesh at fit zoom, so show
+  // only the strongest ones there and reveal the rest as the user zooms in
+  // (fully by kRel 1.6, where individual edges begin). Severity roads always
+  // show so the boundaries story is never hidden.
+  const manyClusters = clusters.length > 20;
+  const zoomRelax = Math.min(1, Math.max(0, (kRel - 1) / 0.6));
+  // The more clusters, the denser the mesh, so thin harder at fit zoom: a
+  // 30-cluster map keeps ~its top third of roads, a 90-cluster map only its
+  // top ~sixth. The floor relaxes to 0 as the user zooms in.
+  const basePct = manyClusters ? Math.min(0.85, 0.4 + clusters.length / 150) : 0;
+  const floorPct = basePct * (1 - zoomRelax);
+  const roadFloor =
+    floorPct > 0 && roadCounts.length > 0
+      ? roadCounts[Math.min(roadCounts.length - 1, Math.floor(roadCounts.length * floorPct))]
+      : 0;
+  // Hovering a cluster label lights up every road touching it and dims the
+  // rest so the cluster's dependency fan reads at a glance.
+  const litCluster = gvs.hoveredCluster;
   for (const road of roads) {
+    const severity = road.violations > 0 || (road.bidi && road.cycleEdges > 0);
+    const lit = litCluster !== null && (road.src === litCluster || road.dst === litCluster);
+    if (road.count < roadFloor && !severity && !lit) continue;
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
     const wSrc = Math.max(minRoadW, roadWidth(road.count));
     ctx.beginPath();
     const thinRatio = road.count >= trunkFloor ? 0.15 : 0.22;
     taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.5, wSrc * thinRatio));
-    ctx.fillStyle = theme.textLow;
+    ctx.fillStyle = lit ? theme.blueText : theme.textLow;
     // Test-to-source imports are the least interesting overview signal
     // but the biggest bundles; keep them recessive so source roads lead.
     const testDim = isTestCluster(clusters[road.src].key) ? 0.4 : 1;
     const trunk = road.count >= trunkFloor && testDim === 1 ? 0.22 : 0;
-    ctx.globalAlpha = (0.3 + 0.18 * roadBoost + trunk) * testDim * reveal.roads * hoverDim;
+    let alpha = (0.3 + 0.18 * roadBoost + trunk) * testDim * reveal.roads * hoverDim;
+    if (litCluster !== null) alpha = lit ? Math.min(1, alpha + 0.55) : alpha * 0.18;
+    ctx.globalAlpha = alpha;
     ctx.fill();
     ctx.globalAlpha = 1;
 
@@ -557,10 +584,14 @@ const renderOverview = (state: AppState, gvs: GraphViewState, w: number, h: numb
   ctx.translate(transform.x, transform.y);
   ctx.scale(transform.k, transform.k);
 
-  drawHullFills(scene);
-  drawLodEdges(scene);
-  drawHullBorders(scene);
+  // Connective tissue first, so cross-cluster roads and edges sit BEHIND the
+  // hulls instead of crossing over them; a cluster's own internal wiring
+  // draws back on top of its hull, below the nodes.
   drawRoads(scene);
+  drawInterEdges(scene);
+  drawHullFills(scene);
+  drawHullBorders(scene);
+  drawIntraEdges(scene);
   const hover = drawHoverNeighborhood(scene);
   drawNodes(scene, hover, w, h);
   drawSearchPulse(scene);

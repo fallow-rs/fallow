@@ -56,48 +56,86 @@ const mulberry32 = (seed: number): (() => number) => {
 
 // ── Clustering ──────────────────────────────────────────────────
 
+/**
+ * A folder at or below this many files is treated as one cohesive module and
+ * kept whole; a bigger folder is a *container* (a repo's `src`, or
+ * `src/features` / `src/components` that hold many modules) and splits into
+ * one cluster per child. Tuned so individual features/components (tens of
+ * files) stand on their own instead of collapsing into a top-level blob.
+ */
+const SPLIT_TARGET = 100;
+/** Safety cap on how deep a container chain will keep subdividing. */
+const MAX_SPLIT_DEPTH = 6;
+/**
+ * A child folder with fewer than this many files folds back into the
+ * container's residual bucket instead of getting its own cluster. This keeps
+ * substantial modules (feature domains, the big components) as their own
+ * groups while the long tail of tiny uniform folders, e.g. a design system's
+ * 3-file atomic components, collapses into one "src/components" group rather
+ * than a confetti of dozens of near-identical blobs.
+ */
+const MIN_CHILD = 8;
+
 const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
-  const clusters = new Map<string, { indices: number[]; depth: number }>();
-  for (let i = 0; i < files.length; i++) {
-    const key = files[i].path.split("/")[0];
-    const existing = clusters.get(key);
-    if (existing) existing.indices.push(i);
-    else clusters.set(key, { indices: [i], depth: 0 });
-  }
-
-  for (let round = 0; round < 10; round++) {
-    if (clusters.size >= MAX_CLUSTERS) break;
-    let largestKey = "";
-    let largestSize = 0;
-    for (const [key, { indices }] of clusters) {
-      if (indices.length > largestSize) {
-        largestSize = indices.length;
-        largestKey = key;
-      }
-    }
-    if (largestSize <= Math.max(20, files.length / MAX_CLUSTERS)) break;
-    const largest = clusters.get(largestKey);
-    if (!largest) break;
-    const nextDepth = largest.depth + 1;
-    const subMap = new Map<string, number[]>();
-    for (const idx of largest.indices) {
-      const parts = files[idx].path.split("/");
-      const key =
-        parts.length > nextDepth + 1 ? parts.slice(0, nextDepth + 1).join("/") : parts.join("/");
-      if (!subMap.has(key)) subMap.set(key, []);
-      subMap.get(key)?.push(idx);
-    }
-    if (subMap.size <= 1 || clusters.size + subMap.size - 1 > MAX_CLUSTERS) break;
-    clusters.delete(largestKey);
-    for (const [key, indices] of subMap) clusters.set(key, { indices, depth: nextDepth });
-  }
-
   const result = new Map<string, number[]>();
-  for (const key of [...clusters.keys()].toSorted()) {
-    const entry = clusters.get(key);
-    if (entry) result.set(key, entry.indices);
+  const emit = (key: string, indices: number[]): void => {
+    if (indices.length === 0) return;
+    const existing = result.get(key);
+    if (existing) existing.push(...indices);
+    else result.set(key, indices);
+  };
+  // Split files sharing `prefix` by their folder segment at `depth`. Files
+  // that live directly in `prefix` (no deeper segment) group under it.
+  const split = (indices: number[], prefix: string, depth: number): void => {
+    if (indices.length <= SPLIT_TARGET || depth >= MAX_SPLIT_DEPTH || result.size >= MAX_CLUSTERS) {
+      emit(prefix, indices);
+      return;
+    }
+    const groups = new Map<string, number[]>();
+    for (const i of indices) {
+      const parts = files[i].path.split("/");
+      const key = depth < parts.length - 1 ? `${prefix}/${parts[depth]}` : prefix;
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(i);
+      else groups.set(key, [i]);
+    }
+    // Nothing to gain: one child, or everything sits directly in `prefix`.
+    if (groups.size <= 1) {
+      emit(prefix, indices);
+      return;
+    }
+    // A substantial child earns its own cluster and recurses; direct files and
+    // small children fold into one residual bucket under the container.
+    const substantial: Array<[string, number[]]> = [];
+    const residual: number[] = [];
+    for (const [key, idx] of groups) {
+      if (key !== prefix && idx.length >= MIN_CHILD) substantial.push([key, idx]);
+      else residual.push(...idx);
+    }
+    if (substantial.length === 0) {
+      emit(prefix, indices);
+      return;
+    }
+    // Largest children first so the biggest containers split before the
+    // cluster budget runs out; a child that is itself a container recurses.
+    const ordered = substantial.toSorted(
+      (a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1),
+    );
+    for (const [key, idx] of ordered) split(idx, key, depth + 1);
+    emit(prefix, residual);
+  };
+  const top = new Map<string, number[]>();
+  for (let i = 0; i < files.length; i++) {
+    const seg = files[i].path.split("/")[0];
+    const bucket = top.get(seg);
+    if (bucket) bucket.push(i);
+    else top.set(seg, [i]);
   }
-  return result;
+  const orderedTop = [...top.entries()].toSorted(
+    (a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1),
+  );
+  for (const [seg, idx] of orderedTop) split(idx, seg, 1);
+  return new Map([...result.entries()].toSorted((a, b) => (a[0] < b[0] ? -1 : 1)));
 };
 
 const louvainCluster = (
@@ -121,21 +159,54 @@ const louvainCluster = (
     if (!communityMap.has(comm)) communityMap.set(comm, []);
     communityMap.get(comm)?.push(i);
   }
-  const result = new Map<string, number[]>();
-  for (const [, indices] of communityMap) {
-    const dirCounts = new Map<string, number>();
+  // Name each community by its dominant directory prefix. When several
+  // communities share the same shallow prefix (e.g. four import groups all
+  // dominated by `src/features`), deepen the colliding ones one folder at a
+  // time so the distinguishing segment (`src/features/savings`) shows through
+  // instead of an opaque `src/features*` disambiguation suffix.
+  const comms = [...communityMap.values()];
+  const dominantPrefix = (indices: number[], depth: number): string => {
+    const counts = new Map<string, number>();
     for (const idx of indices) {
       const parts = files[idx].path.split("/");
-      const dir = parts.length > 1 ? parts.slice(0, 2).join("/") : parts[0];
-      dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+      const dirs = parts.length > 1 ? parts.slice(0, -1) : parts;
+      counts.set(
+        dirs.slice(0, depth).join("/"),
+        (counts.get(dirs.slice(0, depth).join("/")) ?? 0) + 1,
+      );
     }
-    const sorted = [...dirCounts.entries()].toSorted(
-      (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1),
-    );
-    let name = sorted[0]?.[0] ?? "misc";
+    const sorted = [...counts.entries()].toSorted((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    return sorted[0]?.[0] ?? "misc";
+  };
+  const depths = comms.map(() => 2);
+  for (let pass = 0; pass < 6; pass++) {
+    const byName = new Map<string, number[]>();
+    comms.forEach((indices, i) => {
+      const name = dominantPrefix(indices, depths[i]);
+      const group = byName.get(name);
+      if (group) group.push(i);
+      else byName.set(name, [i]);
+    });
+    let deepened = false;
+    for (const [, group] of byName) {
+      if (group.length < 2) continue;
+      // A community whose prefix stops growing has bottomed out; deepening it
+      // further is wasted, so only advance ones that can still get specific.
+      for (const i of group) {
+        if (dominantPrefix(comms[i], depths[i] + 1) !== dominantPrefix(comms[i], depths[i])) {
+          depths[i]++;
+          deepened = true;
+        }
+      }
+    }
+    if (!deepened) break;
+  }
+  const result = new Map<string, number[]>();
+  comms.forEach((indices, i) => {
+    let name = dominantPrefix(indices, depths[i]);
     while (result.has(name)) name = `${name}*`;
     result.set(name, indices);
-  }
+  });
   return new Map([...result.entries()].toSorted((a, b) => (a[0] < b[0] ? -1 : 1)));
 };
 // ── Meta-graph, SCC condensation, layering, ordering ────────────

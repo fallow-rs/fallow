@@ -22,6 +22,7 @@ import {
   markIntroSeen,
   middleTruncate,
   roadGeometry,
+  tailTruncate,
   usableStageWidth,
   worldToScreen,
 } from "./shared";
@@ -201,9 +202,38 @@ export const drawHoverLabels = (
   const hoveredNode = gvs.fileNodes[hovered];
   if (!hoveredNode || hoveredNode.x == null || hoveredNode.y == null) return;
   const hs = worldToScreen(gvs, { x: hoveredNode.x, y: hoveredNode.y });
-  const placed: Array<{ x: number; y: number; w: number; h: number }> = [
-    fileTipCanvasRect(hs.x, hs.y, usableStageWidth(state, w), h),
-  ];
+  const tipRect = fileTipCanvasRect(hs.x, hs.y, usableStageWidth(state, w), h);
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [tipRect];
+
+  // Faint leader from the hovered node to the docked tooltip's near edge, so
+  // the edge-docked card reads as tied to this node instead of floating off
+  // on its own at the far side of the canvas.
+  const dockedRight = tipRect.x > hs.x;
+  const anchorX = dockedRight ? tipRect.x : tipRect.x + tipRect.w;
+  const anchorY = Math.min(Math.max(hs.y, tipRect.y + 12), tipRect.y + tipRect.h - 12);
+  const lr = hoveredNode.radius * gvs.transform.k;
+  const ldx = anchorX - hs.x;
+  const ldy = anchorY - hs.y;
+  const llen = Math.hypot(ldx, ldy) || 1;
+  const lsx = hs.x + (ldx / llen) * (lr + 3);
+  const lsy = hs.y + (ldy / llen) * (lr + 3);
+  ctx.beginPath();
+  ctx.moveTo(lsx, lsy);
+  ctx.lineTo(anchorX, anchorY);
+  ctx.strokeStyle = theme.textLow;
+  ctx.globalAlpha = 0.34;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // A small dot where the leader meets the card anchors the connection so
+  // the card reads as pinned to this node rather than floating beside it.
+  ctx.beginPath();
+  ctx.arc(anchorX, anchorY, 2, 0, Math.PI * 2);
+  ctx.fillStyle = theme.textLow;
+  ctx.globalAlpha = 0.5;
+  ctx.fill();
+  ctx.globalAlpha = 1;
 
   ctx.font = FONT_SMALL;
   ctx.textBaseline = "middle";
@@ -404,6 +434,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  gvs.clusterLabels = [];
   // Bigger clusters claim their spot first; smaller ones move below on overlap.
   const ordered = gvs.clusters.toSorted(
     (a, b) => b.indices.length - a.indices.length || (a.key < b.key ? -1 : 1),
@@ -428,7 +459,21 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
     // full path lives in the tooltip; quiet labels collide far less.
     const single = cluster.indices.length === 1;
     const raw = single ? basename(state.data.files[cluster.indices[0]].path) : cluster.key;
-    const label = middleTruncate(ctx, raw.toUpperCase(), 210);
+    // Natural case: folder names like `Sidebar`/`Calendar` carry meaning in
+    // their casing, so keep it. Only terrain markers (ENTRY CODE / SHARED
+    // FOUNDATIONS) stay uppercased. Multi-file keys are directory paths whose
+    // last segment identifies them, so drop leading segments and keep whole
+    // trailing ones; single-file labels are bare filenames, where the middle
+    // is the safest thing to cut.
+    let label: string;
+    if (single) {
+      label = middleTruncate(ctx, raw, 210);
+    } else {
+      label = tailTruncate(ctx, raw, 210);
+      if (label === "…/" || label === "") {
+        label = middleTruncate(ctx, raw.split("/").pop() ?? raw, 210);
+      }
+    }
     const sub = single ? "" : `${formatCount(cluster.indices.length)} files`;
     const labelW = ctx.measureText(label).width;
     const subW = sub ? ctx.measureText(sub).width : -8;
@@ -447,6 +492,16 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
       y += 19;
     }
     placed.push({ x: x - 4, y: y - 10, w: boxW + 3, h: 20 });
+    // Record the chip rect so a label hover can light up the cluster's roads.
+    if (!cluster.isolated) {
+      gvs.clusterLabels.push({
+        cluster: gvs.clusters.indexOf(cluster),
+        x: x - 4,
+        y: y - 10,
+        w: labelW + subW + 18,
+        h: 20,
+      });
+    }
     if (state.search.trim() !== "") ctx.globalAlpha = 0.35;
     chipRect(
       ctx,

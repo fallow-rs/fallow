@@ -324,7 +324,9 @@ const init = (): void => {
         ? `road:${target.road}`
         : target.kind === "file"
           ? `file:${target.fileIndex}`
-          : "ui"
+          : target.kind === "cluster"
+            ? `cluster:${target.cluster}`
+            : "ui"
       : "";
     if (hovered !== state.graphHovered || targetKey !== lastGraphTarget) {
       state.graphHovered = hovered;

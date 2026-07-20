@@ -276,6 +276,7 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
   const gvs = getGVS(state);
   if (state.selected !== null) {
     gvs.hoveredRoad = null;
+    gvs.hoveredCluster = null;
     const back = gvs.egoBackChip;
     if (back && x >= back.x && x <= back.x + back.w && y >= back.y && y <= back.y + back.h) {
       return { kind: "ui" };
@@ -293,13 +294,25 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
   const chip = gvs.standaloneChip;
   if (chip && x >= chip.x && x <= chip.x + chip.w && y >= chip.y && y <= chip.y + chip.h) {
     gvs.hoveredRoad = null;
+    gvs.hoveredCluster = null;
     return { kind: "ui" };
   }
   const node = nodeHitTest(state, x, y);
   if (node !== null) {
     gvs.hoveredRoad = null;
+    gvs.hoveredCluster = null;
     return { kind: "file", fileIndex: node };
   }
+  // A cluster label lights up every road into/out of that cluster.
+  const label = gvs.clusterLabels.find(
+    (c) => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h,
+  );
+  if (label) {
+    gvs.hoveredRoad = null;
+    gvs.hoveredCluster = label.cluster;
+    return { kind: "cluster", cluster: label.cluster };
+  }
+  gvs.hoveredCluster = null;
   const road = roadHitTest(state, x, y);
   gvs.hoveredRoad = road;
   return road !== null ? { kind: "road", road } : null;
@@ -308,8 +321,9 @@ export const graphHoverTarget = (state: AppState, x: number, y: number): GraphHo
 /** Drop road hover when the cursor leaves the canvas; true if state changed. */
 export const clearRoadHover = (state: AppState): boolean => {
   const gvs = getGVS(state);
-  if (gvs.hoveredRoad === null) return false;
+  if (gvs.hoveredRoad === null && gvs.hoveredCluster === null) return false;
   gvs.hoveredRoad = null;
+  gvs.hoveredCluster = null;
   return true;
 };
 
