@@ -56,11 +56,13 @@ pub(crate) fn infer_props_field_array_element_type(
 }
 
 #[derive(Debug, Clone)]
-struct LocalClassExportInfo {
-    members: Vec<MemberInfo>,
-    super_class: Option<String>,
-    implemented_interfaces: Vec<String>,
-    instance_bindings: Vec<(String, String)>,
+pub(crate) struct LocalClassExportInfo {
+    pub(crate) members: Vec<MemberInfo>,
+    pub(crate) super_class: Option<String>,
+    pub(crate) implemented_interfaces: Vec<String>,
+    pub(crate) instance_bindings: Vec<(String, String)>,
+    pub(crate) super_class_type_args: Vec<String>,
+    pub(crate) generic_instance_bindings: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -729,23 +731,8 @@ impl ModuleInfoExtractor {
         self.route_load_harvest_mode = mode;
     }
 
-    pub(crate) fn record_local_class_export(
-        &mut self,
-        name: String,
-        members: Vec<MemberInfo>,
-        super_class: Option<String>,
-        implemented_interfaces: Vec<String>,
-        instance_bindings: Vec<(String, String)>,
-    ) {
-        self.local_class_exports.insert(
-            name,
-            LocalClassExportInfo {
-                members,
-                super_class,
-                implemented_interfaces,
-                instance_bindings,
-            },
-        );
+    pub(crate) fn record_local_class_export(&mut self, name: String, info: LocalClassExportInfo) {
+        self.local_class_exports.insert(name, info);
     }
 
     pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, BindingTarget> {
@@ -1362,6 +1349,8 @@ impl ModuleInfoExtractor {
                     super_class: local_class.super_class.clone(),
                     implements: local_class.implemented_interfaces.clone(),
                     instance_bindings: local_class.instance_bindings.clone(),
+                    super_class_type_args: local_class.super_class_type_args.clone(),
+                    generic_instance_bindings: local_class.generic_instance_bindings.clone(),
                 });
             }
         }

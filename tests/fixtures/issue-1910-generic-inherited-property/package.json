@@ -1,0 +1,6 @@
+{
+  "name": "issue-1910-generic-inherited-property",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts"
+}

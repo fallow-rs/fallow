@@ -1244,6 +1244,133 @@ where
     bindings
 }
 
+/// Positional super-class type arguments (the `<DerivedClient>` in
+/// `extends BaseService<DerivedClient>`). A positional arg that is not a bare
+/// identifier type reference (nested generic `Foo<Bar>`, qualified `ns.Foo`,
+/// union, literal) yields an empty string so callers keep index alignment with
+/// the base's type parameters (issue #1910).
+#[must_use]
+pub fn extract_super_class_type_args(class: &Class<'_>) -> Vec<String> {
+    let Some(type_args) = class.super_type_arguments.as_deref() else {
+        return Vec::new();
+    };
+    type_args
+        .params
+        .iter()
+        .map(|ty| plain_type_reference_name(ty).unwrap_or_default())
+        .collect()
+}
+
+/// Bare identifier type-reference name (`DerivedClient`), or `None` for any
+/// other shape (nested generic, qualified name, union, literal).
+fn plain_type_reference_name(ty: &TSType<'_>) -> Option<String> {
+    let TSType::TSTypeReference(type_ref) = ty else {
+        return None;
+    };
+    if type_ref.type_arguments.is_some() {
+        return None;
+    }
+    match &type_ref.type_name {
+        TSTypeName::IdentifierReference(ident) => Some(ident.name.to_string()),
+        _ => None,
+    }
+}
+
+/// Instance-binding fields whose annotation is EXACTLY a class type parameter,
+/// as `(field_name, type_param_index)`. Complements the constraint-substituted
+/// `extract_class_instance_bindings`: the analyze layer uses these to resolve an
+/// inherited generic property to the subclass's concrete type argument rather
+/// than the constraint (issue #1910). Non-generic fields are absent here.
+#[must_use]
+pub fn extract_class_generic_instance_bindings(class: &Class<'_>) -> Vec<(String, usize)> {
+    let param_indices = class_type_param_indices(class);
+    if param_indices.is_empty() {
+        return Vec::new();
+    }
+    let mut bindings: Vec<(String, usize)> = Vec::new();
+    for element in &class.body.body {
+        match element {
+            ClassElement::MethodDefinition(method) => {
+                if matches!(method.kind, MethodDefinitionKind::Constructor) {
+                    for param in &method.value.params.items {
+                        let Some(accessibility) = param.accessibility else {
+                            continue;
+                        };
+                        if matches!(accessibility, TSAccessibility::Private) {
+                            continue;
+                        }
+                        let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+                            continue;
+                        };
+                        let Some(type_annotation) = param.type_annotation.as_deref() else {
+                            continue;
+                        };
+                        push_generic_binding(
+                            id.name.as_str(),
+                            type_annotation,
+                            &param_indices,
+                            &mut bindings,
+                        );
+                    }
+                } else if matches!(method.kind, MethodDefinitionKind::Get) {
+                    if matches!(method.accessibility, Some(TSAccessibility::Private)) {
+                        continue;
+                    }
+                    let Some(name) = method.key.static_name() else {
+                        continue;
+                    };
+                    let Some(type_annotation) = method.value.return_type.as_deref() else {
+                        continue;
+                    };
+                    push_generic_binding(&name, type_annotation, &param_indices, &mut bindings);
+                }
+            }
+            ClassElement::PropertyDefinition(prop) => {
+                if matches!(prop.accessibility, Some(TSAccessibility::Private)) {
+                    continue;
+                }
+                let Some(name) = prop.key.static_name() else {
+                    continue;
+                };
+                let Some(type_annotation) = prop.type_annotation.as_deref() else {
+                    continue;
+                };
+                push_generic_binding(&name, type_annotation, &param_indices, &mut bindings);
+            }
+            _ => {}
+        }
+    }
+    bindings
+}
+
+/// Record `(field, type_param_index)` when the field's annotation is exactly a
+/// class type parameter.
+fn push_generic_binding(
+    field: &str,
+    type_annotation: &TSTypeAnnotation<'_>,
+    param_indices: &FxHashMap<String, usize>,
+    bindings: &mut Vec<(String, usize)>,
+) {
+    let Some(type_name) = extract_type_annotation_name(type_annotation) else {
+        return;
+    };
+    if let Some(index) = param_indices.get(type_name.as_str()) {
+        bindings.push((field.to_string(), *index));
+    }
+}
+
+/// Ordered class type-parameter name -> positional index map.
+fn class_type_param_indices(class: &Class<'_>) -> FxHashMap<String, usize> {
+    let mut map = FxHashMap::default();
+    let Some(type_parameters) = class.type_parameters.as_deref() else {
+        return map;
+    };
+    for (index, param) in type_parameters.params.iter().enumerate() {
+        map.insert(param.name.name.to_string(), index);
+    }
+    map
+}
+
 /// Push instance bindings for each non-private typed constructor parameter.
 fn collect_constructor_param_bindings(
     method: &oxc_ast::ast::MethodDefinition<'_>,

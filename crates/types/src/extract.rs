@@ -1324,6 +1324,19 @@ pub struct ClassHeritageInfo {
     /// Typed instance bindings used to resolve member-access chains in external templates.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instance_bindings: Vec<(String, String)>,
+    /// Positional type arguments on the `extends` clause (the `<DerivedClient>`
+    /// in `extends BaseService<DerivedClient>`); an empty string marks a
+    /// positional arg that is not a plain type reference. Lets the analyze layer
+    /// substitute a base class's generic instance-binding field type with the
+    /// subclass's concrete type argument (issue #1910).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub super_class_type_args: Vec<String>,
+    /// Instance-binding fields whose annotation is exactly a class type
+    /// parameter, as `(field_name, type_param_index)`. Lets an inherited generic
+    /// property resolve to the subclass's concrete type argument rather than the
+    /// constraint (issue #1910).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_instance_bindings: Vec<(String, usize)>,
 }
 
 /// An exported free-function factory proven to return one class instance.
@@ -3099,6 +3112,8 @@ mod tests {
                 super_class: Some("Parent".to_string()),
                 implements: vec!["Contract".to_string()],
                 instance_bindings: Vec::new(),
+                super_class_type_args: Vec::new(),
+                generic_instance_bindings: Vec::new(),
             }],
             exported_factory_returns: Box::from([FactoryReturnExport {
                 export_name: "useApi".to_string(),

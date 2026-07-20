@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "target": "ES2019", "module": "esnext", "strict": true, "noEmit": true },
+  "include": ["src/**/*.ts"]
+}

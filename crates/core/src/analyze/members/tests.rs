@@ -690,6 +690,8 @@ fn make_module_with_class_heritage(
             super_class: super_class.map(str::to_string),
             implements: implements.iter().map(ToString::to_string).collect(),
             instance_bindings: Vec::new(),
+            super_class_type_args: Vec::new(),
+            generic_instance_bindings: Vec::new(),
         }],
         exported_factory_returns: Box::default(),
         exported_factory_return_object_shapes: Box::default(),
@@ -1663,6 +1665,8 @@ fn transitive_error_subclass_name_member_not_flagged() {
         super_class: Some("DomainError".to_string()),
         implements: Vec::new(),
         instance_bindings: Vec::new(),
+        super_class_type_args: Vec::new(),
+        generic_instance_bindings: Vec::new(),
     });
     let modules = vec![errors_module];
 

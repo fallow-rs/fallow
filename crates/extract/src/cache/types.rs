@@ -829,7 +829,12 @@ use crate::MemberKind;
 /// that hits either bound now resolves fewer nested bindings, so its
 /// `member_accesses` can change; warm 237 caches can carry the fuller set;
 /// invalidate them.
-pub(super) const CACHE_VERSION: u32 = 238;
+///
+/// Bumped to 239 (issue #1910): `ClassHeritageInfo` gains `super_class_type_args`
+/// and `generic_instance_bindings`, so a method reached through an inherited
+/// base-class property (generic or not) resolves to its owning class instead of
+/// being falsely flagged. Warm 238 caches lack the new fields; invalidate them.
+pub(super) const CACHE_VERSION: u32 = 239;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -909,7 +914,7 @@ assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
-assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 144);
 assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
 assert_cached_type_size!(fallow_types::extract::TypeMemberTypeEntry, 72);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
