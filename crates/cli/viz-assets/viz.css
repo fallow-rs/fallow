@@ -272,7 +272,7 @@ button {
   background: transparent;
   font-size: var(--fs-md);
   font-weight: 400;
-  text-transform: lowercase;
+  text-transform: none;
   color: var(--text-muted);
   position: relative;
   transition:
@@ -357,7 +357,7 @@ button {
   border: none;
   border-radius: var(--radius-sm);
   font-size: var(--fs-md);
-  text-transform: lowercase;
+  text-transform: none;
   color: var(--text-muted);
   background: transparent;
   transition:
@@ -600,6 +600,9 @@ button {
   bottom: 0;
   width: var(--panel-width);
   max-width: 90vw;
+  /* One body size for the whole panel. Only the file name (fs-lg) and meta
+     like column headers / hints / code (fs-xs) step off it: three levels. */
+  font-size: var(--fs-sm);
   background: var(--surface-1);
   border-left: 1px solid var(--border-default);
   transform: translateX(100%);
@@ -674,31 +677,35 @@ button {
 }
 
 #panel section {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 16px 12px;
 }
 
+/* Recessed header bar: a full-bleed tinted band delimits each section, so
+   the header reads as a heading rather than a dim label bracketed by two
+   near-identical hairlines. The -16px horizontal margin cancels the
+   section's 16px padding so the band spans the full panel width. */
 #panel section h3 {
-  padding-bottom: 6px;
+  margin: 0 -16px 12px;
+  padding: 7px 16px;
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border-subtle);
   font-size: var(--fs-sm);
-  font-weight: 400;
+  font-weight: 600;
   letter-spacing: 0.05em;
-  text-transform: lowercase;
-  color: var(--text-low);
-  margin-bottom: 8px;
+  text-transform: none;
+  color: var(--text-high);
 }
 
 #panel .kv {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 2px 16px;
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
 }
 
 #panel .kv dt {
   color: var(--text-muted);
-  text-transform: lowercase;
+  text-transform: none;
   letter-spacing: 0.04em;
 }
 
@@ -731,7 +738,7 @@ button {
   font-weight: 400;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: var(--fs-micro);
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   padding: 2px 8px 2px 0;
   border-bottom: 1px solid var(--border-subtle);
@@ -744,12 +751,17 @@ button {
   vertical-align: top;
 }
 
-#panel td.num {
+#panel td.num,
+#panel th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-#panel tr:hover td {
+/* Only .rank-table rows with a fileCell are clickable, so the row-background
+   hover is scoped to them: a plain table like complexity hotspots must not
+   falsely signal interactivity, and neither should the trailing "… N more"
+   summary row (it has no col-file cell). */
+#panel .rank-table tr:has(td.col-file):hover td {
   background: var(--surface-3);
 }
 
@@ -799,23 +811,47 @@ button {
   padding-left: 14px;
 }
 
-/* Column and term descriptions as an instant styled tooltip (native title
-   is slow and OS-styled). Opens below the element and rightward by default;
-   pointer-events off so it never blocks a click. Used by table headers and
-   the facts-panel hinted terms alike. */
+/* The ordinal column: a narrow, muted, right-aligned rank in front of every
+   row so a list reads as "1, 2, 3 …" at a glance. */
+#panel .rank-table th.col-rank,
+#panel .rank-table td.col-rank {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+  padding-right: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The magnitude meter column: a narrow bar between the file label and the
+   value column, so a ranked list reads as a bar chart at a glance. */
+#panel .rank-table th.col-bar,
+#panel .rank-table td.col-bar {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+  padding-left: 14px;
+}
+
+/* Column and term descriptions carry their text in a `data-tip` attribute;
+   the cursor is the only in-panel hint that hovering explains the term. The
+   tip itself renders in a single floating `.hint-tip` element appended to
+   document.body (see hint.ts), so it escapes the panel's overflow clip and
+   flips to stay in the viewport. Used by table headers and the facts-panel
+   hinted terms alike. */
 #panel [data-tip] {
-  position: relative;
   cursor: help;
 }
 
-#panel [data-tip]:hover::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 5px);
-  left: 0;
-  z-index: 5;
-  width: max-content;
-  max-width: 220px;
+/* The floating tip. hint.ts positions it with position:fixed left/top via
+   computeTipPosition; this rule carries the visual style formerly on the
+   ::after pseudo-element. Tokens keep it theme-aware; pointer-events off so
+   it never blocks a click. No transition, so it is instant and honours
+   prefers-reduced-motion by construction. */
+.hint-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 240px;
   padding: 7px 9px;
   white-space: normal;
   text-align: left;
@@ -824,7 +860,7 @@ button {
   font-size: var(--fs-xs);
   font-weight: 400;
   line-height: 1.45;
-  color: var(--text-low);
+  color: var(--text-high);
   background: var(--surface-3);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
@@ -832,11 +868,8 @@ button {
   pointer-events: none;
 }
 
-/* Value-column headers sit at the panel's right edge: anchor the tip to
-   the right so it opens leftward and stays in view. */
-#panel .rank-table th[data-tip]:hover::after {
-  left: auto;
-  right: 0;
+.hint-tip[hidden] {
+  display: none;
 }
 
 #panel .sev-error {
@@ -872,39 +905,25 @@ button {
   color: var(--red);
 }
 
-#panel .link-list {
-  list-style: none;
-  font-size: var(--fs-md);
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-#panel .link-list li {
-  padding: 1px 0;
-}
-
-#panel .link-list button {
-  display: flex;
-  width: 100%;
-  border-radius: var(--radius-sm);
+/* Neutral fill: a magnitude that is not a defect (how depended-on a file is,
+   a query's footprint), so it must not borrow the amber/red severity ink. */
+#panel .bar .fill-neutral {
   color: var(--text-low);
-  font-size: var(--fs-md);
-  text-align: left;
-  cursor: pointer;
-  transition: color 100ms ease-out;
 }
 
-#panel .link-list button:hover {
-  color: var(--text-high);
+/* A meter sitting inline with its number: blast-radius facts, the duplication
+   density line, and the search totals. */
+#panel .meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-#panel .link-list button:hover .rank-name {
-  text-decoration: underline;
-}
-
-#panel .link-list button:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 1px;
+/* The number beside a meter: right-aligned and tabular so stacked rows line
+   up and their bars share one x (see countWithBar's labelWidthCh). */
+#panel .meter .meter-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Syntax highlighting for the clone-preview snippet. */
@@ -1006,7 +1025,7 @@ button {
 
 #panel .cmd-hint .cmd-label {
   flex: none;
-  font-size: var(--fs-micro);
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
@@ -1026,7 +1045,7 @@ button {
 #panel .cmd-hint .cmd-copy {
   flex: none;
   padding: 2px 8px;
-  font-size: var(--fs-micro);
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   background: var(--surface-2);
   border: 1px solid var(--border-subtle);
