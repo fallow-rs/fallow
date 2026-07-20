@@ -962,18 +962,93 @@ button {
 
 #panel pre {
   border-radius: var(--radius-sm);
-  padding-right: 12px;
-  overflow-x: auto;
   background: var(--surface-0);
   border: 1px solid var(--border-subtle);
   padding: 8px 10px;
   font-size: var(--fs-xs);
   line-height: 1.5;
-  overflow-x: auto;
   color: var(--text-low);
   margin-top: 6px;
   max-height: 180px;
-  overflow-y: auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* Quieter, themed scrollbars across the panel and its code preview,
+   replacing the default heavy OS bars. */
+#panel,
+#panel pre {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+}
+
+#panel::-webkit-scrollbar,
+#panel ::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+#panel::-webkit-scrollbar-thumb,
+#panel ::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 5px;
+}
+
+#panel::-webkit-scrollbar-thumb:hover,
+#panel ::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+#panel::-webkit-scrollbar-track,
+#panel ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Copyable command row: a label, the ellipsized command, and a copy button
+   (replaces the bare "verify: <code>" hint). */
+#panel .cmd-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 5px 6px 5px 10px;
+  background: var(--surface-0);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+#panel .cmd-hint .cmd-label {
+  flex: none;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+#panel .cmd-hint code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--green-text);
+}
+
+#panel .cmd-hint .cmd-copy {
+  flex: none;
+  padding: 2px 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+#panel .cmd-hint .cmd-copy:hover {
+  color: var(--text-high);
+  background: var(--surface-3);
 }
 
 #panel .clone-row {

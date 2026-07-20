@@ -125,7 +125,7 @@ const complexitySection = (file: VizFile): HTMLElement | null => {
       const hint = COLUMN_HINTS[th];
       if (hint) {
         cell.classList.add("hinted");
-        cell.title = hint;
+        cell.dataset.tip = hint;
       }
       hr.appendChild(cell);
     }
@@ -218,9 +218,7 @@ const duplicationSection = (
     if (file.clone_groups.length > 4) {
       dup.appendChild(el("div", "muted", `… ${file.clone_groups.length - 4} more clone groups`));
     }
-    const hint = el("div", "action-hint");
-    hint.append("explore: ", elCode(`fallow dupes --trace ${file.path}:1`));
-    dup.appendChild(hint);
+    dup.appendChild(commandHint("explore", `fallow dupes --trace ${file.path}:1`));
     return dup;
   }
   return null;
@@ -373,9 +371,7 @@ const deadCodeSection = (file: VizFile): HTMLElement | null => {
         ? "no file imports this one; nothing reaches it from an entry point."
         : "unreachable from every entry point.";
     dead.appendChild(msg);
-    const hint = el("div", "action-hint");
-    hint.append("verify: ", elCode(`fallow dead-code --trace ${file.path}`));
-    dead.appendChild(hint);
+    dead.appendChild(commandHint("verify", `fallow dead-code --trace ${file.path}`));
     return dead;
   }
   if (file.unused_exports && file.unused_exports.length > 0) {
@@ -388,9 +384,7 @@ const deadCodeSection = (file: VizFile): HTMLElement | null => {
       tags.appendChild(el("span", "muted", `… ${file.unused_exports.length - 20} more`));
     }
     dead.appendChild(tags);
-    const hint = el("div", "action-hint");
-    hint.append("verify: ", elCode(`fallow trace ${file.path}#${file.unused_exports[0]}`));
-    dead.appendChild(hint);
+    dead.appendChild(commandHint("verify", `fallow trace ${file.path}#${file.unused_exports[0]}`));
     return dead;
   }
   return null;
@@ -565,10 +559,17 @@ const highlightCode = (pre: HTMLElement, code: string): void => {
   if (last < code.length) pre.appendChild(document.createTextNode(code.slice(last)));
 };
 
-const elCode = (text: string): HTMLElement => {
+/** A neat, copyable command row: a label, the command (ellipsized to fit),
+ *  and a copy button. Replaces the bare "verify: <code>" action hints. */
+const commandHint = (label: string, command: string): HTMLElement => {
+  const row = el("div", "cmd-hint");
+  row.appendChild(el("span", "cmd-label", label));
   const code = document.createElement("code");
-  code.textContent = text;
-  return code;
+  code.textContent = command;
+  code.title = command;
+  row.appendChild(code);
+  row.appendChild(copyButton("cmd-copy", "copy", () => command));
+  return row;
 };
 
 interface RankRow {
@@ -823,26 +824,44 @@ export const buildMapDigest = (state: AppState): string => {
  * table: a head-truncated dim directory plus the filename in its own
  * span so it can ellipsize when the row is narrow.
  */
-const rankLabelEl = (row: RankRow): HTMLElement => {
+const rankLabelEl = (label: string, dir: string, budgetHint: number): HTMLElement => {
   const labelBox = el("span", "rank-label");
-  if (row.dir) {
+  if (dir) {
     // Head-truncate the directory in JS (monospace budget), keeping
     // whole tail segments; CSS rtl tricks reorder path punctuation.
-    const budget = Math.max(8, 34 - row.label.length - row.metric.length / 2);
-    let dir = `${row.dir}/`;
-    if (dir.length > budget) {
-      const parts = row.dir.split("/");
+    const budget = Math.max(8, 34 - label.length - budgetHint);
+    let shown = `${dir}/`;
+    if (shown.length > budget) {
+      const parts = dir.split("/");
       while (parts.length > 1 && `…/${parts.join("/")}/`.length > budget) parts.shift();
-      dir = `…/${parts.join("/")}/`;
+      shown = `…/${parts.join("/")}/`;
     }
-    const dirSpan = el("span", "muted", dir);
-    dirSpan.title = `${row.dir}/${row.label}`;
+    const dirSpan = el("span", "muted", shown);
+    dirSpan.title = `${dir}/${label}`;
     labelBox.appendChild(dirSpan);
   }
-  const nameSpan = el("span", "rank-name", row.label);
-  nameSpan.title = `${row.dir ? `${row.dir}/` : ""}${row.label}`;
+  const nameSpan = el("span", "rank-name", label);
+  nameSpan.title = `${dir ? `${dir}/` : ""}${label}`;
   labelBox.appendChild(nameSpan);
   return labelBox;
+};
+
+/** A clickable file cell for a rank-style table: the head-truncated dir plus
+ *  the ellipsizing filename in a button. Shared by every table with a file
+ *  column (lens and search rows, clone copies, road imports). */
+const fileCell = (
+  label: string,
+  dir: string,
+  budgetHint: number,
+  onClick: () => void,
+): HTMLElement => {
+  const td = el("td", "col-file");
+  const btn = el("button") as HTMLButtonElement;
+  btn.type = "button";
+  btn.appendChild(rankLabelEl(label, dir, budgetHint));
+  btn.addEventListener("click", onClick);
+  td.appendChild(btn);
+  return td;
 };
 
 /**
@@ -874,13 +893,7 @@ const renderRankTable = (
   const tbody = el("tbody");
   for (const row of rows.slice(0, cap)) {
     const tr = el("tr");
-    const fileTd = el("td", "col-file");
-    const btn = el("button") as HTMLButtonElement;
-    btn.type = "button";
-    btn.appendChild(rankLabelEl(row));
-    btn.addEventListener("click", () => onPick(row));
-    fileTd.appendChild(btn);
-    tr.appendChild(fileTd);
+    tr.appendChild(fileCell(row.label, row.dir ?? "", row.metric.length / 2, () => onPick(row)));
     for (const cell of row.cells) {
       const td = el("td", "col-val");
       td.appendChild(sev(cell.cls, cell.value));
@@ -1067,17 +1080,26 @@ const renderClonePanel = (
   box.appendChild(statusLine);
 
   const copies = sectionEl(`every copy (${formatCount(group.instances.length)})`);
-  const ul = el("ul", "link-list");
+  const copiesTable = el("table", "rank-table");
+  const copiesHead = el("thead");
+  const copiesHr = el("tr");
+  copiesHr.appendChild(el("th", "col-file", "file"));
+  copiesHr.appendChild(el("th", "col-val", "lines"));
+  copiesHead.appendChild(copiesHr);
+  copiesTable.appendChild(copiesHead);
+  const copiesBody = el("tbody");
   for (const inst of group.instances) {
-    const li = el("li");
-    const btn = el("button") as HTMLButtonElement;
-    btn.type = "button";
-    btn.textContent = `${state.data.files[inst.file].path}:${inst.start_line}-${inst.end_line}`;
-    btn.addEventListener("click", () => navigate(inst.file));
-    li.appendChild(btn);
-    ul.appendChild(li);
+    const path = state.data.files[inst.file].path;
+    const range = `${inst.start_line}-${inst.end_line}`;
+    const tr = el("tr");
+    tr.appendChild(
+      fileCell(basename(path), dirname(path), range.length / 2, () => navigate(inst.file)),
+    );
+    tr.appendChild(el("td", "col-val", range));
+    copiesBody.appendChild(tr);
   }
-  copies.appendChild(ul);
+  copiesTable.appendChild(copiesBody);
+  copies.appendChild(copiesTable);
   panel.appendChild(copies);
 
   const shared = sectionEl("the shared code");
@@ -1088,12 +1110,12 @@ const renderClonePanel = (
   }
   const first = group.instances[0];
   if (first) {
-    const hint = el("div", "action-hint");
-    hint.append(
-      "verify: ",
-      elCode(`fallow dupes --trace ${state.data.files[first.file].path}:${first.start_line}`),
+    shared.appendChild(
+      commandHint(
+        "verify",
+        `fallow dupes --trace ${state.data.files[first.file].path}:${first.start_line}`,
+      ),
     );
-    shared.appendChild(hint);
   }
   if (shared.childNodes.length > 1) panel.appendChild(shared);
 };
@@ -1151,29 +1173,46 @@ const renderRoadPanel = (
   box.appendChild(statusLine);
 
   const section = sectionEl(`every import (${formatCount(road.pairs.length)})`);
-  const ul = el("ul", "link-list");
-  ul.style.maxHeight = "none";
+  const importsTable = el("table", "rank-table");
+  const importsHead = el("thead");
+  const importsHr = el("tr");
+  importsHr.appendChild(el("th", "col-file", "importer"));
+  importsHr.appendChild(el("th", "col-val", "imports"));
+  importsHead.appendChild(importsHr);
+  importsTable.appendChild(importsHead);
+  const importsBody = el("tbody");
   const n = state.data.files.length;
-  for (const [from, to] of road.pairs.slice(0, 80)) {
-    const li = el("li");
-    const btn = el("button") as HTMLButtonElement;
-    btn.type = "button";
+  const cap = 80;
+  for (const [from, to] of road.pairs.slice(0, cap)) {
     const packed = from * n + to;
-    const fromName = state.data.files[from].path;
+    const fromPath = state.data.files[from].path;
     const toName = basename(state.data.files[to].path);
-    btn.textContent = `${fromName} → ${toName}`;
-    if (state.index.violationEdges.has(packed)) btn.classList.add("sev-error");
-    else if (state.index.cycleEdges.has(packed)) btn.classList.add("sev-warn");
-    btn.addEventListener("click", () => navigate(from));
-    li.appendChild(btn);
-    ul.appendChild(li);
+    const cls = state.index.violationEdges.has(packed)
+      ? "sev-error"
+      : state.index.cycleEdges.has(packed)
+        ? "sev-warn"
+        : "";
+    const tr = el("tr");
+    tr.appendChild(
+      fileCell(basename(fromPath), dirname(fromPath), toName.length / 2, () => navigate(from)),
+    );
+    const toTd = el("td", "col-val");
+    toTd.appendChild(sev(cls, toName));
+    tr.appendChild(toTd);
+    importsBody.appendChild(tr);
   }
-  if (road.pairs.length > 80) {
-    ul.appendChild(el("li", "muted", `… ${formatCount(road.pairs.length - 80)} more`));
+  if (road.pairs.length > cap) {
+    const tr = el("tr");
+    const td = el(
+      "td",
+      "muted",
+      `… ${formatCount(road.pairs.length - cap)} more`,
+    ) as HTMLTableCellElement;
+    td.colSpan = 2;
+    tr.appendChild(td);
+    importsBody.appendChild(tr);
   }
-  section.appendChild(ul);
-  const hint = el("div", "action-hint");
-  hint.append("click a pair to open the importing file");
-  section.appendChild(hint);
+  importsTable.appendChild(importsBody);
+  section.appendChild(importsTable);
   panel.appendChild(section);
 };
