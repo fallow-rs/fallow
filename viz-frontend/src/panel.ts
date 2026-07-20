@@ -681,21 +681,14 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
   switch (lens) {
     case "overview": {
       // The newcomer's "what should I read first": files the rest of the
-      // codebase leans on hardest, ranked by how many import them.
+      // codebase leans on hardest, ranked by how many import them. Reuses the
+      // shared used-by row shape (fileRankRows) rather than rebuilding it.
       const ranked = files
         .map((file, index) => ({ file, index }))
         .filter(({ file }) => file.importer_count > 0)
-        .toSorted((left, right) => right.file.importer_count - left.file.importer_count);
-      const maxImporters = ranked.length > 0 ? ranked[0].file.importer_count : 0;
-      const rows = ranked.map(({ file, index }) => ({
-        label: basename(file.path),
-        dir: dirname(file.path),
-        metric: `used by ${formatCount(file.importer_count)}`,
-        cells: [{ value: formatCount(file.importer_count), cls: "muted" }],
-        fileIndex: index,
-        // Neutral: a hub is heavily used, not defective.
-        bar: meterSpec(file.importer_count, maxImporters, "neutral"),
-      }));
+        .toSorted((left, right) => right.file.importer_count - left.file.importer_count)
+        .map(({ index }) => index);
+      const rows = fileRankRows(state, ranked);
       return {
         title: "Most depended-on files",
         rows,

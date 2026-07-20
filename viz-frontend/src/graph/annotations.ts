@@ -28,6 +28,12 @@ import {
   worldToScreen,
 } from "./shared";
 
+/** Axis-aligned overlap between two {x,y,w,h} rectangles. */
+const rectsOverlap = (
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): boolean => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
 /** Greedy screen-space labels for the highest-degree files in view. */
 export const drawZoomLabels = (
   state: AppState,
@@ -64,13 +70,7 @@ export const drawZoomLabels = (
     const sx = x * transform.k + transform.x;
     const sy = y * transform.k + transform.y;
     const rect = { x: sx - textW / 2 - 2, y: sy, w: textW + 4, h: 15 };
-    const overlaps = placed.some(
-      (placedRect) =>
-        rect.x < placedRect.x + placedRect.w &&
-        rect.x + rect.w > placedRect.x &&
-        rect.y < placedRect.y + placedRect.h &&
-        rect.y + rect.h > placedRect.y,
-    );
+    const overlaps = placed.some((placedRect) => rectsOverlap(rect, placedRect));
     if (overlaps) continue;
     placed.push(rect);
     drawn++;
@@ -183,13 +183,7 @@ const findLabelSlot = (
     const rect = { x: left - 4, y: slot.y - 9, w: textW + 8, h: 18 };
     if (rect.x < 4 || rect.x + rect.w > width - 4 || rect.y < 4 || rect.y + rect.h > height - 4)
       continue;
-    const overlaps = placed.some(
-      (placedRect) =>
-        rect.x < placedRect.x + placedRect.w &&
-        rect.x + rect.w > placedRect.x &&
-        rect.y < placedRect.y + placedRect.h &&
-        rect.y + rect.h > placedRect.y,
-    );
+    const overlaps = placed.some((placedRect) => rectsOverlap(rect, placedRect));
     if (!overlaps) return { slot, rect };
   }
   return null;
@@ -648,7 +642,7 @@ const legendEntries = (state: AppState): LegendEntry[] => {
 };
 
 /** Pixel height of the legend box, so the standalone chip can dock above it. */
-export const legendBoxHeight = (state: AppState): number => {
+const legendBoxHeight = (state: AppState): number => {
   const count = legendEntries(state).length;
   return count === 0 ? 0 : LEGEND_PAD_Y * 2 + count * LEGEND_ROW_H;
 };
