@@ -949,9 +949,10 @@ button {
   line-height: 1.5;
   color: var(--text-low);
   margin-top: 6px;
-  max-height: 180px;
-  overflow: auto;
-  overscroll-behavior: contain;
+  /* Grow to full content and wrap long lines so the code preview never
+     scrolls on its own; only the panel scrolls. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Quieter, themed scrollbars across the panel and its code preview,
