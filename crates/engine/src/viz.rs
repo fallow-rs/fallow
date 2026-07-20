@@ -22,12 +22,6 @@ use fallow_types::results::AnalysisResults;
 
 use crate::module_graph::RetainedModuleGraph;
 
-/// Maximum spotlighted functions serialized per file.
-const MAX_FUNCTIONS_PER_FILE: usize = 5;
-/// A function is spotlighted when any of these floors are crossed.
-const FUNCTION_CYCLOMATIC_FLOOR: u16 = 8;
-const FUNCTION_COGNITIVE_FLOOR: u16 = 10;
-const FUNCTION_HOOK_FLOOR: u16 = 5;
 /// A file counts as a complexity hotspot at or above this cyclomatic score.
 const HOTSPOT_CYCLOMATIC_FLOOR: u16 = 10;
 /// Maximum bytes of clone-fragment preview shipped per clone group. The
@@ -130,7 +124,7 @@ pub struct VizFile {
     pub react_hooks: u16,
     /// Deepest JSX nesting across the file's functions.
     pub jsx_depth: u16,
-    /// Spotlighted complex functions (capped, floor-gated).
+    /// Every function in the file, sorted hardest-first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub functions: Vec<VizFunction>,
     /// Duplicated lines in this file across all clone groups.
@@ -156,7 +150,7 @@ pub enum VizFileStatus {
     EntryPoint,
 }
 
-/// One spotlighted complex function inside a file.
+/// One function inside a file, with its complexity metrics.
 #[derive(Serialize)]
 pub struct VizFunction {
     /// Function name, or `<anonymous>`.
@@ -740,21 +734,20 @@ fn rollup_complexity(functions: &[FunctionComplexity]) -> ComplexityRollup {
         rollup.jsx_depth = rollup.jsx_depth.max(f.react_jsx_max_depth);
     }
 
-    let mut spotlighted: Vec<&FunctionComplexity> = functions
+    // Named functions only, hardest-first: the panel lists these and folds the
+    // (often many) anonymous arrow/callback functions into a single count via
+    // `fn_count`. Placeholder names for unnamed functions are `<arrow>` /
+    // `<anonymous>`, so a leading `<` marks the ones to fold away.
+    let mut named: Vec<&FunctionComplexity> = functions
         .iter()
-        .filter(|f| {
-            f.cyclomatic >= FUNCTION_CYCLOMATIC_FLOOR
-                || f.cognitive >= FUNCTION_COGNITIVE_FLOOR
-                || f.react_hook_count >= FUNCTION_HOOK_FLOOR
-        })
+        .filter(|f| !f.name.starts_with('<'))
         .collect();
-    spotlighted.sort_by(|a, b| {
+    named.sort_by(|a, b| {
         b.cyclomatic
             .cmp(&a.cyclomatic)
             .then(b.cognitive.cmp(&a.cognitive))
     });
-    spotlighted.truncate(MAX_FUNCTIONS_PER_FILE);
-    rollup.functions = spotlighted
+    rollup.functions = named
         .into_iter()
         .map(|f| VizFunction {
             name: f.name.clone(),
