@@ -557,7 +557,9 @@ button {
 
 .canvas-focus-ring {
   position: absolute;
-  inset: 0 calc(var(--panel-width) + 8px) 0 0;
+  /* Right edge sits at the panel's left edge: the ring's own border stays just
+     clear of the panel (which paints on top), so it reads flush, not gapped. */
+  inset: 0 var(--panel-width) 0 0;
   pointer-events: none;
   border: var(--focus-ring-width) solid var(--focus-ring-color);
   display: none;

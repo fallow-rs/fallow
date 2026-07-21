@@ -548,9 +548,25 @@ button {
   inset: 0;
 }
 
+/* The canvas is full width (it extends under the panel), so a CSS outline on
+   it would frame the whole element. The ring is an overlay covering only the
+   usable area instead, shown when the canvas takes keyboard focus. */
 #canvas:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: -2px;
+  outline: none;
+}
+
+.canvas-focus-ring {
+  position: absolute;
+  /* Right edge sits at the panel's left edge: the ring's own border stays just
+     clear of the panel (which paints on top), so it reads flush, not gapped. */
+  inset: 0 var(--panel-width) 0 0;
+  pointer-events: none;
+  border: var(--focus-ring-width) solid var(--focus-ring-color);
+  display: none;
+}
+
+#stage:has(#canvas:focus-visible) .canvas-focus-ring {
+  display: block;
 }
 
 /* Brief opacity dip when the canvas content swaps wholesale (view change,
