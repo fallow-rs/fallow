@@ -599,12 +599,6 @@ button {
   bottom: 12px;
 }
 
-#panel .status-gloss {
-  margin-top: 2px;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
-
 /* Terms that carry their definition in a `title` tooltip: the dotted
    underline is the only hint the panel spends space on. */
 #panel .hinted {
@@ -1146,13 +1140,6 @@ button {
 #panel .clone-row .clone-head .n {
   color: var(--amber-text);
   font-weight: 700;
-}
-
-#panel .action-hint {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  margin-top: 6px;
-  overflow-wrap: anywhere;
 }
 
 /* ── Tooltip ─────────────────────────────────────────────────── */

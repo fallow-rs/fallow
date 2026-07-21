@@ -6,9 +6,13 @@ import { closeButton, copyButton, copyIconButton, el } from "./dom";
 /** Called when the user clicks through to another file. */
 export type NavigateFn = (fileIndex: number) => void;
 
-const sectionEl = (title: string): HTMLElement => {
+const sectionEl = (title: string, hint?: string): HTMLElement => {
   const section = el("section");
-  section.appendChild(el("h3", undefined, title));
+  const heading = el("h3", undefined, title);
+  // Optional "why" hangs off the header on hover instead of an always-on line
+  // below the section, matching the status-label tooltips.
+  if (hint) heading.dataset.tip = hint;
+  section.appendChild(heading);
   return section;
 };
 
@@ -1008,7 +1012,12 @@ const renderLensPanel = (
   panel.classList.add("open");
   panel.setAttribute("aria-label", `${state.lens} findings`);
 
-  const section = sectionEl(title);
+  const section = sectionEl(
+    title,
+    state.lens === "hotspots"
+      ? "Riskiest first: complexity weighted by how many files use it."
+      : undefined,
+  );
   if (rows.length === 0) {
     section.appendChild(el("div", "sev-ok", empty));
     panel.appendChild(section);
@@ -1024,13 +1033,6 @@ const renderLensPanel = (
       }
     }),
   );
-  const hint = el("div", "action-hint");
-  hint.append(
-    state.lens === "hotspots"
-      ? "Riskiest first: complexity weighted by how many files use it. Click a row to focus."
-      : "Click a row to focus that file on the map.",
-  );
-  section.appendChild(hint);
   panel.appendChild(section);
 };
 
@@ -1083,12 +1085,11 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
     const statusLine = el("div", "status-line");
     const affectMeter = el("span", "meter");
     affectMeter.appendChild(meterBar(affected.length, totalFiles, "neutral"));
-    affectMeter.appendChild(sev("sev-info", `Affects ${formatCount(affected.length)}`));
+    const affects = sev("sev-info", `Affects ${formatCount(affected.length)}`);
+    affects.dataset.tip = "Files that depend on these, directly or transitively.";
+    affectMeter.appendChild(affects);
     statusLine.appendChild(affectMeter);
     box.appendChild(statusLine);
-    box.appendChild(
-      el("div", "status-gloss", "Files that depend on these, directly or transitively"),
-    );
   }
   head.appendChild(box);
   panel.appendChild(head);
@@ -1100,7 +1101,7 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
     return;
   }
 
-  const section = sectionEl("Matched files");
+  const section = sectionEl("Matched files", "Ranked by how many files import them.");
   section.appendChild(
     renderRankTable(
       state,
@@ -1108,13 +1109,13 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
       (row) => navigate(row.fileIndex),
     ),
   );
-  const matchHint = el("div", "action-hint");
-  matchHint.append("Ranked by how many files import them. Click a row to focus.");
-  section.appendChild(matchHint);
   panel.appendChild(section);
 
   if (affected.length > 0) {
-    const aff = sectionEl(`Affected files (${formatCount(affected.length)})`);
+    const aff = sectionEl(
+      `Affected files (${formatCount(affected.length)})`,
+      "Everything that transitively imports a match.",
+    );
     aff.appendChild(
       renderRankTable(
         state,
@@ -1122,9 +1123,6 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
         (row) => navigate(row.fileIndex),
       ),
     );
-    const hint = el("div", "action-hint");
-    hint.append("Everything that transitively imports a match. Click a row to focus.");
-    aff.appendChild(hint);
     panel.appendChild(aff);
   }
 };
