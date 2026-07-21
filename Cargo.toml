@@ -50,7 +50,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml_ng = "0.10"
 semver = "1"
-jsonc-parser = { version = "0.32", features = ["cst", "serde", "serde_json"] }
+jsonc-parser = { version = "0.33", features = ["cst", "serde", "serde_json"] }
 toml = "1.1"
 toml_edit = "0.25"
 schemars = "1"
