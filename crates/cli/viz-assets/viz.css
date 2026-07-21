@@ -7,11 +7,13 @@
   --radius-sm: 4px;
   --panel-width: 420px;
 
-  /* Keyboard focus ring. Softer than the saturated info blue and offset so
-     it floats around the control's rounded edge rather than hugging it.
-     References the theme-aware --blue-text, so it flips with the palette.
-     Applied only via :focus-visible / :focus-within (never on mouse click). */
-  --focus-ring-color: var(--blue-text);
+  /* Keyboard focus ring. Neutral rather than a saturated accent, matching the
+     chrome's own active language (the active tab and its underline are
+     --text-high), so focus reads as part of the styling instead of an
+     info-blue import. References --text-high, so it flips with the palette.
+     Offset to float around the control's rounded edge rather than hugging it;
+     applied only via :focus-visible / :focus-within (never on mouse click). */
+  --focus-ring-color: var(--text-high);
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
 
