@@ -95,9 +95,17 @@ const countWithBar = (
 const statusLabel = (file: VizFile): HTMLElement => {
   const wrap = el("span");
   switch (file.status) {
-    case "unused":
-      wrap.appendChild(sev("sev-error", "Unused file"));
+    case "unused": {
+      // Why it is dead lives on hover, mirroring the entry-point label, rather
+      // than on its own always-on line in the dead-code section.
+      const unused = sev("sev-error", "Unused file");
+      unused.dataset.tip =
+        file.importer_count === 0
+          ? "No file imports this one; nothing reaches it from an entry point."
+          : "Unreachable from every entry point.";
+      wrap.appendChild(unused);
       break;
+    }
     case "hasUnusedExports":
       wrap.appendChild(
         sev(
@@ -414,13 +422,9 @@ const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElem
 /** Dead-code evidence: the unused file itself, or its unused exports. */
 const deadCodeSection = (file: VizFile): HTMLElement | null => {
   if (file.status === "unused") {
+    // The "why" now rides the "Unused file" status label on hover; this section
+    // is just the verify command.
     const dead = sectionEl("Dead code");
-    const msg = el("div", "sev-error");
-    msg.textContent =
-      file.importer_count === 0
-        ? "No file imports this one; nothing reaches it from an entry point."
-        : "Unreachable from every entry point.";
-    dead.appendChild(msg);
     dead.appendChild(commandHint("Verify", `fallow dead-code --trace ${file.path}`));
     return dead;
   }
