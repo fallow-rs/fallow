@@ -449,12 +449,18 @@ export const chipRect = (
 export const roadWidth = (count: number): number =>
   Math.min(8, Math.max(1.5, 1 + Math.floor(Math.log2(count))));
 
+/** Right panel width (CSS `--panel-width`) and the gutter kept between it
+ *  and the stage content, mirroring the `.arrange` control's offset. */
+const PANEL_WIDTH = 420;
+const PANEL_GUTTER = 12;
+
 /** Width the canvas can actually use: the right panel overlays the stage. */
 export const usableStageWidth = (state: AppState, stageW: number): number => {
   // A panel is always present now: a selection, a road/clone drill-down,
-  // or the per-lens ranked list (overview included). Reserve its width.
+  // or the per-lens ranked list (overview included). Reserve its full width
+  // so treemap tiles and graph layout never render under it.
   void state;
-  return Math.max(420, stageW - 380);
+  return Math.max(PANEL_WIDTH, stageW - (PANEL_WIDTH + PANEL_GUTTER));
 };
 
 /** Folder keys whose imports carry little overview signal (test suites). */
