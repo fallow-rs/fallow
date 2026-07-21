@@ -7,10 +7,39 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::SystemTime;
 
 use fallow_config::WorkspaceInfo;
+use fallow_types::audit_cache::{
+    AuditContextDirectoryFingerprint, AuditContextFileFingerprint, AuditContextPathState,
+    AuditMaterializedContextFingerprint,
+};
+use fallow_types::source_fingerprint::SourceFingerprint;
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{EngineError, EngineResult};
 
 const RAW_MATERIALIZATION_MARKER: &str = "fallow-raw-materialized-v1";
+
+/// Host directories shared with detached audit base views.
+pub const AUDIT_MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
+
+const AUDIT_LOCKFILES: &[&str] = &[
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+];
+
+const NODE_MODULES_MARKERS: &[&str] = &[".package-lock.json", ".modules.yaml", ".yarn-state.yml"];
+const NUXT_MARKERS: &[&str] = &[
+    "tsconfig.json",
+    "tsconfig.app.json",
+    "imports.d.ts",
+    "components.d.ts",
+    "types/nitro-routes.d.ts",
+    "types/nitro-imports.d.ts",
+];
+const ASTRO_MARKERS: &[&str] = &["types.d.ts", "content.d.ts", "env.d.ts"];
 
 /// Resolved base ref for changed-code audit.
 #[derive(Debug, Clone)]
@@ -38,6 +67,7 @@ impl TemporaryBaseWorktree {
     pub fn create(repo_root: &Path, base_ref: &str) -> EngineResult<Self> {
         let path = base_worktree_path()?;
         create_detached_base_worktree(repo_root, &path, base_ref)?;
+        materialize_base_dependency_context(repo_root, &path);
         Ok(Self {
             repo_root: repo_root.to_path_buf(),
             path,
@@ -49,6 +79,133 @@ impl TemporaryBaseWorktree {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Share dependency and generated context from the host checkout with a base view.
+pub fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
+    for &name in AUDIT_MATERIALIZED_CONTEXT_DIRS {
+        let source = repo_root.join(name);
+        if !source.is_dir() {
+            continue;
+        }
+
+        let destination = worktree_path.join(name);
+        if destination.is_dir() {
+            continue;
+        }
+        if let Ok(metadata) = fs::symlink_metadata(&destination) {
+            if !metadata.file_type().is_symlink() {
+                continue;
+            }
+            let _ = fs::remove_file(&destination);
+        }
+
+        let _ = symlink_dependency_dir(&source, &destination);
+    }
+}
+
+/// Build a bounded fingerprint of the host context materialized into a base view.
+#[must_use]
+pub fn audit_materialized_context_fingerprint(root: &Path) -> AuditMaterializedContextFingerprint {
+    let lockfiles = AUDIT_LOCKFILES
+        .iter()
+        .map(|name| fingerprint_context_file(root, &root.join(name)))
+        .collect();
+    let directories = AUDIT_MATERIALIZED_CONTEXT_DIRS
+        .iter()
+        .map(|name| fingerprint_context_directory(root, name))
+        .collect();
+    AuditMaterializedContextFingerprint {
+        lockfiles,
+        directories,
+    }
+}
+
+fn fingerprint_context_directory(root: &Path, name: &str) -> AuditContextDirectoryFingerprint {
+    let path = root.join(name);
+    let (state, source) = match fs::metadata(&path) {
+        Ok(metadata) if metadata.is_dir() => (
+            AuditContextPathState::Present,
+            Some(SourceFingerprint::from_metadata(&metadata)),
+        ),
+        Ok(_) => (AuditContextPathState::Missing, None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            (AuditContextPathState::Missing, None)
+        }
+        Err(error) => (
+            AuditContextPathState::Unreadable(error.kind().to_string()),
+            None,
+        ),
+    };
+    let canonical_path = if matches!(state, AuditContextPathState::Present) {
+        dunce::canonicalize(&path)
+            .ok()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+    } else {
+        None
+    };
+    let markers = context_markers(name)
+        .iter()
+        .map(|marker| fingerprint_context_file(root, &path.join(marker)))
+        .collect();
+    AuditContextDirectoryFingerprint {
+        name: name.to_string(),
+        state,
+        canonical_path,
+        source,
+        markers,
+    }
+}
+
+fn context_markers(name: &str) -> &'static [&'static str] {
+    match name {
+        "node_modules" => NODE_MODULES_MARKERS,
+        ".nuxt" => NUXT_MARKERS,
+        ".astro" => ASTRO_MARKERS,
+        _ => &[],
+    }
+}
+
+fn fingerprint_context_file(root: &Path, path: &Path) -> AuditContextFileFingerprint {
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    match fs::read(path) {
+        Ok(bytes) => AuditContextFileFingerprint {
+            path: relative,
+            state: AuditContextPathState::Present,
+            source: fs::metadata(path)
+                .ok()
+                .map(|metadata| SourceFingerprint::from_metadata(&metadata)),
+            content_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => AuditContextFileFingerprint {
+            path: relative,
+            state: AuditContextPathState::Missing,
+            source: None,
+            content_hash: None,
+        },
+        Err(error) => AuditContextFileFingerprint {
+            path: relative,
+            state: AuditContextPathState::Unreadable(error.kind().to_string()),
+            source: fs::metadata(path)
+                .ok()
+                .map(|metadata| SourceFingerprint::from_metadata(&metadata)),
+            content_hash: None,
+        },
+    }
+}
+
+#[cfg(unix)]
+fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(source, destination)
+}
+
+#[cfg(windows)]
+fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(source, destination)
 }
 
 /// Register a detached worktree without checking files out, then materialize
@@ -1128,5 +1285,51 @@ mod tests {
 
         assert!(result.is_err(), "symlink parent must be rejected");
         assert!(!outside.join("escaped.txt").exists());
+    }
+
+    #[test]
+    fn audit_context_fingerprint_tracks_bounded_lockfiles_and_markers() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: 9\n").expect("lockfile");
+        fs::create_dir(root.join("node_modules")).expect("node_modules");
+        fs::write(
+            root.join("node_modules/.modules.yaml"),
+            "layoutVersion: 5\n",
+        )
+        .expect("node marker");
+
+        let first = audit_materialized_context_fingerprint(root);
+        let unchanged = audit_materialized_context_fingerprint(root);
+        assert_eq!(
+            first, unchanged,
+            "unchanged context must preserve a warm key"
+        );
+
+        fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: 10\n").expect("mutate lockfile");
+        let lock_changed = audit_materialized_context_fingerprint(root);
+        assert_ne!(
+            first, lock_changed,
+            "lockfile content must invalidate the key"
+        );
+
+        fs::write(
+            root.join("node_modules/.modules.yaml"),
+            "layoutVersion: 6\n",
+        )
+        .expect("mutate node marker");
+        let marker_changed = audit_materialized_context_fingerprint(root);
+        assert_ne!(
+            lock_changed, marker_changed,
+            "bounded dependency markers must invalidate the key"
+        );
+
+        fs::create_dir(root.join(".nuxt")).expect("nuxt context");
+        fs::write(root.join(".nuxt/imports.d.ts"), "export {}\n").expect("nuxt marker");
+        assert_ne!(
+            marker_changed,
+            audit_materialized_context_fingerprint(root),
+            "missing and materialized generated context must differ"
+        );
     }
 }

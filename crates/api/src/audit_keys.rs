@@ -2,7 +2,359 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use fallow_config::{ResolvedConfig, Severity};
+use fallow_types::envelope::AuditIntroduced;
+
+/// One dead-code finding classified for audit comparison.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditFindingRecord {
+    /// JSON collection containing the finding.
+    pub collection: &'static str,
+    /// Stable position inside the collection for typed annotation routing.
+    pub ordinal: usize,
+    /// Stable cross-run identity used for base comparison.
+    pub stable_key: String,
+    /// Whether the finding is absent from the base snapshot.
+    pub introduced: bool,
+    /// Effective rule severity after per-file overrides.
+    pub effective_severity: Severity,
+}
+
+/// Exhaustive dead-code comparison ledger shared by audit verdict and output.
+#[derive(Debug, Clone, Default)]
+pub struct DeadCodeAuditLedger {
+    records: Vec<AuditFindingRecord>,
+    keys: FxHashSet<String>,
+    #[cfg(test)]
+    classifications: usize,
+}
+
+impl DeadCodeAuditLedger {
+    /// Classified findings in deterministic output order.
+    #[must_use]
+    pub fn records(&self) -> &[AuditFindingRecord] {
+        &self.records
+    }
+
+    /// Stable current-run key set for cache snapshots and graph hashes.
+    #[must_use]
+    pub const fn keys(&self) -> &FxHashSet<String> {
+        &self.keys
+    }
+
+    #[cfg(test)]
+    const fn classification_count(&self) -> usize {
+        self.classifications
+    }
+
+    /// Number of visible findings introduced since the base snapshot.
+    #[must_use]
+    pub fn introduced_count(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|record| record.introduced && record.effective_severity != Severity::Off)
+            .count()
+    }
+
+    /// Number of findings whose effective severity is not off.
+    #[must_use]
+    pub fn visible_count(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|record| record.effective_severity != Severity::Off)
+            .count()
+    }
+
+    /// Number of visible findings inherited from the base snapshot.
+    #[must_use]
+    pub fn inherited_count(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|record| !record.introduced && record.effective_severity != Severity::Off)
+            .count()
+    }
+
+    /// Whether an introduced finding has effective error severity.
+    #[must_use]
+    pub fn has_introduced_errors(&self) -> bool {
+        self.records
+            .iter()
+            .any(|record| record.introduced && record.effective_severity == Severity::Error)
+    }
+
+    /// Whether an introduced finding has effective warning severity.
+    #[must_use]
+    pub fn has_introduced_warnings(&self) -> bool {
+        self.records
+            .iter()
+            .any(|record| record.introduced && record.effective_severity == Severity::Warn)
+    }
+
+    /// Whether any current finding has effective error severity.
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.records
+            .iter()
+            .any(|record| record.effective_severity == Severity::Error)
+    }
+
+    /// Persist comparison membership into existing typed output fields.
+    ///
+    /// `StaleSuppression` is the sole legacy finding without a typed
+    /// `introduced` slot. Its serializer keeps a narrow stable-key fallback.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive result destructuring and field annotation must stay together so new finding collections require an explicit audit decision"
+    )]
+    pub fn annotate_results(&self, results: &mut fallow_types::results::AnalysisResults) {
+        let fallow_types::results::AnalysisResults {
+            unused_files,
+            unused_exports,
+            unused_types,
+            private_type_leaks,
+            unused_dependencies,
+            unused_dev_dependencies,
+            unused_optional_dependencies,
+            unused_enum_members,
+            unused_class_members,
+            unused_store_members,
+            unresolved_imports,
+            unlisted_dependencies,
+            duplicate_exports,
+            type_only_dependencies,
+            test_only_dependencies,
+            dev_dependencies_in_production,
+            circular_dependencies,
+            re_export_cycles,
+            boundary_violations,
+            boundary_coverage_violations,
+            boundary_call_violations,
+            policy_violations,
+            stale_suppressions: _stale_suppressions,
+            unused_catalog_entries,
+            empty_catalog_groups,
+            unresolved_catalog_references,
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
+            invalid_client_exports,
+            mixed_client_server_barrels,
+            misplaced_directives,
+            unprovided_injects,
+            unrendered_components,
+            unused_component_props,
+            unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
+            unused_svelte_events,
+            unused_server_actions,
+            unused_load_data_keys,
+            unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
+            route_collisions,
+            dynamic_segment_name_conflicts,
+            suppression_count: _suppression_count,
+            unused_component_props_exempted: _unused_component_props_exempted,
+            active_suppressions: _active_suppressions,
+            feature_flags: _feature_flags,
+            security_findings: _security_findings,
+            security_unresolved_edge_files: _security_unresolved_edge_files,
+            security_unresolved_callee_sites: _security_unresolved_callee_sites,
+            security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
+            prop_drilling_chains: _prop_drilling_chains,
+            thin_wrappers: _thin_wrappers,
+            duplicate_prop_shapes: _duplicate_prop_shapes,
+            export_usages: _export_usages,
+            entry_point_summary: _entry_point_summary,
+            render_fan_in: _render_fan_in,
+            react_component_intel: _react_component_intel,
+        } = results;
+
+        macro_rules! annotate {
+            ($field:ident, $collection:literal) => {
+                for (item, introduced) in $field.iter_mut().zip(
+                    self.records
+                        .iter()
+                        .filter(|record| record.collection == $collection)
+                        .map(|record| record.introduced),
+                ) {
+                    item.introduced = Some(AuditIntroduced(introduced));
+                }
+            };
+        }
+
+        annotate!(unused_files, "unused_files");
+        annotate!(unused_exports, "unused_exports");
+        annotate!(unused_types, "unused_types");
+        annotate!(private_type_leaks, "private_type_leaks");
+        annotate!(unused_dependencies, "unused_dependencies");
+        annotate!(unused_dev_dependencies, "unused_dev_dependencies");
+        annotate!(unused_optional_dependencies, "unused_optional_dependencies");
+        annotate!(unused_enum_members, "unused_enum_members");
+        annotate!(unused_class_members, "unused_class_members");
+        annotate!(unused_store_members, "unused_store_members");
+        annotate!(unresolved_imports, "unresolved_imports");
+        annotate!(unlisted_dependencies, "unlisted_dependencies");
+        annotate!(duplicate_exports, "duplicate_exports");
+        annotate!(type_only_dependencies, "type_only_dependencies");
+        annotate!(test_only_dependencies, "test_only_dependencies");
+        annotate!(
+            dev_dependencies_in_production,
+            "dev_dependencies_in_production"
+        );
+        annotate!(circular_dependencies, "circular_dependencies");
+        annotate!(re_export_cycles, "re_export_cycles");
+        annotate!(boundary_violations, "boundary_violations");
+        annotate!(boundary_coverage_violations, "boundary_coverage_violations");
+        annotate!(boundary_call_violations, "boundary_call_violations");
+        annotate!(policy_violations, "policy_violations");
+        annotate!(unused_catalog_entries, "unused_catalog_entries");
+        annotate!(empty_catalog_groups, "empty_catalog_groups");
+        annotate!(
+            unresolved_catalog_references,
+            "unresolved_catalog_references"
+        );
+        annotate!(unused_dependency_overrides, "unused_dependency_overrides");
+        annotate!(
+            misconfigured_dependency_overrides,
+            "misconfigured_dependency_overrides"
+        );
+        annotate!(invalid_client_exports, "invalid_client_exports");
+        annotate!(mixed_client_server_barrels, "mixed_client_server_barrels");
+        annotate!(misplaced_directives, "misplaced_directives");
+        annotate!(unprovided_injects, "unprovided_injects");
+        annotate!(unrendered_components, "unrendered_components");
+        annotate!(route_collisions, "route_collisions");
+        annotate!(
+            dynamic_segment_name_conflicts,
+            "dynamic_segment_name_conflicts"
+        );
+        annotate!(unused_component_props, "unused_component_props");
+        annotate!(unused_component_emits, "unused_component_emits");
+        annotate!(unused_component_inputs, "unused_component_inputs");
+        annotate!(unused_component_outputs, "unused_component_outputs");
+        annotate!(unused_svelte_events, "unused_svelte_events");
+        annotate!(unused_server_actions, "unused_server_actions");
+        annotate!(unused_load_data_keys, "unused_load_data_keys");
+    }
+}
+
+/// Stable-key membership for one non-dead-code audit domain.
+#[derive(Debug, Clone, Default)]
+pub struct AuditDomainLedger {
+    records: Vec<(String, bool)>,
+    keys: FxHashSet<String>,
+}
+
+impl AuditDomainLedger {
+    /// Compare ordered stable keys against an optional base snapshot.
+    #[must_use]
+    pub fn compare(
+        keys: impl IntoIterator<Item = String>,
+        base: Option<&FxHashSet<String>>,
+    ) -> Self {
+        let records = keys
+            .into_iter()
+            .map(|key| {
+                let introduced = base.is_some_and(|base| !base.contains(&key));
+                (key, introduced)
+            })
+            .collect::<Vec<_>>();
+        let keys = records.iter().map(|(key, _)| key.clone()).collect();
+        Self { records, keys }
+    }
+
+    /// Stable current-run key set.
+    #[must_use]
+    pub const fn keys(&self) -> &FxHashSet<String> {
+        &self.keys
+    }
+
+    /// Number of introduced findings.
+    #[must_use]
+    pub fn introduced_count(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|(_, introduced)| *introduced)
+            .count()
+    }
+
+    /// Number of inherited findings.
+    #[must_use]
+    pub fn inherited_count(&self) -> usize {
+        self.records.len().saturating_sub(self.introduced_count())
+    }
+
+    /// Introduced membership in typed output order.
+    pub fn introduced(&self) -> impl ExactSizeIterator<Item = bool> + '_ {
+        self.records.iter().map(|(_, introduced)| *introduced)
+    }
+}
+
+/// One-pass audit comparison shared by attribution, verdict, and annotations.
+#[derive(Debug, Clone, Default)]
+pub struct AuditComparison {
+    /// Dead-code finding ledger with effective severity routing.
+    pub dead_code: DeadCodeAuditLedger,
+    /// Complexity finding membership.
+    pub health: AuditDomainLedger,
+    /// Duplication group membership.
+    pub dupes: AuditDomainLedger,
+    /// Styling finding membership.
+    pub styling: AuditDomainLedger,
+}
+
+/// Inputs for building one [`AuditComparison`].
+pub struct AuditComparisonInput<'a> {
+    pub results: &'a fallow_types::results::AnalysisResults,
+    pub config: &'a ResolvedConfig,
+    pub root: &'a Path,
+    pub health: &'a fallow_output::HealthReport,
+    pub health_root: &'a Path,
+    pub dupe_keys: Vec<String>,
+    pub styling_keys: Vec<String>,
+    pub base_dead_code: Option<&'a FxHashSet<String>>,
+    pub base_health: Option<&'a FxHashSet<String>>,
+    pub base_dupes: Option<&'a FxHashSet<String>>,
+    pub base_styling: Option<&'a FxHashSet<String>>,
+}
+
+impl AuditComparison {
+    /// Classify every audit finding once against the base snapshot.
+    #[must_use]
+    pub fn build(input: AuditComparisonInput<'_>) -> Self {
+        Self {
+            dead_code: dead_code_audit_ledger(
+                input.results,
+                input.root,
+                input.config,
+                input.base_dead_code,
+            ),
+            health: AuditDomainLedger::compare(
+                input
+                    .health
+                    .findings
+                    .iter()
+                    .map(|finding| health_finding_key(finding, input.health_root)),
+                input.base_health,
+            ),
+            dupes: AuditDomainLedger::compare(input.dupe_keys, input.base_dupes),
+            styling: AuditDomainLedger::compare(input.styling_keys, input.base_styling),
+        }
+    }
+
+    /// Persist introduced membership into typed dead-code and health findings.
+    pub fn annotate_typed_findings(
+        &self,
+        results: &mut fallow_types::results::AnalysisResults,
+        health: &mut fallow_output::HealthReport,
+    ) {
+        self.dead_code.annotate_results(results);
+        for (finding, introduced) in health.findings.iter_mut().zip(self.health.introduced()) {
+            finding.introduced = Some(introduced);
+        }
+    }
+}
 
 pub fn relative_key_path(path: &Path, root: &Path) -> String {
     let simple_path = dunce::simplified(path);
@@ -452,6 +804,23 @@ pub fn dead_code_keys(
     collector.into_keys()
 }
 
+/// Build the exhaustive dead-code comparison ledger once for an audit run.
+#[must_use]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across audit attribution keys"
+)]
+pub fn dead_code_audit_ledger(
+    results: &fallow_types::results::AnalysisResults,
+    root: &Path,
+    config: &ResolvedConfig,
+    base: Option<&FxHashSet<String>>,
+) -> DeadCodeAuditLedger {
+    let mut collector = DeadCodeKeyCollector::for_comparison(root, config, base);
+    collector.add_all_findings(results);
+    collector.into_ledger()
+}
+
 impl DeadCodeKeyCollector<'_> {
     #[expect(
         clippy::too_many_lines,
@@ -600,9 +969,110 @@ impl DeadCodeKeyCollector<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum AuditCollection {
+    UnusedFiles,
+    UnusedExports,
+    UnusedTypes,
+    PrivateTypeLeaks,
+    UnusedDependencies,
+    UnusedDevDependencies,
+    UnusedOptionalDependencies,
+    UnusedEnumMembers,
+    UnusedClassMembers,
+    UnusedStoreMembers,
+    UnresolvedImports,
+    UnlistedDependencies,
+    DuplicateExports,
+    TypeOnlyDependencies,
+    TestOnlyDependencies,
+    DevDependenciesInProduction,
+    CircularDependencies,
+    ReExportCycles,
+    BoundaryViolations,
+    BoundaryCoverageViolations,
+    BoundaryCallViolations,
+    PolicyViolations,
+    StaleSuppressions,
+    UnusedCatalogEntries,
+    EmptyCatalogGroups,
+    UnresolvedCatalogReferences,
+    UnusedDependencyOverrides,
+    MisconfiguredDependencyOverrides,
+    InvalidClientExports,
+    MixedClientServerBarrels,
+    MisplacedDirectives,
+    UnprovidedInjects,
+    UnrenderedComponents,
+    RouteCollisions,
+    DynamicSegmentNameConflicts,
+    UnusedComponentProps,
+    UnusedComponentEmits,
+    UnusedComponentInputs,
+    UnusedComponentOutputs,
+    UnusedSvelteEvents,
+    UnusedServerActions,
+    UnusedLoadDataKeys,
+}
+
+impl AuditCollection {
+    const fn json_key(self) -> &'static str {
+        match self {
+            Self::UnusedFiles => "unused_files",
+            Self::UnusedExports => "unused_exports",
+            Self::UnusedTypes => "unused_types",
+            Self::PrivateTypeLeaks => "private_type_leaks",
+            Self::UnusedDependencies => "unused_dependencies",
+            Self::UnusedDevDependencies => "unused_dev_dependencies",
+            Self::UnusedOptionalDependencies => "unused_optional_dependencies",
+            Self::UnusedEnumMembers => "unused_enum_members",
+            Self::UnusedClassMembers => "unused_class_members",
+            Self::UnusedStoreMembers => "unused_store_members",
+            Self::UnresolvedImports => "unresolved_imports",
+            Self::UnlistedDependencies => "unlisted_dependencies",
+            Self::DuplicateExports => "duplicate_exports",
+            Self::TypeOnlyDependencies => "type_only_dependencies",
+            Self::TestOnlyDependencies => "test_only_dependencies",
+            Self::DevDependenciesInProduction => "dev_dependencies_in_production",
+            Self::CircularDependencies => "circular_dependencies",
+            Self::ReExportCycles => "re_export_cycles",
+            Self::BoundaryViolations => "boundary_violations",
+            Self::BoundaryCoverageViolations => "boundary_coverage_violations",
+            Self::BoundaryCallViolations => "boundary_call_violations",
+            Self::PolicyViolations => "policy_violations",
+            Self::StaleSuppressions => "stale_suppressions",
+            Self::UnusedCatalogEntries => "unused_catalog_entries",
+            Self::EmptyCatalogGroups => "empty_catalog_groups",
+            Self::UnresolvedCatalogReferences => "unresolved_catalog_references",
+            Self::UnusedDependencyOverrides => "unused_dependency_overrides",
+            Self::MisconfiguredDependencyOverrides => "misconfigured_dependency_overrides",
+            Self::InvalidClientExports => "invalid_client_exports",
+            Self::MixedClientServerBarrels => "mixed_client_server_barrels",
+            Self::MisplacedDirectives => "misplaced_directives",
+            Self::UnprovidedInjects => "unprovided_injects",
+            Self::UnrenderedComponents => "unrendered_components",
+            Self::RouteCollisions => "route_collisions",
+            Self::DynamicSegmentNameConflicts => "dynamic_segment_name_conflicts",
+            Self::UnusedComponentProps => "unused_component_props",
+            Self::UnusedComponentEmits => "unused_component_emits",
+            Self::UnusedComponentInputs => "unused_component_inputs",
+            Self::UnusedComponentOutputs => "unused_component_outputs",
+            Self::UnusedSvelteEvents => "unused_svelte_events",
+            Self::UnusedServerActions => "unused_server_actions",
+            Self::UnusedLoadDataKeys => "unused_load_data_keys",
+        }
+    }
+}
+
 struct DeadCodeKeyCollector<'a> {
     root: &'a Path,
     keys: FxHashSet<String>,
+    records: Vec<AuditFindingRecord>,
+    collection_counts: FxHashMap<&'static str, usize>,
+    config: Option<&'a ResolvedConfig>,
+    base: Option<&'a FxHashSet<String>>,
+    #[cfg(test)]
+    classifications: usize,
 }
 
 impl<'a> DeadCodeKeyCollector<'a> {
@@ -610,6 +1080,29 @@ impl<'a> DeadCodeKeyCollector<'a> {
         Self {
             root,
             keys: FxHashSet::default(),
+            records: Vec::new(),
+            collection_counts: FxHashMap::default(),
+            config: None,
+            base: None,
+            #[cfg(test)]
+            classifications: 0,
+        }
+    }
+
+    fn for_comparison(
+        root: &'a Path,
+        config: &'a ResolvedConfig,
+        base: Option<&'a FxHashSet<String>>,
+    ) -> Self {
+        Self {
+            root,
+            keys: FxHashSet::default(),
+            records: Vec::new(),
+            collection_counts: FxHashMap::default(),
+            config: Some(config),
+            base,
+            #[cfg(test)]
+            classifications: 0,
         }
     }
 
@@ -617,8 +1110,58 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.keys
     }
 
-    fn insert(&mut self, key: String) {
+    fn into_ledger(self) -> DeadCodeAuditLedger {
+        DeadCodeAuditLedger {
+            records: self.records,
+            keys: self.keys,
+            #[cfg(test)]
+            classifications: self.classifications,
+        }
+    }
+
+    fn insert(&mut self, collection: AuditCollection, key: String, effective_severity: Severity) {
+        let collection = collection.json_key();
+        let ordinal = self.collection_counts.entry(collection).or_default();
+        if self.config.is_some() {
+            #[cfg(test)]
+            {
+                self.classifications += 1;
+            }
+            self.records.push(AuditFindingRecord {
+                collection,
+                ordinal: *ordinal,
+                introduced: self.base.is_some_and(|base| !base.contains(&key)),
+                effective_severity,
+                stable_key: key.clone(),
+            });
+        }
+        *ordinal += 1;
         self.keys.insert(key);
+    }
+
+    fn insert_file(
+        &mut self,
+        collection: AuditCollection,
+        key: String,
+        path: &Path,
+        severity: fn(&fallow_config::RulesConfig) -> Severity,
+    ) {
+        let effective = self.config.map_or(Severity::Off, |config| {
+            severity(&config.resolve_rules_for_path(path))
+        });
+        self.insert(collection, key, effective);
+    }
+
+    fn insert_project(
+        &mut self,
+        collection: AuditCollection,
+        key: String,
+        severity: fn(&fallow_config::RulesConfig) -> Severity,
+    ) {
+        let effective = self
+            .config
+            .map_or(Severity::Off, |config| severity(&config.rules));
+        self.insert(collection, key, effective);
     }
 
     fn add_core_findings(
@@ -757,10 +1300,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_files(&mut self, items: &[fallow_types::output_dead_code::UnusedFileFinding]) {
         for item in items {
-            self.insert(format!(
-                "unused-file:{}",
-                relative_key_path(&item.file.path, self.root)
-            ));
+            self.insert_file(
+                AuditCollection::UnusedFiles,
+                format!(
+                    "unused-file:{}",
+                    relative_key_path(&item.file.path, self.root)
+                ),
+                &item.file.path,
+                |rules| rules.unused_files,
+            );
         }
     }
 
@@ -769,21 +1317,31 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedExportFinding],
     ) {
         for item in items {
-            self.insert(format!(
-                "unused-export:{}:{}",
-                relative_key_path(&item.export.path, self.root),
-                item.export.export_name
-            ));
+            self.insert_file(
+                AuditCollection::UnusedExports,
+                format!(
+                    "unused-export:{}:{}",
+                    relative_key_path(&item.export.path, self.root),
+                    item.export.export_name
+                ),
+                &item.export.path,
+                |rules| rules.unused_exports,
+            );
         }
     }
 
     fn add_unused_types(&mut self, items: &[fallow_types::output_dead_code::UnusedTypeFinding]) {
         for item in items {
-            self.insert(format!(
-                "unused-type:{}:{}",
-                relative_key_path(&item.export.path, self.root),
-                item.export.export_name
-            ));
+            self.insert_file(
+                AuditCollection::UnusedTypes,
+                format!(
+                    "unused-type:{}:{}",
+                    relative_key_path(&item.export.path, self.root),
+                    item.export.export_name
+                ),
+                &item.export.path,
+                |rules| rules.unused_types,
+            );
         }
     }
 
@@ -792,12 +1350,17 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::PrivateTypeLeakFinding],
     ) {
         for item in items {
-            self.insert(format!(
-                "private-type-leak:{}:{}:{}",
-                relative_key_path(&item.leak.path, self.root),
-                item.leak.export_name,
-                item.leak.type_name
-            ));
+            self.insert_file(
+                AuditCollection::PrivateTypeLeaks,
+                format!(
+                    "private-type-leak:{}:{}:{}",
+                    relative_key_path(&item.leak.path, self.root),
+                    item.leak.export_name,
+                    item.leak.type_name
+                ),
+                &item.leak.path,
+                |rules| rules.private_type_leaks,
+            );
         }
     }
 
@@ -806,7 +1369,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::InvalidClientExportFinding],
     ) {
         for item in items {
-            self.insert(invalid_client_export_key(&item.export, self.root));
+            self.insert_file(
+                AuditCollection::InvalidClientExports,
+                invalid_client_export_key(&item.export, self.root),
+                &item.export.path,
+                |rules| rules.invalid_client_export,
+            );
         }
     }
 
@@ -815,7 +1383,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::MixedClientServerBarrelFinding],
     ) {
         for item in items {
-            self.insert(mixed_client_server_barrel_key(&item.barrel, self.root));
+            self.insert_file(
+                AuditCollection::MixedClientServerBarrels,
+                mixed_client_server_barrel_key(&item.barrel, self.root),
+                &item.barrel.path,
+                |rules| rules.mixed_client_server_barrel,
+            );
         }
     }
 
@@ -824,7 +1397,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::MisplacedDirectiveFinding],
     ) {
         for item in items {
-            self.insert(misplaced_directive_key(&item.directive_site, self.root));
+            self.insert_file(
+                AuditCollection::MisplacedDirectives,
+                misplaced_directive_key(&item.directive_site, self.root),
+                &item.directive_site.path,
+                |rules| rules.misplaced_directive,
+            );
         }
     }
 
@@ -833,7 +1411,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnprovidedInjectFinding],
     ) {
         for item in items {
-            self.insert(unprovided_inject_key(&item.inject, self.root));
+            self.insert_file(
+                AuditCollection::UnprovidedInjects,
+                unprovided_inject_key(&item.inject, self.root),
+                &item.inject.path,
+                |rules| rules.unprovided_injects,
+            );
         }
     }
 
@@ -842,7 +1425,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnrenderedComponentFinding],
     ) {
         for item in items {
-            self.insert(unrendered_component_key(&item.component, self.root));
+            self.insert_file(
+                AuditCollection::UnrenderedComponents,
+                unrendered_component_key(&item.component, self.root),
+                &item.component.path,
+                |rules| rules.unrendered_components,
+            );
         }
     }
 
@@ -851,7 +1439,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedComponentPropFinding],
     ) {
         for item in items {
-            self.insert(unused_component_prop_key(&item.prop, self.root));
+            self.insert_file(
+                AuditCollection::UnusedComponentProps,
+                unused_component_prop_key(&item.prop, self.root),
+                &item.prop.path,
+                |rules| rules.unused_component_props,
+            );
         }
     }
 
@@ -860,7 +1453,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedComponentEmitFinding],
     ) {
         for item in items {
-            self.insert(unused_component_emit_key(&item.emit, self.root));
+            self.insert_file(
+                AuditCollection::UnusedComponentEmits,
+                unused_component_emit_key(&item.emit, self.root),
+                &item.emit.path,
+                |rules| rules.unused_component_emits,
+            );
         }
     }
 
@@ -869,7 +1467,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedComponentInputFinding],
     ) {
         for item in items {
-            self.insert(unused_component_input_key(&item.input, self.root));
+            self.insert_file(
+                AuditCollection::UnusedComponentInputs,
+                unused_component_input_key(&item.input, self.root),
+                &item.input.path,
+                |rules| rules.unused_component_inputs,
+            );
         }
     }
 
@@ -878,7 +1481,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedComponentOutputFinding],
     ) {
         for item in items {
-            self.insert(unused_component_output_key(&item.output, self.root));
+            self.insert_file(
+                AuditCollection::UnusedComponentOutputs,
+                unused_component_output_key(&item.output, self.root),
+                &item.output.path,
+                |rules| rules.unused_component_outputs,
+            );
         }
     }
 
@@ -887,7 +1495,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedSvelteEventFinding],
     ) {
         for item in items {
-            self.insert(unused_svelte_event_key(&item.event, self.root));
+            self.insert_file(
+                AuditCollection::UnusedSvelteEvents,
+                unused_svelte_event_key(&item.event, self.root),
+                &item.event.path,
+                |rules| rules.unused_svelte_events,
+            );
         }
     }
 
@@ -896,7 +1509,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedServerActionFinding],
     ) {
         for item in items {
-            self.insert(unused_server_action_key(&item.action, self.root));
+            self.insert_file(
+                AuditCollection::UnusedServerActions,
+                unused_server_action_key(&item.action, self.root),
+                &item.action.path,
+                |rules| rules.unused_server_actions,
+            );
         }
     }
 
@@ -905,7 +1523,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedLoadDataKeyFinding],
     ) {
         for item in items {
-            self.insert(unused_load_data_key_key(&item.key, self.root));
+            self.insert_file(
+                AuditCollection::UnusedLoadDataKeys,
+                unused_load_data_key_key(&item.key, self.root),
+                &item.key.path,
+                |rules| rules.unused_load_data_keys,
+            );
         }
     }
 
@@ -914,7 +1537,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::RouteCollisionFinding],
     ) {
         for item in items {
-            self.insert(route_collision_key(&item.collision, self.root));
+            self.insert_file(
+                AuditCollection::RouteCollisions,
+                route_collision_key(&item.collision, self.root),
+                &item.collision.path,
+                |rules| rules.route_collision,
+            );
         }
     }
 
@@ -923,7 +1551,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::DynamicSegmentNameConflictFinding],
     ) {
         for item in items {
-            self.insert(dynamic_segment_name_conflict_key(&item.conflict, self.root));
+            self.insert_file(
+                AuditCollection::DynamicSegmentNameConflicts,
+                dynamic_segment_name_conflict_key(&item.conflict, self.root),
+                &item.conflict.path,
+                |rules| rules.dynamic_segment_name_conflict,
+            );
         }
     }
 
@@ -932,7 +1565,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedDependencyFinding],
     ) {
         for item in items {
-            self.insert(unused_dependency_key(&item.dep, self.root));
+            self.insert_project(
+                AuditCollection::UnusedDependencies,
+                unused_dependency_key(&item.dep, self.root),
+                |rules| rules.unused_dependencies,
+            );
         }
     }
 
@@ -941,7 +1578,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedDevDependencyFinding],
     ) {
         for item in items {
-            self.insert(unused_dependency_key(&item.dep, self.root));
+            self.insert_project(
+                AuditCollection::UnusedDevDependencies,
+                unused_dependency_key(&item.dep, self.root),
+                |rules| rules.unused_dev_dependencies,
+            );
         }
     }
 
@@ -950,7 +1591,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedOptionalDependencyFinding],
     ) {
         for item in items {
-            self.insert(unused_dependency_key(&item.dep, self.root));
+            self.insert_project(
+                AuditCollection::UnusedOptionalDependencies,
+                unused_dependency_key(&item.dep, self.root),
+                |rules| rules.unused_optional_dependencies,
+            );
         }
     }
 
@@ -959,11 +1604,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedEnumMemberFinding],
     ) {
         for item in items {
-            self.insert(unused_member_key(
-                "unused-enum-member",
-                &item.member,
-                self.root,
-            ));
+            self.insert_file(
+                AuditCollection::UnusedEnumMembers,
+                unused_member_key("unused-enum-member", &item.member, self.root),
+                &item.member.path,
+                |rules| rules.unused_enum_members,
+            );
         }
     }
 
@@ -972,11 +1618,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedClassMemberFinding],
     ) {
         for item in items {
-            self.insert(unused_member_key(
-                "unused-class-member",
-                &item.member,
-                self.root,
-            ));
+            self.insert_file(
+                AuditCollection::UnusedClassMembers,
+                unused_member_key("unused-class-member", &item.member, self.root),
+                &item.member.path,
+                |rules| rules.unused_class_members,
+            );
         }
     }
 
@@ -985,11 +1632,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedStoreMemberFinding],
     ) {
         for item in items {
-            self.insert(unused_member_key(
-                "unused-store-member",
-                &item.member,
-                self.root,
-            ));
+            self.insert_file(
+                AuditCollection::UnusedStoreMembers,
+                unused_member_key("unused-store-member", &item.member, self.root),
+                &item.member.path,
+                |rules| rules.unused_store_members,
+            );
         }
     }
 
@@ -998,11 +1646,16 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnresolvedImportFinding],
     ) {
         for item in items {
-            self.insert(format!(
-                "unresolved-import:{}:{}",
-                relative_key_path(&item.import.path, self.root),
-                item.import.specifier
-            ));
+            self.insert_file(
+                AuditCollection::UnresolvedImports,
+                format!(
+                    "unresolved-import:{}:{}",
+                    relative_key_path(&item.import.path, self.root),
+                    item.import.specifier
+                ),
+                &item.import.path,
+                |rules| rules.unresolved_imports,
+            );
         }
     }
 
@@ -1011,7 +1664,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnlistedDependencyFinding],
     ) {
         for item in items {
-            self.insert(unlisted_dependency_key(&item.dep, self.root));
+            self.insert_project(
+                AuditCollection::UnlistedDependencies,
+                unlisted_dependency_key(&item.dep, self.root),
+                |rules| rules.unlisted_dependencies,
+            );
         }
     }
 
@@ -1020,7 +1677,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::DuplicateExportFinding],
     ) {
         for item in items {
-            self.insert(duplicate_export_key(item, self.root));
+            self.insert_project(
+                AuditCollection::DuplicateExports,
+                duplicate_export_key(item, self.root),
+                |rules| rules.duplicate_exports,
+            );
         }
     }
 
@@ -1029,11 +1690,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::TypeOnlyDependencyFinding],
     ) {
         for item in items {
-            self.insert(format!(
-                "type-only-dependency:{}:{}",
-                relative_key_path(&item.dep.path, self.root),
-                item.dep.package_name
-            ));
+            self.insert_project(
+                AuditCollection::TypeOnlyDependencies,
+                format!(
+                    "type-only-dependency:{}:{}",
+                    relative_key_path(&item.dep.path, self.root),
+                    item.dep.package_name
+                ),
+                |rules| rules.type_only_dependencies,
+            );
         }
     }
 
@@ -1042,11 +1707,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::TestOnlyDependencyFinding],
     ) {
         for item in items {
-            self.insert(format!(
-                "test-only-dependency:{}:{}",
-                relative_key_path(&item.dep.path, self.root),
-                item.dep.package_name
-            ));
+            self.insert_project(
+                AuditCollection::TestOnlyDependencies,
+                format!(
+                    "test-only-dependency:{}:{}",
+                    relative_key_path(&item.dep.path, self.root),
+                    item.dep.package_name
+                ),
+                |rules| rules.test_only_dependencies,
+            );
         }
     }
 
@@ -1055,11 +1724,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::DevDependencyInProductionFinding],
     ) {
         for item in items {
-            self.insert(format!(
-                "dev-dependency-in-production:{}:{}",
-                relative_key_path(&item.dep.path, self.root),
-                item.dep.package_name
-            ));
+            self.insert_project(
+                AuditCollection::DevDependenciesInProduction,
+                format!(
+                    "dev-dependency-in-production:{}:{}",
+                    relative_key_path(&item.dep.path, self.root),
+                    item.dep.package_name
+                ),
+                |rules| rules.dev_dependencies_in_production,
+            );
         }
     }
 
@@ -1068,7 +1741,22 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::CircularDependencyFinding],
     ) {
         for item in items {
-            self.insert(circular_dependency_key(item, self.root));
+            let severity = self.config.map_or(Severity::Off, |config| {
+                item.cycle
+                    .files
+                    .iter()
+                    .fold(Severity::Off, |current, path| {
+                        merge_severity(
+                            current,
+                            config.resolve_rules_for_path(path).circular_dependencies,
+                        )
+                    })
+            });
+            self.insert(
+                AuditCollection::CircularDependencies,
+                circular_dependency_key(item, self.root),
+                severity,
+            );
         }
     }
 
@@ -1077,7 +1765,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::ReExportCycleFinding],
     ) {
         for item in items {
-            self.insert(re_export_cycle_key(item, self.root));
+            self.insert_project(
+                AuditCollection::ReExportCycles,
+                re_export_cycle_key(item, self.root),
+                |rules| rules.re_export_cycle,
+            );
         }
     }
 
@@ -1086,7 +1778,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::BoundaryViolationFinding],
     ) {
         for item in items {
-            self.insert(boundary_violation_key(item, self.root));
+            self.insert_file(
+                AuditCollection::BoundaryViolations,
+                boundary_violation_key(item, self.root),
+                &item.violation.from_path,
+                |rules| rules.boundary_violation,
+            );
         }
     }
 
@@ -1095,7 +1792,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::BoundaryCoverageViolationFinding],
     ) {
         for item in items {
-            self.insert(boundary_coverage_key(item, self.root));
+            self.insert_file(
+                AuditCollection::BoundaryCoverageViolations,
+                boundary_coverage_key(item, self.root),
+                &item.violation.path,
+                |rules| rules.boundary_violation,
+            );
         }
     }
 
@@ -1104,7 +1806,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::BoundaryCallViolationFinding],
     ) {
         for item in items {
-            self.insert(boundary_call_key(item, self.root));
+            self.insert_file(
+                AuditCollection::BoundaryCallViolations,
+                boundary_call_key(item, self.root),
+                &item.violation.path,
+                |rules| rules.boundary_violation,
+            );
         }
     }
 
@@ -1113,13 +1820,33 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::PolicyViolationFinding],
     ) {
         for item in items {
-            self.insert(policy_violation_key(item, self.root));
+            let severity = match item.violation.severity {
+                fallow_types::results::PolicyViolationSeverity::Error => Severity::Error,
+                fallow_types::results::PolicyViolationSeverity::Warn => Severity::Warn,
+            };
+            self.insert(
+                AuditCollection::PolicyViolations,
+                policy_violation_key(item, self.root),
+                severity,
+            );
         }
     }
 
     fn add_stale_suppressions(&mut self, items: &[fallow_types::results::StaleSuppression]) {
         for item in items {
-            self.insert(stale_suppression_key(item, self.root));
+            let effective = self.config.map_or(Severity::Off, |config| {
+                let rules = config.resolve_rules_for_path(&item.path);
+                if item.missing_reason {
+                    rules.require_suppression_reason
+                } else {
+                    rules.stale_suppressions
+                }
+            });
+            self.insert(
+                AuditCollection::StaleSuppressions,
+                stale_suppression_key(item, self.root),
+                effective,
+            );
         }
     }
 
@@ -1128,7 +1855,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
     ) {
         for item in items {
-            self.insert(unresolved_catalog_reference_key(item, self.root));
+            self.insert_file(
+                AuditCollection::UnresolvedCatalogReferences,
+                unresolved_catalog_reference_key(item, self.root),
+                &item.reference.path,
+                |rules| rules.unresolved_catalog_references,
+            );
         }
     }
 
@@ -1137,7 +1869,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedCatalogEntryFinding],
     ) {
         for item in items {
-            self.insert(unused_catalog_entry_key(&item.entry, self.root));
+            self.insert_project(
+                AuditCollection::UnusedCatalogEntries,
+                unused_catalog_entry_key(&item.entry, self.root),
+                |rules| rules.unused_catalog_entries,
+            );
         }
     }
 
@@ -1146,7 +1882,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
     ) {
         for item in items {
-            self.insert(empty_catalog_group_key(&item.group, self.root));
+            self.insert_file(
+                AuditCollection::EmptyCatalogGroups,
+                empty_catalog_group_key(&item.group, self.root),
+                &item.group.path,
+                |rules| rules.empty_catalog_groups,
+            );
         }
     }
 
@@ -1155,7 +1896,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedDependencyOverrideFinding],
     ) {
         for item in items {
-            self.insert(unused_dependency_override_key(item, self.root));
+            self.insert_file(
+                AuditCollection::UnusedDependencyOverrides,
+                unused_dependency_override_key(item, self.root),
+                &item.entry.path,
+                |rules| rules.unused_dependency_overrides,
+            );
         }
     }
 
@@ -1164,8 +1910,21 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
     ) {
         for item in items {
-            self.insert(misconfigured_dependency_override_key(item, self.root));
+            self.insert_file(
+                AuditCollection::MisconfiguredDependencyOverrides,
+                misconfigured_dependency_override_key(item, self.root),
+                &item.entry.path,
+                |rules| rules.misconfigured_dependency_overrides,
+            );
         }
+    }
+}
+
+const fn merge_severity(left: Severity, right: Severity) -> Severity {
+    match (left, right) {
+        (Severity::Error, _) | (_, Severity::Error) => Severity::Error,
+        (Severity::Warn, _) | (_, Severity::Warn) => Severity::Warn,
+        (Severity::Off, Severity::Off) => Severity::Off,
     }
 }
 
@@ -1584,6 +2343,29 @@ pub fn annotate_dead_code_json(
     annotator.annotate_imports_and_exports();
     annotator.annotate_graph();
     annotator.annotate_catalog();
+}
+
+/// Annotate the sole legacy dead-code collection without a typed
+/// `introduced` field. Every wrapper-backed collection is annotated from the
+/// persisted [`AuditComparison`] instead.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across audit attribution keys"
+)]
+pub fn annotate_stale_suppressions_json(
+    json: &mut serde_json::Value,
+    results: &fallow_types::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
+    annotate_issue_array(
+        json,
+        "stale_suppressions",
+        results
+            .stale_suppressions
+            .iter()
+            .map(|item| issue_was_introduced(&stale_suppression_key(item, root), base)),
+    );
 }
 
 struct DeadCodeJsonAnnotator<'a> {
@@ -2239,6 +3021,15 @@ pub fn annotate_dupes_json(
     }
 }
 
+/// Attach precomputed introduced membership to an audit JSON array.
+pub fn annotate_domain_json(
+    json: &mut serde_json::Value,
+    collection: &str,
+    introduced: impl IntoIterator<Item = bool>,
+) {
+    annotate_issue_array(json, collection, introduced);
+}
+
 pub fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
     report
         .findings
@@ -2311,9 +3102,12 @@ pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path)
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use fallow_config::{FallowConfig, Severity};
     use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
+    use fallow_types::envelope::AuditIntroduced;
     use fallow_types::extract::MemberKind;
     use fallow_types::output_dead_code::*;
+    use fallow_types::output_format::OutputFormat;
     use fallow_types::results::*;
     use rustc_hash::FxHashSet;
     use serde_json::json;
@@ -2323,8 +3117,9 @@ mod tests {
     };
 
     use super::{
-        annotate_dead_code_json, annotate_dupes_json, annotate_health_json, dead_code_keys,
-        dupe_group_key, dupes_keys, health_finding_key, health_keys, relative_key_path,
+        annotate_dead_code_json, annotate_dupes_json, annotate_health_json,
+        annotate_stale_suppressions_json, dead_code_audit_ledger, dead_code_keys, dupe_group_key,
+        dupes_keys, health_finding_key, health_keys, relative_key_path,
         retain_introduced_dead_code,
     };
 
@@ -3519,5 +4314,72 @@ mod tests {
 
         assert!(results.circular_dependencies.is_empty());
         assert_eq!(results.re_export_cycles.len(), 1);
+    }
+
+    #[test]
+    fn audit_ledger_routes_override_severity_and_persists_introduced_flags() {
+        let root = root();
+        let config: FallowConfig = serde_json::from_value(json!({
+            "rules": { "unused-exports": "warn" },
+            "overrides": [{
+                "files": ["src/generated/**"],
+                "rules": { "unused-exports": "error" }
+            }]
+        }))
+        .expect("config");
+        let config = config.resolve(root.clone(), OutputFormat::Json, 1, false, true, None);
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(export(&root.join("src/base.ts"), "baseExport"));
+        results
+            .unused_exports
+            .push(export(&root.join("src/generated/new.ts"), "newExport"));
+        let base = FxHashSet::from_iter(["unused-export:src/base.ts:baseExport".to_string()]);
+
+        let ledger = dead_code_audit_ledger(&results, &root, &config, Some(&base));
+
+        assert_eq!(ledger.classification_count(), 2);
+        assert_eq!(ledger.introduced_count(), 1);
+        assert_eq!(ledger.inherited_count(), 1);
+        assert!(ledger.has_introduced_errors());
+        assert!(!ledger.has_introduced_warnings());
+        assert_eq!(ledger.records()[0].effective_severity, Severity::Warn);
+        assert_eq!(ledger.records()[1].effective_severity, Severity::Error);
+
+        ledger.annotate_results(&mut results);
+        assert_eq!(ledger.classification_count(), 2);
+        assert_eq!(
+            results.unused_exports[0].introduced,
+            Some(AuditIntroduced(false))
+        );
+        assert_eq!(
+            results.unused_exports[1].introduced,
+            Some(AuditIntroduced(true))
+        );
+    }
+
+    #[test]
+    fn stale_suppression_fallback_preserves_introduced_annotation() {
+        let root = root();
+        let mut results = AnalysisResults::default();
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/new.ts"),
+            line: 2,
+            col: 0,
+            origin: SuppressionOrigin::Comment {
+                issue_kind: Some("unused-export".to_string()),
+                reason: None,
+                is_file_level: false,
+                kind_known: true,
+            },
+            missing_reason: false,
+            actions: StaleSuppression::actions_for(false),
+        });
+        let mut json = serde_json::to_value(&results).expect("json");
+
+        annotate_stale_suppressions_json(&mut json, &results, &root, &FxHashSet::default());
+
+        assert_eq!(json["stale_suppressions"][0]["introduced"], true);
     }
 }

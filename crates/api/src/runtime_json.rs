@@ -177,12 +177,21 @@ fn serialize_audit_dead_code(
             .with_context("audit.deadCode")
     })?;
     if let Some(base) = base_snapshot {
-        crate::audit_keys::annotate_dead_code_json(
-            &mut json,
-            &output.output.results,
-            &output.root,
-            &base.dead_code,
-        );
+        if has_persisted_introduced_flags(&json) {
+            crate::audit_keys::annotate_stale_suppressions_json(
+                &mut json,
+                &output.output.results,
+                &output.root,
+                &base.dead_code,
+            );
+        } else {
+            crate::audit_keys::annotate_dead_code_json(
+                &mut json,
+                &output.output.results,
+                &output.root,
+                &base.dead_code,
+            );
+        }
     }
     Ok(json)
 }
@@ -198,7 +207,9 @@ fn serialize_audit_duplication(
     })?;
     let root_prefix = format!("{}/", output.root.display());
     strip_root_prefix(&mut json, &root_prefix);
-    if let Some(base) = base_snapshot {
+    if let Some(base) = base_snapshot
+        && !has_persisted_introduced_flags(&json)
+    {
         annotate_audit_duplication_json(&mut json, output, &base.dupes);
     }
     Ok(json)
@@ -215,7 +226,9 @@ fn serialize_audit_complexity(
     })?;
     let root_prefix = format!("{}/", output.root.display());
     strip_root_prefix(&mut json, &root_prefix);
-    if let Some(base) = base_snapshot {
+    if let Some(base) = base_snapshot
+        && !has_persisted_introduced_flags(&json)
+    {
         crate::audit_keys::annotate_health_json(
             &mut json,
             &output.report,
@@ -224,6 +237,16 @@ fn serialize_audit_complexity(
         );
     }
     Ok(json)
+}
+
+fn has_persisted_introduced_flags(json: &serde_json::Value) -> bool {
+    json.as_object().is_some_and(|object| {
+        object.values().any(|value| {
+            value
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item.get("introduced").is_some()))
+        })
+    })
 }
 
 fn annotate_audit_duplication_json(

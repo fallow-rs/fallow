@@ -13,7 +13,7 @@ use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 4;
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 5;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {
@@ -238,12 +238,15 @@ pub(super) fn audit_base_snapshot_cache_key(
     let coverage_file = opts
         .coverage
         .map(|p| coverage_file_fingerprint(p, opts.root));
+    let materialized_context =
+        fallow_engine::repo_refs::audit_materialized_context_fingerprint(opts.root);
     let bytes = AuditCacheKeyBuilder::new(
         AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         env!("CARGO_PKG_VERSION"),
         base_sha.clone(),
         config_file,
         normalized_changed_files(opts.root, changed_files),
+        materialized_context,
     )
     .production(
         opts.production,

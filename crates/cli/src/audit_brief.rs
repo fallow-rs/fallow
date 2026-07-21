@@ -1091,6 +1091,7 @@ mod tests {
                 ..AuditAttribution::default()
             },
             base_snapshot: None,
+            comparison: None,
             base_snapshot_skipped: false,
             changed_files_count: 0,
             changed_files: Vec::new(),

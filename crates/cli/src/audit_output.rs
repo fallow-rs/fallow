@@ -19,7 +19,8 @@ use crate::report::plural;
 use crate::report::sink::outln;
 
 use super::keys::{
-    annotate_dead_code_json, annotate_dupes_json, annotate_health_json, styling_finding_key,
+    annotate_dead_code_json, annotate_domain_json, annotate_dupes_json, annotate_health_json,
+    annotate_stale_suppressions_json, styling_finding_key,
 };
 use super::{AuditResult, AuditSummary, AuditVerdict};
 
@@ -805,7 +806,21 @@ fn build_audit_dead_code_json_with_results(
     ) {
         Ok(mut json) => {
             if let Some(ref base) = result.base_snapshot {
-                annotate_dead_code_json(&mut json, results, &check.config.root, &base.dead_code);
+                if result.comparison.is_some() {
+                    annotate_stale_suppressions_json(
+                        &mut json,
+                        results,
+                        &check.config.root,
+                        &base.dead_code,
+                    );
+                } else {
+                    annotate_dead_code_json(
+                        &mut json,
+                        results,
+                        &check.config.root,
+                        &base.dead_code,
+                    );
+                }
             }
             Ok(json)
         }
@@ -837,7 +852,11 @@ fn build_audit_duplication_json(
             let root_prefix = format!("{}/", dupes.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
             if let Some(ref base) = result.base_snapshot {
-                annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
+                if let Some(comparison) = result.comparison.as_ref() {
+                    annotate_domain_json(&mut json, "clone_groups", comparison.dupes.introduced());
+                } else {
+                    annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
+                }
             }
             Ok(json)
         }
@@ -875,7 +894,9 @@ fn build_audit_health_json_with_report(
         Ok(mut json) => {
             let root_prefix = format!("{}/", health.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
-            if let Some(ref base) = result.base_snapshot {
+            if result.comparison.is_none()
+                && let Some(ref base) = result.base_snapshot
+            {
                 annotate_health_json(&mut json, report, &health.config.root, &base.health);
             }
             Ok(json)
@@ -967,6 +988,7 @@ mod tests {
                 ..AuditAttribution::default()
             },
             base_snapshot: None,
+            comparison: None,
             base_snapshot_skipped: false,
             changed_files_count: 0,
             changed_files: Vec::new(),

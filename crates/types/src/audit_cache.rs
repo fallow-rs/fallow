@@ -4,6 +4,55 @@ use serde::Serialize;
 
 use crate::source_fingerprint::SourceFingerprint;
 
+/// Filesystem state of one bounded audit context input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditContextPathState {
+    /// The path does not exist.
+    Missing,
+    /// The path exists and was read successfully.
+    Present,
+    /// The path exists, but its metadata or contents could not be read.
+    Unreadable(String),
+}
+
+/// Fingerprint of one file that can affect base-worktree resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditContextFileFingerprint {
+    /// Project-root-relative, forward-slash path.
+    pub path: String,
+    /// Presence or read-error state.
+    pub state: AuditContextPathState,
+    /// Source metadata when readable.
+    pub source: Option<SourceFingerprint>,
+    /// Stable content hash when readable.
+    pub content_hash: Option<String>,
+}
+
+/// Fingerprint of one host directory materialized into an audit base worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditContextDirectoryFingerprint {
+    /// Directory name relative to the analysis root.
+    pub name: String,
+    /// Presence or metadata-error state.
+    pub state: AuditContextPathState,
+    /// Canonical source identity when available.
+    pub canonical_path: Option<String>,
+    /// Root directory metadata when readable.
+    pub source: Option<SourceFingerprint>,
+    /// Bounded marker files whose contents affect resolution.
+    pub markers: Vec<AuditContextFileFingerprint>,
+}
+
+/// Bounded host context shared with an audit base worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditMaterializedContextFingerprint {
+    /// Current package-manager lockfiles at the analysis root.
+    pub lockfiles: Vec<AuditContextFileFingerprint>,
+    /// Dependency and generated-context directories shared with the base view.
+    pub directories: Vec<AuditContextDirectoryFingerprint>,
+}
+
 /// Fingerprint of the resolved config that can affect audit output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuditConfigFingerprint {
@@ -47,6 +96,8 @@ pub struct AuditCacheKeyPayload {
     pub config_file: AuditConfigFingerprint,
     /// Changed files normalized to git-root-relative, forward-slash paths.
     pub changed_files: Vec<String>,
+    /// Host dependency and generated context materialized into the base view.
+    pub materialized_context: AuditMaterializedContextFingerprint,
     /// Global production mode.
     pub production: bool,
     /// Dead-code-specific production override.
@@ -96,6 +147,7 @@ impl AuditCacheKeyBuilder {
         base_sha: impl Into<String>,
         config_file: AuditConfigFingerprint,
         changed_files: Vec<String>,
+        materialized_context: AuditMaterializedContextFingerprint,
     ) -> Self {
         Self {
             payload: AuditCacheKeyPayload {
@@ -104,6 +156,7 @@ impl AuditCacheKeyBuilder {
                 base_sha: base_sha.into(),
                 config_file,
                 changed_files,
+                materialized_context,
                 production: false,
                 production_dead_code: None,
                 production_health: None,
@@ -219,6 +272,13 @@ mod tests {
         }
     }
 
+    fn context() -> AuditMaterializedContextFingerprint {
+        AuditMaterializedContextFingerprint {
+            lockfiles: Vec::new(),
+            directories: Vec::new(),
+        }
+    }
+
     #[test]
     fn audit_cache_key_builder_preserves_typed_fields() {
         let coverage = AuditCoverageFingerprint {
@@ -230,22 +290,28 @@ mod tests {
             error: None,
         };
 
-        let builder =
-            AuditCacheKeyBuilder::new(3, "1.2.3", "abc123", config(), vec!["src/a.ts".to_string()])
-                .production(true, Some(false), Some(true), None)
-                .scope(
-                    Some(vec!["web".to_string()]),
-                    Some("main".to_string()),
-                    Some("Package".to_string()),
-                    true,
-                )
-                .health(Some(42.0), Some(coverage), Some("/workspace".to_string()))
-                .styling(true, true)
-                .baselines(
-                    Some("dead.json".to_string()),
-                    Some("health.json".to_string()),
-                    Some("dupes.json".to_string()),
-                );
+        let builder = AuditCacheKeyBuilder::new(
+            3,
+            "1.2.3",
+            "abc123",
+            config(),
+            vec!["src/a.ts".to_string()],
+            context(),
+        )
+        .production(true, Some(false), Some(true), None)
+        .scope(
+            Some(vec!["web".to_string()]),
+            Some("main".to_string()),
+            Some("Package".to_string()),
+            true,
+        )
+        .health(Some(42.0), Some(coverage), Some("/workspace".to_string()))
+        .styling(true, true)
+        .baselines(
+            Some("dead.json".to_string()),
+            Some("health.json".to_string()),
+            Some("dupes.json".to_string()),
+        );
 
         let payload = builder.payload();
         assert_eq!(payload.cache_version, 3);
@@ -268,6 +334,7 @@ mod tests {
             "base",
             config(),
             vec!["src/a.ts".to_string(), "src/b.ts".to_string()],
+            context(),
         )
         .to_json_bytes()
         .expect("payload should serialize");
@@ -277,10 +344,47 @@ mod tests {
             "base",
             config(),
             vec!["src/b.ts".to_string(), "src/a.ts".to_string()],
+            context(),
         )
         .to_json_bytes()
         .expect("payload should serialize");
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn audit_cache_key_bytes_include_materialized_context() {
+        let missing = context();
+        let present = AuditMaterializedContextFingerprint {
+            lockfiles: vec![AuditContextFileFingerprint {
+                path: "pnpm-lock.yaml".to_string(),
+                state: AuditContextPathState::Present,
+                source: Some(SourceFingerprint::new(1, 10)),
+                content_hash: Some("lock-hash".to_string()),
+            }],
+            directories: Vec::new(),
+        };
+        let build = |materialized_context| {
+            AuditCacheKeyBuilder::new(
+                5,
+                "1.0.0",
+                "base",
+                config(),
+                vec!["src/a.ts".to_string()],
+                materialized_context,
+            )
+            .to_json_bytes()
+            .expect("payload should serialize")
+        };
+
+        let missing_json = build(missing);
+        let present_json = build(present);
+
+        assert_ne!(missing_json, present_json);
+        assert!(
+            String::from_utf8(present_json)
+                .expect("utf8 json")
+                .contains("pnpm-lock.yaml")
+        );
     }
 }

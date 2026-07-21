@@ -28,6 +28,8 @@ pub struct AuditResult {
     /// crate scope so test fixtures in sibling modules can construct an
     /// `AuditResult` with `base_snapshot: None`.
     pub base_snapshot: Option<AuditKeySnapshot>,
+    /// One-pass introduced-finding classification used by verdict and JSON.
+    pub comparison: Option<keys::AuditComparison>,
     pub base_snapshot_skipped: bool,
     pub changed_files_count: usize,
     /// Absolute paths of the files this run re-analyzed. Threaded into the
@@ -192,233 +194,6 @@ fn styling_finding_gates(rules: &fallow_config::RulesConfig, code: &str) -> bool
     severity == fallow_config::Severity::Error
 }
 
-fn compute_verdict(
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-) -> AuditVerdict {
-    let mut has_errors = false;
-    let mut has_warnings = false;
-
-    if let Some(result) = check {
-        if crate::check::has_error_severity_issues(
-            &result.results,
-            &result.config.rules,
-            Some(&result.config),
-        ) {
-            has_errors = true;
-        } else if result.results.total_issues() > 0 {
-            has_warnings = true;
-        }
-    }
-
-    if let Some(result) = health
-        && !result.report.findings.is_empty()
-    {
-        has_errors = true;
-    }
-
-    // Styling findings are verdict-NEUTRAL by default (the rule defaults to
-    // `warn`): a warn styling finding never flips the verdict, Pass stays Pass.
-    // Only a per-rule `error` escalation gates. Sole family today is
-    // css-token-drift; add sibling rule checks as families graduate.
-    if let Some(result) = health
-        && result
-            .report
-            .styling_findings
-            .iter()
-            .any(|finding| styling_finding_gates(&result.config.rules, &finding.code))
-    {
-        has_errors = true;
-    }
-
-    if let Some(result) = dupes
-        && !result.report.clone_groups.is_empty()
-    {
-        if result.threshold > 0.0 && result.report.stats.duplication_percentage > result.threshold {
-            has_errors = true;
-        } else {
-            has_warnings = true;
-        }
-    }
-
-    if has_errors {
-        AuditVerdict::Fail
-    } else if has_warnings {
-        AuditVerdict::Warn
-    } else {
-        AuditVerdict::Pass
-    }
-}
-
-fn build_summary(
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-) -> AuditSummary {
-    let dead_code_issues = check.map_or(0, |r| r.results.total_issues());
-    let dead_code_has_errors = check.is_some_and(|r| {
-        crate::check::has_error_severity_issues(&r.results, &r.config.rules, Some(&r.config))
-    });
-    let complexity_findings = health.map_or(0, |r| r.report.findings.len());
-    let max_cyclomatic = health.and_then(|r| r.report.findings.iter().map(|f| f.cyclomatic).max());
-    let duplication_clone_groups = dupes.map_or(0, |r| r.report.clone_groups.len());
-
-    AuditSummary {
-        dead_code_issues,
-        dead_code_has_errors,
-        complexity_findings,
-        max_cyclomatic,
-        duplication_clone_groups,
-    }
-}
-
-fn compute_audit_attribution(
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    base: Option<&AuditKeySnapshot>,
-    gate: AuditGate,
-) -> AuditAttribution {
-    let dead_code = check
-        .map(|r| {
-            count_introduced(
-                &dead_code_keys(&r.results, &r.config.root),
-                base.map(|b| &b.dead_code),
-            )
-        })
-        .unwrap_or_default();
-    let complexity = health
-        .map(|r| {
-            count_introduced(
-                &health_keys(&r.report, &r.config.root),
-                base.map(|b| &b.health),
-            )
-        })
-        .unwrap_or_default();
-    let duplication = dupes
-        .map(|r| {
-            count_introduced(
-                &dupes_keys(&r.report, &r.config.root),
-                base.map(|b| &b.dupes),
-            )
-        })
-        .unwrap_or_default();
-
-    AuditAttribution {
-        gate,
-        dead_code_introduced: dead_code.0,
-        dead_code_inherited: dead_code.1,
-        complexity_introduced: complexity.0,
-        complexity_inherited: complexity.1,
-        duplication_introduced: duplication.0,
-        duplication_inherited: duplication.1,
-    }
-}
-
-fn compute_introduced_verdict(
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    base: Option<&AuditKeySnapshot>,
-) -> AuditVerdict {
-    let mut has_errors = false;
-    let mut has_warnings = false;
-
-    if let Some(result) = check {
-        let (errors, warnings) = introduced_check_verdict(result, base);
-        has_errors |= errors;
-        has_warnings |= warnings;
-    }
-    if let Some(result) = health {
-        has_errors |= introduced_health_has_errors(result, base);
-    }
-    if let Some(result) = health
-        && result
-            .report
-            .styling_findings
-            .iter()
-            .any(|finding| introduced_styling_finding_gates(result, base, finding))
-    {
-        has_errors = true;
-    }
-    if let Some(result) = dupes {
-        let (errors, warnings) = introduced_dupes_verdict(result, base);
-        has_errors |= errors;
-        has_warnings |= warnings;
-    }
-
-    if has_errors {
-        AuditVerdict::Fail
-    } else if has_warnings {
-        AuditVerdict::Warn
-    } else {
-        AuditVerdict::Pass
-    }
-}
-
-/// Error/warning contribution from dead-code issues introduced since the base.
-fn introduced_check_verdict(result: &CheckResult, base: Option<&AuditKeySnapshot>) -> (bool, bool) {
-    let base_keys = base.map(|b| &b.dead_code);
-    let mut introduced = result.results.clone();
-    retain_introduced_dead_code(&mut introduced, &result.config.root, base_keys);
-    if crate::check::has_error_severity_issues(
-        &introduced,
-        &result.config.rules,
-        Some(&result.config),
-    ) {
-        (true, false)
-    } else if introduced.total_issues() > 0 {
-        (false, true)
-    } else {
-        (false, false)
-    }
-}
-
-/// True when complexity findings were introduced since the base (always an error).
-fn introduced_health_has_errors(result: &HealthResult, base: Option<&AuditKeySnapshot>) -> bool {
-    let base_keys = base.map(|b| &b.health);
-    result.report.findings.iter().any(|finding| {
-        !base_keys
-            .is_some_and(|keys| keys.contains(&health_finding_key(finding, &result.config.root)))
-    })
-}
-
-fn introduced_styling_finding_gates(
-    result: &HealthResult,
-    base: Option<&AuditKeySnapshot>,
-    finding: &fallow_output::StylingFinding,
-) -> bool {
-    styling_finding_gates(&result.config.rules, &finding.code)
-        && !base.is_some_and(|snapshot| {
-            snapshot
-                .styling
-                .contains(&styling_finding_key(finding, &result.config.root))
-        })
-}
-
-/// Error/warning contribution from clone groups introduced since the base.
-fn introduced_dupes_verdict(result: &DupesResult, base: Option<&AuditKeySnapshot>) -> (bool, bool) {
-    let base_keys = base.map(|b| &b.dupes);
-    let introduced = result
-        .report
-        .clone_groups
-        .iter()
-        .filter(|group| {
-            !base_keys
-                .is_some_and(|keys| keys.contains(&dupe_group_key(group, &result.config.root)))
-        })
-        .count();
-    if introduced == 0 {
-        return (false, false);
-    }
-    if result.threshold > 0.0 && result.report.stats.duplication_percentage > result.threshold {
-        (true, false)
-    } else {
-        (false, true)
-    }
-}
-
 pub struct AuditKeySnapshot {
     dead_code: FxHashSet<String>,
     health: FxHashSet<String>,
@@ -433,19 +208,6 @@ pub struct AuditKeySnapshot {
     /// Exports-aware public-export keys (`<rel_path>::<name>`), the surface
     /// reachable through `package.json` `exports` + re-export reachability.
     public_api: FxHashSet<String>,
-}
-
-fn count_introduced(keys: &FxHashSet<String>, base: Option<&FxHashSet<String>>) -> (usize, usize) {
-    let Some(base) = base else {
-        return (0, 0);
-    };
-    keys.iter().fold((0, 0), |(introduced, inherited), key| {
-        if base.contains(key) {
-            (introduced, inherited + 1)
-        } else {
-            (introduced + 1, inherited)
-        }
-    })
 }
 
 /// If fallow's process inherited any ambient git repo-state env vars (typical
@@ -947,7 +709,7 @@ pub mod routing;
 
 use keys::{
     dead_code_keys, dupe_group_key, dupes_keys, health_finding_key, health_keys,
-    retain_introduced_dead_code, styling_finding_key, styling_keys,
+    styling_finding_key, styling_keys,
 };
 
 struct HeadAnalyses {
@@ -993,6 +755,7 @@ struct AuditResultParts {
     summary: AuditSummary,
     attribution: AuditAttribution,
     base_snapshot: Option<AuditKeySnapshot>,
+    comparison: Option<keys::AuditComparison>,
     base_snapshot_skipped: bool,
     changed_files_count: usize,
     changed_files: FxHashSet<PathBuf>,
@@ -1303,7 +1066,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
     let head = input.head_res?;
     let mut check_result = head.check;
     let dupes_result = head.dupes;
-    let health_result = head.health;
+    let mut health_result = head.health;
 
     let (base_snapshot, base_snapshot_skipped) = resolve_base_snapshot(
         opts,
@@ -1317,13 +1080,34 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         },
     )?;
     drop_check_shared_parse(&mut check_result);
-    let (attribution, verdict, summary) = compute_audit_outcome(
-        opts.gate,
+    let comparison = build_cli_audit_comparison(
         check_result.as_ref(),
         dupes_result.as_ref(),
         health_result.as_ref(),
         base_snapshot.as_ref(),
     );
+    let (attribution, verdict, summary) = compute_comparison_audit_outcome(
+        opts.gate,
+        dupes_result.as_ref(),
+        health_result.as_ref(),
+        &comparison,
+        base_snapshot.is_some(),
+    );
+    if base_snapshot.is_some() {
+        if let Some(check) = check_result.as_mut() {
+            comparison.dead_code.annotate_results(&mut check.results);
+        }
+        if let Some(health) = health_result.as_mut() {
+            for (finding, introduced) in health
+                .report
+                .findings
+                .iter_mut()
+                .zip(comparison.health.introduced())
+            {
+                finding.introduced = Some(introduced);
+            }
+        }
+    }
 
     let head_sha = get_head_sha(opts.root);
     let brief = compute_audit_brief_data(AuditBriefDataInput {
@@ -1342,6 +1126,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         summary,
         attribution,
         base_snapshot,
+        comparison: Some(comparison),
         base_snapshot_skipped,
         changed_files_count: input.changed_files_count,
         changed_files: input.changed_files,
@@ -1835,18 +1620,144 @@ fn extend_weakening_signals(
     );
 }
 
-/// Attribution, verdict, and summary computed together from the HEAD analyses and
-/// base snapshot. Also records the final result count for telemetry.
-fn compute_audit_outcome(
-    gate: AuditGate,
+fn build_cli_audit_comparison(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
     base: Option<&AuditKeySnapshot>,
+) -> keys::AuditComparison {
+    let dead_code = check.map_or_else(keys::DeadCodeAuditLedger::default, |result| {
+        keys::dead_code_audit_ledger(
+            &result.results,
+            &result.config.root,
+            &result.config,
+            base.map(|snapshot| &snapshot.dead_code),
+        )
+    });
+    let health_ledger = keys::AuditDomainLedger::compare(
+        health.into_iter().flat_map(|result| {
+            result
+                .report
+                .findings
+                .iter()
+                .map(move |finding| health_finding_key(finding, &result.config.root))
+        }),
+        base.map(|snapshot| &snapshot.health),
+    );
+    let dupes_ledger = keys::AuditDomainLedger::compare(
+        dupes.into_iter().flat_map(|result| {
+            result
+                .report
+                .clone_groups
+                .iter()
+                .map(move |group| dupe_group_key(group, &result.config.root))
+        }),
+        base.map(|snapshot| &snapshot.dupes),
+    );
+    let styling = keys::AuditDomainLedger::compare(
+        health.into_iter().flat_map(|result| {
+            result
+                .report
+                .styling_findings
+                .iter()
+                .map(move |finding| styling_finding_key(finding, &result.config.root))
+        }),
+        base.map(|snapshot| &snapshot.styling),
+    );
+    keys::AuditComparison {
+        dead_code,
+        health: health_ledger,
+        dupes: dupes_ledger,
+        styling,
+    }
+}
+
+fn compute_comparison_audit_outcome(
+    gate: AuditGate,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+    comparison: &keys::AuditComparison,
+    has_base: bool,
 ) -> (AuditAttribution, AuditVerdict, AuditSummary) {
-    let attribution = compute_audit_attribution(check, dupes, health, base, gate);
-    let verdict = compute_audit_verdict(gate, check, dupes, health, base);
-    let summary = build_summary(check, dupes, health);
+    let new_only = matches!(gate, AuditGate::NewOnly);
+    let dead_code_errors = if new_only {
+        comparison.dead_code.has_introduced_errors()
+    } else {
+        comparison.dead_code.has_errors()
+    };
+    let dead_code_warnings = if new_only {
+        comparison.dead_code.has_introduced_warnings()
+    } else {
+        comparison
+            .dead_code
+            .records()
+            .iter()
+            .any(|record| record.effective_severity == fallow_config::Severity::Warn)
+    };
+    let complexity_findings = if new_only {
+        comparison.health.introduced_count()
+    } else {
+        health.map_or(0, |result| result.report.findings.len())
+    };
+    let styling_errors = health.is_some_and(|result| {
+        result
+            .report
+            .styling_findings
+            .iter()
+            .zip(comparison.styling.introduced())
+            .any(|(finding, introduced)| {
+                (!new_only || introduced)
+                    && styling_finding_gates(&result.config.rules, &finding.code)
+            })
+    });
+    let duplication_findings = if new_only {
+        comparison.dupes.introduced_count()
+    } else {
+        dupes.map_or(0, |result| result.report.clone_groups.len())
+    };
+    let duplication_errors = dupes.is_some_and(|result| {
+        duplication_findings > 0
+            && result.threshold > 0.0
+            && result.report.stats.duplication_percentage > result.threshold
+    });
+    let verdict =
+        if dead_code_errors || complexity_findings > 0 || styling_errors || duplication_errors {
+            AuditVerdict::Fail
+        } else if dead_code_warnings || duplication_findings > 0 {
+            AuditVerdict::Warn
+        } else {
+            AuditVerdict::Pass
+        };
+    let attribution = if has_base {
+        AuditAttribution {
+            gate,
+            dead_code_introduced: comparison.dead_code.introduced_count(),
+            dead_code_inherited: comparison.dead_code.inherited_count(),
+            complexity_introduced: comparison.health.introduced_count(),
+            complexity_inherited: comparison.health.inherited_count(),
+            duplication_introduced: comparison.dupes.introduced_count(),
+            duplication_inherited: comparison.dupes.inherited_count(),
+        }
+    } else {
+        AuditAttribution {
+            gate,
+            ..AuditAttribution::default()
+        }
+    };
+    let summary = AuditSummary {
+        dead_code_issues: comparison.dead_code.visible_count(),
+        dead_code_has_errors: comparison.dead_code.has_errors(),
+        complexity_findings: health.map_or(0, |result| result.report.findings.len()),
+        max_cyclomatic: health.and_then(|result| {
+            result
+                .report
+                .findings
+                .iter()
+                .map(|finding| finding.cyclomatic)
+                .max()
+        }),
+        duplication_clone_groups: dupes.map_or(0, |result| result.report.clone_groups.len()),
+    };
     crate::telemetry::note_final_result_count(
         summary.dead_code_issues + summary.complexity_findings + summary.duplication_clone_groups,
     );
@@ -1894,28 +1805,13 @@ fn resolve_base_snapshot(
     Ok((Some(current_keys_as_base_keys(check, dupes, health)), true))
 }
 
-/// Pick the audit verdict: the introduced-only gate in `new`-only mode, otherwise
-/// the full backlog verdict.
-fn compute_audit_verdict(
-    gate: AuditGate,
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    base: Option<&AuditKeySnapshot>,
-) -> AuditVerdict {
-    if matches!(gate, AuditGate::NewOnly) {
-        compute_introduced_verdict(check, dupes, health, base)
-    } else {
-        compute_verdict(check, dupes, health)
-    }
-}
-
 fn build_audit_result(parts: AuditResultParts) -> AuditResult {
     AuditResult {
         verdict: parts.verdict,
         summary: parts.summary,
         attribution: parts.attribution,
         base_snapshot: parts.base_snapshot,
+        comparison: parts.comparison,
         base_snapshot_skipped: parts.base_snapshot_skipped,
         changed_files_count: parts.changed_files_count,
         changed_files: parts.changed_files.into_iter().collect(),
@@ -1979,6 +1875,7 @@ fn empty_audit_result(
             ..AuditAttribution::default()
         },
         base_snapshot: None,
+        comparison: None,
         base_snapshot_skipped: false,
         changed_files_count: 0,
         changed_files: Vec::new(),

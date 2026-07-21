@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use fallow_engine::changed_files::clear_ambient_git_env;
+pub use fallow_engine::repo_refs::materialize_base_dependency_context;
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -1161,56 +1162,6 @@ pub fn paths_equal(left: &Path, right: &Path) -> bool {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
     }
-}
-
-/// Directories the audit base worktree shares with the host checkout.
-///
-/// `node_modules` is the original case: bare `git worktree add` lacks the
-/// installed dependencies. `.nuxt` / `.astro` extend the same idea to
-/// meta-framework `prepare` / `sync` outputs that the project gitignores;
-/// without them the base pass cannot resolve tsconfig `references` chains
-/// pointing into the generated tsconfigs and falls back to resolver-less
-/// resolution. The trade-off matches `node_modules`: the symlinked dir is
-/// HEAD-shaped, not base-shaped, but the alias resolution accuracy recovered
-/// far outweighs the residual drift.
-///
-/// The meta-framework entries must stay aligned with the set recognized by
-/// `missing_meta_framework_prerequisites` in `fallow_core`'s plugin registry.
-/// Adding a framework's prepare-dir warning there without extending this list
-/// silently reintroduces the broken-tsconfig-chain bug on the base pass for
-/// that framework.
-const MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
-
-pub fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
-    for &name in MATERIALIZED_CONTEXT_DIRS {
-        let source = repo_root.join(name);
-        if !source.is_dir() {
-            continue;
-        }
-
-        let destination = worktree_path.join(name);
-        if destination.is_dir() {
-            continue;
-        }
-        if let Ok(metadata) = std::fs::symlink_metadata(&destination) {
-            if !metadata.file_type().is_symlink() {
-                continue;
-            }
-            let _ = std::fs::remove_file(&destination);
-        }
-
-        let _ = symlink_dependency_dir(&source, &destination);
-    }
-}
-
-#[cfg(unix)]
-fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(source, destination)
-}
-
-#[cfg(windows)]
-fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_dir(source, destination)
 }
 
 pub fn remove_audit_worktree(repo_root: &Path, path: &Path) {

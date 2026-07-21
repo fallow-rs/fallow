@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fallow_config::AuditGate;
+use fallow_config::{AuditGate, ProductionAnalysis};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     project_analysis::ProjectAnalysisArtifactOptions,
+    project_config::ProjectConfigOptions,
     repo_refs::{self, ResolvedAuditBase, TemporaryBaseWorktree},
     session::AnalysisSession,
 };
 use fallow_output::build_audit_next_steps;
-use fallow_types::output::NextStep;
+use fallow_types::{envelope::AuditIntroduced, output::NextStep, output_format::OutputFormat};
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -53,27 +54,34 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         ));
     }
 
-    let head =
+    let mut head =
         run_audit_subanalyses_with_context(options, &analysis, &resolved, Some(&changed_files))?;
-    let current_snapshot = snapshot_from_analyses(&head);
     let base_snapshot = if matches!(options.gate, AuditGate::NewOnly) {
         Some(compute_base_snapshot(options, &resolved_base.git_ref)?)
     } else {
         None
     };
-    let summary = build_programmatic_audit_summary(&head);
-    let attribution = compute_programmatic_audit_attribution(
-        options.gate,
-        &current_snapshot,
-        base_snapshot.as_ref(),
-    );
-    let verdict = compute_programmatic_audit_verdict(
-        options.gate,
-        &summary,
-        &head.duplication,
-        &current_snapshot,
-        base_snapshot.as_ref(),
-    );
+    let config = load_programmatic_audit_config(&resolved)?;
+    let comparison = build_programmatic_audit_comparison(&head, &config, base_snapshot.as_ref());
+    let summary = build_programmatic_audit_summary(&head, &comparison);
+    let attribution = comparison_attribution(options.gate, &comparison, base_snapshot.is_some());
+    let verdict = comparison_verdict(options.gate, &summary, &head.duplication, &comparison);
+    if base_snapshot.is_some() {
+        comparison.annotate_typed_findings(
+            &mut head.dead_code.output.results,
+            &mut head.complexity.report,
+        );
+        for (group, introduced) in head
+            .duplication
+            .output
+            .report
+            .clone_groups
+            .iter_mut()
+            .zip(comparison.dupes.introduced())
+        {
+            group.introduced = Some(AuditIntroduced(introduced));
+        }
+    }
     let next_steps = audit_next_steps(&head.dead_code, &head.complexity);
 
     Ok(AuditProgrammaticOutput {
@@ -515,11 +523,73 @@ fn run_dead_code_and_health_with_session(
     Ok((dead_code, complexity))
 }
 
-fn build_programmatic_audit_summary(analyses: &AuditSubanalyses) -> AuditSummary {
-    let dead_code_issues = analyses.dead_code.output.results.total_issues();
+fn load_programmatic_audit_config(
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<fallow_config::ResolvedConfig> {
+    fallow_engine::project_config::config_for_project_analysis(
+        resolved.root(),
+        resolved.config_path().as_deref(),
+        ProjectConfigOptions {
+            output: OutputFormat::Json,
+            no_cache: resolved.no_cache(),
+            threads: resolved.threads(),
+            production_override: resolved.production_override(),
+            quiet: true,
+            analysis: ProductionAnalysis::DeadCode,
+            allow_remote_extends: resolved.allow_remote_extends(),
+        },
+    )
+    .map(|project| project.config)
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
+            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_context("analysis.configPath")
+    })
+}
+
+fn build_programmatic_audit_comparison(
+    analyses: &AuditSubanalyses,
+    config: &fallow_config::ResolvedConfig,
+    base: Option<&AuditProgrammaticKeySnapshot>,
+) -> crate::audit_keys::AuditComparison {
+    let dupe_keys = analyses
+        .duplication
+        .output
+        .report
+        .clone_groups
+        .iter()
+        .map(|group| crate::audit_keys::dupe_group_key(&group.group, &analyses.duplication.root))
+        .collect();
+    let styling_keys = analyses
+        .complexity
+        .report
+        .styling_findings
+        .iter()
+        .map(|finding| crate::audit_keys::styling_finding_key(finding, &analyses.complexity.root))
+        .collect();
+    crate::audit_keys::AuditComparison::build(crate::audit_keys::AuditComparisonInput {
+        results: &analyses.dead_code.output.results,
+        config,
+        root: &analyses.dead_code.root,
+        health: &analyses.complexity.report,
+        health_root: &analyses.complexity.root,
+        dupe_keys,
+        styling_keys,
+        base_dead_code: base.map(|snapshot| &snapshot.dead_code),
+        base_health: base.map(|snapshot| &snapshot.health),
+        base_dupes: base.map(|snapshot| &snapshot.dupes),
+        base_styling: None,
+    })
+}
+
+fn build_programmatic_audit_summary(
+    analyses: &AuditSubanalyses,
+    comparison: &crate::audit_keys::AuditComparison,
+) -> AuditSummary {
+    let dead_code_issues = comparison.dead_code.visible_count();
     AuditSummary {
         dead_code_issues,
-        dead_code_has_errors: dead_code_issues > 0,
+        dead_code_has_errors: comparison.dead_code.has_errors(),
         complexity_findings: analyses.complexity.report.findings.len(),
         max_cyclomatic: analyses
             .complexity
@@ -532,88 +602,73 @@ fn build_programmatic_audit_summary(analyses: &AuditSubanalyses) -> AuditSummary
     }
 }
 
-fn compute_programmatic_audit_verdict(
+fn comparison_verdict(
     gate: AuditGate,
     summary: &AuditSummary,
     duplication: &crate::DuplicationProgrammaticOutput,
-    current: &AuditProgrammaticKeySnapshot,
-    base: Option<&AuditProgrammaticKeySnapshot>,
+    comparison: &crate::audit_keys::AuditComparison,
 ) -> AuditVerdict {
-    if matches!(gate, AuditGate::NewOnly) {
-        return compute_programmatic_introduced_verdict(summary, duplication, current, base);
-    }
-    if summary.dead_code_has_errors || summary.complexity_findings > 0 {
+    let new_only = matches!(gate, AuditGate::NewOnly);
+    let dead_code_errors = if new_only {
+        comparison.dead_code.has_introduced_errors()
+    } else {
+        comparison.dead_code.has_errors()
+    };
+    let dead_code_warnings = if new_only {
+        comparison.dead_code.has_introduced_warnings()
+    } else {
+        comparison
+            .dead_code
+            .records()
+            .iter()
+            .any(|record| record.effective_severity == fallow_config::Severity::Warn)
+    };
+    let complexity_findings = if new_only {
+        comparison.health.introduced_count()
+    } else {
+        summary.complexity_findings
+    };
+    if dead_code_errors || complexity_findings > 0 {
         return AuditVerdict::Fail;
     }
-    if summary.duplication_clone_groups > 0 {
+    let duplication_findings = if new_only {
+        comparison.dupes.introduced_count()
+    } else {
+        summary.duplication_clone_groups
+    };
+    if duplication_findings > 0 {
         let pct = duplication.output.report.stats.duplication_percentage;
         if duplication.threshold > 0.0 && pct > duplication.threshold {
             return AuditVerdict::Fail;
         }
         return AuditVerdict::Warn;
     }
-    AuditVerdict::Pass
-}
-
-fn compute_programmatic_introduced_verdict(
-    summary: &AuditSummary,
-    duplication: &crate::DuplicationProgrammaticOutput,
-    current: &AuditProgrammaticKeySnapshot,
-    base: Option<&AuditProgrammaticKeySnapshot>,
-) -> AuditVerdict {
-    let attribution = compute_programmatic_audit_attribution(AuditGate::NewOnly, current, base);
-    if attribution.dead_code_introduced > 0 || attribution.complexity_introduced > 0 {
-        return AuditVerdict::Fail;
-    }
-    if attribution.duplication_introduced > 0 {
-        let pct = duplication.output.report.stats.duplication_percentage;
-        if duplication.threshold > 0.0 && pct > duplication.threshold {
-            return AuditVerdict::Fail;
-        }
+    if dead_code_warnings {
         return AuditVerdict::Warn;
     }
-    if summary.dead_code_issues == 0
-        && summary.complexity_findings == 0
-        && summary.duplication_clone_groups == 0
-    {
-        return AuditVerdict::Pass;
-    }
     AuditVerdict::Pass
 }
 
-fn compute_programmatic_audit_attribution(
+fn comparison_attribution(
     gate: AuditGate,
-    current: &AuditProgrammaticKeySnapshot,
-    base: Option<&AuditProgrammaticKeySnapshot>,
+    comparison: &crate::audit_keys::AuditComparison,
+    has_base: bool,
 ) -> AuditAttribution {
-    let dead_code = count_introduced(&current.dead_code, base.map(|snapshot| &snapshot.dead_code));
-    let complexity = count_introduced(&current.health, base.map(|snapshot| &snapshot.health));
-    let duplication = count_introduced(&current.dupes, base.map(|snapshot| &snapshot.dupes));
+    if !has_base {
+        return AuditAttribution {
+            gate,
+            ..AuditAttribution::default()
+        };
+    }
     AuditAttribution {
         gate,
-        dead_code_introduced: dead_code.0,
-        dead_code_inherited: dead_code.1,
-        complexity_introduced: complexity.0,
-        complexity_inherited: complexity.1,
-        duplication_introduced: duplication.0,
-        duplication_inherited: duplication.1,
+        dead_code_introduced: comparison.dead_code.introduced_count(),
+        dead_code_inherited: comparison.dead_code.inherited_count(),
+        complexity_introduced: comparison.health.introduced_count(),
+        complexity_inherited: comparison.health.inherited_count(),
+        duplication_introduced: comparison.dupes.introduced_count(),
+        duplication_inherited: comparison.dupes.inherited_count(),
     }
-}
-
-fn count_introduced(
-    keys: &rustc_hash::FxHashSet<String>,
-    base: Option<&rustc_hash::FxHashSet<String>>,
-) -> (usize, usize) {
-    let Some(base) = base else {
-        return (0, 0);
-    };
-    keys.iter().fold((0, 0), |(introduced, inherited), key| {
-        if base.contains(key) {
-            (introduced, inherited + 1)
-        } else {
-            (introduced + 1, inherited)
-        }
-    })
 }
 
 fn snapshot_from_analyses(analyses: &AuditSubanalyses) -> AuditProgrammaticKeySnapshot {
@@ -836,6 +891,31 @@ mod tests {
             "src/feature.ts"
         );
         assert_eq!(json["dead_code"]["unused_files"][0]["introduced"], true);
+    }
+
+    #[test]
+    fn run_audit_warn_only_dead_code_matches_cli_verdict_semantics() {
+        let project = audit_fixture();
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"unused-files":"warn"}}"#,
+        )
+        .expect("write config");
+
+        let output = run_audit(&AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(project.path().to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD".to_string()),
+            gate: AuditGate::All,
+            ..AuditOptions::default()
+        })
+        .expect("audit output");
+
+        assert_eq!(output.verdict, AuditVerdict::Warn);
+        assert!(!output.summary.dead_code_has_errors);
     }
 
     #[test]
