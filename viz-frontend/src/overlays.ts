@@ -43,7 +43,6 @@ const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
       ["1 to 5", "Switch lens"],
       ["g or t", "Graph view or treemap view"],
       ["0", "Reset the view"],
-      ["PNG", "Export this view for a slide or doc"],
       ["esc", "Back out of anything"],
     ],
   },
