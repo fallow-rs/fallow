@@ -814,6 +814,12 @@ button {
   background: var(--surface-3);
 }
 
+/* The row highlight plus the filename underline are the focus affordance, so
+   the button drops the default UA outline (which was rendering blue). */
+#panel .rank-table td.col-file button:focus-visible {
+  outline: none;
+}
+
 #panel .rank-table td.col-file button:focus-visible .rank-name {
   text-decoration: underline;
   text-decoration-color: var(--focus-ring-color);
@@ -1391,16 +1397,14 @@ button {
   padding: 0 3px;
 }
 
-#status-info {
-  margin-left: auto;
-  color: var(--text-muted);
-}
-
-/* Keycap chips separated by space alone; no interpunct between them. */
+/* Keycap chips separated by space alone; no interpunct between them.
+   margin-left:auto pins the hints to the right, with the drill crumbs (when
+   present) on the left. */
 #hints {
   display: inline-flex;
   align-items: baseline;
   gap: 12px;
+  margin-left: auto;
   color: var(--text-muted);
   letter-spacing: 0.03em;
 }
