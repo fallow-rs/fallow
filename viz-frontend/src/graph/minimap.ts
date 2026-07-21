@@ -8,7 +8,7 @@ import { select } from "d3-selection";
 import "d3-transition";
 import { zoomIdentity } from "d3-zoom";
 import type { AppState } from "../state";
-import { type GraphViewState, type Pt, clusterBounds, easeOut, getGVS } from "./shared";
+import { type GraphViewState, type Pt, PANEL_WIDTH, clusterBounds, easeOut, getGVS } from "./shared";
 
 const MINIMAP_W = 172;
 const MINIMAP_H = 112;
@@ -32,7 +32,7 @@ const minimapFrameAt = (
 ): MinimapFrame | null => {
   if (gvs.clusters.length < 2) return null;
   // Keep clear of the detail panel when a road drill-down is open.
-  const panelW = state.selectedRoad !== null ? Math.min(380, width * 0.9) : 0;
+  const panelW = state.selectedRoad !== null ? Math.min(PANEL_WIDTH, width * 0.9) : 0;
   const { minX, minY, maxX, maxY } = clusterBounds(gvs.clusters, () => true);
   const worldW = Math.max(1, maxX - minX);
   const worldH = Math.max(1, maxY - minY);

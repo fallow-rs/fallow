@@ -11,6 +11,7 @@ import {
   FONT_CARD,
   FONT_MICRO,
   FONT_SMALL,
+  PANEL_WIDTH,
   STAGE_ENTER_MS,
   chipRect,
   easeOut,
@@ -195,9 +196,9 @@ export const renderEgoStage = (
     : Math.min(1, (performance.now() - gvs.stageEnterAt) / STAGE_ENTER_MS);
   const ease = easeOut(progress);
 
-  // Stage area: keep clear of the detail panel (380px when open).
-  const panelW = Math.min(380, width * 0.9);
-  const stageW = Math.max(420, width - panelW);
+  // Stage area: keep clear of the detail panel that overlays the right edge.
+  const panelW = Math.min(PANEL_WIDTH, width * 0.9);
+  const stageW = Math.max(PANEL_WIDTH, width - panelW);
   const cx = stageW / 2;
   const cy = height / 2;
 
