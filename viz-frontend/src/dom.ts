@@ -63,7 +63,7 @@ export const copyButton = (
 
 /** The panel's dismiss button, aria-labelled and wired to a handler. */
 export const closeButton = (onClose: () => void): HTMLButtonElement => {
-  const buttonEl = button("close", "×");
+  const buttonEl = button("icon-btn close", "×");
   buttonEl.setAttribute("aria-label", "Close details");
   buttonEl.addEventListener("click", onClose);
   return buttonEl;
@@ -109,7 +109,7 @@ export const copyIconButton = (
   ariaLabel: string,
   getText: () => string,
 ): HTMLButtonElement => {
-  const buttonEl = button(cls, "");
+  const buttonEl = button(`icon-btn ${cls}`, "");
   buttonEl.setAttribute("aria-label", ariaLabel);
   buttonEl.title = ariaLabel;
   buttonEl.appendChild(copyIcon());

@@ -252,6 +252,49 @@ button {
   border-radius: var(--radius-sm);
 }
 
+/* Square icon button shared by every close and the copy-path affordance, so
+   they read as one control family at one size wherever they appear. */
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.icon-btn:hover {
+  color: var(--text-high);
+  border-color: var(--border-default);
+}
+
+.icon-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* The × glyph reads smaller than its font size, so it is sized up to match
+   the copy icon's optical weight. Close is destructive, hence the red hover. */
+.icon-btn.close {
+  font-size: 22px;
+}
+
+.icon-btn.close:hover {
+  color: var(--red-text);
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
 /* ── Row 2: lens tabs (primary nav) + view segment ───────────── */
 
 #toolbar {
@@ -530,30 +573,12 @@ button {
 }
 
 /* Panel: copy-path icon, status gloss, ranked lens list. The copy-path icon
-   button mirrors the close button but anchors to the frame's bottom-right
-   corner (panel-head is sticky, so it is the containing block). */
+   button (see .icon-btn) anchors to the frame's bottom-right corner, opposite
+   the close button (panel-head is sticky, so it is the containing block). */
 #panel .copy-path {
   position: absolute;
   right: 16px;
   bottom: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  background: none;
-  padding: 2px 6px;
-  border: 1px solid transparent;
-}
-
-#panel .copy-path:hover {
-  color: var(--text-high);
-  border-color: var(--border-default);
-}
-
-#panel .copy-path:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-sm);
 }
 
 #panel .status-gloss {
@@ -689,24 +714,6 @@ button {
 #panel .panel-head .status-line {
   font-size: var(--fs-sm);
   margin-top: 4px;
-}
-
-#panel .close {
-  color: var(--text-muted);
-  font-size: var(--fs-lg);
-  padding: 2px 6px;
-  border: 1px solid transparent;
-}
-
-#panel .close:hover {
-  color: var(--red-text);
-  border-color: var(--border-default);
-}
-
-#panel .close:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-sm);
 }
 
 #panel section {
@@ -1283,16 +1290,6 @@ button {
   font-weight: 400;
   letter-spacing: 0.05em;
   color: var(--text-high);
-}
-
-#help-overlay .close {
-  color: var(--text-muted);
-  font-size: var(--fs-xl);
-  padding: 0 6px;
-}
-
-#help-overlay .close:hover {
-  color: var(--red-text);
 }
 
 #help-overlay .help-grid {

@@ -58,7 +58,7 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
   const box = el("div", "help-box");
   const head = el("div", "help-head");
   head.appendChild(el("h2", undefined, "How to read this map"));
-  const close = button("close", "×");
+  const close = button("icon-btn close", "×");
   close.setAttribute("aria-label", "Close help");
   close.addEventListener("click", handlers.onHelpClose);
   head.appendChild(close);
