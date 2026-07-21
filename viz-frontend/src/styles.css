@@ -7,6 +7,14 @@
   --radius-sm: 4px;
   --panel-width: 420px;
 
+  /* Keyboard focus ring. Softer than the saturated info blue and offset so
+     it floats around the control's rounded edge rather than hugging it.
+     References the theme-aware --blue-text, so it flips with the palette.
+     Applied only via :focus-visible / :focus-within (never on mouse click). */
+  --focus-ring-color: var(--blue-text);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
   /* Theme-independent: only the palette flips per theme, never the face. */
   --font-mono:
     "Martian Mono", "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas,
@@ -239,8 +247,9 @@ button {
 }
 
 .ghost-btn:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
 }
 
 /* ── Row 2: lens tabs (primary nav) + view segment ───────────── */
@@ -301,8 +310,11 @@ button {
 }
 
 .lens-tab:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: -2px;
+  /* Inset: the tabs sit in a tight 4px-gap rail, so an outset ring would
+     reach into the neighbour. Rounded so it reads like the other rings. */
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: -3px;
+  border-radius: var(--radius-sm);
 }
 
 .lens-tab .badge {
@@ -377,10 +389,10 @@ button {
 }
 
 .seg button:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 1px;
-  position: relative;
-  z-index: 1;
+  /* Joined control with 2px gaps: inset so the ring hugs the button's own
+     rounded rect instead of bleeding into the neighbour or the track. */
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: -2px;
 }
 
 /* Context strip: gloss + findings sentence left, arrange right. */
@@ -449,9 +461,13 @@ button {
   border-color: var(--border-default);
 }
 
-#search:focus {
-  outline: none;
-  border-color: var(--blue);
+/* Text field: browsers keep :focus-visible active on click for typing
+   targets, so this still shows while typing but drops the mouse-only ring
+   elsewhere. A soft ring plus a tinted border, matching the other controls. */
+#search:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-color: var(--focus-ring-color);
 }
 
 #search-count {
@@ -485,7 +501,7 @@ button {
 }
 
 #canvas:focus-visible {
-  outline: 2px solid var(--blue);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: -2px;
 }
 
@@ -672,8 +688,9 @@ button {
 }
 
 #panel .close:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
 }
 
 #panel section {
@@ -763,6 +780,19 @@ button {
    summary row (it has no col-file cell). */
 #panel .rank-table tr:has(td.col-file):hover td {
   background: var(--surface-3);
+}
+
+/* Keyboard focus mirrors the hover row-highlight (an outline would be clipped
+   by the file cell's overflow:hidden), and underlines the filename so the
+   focused row is unambiguous. :focus-within keeps it keyboard-only. */
+#panel .rank-table tr:has(td.col-file):focus-within td {
+  background: var(--surface-3);
+}
+
+#panel .rank-table td.col-file button:focus-visible .rank-name {
+  text-decoration: underline;
+  text-decoration-color: var(--focus-ring-color);
+  text-underline-offset: 2px;
 }
 
 #panel .fn-name,
@@ -1327,8 +1357,9 @@ button {
 }
 
 #crumbs button:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
 }
 
 #crumbs .sep {
