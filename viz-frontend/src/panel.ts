@@ -1,7 +1,7 @@
 import type { AppState } from "./state";
 import type { Lens, VizCloneGroup, VizFile } from "./types";
 import { basename, dirname, formatCount, formatSize, reachSet } from "./data";
-import { closeButton, copyButton, el } from "./dom";
+import { closeButton, copyButton, copyIconButton, el } from "./dom";
 
 /** Called when the user clicks through to another file. */
 export type NavigateFn = (fileIndex: number) => void;
@@ -449,9 +449,11 @@ const fileHead = (file: VizFile, close: () => void): HTMLElement => {
   fileBox.appendChild(el("div", "name", basename(file.path)));
   const statusLine = el("div", "status-line");
   statusLine.appendChild(statusLabel(file));
-  statusLine.appendChild(copyButton("copy-path", "Copy path", () => file.path));
   fileBox.appendChild(statusLine);
   head.appendChild(fileBox);
+  // Copy path sits at the frame's bottom-right corner as an icon, mirroring
+  // the close button at the top-right (positioned via CSS).
+  head.appendChild(copyIconButton("copy-path", "Copy path", () => file.path));
   head.appendChild(closeButton(close));
   return head;
 };

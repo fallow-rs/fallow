@@ -270,6 +270,9 @@ button {
   display: flex;
   align-items: stretch;
   gap: 4px;
+  /* Cancel the first tab's own 12px padding so its label's left edge lines up
+     with the 20px toolbar inset shared by the brand and the lens gloss. */
+  margin-left: -12px;
 }
 
 .lens-tab {
@@ -526,18 +529,31 @@ button {
   }
 }
 
-/* Panel: copy chip, status gloss, ranked lens list */
+/* Panel: copy-path icon, status gloss, ranked lens list. The copy-path icon
+   button mirrors the close button but anchors to the frame's bottom-right
+   corner (panel-head is sticky, so it is the containing block). */
 #panel .copy-path {
-  margin-left: 10px;
-  font-size: var(--fs-xs);
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
   background: none;
-  border: none;
-  padding: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
 }
 
 #panel .copy-path:hover {
   color: var(--text-high);
+  border-color: var(--border-default);
+}
+
+#panel .copy-path:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
 }
 
 #panel .status-gloss {
