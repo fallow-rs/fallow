@@ -30,6 +30,6 @@
     "@commitlint/config-conventional": "21.2.0",
     "@tanstack/intent": "0.3.5",
     "oxfmt": "0.59.0",
-    "oxlint": "1.73.0"
+    "oxlint": "1.74.0"
   }
 }
