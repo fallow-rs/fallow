@@ -155,6 +155,13 @@ const init = (): void => {
   };
 
   stage.appendChild(canvas);
+  // Keyboard-focus ring for the full-width canvas, drawn as an overlay over
+  // just the usable area so it never runs under the always-open panel (a CSS
+  // outline on the canvas would frame the whole element, panel included).
+  const canvasFocusRing = document.createElement("div");
+  canvasFocusRing.className = "canvas-focus-ring";
+  canvasFocusRing.setAttribute("aria-hidden", "true");
+  stage.appendChild(canvasFocusRing);
   // The arrange toggle floats over the map (top-right, graph view only);
   // chrome builds it but leaves mounting to the stage here.
   stage.appendChild(refs.clusterGroup);
