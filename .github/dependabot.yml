@@ -13,6 +13,22 @@ updates:
         patterns: ["ed25519-dalek", "rand", "rand_core"]
     open-pull-requests-limit: 10
 
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: cargo
+    directory: /editors/zed
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+
   - package-ecosystem: npm
     directory: /
     schedule:
