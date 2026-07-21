@@ -7,6 +7,9 @@
 use std::path::PathBuf;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use fallow_engine::duplicates::{
+    CloneGroup, CloneInstance, DuplicationReport, refresh_clone_families,
+};
 
 fn make_hashed_tokens(hashes: &[u64]) -> Vec<fallow_engine::duplicates::normalize::HashedToken> {
     hashes
@@ -104,6 +107,41 @@ fn make_interval_pressure_files(n: usize, blocks: usize, block_tokens: usize) ->
             )
         })
         .collect()
+}
+
+fn make_family_grouping_report(family_count: usize, groups_per_family: usize) -> DuplicationReport {
+    let mut report = DuplicationReport::default();
+    report
+        .clone_groups
+        .reserve(family_count * groups_per_family);
+    for family in 0..family_count {
+        for group in 0..groups_per_family {
+            let start_line = group * 10 + 1;
+            report.clone_groups.push(CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from(format!("src/family-{family}/left.ts")),
+                        start_line,
+                        end_line: start_line + 5,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: String::new(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from(format!("src/family-{family}/right.ts")),
+                        start_line,
+                        end_line: start_line + 5,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: String::new(),
+                    },
+                ],
+                token_count: 30,
+                line_count: 6,
+            });
+        }
+    }
+    report
 }
 
 fn dupe_detect_2x500_identical(c: &mut Criterion) {
@@ -239,6 +277,20 @@ fn dupe_detect_2x5000_identical(c: &mut Criterion) {
     });
 }
 
+fn clone_family_grouping_1000x3(c: &mut Criterion) {
+    let report = make_family_grouping_report(1_000, 3);
+    c.bench_function("clone_family_grouping_1000x3", |bencher| {
+        bencher.iter_batched(
+            || report.clone(),
+            |mut report| {
+                refresh_clone_families(&mut report, PathBuf::new().as_path());
+                std::hint::black_box(report.clone_families.len())
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 criterion_group!(
     benches,
     dupe_detect_2x500_identical,
@@ -248,6 +300,7 @@ criterion_group!(
     dupe_detect_100x200_mixed,
     dupe_detect_100x200_mixed_focused,
     dupe_detect_80x20x80_interval_pressure,
-    dupe_detect_2x5000_identical
+    dupe_detect_2x5000_identical,
+    clone_family_grouping_1000x3
 );
 criterion_main!(benches);

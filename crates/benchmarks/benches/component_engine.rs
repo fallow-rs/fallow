@@ -23,6 +23,8 @@ use tempfile::TempDir;
 
 const FILE_COUNT: usize = 32;
 const WARM_FILE_COUNT: usize = 256;
+const WARM_CSS_FILE_COUNT: usize = 96;
+const WARM_CSS_TOKENS_PER_FILE: usize = 32;
 
 struct EngineFixture {
     _temp_dir: TempDir,
@@ -97,6 +99,34 @@ export function compute{index}(input: number): number {{
 
 fn create_warm_engine_fixture() -> WarmEngineFixture {
     let fixture = create_engine_fixture_with_file_count(WARM_FILE_COUNT);
+    let session = AnalysisSession::load_default(&fixture.root);
+    session
+        .analyze_dead_code_with_complexity()
+        .expect("warm-up analysis succeeds");
+    WarmEngineFixture {
+        fixture,
+        session,
+        config_path: None,
+    }
+}
+
+fn create_warm_css_engine_fixture() -> WarmEngineFixture {
+    let fixture = create_engine_fixture_with_file_count(WARM_FILE_COUNT);
+    for file_index in 0..WARM_CSS_FILE_COUNT {
+        let mut css = String::new();
+        for token_index in 0..WARM_CSS_TOKENS_PER_FILE {
+            writeln!(
+                &mut css,
+                ".component-{file_index}-{token_index} {{ color: var(--color-{file_index}-{token_index}); --color-{file_index}-{token_index}: #{file_index:02x}{token_index:02x}aa; padding: {token_index}px; }}"
+            )
+            .unwrap();
+        }
+        write_file(
+            &fixture.root,
+            &format!("src/styles/theme-{file_index}.css"),
+            css,
+        );
+    }
     let session = AnalysisSession::load_default(&fixture.root);
     session
         .analyze_dead_code_with_complexity()
@@ -257,7 +287,7 @@ fn component_engine_warm_session_health(c: &mut Criterion) {
 }
 
 fn component_engine_warm_session_css_health(c: &mut Criterion) {
-    let fixture = create_warm_engine_fixture();
+    let fixture = create_warm_css_engine_fixture();
     let options = warm_css_health_options(&fixture);
     run_ungrouped_health_with_session(&options, None, &fixture.session, None)
         .expect("CSS health warm-up succeeds");

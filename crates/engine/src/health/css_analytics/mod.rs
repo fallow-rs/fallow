@@ -411,6 +411,7 @@ impl CssTokenSets {
     /// undefined (`undefined`).
     fn finalize(
         &self,
+        referenced_keyframes: &rustc_hash::FxHashSet<String>,
         summary: &mut fallow_output::CssAnalyticsSummary,
     ) -> (
         Vec<fallow_output::UnreferencedKeyframes>,
@@ -441,11 +442,11 @@ impl CssTokenSets {
         summary.keyframes_defined = saturate_len(self.defined_keyframes.len());
         summary.keyframes_unreferenced = saturate_len(
             self.defined_keyframes
-                .difference(&self.referenced_keyframes)
+                .difference(referenced_keyframes)
                 .count(),
         );
         summary.keyframes_undefined = saturate_len(
-            self.referenced_keyframes
+            referenced_keyframes
                 .difference(&self.defined_keyframes)
                 .count(),
         );
@@ -454,7 +455,7 @@ impl CssTokenSets {
         // just counted): defined-but-unused, and used-but-defined-nowhere.
         let unreferenced_keyframes = locate_keyframe_diff(
             &self.defined_keyframes,
-            &self.referenced_keyframes,
+            referenced_keyframes,
             &self.keyframes_definers,
         )
         .into_iter()
@@ -465,7 +466,7 @@ impl CssTokenSets {
         })
         .collect();
         let undefined_keyframes = locate_keyframe_diff(
-            &self.referenced_keyframes,
+            referenced_keyframes,
             &self.defined_keyframes,
             &self.keyframe_referencers,
         )
@@ -763,6 +764,51 @@ struct CssWalkAccum {
     scoring: CssGradeScoring,
 }
 
+enum CssReportWalk<'a> {
+    Cached(&'a CssWalkAccum),
+    Fresh(Box<CssWalkAccum>),
+}
+
+impl CssReportWalk<'_> {
+    fn as_ref(&self) -> &CssWalkAccum {
+        match self {
+            Self::Cached(walk) => walk,
+            Self::Fresh(walk) => walk,
+        }
+    }
+
+    fn into_output(
+        self,
+        summary: fallow_output::CssAnalyticsSummary,
+        raw_style_values: Vec<fallow_output::RawStyleValue>,
+    ) -> CssReportOutput {
+        let (file_reports, scoped_unused) = match self {
+            Self::Cached(walk) => (walk.file_reports.clone(), walk.scoped_unused.clone()),
+            Self::Fresh(walk) => {
+                let CssWalkAccum {
+                    file_reports,
+                    scoped_unused,
+                    ..
+                } = *walk;
+                (file_reports, scoped_unused)
+            }
+        };
+        CssReportOutput {
+            file_reports,
+            summary,
+            scoped_unused,
+            raw_style_values,
+        }
+    }
+}
+
+struct CssReportOutput {
+    file_reports: Vec<fallow_output::CssFileAnalytics>,
+    summary: fallow_output::CssAnalyticsSummary,
+    scoped_unused: Vec<fallow_output::ScopedUnusedClasses>,
+    raw_style_values: Vec<fallow_output::RawStyleValue>,
+}
+
 #[derive(Clone, Debug, Default)]
 struct CssGradeScoring {
     non_atomic_declarations: u32,
@@ -902,7 +948,7 @@ fn record_css_scan_item(
 /// Credit Tailwind-markup-applied keyframes, then finalize the whole-project
 /// token metrics and prune unused `@font-face` families referenced elsewhere.
 fn finalize_css_token_metrics(
-    tokens: &mut CssTokenSets,
+    tokens: &CssTokenSets,
     summary: &mut fallow_output::CssAnalyticsSummary,
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -912,13 +958,15 @@ fn finalize_css_token_metrics(
     // `animate-name`), not just CSS `animation:` declarations, before the
     // unreferenced diff. Filtered to actually-defined keyframes so a stray
     // `animate-*` suffix never manufactures a false `undefined_keyframes`.
+    let mut referenced_keyframes = tokens.referenced_keyframes.clone();
     for name in collect_markup_keyframe_references(files, config, ignore_set) {
         if tokens.defined_keyframes.contains(&name) {
-            tokens.referenced_keyframes.insert(name);
+            referenced_keyframes.insert(name);
         }
     }
 
-    let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(summary);
+    let (unreferenced_keyframes, undefined_keyframes) =
+        tokens.finalize(&referenced_keyframes, summary);
     let duplicate_declaration_blocks = tokens.group_duplicate_blocks(summary);
     let unused_at_rules = tokens.group_unused_at_rules(summary);
     let font_size_unit_mix = tokens.font_size_unit_mix(summary);
@@ -979,19 +1027,17 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
         collect_css_in_js_definers(modules, &path_by_id, config)
     });
 
-    let mut walk = css_report_walk(files, ctx, styling_artifacts);
+    let walk = css_report_walk(files, ctx, styling_artifacts);
+    let walk_ref = walk.as_ref();
+    let mut summary = walk_ref.summary.clone();
+    let mut raw_style_values = walk_ref.tokens.raw_style_values.clone();
     let styling_token_candidates =
-        css_report_token_candidates(&walk.tokens, config, css_in_js_definers.as_ref());
-    annotate_raw_style_value_nearest_tokens(&mut walk.tokens, &styling_token_candidates);
-    let metrics = finalize_css_token_metrics(
-        &mut walk.tokens,
-        &mut walk.summary,
-        files,
-        config,
-        ignore_set,
-    );
+        css_report_token_candidates(&walk_ref.tokens, config, css_in_js_definers.as_ref());
+    annotate_raw_style_value_nearest_tokens(&mut raw_style_values, &styling_token_candidates);
+    let metrics =
+        finalize_css_token_metrics(&walk_ref.tokens, &mut summary, files, config, ignore_set);
     let candidates = scan_markup_css_candidates(&mut MarkupCssCandidateInput {
-        tokens: &walk.tokens,
+        tokens: &walk_ref.tokens,
         files,
         css_in_js_definers: css_in_js_definers.as_ref(),
         config,
@@ -1002,11 +1048,11 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
         ws_roots,
         styling_artifacts,
         token_candidates: &styling_token_candidates,
-        summary: &mut walk.summary,
+        summary: &mut summary,
     });
     let token_consumers = css_report_token_consumers(
         &TokenConsumersInput {
-            tokens: &walk.tokens,
+            tokens: &walk_ref.tokens,
             files,
             config,
             ignore_set,
@@ -1016,9 +1062,10 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
         modules,
         css_in_js_definers.as_ref(),
     );
-    let scoring_inputs = css_report_scoring_inputs(&walk);
+    let scoring_inputs = css_report_scoring_inputs(walk_ref);
+    let output = walk.into_output(summary, raw_style_values);
     let report = assemble_css_report(CssReportAssemblyInput {
-        walk,
+        output,
         metrics,
         candidates,
         token_consumers,
@@ -1031,11 +1078,11 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     })
 }
 
-fn css_report_walk(
+fn css_report_walk<'a>(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    styling_artifacts: Option<&StylingAnalysisArtifacts>,
-) -> CssWalkAccum {
+    styling_artifacts: Option<&'a StylingAnalysisArtifacts>,
+) -> CssReportWalk<'a> {
     let HealthScanCtx {
         changed_files,
         output_changed_files,
@@ -1043,12 +1090,13 @@ fn css_report_walk(
         ..
     } = ctx;
 
-    styling_artifacts
+    if let Some(artifacts) = styling_artifacts
         .filter(|_| changed_files.is_none() && output_changed_files.is_none() && ws_roots.is_none())
-        .map_or_else(
-            || walk_css_files(files, ctx),
-            |artifacts| artifacts.whole_scope_walk.clone(),
-        )
+    {
+        CssReportWalk::Cached(&artifacts.whole_scope_walk)
+    } else {
+        CssReportWalk::Fresh(Box::new(walk_css_files(files, ctx)))
+    }
 }
 
 fn css_report_scoring_inputs(walk: &CssWalkAccum) -> super::styling_score::StylingScoringInputs {
@@ -1098,7 +1146,7 @@ fn css_report_token_consumers(
 /// token metrics, and markup candidates; returns `None` when nothing notable was
 /// found (no analyzed files and every candidate list empty).
 struct CssReportAssemblyInput<'a> {
-    walk: CssWalkAccum,
+    output: CssReportOutput,
     metrics: CssTokenMetrics,
     candidates: MarkupCssCandidates,
     token_consumers: Vec<fallow_output::TokenConsumers>,
@@ -1112,7 +1160,7 @@ fn assemble_css_report(
     use fallow_output::CssAnalyticsReport;
 
     let CssReportAssemblyInput {
-        mut walk,
+        mut output,
         mut metrics,
         mut candidates,
         mut token_consumers,
@@ -1122,7 +1170,7 @@ fn assemble_css_report(
 
     if let Some(changed) = output_changed_files {
         retain_css_report_changed_scope(CssReportChangedScopeInput {
-            walk: &mut walk,
+            output: &mut output,
             metrics: &mut metrics,
             candidates: &mut candidates,
             token_consumers: &mut token_consumers,
@@ -1131,17 +1179,16 @@ fn assemble_css_report(
         });
     }
 
-    if css_report_is_empty(&walk, &metrics, &candidates, &token_consumers) {
+    if css_report_is_empty(&output, &metrics, &candidates, &token_consumers) {
         return None;
     }
-    let mut scoped_unused = walk.scoped_unused;
+    let mut scoped_unused = output.scoped_unused;
     scoped_unused.sort_by(|a, b| a.path.cmp(&b.path));
-    let mut raw_style_values = walk.tokens.raw_style_values;
-    sort_raw_style_values(&mut raw_style_values);
-    walk.summary.raw_style_values = saturate_len(raw_style_values.len());
+    sort_raw_style_values(&mut output.raw_style_values);
+    output.summary.raw_style_values = saturate_len(output.raw_style_values.len());
     Some(CssAnalyticsReport {
-        files: walk.file_reports,
-        summary: walk.summary,
+        files: output.file_reports,
+        summary: output.summary,
         scoped_unused,
         unreferenced_keyframes: metrics.unreferenced_keyframes,
         undefined_keyframes: metrics.undefined_keyframes,
@@ -1149,7 +1196,7 @@ fn assemble_css_report(
         cva_duplicate_variant_blocks: candidates.cva_duplicate_variant_blocks,
         cva_variant_token_drifts: candidates.cva_variant_token_drifts,
         tailwind_arbitrary_values: candidates.tailwind_arbitrary_values,
-        raw_style_values,
+        raw_style_values: output.raw_style_values,
         unused_at_rules: metrics.unused_at_rules,
         unresolved_class_references: candidates.unresolved_class_references,
         unreferenced_css_classes: candidates.unreferenced_css_classes,
@@ -1163,13 +1210,13 @@ fn assemble_css_report(
 }
 
 fn css_report_is_empty(
-    walk: &CssWalkAccum,
+    output: &CssReportOutput,
     metrics: &CssTokenMetrics,
     candidates: &MarkupCssCandidates,
     token_consumers: &[fallow_output::TokenConsumers],
 ) -> bool {
-    walk.summary.files_analyzed == 0
-        && walk.scoped_unused.is_empty()
+    output.summary.files_analyzed == 0
+        && output.scoped_unused.is_empty()
         && candidates.tailwind_arbitrary_values.is_empty()
         && candidates.cva_duplicate_variant_blocks.is_empty()
         && candidates.cva_variant_token_drifts.is_empty()
@@ -1195,7 +1242,7 @@ fn sort_raw_style_values(values: &mut [fallow_output::RawStyleValue]) {
 }
 
 struct CssReportChangedScopeInput<'a> {
-    walk: &'a mut CssWalkAccum,
+    output: &'a mut CssReportOutput,
     metrics: &'a mut CssTokenMetrics,
     candidates: &'a mut MarkupCssCandidates,
     token_consumers: &'a mut Vec<fallow_output::TokenConsumers>,
@@ -1205,7 +1252,7 @@ struct CssReportChangedScopeInput<'a> {
 
 fn retain_css_report_changed_scope(input: CssReportChangedScopeInput<'_>) {
     let CssReportChangedScopeInput {
-        walk,
+        output,
         metrics,
         candidates,
         token_consumers,
@@ -1213,13 +1260,11 @@ fn retain_css_report_changed_scope(input: CssReportChangedScopeInput<'_>) {
         changed,
     } = input;
     let in_scope = |path: &str| css_output_path_in_changed_scope(path, config, changed);
-    walk.file_reports.retain(|file| in_scope(&file.path));
-    walk.scoped_unused.retain(|item| in_scope(&item.path));
+    output.file_reports.retain(|file| in_scope(&file.path));
+    output.scoped_unused.retain(|item| in_scope(&item.path));
     retain_css_metrics_changed_scope(metrics, &in_scope);
     retain_markup_candidates_changed_scope(candidates, &in_scope);
-    walk.tokens
-        .raw_style_values
-        .retain(|item| in_scope(&item.path));
+    output.raw_style_values.retain(|item| in_scope(&item.path));
     token_consumers.retain(|item| in_scope(&item.definition_path));
 }
 

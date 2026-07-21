@@ -23,16 +23,12 @@ pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<Clon
         return Vec::new();
     }
 
-    let mut family_map: Vec<(BTreeSet<PathBuf>, Vec<CloneGroup>)> = Vec::new();
+    let mut family_map: FxHashMap<BTreeSet<PathBuf>, Vec<CloneGroup>> = FxHashMap::default();
 
     for group in clone_groups {
         let file_set: BTreeSet<PathBuf> = group.instances.iter().map(|i| i.file.clone()).collect();
 
-        if let Some(entry) = family_map.iter_mut().find(|(fs, _)| *fs == file_set) {
-            entry.1.push(group.clone());
-        } else {
-            family_map.push((file_set, vec![group.clone()]));
-        }
+        family_map.entry(file_set).or_default().push(group.clone());
     }
 
     let mut families: Vec<CloneFamily> = family_map
@@ -57,6 +53,7 @@ pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<Clon
         b.total_duplicated_lines
             .cmp(&a.total_duplicated_lines)
             .then(b.groups.len().cmp(&a.groups.len()))
+            .then_with(|| a.files.cmp(&b.files))
     });
 
     families
@@ -335,6 +332,26 @@ mod tests {
         assert_eq!(families.len(), 2);
         assert_eq!(families[0].total_duplicated_lines, 20);
         assert_eq!(families[1].total_duplicated_lines, 5);
+    }
+
+    #[test]
+    fn equally_weighted_families_are_sorted_by_file_set() {
+        let groups = vec![
+            CloneGroup {
+                instances: vec![instance("src/c.ts", 1, 10), instance("src/d.ts", 1, 10)],
+                token_count: 30,
+                line_count: 10,
+            },
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
+                token_count: 30,
+                line_count: 10,
+            },
+        ];
+
+        let families = group_into_families(&groups, &root());
+        assert_eq!(families[0].files[0], PathBuf::from("src/a.ts"));
+        assert_eq!(families[1].files[0], PathBuf::from("src/c.ts"));
     }
 
     #[test]

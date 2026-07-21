@@ -209,14 +209,14 @@ pub(super) fn scan_near_duplicate_css_in_js_tokens(
 }
 
 pub(super) fn annotate_raw_style_value_nearest_tokens(
-    tokens: &mut CssTokenSets,
+    raw_style_values: &mut [fallow_output::RawStyleValue],
     candidates: &[ComparableThemeTokenCandidate],
 ) {
-    if tokens.raw_style_values.is_empty() || candidates.is_empty() {
+    if raw_style_values.is_empty() || candidates.is_empty() {
         return;
     }
-    let raw_value_counts = raw_style_value_counts(&tokens.raw_style_values);
-    for raw in &mut tokens.raw_style_values {
+    let raw_value_counts = raw_style_value_counts(raw_style_values);
+    for raw in raw_style_values {
         let Some(namespace) = raw_style_token_namespace(&raw.axis) else {
             continue;
         };
