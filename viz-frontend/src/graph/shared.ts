@@ -452,11 +452,11 @@ export const roadWidth = (count: number): number =>
 /** Right panel width (CSS `--panel-width`). The panel overlays the stage. */
 export const PANEL_WIDTH = 420;
 
-/** Clearance kept between the stage content and the panel, so the outermost
- *  treemap tiles and graph nodes render (with their right border) in visible
- *  canvas instead of tucking under the opaque panel. Enough to read as a
- *  deliberate edge, not so much it looks like a gap. */
-const PANEL_CLEARANCE = 8;
+/** Clearance kept between the stage content and the panel: just enough that the
+ *  outermost treemap tiles' / graph nodes' right border renders in visible
+ *  canvas instead of tucking under the opaque panel, but small enough that it
+ *  reads as the tile's own edge, not an empty gap. */
+const PANEL_CLEARANCE = 2;
 
 /** Width the canvas can actually use: the right panel overlays the stage. */
 export const usableStageWidth = (state: AppState, stageW: number): number => {
