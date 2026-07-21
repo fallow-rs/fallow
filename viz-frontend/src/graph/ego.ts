@@ -11,13 +11,13 @@ import {
   FONT_CARD,
   FONT_MICRO,
   FONT_SMALL,
-  PANEL_WIDTH,
   STAGE_ENTER_MS,
   chipRect,
   easeOut,
   hullPath,
   middleTruncate,
   tailTruncate,
+  usableStageWidth,
   worldToScreen,
 } from "./shared";
 
@@ -196,9 +196,9 @@ export const renderEgoStage = (
     : Math.min(1, (performance.now() - gvs.stageEnterAt) / STAGE_ENTER_MS);
   const ease = easeOut(progress);
 
-  // Stage area: keep clear of the detail panel that overlays the right edge.
-  const panelW = Math.min(PANEL_WIDTH, width * 0.9);
-  const stageW = Math.max(PANEL_WIDTH, width - panelW);
+  // Stage area: the same usable width the treemap and folder graph use, so the
+  // ego columns keep the identical clearance from the detail panel.
+  const stageW = usableStageWidth(state, width);
   const cx = stageW / 2;
   const cy = height / 2;
 
