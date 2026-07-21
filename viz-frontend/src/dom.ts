@@ -25,7 +25,7 @@ let liveRegion: HTMLElement | null = null;
  * polite live region. Canvas actions and clipboard copies are conveyed
  * visually only, so this is the sole screen-reader channel for them.
  */
-export const announce = (message: string): void => {
+const announce = (message: string): void => {
   if (!liveRegion) {
     liveRegion = el("div", "sr-only");
     liveRegion.setAttribute("role", "status");

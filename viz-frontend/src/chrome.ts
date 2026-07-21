@@ -1,7 +1,7 @@
 import type { AppState } from "./state";
 import type { Lens } from "./types";
 import { formatCount } from "./data";
-import { announce, button, el } from "./dom";
+import { button, el } from "./dom";
 
 /**
  * HTML chrome around the canvas. One rule carries the affordance story:
@@ -27,10 +27,6 @@ export interface ChromeRefs {
   crumbHandler?: (path: string) => void;
   /** Wired by main.ts after chrome build (help overlay toggle). */
   helpHandler?: () => void;
-  /** Wired by main.ts after chrome build (PNG export of the canvas). */
-  exportHandler?: () => void;
-  /** Wired by main.ts after chrome build (copy the whole-map markdown digest). */
-  digestHandler?: () => void;
 }
 
 export interface ChromeHandlers {
@@ -166,24 +162,6 @@ export const buildChrome = (
   searchCount.setAttribute("aria-live", "polite");
   actions.appendChild(searchCount);
   actions.appendChild(el("span", "divider"));
-  const digestBtn = button("ghost-btn", "Copy map");
-  digestBtn.id = "digest-btn";
-  digestBtn.title = "Copy a markdown digest of the whole map";
-  digestBtn.setAttribute("aria-label", "Copy a markdown digest of the whole map");
-  digestBtn.addEventListener("click", () => {
-    refs.digestHandler?.();
-    digestBtn.textContent = "Copied";
-    announce("Copied the whole map as markdown");
-    setTimeout(() => {
-      digestBtn.textContent = "Copy map";
-    }, 1200);
-  });
-  actions.appendChild(digestBtn);
-  const exportBtn = button("ghost-btn", "PNG");
-  exportBtn.id = "export-btn";
-  exportBtn.title = "Export this view as an image";
-  exportBtn.setAttribute("aria-label", "Export the current view as PNG");
-  actions.appendChild(exportBtn);
   const helpBtn = button("ghost-btn", "?");
   helpBtn.id = "help-btn";
   helpBtn.title = "How to read this map";
@@ -333,7 +311,6 @@ export const buildChrome = (
   };
 
   helpBtn.addEventListener("click", () => refs.helpHandler?.());
-  exportBtn.addEventListener("click", () => refs.exportHandler?.());
 
   return refs;
 };

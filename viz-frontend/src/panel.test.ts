@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMapDigest, panelRenderKey, rankRowsFor, searchPanelModel } from "./panel";
+import { panelRenderKey, rankRowsFor, searchPanelModel } from "./panel";
 import { buildIndex } from "./data";
 import { getTheme } from "./theme";
 import type { AppState } from "./state";
@@ -248,39 +248,5 @@ describe("searchPanelModel", () => {
     expect(model.query).toBe("none");
     expect(model.matches).toEqual([]);
     expect(model.affected).toEqual([]);
-  });
-});
-
-describe("buildMapDigest", () => {
-  it("assembles headline totals and per-lens sections into one markdown block", () => {
-    const state = stateFor("overview", [
-      file("src/hub.ts", { importer_count: 40 }),
-      file("src/dead.ts", { status: "unused", size: 900 }),
-      file("src/hot.ts", { max_cyclomatic: 22, importer_count: 5 }),
-    ]);
-    state.data.summary.hotspot_files = 1;
-    state.data.summary.unused_files = 1;
-    const md = buildMapDigest(state);
-    expect(md).toContain("# fallow map: demo");
-    expect(md).toContain("Most depended-on");
-    expect(md).toContain("hub.ts (used by 40)");
-    expect(md).toContain("$ fallow health");
-    expect(md).toContain("Complexity hotspots");
-  });
-
-  it("surfaces the clone-group truncation flag in the duplication line", () => {
-    const state = stateFor("overview", [file("src/a.ts")]);
-    state.data.summary.clone_groups = 500;
-    state.data.summary.clone_groups_truncated = 37;
-    const md = buildMapDigest(state);
-    expect(md).toContain("duplication: 500 groups (+37 not shown)");
-  });
-
-  it("omits the truncation note when nothing was dropped", () => {
-    const state = stateFor("overview", [file("src/a.ts")]);
-    state.data.summary.clone_groups = 12;
-    const md = buildMapDigest(state);
-    expect(md).toContain("duplication: 12 groups, ");
-    expect(md).not.toContain("not shown");
   });
 });

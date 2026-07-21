@@ -36,7 +36,7 @@ import {
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
-import { buildMapDigest, createPanel, panelRenderKey, renderPanel } from "./panel";
+import { createPanel, panelRenderKey, renderPanel } from "./panel";
 import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
 import { installHintTips } from "./hint";
 import { dirname } from "./data";
@@ -196,23 +196,6 @@ const init = (): void => {
     }
   };
   refs.helpHandler = toggleHelp;
-
-  // PNG export of the current canvas (map or graph, current lens state).
-  refs.digestHandler = () => {
-    void navigator.clipboard?.writeText(buildMapDigest(state));
-  };
-  refs.exportHandler = () => {
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `fallow-map-${data.root}-${state.view}-${state.lens}.png`;
-      link.click();
-      // Deferred (macrotask) revoke: a synchronous revoke can cancel
-      // the download before the browser grabs the blob.
-      setTimeout(() => URL.revokeObjectURL(link.href), 0);
-    }, "image/png");
-  };
 
   // ── Navigation shared by panel + views ────────────────────────
   const selectFile = (fileIndex: number | null, reveal = false): void => {

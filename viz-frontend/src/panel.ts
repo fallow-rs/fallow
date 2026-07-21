@@ -864,49 +864,6 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
   }
 };
 
-/** Per-lens CLI that reproduces its findings, mirroring the summary chip. */
-const DIGEST_COMMANDS: Record<Lens, string> = {
-  overview: "fallow",
-  deadcode: "fallow dead-code",
-  dupes: "fallow dupes",
-  boundaries: "fallow dead-code --circular-deps --boundary-violations",
-  hotspots: "fallow health",
-};
-
-/**
- * One markdown block covering the whole map: headline totals, then the
- * top rows of every lens with the command that verifies each. The single
- * paste an agent (or a quarterly report) wants, assembled from data
- * already in memory.
- */
-export const buildMapDigest = (state: AppState): string => {
-  const summary = state.data.summary;
-  const lines: string[] = [
-    `# fallow map: ${state.data.root}`,
-    "",
-    `${formatCount(summary.total_files)} files, ${formatCount(summary.total_edges)} imports`,
-    `- unused: ${formatCount(summary.unused_files)} files, ${formatCount(summary.unused_exports)} exports`,
-    `- duplication: ${formatCount(summary.clone_groups)} groups${
-      summary.clone_groups_truncated
-        ? ` (+${formatCount(summary.clone_groups_truncated)} not shown)`
-        : ""
-    }, ${formatCount(summary.duplicated_lines)} lines`,
-    `- boundaries: ${formatCount(summary.circular_deps)} loops, ${formatCount(summary.boundary_violations)} forbidden imports`,
-    `- complexity: ${formatCount(summary.hotspot_files)} files flagged as hardest to change`,
-  ];
-  const lenses: Lens[] = ["overview", "deadcode", "dupes", "boundaries", "hotspots"];
-  for (const lens of lenses) {
-    const { title, rows } = rankRowsForLens(state, lens);
-    if (rows.length === 0) continue;
-    lines.push("", `## ${title}`, `\`$ ${DIGEST_COMMANDS[lens]}\``, "");
-    for (const row of rows.slice(0, 15)) {
-      lines.push(`- ${row.dir ? `${row.dir}/` : ""}${row.label} (${row.metric})`);
-    }
-    if (rows.length > 15) lines.push(`- … ${formatCount(rows.length - 15)} more`);
-  }
-  return lines.join("\n");
-};
-
 /**
  * The dir-prefixed, truncating filename label shared by every ranked
  * table: a head-truncated dim directory plus the filename in its own
