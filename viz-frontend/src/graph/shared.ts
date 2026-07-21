@@ -449,18 +449,22 @@ export const chipRect = (
 export const roadWidth = (count: number): number =>
   Math.min(8, Math.max(1.5, 1 + Math.floor(Math.log2(count))));
 
-/** Right panel width (CSS `--panel-width`). The panel overlays the stage, so
- *  stage content reserves exactly this much on the right and sits flush against
- *  the panel's border, with no gap. */
+/** Right panel width (CSS `--panel-width`). The panel overlays the stage. */
 export const PANEL_WIDTH = 420;
+
+/** A hair of clearance kept between the stage content and the panel, so the
+ *  outermost treemap tiles' right border renders in visible canvas instead of
+ *  being hidden under the opaque panel. Small enough to read as an edge, not a
+ *  gap. */
+const PANEL_CLEARANCE = 4;
 
 /** Width the canvas can actually use: the right panel overlays the stage. */
 export const usableStageWidth = (state: AppState, stageW: number): number => {
   // A panel is always present now: a selection, a road/clone drill-down,
-  // or the per-lens ranked list (overview included). Reserve its full width
-  // so treemap tiles and graph layout render up to it but never under it.
+  // or the per-lens ranked list (overview included). Reserve its width plus a
+  // few px so tiles render up to it, edge visible, but never under it.
   void state;
-  return Math.max(PANEL_WIDTH, stageW - PANEL_WIDTH);
+  return Math.max(PANEL_WIDTH, stageW - PANEL_WIDTH - PANEL_CLEARANCE);
 };
 
 /** Folder keys whose imports carry little overview signal (test suites). */

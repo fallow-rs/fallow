@@ -16,7 +16,6 @@ export interface ChromeRefs {
   search: HTMLInputElement;
   searchCount: HTMLElement;
   crumbs: HTMLElement;
-  statusInfo: HTMLElement;
   themeToggle: HTMLButtonElement;
   viewButtons: Map<string, HTMLButtonElement>;
   lensButtons: Map<Lens, HTMLButtonElement>;
@@ -268,9 +267,6 @@ export const buildChrome = (
   const crumbs = el("div");
   crumbs.id = "crumbs";
   statusline.appendChild(crumbs);
-  const statusInfo = el("span");
-  statusInfo.id = "status-info";
-  statusline.appendChild(statusInfo);
   const hints = el("span");
   hints.id = "hints";
   // Keycaps and their action, one chip each. Spacing separates them, so
@@ -301,7 +297,6 @@ export const buildChrome = (
     search,
     searchCount,
     crumbs,
-    statusInfo,
     themeToggle,
     viewButtons,
     lensButtons,
@@ -353,7 +348,6 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
 
   updateSummaryLine(state, refs);
   updateCrumbs(state, refs);
-  updateStatusInfo(state, refs);
   updateSearchCount(state, refs);
 };
 
@@ -401,13 +395,6 @@ const updateCrumbs = (state: AppState, refs: ChromeRefs): void => {
       }
     });
   }
-};
-
-const updateStatusInfo = (state: AppState, refs: ChromeRefs): void => {
-  const summary = state.data.summary;
-  const stamp = new Date(document.lastModified);
-  const day = Number.isNaN(stamp.getTime()) ? "" : ` ${stamp.toISOString().slice(0, 10)}`;
-  refs.statusInfo.textContent = `${formatCount(summary.total_files)} files, ${formatCount(summary.total_edges)} imports, generated${day} by fallow`;
 };
 
 const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {
