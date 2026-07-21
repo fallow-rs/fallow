@@ -1477,6 +1477,9 @@ assert_contains "$OUT" "Move this dependency to the consuming workspace package.
 assert_contains "$OUT" "Empty catalog group" "annotation includes empty catalog group title"
 assert_contains "$OUT" "legacy" "annotation includes empty catalog group name"
 
+OUT_ESCAPED_PATH=$(jq '.unused_files[0].path = "src/a%,b:c\r\nd.ts"' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_ESCAPED_PATH" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "check annotation escapes workflow-command properties"
+
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 [ -z "$OUT_CLEAN" ] && pass "clean: no annotations" || fail "clean: no annotations" "got output"
 
@@ -1493,6 +1496,9 @@ OUT=$(jq -r -f "$JQ_DIR/annotations-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_contains "$OUT" "::warning" "emits warning commands"
 assert_contains "$OUT" "Code duplication" "mentions duplication"
 
+OUT_ESCAPED_PATH=$(jq '.clone_groups[0].instances[0].file = "src/a%,b:c\r\nd.ts"' "$FIXTURES/dupes.json" | jq -r -f "$JQ_DIR/annotations-dupes.jq" 2>&1)
+assert_contains "$OUT_ESCAPED_PATH" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "dupes annotation escapes workflow-command properties"
+
 echo "  annotations-health.jq:"
 OUT=$(jq -r -f "$JQ_DIR/annotations-health.jq" "$FIXTURES/health.json" 2>&1)
 assert_contains "$OUT" "::error" "critical finding emits ::error annotation"
@@ -1500,6 +1506,9 @@ assert_contains "$OUT" "::warning" "high/moderate findings emit ::warning annota
 assert_contains "$OUT" "(critical)" "critical severity in annotation title"
 assert_contains "$OUT" "(high)" "high severity in annotation title"
 assert_contains "$OUT" "parseContentBlocks" "includes function name"
+
+OUT_ESCAPED_PATH=$(jq '.findings[0].path = "src/a%,b:c\r\nd.ts"' "$FIXTURES/health.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
+assert_contains "$OUT_ESCAPED_PATH" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "health annotation escapes workflow-command properties"
 
 OUT_PROD_ANN=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]},{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"untracked","untracked_reason":"lazy_parsed"}}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
 assert_contains "$OUT_PROD_ANN" "Runtime coverage" "prod annotation: title present"
@@ -2418,6 +2427,18 @@ else
   else
     fail "annotate.sh probe-false keeps the exact jq annotation output" "diverged from the jq render"
   fi
+
+  FASTPATH_ESCAPE_ENVELOPE="$FASTPATH_WORK/escape.json"
+  jq '.unused_files[0].path = "src/a%,b:c\r\nd.ts"' "$FIXTURES/check.json" > "$FASTPATH_ESCAPE_ENVELOPE"
+  FASTPATH_ESCAPED=$(
+    HAS_NATIVE_REPORT=false \
+      FALLOW_COMMAND="dead-code" \
+      MAX_ANNOTATIONS="50" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      FALLOW_RESULTS_FILE="$FASTPATH_ESCAPE_ENVELOPE" \
+      bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
+  )
+  assert_contains "$FASTPATH_ESCAPED" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "annotate.sh jq fallback escapes workflow-command properties"
 
   rm -rf "$FASTPATH_WORK"
 fi

@@ -41,6 +41,30 @@ updates:
       default-days: 7
     open-pull-requests-limit: 5
 
+  - package-ecosystem: npm
+    directory: /benchmarks
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /crates/napi
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /apps/review-electron
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
   - package-ecosystem: docker
     directory: /
     schedule:
