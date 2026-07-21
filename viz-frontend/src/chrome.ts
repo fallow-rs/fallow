@@ -123,6 +123,24 @@ const brandMark = (): SVGSVGElement => {
   return svg;
 };
 
+/**
+ * Set the browser-tab favicon to the fallow mark, reusing the same inlined
+ * path so there is no second copy to drift. Theme-aware (dark ink on a light
+ * tab bar, light ink on a dark one) via a prefers-color-scheme rule inside the
+ * SVG, and a data URI so the single-file report stays self-contained.
+ */
+const setFavicon = (): void => {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="273.96 198.32 806.79 806.79">` +
+    `<style>path{fill:#21201c}@media(prefers-color-scheme:dark){path{fill:#eeeeec}}</style>` +
+    `<g transform="translate(0,1254) scale(0.1,-0.1)"><path d="${MARK_PATH}"/></g></svg>`;
+  const link = document.createElement("link");
+  link.rel = "icon";
+  link.type = "image/svg+xml";
+  link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  document.head.appendChild(link);
+};
+
 // ── Build ───────────────────────────────────────────────────────
 
 export const buildChrome = (
@@ -130,6 +148,7 @@ export const buildChrome = (
   app: HTMLElement,
   handlers: ChromeHandlers,
 ): ChromeRefs => {
+  setFavicon();
   // Row 1: identity left; search + quiet utility icons right.
   const topbar = el("header");
   topbar.id = "topbar";
