@@ -919,17 +919,21 @@ fn partition_by_common_importer(entries: &[ExportEntry], graph: &ModuleGraph) ->
     }
 
     // Also union entries where one directly imports the other (i.e. the importer
-    // itself is a member of the duplicate set).
-    let entry_file_ids: FxHashSet<FileId> = entries.iter().map(|e| e.file_id).collect();
+    // itself is a member of the duplicate set). Build a `file_id -> first index`
+    // map once (first index wins, mirroring `position()`), so the importer lookup
+    // is O(1) instead of a linear `position()` scan over the growing entries vec
+    // nested inside the per-entry x per-importer loops (issue #1843 follow-up).
+    let mut entry_index_by_file_id: FxHashMap<FileId, usize> = FxHashMap::default();
+    for (i, entry) in entries.iter().enumerate() {
+        entry_index_by_file_id.entry(entry.file_id).or_insert(i);
+    }
     for (i, entry) in entries.iter().enumerate() {
         let idx = entry.file_id.0 as usize;
         if idx >= graph.reverse_deps.len() {
             continue;
         }
         for &importer in &graph.reverse_deps[idx] {
-            if entry_file_ids.contains(&importer)
-                && let Some(j) = entries.iter().position(|e| e.file_id == importer)
-            {
+            if let Some(&j) = entry_index_by_file_id.get(&importer) {
                 union_find.union(i, j);
             }
         }
@@ -3226,5 +3230,103 @@ mod tests {
             "entry export should be flagged when include_entry_exports is true"
         );
         assert_eq!(exports_on[0].export_name, "main");
+    }
+
+    fn make_export_entry(module_idx: usize, file_id: u32) -> ExportEntry {
+        ExportEntry {
+            module_idx,
+            path: PathBuf::from(format!("f{file_id}.ts")),
+            file_id: FileId(file_id),
+            span_start: 0,
+            is_type_only: false,
+        }
+    }
+
+    /// Reference implementation of the direct-import union path using the
+    /// original O(n^2) `entries.iter().position(...)` linear scan, so the
+    /// O(1) `file_id -> first index` map in `partition_by_common_importer`
+    /// (issue #1843 follow-up) can be proven to produce identical grouping.
+    fn reference_partition(entries: &[ExportEntry], graph: &ModuleGraph) -> Vec<Vec<usize>> {
+        let mut union_find = UnionFind::new(entries.len());
+
+        let mut importer_to_entries: FxHashMap<FileId, Vec<usize>> = FxHashMap::default();
+        for (i, entry) in entries.iter().enumerate() {
+            let idx = entry.file_id.0 as usize;
+            if idx >= graph.reverse_deps.len() {
+                continue;
+            }
+            for &importer in &graph.reverse_deps[idx] {
+                importer_to_entries.entry(importer).or_default().push(i);
+            }
+        }
+        for members in importer_to_entries.values() {
+            if let Some((&first, rest)) = members.split_first() {
+                for &other in rest {
+                    union_find.union(first, other);
+                }
+            }
+        }
+
+        let entry_file_ids: FxHashSet<FileId> = entries.iter().map(|e| e.file_id).collect();
+        for (i, entry) in entries.iter().enumerate() {
+            let idx = entry.file_id.0 as usize;
+            if idx >= graph.reverse_deps.len() {
+                continue;
+            }
+            for &importer in &graph.reverse_deps[idx] {
+                if entry_file_ids.contains(&importer)
+                    && let Some(j) = entries.iter().position(|e| e.file_id == importer)
+                {
+                    union_find.union(i, j);
+                }
+            }
+        }
+
+        union_find.components()
+    }
+
+    fn normalize_components(mut components: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
+        for comp in &mut components {
+            comp.sort_unstable();
+        }
+        components.sort_unstable();
+        components
+    }
+
+    #[test]
+    fn partition_direct_import_index_matches_position_scan() {
+        // Four real files (FileIds 0..=3), all also duplicate-export entry files.
+        let mut graph = build_graph(&[
+            ("f0.ts", false),
+            ("f1.ts", false),
+            ("f2.ts", false),
+            ("f3.ts", false),
+        ]);
+
+        // file0 imported by file1 and file3; file2 imported by file1.
+        graph.reverse_deps[0] = vec![FileId(1), FileId(3)];
+        graph.reverse_deps[2] = vec![FileId(1)];
+
+        // Five entries with a DUPLICATE file_id (indices 1 and 2 both in file1),
+        // exercising the first-index-wins semantics the map must preserve.
+        let entries = vec![
+            make_export_entry(0, 0),
+            make_export_entry(1, 1),
+            make_export_entry(2, 1),
+            make_export_entry(3, 2),
+            make_export_entry(4, 3),
+        ];
+
+        let actual = normalize_components(partition_by_common_importer(&entries, &graph));
+        let reference = normalize_components(reference_partition(&entries, &graph));
+        assert_eq!(
+            actual, reference,
+            "map-based partition must match the position()-scan reference"
+        );
+
+        // Hand-computed grouping: {0,1,3,4} merged via the shared/direct-import
+        // unions; the duplicate-file_id entry at index 2 stays a singleton
+        // because position()/the first-index map never resolve to it.
+        assert_eq!(actual, vec![vec![0, 1, 3, 4], vec![2]]);
     }
 }

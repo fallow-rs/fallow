@@ -7,18 +7,66 @@
     reason = "tsconfig AST parsing requires deep nesting"
 )]
 
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use super::config_parser;
+use super::registry::ConfigCandidateIndex;
 use super::{Plugin, PluginResult};
 
-define_plugin!(
-    struct TypeScriptPlugin => "typescript",
-    enablers: &["typescript"],
-    config_patterns: &["tsconfig.json", "tsconfig.*.json"],
-    always_used: &["tsconfig.json", "tsconfig.*.json"],
-    tooling_dependencies: &["typescript", "ts-node", "tsx", "ts-loader"],
-    resolve_config(config_path, source, root) {
+const ENABLERS: &[&str] = &["typescript"];
+const CONFIG_PATTERNS: &[&str] = &["tsconfig.json", "tsconfig.*.json"];
+const ALWAYS_USED: &[&str] = &["tsconfig.json", "tsconfig.*.json"];
+const TOOLING_DEPENDENCIES: &[&str] = &["typescript", "ts-node", "tsx", "ts-loader"];
+
+pub struct TypeScriptPlugin;
+
+impl Plugin for TypeScriptPlugin {
+    fn name(&self) -> &'static str {
+        "typescript"
+    }
+
+    fn enablers(&self) -> &'static [&'static str] {
+        ENABLERS
+    }
+
+    fn config_patterns(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
+    fn always_used(&self) -> &'static [&'static str] {
+        ALWAYS_USED
+    }
+
+    fn tooling_dependencies(&self) -> &'static [&'static str] {
+        TOOLING_DEPENDENCIES
+    }
+
+    /// Activate on a discovered `tsconfig.json` / `tsconfig.*.json`, not only on
+    /// a declared `typescript` dependency.
+    ///
+    /// The plugin is the sole registrar of `compilerOptions.paths` into the
+    /// project-wide alias table (`PluginResult.path_aliases`). A project that
+    /// configures `paths` in a tsconfig but does not list `typescript` in its
+    /// package.json (or keeps `paths` in a `tsconfig.app.json` the per-file
+    /// nearest-`tsconfig.json` chain never reads) would otherwise leave those
+    /// aliases unregistered, so an aliased import like
+    /// `@acme/internal/common/request-context` falls through to npm-package
+    /// classification and surfaces as a false `unlisted-dependency` finding
+    /// (issue #1911). Mirrors the config-file activation used by `danger` /
+    /// `k6` / `browser-extension`.
+    fn is_enabled_with_files(
+        &self,
+        deps: &[String],
+        root: &Path,
+        _discovered_files: &[PathBuf],
+        candidate_index: Option<&ConfigCandidateIndex>,
+    ) -> bool {
+        self.is_enabled_with_deps(deps, root) || tsconfig_present(root, candidate_index)
+    }
+
+    fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
         let is_json = config_path.extension().is_some_and(|ext| ext == "json");
@@ -98,8 +146,58 @@ define_plugin!(
         parse_tsconfig_references(&parse_source, parse_path, root, &mut result);
 
         result
-    },
-);
+    }
+}
+
+/// Whether a `tsconfig.json` / `tsconfig.*.json` is present under `root`.
+///
+/// tsconfig files are non-source config candidates, so they never appear in the
+/// activation call's `discovered_files`; outside production mode the discovery
+/// walk's config index carries them (nested anywhere under `root`), and in
+/// production (`candidate_index` is `None`) a bounded root-level filesystem
+/// probe is the fallback, matching the root-level probe posture the
+/// dependency-gated plugins use when the index is unavailable.
+fn tsconfig_present(root: &Path, candidate_index: Option<&ConfigCandidateIndex>) -> bool {
+    match candidate_index {
+        Some(index) => {
+            index.any_descendant_contains(root, OsStr::new("tsconfig.json"))
+                || tsconfig_variant_matcher()
+                    .is_some_and(|matcher| index.any_descendant_matches(root, matcher))
+        }
+        None => root_has_tsconfig(root),
+    }
+}
+
+/// Cached matcher for the wildcard config filename (`tsconfig.app.json`,
+/// `tsconfig.base.json`). Excludes the exact `tsconfig.json`, handled separately.
+/// The pattern is a compile-time constant, so `None` is unreachable in practice.
+fn tsconfig_variant_matcher() -> Option<&'static globset::GlobMatcher> {
+    static MATCHER: OnceLock<Option<globset::GlobMatcher>> = OnceLock::new();
+    MATCHER
+        .get_or_init(|| {
+            globset::Glob::new("tsconfig.*.json")
+                .ok()
+                .map(|glob| glob.compile_matcher())
+        })
+        .as_ref()
+}
+
+/// Production-mode fallback: a `tsconfig.json` or `tsconfig.*.json` directly at
+/// the project root. Bounded to a single root directory read so a non-TypeScript
+/// project pays at most one `read_dir` during activation.
+fn root_has_tsconfig(root: &Path) -> bool {
+    if root.join("tsconfig.json").is_file() {
+        return true;
+    }
+    let Some(matcher) = tsconfig_variant_matcher() else {
+        return false;
+    };
+    std::fs::read_dir(root).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| matcher.is_match(Path::new(&entry.file_name())))
+    })
+}
 
 fn normalize_tsconfig_path_alias(
     find: &str,
@@ -266,6 +364,75 @@ fn parse_tsconfig_references(source: &str, path: &Path, root: &Path, result: &mu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activates_from_declared_typescript_dependency() {
+        let plugin = TypeScriptPlugin;
+        let deps = vec!["typescript".to_string()];
+
+        assert!(plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+        assert!(plugin.is_enabled_with_files(&deps, Path::new("/project"), &[], None));
+    }
+
+    #[test]
+    fn activates_from_nested_tsconfig_variant_via_index() {
+        // A `tsconfig.app.json` (the issue #1911 shape) is a config candidate,
+        // not a source file, so it reaches the plugin through the discovery
+        // index rather than `discovered_files`. Activation must fire even with
+        // no `typescript` dependency, so the plugin's `compilerOptions.paths`
+        // are registered project-wide.
+        let plugin = TypeScriptPlugin;
+        let tsconfig = PathBuf::from("/repo/apps/web/tsconfig.app.json");
+        let index = ConfigCandidateIndex::build(std::iter::once(tsconfig.as_path()));
+
+        assert!(plugin.is_enabled_with_files(&[], Path::new("/repo"), &[], Some(&index)));
+        // Scoping: a tsconfig under a different root does not activate this root.
+        assert!(!plugin.is_enabled_with_files(&[], Path::new("/other"), &[], Some(&index)));
+    }
+
+    #[test]
+    fn activates_from_root_tsconfig_json_via_index() {
+        let plugin = TypeScriptPlugin;
+        let tsconfig = PathBuf::from("/repo/tsconfig.json");
+        let index = ConfigCandidateIndex::build(std::iter::once(tsconfig.as_path()));
+
+        assert!(plugin.is_enabled_with_files(&[], Path::new("/repo"), &[], Some(&index)));
+    }
+
+    #[test]
+    fn does_not_activate_without_tsconfig_or_dependency() {
+        let plugin = TypeScriptPlugin;
+        let unrelated = PathBuf::from("/repo/src/index.ts");
+        let index = ConfigCandidateIndex::build(std::iter::once(unrelated.as_path()));
+
+        assert!(!plugin.is_enabled_with_files(&[], Path::new("/repo"), &[], Some(&index)));
+    }
+
+    #[test]
+    fn similarly_named_files_do_not_activate_wildcard_matcher() {
+        let plugin = TypeScriptPlugin;
+        // A `mytsconfig.app.json` / `tsconfig.app.jsonc` must not match the
+        // `tsconfig.*.json` wildcard.
+        for name in ["/repo/mytsconfig.app.json", "/repo/tsconfig.app.jsonc"] {
+            let path = PathBuf::from(name);
+            let index = ConfigCandidateIndex::build(std::iter::once(path.as_path()));
+            assert!(
+                !plugin.is_enabled_with_files(&[], Path::new("/repo"), &[], Some(&index)),
+                "{name} should not activate the plugin"
+            );
+        }
+    }
+
+    #[test]
+    fn activates_from_root_tsconfig_variant_filesystem_probe() {
+        // Production mode passes `candidate_index: None`; a root-level tsconfig
+        // variant is found via the bounded filesystem probe.
+        let plugin = TypeScriptPlugin;
+        let tmp = tempfile::tempdir().expect("temp dir");
+        std::fs::write(tmp.path().join("tsconfig.base.json"), "{}").expect("write tsconfig");
+
+        assert!(plugin.is_enabled_with_files(&[], tmp.path(), &[], None));
+    }
 
     #[test]
     fn resolve_config_extends_package() {

@@ -73,6 +73,58 @@ static TEMPLATE_TAG_RE: LazyLock<regex::Regex> =
 static DEFINE_VARS_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"define:vars\s*="));
 
+/// Build the disjoint, ascending list of byte ranges to mask when scanning the
+/// Astro template: `<script>` / `<style>` block bodies and HTML comments. The
+/// three `find_iter` passes are concatenated (not globally sorted, and their
+/// ranges overlap when e.g. an HTML comment wraps a `<script>`), then sorted by
+/// start and merged into a non-overlapping ascending list so membership can be
+/// tested by binary search (`pos_in_masked_ranges`) instead of a linear scan
+/// over every range per position. The merged union covers exactly the same byte
+/// positions as the raw ranges, so masking decisions are byte-identical.
+fn build_masked_ranges(template: &str) -> Vec<(usize, usize)> {
+    let mut masked: Vec<(usize, usize)> = Vec::new();
+    masked.extend(
+        SCRIPT_BLOCK_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    masked.extend(
+        STYLE_BLOCK_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    masked.extend(
+        HTML_COMMENT_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    masked.sort_unstable_by_key(|&(start, _)| start);
+    // Merge overlapping / touching ranges so the result is disjoint and ascending,
+    // the invariant `pos_in_masked_ranges`'s binary search relies on.
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(masked.len());
+    for (start, end) in masked {
+        if let Some(last) = merged.last_mut()
+            && start <= last.1
+        {
+            last.1 = last.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    merged
+}
+
+/// Test whether `pos` falls inside any masked range. `ranges` must be the disjoint
+/// ascending list produced by `build_masked_ranges`; membership is a binary search
+/// (`partition_point`) rather than a linear `.any()` scan, keeping the per-position
+/// cost logarithmic when a template carries many masked regions. Because the list
+/// is disjoint and ascending, only the last range with `start <= pos` can contain
+/// it, so a single bounds check on that candidate decides membership.
+fn pos_in_masked_ranges(ranges: &[(usize, usize)], pos: usize) -> bool {
+    let idx = ranges.partition_point(|&(start, _)| start <= pos);
+    idx > 0 && pos < ranges[idx - 1].1
+}
+
 /// Collect the set of identifier names that appear USED in the Astro template
 /// markup, so the frontmatter semantic pass does not mark a template-only-used
 /// import (a rendered `<Header/>` component, or a `{fmt(x)}` expression binding)
@@ -93,23 +145,8 @@ fn collect_astro_template_used_names(template: &str) -> FxHashSet<String> {
     // Byte ranges of `<script>` / `<style>` bodies and HTML comments. Positions
     // inside any of these are skipped rather than mutating the source (mutation
     // would corrupt multibyte UTF-8 inside a masked range).
-    let mut masked: Vec<(usize, usize)> = Vec::new();
-    masked.extend(
-        SCRIPT_BLOCK_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
-    );
-    masked.extend(
-        STYLE_BLOCK_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
-    );
-    masked.extend(
-        HTML_COMMENT_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
-    );
-    let is_masked = |pos: usize| masked.iter().any(|&(s, e)| pos >= s && pos < e);
+    let masked = build_masked_ranges(template);
+    let is_masked = |pos: usize| pos_in_masked_ranges(&masked, pos);
 
     // Component tag roots.
     for cap in TEMPLATE_TAG_RE.captures_iter(template) {
@@ -231,23 +268,8 @@ fn collect_template_expression_regions(template: &str) -> Vec<String> {
     if template.is_empty() {
         return regions;
     }
-    let mut masked: Vec<(usize, usize)> = Vec::new();
-    masked.extend(
-        SCRIPT_BLOCK_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
-    );
-    masked.extend(
-        STYLE_BLOCK_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
-    );
-    masked.extend(
-        HTML_COMMENT_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
-    );
-    let is_masked = |pos: usize| masked.iter().any(|&(s, e)| pos >= s && pos < e);
+    let masked = build_masked_ranges(template);
+    let is_masked = |pos: usize| pos_in_masked_ranges(&masked, pos);
 
     let bytes = template.as_bytes();
     let len = bytes.len();
@@ -1174,5 +1196,81 @@ mod tests {
             "an untyped receiver must not credit any Util member, found: {:?}",
             info.member_accesses
         );
+    }
+
+    /// Template that is roughly half HTML comments (masked) and half `{expr}`
+    /// braces / tags (credited), with an overlapping masked range (a comment that
+    /// wraps a `<script>`). The merged binary-search masking must decide every
+    /// byte position identically to the old linear `.any()` over the raw,
+    /// unsorted, overlapping ranges. Regression for the masking-cost change
+    /// (issue #1843 follow-up): behavior must stay byte-identical.
+    const MASKED_MIX_TEMPLATE: &str = concat!(
+        "<!-- <Widget/> and {Sidebar} -->\n",
+        "<Header title={fmt(x)} />\n",
+        "<!-- <script>{Buried}</script> -->\n",
+        "<script><Hidden/>{Ghost}</script>\n",
+        "<style>a { color: {red}; }</style>\n",
+        "<Footer>{items.map((i) => i.label)}</Footer>\n",
+    );
+
+    #[test]
+    fn astro_masked_ranges_match_linear_reference() {
+        let template = MASKED_MIX_TEMPLATE;
+
+        // Old masking: a linear scan over the three raw (unsorted, overlapping)
+        // `find_iter` passes.
+        let mut raw: Vec<(usize, usize)> = Vec::new();
+        raw.extend(
+            SCRIPT_BLOCK_RE
+                .find_iter(template)
+                .map(|m| (m.start(), m.end())),
+        );
+        raw.extend(
+            STYLE_BLOCK_RE
+                .find_iter(template)
+                .map(|m| (m.start(), m.end())),
+        );
+        raw.extend(
+            HTML_COMMENT_RE
+                .find_iter(template)
+                .map(|m| (m.start(), m.end())),
+        );
+        let linear = |pos: usize| raw.iter().any(|&(s, e)| pos >= s && pos < e);
+
+        let merged = build_masked_ranges(template);
+        // The overlapping comment+script pair must collapse during the merge.
+        assert!(
+            merged.len() < raw.len(),
+            "expected overlapping ranges to merge, raw={raw:?} merged={merged:?}"
+        );
+        for pos in 0..template.len() {
+            assert_eq!(
+                pos_in_masked_ranges(&merged, pos),
+                linear(pos),
+                "masking decision differs at byte {pos}"
+            );
+        }
+    }
+
+    #[test]
+    fn astro_template_used_names_masks_comments_credits_braces() {
+        let used = collect_astro_template_used_names(MASKED_MIX_TEMPLATE);
+
+        // Credited: tag roots + brace-expression identifiers outside masked regions.
+        for name in ["Header", "Footer", "fmt", "x", "items", "map", "i", "label"] {
+            assert!(
+                used.contains(name),
+                "expected {name} to be credited, got {used:?}"
+            );
+        }
+
+        // Masked: identifiers only reachable inside comments / `<script>` / `<style>`
+        // (each would be a tag root or brace ident if the range were not masked).
+        for name in ["Widget", "Sidebar", "Buried", "Hidden", "Ghost", "red"] {
+            assert!(
+                !used.contains(name),
+                "expected {name} to stay masked, got {used:?}"
+            );
+        }
     }
 }

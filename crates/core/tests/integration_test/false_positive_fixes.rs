@@ -1254,8 +1254,14 @@ export const app = message;
     );
 }
 
+// Since issue #1911 the TypeScript plugin activates on the presence of a
+// tsconfig (no `typescript` dependency required) and registers the
+// `compilerOptions.paths` of EVERY discovered tsconfig project-wide (the
+// documented liberal union; it does not model TypeScript's per-file `paths`
+// override semantics). A broken `extends` chain still does not break the child's
+// own path resolution, and the base config's `@base/*` is additionally credited.
 #[test]
-fn missing_extends_honors_child_path_alias_overrides() {
+fn missing_extends_keeps_child_path_alias_resolution() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();
 
@@ -1339,11 +1345,17 @@ export const app = child + base;
             .any(|path| path.ends_with("src/child/value.ts")),
         "child alias target should stay reachable: {unused_files:?}"
     );
+    // With the TypeScript plugin now active on tsconfig presence (issue #1911),
+    // the base config's `@base/*` alias is registered project-wide, so
+    // `@base/value` resolves and its target stays reachable. This is the
+    // false-negative direction (an alias TypeScript would treat as overridden
+    // stays reachable), the accepted trade-off for eliminating the #1911
+    // unlisted-dependency false positive.
     assert!(
-        unused_files
+        !unused_files
             .iter()
             .any(|path| path.ends_with("src/base/value.ts")),
-        "parent alias target should not be marked used by an overridden paths map: {unused_files:?}"
+        "base alias target resolves via the plugin's project-wide tsconfig paths: {unused_files:?}"
     );
 }
 

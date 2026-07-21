@@ -220,7 +220,7 @@ pub fn css_in_js_theme_token_defs(source: &str, path: &Path) -> Vec<CssInJsToken
     let ret = Parser::new(&allocator, source, source_type).parse();
 
     let mut collector = ThemeDefCollector {
-        source,
+        lines: LineCounter::new(source),
         defs: Vec::new(),
     };
     collector.visit_program(&ret.program);
@@ -322,7 +322,7 @@ fn run_consumer_query<'a>(
                 return;
             }
             let mut collector = ConsumerCollector {
-                source,
+                lines: LineCounter::new(source),
                 alias,
                 leaf_paths,
                 hits: Vec::new(),
@@ -335,7 +335,7 @@ fn run_consumer_query<'a>(
                 return;
             }
             let mut collector = PandaTokenCallCollector {
-                source,
+                lines: LineCounter::new(source),
                 alias,
                 leaf_paths,
                 hits: Vec::new(),
@@ -351,7 +351,7 @@ fn run_consumer_query<'a>(
                 return;
             }
             let mut collector = PandaStyleValueCollector {
-                source,
+                lines: LineCounter::new(source),
                 aliases,
                 leaf_paths,
                 hits: Vec::new(),
@@ -364,7 +364,7 @@ fn run_consumer_query<'a>(
                 return;
             }
             let mut collector = ThemeConsumerCollector {
-                source,
+                lines: LineCounter::new(source),
                 leaf_paths,
                 hits: Vec::new(),
             };
@@ -376,7 +376,7 @@ fn run_consumer_query<'a>(
 
 /// Walks a consuming program for member accesses on a token binding alias.
 struct ConsumerCollector<'a, 'b> {
-    source: &'a str,
+    lines: LineCounter<'a>,
     alias: &'b str,
     leaf_paths: &'b FxHashSet<String>,
     hits: Vec<TokenConsumerHit>,
@@ -394,10 +394,8 @@ impl<'a> ConsumerCollector<'a, '_> {
         {
             let token_path = segments.join(".");
             if self.leaf_paths.contains(&token_path) {
-                self.hits.push(TokenConsumerHit {
-                    token_path,
-                    line: line_at(self.source, span_start),
-                });
+                let line = self.lines.line_at(span_start);
+                self.hits.push(TokenConsumerHit { token_path, line });
             }
         }
     }
@@ -433,7 +431,7 @@ impl<'a> Visit<'a> for ConsumerCollector<'a, '_> {
 }
 
 struct PandaTokenCallCollector<'a, 'b> {
-    source: &'a str,
+    lines: LineCounter<'a>,
     alias: &'b str,
     leaf_paths: &'b FxHashSet<String>,
     hits: Vec<TokenConsumerHit>,
@@ -450,9 +448,10 @@ impl<'a> Visit<'a> for PandaTokenCallCollector<'a, '_> {
         {
             let token_path = lit.value.as_str();
             if self.leaf_paths.contains(token_path) {
+                let line = self.lines.line_at(call.span().start);
                 self.hits.push(TokenConsumerHit {
                     token_path: token_path.to_owned(),
-                    line: line_at(self.source, call.span().start),
+                    line,
                 });
             }
         }
@@ -461,7 +460,7 @@ impl<'a> Visit<'a> for PandaTokenCallCollector<'a, '_> {
 }
 
 struct PandaStyleValueCollector<'a, 'b> {
-    source: &'a str,
+    lines: LineCounter<'a>,
     aliases: &'b FxHashSet<String>,
     leaf_paths: &'b FxHashSet<String>,
     hits: Vec<TokenConsumerHit>,
@@ -482,9 +481,10 @@ impl<'a> PandaStyleValueCollector<'a, '_> {
             Expression::StringLiteral(lit) => {
                 let token_path = lit.value.as_str();
                 if self.leaf_paths.contains(token_path) {
+                    let line = self.lines.line_at(lit.span().start);
                     self.hits.push(TokenConsumerHit {
                         token_path: token_path.to_owned(),
-                        line: line_at(self.source, lit.span().start),
+                        line,
                     });
                 }
             }
@@ -512,7 +512,7 @@ impl<'a> Visit<'a> for PandaStyleValueCollector<'a, '_> {
 }
 
 struct ThemeDefCollector<'a> {
-    source: &'a str,
+    lines: LineCounter<'a>,
     defs: Vec<CssInJsTokenDef>,
 }
 
@@ -529,7 +529,13 @@ impl<'a> ThemeDefCollector<'a> {
             return;
         };
         let mut tokens = Vec::new();
-        collect_token_leaves(self.source, obj, "", CssInJsTokenOrigin::Theme, &mut tokens);
+        collect_token_leaves(
+            &mut self.lines,
+            obj,
+            "",
+            CssInJsTokenOrigin::Theme,
+            &mut tokens,
+        );
         if tokens.is_empty() {
             return;
         }
@@ -549,7 +555,7 @@ impl<'a> Visit<'a> for ThemeDefCollector<'a> {
 }
 
 struct ThemeConsumerCollector<'a, 'b> {
-    source: &'a str,
+    lines: LineCounter<'a>,
     leaf_paths: &'b FxHashSet<String>,
     hits: Vec<TokenConsumerHit>,
 }
@@ -569,10 +575,8 @@ impl<'a> ThemeConsumerCollector<'a, '_> {
         }
         let token_path = token_segments.join(".");
         if self.leaf_paths.contains(&token_path) {
-            self.hits.push(TokenConsumerHit {
-                token_path,
-                line: line_at(self.source, span_start),
-            });
+            let line = self.lines.line_at(span_start);
+            self.hits.push(TokenConsumerHit { token_path, line });
         }
     }
 }
@@ -652,7 +656,7 @@ struct Recognized {
 
 /// Collects token-definition sites, gated on import provenance.
 struct TokenDefCollector<'a> {
-    source: &'a str,
+    lines: LineCounter<'a>,
     /// local-binding name -> (library, canonical role). Mirrors the
     /// `css_in_js_object` provenance map but for token-definition roles.
     imports: FxHashMap<&'a str, (Lib, &'a str)>,
@@ -662,7 +666,7 @@ struct TokenDefCollector<'a> {
 impl<'a> TokenDefCollector<'a> {
     fn new(source: &'a str) -> Self {
         Self {
-            source,
+            lines: LineCounter::new(source),
             imports: FxHashMap::default(),
             defs: Vec::new(),
         }
@@ -800,7 +804,7 @@ impl<'a> TokenDefCollector<'a> {
             return;
         };
         let mut tokens = Vec::new();
-        collect_token_leaves(self.source, obj, "", recognized.origin, &mut tokens);
+        collect_token_leaves(&mut self.lines, obj, "", recognized.origin, &mut tokens);
         if tokens.is_empty() {
             return;
         }
@@ -819,7 +823,7 @@ impl<'a> TokenDefCollector<'a> {
             return true;
         };
         let mut tokens = Vec::new();
-        collect_panda_config_token_leaves(self.source, obj, &mut tokens);
+        collect_panda_config_token_leaves(&mut self.lines, obj, &mut tokens);
         if !tokens.is_empty() {
             self.defs.push(CssInJsTokenDef {
                 binding: PANDA_CONFIG_BINDING.to_string(),
@@ -841,7 +845,7 @@ impl<'a> TokenDefCollector<'a> {
 /// credit every `vars.palette.<x>` access to it). Spreads and computed keys are
 /// skipped because they cannot be resolved statically.
 fn collect_token_leaves(
-    source: &str,
+    lines: &mut LineCounter<'_>,
     obj: &ObjectExpression<'_>,
     prefix: &str,
     origin: CssInJsTokenOrigin,
@@ -867,12 +871,12 @@ fn collect_token_leaves(
             {
                 out.push(CssInJsToken {
                     path,
-                    def_line: line_at(source, prop.key.span().start),
+                    def_line: lines.line_at(prop.key.span().start),
                     value: object_static_property_value(nested, "value"),
                 });
             }
             Expression::ObjectExpression(nested) => {
-                collect_token_leaves(source, nested, &path, origin, out);
+                collect_token_leaves(lines, nested, &path, origin, out);
             }
             // A bare identifier is an unresolvable reference, usually an imported
             // token group; do not record it as a leaf.
@@ -880,7 +884,7 @@ fn collect_token_leaves(
             _ => out.push(CssInJsToken {
                 value: static_token_value(&prop.value),
                 path,
-                def_line: line_at(source, prop.key.span().start),
+                def_line: lines.line_at(prop.key.span().start),
             }),
         }
     }
@@ -956,7 +960,7 @@ fn object_static_property_object<'a>(
 }
 
 fn collect_panda_config_token_leaves(
-    source: &str,
+    lines: &mut LineCounter<'_>,
     obj: &ObjectExpression<'_>,
     out: &mut Vec<CssInJsToken>,
 ) {
@@ -965,7 +969,7 @@ fn collect_panda_config_token_leaves(
     };
     for key in ["tokens", "semanticTokens"] {
         if let Some(tokens) = object_static_property_object(theme, key) {
-            collect_token_leaves(source, tokens, "", CssInJsTokenOrigin::Panda, out);
+            collect_token_leaves(lines, tokens, "", CssInJsTokenOrigin::Panda, out);
         }
     }
 }
@@ -987,15 +991,60 @@ impl<'a> Visit<'a> for TokenDefCollector<'a> {
     }
 }
 
-/// 1-based line number of a byte offset in `source`. Uses `.get(..end)` so an
-/// out-of-range or non-char-boundary offset clamps to line 1 rather than
-/// panicking (matches `css::line_at_offset`).
-fn line_at(source: &str, offset: u32) -> u32 {
-    let end = (offset as usize).min(source.len());
-    let count = source
-        .get(..end)
-        .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
-    u32::try_from(1 + count).unwrap_or(u32::MAX)
+/// Count `\n` bytes in `s` as a saturating `u32`.
+fn count_newlines_u32(s: &str) -> u32 {
+    u32::try_from(s.bytes().filter(|&b| b == b'\n').count()).unwrap_or(u32::MAX)
+}
+
+/// Incremental 1-based line-number counter over a fixed `source` (issue #1843
+/// follow-up). The old free `line_at` counted the newlines in `source[..offset]`
+/// from the start on every call, so a token file with M definitions cost
+/// O(M * source-len). Definitions and consumer hits are visited in source order,
+/// so this advances a cursor by only the newline delta since the previous query
+/// (`source[last_offset..offset]`), making a whole walk O(source-len). A
+/// non-monotonic query rewinds by the reverse delta, and an out-of-range or
+/// non-char-boundary offset clamps to line 1 exactly as the previous `line_at`
+/// did (matching `css::line_at_offset`), so the result is byte-identical to a
+/// from-scratch count regardless of query order. Deliberately a plain cursor,
+/// mirroring the `MAX_BINDING_PATH_DEPTH` bounded-work companions.
+struct LineCounter<'a> {
+    source: &'a str,
+    /// Byte offset of the last query whose line was computed. Always a valid
+    /// char boundary (only ever assigned a boundary-checked `end`).
+    last_offset: usize,
+    /// `1 + count_newlines(&source[..last_offset])`, the invariant maintained
+    /// across queries.
+    last_line: u32,
+}
+
+impl<'a> LineCounter<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            last_offset: 0,
+            last_line: 1,
+        }
+    }
+
+    /// 1-based line number of `offset`, byte-identical to the previous
+    /// `line_at(source, offset)`.
+    fn line_at(&mut self, offset: u32) -> u32 {
+        let end = (offset as usize).min(self.source.len());
+        // Preserve the previous `.get(..end)` contract: a non-char-boundary
+        // offset clamps to line 1 rather than panicking on the slice below.
+        if !self.source.is_char_boundary(end) {
+            return 1;
+        }
+        if end >= self.last_offset {
+            let delta = count_newlines_u32(&self.source[self.last_offset..end]);
+            self.last_line = self.last_line.saturating_add(delta);
+        } else {
+            let delta = count_newlines_u32(&self.source[end..self.last_offset]);
+            self.last_line = self.last_line.saturating_sub(delta);
+        }
+        self.last_offset = end;
+        self.last_line
+    }
 }
 
 #[cfg(all(test, not(miri)))]
@@ -1027,6 +1076,36 @@ mod tests {
 
     fn theme_defs(source: &str) -> Vec<CssInJsTokenDef> {
         css_in_js_theme_token_defs(source, Path::new("theme.ts"))
+    }
+
+    #[test]
+    fn incremental_def_lines_match_source_order() {
+        // Issue #1843 follow-up (FIX B): the incremental LineCounter must yield
+        // the same def_line as a from-scratch newline count for every token,
+        // across MULTIPLE definitions on multiple lines (the source-order cursor
+        // must advance correctly between separate `defineVars` calls, not just
+        // within one).
+        let src = "import { defineVars } from '@stylexjs/stylex';\n\
+export const colors = defineVars({\n\
+primary: '#000',\n\
+secondary: '#fff',\n\
+});\n\
+export const space = defineVars({\n\
+sm: '4px',\n\
+lg: '16px',\n\
+});\n";
+        let d = defs(src);
+        let line_of = |binding: &str, path: &str| {
+            d.iter()
+                .find(|def| def.binding == binding)
+                .and_then(|def| def.tokens.iter().find(|t| t.path == path))
+                .unwrap_or_else(|| panic!("token {binding}.{path} present"))
+                .def_line
+        };
+        assert_eq!(line_of("colors", "primary"), 3);
+        assert_eq!(line_of("colors", "secondary"), 4);
+        assert_eq!(line_of("space", "sm"), 7);
+        assert_eq!(line_of("space", "lg"), 8);
     }
 
     #[test]

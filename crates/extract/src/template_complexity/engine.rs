@@ -56,7 +56,7 @@ impl TemplateComplexity {
             return Ok(());
         };
         self.first_offset.get_or_insert(offset + trim_start);
-        let metrics = compute_expression_metrics(&source[trim_start..], nesting)?;
+        let metrics = compute_expression_metrics(&source[trim_start..], nesting, 0)?;
         self.cyclomatic = self.cyclomatic.saturating_add(metrics.cyclomatic);
         self.cognitive = self.cognitive.saturating_add(metrics.cognitive);
         Ok(())
@@ -120,27 +120,49 @@ impl ExpressionMetrics {
     }
 }
 
-fn compute_expression_metrics(source: &str, nesting: u16) -> Result<ExpressionMetrics, ScanError> {
+/// Maximum bracket/ternary recursion depth for template-expression metric
+/// scoring. Real template expressions nest only 3-5 levels deep, so this cap is
+/// generous; past it a pathological input like `((((...))))` is treated as
+/// malformed and its synthetic finding is dropped (via [`ScanError`]) rather
+/// than recursing until the stack overflows (SIGABRT under release
+/// `panic = "abort"`). Mirrors the `MAX_TAINT_BINDING_HOPS` /
+/// `MAX_BINDING_PATH_DEPTH` bounded-work style. Issue #1843 follow-up.
+const MAX_TEMPLATE_EXPR_DEPTH: u16 = 64;
+
+fn compute_expression_metrics(
+    source: &str,
+    nesting: u16,
+    depth: u16,
+) -> Result<ExpressionMetrics, ScanError> {
+    if depth > MAX_TEMPLATE_EXPR_DEPTH {
+        return Err(ScanError);
+    }
     let source = source.trim();
     if source.is_empty() {
         return Ok(ExpressionMetrics::default());
     }
     if let Some((question, colon)) = find_top_level_ternary(source)? {
         let mut metrics = ExpressionMetrics::default();
-        metrics.add(compute_expression_metrics(&source[..question], nesting)?);
+        metrics.add(compute_expression_metrics(
+            &source[..question],
+            nesting,
+            depth + 1,
+        )?);
         metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
         metrics.cognitive = metrics.cognitive.saturating_add(1 + nesting);
         metrics.add(compute_expression_metrics(
             &source[question + 1..colon],
             nesting.saturating_add(1),
+            depth + 1,
         )?);
         metrics.add(compute_expression_metrics(
             &source[colon + 1..],
             nesting.saturating_add(1),
+            depth + 1,
         )?);
         return Ok(metrics);
     }
-    scan_expression_without_ternary(source, nesting)
+    scan_expression_without_ternary(source, nesting, depth)
 }
 
 /// Mutable scanning state shared across the [`scan_expression_without_ternary`]
@@ -154,6 +176,7 @@ struct ScanState {
 fn scan_expression_without_ternary(
     source: &str,
     nesting: u16,
+    depth: u16,
 ) -> Result<ExpressionMetrics, ScanError> {
     let mut state = ScanState {
         metrics: ExpressionMetrics::default(),
@@ -169,7 +192,9 @@ fn scan_expression_without_ternary(
                 offset = skip_quoted(source, offset)?;
                 state.needs_rhs = false;
             }
-            b'(' | b'[' | b'{' => offset = scan_bracket_group(source, offset, nesting, &mut state)?,
+            b'(' | b'[' | b'{' => {
+                offset = scan_bracket_group(source, offset, nesting, depth, &mut state)?;
+            }
             b')' | b']' | b'}' => return Err(ScanError),
             _ if source[offset..].starts_with("?.") => {
                 state.metrics.cyclomatic = state.metrics.cyclomatic.saturating_add(1);
@@ -217,6 +242,7 @@ fn scan_bracket_group(
     source: &str,
     offset: usize,
     nesting: u16,
+    depth: u16,
     state: &mut ScanState,
 ) -> Result<usize, ScanError> {
     let close = matching_close_byte(source.as_bytes()[offset]).ok_or(ScanError)?;
@@ -224,6 +250,7 @@ fn scan_bracket_group(
     state.metrics.add(compute_expression_metrics(
         &source[offset + 1..end],
         nesting,
+        depth + 1,
     )?);
     state.last_logical_operator = None;
     state.needs_rhs = false;
@@ -398,4 +425,47 @@ fn is_identifier_start(byte: u8) -> bool {
 
 fn is_identifier_continue(byte: u8) -> bool {
     is_identifier_start(byte) || byte.is_ascii_digit()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shallow_expression_metrics_are_stable() {
+        // A normal 2-3 level nested expression scores by logical-operator and
+        // ternary count; the depth guard never fires for it.
+        let ternary = compute_expression_metrics("(a && b) ? c : (d || e)", 0, 0).unwrap();
+        assert_eq!(ternary.cyclomatic, 3);
+        assert_eq!(ternary.cognitive, 3);
+
+        let bracketed = compute_expression_metrics("(a && b)", 0, 0).unwrap();
+        assert_eq!(bracketed.cyclomatic, 1);
+        assert_eq!(bracketed.cognitive, 1);
+    }
+
+    #[test]
+    fn moderate_nesting_below_cap_scores_identically() {
+        // Ten bracket levels is far below MAX_TEMPLATE_EXPR_DEPTH, so wrapping
+        // `a && b` in redundant parens yields the same metrics as the bare
+        // expression.
+        let source = format!("{}a && b{}", "(".repeat(10), ")".repeat(10));
+        let metrics = compute_expression_metrics(&source, 0, 0).unwrap();
+        assert_eq!(metrics.cyclomatic, 1);
+        assert_eq!(metrics.cognitive, 1);
+    }
+
+    #[test]
+    fn pathologically_deep_nesting_is_dropped_without_crashing() {
+        // ~5000 nested parens previously recursed until the stack overflowed
+        // (SIGABRT under release panic = "abort"). The depth guard now bails
+        // past MAX_TEMPLATE_EXPR_DEPTH and the synthetic finding is dropped.
+        let depth = 5000;
+        let source = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
+        assert!(compute_expression_metrics(&source, 0, 0).is_err());
+
+        // The public entry point surfaces the same drop as a ScanError.
+        let mut complexity = TemplateComplexity::default();
+        assert!(complexity.add_expression(&source, 0, 0).is_err());
+    }
 }

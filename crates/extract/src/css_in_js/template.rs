@@ -36,6 +36,17 @@ use super::shared::{WRAPPER, count_newlines};
 /// dropped by its `error_recovery: true` parse.
 const INTERP_PLACEHOLDER: &str = "fallowinterp";
 
+/// Maximum template-literal nesting depth the body scanner will descend before
+/// bailing (issue #1843 follow-up). `scan_template_body` and `scan_interpolation`
+/// are mutually recursive (a nested `` ${`...`} `` re-enters `scan_template_body`
+/// one level deeper), so an adversarial `` ${`${`${...}`}`} `` overflows the stack
+/// (SIGABRT under `panic = "abort"`). Past the cap the scan returns `None`
+/// (unterminated-equivalent) and the lift is dropped gracefully. Real
+/// styled-components / emotion / linaria CSS nests only a handful of levels, so
+/// output is byte-identical for any genuine input. Deliberately a constant, not a
+/// config knob, mirroring `MAX_TAINT_BINDING_HOPS` / `MAX_BINDING_PATH_DEPTH`.
+const MAX_CSS_IN_JS_TEMPLATE_DEPTH: usize = 64;
+
 /// Matches the opening of a CSS-in-JS tagged template: a recognized tag
 /// (`styled.div`, `styled(Component)`, bare `css` / `keyframes` /
 /// `createGlobalStyle` / `injectGlobal`) immediately followed by a backtick. The
@@ -67,11 +78,20 @@ pub fn css_in_js_virtual_stylesheet(source: &str) -> Option<String> {
     let mut current_line: usize = 1;
     let mut found = false;
     let mut search_from = 0;
+    // Incremental source-line cursor (issue #1843 follow-up). `body_start`
+    // advances monotonically across matches (the regex is scanned left-to-right
+    // and `search_from` only moves forward), so the block line is the running
+    // count plus the newline delta since the last block, instead of rescanning
+    // `source[..body_start]` from the start every iteration (the old
+    // O(matches * source-len) cost). Byte-identical: `last_line` always equals
+    // `1 + count_newlines(&source[..last_offset])`.
+    let mut last_offset: usize = 0;
+    let mut last_line: usize = 1;
 
     while let Some(m) = CSS_IN_JS_TAG_RE.find_at(source, search_from) {
         // The regex match ends at the opening backtick (its last byte).
         let backtick = m.end() - 1;
-        let Some((body, after)) = scan_template_body(bytes, backtick) else {
+        let Some((body, after)) = scan_template_body(bytes, backtick, 0) else {
             // Unterminated template; stop scanning (the rest is malformed).
             break;
         };
@@ -79,7 +99,9 @@ pub fn css_in_js_virtual_stylesheet(source: &str) -> Option<String> {
         // Blank-line-pad to the template body's real start line, so a metric on
         // line N of the lifted sheet maps to line N of the source.
         let body_start = backtick + 1;
-        let block_line = 1 + count_newlines(&source[..body_start]);
+        last_line += count_newlines(&source[last_offset..body_start]);
+        last_offset = body_start;
+        let block_line = last_line;
         while current_line < block_line {
             out.push('\n');
             current_line += 1;
@@ -107,7 +129,13 @@ pub fn css_in_js_virtual_stylesheet(source: &str) -> Option<String> {
 /// text with every top-level `${...}` interpolation replaced by the placeholder
 /// (newline count preserved), plus the index immediately after the closing
 /// backtick. Returns `None` if the template is unterminated.
-fn scan_template_body(bytes: &[u8], open: usize) -> Option<(String, usize)> {
+fn scan_template_body(bytes: &[u8], open: usize, depth: usize) -> Option<(String, usize)> {
+    // Bounded-work depth cap (issue #1843 follow-up): a template nested past
+    // `MAX_CSS_IN_JS_TEMPLATE_DEPTH` levels bails as if unterminated rather than
+    // recursing further and overflowing the stack. Byte work stays linear.
+    if depth > MAX_CSS_IN_JS_TEMPLATE_DEPTH {
+        return None;
+    }
     // The body is accumulated as raw bytes and converted to a `String` at the end.
     // Every static byte (including the continuation bytes of a multi-byte UTF-8
     // char) is copied verbatim and contiguously, and only ASCII bytes (the
@@ -135,7 +163,7 @@ fn scan_template_body(bytes: &[u8], open: usize) -> Option<(String, usize)> {
             }
             b'`' => return Some((String::from_utf8(out).unwrap_or_default(), i + 1)),
             b'$' if i + 1 < bytes.len() && bytes[i + 1] == b'{' => {
-                let interp_end = scan_interpolation(bytes, i + 2)?;
+                let interp_end = scan_interpolation(bytes, i + 2, depth)?;
                 // The span is bounded by ASCII `$` and the byte after `}`, so the
                 // sub-slice is always valid UTF-8. Count via the str helper to
                 // preserve newlines that lived inside nested templates/strings too.
@@ -158,26 +186,27 @@ fn scan_template_body(bytes: &[u8], open: usize) -> Option<(String, usize)> {
 /// Returns the index immediately after the matching `}`. Handles nested braces,
 /// nested template literals (which may carry their own `${}`), and string
 /// literals so a `}` inside a string or nested template does not close early.
-fn scan_interpolation(bytes: &[u8], start: usize) -> Option<usize> {
-    let mut depth: usize = 1;
+fn scan_interpolation(bytes: &[u8], start: usize, template_depth: usize) -> Option<usize> {
+    let mut brace_depth: usize = 1;
     let mut i = start;
     while i < bytes.len() {
         match bytes[i] {
             b'{' => {
-                depth += 1;
+                brace_depth += 1;
                 i += 1;
             }
             b'}' => {
-                depth -= 1;
+                brace_depth -= 1;
                 i += 1;
-                if depth == 0 {
+                if brace_depth == 0 {
                     return Some(i);
                 }
             }
             b'`' => {
                 // Nested template literal: skip it wholesale (recurses for its
-                // own interpolations).
-                let (_, after) = scan_template_body(bytes, i)?;
+                // own interpolations) one template level deeper so the shared
+                // depth cap in `scan_template_body` bounds the mutual recursion.
+                let (_, after) = scan_template_body(bytes, i, template_depth + 1)?;
                 i = after;
             }
             b'\'' | b'"' => {
@@ -335,5 +364,56 @@ mod tests {
             vcss.contains("border"),
             "outer template extent must include the post-interpolation decl: {vcss:?}"
         );
+    }
+
+    #[test]
+    fn deeply_nested_template_does_not_overflow_stack() {
+        // Issue #1843 follow-up (FIX A): scan_template_body <-> scan_interpolation
+        // are mutually recursive, so a pathologically nested `${`${`...`}`}` must
+        // hit MAX_CSS_IN_JS_TEMPLATE_DEPTH and bail (unterminated-equivalent)
+        // rather than recursing per input level and overflowing the stack
+        // (SIGABRT under panic=abort). Far past the cap; without it this recursion
+        // depth would blow the stack.
+        let levels = 50_000;
+        let mut src = String::from("const T = styled.div`");
+        for _ in 0..levels {
+            src.push_str("${`");
+        }
+        src.push_str("color: red;");
+        for _ in 0..levels {
+            src.push_str("`}");
+        }
+        src.push_str("`;\n");
+        // Past-cap bail drops the whole lift gracefully (no panic, no overflow).
+        assert!(css_in_js_virtual_stylesheet(&src).is_none());
+    }
+
+    #[test]
+    fn multi_template_block_lines_map_back_to_source() {
+        // Issue #1843 follow-up (FIX B): the incremental line cursor must yield
+        // the SAME block line numbers as a from-scratch newline count for EVERY
+        // template in a multi-template file, not just the first.
+        let src = "import styled from 'styled-components';\n\
+                   \n\
+                   const A = styled.div`\n\
+                   color: red;\n\
+                   `;\n\
+                   \n\
+                   const B = styled.span`\n\
+                   margin: 0;\n\
+                   `;\n\
+                   \n\
+                   const C = styled.p`\n\
+                   padding: 4px;\n\
+                   `;\n";
+        let vcss = css_in_js_virtual_stylesheet(src).expect("has templates");
+        for needle in ["color: red", "margin: 0", "padding: 4px"] {
+            let decl = needle.split(':').next().unwrap();
+            let vcss_pos = vcss.find(decl).expect("decl present in vcss");
+            let vcss_line = 1 + vcss[..vcss_pos].bytes().filter(|&b| b == b'\n').count();
+            let src_pos = src.find(needle).unwrap();
+            let src_line = 1 + src[..src_pos].bytes().filter(|&b| b == b'\n').count();
+            assert_eq!(vcss_line, src_line, "decl {needle:?} vcss={vcss:?}");
+        }
     }
 }

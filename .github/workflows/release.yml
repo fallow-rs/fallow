@@ -474,88 +474,14 @@ jobs:
       # on the first release after any workflow edit (v3.4.2).
 
   # The Dockerfile pins ARG FALLOW_VERSION plus two per-arch sha256 digests by
-  # hand. Nothing kept them in sync with releases: the pin sat on 2.94.0 for
-  # 13 releases until #1805 fixed it manually. This job closes that gap by
-  # rewriting the pins from the assets `release` just published and opening a
-  # PR, every release, automatically. Refs #1817.
-  #
-  # The digests cannot be produced earlier (e.g. as part of the release
-  # commit itself): they depend on the musl binaries the `build` matrix job
-  # compiles and `release` uploads, both of which only exist after the tag
-  # push that triggers this whole workflow. A follow-up job is the only sound
-  # design.
-  #
-  # No other job `needs` this one, intentionally: a Dockerfile refactor that
-  # trips one of update-dockerfile-pins.mjs's guards (see that file) must
-  # never block npm/VS Code publishing.
-  docker-lockstep:
-    name: Docker lockstep
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      # contents: write pushes the docker-lockstep/vX.Y.Z branch (via an
-      # explicit token URL below, not persisted checkout credentials).
-      # pull-requests: write opens the PR against it.
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: main
-          persist-credentials: false
-
-      - name: Compute release version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-
-      - name: Download published assets and rewrite Dockerfile pins
-        env:
-          # Hashes the exact bytes users' `docker build` fetches from the
-          # release, catching upload corruption as well as a stale pin.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
-            --pattern fallow-linux-x64-musl --pattern fallow-linux-arm64-musl \
-            --dir /tmp/docker-lockstep-assets
-          X64_SHA="$(sha256sum /tmp/docker-lockstep-assets/fallow-linux-x64-musl | cut -d ' ' -f1)"
-          ARM64_SHA="$(sha256sum /tmp/docker-lockstep-assets/fallow-linux-arm64-musl | cut -d ' ' -f1)"
-          node .github/scripts/update-dockerfile-pins.mjs "${VERSION}" "${X64_SHA}" "${ARM64_SHA}"
-
-      - name: Sanity-build the amd64 image
-        # arm64 digest correctness is already proven by hashing the published
-        # asset above; this also re-runs the Dockerfile's own `sha256sum -c`,
-        # so a corrupted pin fails the build here rather than shipping.
-        run: |
-          docker build -t fallow:docker-lockstep-check .
-          docker run --rm fallow:docker-lockstep-check --version | grep -qF "${VERSION}"
-
-      - name: Open pull request with the refreshed pins
-        env:
-          # A PR opened with the default GITHUB_TOKEN triggers no
-          # `pull_request` workflows (a GitHub restriction), so it needs a
-          # manual close/reopen, a label, or admin squash-merge to satisfy
-          # fallow-rs's required checks. Configuring a fine-grained PAT or
-          # GitHub App token in LOCKSTEP_PR_TOKEN makes the PR trigger CI
-          # like any other; this is a maintainer config decision, not a code
-          # change.
-          GH_TOKEN: ${{ secrets.LOCKSTEP_PR_TOKEN || secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          BRANCH="docker-lockstep/v${VERSION}"
-          git checkout -b "${BRANCH}"
-          git add Dockerfile
-          git commit -m "chore(docker): pin FALLOW_VERSION ${VERSION} with refreshed checksums"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
-            "HEAD:refs/heads/${BRANCH}" --force
-
-          BODY="Automated Dockerfile lockstep for the v${VERSION} release: refreshes ARG FALLOW_VERSION and both per-arch sha256 pins from the just-published release assets. Refs #1817."
-          if ! gh pr create --repo "${GITHUB_REPOSITORY}" --base main --head "${BRANCH}" \
-            --title "chore(docker): pin FALLOW_VERSION ${VERSION} with refreshed checksums" \
-            --body "${BODY}"; then
-            echo "a pull request for ${BRANCH} may already exist; verifying" >&2
-            gh pr view "${BRANCH}" --repo "${GITHUB_REPOSITORY}"
-          fi
+  # hand. These are refreshed by the maintainer's release flow (fallow-release
+  # skill step 13), NOT from here: like the crates/napi lockfile catch-up
+  # (step 12) and the rolling v1/v3 tags (step 8b), the pin depends on the musl
+  # binaries the `build` matrix compiles and `release` uploads, which only exist
+  # after the publish this workflow performs. Step 13 downloads those assets,
+  # re-hashes them, runs .github/scripts/update-dockerfile-pins.mjs, and pushes
+  # the `chore(docker): pin ...` commit directly to main. The `Docker` job in
+  # ci.yml re-verifies the pin end-to-end on that commit. Refs #1817.
 
   # Belt-and-suspenders generated contract drift check before either privileged
   # publish job runs. PR CI runs `npm run generate:contracts:check` on every relevant

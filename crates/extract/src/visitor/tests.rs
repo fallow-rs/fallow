@@ -8982,7 +8982,6 @@ fn binding_pattern_array_destructure_second_element_name_is_extracted() {
     // skips the hole and names `pkg` via `binding_pattern_value_name` for
     // ArrayPattern. The for-of binding is only used when the variable flows
     // into a `require.resolve(pkg + '/package.json')` inside the loop body.
-    // Here we just verify the loop body and the require call are parsed.
     let info = parse(
         r"
         const pkgTable = { react: 'react', lodash: 'lodash' }

@@ -356,6 +356,10 @@ pub(super) fn build_parent_to_children(
     indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut parent_to_children: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    // O(1) dedup across the whole build: a `contains` scan of the growing child
+    // Vec is O(children^2) for a widely-extended base (issue #1843 follow-up).
+    // Keyed on (parent key, child key); the Vec insertion order is unchanged.
+    let mut seen_pairs: FxHashSet<(ExportKey, ExportKey)> = FxHashSet::default();
 
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
@@ -369,9 +373,11 @@ pub(super) fn build_parent_to_children(
 
                 for parent_key in parent_keys {
                     for resolved_parent_key in export_key_with_origins(graph, parent_key) {
-                        let children = parent_to_children.entry(resolved_parent_key).or_default();
-                        if !children.contains(&child_key) {
-                            children.push(child_key.clone());
+                        if seen_pairs.insert((resolved_parent_key.clone(), child_key.clone())) {
+                            parent_to_children
+                                .entry(resolved_parent_key)
+                                .or_default()
+                                .push(child_key.clone());
                         }
                     }
                 }
@@ -477,6 +483,11 @@ pub(super) fn build_interface_to_implementers(
     indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    // O(1) dedup across the whole build: a `contains` scan of the growing
+    // implementer Vec is O(implementers^2) for a widely-implemented interface
+    // (issue #1843 follow-up). Keyed on (interface key, implementer key); the Vec
+    // insertion order is unchanged.
+    let mut seen_pairs: FxHashSet<(ExportKey, ExportKey)> = FxHashSet::default();
     for resolved in resolved_modules {
         let Some(class_heritage) = class_heritage_by_file.get(&resolved.file_id) else {
             continue;
@@ -498,11 +509,13 @@ pub(super) fn build_interface_to_implementers(
                 };
                 for interface_key in interface_keys {
                     for resolved_interface_key in export_key_with_origins(graph, interface_key) {
-                        let implementers = interface_to_implementers
-                            .entry(resolved_interface_key)
-                            .or_default();
-                        if !implementers.contains(&implementer_key) {
-                            implementers.push(implementer_key.clone());
+                        if seen_pairs
+                            .insert((resolved_interface_key.clone(), implementer_key.clone()))
+                        {
+                            interface_to_implementers
+                                .entry(resolved_interface_key)
+                                .or_default()
+                                .push(implementer_key.clone());
                         }
                     }
                 }

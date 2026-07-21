@@ -393,6 +393,8 @@ mod tests {
                 super_class: Some("Base".to_string()),
                 implements: Vec::new(),
                 instance_bindings: Vec::new(),
+                super_class_type_args: Vec::new(),
+                generic_instance_bindings: Vec::new(),
             }],
             ..empty_module()
         };

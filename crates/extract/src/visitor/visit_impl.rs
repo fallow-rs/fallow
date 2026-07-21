@@ -23,11 +23,12 @@ use crate::html::is_remote_url;
 
 use super::helpers::{
     array_element_type_from_type, extract_angular_component_metadata,
-    extract_angular_inputs_outputs, extract_angular_signal_query, extract_class_members,
-    extract_concat_parts, extract_custom_element_tag_reference, extract_custom_elements_define,
+    extract_angular_inputs_outputs, extract_angular_signal_query,
+    extract_class_generic_instance_bindings, extract_class_members, extract_concat_parts,
+    extract_custom_element_tag_reference, extract_custom_elements_define,
     extract_implemented_interface_names, extract_nested_type_bindings,
-    extract_query_list_element_type, extract_super_class_name, extract_type_annotation_name,
-    has_angular_class_decorator, has_angular_plural_query_decorator,
+    extract_query_list_element_type, extract_super_class_name, extract_super_class_type_args,
+    extract_type_annotation_name, has_angular_class_decorator, has_angular_plural_query_decorator,
     infer_array_binding_element_type, is_meta_url_arg, lit_custom_element_decorator,
     lit_custom_element_tag, regex_pattern_to_suffix, return_type_element_name,
     ts_import_type_qualifier_root,
@@ -115,6 +116,19 @@ const ITERABLE_ELEMENT_CALLBACK_METHODS: &[&str] = &[
 
 const ROUTE_LOADER_DATA_SOURCES: &[&str] =
     &["react-router", "react-router-dom", "@remix-run/react"];
+
+/// Per-module breadth cap on recorded factory-return candidates (issue #1843
+/// follow-up): the companion to `MAX_TAINTED_BINDINGS_PER_MODULE` for the
+/// `const local = callee(...)` factory-return channel. `factory_return_candidates`
+/// grows once per bare-callee assignment in the module and is resolved by an
+/// O(n) finalize pass, so a dense machine-generated bundle that emits tens of
+/// thousands of such assignments drove the working set (and the finalize scan)
+/// super-linearly. Past the cap no NEW candidate is recorded, degrading an
+/// over-cap file to the pre-existing module-level reachability instead of an
+/// arg-level factory-return claim, matching the false-negative-preferring
+/// direction of the depth/breadth taint caps. Deliberately a constant, not a
+/// config knob: real hand-written modules stay far below it.
+const MAX_FACTORY_RETURN_CANDIDATES: usize = 4096;
 
 fn is_css_module_import_source(source: &str) -> bool {
     let path = source.split(['?', '#']).next().unwrap_or(source);
@@ -243,7 +257,13 @@ impl ModuleInfoExtractor {
         };
 
         match &declarator.id {
-            BindingPattern::BindingIdentifier(id) => {
+            // Per-module breadth cap (issue #1843 follow-up): the guard stops
+            // recording once at capacity so a pathological bundle cannot grow the
+            // candidate set (and its finalize scan) without bound. At capacity the
+            // arm falls through to the no-op `_ =>` arm, identical to skipping.
+            BindingPattern::BindingIdentifier(id)
+                if self.factory_return_candidates.len() < MAX_FACTORY_RETURN_CANDIDATES =>
+            {
                 self.factory_return_candidates
                     .push(super::FactoryReturnCandidate {
                         local_name: id.name.to_string(),
@@ -775,10 +795,14 @@ impl ModuleInfoExtractor {
             );
             self.record_local_class_export(
                 id.name.to_string(),
-                extract_class_members(class, is_angular),
-                extract_super_class_name(class),
-                extract_implemented_interface_names(class),
-                instance_bindings,
+                super::LocalClassExportInfo {
+                    members: extract_class_members(class, is_angular),
+                    super_class: extract_super_class_name(class),
+                    implemented_interfaces: extract_implemented_interface_names(class),
+                    instance_bindings,
+                    super_class_type_args: extract_super_class_type_args(class),
+                    generic_instance_bindings: extract_class_generic_instance_bindings(class),
+                },
             );
             let refs = Self::collect_class_signature_refs(class);
             self.record_local_signature_refs(&id.name, refs);
@@ -2242,11 +2266,22 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             || !implemented_interfaces.is_empty()
             || !instance_bindings.is_empty()
         {
+            let (super_class_type_args, generic_instance_bindings) =
+                if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &decl.declaration {
+                    (
+                        extract_super_class_type_args(class),
+                        extract_class_generic_instance_bindings(class),
+                    )
+                } else {
+                    (vec![], vec![])
+                };
             self.class_heritage.push(ClassHeritageInfo {
                 export_name: "default".to_string(),
                 super_class: super_class.clone(),
                 implements: implemented_interfaces,
                 instance_bindings,
+                super_class_type_args,
+                generic_instance_bindings,
             });
         }
 

@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-api"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-benchmarks"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "criterion2",
  "fallow-api",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "base64",
  "bitcode",
@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "dunce",
  "fallow-types",
@@ -1105,7 +1105,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "criterion2",
  "dhat",
@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-engine"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "bitcode",
  "colored 3.1.1",
@@ -1190,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "bitcode",
  "fallow-cov-protocol",
@@ -1213,7 +1213,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -1235,7 +1235,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-license"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "dunce",
  "fallow-api",
@@ -1265,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mcp"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "fallow-api",
  "fallow-types",
@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-multicall"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "fallow-cli",
  "fallow-lsp",
@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-node"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "fallow-api",
  "fallow-types",
@@ -1306,7 +1306,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-output"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1319,7 +1319,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1330,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "bitcode",
  "oxc_span",
@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-v8-coverage"
-version = "3.6.0"
+version = "3.7.1"
 dependencies = [
  "proptest",
  "serde",

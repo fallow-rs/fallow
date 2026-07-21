@@ -808,12 +808,33 @@ use crate::MemberKind;
 /// Warm 234 caches lack the field and the fact, leaving those methods falsely
 /// reported as unused.
 ///
-/// Bumped to 236: nested object-binding target extraction now caps binding-path
-/// depth at `MAX_BINDING_PATH_DEPTH` (8) to bound a cyclic-candidate blowup.
-/// The cap also drops paths deeper than 8 in ordinary acyclic deeply-nested
-/// object literals, so warm 235 caches can retain `member_accesses` entries for
-/// paths a fresh parse under this cap no longer produces; invalidate them.
-pub(super) const CACHE_VERSION: u32 = 236;
+/// Bumped to 236 (issue #1843): tainted-binding recording now caps the
+/// per-module set at `MAX_TAINTED_BINDINGS_PER_MODULE` (4096) to bound a
+/// super-linear memory blowup on dense minified bundles. A file that previously
+/// recorded more than the cap now persists a truncated `tainted_bindings`
+/// vector, so warm 235 caches can carry over-cap entries; invalidate them.
+///
+/// Bumped to 237 (issue #1843 follow-up): object-binding and factory-return
+/// candidate recording now cap the per-module set at
+/// `MAX_OBJECT_BINDING_CANDIDATES` / `MAX_FACTORY_RETURN_CANDIDATES` (4096),
+/// bounding the object-binding resolution fixed-point the same way the taint cap
+/// bounds its accumulator. A file exceeding a cap now persists fewer candidates,
+/// so its resolved `member_accesses` can change; warm 236 caches can carry
+/// over-cap entries; invalidate them.
+///
+/// Bumped to 238 (issue #1843 follow-up): the object-binding resolution
+/// fixed-point is now additionally bounded by a `binding_target_names` size cap
+/// (8192) and a pass cap (8), because a real minified bundle full of nested
+/// object maps drove it to tens of seconds even under the candidate cap. A file
+/// that hits either bound now resolves fewer nested bindings, so its
+/// `member_accesses` can change; warm 237 caches can carry the fuller set;
+/// invalidate them.
+///
+/// Bumped to 239 (issue #1910): `ClassHeritageInfo` gains `super_class_type_args`
+/// and `generic_instance_bindings`, so a method reached through an inherited
+/// base-class property (generic or not) resolves to its owning class instead of
+/// being falsely flagged. Warm 238 caches lack the new fields; invalidate them.
+pub(super) const CACHE_VERSION: u32 = 239;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -893,7 +914,7 @@ assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
-assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 144);
 assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
 assert_cached_type_size!(fallow_types::extract::TypeMemberTypeEntry, 72);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);

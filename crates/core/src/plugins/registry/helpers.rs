@@ -305,6 +305,18 @@ impl ConfigCandidateIndex {
             .any(|(dir, names)| dir.starts_with(root) && names.contains(name))
     }
 
+    /// Whether any directory at or below `root` contains a file whose name
+    /// matches `matcher`, per the files the discovery walk collected. The glob
+    /// analogue of [`Self::any_descendant_contains`], used to activate a plugin
+    /// from a wildcard config filename (e.g. `tsconfig.*.json`) nested anywhere
+    /// under `root` without a recursive filesystem walk.
+    #[must_use]
+    pub fn any_descendant_matches(&self, root: &Path, matcher: &globset::GlobMatcher) -> bool {
+        self.dirs.iter().any(|(dir, names)| {
+            dir.starts_with(root) && names.iter().any(|name| matcher.is_match(Path::new(name)))
+        })
+    }
+
     fn glob_matches_in_dir(&self, dir: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
         self.dirs.get(dir).map_or_else(Vec::new, |names| {
             names

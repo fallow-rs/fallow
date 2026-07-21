@@ -2,8 +2,9 @@
 // and its two per-arch sha256 pins (`fallow-linux-x64-musl`,
 // `fallow-linux-arm64-musl`) to match a just-published release. The pins were
 // hand-maintained starting at 2.94.0 (commit 1a8e7ac8d), drifted through 13
-// releases, and were fixed manually by #1805. This script is the release.yml
-// `docker-lockstep` job's rewrite step. Refs #1817.
+// releases, and were fixed manually by #1805. This script is the rewrite step
+// invoked by the maintainer's release flow (fallow-release skill step 13),
+// mirroring the crates/napi lockfile catch-up (step 12). Refs #1817.
 //
 // Every guard below fails loud (non-zero exit, file left untouched) instead
 // of silently no-oping, so a future Dockerfile refactor (renamed ARG,
