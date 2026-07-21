@@ -29,7 +29,7 @@
     "@commitlint/cli": "21.2.1",
     "@commitlint/config-conventional": "21.2.0",
     "@tanstack/intent": "0.3.5",
-    "oxfmt": "0.58.0",
+    "oxfmt": "0.59.0",
     "oxlint": "1.73.0"
   }
 }
