@@ -54,15 +54,16 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 
 pub use fallow_types::extract::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
-    ClassHeritageInfo, DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern,
-    ExportInfo, ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact,
-    FactoryFnWholeObjectFact, FactoryReturnExport, FactoryReturnObjectPropertyAccessFact,
-    FactoryReturnObjectShapeExport, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
-    ImportInfo, ImportedName, InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess,
-    MemberInfo, MemberKind, ModuleInfo, ParseResult, PlaywrightFixtureAliasFact,
-    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, SourceReadFailure,
-    TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag, compute_line_offsets,
+    ClassHeritageInfo, ClassThisMemberAccessFact, ClassThisWholeObjectUseFact,
+    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
+    ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
+    FactoryReturnExport, FactoryReturnObjectPropertyAccessFact, FactoryReturnObjectShapeExport,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
+    InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind,
+    ModuleInfo, ParseResult, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
+    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, PublicSignatureTypeReference,
+    ReExportInfo, RequireCallInfo, SemanticFact, SourceReadFailure, TypeMemberTypeEntry,
+    TypedPropertyMemberAccessFact, VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{

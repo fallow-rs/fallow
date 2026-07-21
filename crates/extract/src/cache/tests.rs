@@ -1140,6 +1140,15 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 export_name: "service".to_string(),
                 target_name: "Service".to_string(),
             }),
+            SemanticFact::ClassThisMemberAccess(ClassThisMemberAccessFact {
+                class_local_name: "Service".to_string(),
+                object: "this.client".to_string(),
+                member: "run".to_string(),
+            }),
+            SemanticFact::ClassThisWholeObjectUse(ClassThisWholeObjectUseFact {
+                class_local_name: "Service".to_string(),
+                object: "this.client".to_string(),
+            }),
         ]
         .into(),
         whole_object_uses: Box::default(),
@@ -1155,7 +1164,15 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
-        class_heritage: vec![],
+        class_heritage: vec![ClassHeritageInfo {
+            export_name: "Service".to_string(),
+            super_class: Some("BaseService".to_string()),
+            implements: Vec::new(),
+            type_parameters: vec!["TClient".to_string()],
+            instance_bindings: Vec::new(),
+            super_class_type_args: vec!["TClient".to_string()],
+            generic_instance_bindings: Vec::new(),
+        }],
         exported_factory_returns: Box::default(),
         exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
@@ -1271,8 +1288,18 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 export_name: "service".to_string(),
                 target_name: "Service".to_string(),
             }),
+            SemanticFact::ClassThisMemberAccess(ClassThisMemberAccessFact {
+                class_local_name: "Service".to_string(),
+                object: "this.client".to_string(),
+                member: "run".to_string(),
+            }),
+            SemanticFact::ClassThisWholeObjectUse(ClassThisWholeObjectUseFact {
+                class_local_name: "Service".to_string(),
+                object: "this.client".to_string(),
+            }),
         ][..]
     );
+    assert_eq!(restored.class_heritage, module.class_heritage);
     assert!(restored.has_cjs_exports);
 }
 

@@ -1221,6 +1221,9 @@ fn is_template_visible_script(kind: SfcKind, script: &SfcScript) -> bool {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
+    use fallow_types::extract::{
+        ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, SemanticFactView,
+    };
 
     #[test]
     fn is_sfc_file_vue() {
@@ -1524,6 +1527,40 @@ const count = ref(0);
         assert!(
             info.imports.iter().any(|i| i.source == "vue"),
             "import from <script setup> block should be extracted"
+        );
+    }
+
+    #[test]
+    fn class_this_facts_survive_sfc_script_merge() {
+        let source = r#"
+<script lang="ts">
+export class Service {
+    client!: Client;
+
+    run() {
+        this.client.execute();
+        Object.keys(this.client);
+    }
+}
+</script>
+"#;
+        let info = parse_sfc_to_module(FileId(0), Path::new("Service.vue"), source, 0, false);
+        let facts = SemanticFactView::new(&info.semantic_facts, &info.member_accesses);
+
+        assert_eq!(
+            facts.class_this_member_accesses(),
+            vec![ClassThisMemberAccessFact {
+                class_local_name: "Service".to_string(),
+                object: "this.client".to_string(),
+                member: "execute".to_string(),
+            }]
+        );
+        assert_eq!(
+            facts.class_this_whole_object_uses(),
+            vec![ClassThisWholeObjectUseFact {
+                class_local_name: "Service".to_string(),
+                object: "this.client".to_string(),
+            }]
         );
     }
 

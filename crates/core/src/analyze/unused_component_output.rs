@@ -325,6 +325,7 @@ mod tests {
                 export_name: "Foo".to_string(),
                 super_class: Some("Base".to_string()),
                 implements: Vec::new(),
+                type_parameters: Vec::new(),
                 instance_bindings: Vec::new(),
                 super_class_type_args: Vec::new(),
                 generic_instance_bindings: Vec::new(),

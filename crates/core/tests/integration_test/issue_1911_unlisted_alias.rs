@@ -22,51 +22,44 @@ fn write(path: &Path, contents: &str) {
 
 /// Reproduce the reporter's shape: `paths` live in a `tsconfig.app.json` and
 /// the analyzed package.json declares no `typescript` dependency.
-fn create_project(root: &Path) {
+fn create_project(root: &Path, project_dir: &str) {
+    let project_root = root.join(project_dir);
     write(
         &root.join("package.json"),
         r#"{ "name": "acme-app", "private": true, "type": "module" }"#,
     );
     write(
-        &root.join("tsconfig.app.json"),
+        &project_root.join("tsconfig.app.json"),
         r#"{
             "compilerOptions": { "paths": { "@acme/*": ["./src/*"] } },
             "include": ["src/**/*.ts"]
         }"#,
     );
     write(
-        &root.join("src/internal/common/request-context.ts"),
+        &project_root.join("src/internal/common/request-context.ts"),
         r"export interface RequestContext { id: string; }
            export interface RequestOptions { retries: number; }",
     );
     write(
-        &root.join("src/internal/feature-a/clients/base-client.ts"),
+        &project_root.join("src/internal/feature-a/clients/base-client.ts"),
         r#"import { RequestContext } from "@acme/internal/common/request-context";
            export class BaseClient { ctx: RequestContext | null = null; }"#,
     );
     write(
-        &root.join("src/internal/feature-b/clients/lookup-client.ts"),
+        &project_root.join("src/internal/feature-b/clients/lookup-client.ts"),
         r#"import { BaseClient } from "@acme/internal/feature-a/clients/base-client";
            import { missingHelper } from "@acme/internal/files/missing-helper";
            export class LookupClient { client = new BaseClient(); helper = missingHelper; }"#,
     );
     write(
-        &root.join("src/main.ts"),
+        &project_root.join("src/main.ts"),
         r#"import { LookupClient } from "@acme/internal/feature-b/clients/lookup-client";
            const c = new LookupClient();
            console.log(c);"#,
     );
 }
 
-#[test]
-fn issue_1911_paths_alias_not_reported_as_unlisted_dependency() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    create_project(dir.path());
-
-    let config = create_config(dir.path().to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
-
-    // 1. The alias prefix must NOT be classified as an npm package.
+fn assert_alias_resolution(results: &fallow_types::results::AnalysisResults) {
     let unlisted: Vec<&str> = results
         .unlisted_dependencies
         .iter()
@@ -77,7 +70,6 @@ fn issue_1911_paths_alias_not_reported_as_unlisted_dependency() {
         "aliased prefix @acme/internal should not be an unlisted dependency, got {unlisted:?}"
     );
 
-    // 2. The genuinely-broken alias target must reclassify as unresolved-import.
     let unresolved: Vec<&str> = results
         .unresolved_imports
         .iter()
@@ -88,7 +80,6 @@ fn issue_1911_paths_alias_not_reported_as_unlisted_dependency() {
         "broken alias target should surface as unresolved-import, got {unresolved:?}"
     );
 
-    // 3. Valid alias imports resolve internally (never surface as unresolved).
     for specifier in [
         "@acme/internal/common/request-context",
         "@acme/internal/feature-a/clients/base-client",
@@ -99,4 +90,27 @@ fn issue_1911_paths_alias_not_reported_as_unlisted_dependency() {
             "valid alias import {specifier} should resolve, got {unresolved:?}"
         );
     }
+}
+
+#[test]
+fn issue_1911_paths_alias_not_reported_as_unlisted_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    create_project(dir.path(), "");
+
+    let config = create_config(dir.path().to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_alias_resolution(&results);
+}
+
+#[test]
+fn issue_1911_nested_paths_alias_activates_in_production_without_typescript_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    create_project(dir.path(), "apps/web");
+
+    let mut config = create_config(dir.path().to_path_buf());
+    config.production = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_alias_resolution(&results);
 }

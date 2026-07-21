@@ -13,8 +13,8 @@ use fallow_types::extract::ClassHeritageInfo;
 
 use super::helpers::{
     extract_class_generic_instance_bindings, extract_class_instance_bindings,
-    extract_class_members, extract_implemented_interface_names, extract_super_class_name,
-    extract_super_class_type_args, has_angular_class_decorator,
+    extract_class_members, extract_class_type_parameter_names, extract_implemented_interface_names,
+    extract_super_class_name, extract_super_class_type_args, has_angular_class_decorator,
 };
 use super::{MemberAccess, ModuleInfoExtractor, extract_destructured_names};
 
@@ -121,6 +121,7 @@ impl ModuleInfoExtractor {
                 export_name: id.name.to_string(),
                 super_class: super_class.clone(),
                 implements: implemented_interfaces,
+                type_parameters: extract_class_type_parameter_names(class),
                 instance_bindings,
                 super_class_type_args: extract_super_class_type_args(class),
                 generic_instance_bindings: extract_class_generic_instance_bindings(class),

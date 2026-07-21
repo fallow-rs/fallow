@@ -13,13 +13,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::suppress::ParsedSuppressions;
 use crate::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
-    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
-    FactoryReturnObjectPropertyAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
-    MemberAccess, MemberInfo, MemberKind, ModuleInfo, PlaywrightFixtureAliasFact,
-    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
+    ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, DynamicCustomElementRenderFact,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
+    FactoryFnMemberAccessFact, FactoryFnWholeObjectFact, FactoryReturnObjectPropertyAccessFact,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
+    InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
     TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use fallow_types::extract::{
@@ -60,6 +60,7 @@ pub(crate) struct LocalClassExportInfo {
     pub(crate) members: Vec<MemberInfo>,
     pub(crate) super_class: Option<String>,
     pub(crate) implemented_interfaces: Vec<String>,
+    pub(crate) type_parameters: Vec<String>,
     pub(crate) instance_bindings: Vec<(String, String)>,
     pub(crate) super_class_type_args: Vec<String>,
     pub(crate) generic_instance_bindings: Vec<(String, usize)>,
@@ -841,6 +842,51 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Preserve exact enclosing-class provenance before internal `this@<id>`
+    /// qualifiers are removed for legacy consumers.
+    fn record_class_this_facts(
+        &mut self,
+        class: &oxc_ast::ast::Class<'_>,
+        scope_id: u32,
+        member_access_start: usize,
+        whole_object_start: usize,
+    ) {
+        let prefix = format!("this@{scope_id}.");
+        let class_local_name = class
+            .id
+            .as_ref()
+            .map_or_else(|| "default".to_string(), |id| id.name.to_string());
+
+        let member_facts = self.member_accesses[member_access_start..]
+            .iter()
+            .filter_map(|access| {
+                let rest = access.object.strip_prefix(&prefix)?;
+                Some(SemanticFact::ClassThisMemberAccess(
+                    ClassThisMemberAccessFact {
+                        class_local_name: class_local_name.clone(),
+                        object: format!("this.{rest}"),
+                        member: access.member.clone(),
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        self.semantic_facts.extend(member_facts);
+
+        let whole_object_facts = self.whole_object_uses[whole_object_start..]
+            .iter()
+            .filter_map(|object| {
+                let rest = object.strip_prefix(&prefix)?;
+                Some(SemanticFact::ClassThisWholeObjectUse(
+                    ClassThisWholeObjectUseFact {
+                        class_local_name: class_local_name.clone(),
+                        object: format!("this.{rest}"),
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        self.semantic_facts.extend(whole_object_facts);
+    }
+
     fn insert_class_binding_target(&mut self, binding: String, target: String) {
         self.binding_target_names
             .insert(binding, BindingTarget::Class(target));
@@ -1348,6 +1394,7 @@ impl ModuleInfoExtractor {
                     export_name,
                     super_class: local_class.super_class.clone(),
                     implements: local_class.implemented_interfaces.clone(),
+                    type_parameters: local_class.type_parameters.clone(),
                     instance_bindings: local_class.instance_bindings.clone(),
                     super_class_type_args: local_class.super_class_type_args.clone(),
                     generic_instance_bindings: local_class.generic_instance_bindings.clone(),

@@ -1261,6 +1261,21 @@ pub fn extract_super_class_type_args(class: &Class<'_>) -> Vec<String> {
         .collect()
 }
 
+/// Ordered class type-parameter names (`T`, `U` in `class C<T, U>`).
+#[must_use]
+pub fn extract_class_type_parameter_names(class: &Class<'_>) -> Vec<String> {
+    class
+        .type_parameters
+        .as_deref()
+        .map_or_else(Vec::new, |parameters| {
+            parameters
+                .params
+                .iter()
+                .map(|parameter| parameter.name.name.to_string())
+                .collect()
+        })
+}
+
 /// Bare identifier type-reference name (`DerivedClient`), or `None` for any
 /// other shape (nested generic, qualified name, union, literal).
 fn plain_type_reference_name(ty: &TSType<'_>) -> Option<String> {

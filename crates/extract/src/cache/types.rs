@@ -834,7 +834,12 @@ use crate::MemberKind;
 /// and `generic_instance_bindings`, so a method reached through an inherited
 /// base-class property (generic or not) resolves to its owning class instead of
 /// being falsely flagged. Warm 238 caches lack the new fields; invalidate them.
-pub(super) const CACHE_VERSION: u32 = 239;
+///
+/// Bumped to 240: class heritage now retains ordered type-parameter names for
+/// multi-hop generic substitution, and semantic facts retain exact enclosing
+/// class provenance for `this`-rooted typed member and whole-object access.
+/// Warm 239 caches lack both forms of extraction data; invalidate them.
+pub(super) const CACHE_VERSION: u32 = 240;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -914,7 +919,7 @@ assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
-assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 144);
+assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 168);
 assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
 assert_cached_type_size!(fallow_types::extract::TypeMemberTypeEntry, 72);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);

@@ -11,6 +11,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use rustc_hash::FxHashSet;
+
 use super::config_parser;
 use super::registry::ConfigCandidateIndex;
 use super::{Plugin, PluginResult};
@@ -60,10 +62,11 @@ impl Plugin for TypeScriptPlugin {
         &self,
         deps: &[String],
         root: &Path,
-        _discovered_files: &[PathBuf],
+        discovered_files: &[PathBuf],
         candidate_index: Option<&ConfigCandidateIndex>,
     ) -> bool {
-        self.is_enabled_with_deps(deps, root) || tsconfig_present(root, candidate_index)
+        self.is_enabled_with_deps(deps, root)
+            || tsconfig_present(root, discovered_files, candidate_index)
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
@@ -154,17 +157,21 @@ impl Plugin for TypeScriptPlugin {
 /// tsconfig files are non-source config candidates, so they never appear in the
 /// activation call's `discovered_files`; outside production mode the discovery
 /// walk's config index carries them (nested anywhere under `root`), and in
-/// production (`candidate_index` is `None`) a bounded root-level filesystem
-/// probe is the fallback, matching the root-level probe posture the
-/// dependency-gated plugins use when the index is unavailable.
-fn tsconfig_present(root: &Path, candidate_index: Option<&ConfigCandidateIndex>) -> bool {
+/// production (`candidate_index` is `None`) bounded probes cover the root and
+/// unique source ancestors, matching the config search roots used after
+/// activation without introducing a recursive filesystem walk.
+fn tsconfig_present(
+    root: &Path,
+    discovered_files: &[PathBuf],
+    candidate_index: Option<&ConfigCandidateIndex>,
+) -> bool {
     match candidate_index {
         Some(index) => {
             index.any_descendant_contains(root, OsStr::new("tsconfig.json"))
                 || tsconfig_variant_matcher()
                     .is_some_and(|matcher| index.any_descendant_matches(root, matcher))
         }
-        None => root_has_tsconfig(root),
+        None => source_ancestor_has_tsconfig(root, discovered_files),
     }
 }
 
@@ -182,17 +189,32 @@ fn tsconfig_variant_matcher() -> Option<&'static globset::GlobMatcher> {
         .as_ref()
 }
 
-/// Production-mode fallback: a `tsconfig.json` or `tsconfig.*.json` directly at
-/// the project root. Bounded to a single root directory read so a non-TypeScript
-/// project pays at most one `read_dir` during activation.
-fn root_has_tsconfig(root: &Path) -> bool {
-    if root.join("tsconfig.json").is_file() {
+/// Production-mode fallback over the root and unique directories containing or
+/// containing ancestors of discovered source files.
+fn source_ancestor_has_tsconfig(root: &Path, discovered_files: &[PathBuf]) -> bool {
+    let mut directories = FxHashSet::default();
+    directories.insert(root.to_path_buf());
+    for file in discovered_files {
+        let Some(parent) = file.parent() else {
+            continue;
+        };
+        for ancestor in parent.ancestors().take_while(|dir| dir.starts_with(root)) {
+            directories.insert(ancestor.to_path_buf());
+        }
+    }
+    directories
+        .into_iter()
+        .any(|dir| directory_has_tsconfig(&dir))
+}
+
+fn directory_has_tsconfig(directory: &Path) -> bool {
+    if directory.join("tsconfig.json").is_file() {
         return true;
     }
     let Some(matcher) = tsconfig_variant_matcher() else {
         return false;
     };
-    std::fs::read_dir(root).is_ok_and(|entries| {
+    std::fs::read_dir(directory).is_ok_and(|entries| {
         entries
             .flatten()
             .any(|entry| matcher.is_match(Path::new(&entry.file_name())))
@@ -432,6 +454,34 @@ mod tests {
         std::fs::write(tmp.path().join("tsconfig.base.json"), "{}").expect("write tsconfig");
 
         assert!(plugin.is_enabled_with_files(&[], tmp.path(), &[], None));
+    }
+
+    #[test]
+    fn activates_from_nested_tsconfig_variant_via_production_source_ancestor() {
+        let plugin = TypeScriptPlugin;
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let app = tmp.path().join("apps/web");
+        std::fs::create_dir_all(app.join("src")).expect("create source directory");
+        std::fs::write(app.join("tsconfig.app.json"), "{}").expect("write tsconfig");
+        let source = app.join("src/main.ts");
+        std::fs::write(&source, "export {};").expect("write source");
+
+        assert!(plugin.is_enabled_with_files(&[], tmp.path(), &[source], None));
+    }
+
+    #[test]
+    fn production_source_ancestor_probe_stays_bounded_to_root() {
+        let plugin = TypeScriptPlugin;
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let project = tmp.path().join("project");
+        let sibling = tmp.path().join("sibling");
+        std::fs::create_dir_all(project.join("src")).expect("create project source directory");
+        std::fs::create_dir_all(&sibling).expect("create sibling directory");
+        std::fs::write(sibling.join("tsconfig.app.json"), "{}").expect("write tsconfig");
+        let source = project.join("src/main.ts");
+        std::fs::write(&source, "export {};").expect("write source");
+
+        assert!(!plugin.is_enabled_with_files(&[], &project, &[source], None));
     }
 
     #[test]

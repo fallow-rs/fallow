@@ -1321,6 +1321,10 @@ pub struct ClassHeritageInfo {
     pub super_class: Option<String>,
     /// Interface names from the class `implements` clause.
     pub implements: Vec<String>,
+    /// Ordered class type-parameter names used to compose concrete arguments
+    /// through multi-hop inheritance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub type_parameters: Vec<String>,
     /// Typed instance bindings used to resolve member-access chains in external templates.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instance_bindings: Vec<(String, String)>,
@@ -1595,6 +1599,12 @@ pub enum SemanticFact {
     /// ui.orders.member`). Appended after `FactoryFnWholeObject`, never inserted
     /// (bitcode encodes by ordinal). See issue #1858.
     FactoryReturnObjectPropertyAccess(FactoryReturnObjectPropertyAccessFact),
+    /// A `this.<field>.<member>` access tied to its exact enclosing class.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    ClassThisMemberAccess(ClassThisMemberAccessFact),
+    /// A whole-object use of `this.<field>...` tied to its exact enclosing class.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    ClassThisWholeObjectUse(ClassThisWholeObjectUseFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -1706,6 +1716,20 @@ impl<'a> SemanticFactView<'a> {
         self.member_accesses.iter()
     }
 
+    /// Collect class-scoped `this` member-access facts.
+    pub fn class_this_member_accesses(self) -> Vec<ClassThisMemberAccessFact> {
+        class_this_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect class-scoped `this` whole-object-use facts.
+    pub fn class_this_whole_object_uses(self) -> Vec<ClassThisWholeObjectUseFact> {
+        class_this_whole_object_use_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
     /// Collect instance-export binding facts.
     pub fn instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
         instance_export_binding_facts(self.semantic_facts)
@@ -1804,6 +1828,30 @@ fn instance_export_binding_facts(
 ) -> impl Iterator<Item = &InstanceExportBindingFact> {
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::InstanceExportBinding(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn class_this_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &ClassThisMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::ClassThisMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn class_this_whole_object_use_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &ClassThisWholeObjectUseFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::ClassThisWholeObjectUse(access) = fact {
             Some(access)
         } else {
             None
@@ -2157,6 +2205,28 @@ pub struct InstanceExportBindingFact {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DynamicCustomElementRenderFact;
+
+/// A `this`-rooted member access with exact enclosing-class provenance.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ClassThisMemberAccessFact {
+    /// Enclosing class local name, or `default` for an anonymous default class.
+    pub class_local_name: String,
+    /// Dotted receiver spelling beginning with `this.`.
+    pub object: String,
+    /// Terminal member being accessed.
+    pub member: String,
+}
+
+/// A whole-object use of a `this`-rooted chain with enclosing-class provenance.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ClassThisWholeObjectUseFact {
+    /// Enclosing class local name, or `default` for an anonymous default class.
+    pub class_local_name: String,
+    /// Dotted receiver spelling beginning with `this.`.
+    pub object: String,
+}
 
 /// A statically flattenable callee path invoked in a module (e.g. `execSync`,
 /// `child_process.exec`, `console.log`). One entry per unique `callee_path`
@@ -3111,6 +3181,7 @@ mod tests {
                 export_name: "Child".to_string(),
                 super_class: Some("Parent".to_string()),
                 implements: vec!["Contract".to_string()],
+                type_parameters: Vec::new(),
                 instance_bindings: Vec::new(),
                 super_class_type_args: Vec::new(),
                 generic_instance_bindings: Vec::new(),

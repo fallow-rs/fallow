@@ -24,14 +24,14 @@ use crate::html::is_remote_url;
 use super::helpers::{
     array_element_type_from_type, extract_angular_component_metadata,
     extract_angular_inputs_outputs, extract_angular_signal_query,
-    extract_class_generic_instance_bindings, extract_class_members, extract_concat_parts,
-    extract_custom_element_tag_reference, extract_custom_elements_define,
-    extract_implemented_interface_names, extract_nested_type_bindings,
-    extract_query_list_element_type, extract_super_class_name, extract_super_class_type_args,
-    extract_type_annotation_name, has_angular_class_decorator, has_angular_plural_query_decorator,
-    infer_array_binding_element_type, is_meta_url_arg, lit_custom_element_decorator,
-    lit_custom_element_tag, regex_pattern_to_suffix, return_type_element_name,
-    ts_import_type_qualifier_root,
+    extract_class_generic_instance_bindings, extract_class_members,
+    extract_class_type_parameter_names, extract_concat_parts, extract_custom_element_tag_reference,
+    extract_custom_elements_define, extract_implemented_interface_names,
+    extract_nested_type_bindings, extract_query_list_element_type, extract_super_class_name,
+    extract_super_class_type_args, extract_type_annotation_name, has_angular_class_decorator,
+    has_angular_plural_query_decorator, infer_array_binding_element_type, is_meta_url_arg,
+    lit_custom_element_decorator, lit_custom_element_tag, regex_pattern_to_suffix,
+    return_type_element_name, ts_import_type_qualifier_root,
 };
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
@@ -799,6 +799,7 @@ impl ModuleInfoExtractor {
                     members: extract_class_members(class, is_angular),
                     super_class: extract_super_class_name(class),
                     implemented_interfaces: extract_implemented_interface_names(class),
+                    type_parameters: extract_class_type_parameter_names(class),
                     instance_bindings,
                     super_class_type_args: extract_super_class_type_args(class),
                     generic_instance_bindings: extract_class_generic_instance_bindings(class),
@@ -2266,19 +2267,21 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             || !implemented_interfaces.is_empty()
             || !instance_bindings.is_empty()
         {
-            let (super_class_type_args, generic_instance_bindings) =
+            let (type_parameters, super_class_type_args, generic_instance_bindings) =
                 if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &decl.declaration {
                     (
+                        extract_class_type_parameter_names(class),
                         extract_super_class_type_args(class),
                         extract_class_generic_instance_bindings(class),
                     )
                 } else {
-                    (vec![], vec![])
+                    (vec![], vec![], vec![])
                 };
             self.class_heritage.push(ClassHeritageInfo {
                 export_name: "default".to_string(),
                 super_class: super_class.clone(),
                 implements: implemented_interfaces,
+                type_parameters,
                 instance_bindings,
                 super_class_type_args,
                 generic_instance_bindings,
@@ -2794,6 +2797,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_class(&mut self, class: &Class<'a>) {
+        let member_access_start = self.member_accesses.len();
+        let whole_object_start = self.whole_object_uses.len();
         self.record_lit_custom_element(class);
 
         if let Some(meta) = extract_angular_component_metadata(class) {
@@ -2812,8 +2817,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // pushes its own id, so `this` inside the inner body binds to the inner
         // class.
         self.class_scope_counter += 1;
-        self.class_scope_stack.push(self.class_scope_counter);
+        let class_scope_id = self.class_scope_counter;
+        self.class_scope_stack.push(class_scope_id);
         walk::walk_class(self, class);
+        self.record_class_this_facts(
+            class,
+            class_scope_id,
+            member_access_start,
+            whole_object_start,
+        );
         self.class_scope_stack.pop();
         self.class_type_param_constraints.pop();
         self.class_super_stack.pop();

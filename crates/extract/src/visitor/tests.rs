@@ -6437,12 +6437,149 @@ fn generic_constructor_param_resolved_via_constraint() {
     assert!(
         info.class_heritage.iter().any(|heritage| {
             heritage.export_name == "BaseService"
+                && heritage.type_parameters == ["TClient"]
                 && heritage
                     .instance_bindings
                     .contains(&("client".to_string(), "BaseClient".to_string()))
         }),
         "constructor param typed as a generic parameter should resolve to its constraint, found: {:?}",
         info.class_heritage
+    );
+}
+
+#[test]
+fn class_this_facts_cover_named_declaration_forms() {
+    let info = parse(
+        r"
+        import { Client } from './client';
+
+        class Separate {
+            constructor(public client: Client) {}
+            run() { return this.client.separate(); }
+        }
+        export { Separate };
+
+        export class NamedExport {
+            constructor(public client: Client) {}
+            run() { return this.client.named(); }
+        }
+
+        export default class NamedDefault {
+            constructor(public client: Client) {}
+            run() { return this.client.namedDefault(); }
+        }
+        ",
+    );
+
+    let facts = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::ClassThisMemberAccess(access) = fact {
+                Some((
+                    access.class_local_name.as_str(),
+                    access.object.as_str(),
+                    access.member.as_str(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for expected in [
+        ("Separate", "this.client", "separate"),
+        ("NamedExport", "this.client", "named"),
+        ("NamedDefault", "this.client", "namedDefault"),
+    ] {
+        assert!(
+            facts.contains(&expected),
+            "missing {expected:?} in {facts:?}"
+        );
+    }
+}
+
+#[test]
+fn class_this_facts_cover_anonymous_default_and_whole_object_use() {
+    let info = parse(
+        r"
+        import { Client } from './client';
+        export default class {
+            constructor(public client: Client) {}
+            run() {
+                this.client.used();
+                return Object.keys(this.client);
+            }
+        }
+        ",
+    );
+
+    assert!(info.semantic_facts.iter().any(|fact| {
+        matches!(fact, SemanticFact::ClassThisMemberAccess(access)
+            if access.class_local_name == "default"
+                && access.object == "this.client"
+                && access.member == "used")
+    }));
+    assert!(info.semantic_facts.iter().any(|fact| {
+        matches!(fact, SemanticFact::ClassThisWholeObjectUse(access)
+            if access.class_local_name == "default" && access.object == "this.client")
+    }));
+}
+
+#[test]
+fn class_this_facts_keep_sibling_and_nested_classes_separate() {
+    let info = parse(
+        r"
+        import { Client } from './client';
+
+        export class Outer {
+            constructor(public client: Client) {}
+            run() {
+                class Inner {
+                    constructor(public client: Client) {}
+                    run() { return this.client.inner(); }
+                }
+                new Inner().run();
+                return this.client.outer();
+            }
+        }
+
+        export class Sibling {
+            constructor(public client: Client) {}
+            run() { return this.client.sibling(); }
+        }
+        ",
+    );
+
+    let facts = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::ClassThisMemberAccess(access) = fact {
+                Some((access.class_local_name.as_str(), access.member.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for expected in [
+        ("Outer", "outer"),
+        ("Inner", "inner"),
+        ("Sibling", "sibling"),
+    ] {
+        assert!(
+            facts.contains(&expected),
+            "missing {expected:?} in {facts:?}"
+        );
+    }
+    assert!(
+        !facts.contains(&("Outer", "inner")),
+        "nested fact leaked to outer: {facts:?}"
+    );
+    assert!(
+        !facts.contains(&("Sibling", "outer")),
+        "sibling facts crossed: {facts:?}"
     );
 }
 
