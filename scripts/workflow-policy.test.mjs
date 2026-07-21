@@ -49,13 +49,13 @@ test("bundled skill validation uses the root lockfile without network fallback",
   const nestedPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
   const lockfile = JSON.parse(readFileSync("package-lock.json", "utf8"));
 
-  assert.equal(rootPackage.devDependencies["@tanstack/intent"], "0.3.5");
+  assert.equal(rootPackage.devDependencies["@tanstack/intent"], "0.3.6");
   assert.equal(
     nestedPackage.devDependencies?.["@tanstack/intent"],
     rootPackage.devDependencies["@tanstack/intent"],
   );
-  assert.equal(lockfile.packages[""].devDependencies["@tanstack/intent"], "0.3.5");
-  assert.equal(lockfile.packages["node_modules/@tanstack/intent"].version, "0.3.5");
+  assert.equal(lockfile.packages[""].devDependencies["@tanstack/intent"], "0.3.6");
+  assert.equal(lockfile.packages["node_modules/@tanstack/intent"].version, "0.3.6");
   assert.match(
     npmPackageJob,
     /npm ci --no-audit --no-fund --ignore-scripts[\s\S]*npx --no-install intent validate npm\/fallow\/skills/,
