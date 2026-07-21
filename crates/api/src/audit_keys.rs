@@ -27,6 +27,8 @@ pub struct AuditFindingRecord {
 pub struct DeadCodeAuditLedger {
     records: Vec<AuditFindingRecord>,
     keys: FxHashSet<String>,
+    introduced_keys: FxHashSet<String>,
+    inherited_keys: FxHashSet<String>,
     #[cfg(test)]
     classifications: usize,
 }
@@ -52,10 +54,7 @@ impl DeadCodeAuditLedger {
     /// Number of visible findings introduced since the base snapshot.
     #[must_use]
     pub fn introduced_count(&self) -> usize {
-        self.records
-            .iter()
-            .filter(|record| record.introduced && record.effective_severity != Severity::Off)
-            .count()
+        self.introduced_keys.len()
     }
 
     /// Number of findings whose effective severity is not off.
@@ -70,10 +69,7 @@ impl DeadCodeAuditLedger {
     /// Number of visible findings inherited from the base snapshot.
     #[must_use]
     pub fn inherited_count(&self) -> usize {
-        self.records
-            .iter()
-            .filter(|record| !record.introduced && record.effective_severity != Severity::Off)
-            .count()
+        self.inherited_keys.len()
     }
 
     /// Whether an introduced finding has effective error severity.
@@ -244,6 +240,8 @@ impl DeadCodeAuditLedger {
 pub struct AuditDomainLedger {
     records: Vec<(String, bool)>,
     keys: FxHashSet<String>,
+    introduced_keys: FxHashSet<String>,
+    inherited_keys: FxHashSet<String>,
 }
 
 impl AuditDomainLedger {
@@ -253,15 +251,28 @@ impl AuditDomainLedger {
         keys: impl IntoIterator<Item = String>,
         base: Option<&FxHashSet<String>>,
     ) -> Self {
-        let records = keys
-            .into_iter()
-            .map(|key| {
-                let introduced = base.is_some_and(|base| !base.contains(&key));
-                (key, introduced)
-            })
-            .collect::<Vec<_>>();
-        let keys = records.iter().map(|(key, _)| key.clone()).collect();
-        Self { records, keys }
+        let mut records = Vec::new();
+        let mut unique_keys = FxHashSet::default();
+        let mut introduced_keys = FxHashSet::default();
+        let mut inherited_keys = FxHashSet::default();
+        for key in keys {
+            let introduced = base.is_some_and(|base| !base.contains(&key));
+            if base.is_some() {
+                if introduced {
+                    introduced_keys.insert(key.clone());
+                } else {
+                    inherited_keys.insert(key.clone());
+                }
+            }
+            unique_keys.insert(key.clone());
+            records.push((key, introduced));
+        }
+        Self {
+            records,
+            keys: unique_keys,
+            introduced_keys,
+            inherited_keys,
+        }
     }
 
     /// Stable current-run key set.
@@ -273,16 +284,13 @@ impl AuditDomainLedger {
     /// Number of introduced findings.
     #[must_use]
     pub fn introduced_count(&self) -> usize {
-        self.records
-            .iter()
-            .filter(|(_, introduced)| *introduced)
-            .count()
+        self.introduced_keys.len()
     }
 
     /// Number of inherited findings.
     #[must_use]
     pub fn inherited_count(&self) -> usize {
-        self.records.len().saturating_sub(self.introduced_count())
+        self.inherited_keys.len()
     }
 
     /// Introduced membership in typed output order.
@@ -1067,6 +1075,8 @@ impl AuditCollection {
 struct DeadCodeKeyCollector<'a> {
     root: &'a Path,
     keys: FxHashSet<String>,
+    introduced_keys: FxHashSet<String>,
+    inherited_keys: FxHashSet<String>,
     records: Vec<AuditFindingRecord>,
     collection_counts: FxHashMap<&'static str, usize>,
     config: Option<&'a ResolvedConfig>,
@@ -1080,6 +1090,8 @@ impl<'a> DeadCodeKeyCollector<'a> {
         Self {
             root,
             keys: FxHashSet::default(),
+            introduced_keys: FxHashSet::default(),
+            inherited_keys: FxHashSet::default(),
             records: Vec::new(),
             collection_counts: FxHashMap::default(),
             config: None,
@@ -1097,6 +1109,8 @@ impl<'a> DeadCodeKeyCollector<'a> {
         Self {
             root,
             keys: FxHashSet::default(),
+            introduced_keys: FxHashSet::default(),
+            inherited_keys: FxHashSet::default(),
             records: Vec::new(),
             collection_counts: FxHashMap::default(),
             config: Some(config),
@@ -1114,6 +1128,8 @@ impl<'a> DeadCodeKeyCollector<'a> {
         DeadCodeAuditLedger {
             records: self.records,
             keys: self.keys,
+            introduced_keys: self.introduced_keys,
+            inherited_keys: self.inherited_keys,
             #[cfg(test)]
             classifications: self.classifications,
         }
@@ -1127,10 +1143,18 @@ impl<'a> DeadCodeKeyCollector<'a> {
             {
                 self.classifications += 1;
             }
+            let introduced = self.base.is_some_and(|base| !base.contains(&key));
+            if effective_severity != Severity::Off && self.base.is_some() {
+                if introduced {
+                    self.introduced_keys.insert(key.clone());
+                } else {
+                    self.inherited_keys.insert(key.clone());
+                }
+            }
             self.records.push(AuditFindingRecord {
                 collection,
                 ordinal: *ordinal,
-                introduced: self.base.is_some_and(|base| !base.contains(&key)),
+                introduced,
                 effective_severity,
                 stable_key: key.clone(),
             });
@@ -3117,7 +3141,7 @@ mod tests {
     };
 
     use super::{
-        annotate_dead_code_json, annotate_dupes_json, annotate_health_json,
+        AuditDomainLedger, annotate_dead_code_json, annotate_dupes_json, annotate_health_json,
         annotate_stale_suppressions_json, dead_code_audit_ledger, dead_code_keys, dupe_group_key,
         dupes_keys, health_finding_key, health_keys, relative_key_path,
         retain_introduced_dead_code,
@@ -4357,6 +4381,58 @@ mod tests {
             results.unused_exports[1].introduced,
             Some(AuditIntroduced(true))
         );
+    }
+
+    #[test]
+    fn audit_ledger_counts_colliding_dead_code_keys_once_but_annotates_each_record() {
+        let root = root();
+        let config: FallowConfig = serde_json::from_value(json!({
+            "rules": { "unused-exports": "error" }
+        }))
+        .expect("config");
+        let config = config.resolve(root.clone(), OutputFormat::Json, 1, false, true, None);
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(export(&root.join("src/collision.ts"), "sameExport"));
+        results
+            .unused_exports
+            .push(export(&root.join("src/collision.ts"), "sameExport"));
+
+        let ledger = dead_code_audit_ledger(&results, &root, &config, Some(&FxHashSet::default()));
+
+        assert_eq!(ledger.classification_count(), 2);
+        assert_eq!(ledger.records().len(), 2);
+        assert_eq!(ledger.introduced_count(), 1);
+        assert_eq!(ledger.inherited_count(), 0);
+
+        ledger.annotate_results(&mut results);
+        assert!(
+            results
+                .unused_exports
+                .iter()
+                .all(|finding| { finding.introduced == Some(AuditIntroduced(true)) })
+        );
+    }
+
+    #[test]
+    fn audit_domain_ledger_counts_colliding_keys_once_but_preserves_record_membership() {
+        let introduced = AuditDomainLedger::compare(
+            ["same-key".to_string(), "same-key".to_string()],
+            Some(&FxHashSet::default()),
+        );
+        assert_eq!(introduced.introduced_count(), 1);
+        assert_eq!(introduced.inherited_count(), 0);
+        assert_eq!(introduced.introduced().collect::<Vec<_>>(), [true, true]);
+
+        let base = FxHashSet::from_iter(["same-key".to_string()]);
+        let inherited = AuditDomainLedger::compare(
+            ["same-key".to_string(), "same-key".to_string()],
+            Some(&base),
+        );
+        assert_eq!(inherited.introduced_count(), 0);
+        assert_eq!(inherited.inherited_count(), 1);
+        assert_eq!(inherited.introduced().collect::<Vec<_>>(), [false, false]);
     }
 
     #[test]

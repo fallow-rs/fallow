@@ -13,6 +13,13 @@ export class DerivedClient extends BaseClient {
     return "deep";
   }
 
+  // Called through a field whose nearer generic declaration cannot resolve.
+  // The same-named concrete grandparent field must remain shadowed, so this
+  // method must NOT be credited.
+  async shadowedByUnresolvedGeneric(): Promise<string> {
+    return "shadowed";
+  }
+
   // Never called. Control - must STAY flagged.
   async deadDerivedMethod(): Promise<string> {
     return "dead";

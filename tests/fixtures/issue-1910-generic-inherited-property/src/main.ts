@@ -14,6 +14,7 @@ import {
   UnusedSiblingClient,
   UsedSiblingClient,
 } from "./sibling-services";
+import { UnresolvedShadowService } from "./unresolved-shadow-service";
 
 async function main(): Promise<void> {
   const service = new DerivedService(new DerivedClient());
@@ -33,6 +34,9 @@ async function main(): Promise<void> {
   console.log(new NamedExportFormService(formClient).run());
   console.log(new NamedDefaultFormService(formClient).run());
   console.log(new AnonymousDefaultFormService(formClient).run());
+
+  const unresolvedShadow = new UnresolvedShadowService(new DerivedClient());
+  console.log(await unresolvedShadow.run());
 }
 
 void main();

@@ -317,6 +317,37 @@ mod tests {
         assert_eq!(json["dead_code"]["unused_files"][0]["introduced"], true);
     }
 
+    #[test]
+    fn audit_api_value_preserves_styling_gate_parity() {
+        let project = audit_styling_fixture();
+        std::fs::write(
+            project.path().join("src/styles.css"),
+            "#app .legacy .title { color: red; }\n.plain { color: blue; }\n",
+        )
+        .expect("write inherited-only change");
+
+        let all = run_audit_api_value(&AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            gate: Some("all".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("all-gate MCP API value")
+        .expect("typed API path");
+        assert_eq!(all["verdict"], "fail");
+
+        let new_only = run_audit_api_value(&AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("new-only MCP API value")
+        .expect("typed API path");
+        assert_eq!(new_only["verdict"], "pass");
+    }
+
     fn audit_fixture() -> tempfile::TempDir {
         let project = tempfile::tempdir().expect("project");
         std::fs::create_dir_all(project.path().join("src")).expect("create src");
@@ -351,6 +382,48 @@ mod tests {
             "export const unused = 1;\n",
         )
         .expect("write changed source");
+        project
+    }
+
+    fn audit_styling_fixture() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::create_dir_all(project.path().join("src")).expect("create src");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"audit-mcp-styling","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"css-selector-complexity":"error"}}"#,
+        )
+        .expect("write config");
+        std::fs::write(
+            project.path().join("src/index.ts"),
+            "console.log('entry');\n",
+        )
+        .expect("write entry");
+        std::fs::write(
+            project.path().join("src/styles.css"),
+            "#app .legacy .title { color: red; }\n",
+        )
+        .expect("write inherited styling");
+        git(project.path(), &["init"]);
+        git(project.path(), &["add", "."]);
+        git(
+            project.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
         project
     }
 

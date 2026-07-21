@@ -65,4 +65,10 @@ fn credits_members_reached_through_inherited_base_class_property() {
              must not blanket-credit), found: {unused:?}"
         );
     }
+
+    assert!(
+        unused.contains(&"DerivedClient.shadowedByUnresolvedGeneric".to_string()),
+        "an unresolved nearer generic field must shadow the concrete grandparent field, found: \
+         {unused:?}"
+    );
 }

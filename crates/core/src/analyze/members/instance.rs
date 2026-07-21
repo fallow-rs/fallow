@@ -181,12 +181,12 @@ fn collect_inherited_bindings(
     let mut inherited: FxHashMap<String, Vec<ExportKey>> = FxHashMap::default();
 
     // Fields the child binds itself shadow inherited ones and must be excluded.
-    let mut owned_fields: FxHashSet<&str> = FxHashSet::default();
+    let mut shadowed_fields: FxHashSet<String> = FxHashSet::default();
     for (field, _) in &child.instance_bindings {
-        owned_fields.insert(field.as_str());
+        shadowed_fields.insert(field.clone());
     }
     for (field, _) in &child.generic_instance_bindings {
-        owned_fields.insert(field.as_str());
+        shadowed_fields.insert(field.clone());
     }
 
     let mut visited: FxHashSet<ExportKey> = FxHashSet::default();
@@ -221,7 +221,7 @@ fn collect_inherited_bindings(
         let mut generic_fields: FxHashSet<&str> = FxHashSet::default();
         for (field, index) in &parent.generic_instance_bindings {
             generic_fields.insert(field.as_str());
-            if owned_fields.contains(field.as_str()) || inherited.contains_key(field) {
+            if shadowed_fields.contains(field) || inherited.contains_key(field) {
                 continue;
             }
             let Some(Some(concrete)) = type_args.get(*index) else {
@@ -237,7 +237,7 @@ fn collect_inherited_bindings(
         // Non-generic fields: copy the parent's already-resolved targets.
         if let Some(parent_targets) = targets_by_class.get(&parent_key) {
             for (field, _) in &parent.instance_bindings {
-                if owned_fields.contains(field.as_str())
+                if shadowed_fields.contains(field)
                     || inherited.contains_key(field)
                     || generic_fields.contains(field.as_str())
                 {
@@ -248,6 +248,21 @@ fn collect_inherited_bindings(
                 }
             }
         }
+
+        // Every declaration on this inheritance level shadows same-named
+        // fields farther up the chain, even when its type cannot be resolved.
+        shadowed_fields.extend(
+            parent
+                .generic_instance_bindings
+                .iter()
+                .map(|(field, _)| field.clone()),
+        );
+        shadowed_fields.extend(
+            parent
+                .instance_bindings
+                .iter()
+                .map(|(field, _)| field.clone()),
+        );
 
         // Ascend to the grandparent. A parent argument matching one of this
         // class's type parameters forwards the already-composed concrete arg;

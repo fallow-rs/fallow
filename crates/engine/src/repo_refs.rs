@@ -20,6 +20,7 @@ const RAW_MATERIALIZATION_MARKER: &str = "fallow-raw-materialized-v1";
 
 /// Host directories shared with detached audit base views.
 pub const AUDIT_MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
+const AUDIT_WORKSPACE_GENERATED_CONTEXT_DIRS: &[&str] = &[".nuxt", ".astro"];
 
 const AUDIT_LOCKFILES: &[&str] = &[
     "package-lock.json",
@@ -83,13 +84,12 @@ impl TemporaryBaseWorktree {
 
 /// Share dependency and generated context from the host checkout with a base view.
 pub fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
-    for &name in AUDIT_MATERIALIZED_CONTEXT_DIRS {
-        let source = repo_root.join(name);
-        if !source.is_dir() {
+    for slot in audit_materialized_context_slots(repo_root) {
+        if !slot.source.is_dir() {
             continue;
         }
 
-        let destination = worktree_path.join(name);
+        let destination = worktree_path.join(&slot.relative);
         if destination.is_dir() {
             continue;
         }
@@ -100,7 +100,7 @@ pub fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Pat
             let _ = fs::remove_file(&destination);
         }
 
-        let _ = symlink_dependency_dir(&source, &destination);
+        let _ = symlink_dependency_dir(&slot.source, &destination);
     }
 }
 
@@ -111,9 +111,9 @@ pub fn audit_materialized_context_fingerprint(root: &Path) -> AuditMaterializedC
         .iter()
         .map(|name| fingerprint_context_file(root, &root.join(name)))
         .collect();
-    let directories = AUDIT_MATERIALIZED_CONTEXT_DIRS
+    let directories = audit_materialized_context_slots(root)
         .iter()
-        .map(|name| fingerprint_context_directory(root, name))
+        .map(fingerprint_context_directory)
         .collect();
     AuditMaterializedContextFingerprint {
         lockfiles,
@@ -121,9 +121,53 @@ pub fn audit_materialized_context_fingerprint(root: &Path) -> AuditMaterializedC
     }
 }
 
-fn fingerprint_context_directory(root: &Path, name: &str) -> AuditContextDirectoryFingerprint {
-    let path = root.join(name);
-    let (state, source) = match fs::metadata(&path) {
+#[derive(Debug)]
+struct AuditMaterializedContextSlot {
+    kind: &'static str,
+    relative: PathBuf,
+    source: PathBuf,
+}
+
+fn audit_materialized_context_slots(root: &Path) -> Vec<AuditMaterializedContextSlot> {
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut slots = AUDIT_MATERIALIZED_CONTEXT_DIRS
+        .iter()
+        .map(|&kind| AuditMaterializedContextSlot {
+            kind,
+            relative: PathBuf::from(kind),
+            source: canonical_root.join(kind),
+        })
+        .collect::<Vec<_>>();
+
+    for workspace in crate::discover::discover_workspace_packages(root) {
+        let Ok(canonical_workspace) = dunce::canonicalize(&workspace.root) else {
+            continue;
+        };
+        let Ok(relative_workspace) = canonical_workspace.strip_prefix(&canonical_root) else {
+            continue;
+        };
+        if relative_workspace.as_os_str().is_empty() {
+            continue;
+        }
+        for &kind in AUDIT_WORKSPACE_GENERATED_CONTEXT_DIRS {
+            slots.push(AuditMaterializedContextSlot {
+                kind,
+                relative: relative_workspace.join(kind),
+                source: canonical_workspace.join(kind),
+            });
+        }
+    }
+
+    slots.sort_by(|left, right| left.relative.cmp(&right.relative));
+    slots.dedup_by(|left, right| left.relative == right.relative);
+    slots
+}
+
+fn fingerprint_context_directory(
+    slot: &AuditMaterializedContextSlot,
+) -> AuditContextDirectoryFingerprint {
+    let path = &slot.source;
+    let (state, source) = match fs::metadata(path) {
         Ok(metadata) if metadata.is_dir() => (
             AuditContextPathState::Present,
             Some(SourceFingerprint::from_metadata(&metadata)),
@@ -138,18 +182,27 @@ fn fingerprint_context_directory(root: &Path, name: &str) -> AuditContextDirecto
         ),
     };
     let canonical_path = if matches!(state, AuditContextPathState::Present) {
-        dunce::canonicalize(&path)
+        dunce::canonicalize(path)
             .ok()
             .map(|path| path.to_string_lossy().replace('\\', "/"))
     } else {
         None
     };
-    let markers = context_markers(name)
+    let markers = context_markers(slot.kind)
         .iter()
-        .map(|marker| fingerprint_context_file(root, &path.join(marker)))
+        .map(|marker| {
+            fingerprint_context_file_at(
+                &path.join(marker),
+                &slot
+                    .relative
+                    .join(marker)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            )
+        })
         .collect();
     AuditContextDirectoryFingerprint {
-        name: name.to_string(),
+        name: slot.relative.to_string_lossy().replace('\\', "/"),
         state,
         canonical_path,
         source,
@@ -172,9 +225,13 @@ fn fingerprint_context_file(root: &Path, path: &Path) -> AuditContextFileFingerp
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/");
+    fingerprint_context_file_at(path, &relative)
+}
+
+fn fingerprint_context_file_at(path: &Path, relative: &str) -> AuditContextFileFingerprint {
     match fs::read(path) {
         Ok(bytes) => AuditContextFileFingerprint {
-            path: relative,
+            path: relative.to_string(),
             state: AuditContextPathState::Present,
             source: fs::metadata(path)
                 .ok()
@@ -182,13 +239,13 @@ fn fingerprint_context_file(root: &Path, path: &Path) -> AuditContextFileFingerp
             content_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => AuditContextFileFingerprint {
-            path: relative,
+            path: relative.to_string(),
             state: AuditContextPathState::Missing,
             source: None,
             content_hash: None,
         },
         Err(error) => AuditContextFileFingerprint {
-            path: relative,
+            path: relative.to_string(),
             state: AuditContextPathState::Unreadable(error.kind().to_string()),
             source: fs::metadata(path)
                 .ok()
@@ -1331,5 +1388,99 @@ mod tests {
             audit_materialized_context_fingerprint(root),
             "missing and materialized generated context must differ"
         );
+    }
+
+    #[test]
+    fn audit_context_fingerprint_tracks_nested_workspace_generated_roots() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        fs::write(
+            root.join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("root package");
+        let nuxt = root.join("packages/nuxt-app");
+        let astro = root.join("packages/astro-app");
+        fs::create_dir_all(nuxt.join(".nuxt")).expect("nested nuxt context");
+        fs::create_dir_all(astro.join(".astro")).expect("nested astro context");
+        fs::write(nuxt.join("package.json"), r#"{"name":"nuxt-app"}"#).expect("nuxt package");
+        fs::write(astro.join("package.json"), r#"{"name":"astro-app"}"#).expect("astro package");
+        fs::write(nuxt.join(".nuxt/imports.d.ts"), "export {};\n").expect("nuxt marker");
+        fs::write(astro.join(".astro/types.d.ts"), "export {};\n").expect("astro marker");
+
+        let first = audit_materialized_context_fingerprint(root);
+        assert!(
+            first
+                .directories
+                .iter()
+                .any(|directory| directory.name == "packages/nuxt-app/.nuxt")
+        );
+        assert!(
+            first
+                .directories
+                .iter()
+                .any(|directory| directory.name == "packages/astro-app/.astro")
+        );
+
+        fs::write(
+            nuxt.join(".nuxt/imports.d.ts"),
+            "export type Changed = true;\n",
+        )
+        .expect("mutate nuxt marker");
+        assert_ne!(
+            first,
+            audit_materialized_context_fingerprint(root),
+            "nested workspace marker changes must invalidate the audit context"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_base_context_symlinks_nested_workspace_generated_roots() {
+        let host = tempfile::tempdir().expect("host");
+        let worktree = tempfile::tempdir().expect("worktree");
+        fs::write(
+            host.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("root package");
+
+        for (workspace, generated, marker) in [
+            ("nuxt-app", ".nuxt", "imports.d.ts"),
+            ("astro-app", ".astro", "types.d.ts"),
+        ] {
+            let host_workspace = host.path().join("packages").join(workspace);
+            let worktree_workspace = worktree.path().join("packages").join(workspace);
+            fs::create_dir_all(host_workspace.join(generated)).expect("host generated context");
+            fs::create_dir_all(&worktree_workspace).expect("worktree workspace");
+            fs::write(
+                host_workspace.join("package.json"),
+                format!(r#"{{"name":"{workspace}"}}"#),
+            )
+            .expect("workspace package");
+            fs::write(host_workspace.join(generated).join(marker), "export {};\n")
+                .expect("generated marker");
+        }
+
+        materialize_base_dependency_context(host.path(), worktree.path());
+
+        for (workspace, generated, marker) in [
+            ("nuxt-app", ".nuxt", "imports.d.ts"),
+            ("astro-app", ".astro", "types.d.ts"),
+        ] {
+            let mirrored = worktree
+                .path()
+                .join("packages")
+                .join(workspace)
+                .join(generated);
+            assert!(
+                fs::symlink_metadata(&mirrored)
+                    .expect("mirrored generated root")
+                    .file_type()
+                    .is_symlink(),
+                "{workspace}/{generated} must reuse the host generated root"
+            );
+            assert!(mirrored.join(marker).is_file());
+        }
     }
 }

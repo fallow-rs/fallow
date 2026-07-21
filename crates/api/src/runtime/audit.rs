@@ -56,17 +56,26 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
 
     let mut head =
         run_audit_subanalyses_with_context(options, &analysis, &resolved, Some(&changed_files))?;
-    let base_snapshot = if matches!(options.gate, AuditGate::NewOnly) {
+    let runtime_base_snapshot = if matches!(options.gate, AuditGate::NewOnly) {
         Some(compute_base_snapshot(options, &resolved_base.git_ref)?)
     } else {
         None
     };
     let config = load_programmatic_audit_config(&resolved)?;
-    let comparison = build_programmatic_audit_comparison(&head, &config, base_snapshot.as_ref());
+    let comparison =
+        build_programmatic_audit_comparison(&head, &config, runtime_base_snapshot.as_ref());
     let summary = build_programmatic_audit_summary(&head, &comparison);
-    let attribution = comparison_attribution(options.gate, &comparison, base_snapshot.is_some());
-    let verdict = comparison_verdict(options.gate, &summary, &head.duplication, &comparison);
-    if base_snapshot.is_some() {
+    let attribution =
+        comparison_attribution(options.gate, &comparison, runtime_base_snapshot.is_some());
+    let verdict = comparison_verdict(
+        options.gate,
+        &summary,
+        &head.duplication,
+        &head.complexity,
+        &config,
+        &comparison,
+    );
+    if runtime_base_snapshot.is_some() {
         comparison.annotate_typed_findings(
             &mut head.dead_code.output.results,
             &mut head.complexity.report,
@@ -83,6 +92,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         }
     }
     let next_steps = audit_next_steps(&head.dead_code, &head.complexity);
+    let base_snapshot = runtime_base_snapshot.map(|snapshot| snapshot.public);
 
     Ok(AuditProgrammaticOutput {
         verdict,
@@ -219,6 +229,11 @@ struct AuditSubanalyses {
     dead_code: crate::DeadCodeProgrammaticOutput,
     duplication: crate::DuplicationProgrammaticOutput,
     complexity: crate::HealthProgrammaticOutput,
+}
+
+struct AuditRuntimeKeySnapshot {
+    public: AuditProgrammaticKeySnapshot,
+    styling: FxHashSet<String>,
 }
 
 struct AuditSubanalysisOptions {
@@ -550,7 +565,7 @@ fn load_programmatic_audit_config(
 fn build_programmatic_audit_comparison(
     analyses: &AuditSubanalyses,
     config: &fallow_config::ResolvedConfig,
-    base: Option<&AuditProgrammaticKeySnapshot>,
+    base: Option<&AuditRuntimeKeySnapshot>,
 ) -> crate::audit_keys::AuditComparison {
     let dupe_keys = analyses
         .duplication
@@ -575,10 +590,10 @@ fn build_programmatic_audit_comparison(
         health_root: &analyses.complexity.root,
         dupe_keys,
         styling_keys,
-        base_dead_code: base.map(|snapshot| &snapshot.dead_code),
-        base_health: base.map(|snapshot| &snapshot.health),
-        base_dupes: base.map(|snapshot| &snapshot.dupes),
-        base_styling: None,
+        base_dead_code: base.map(|snapshot| &snapshot.public.dead_code),
+        base_health: base.map(|snapshot| &snapshot.public.health),
+        base_dupes: base.map(|snapshot| &snapshot.public.dupes),
+        base_styling: base.map(|snapshot| &snapshot.styling),
     })
 }
 
@@ -602,10 +617,24 @@ fn build_programmatic_audit_summary(
     }
 }
 
+fn styling_finding_gates(rules: &fallow_config::RulesConfig, code: &str) -> bool {
+    let severity = match code {
+        "css-token-drift" => rules.css_token_drift,
+        "css-duplicate-block" => rules.css_duplicate_block,
+        "css-selector-complexity" => rules.css_selector_complexity,
+        "css-dead-surface" => rules.css_dead_surface,
+        "css-broken-reference" => rules.css_broken_reference,
+        _ => fallow_config::Severity::Warn,
+    };
+    severity == fallow_config::Severity::Error
+}
+
 fn comparison_verdict(
     gate: AuditGate,
     summary: &AuditSummary,
     duplication: &crate::DuplicationProgrammaticOutput,
+    complexity: &crate::HealthProgrammaticOutput,
+    config: &fallow_config::ResolvedConfig,
     comparison: &crate::audit_keys::AuditComparison,
 ) -> AuditVerdict {
     let new_only = matches!(gate, AuditGate::NewOnly);
@@ -628,7 +657,15 @@ fn comparison_verdict(
     } else {
         summary.complexity_findings
     };
-    if dead_code_errors || complexity_findings > 0 {
+    let styling_errors = complexity
+        .report
+        .styling_findings
+        .iter()
+        .zip(comparison.styling.introduced())
+        .any(|(finding, introduced)| {
+            (!new_only || introduced) && styling_finding_gates(&config.rules, &finding.code)
+        });
+    if dead_code_errors || complexity_findings > 0 || styling_errors {
         return AuditVerdict::Fail;
     }
     let duplication_findings = if new_only {
@@ -671,33 +708,39 @@ fn comparison_attribution(
     }
 }
 
-fn snapshot_from_analyses(analyses: &AuditSubanalyses) -> AuditProgrammaticKeySnapshot {
-    AuditProgrammaticKeySnapshot {
-        dead_code: crate::audit_keys::dead_code_keys(
-            &analyses.dead_code.output.results,
-            &analyses.dead_code.root,
-        ),
-        health: crate::audit_keys::health_keys(
+fn snapshot_from_analyses(analyses: &AuditSubanalyses) -> AuditRuntimeKeySnapshot {
+    AuditRuntimeKeySnapshot {
+        public: AuditProgrammaticKeySnapshot {
+            dead_code: crate::audit_keys::dead_code_keys(
+                &analyses.dead_code.output.results,
+                &analyses.dead_code.root,
+            ),
+            health: crate::audit_keys::health_keys(
+                &analyses.complexity.report,
+                &analyses.complexity.root,
+            ),
+            dupes: analyses
+                .duplication
+                .output
+                .report
+                .clone_groups
+                .iter()
+                .map(|group| {
+                    crate::audit_keys::dupe_group_key(&group.group, &analyses.duplication.root)
+                })
+                .collect(),
+        },
+        styling: crate::audit_keys::styling_keys(
             &analyses.complexity.report,
             &analyses.complexity.root,
         ),
-        dupes: analyses
-            .duplication
-            .output
-            .report
-            .clone_groups
-            .iter()
-            .map(|group| {
-                crate::audit_keys::dupe_group_key(&group.group, &analyses.duplication.root)
-            })
-            .collect(),
     }
 }
 
 fn compute_base_snapshot(
     options: &AuditOptions,
     base_ref: &str,
-) -> ProgrammaticResult<AuditProgrammaticKeySnapshot> {
+) -> ProgrammaticResult<AuditRuntimeKeySnapshot> {
     let current_root = analysis_root_from_options(options)?;
     let worktree = TemporaryBaseWorktree::create(&current_root, base_ref).map_err(|err| {
         ProgrammaticError::new(err.to_string(), 2)
@@ -919,6 +962,62 @@ mod tests {
     }
 
     #[test]
+    fn run_audit_styling_error_matches_cli_for_new_only_and_all_gates() {
+        let project = audit_styling_fixture();
+        let root = project.path();
+        std::fs::write(
+            root.join("src/styles.css"),
+            "#app .legacy .title { color: red; }\n.plain { color: blue; }\n",
+        )
+        .expect("write inherited-only change");
+
+        let all = run_audit(&AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD".to_string()),
+            gate: AuditGate::All,
+            ..AuditOptions::default()
+        })
+        .expect("all-gate audit");
+        assert_eq!(all.verdict, AuditVerdict::Fail);
+
+        let inherited_only = run_audit(&AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD".to_string()),
+            gate: AuditGate::NewOnly,
+            ..AuditOptions::default()
+        })
+        .expect("new-only inherited audit");
+        assert_eq!(inherited_only.verdict, AuditVerdict::Pass);
+        assert!(inherited_only.base_snapshot.is_some());
+
+        std::fs::write(
+            root.join("src/styles.css"),
+            "#app .legacy .title { color: red; }\n.plain { color: blue; }\n#app .introduced .title { color: green; }\n",
+        )
+        .expect("write introduced styling change");
+        let introduced = run_audit(&AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD".to_string()),
+            gate: AuditGate::NewOnly,
+            ..AuditOptions::default()
+        })
+        .expect("new-only introduced audit");
+        assert_eq!(introduced.verdict, AuditVerdict::Fail);
+    }
+
+    #[test]
     fn audit_production_mode_branches_preserve_per_section_workspace_scope() {
         let project = audit_workspace_modes_fixture();
 
@@ -1031,6 +1130,48 @@ mod tests {
             "export const unused = 1;\n",
         )
         .expect("write changed source");
+        project
+    }
+
+    fn audit_styling_fixture() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::create_dir_all(project.path().join("src")).expect("create src");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"audit-api-styling","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"css-selector-complexity":"error"}}"#,
+        )
+        .expect("write config");
+        std::fs::write(
+            project.path().join("src/index.ts"),
+            "console.log('entry');\n",
+        )
+        .expect("write entry");
+        std::fs::write(
+            project.path().join("src/styles.css"),
+            "#app .legacy .title { color: red; }\n",
+        )
+        .expect("write inherited styling");
+        git(project.path(), &["init"]);
+        git(project.path(), &["add", "."]);
+        git(
+            project.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
         project
     }
 

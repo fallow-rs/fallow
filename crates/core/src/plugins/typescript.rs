@@ -192,19 +192,31 @@ fn tsconfig_variant_matcher() -> Option<&'static globset::GlobMatcher> {
 /// Production-mode fallback over the root and unique directories containing or
 /// containing ancestors of discovered source files.
 fn source_ancestor_has_tsconfig(root: &Path, discovered_files: &[PathBuf]) -> bool {
-    let mut directories = FxHashSet::default();
-    directories.insert(root.to_path_buf());
+    source_ancestor_has_tsconfig_with(root, discovered_files, directory_has_tsconfig)
+}
+
+fn source_ancestor_has_tsconfig_with(
+    root: &Path,
+    discovered_files: &[PathBuf],
+    mut has_tsconfig: impl FnMut(&Path) -> bool,
+) -> bool {
+    if has_tsconfig(root) {
+        return true;
+    }
+
+    let mut probed = FxHashSet::default();
+    probed.insert(root.to_path_buf());
     for file in discovered_files {
         let Some(parent) = file.parent() else {
             continue;
         };
         for ancestor in parent.ancestors().take_while(|dir| dir.starts_with(root)) {
-            directories.insert(ancestor.to_path_buf());
+            if probed.insert(ancestor.to_path_buf()) && has_tsconfig(ancestor) {
+                return true;
+            }
         }
     }
-    directories
-        .into_iter()
-        .any(|dir| directory_has_tsconfig(&dir))
+    false
 }
 
 fn directory_has_tsconfig(directory: &Path) -> bool {
@@ -482,6 +494,53 @@ mod tests {
         std::fs::write(&source, "export {};").expect("write source");
 
         assert!(!plugin.is_enabled_with_files(&[], &project, &[source], None));
+    }
+
+    #[test]
+    fn production_source_ancestor_probe_checks_root_first_and_stops() {
+        let root = PathBuf::from("repo");
+        let source = root.join("apps/web/src/main.ts");
+        let mut probed = Vec::new();
+
+        assert!(source_ancestor_has_tsconfig_with(
+            &root,
+            &[source],
+            |directory| {
+                probed.push(directory.to_path_buf());
+                directory == root
+            }
+        ));
+        assert_eq!(probed, vec![root]);
+    }
+
+    #[test]
+    fn production_source_ancestor_probe_checks_unique_ancestors_immediately() {
+        let root = PathBuf::from("repo");
+        let files = [
+            root.join("apps/web/src/main.ts"),
+            root.join("apps/web/src/other.ts"),
+            root.join("apps/web/tests/main.ts"),
+        ];
+        let mut probed = Vec::new();
+
+        assert!(!source_ancestor_has_tsconfig_with(
+            &root,
+            &files,
+            |directory| {
+                probed.push(directory.to_path_buf());
+                false
+            }
+        ));
+        assert_eq!(
+            probed,
+            vec![
+                root.clone(),
+                root.join("apps/web/src"),
+                root.join("apps/web"),
+                root.join("apps"),
+                root.join("apps/web/tests"),
+            ]
+        );
     }
 
     #[test]

@@ -74,6 +74,21 @@ assert_json_value() {
   fi
 }
 
+assert_safe_workflow_output() {
+  local output="$1" expected_lines="$2" name="$3"
+  local actual_lines
+  actual_lines=$(printf '%s\n' "$output" | awk 'END { print NR }')
+  if [[ "$output" == *$'\r'* ]]; then
+    fail "$name" "contains a raw carriage return"
+  elif [ "$actual_lines" != "$expected_lines" ]; then
+    fail "$name" "expected $expected_lines command lines, got $actual_lines"
+  elif printf '%s\n' "$output" | grep -qv '^::'; then
+    fail "$name" "contains a non-command continuation line"
+  else
+    pass "$name"
+  fi
+}
+
 # --- Repository config hygiene ---
 
 echo ""
@@ -1513,6 +1528,105 @@ assert_contains "$OUT_ESCAPED_PATH" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "health an
 OUT_PROD_ANN=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]},{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"untracked","untracked_reason":"lazy_parsed"}}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
 assert_contains "$OUT_PROD_ANN" "Runtime coverage" "prod annotation: title present"
 assert_contains "$OUT_PROD_ANN" "coldPath" "prod annotation: function name present"
+
+render_direct_annotations() {
+  local kind="$1" input="$2"
+  case "$kind" in
+    dead-code) jq -r -f "$JQ_DIR/annotations-check.jq" "$input" ;;
+    dupes) jq -r -f "$JQ_DIR/annotations-dupes.jq" "$input" ;;
+    health) jq -r -f "$JQ_DIR/annotations-health.jq" "$input" ;;
+    audit)
+      {
+        jq '.dead_code // empty' "$input" | jq -r -f "$JQ_DIR/annotations-check.jq"
+        jq '.complexity // empty' "$input" | jq -r -f "$JQ_DIR/annotations-health.jq"
+        jq '.duplication // empty' "$input" | jq -r -f "$JQ_DIR/annotations-dupes.jq"
+      }
+      ;;
+    combined)
+      {
+        jq '.check // empty' "$input" | jq -r -f "$JQ_DIR/annotations-check.jq"
+        jq '.health // empty' "$input" | jq -r -f "$JQ_DIR/annotations-health.jq"
+        jq '.dupes // empty' "$input" | jq -r -f "$JQ_DIR/annotations-dupes.jq"
+      }
+      ;;
+  esac
+}
+
+render_forced_fallback_annotations() {
+  local kind="$1" input="$2" command="$1"
+  [ "$kind" = "combined" ] && command=""
+  HAS_NATIVE_REPORT=false \
+    FALLOW_PR_DECISION_FILE="" \
+    FALLOW_COMMAND="$command" \
+    MAX_ANNOTATIONS="50" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    FALLOW_RESULTS_FILE="$input" \
+    bash "$DIR/../scripts/annotate.sh" 2>/dev/null
+}
+
+ANNOTATION_SAFETY_DIR=$(mktemp -d)
+ANNOTATION_ATTACK=$'value%\r\n::error::injected'
+ANNOTATION_PATH=$'src/a%,b:c\r\nd.ts'
+ANNOTATION_EXPECTED_PATH="file=src/a%25%2Cb%3Ac%0D%0Ad.ts"
+
+jq -n --arg path "$ANNOTATION_PATH" --arg attack "$ANNOTATION_ATTACK" '{
+  unused_exports: [
+    {path: $path, line: 4, col: 1, export_name: $attack, is_re_export: false, is_type_only: false},
+    {path: null, line: 5, col: 1, export_name: $attack, is_re_export: false, is_type_only: false},
+    {path: 42, line: 6, col: 1, export_name: $attack, is_re_export: false, is_type_only: false}
+  ]
+}' > "$ANNOTATION_SAFETY_DIR/dead-code.json"
+
+jq -n --arg path "$ANNOTATION_PATH" --arg attack "$ANNOTATION_ATTACK" '{
+  clone_groups: [{
+    line_count: $attack,
+    token_count: $attack,
+    instances: [
+      {file: $path, start_line: 1, end_line: 3, start_col: 0},
+      {file: null, start_line: 4, end_line: 6, start_col: 0},
+      {file: 42, start_line: 7, end_line: 9, start_col: 0}
+    ]
+  }]
+}' > "$ANNOTATION_SAFETY_DIR/dupes.json"
+
+jq -n --arg path "$ANNOTATION_PATH" --arg attack "$ANNOTATION_ATTACK" '{
+  summary: {max_cyclomatic_threshold: 20, max_cognitive_threshold: 15, max_crap_threshold: 30},
+  findings: [
+    {path: $path, name: $attack, line: 2, col: 0, cyclomatic: 21, cognitive: 16, line_count: 8, severity: "moderate", exceeded: "both"},
+    {path: null, name: $attack, line: 3, col: 0, cyclomatic: 21, cognitive: 16, line_count: 8, severity: "moderate", exceeded: "both"},
+    {path: 42, name: $attack, line: 4, col: 0, cyclomatic: 21, cognitive: 16, line_count: 8, severity: "moderate", exceeded: "both"}
+  ]
+}' > "$ANNOTATION_SAFETY_DIR/health.json"
+
+jq -n \
+  --slurpfile dead "$ANNOTATION_SAFETY_DIR/dead-code.json" \
+  --slurpfile health "$ANNOTATION_SAFETY_DIR/health.json" \
+  --slurpfile dupes "$ANNOTATION_SAFETY_DIR/dupes.json" \
+  '{dead_code: $dead[0], complexity: $health[0], duplication: $dupes[0]}' \
+  > "$ANNOTATION_SAFETY_DIR/audit.json"
+
+jq -n \
+  --slurpfile dead "$ANNOTATION_SAFETY_DIR/dead-code.json" \
+  --slurpfile health "$ANNOTATION_SAFETY_DIR/health.json" \
+  --slurpfile dupes "$ANNOTATION_SAFETY_DIR/dupes.json" \
+  '{check: $dead[0], health: $health[0], dupes: $dupes[0]}' \
+  > "$ANNOTATION_SAFETY_DIR/combined.json"
+
+for kind in dead-code dupes health audit combined; do
+  expected_lines=1
+  [ "$kind" = "audit" ] || [ "$kind" = "combined" ] && expected_lines=3
+  DIRECT_SAFE=$(render_direct_annotations "$kind" "$ANNOTATION_SAFETY_DIR/$kind.json")
+  assert_contains "$DIRECT_SAFE" "$ANNOTATION_EXPECTED_PATH" "$kind direct renderer preserves property encoding"
+  assert_contains "$DIRECT_SAFE" "value%25%0D%0A::error::injected" "$kind direct renderer escapes message data"
+  assert_safe_workflow_output "$DIRECT_SAFE" "$expected_lines" "$kind direct renderer skips malformed paths without command injection"
+
+  FALLBACK_SAFE=$(render_forced_fallback_annotations "$kind" "$ANNOTATION_SAFETY_DIR/$kind.json")
+  assert_contains "$FALLBACK_SAFE" "$ANNOTATION_EXPECTED_PATH" "$kind forced fallback preserves property encoding"
+  assert_contains "$FALLBACK_SAFE" "value%25%0D%0A::error::injected" "$kind forced fallback escapes message data"
+  assert_safe_workflow_output "$FALLBACK_SAFE" "$expected_lines" "$kind forced fallback skips malformed paths without command injection"
+done
+
+rm -rf "$ANNOTATION_SAFETY_DIR"
 
 # --- Changed-file filter tests ---
 
