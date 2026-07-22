@@ -5,65 +5,92 @@ on:
     branches: [main]
     paths:
       - 'fuzz/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'crates/extract/**'
       - 'crates/core/**'
       - 'crates/types/**'
       - 'crates/graph/**'
       - 'crates/config/**'
+      - 'crates/security/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/fuzz-smoke.yml'
   pull_request:
     branches: [main]
     paths:
       - 'fuzz/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'crates/extract/**'
       - 'crates/core/**'
       - 'crates/types/**'
       - 'crates/graph/**'
       - 'crates/config/**'
+      - 'crates/security/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/fuzz-smoke.yml'
+  schedule:
+    - cron: '30 5 * * 0'
   workflow_dispatch:
 
 concurrency:
-  group: fuzz-smoke-${{ github.ref }}
+  group: fuzz-smoke-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
+  FUZZ_TARGETS: fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts
+  FUZZ_TIME_SECONDS: ${{ github.event_name == 'schedule' && '300' || '30' }}
 
 jobs:
   fuzz-smoke:
-    name: Fuzz harness compile-check
+    name: Fuzz harness smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      # Inlined (rather than the shared ./.github/actions/setup-rust
-      # composite) because the fuzz/ crate deliberately excludes itself
-      # from the parent workspace (see fuzz/Cargo.toml): the composite's
-      # cache step is scoped to the root workspace and never sees
-      # fuzz/Cargo.lock or fuzz/target. Toolchain resolution mirrors the
-      # composite's own logic; the action SHA is the same pin it uses.
-      - name: Resolve toolchain
-        id: resolve
-        run: |
-          channel=$(awk -F '"' '/^[[:space:]]*channel[[:space:]]*=/ {print $2; exit}' rust-toolchain.toml)
-          echo "toolchain=${channel:-stable}" >> "$GITHUB_OUTPUT"
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
         with:
-          toolchain: ${{ steps.resolve.outputs.toolchain }}
+          toolchain: nightly-2026-07-20
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: fuzz -> target
-          key: fuzz-smoke
+          key: fuzz-smoke-nightly-2026-07-20-cargo-fuzz-0.13.2
 
-      - name: Compile-check fuzz targets
-        run: cargo check --manifest-path fuzz/Cargo.toml
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: cargo-fuzz@0.13.2
+
+      - name: Verify locked fuzz dependencies
+        run: cargo +nightly-2026-07-20 metadata --locked --no-deps --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
+
+      - name: Run bounded fuzz smoke
+        shell: bash
+        run: |
+          failed=0
+          for target in $FUZZ_TARGETS; do
+            echo "::group::Fuzz ${target}"
+            if ! cargo +nightly-2026-07-20 fuzz run "$target" -- -max_total_time="$FUZZ_TIME_SECONDS" -timeout=10; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
+
+      - name: Upload fuzz crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

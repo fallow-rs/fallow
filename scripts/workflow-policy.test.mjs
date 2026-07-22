@@ -42,6 +42,43 @@ test("workflow block parser rejects missing keys", () => {
   assert.throws(() => indentedBlock("root:\n  value: true", "missing", 0), /missing missing block/);
 });
 
+test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
+  const workflow = readWorkflow(".github/workflows/fuzz-smoke.yml");
+  const pushPaths = listedPaths(indentedBlock(workflow, "push", 2));
+  const pullRequestPaths = listedPaths(indentedBlock(workflow, "pull_request", 2));
+  const job = indentedBlock(workflow, "fuzz-smoke", 2);
+
+  assert.match(workflow, /^  schedule:\n    - cron: '30 5 \* \* 0'$/m);
+  assert.match(workflow, /FUZZ_TIME_SECONDS:.*'schedule'.*'300'.*'30'/);
+  assert.match(workflow, /FUZZ_TARGETS: fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(job, /toolchain: nightly-2026-07-20/);
+  assert.match(job, /tool: cargo-fuzz@0\.13\.2/);
+  assert.match(job, /cargo \+nightly-2026-07-20 metadata --locked/);
+  assert.match(job, /cargo \+nightly-2026-07-20 fuzz run "\$target"/);
+  assert.match(job, /-max_total_time="\$FUZZ_TIME_SECONDS" -timeout=10/);
+  assert.match(job, /if ! cargo[\s\S]*failed=1[\s\S]*exit "\$failed"/);
+  assert.match(job, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
+  assert.match(job, /if: failure\(\)[\s\S]*path: fuzz\/artifacts\//);
+
+  for (const path of [
+    "fuzz/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/extract/**",
+    "crates/core/**",
+    "crates/types/**",
+    "crates/graph/**",
+    "crates/config/**",
+    "crates/security/**",
+    "rust-toolchain.toml",
+    ".github/workflows/fuzz-smoke.yml",
+  ]) {
+    assert.ok(pushPaths.includes(path), `fuzz push filter is missing ${path}`);
+    assert.ok(pullRequestPaths.includes(path), `fuzz pull request filter is missing ${path}`);
+  }
+});
+
 test("bundled skill validation uses the root lockfile without network fallback", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const npmPackageJob = indentedBlock(workflow, "npm-package", 2);

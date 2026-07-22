@@ -77,6 +77,22 @@ fix list. Before deleting a declaration or narrowing its visibility, confirm it
 is unused by every relevant feature profile and release target. The scheduled
 workflow stores its complete output as an artifact for review.
 
+### Fuzzing
+
+The fuzz harnesses require a Rust nightly toolchain and cargo-fuzz 0.13.2:
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz --version 0.13.2 --locked
+cargo +nightly fuzz list
+cargo +nightly fuzz run fuzz_sfc -- -max_total_time=30 -timeout=10
+```
+
+Each target uses seed inputs from `fuzz/corpus/<target-name>/`. Pull requests
+and pushes that affect the parser pipeline run every target for 30 seconds.
+The scheduled workflow runs every target for five minutes each week and can
+also be started manually. Crashing inputs are retained as workflow artifacts.
+
 ### Running locally
 
 ```bash
