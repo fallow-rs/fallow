@@ -13,7 +13,8 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test app.e2e.ts",
+    "test:shots": "playwright test shots.e2e.ts"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

@@ -1,11 +1,27 @@
 import { test, _electron as electron, type ElectronApplication } from "@playwright/test";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureReviewStarted } from "./review";
 
 const appDir = resolve(__dirname, "..");
 const worktreeRoot = resolve(appDir, "..", "..");
 const shots = process.env["FALLOW_REVIEW_SHOTS_DIR"] ?? "/tmp/fallow-review-qa";
+
+const resolveFallowBin = (): string => {
+  const explicit = process.env["FALLOW_BIN"]?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  for (const profile of ["release", "debug"] as const) {
+    const candidate = resolve(worktreeRoot, "target", profile, "fallow");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "fallow";
+};
 
 const safe = async (fn: () => Promise<void>): Promise<void> => {
   try {
@@ -23,7 +39,7 @@ test("capture screens for design QA", async () => {
     cwd: worktreeRoot,
     env: {
       ...process.env,
-      FALLOW_BIN: process.env["FALLOW_BIN"] ?? resolve(worktreeRoot, "target", "release", "fallow"),
+      FALLOW_BIN: resolveFallowBin(),
     } as Record<string, string>,
   });
   const win = await app.firstWindow();

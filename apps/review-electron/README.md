@@ -17,6 +17,7 @@ npm run build      # build main + preload + renderer into out/
 npm run package    # build + electron-builder (unsigned macOS .app, dir target)
 npm test           # vitest unit tests
 npm run test:e2e   # Playwright-electron e2e
+npm run test:shots # capture Playwright screenshots for design QA
 npm run typecheck  # tsc --noEmit
 ```
 

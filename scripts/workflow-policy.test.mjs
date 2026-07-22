@@ -184,6 +184,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     /missing windows-audit-smoke block/,
   );
   assert.match(aggregateJob, /windows-rust/);
+  assert.match(aggregateJob, /needs: \[[^\n]*\bzed\b[^\n]*\]/);
   assert.doesNotMatch(aggregateJob, /windows-audit-smoke|windows-arm64/);
 });
 

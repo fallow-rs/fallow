@@ -884,7 +884,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, windows-rust, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [check, windows-rust, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
