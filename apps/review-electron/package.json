@@ -46,7 +46,7 @@
     "oxlint": "^1.70.0",
     "typescript": "^5.7.0",
     "vite": "7.3.6",
-    "vitest": "4.1.9"
+    "vitest": "4.1.10"
   },
   "build": {
     "appId": "dev.fallow.review",
