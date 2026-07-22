@@ -27,11 +27,11 @@ use super::ModuleGraph;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoordinationGap {
     /// The changed file whose exported contract a non-diff module consumes.
-    pub changed_file: FileId,
+    pub(crate) changed_file: FileId,
     /// The consumer module that imports the changed contract and is NOT in the diff.
-    pub consumer_file: FileId,
+    pub(crate) consumer_file: FileId,
     /// The exported symbol names the consumer references, sorted and deduped.
-    pub consumed_symbols: Vec<String>,
+    pub(crate) consumed_symbols: Vec<String>,
 }
 
 /// Result of an impact-closure computation. File partitions are `FileId` sets so
@@ -40,12 +40,12 @@ pub struct CoordinationGap {
 #[derive(Debug, Clone, Default)]
 pub struct ImpactClosure {
     /// The seed (changed) files, the diff itself.
-    pub in_diff: Vec<FileId>,
+    pub(crate) in_diff: Vec<FileId>,
     /// Files transitively affected through `reverse_deps` (importers + re-export
     /// chains) that do NOT appear in the diff. The differentiator set.
-    pub affected_not_shown: Vec<FileId>,
+    pub(crate) affected_not_shown: Vec<FileId>,
     /// Coordination gaps: changed contracts consumed by non-diff modules.
-    pub coordination_gap: Vec<CoordinationGap>,
+    pub(crate) coordination_gap: Vec<CoordinationGap>,
 }
 
 /// The same closure with `FileId`s resolved to root-relative, forward-slashed

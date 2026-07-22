@@ -30,7 +30,7 @@ pub fn render_review_envelope(
 /// cache (which is `OnceLock`-bounded and not reentrant under cargo test's
 /// parallel runner).
 #[must_use]
-pub fn render_review_envelope_with_diff(
+pub(crate) fn render_review_envelope_with_diff(
     command: &str,
     provider: Provider,
     issues: &[CiIssue],
@@ -82,7 +82,11 @@ fn note_review_truncation(truncation: ReviewEnvelopeTruncation) {
 }
 
 #[must_use]
-pub fn print_review_envelope(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
+pub(crate) fn print_review_envelope(
+    command: &str,
+    provider: Provider,
+    codeclimate: &Value,
+) -> ExitCode {
     let issues = super::diff_filter::filter_issues_from_env(
         super::pr_comment::issues_from_codeclimate(codeclimate),
     );
@@ -90,7 +94,7 @@ pub fn print_review_envelope(command: &str, provider: Provider, codeclimate: &Va
 }
 
 #[must_use]
-pub fn print_review_envelope_from_codeclimate_issues(
+pub(crate) fn print_review_envelope_from_codeclimate_issues(
     command: &str,
     provider: Provider,
     codeclimate: &[CodeClimateIssue],

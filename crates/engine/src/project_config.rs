@@ -87,7 +87,7 @@ pub fn config_for_project_with_load_options(
 
 /// Resolve the parse-cache size limit for a resolved config.
 #[must_use]
-pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
+pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
     config
         .cache_max_size_mb
         .map_or(fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
@@ -95,7 +95,7 @@ pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
         })
 }
 
-pub fn default_project_config(root: &Path) -> ProjectConfig {
+pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let config = FallowConfig::default().resolve(
         root.to_path_buf(),

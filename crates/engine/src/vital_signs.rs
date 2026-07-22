@@ -21,26 +21,26 @@ use fallow_output::{
 /// Data sources for computing vital signs.
 ///
 /// Fields are `Option` because not all pipelines run in every health invocation.
-pub struct VitalSignsInput<'a> {
+pub(crate) struct VitalSignsInput<'a> {
     /// All parsed modules (always available).
-    pub modules: &'a [crate::source::ModuleInfo],
+    pub(crate) modules: &'a [crate::source::ModuleInfo],
     /// Optional file-id allowlist used to restrict per-module aggregates
     /// (cyclomatic distribution, total LOC, unit profiles) to a subset.
     /// Used by `--workspace` and `--group-by` to scope project-wide metrics
     /// to a single workspace package without re-parsing.
     /// `None` includes every module in `modules`.
-    pub module_filter: Option<&'a rustc_hash::FxHashSet<crate::discover::FileId>>,
+    pub(crate) module_filter: Option<&'a rustc_hash::FxHashSet<crate::discover::FileId>>,
     /// File health scores (available when file_scores/hotspots/targets are computed).
-    pub file_scores: Option<&'a [FileHealthScore]>,
+    pub(crate) file_scores: Option<&'a [FileHealthScore]>,
     /// Hotspot entries (available when hotspots are computed).
-    pub hotspots: Option<&'a [HotspotEntry]>,
+    pub(crate) hotspots: Option<&'a [HotspotEntry]>,
     /// Total discovered files (already scoped to the workspace when `--workspace` is set).
-    pub total_files: usize,
+    pub(crate) total_files: usize,
     /// Analysis results (available when file_scores pipeline ran). When a
     /// `module_filter` is also set, callers should pass workspace-scoped
     /// counts here so `dead_*_pct` denominators line up with the rest of the
     /// metrics.
-    pub analysis_counts: Option<AnalysisCounts>,
+    pub(crate) analysis_counts: Option<AnalysisCounts>,
 }
 
 impl<'a> VitalSignsInput<'a> {
@@ -56,12 +56,12 @@ impl<'a> VitalSignsInput<'a> {
 /// Aggregate counts from the analysis pipeline.
 #[derive(Clone, Copy)]
 pub struct AnalysisCounts {
-    pub total_exports: usize,
-    pub dead_files: usize,
-    pub dead_exports: usize,
-    pub unused_deps: usize,
-    pub circular_deps: usize,
-    pub total_deps: usize,
+    pub(crate) total_exports: usize,
+    pub(crate) dead_files: usize,
+    pub(crate) dead_exports: usize,
+    pub(crate) unused_deps: usize,
+    pub(crate) circular_deps: usize,
+    pub(crate) total_deps: usize,
 }
 
 fn collect_sorted_cyclomatic(input: &VitalSignsInput<'_>) -> Vec<u16> {
@@ -177,7 +177,7 @@ fn vital_sign_counts(input: &VitalSignsInput<'_>, total_loc: u64) -> Option<Vita
 }
 
 /// Compute vital signs from available health data.
-pub fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
+pub(crate) fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
     let all_cyclomatic = collect_sorted_cyclomatic(input);
     let avg_cyclomatic = average_cyclomatic(&all_cyclomatic);
     let critical_complexity_pct = critical_complexity_pct(&all_cyclomatic);
@@ -413,7 +413,7 @@ fn compute_coupling_concentration(scores: &[FileHealthScore]) -> (Option<u32>, O
 /// The score starts at 100 and subtracts penalties for each metric.
 /// Missing metrics (from pipelines that didn't run) don't penalize.
 /// `total_files` is used to normalize the hotspot count penalty.
-pub fn compute_health_score(vs: &VitalSigns, total_files: usize) -> HealthScore {
+pub(crate) fn compute_health_score(vs: &VitalSigns, total_files: usize) -> HealthScore {
     let penalties = compute_health_score_penalties(vs, total_files);
     let score = apply_health_score_penalties(&penalties);
     let grade = letter_grade(score);
@@ -571,7 +571,7 @@ fn coupling_penalty(vs: &VitalSigns) -> Option<f64> {
 }
 
 /// Build the raw counts for a snapshot.
-pub fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
+pub(crate) fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
     let (total_exports, dead_files, dead_exports, total_deps) = input
         .analysis_counts
         .as_ref()
@@ -638,7 +638,7 @@ fn git_branch(root: &Path) -> Option<String> {
 }
 
 /// Build a snapshot from vital signs and input data.
-pub fn build_snapshot(
+pub(crate) fn build_snapshot(
     vital_signs: VitalSigns,
     counts: VitalSignsCounts,
     root: &Path,
@@ -701,7 +701,7 @@ const fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 ///
 /// If `path` is `None`, writes to `.fallow/snapshots/{timestamp}.json`.
 /// Creates parent directories as needed.
-pub fn save_snapshot(
+pub(crate) fn save_snapshot(
     snapshot: &VitalSignsSnapshot,
     root: &Path,
     explicit_path: Option<&Path>,
@@ -735,7 +735,7 @@ pub fn save_snapshot(
     clippy::print_stderr,
     reason = "corrupt-snapshot warnings to stderr, preserved verbatim from the CLI health path"
 )]
-pub fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
+pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
     let dir = root.join(".fallow").join("snapshots");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
@@ -798,7 +798,7 @@ fn overall_trend_direction(metrics: &[TrendMetric]) -> TrendDirection {
 ///
 /// Uses the stored `score` field from the snapshot (never re-derives it).
 /// Returns `None` if no snapshots are available.
-pub fn compute_trend(
+pub(crate) fn compute_trend(
     current_vs: &VitalSigns,
     current_counts: &VitalSignsCounts,
     current_score: Option<f64>,

@@ -16,7 +16,7 @@ pub enum DiffFilterMode {
 
 impl DiffFilterMode {
     #[must_use]
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         match std::env::var("FALLOW_DIFF_FILTER")
             .unwrap_or_else(|_| "added".into())
             .as_str()
@@ -91,8 +91,8 @@ impl DiffSource {
 /// changed set.
 #[derive(Debug)]
 pub struct LoadedDiff {
-    pub index: DiffIndex,
-    pub raw: String,
+    pub(crate) index: DiffIndex,
+    pub(crate) raw: String,
 }
 
 /// Resolve a diff source from CLI input.
@@ -113,7 +113,7 @@ pub struct LoadedDiff {
 /// Returns a human-readable message when the CLI input is internally
 /// inconsistent (e.g. `--diff-stdin` and `--diff-file pr.diff` both set,
 /// or `--diff-file ""` after env-var fallback failed).
-pub fn resolve_diff_source(
+pub(crate) fn resolve_diff_source(
     diff_file: Option<&Path>,
     diff_stdin: bool,
     root: &Path,
@@ -169,7 +169,7 @@ pub fn resolve_diff_source(
 /// Stdin is consumed exactly once. The first call drains it; downstream
 /// callers must reuse the returned `LoadedDiff` rather than re-loading.
 #[must_use]
-pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
+pub(crate) fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
     match source {
         DiffSource::Stdin => load_diff_index_from_stdin(quiet),
         DiffSource::Flag(path) | DiffSource::EnvVar(path) => {
@@ -283,7 +283,7 @@ static SHARED_DIFF: OnceLock<Option<LoadedDiff>> = OnceLock::new();
 /// Pass `None` to lock the cache to "no diff" without reading anything,
 /// so a subsequent errant load attempt cannot accidentally populate the
 /// cache later.
-pub fn init_shared_diff(
+pub(crate) fn init_shared_diff(
     source: Option<&DiffSource>,
     root: &Path,
     candidate_bases: &[PathBuf],
@@ -444,7 +444,7 @@ fn warn_on_foreign_diff_namespace(index: &DiffIndex, candidate_bases: &[PathBuf]
 /// `None` when the cache is empty (no diff was supplied, or
 /// `init_shared_diff` was never called).
 #[must_use]
-pub fn shared_diff_index() -> Option<&'static DiffIndex> {
+pub(crate) fn shared_diff_index() -> Option<&'static DiffIndex> {
     SHARED_DIFF.get().and_then(|v| v.as_ref()).map(|l| &l.index)
 }
 
@@ -454,7 +454,7 @@ pub fn shared_diff_index() -> Option<&'static DiffIndex> {
 /// (e.g. a `--diff-stdin` staged diff) the finding filter used, rather than
 /// recomputing a committed `base...HEAD` diff that would not match.
 #[must_use]
-pub fn shared_diff_raw() -> Option<&'static str> {
+pub(crate) fn shared_diff_raw() -> Option<&'static str> {
     SHARED_DIFF
         .get()
         .and_then(|v| v.as_ref())
@@ -484,7 +484,7 @@ fn context_radius_from_env() -> u64 {
 /// it. The env-var fallback is only for the case where `init_shared_diff` never
 /// ran (an embedder or a test), so those callers keep working.
 #[must_use]
-pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
+pub(crate) fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
     let mode = DiffFilterMode::from_env();
     let radius = context_radius_from_env();
     match SHARED_DIFF.get() {
@@ -526,7 +526,7 @@ pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
 /// Sorting is restored after the partition + merge so downstream rendering
 /// sees the same `(path, line, fingerprint)` order as the unfiltered input.
 #[must_use]
-pub fn filter_issues_for_summary(issues: Vec<CiIssue>) -> Vec<CiIssue> {
+pub(crate) fn filter_issues_for_summary(issues: Vec<CiIssue>) -> Vec<CiIssue> {
     summary_filter_with_scope(issues, SummaryScope::from_env(), filter_issues_from_env)
 }
 
@@ -555,7 +555,7 @@ where
 }
 
 #[must_use]
-pub fn filter_issues_from_path(
+pub(crate) fn filter_issues_from_path(
     issues: Vec<CiIssue>,
     path: &Path,
     mode: DiffFilterMode,

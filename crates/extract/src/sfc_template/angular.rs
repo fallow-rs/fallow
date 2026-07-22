@@ -55,14 +55,14 @@ impl AngularTemplateRefs {
     /// Whether the given identifier appears in this template's unresolved refs.
     #[cfg(test)]
     #[must_use]
-    pub fn contains(&self, name: &str) -> bool {
+    pub(crate) fn contains(&self, name: &str) -> bool {
         self.identifiers.contains(name)
     }
 
     /// Whether this template produced no refs or member accesses at all.
     #[cfg(test)]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.identifiers.is_empty() && self.member_accesses.is_empty()
     }
 }

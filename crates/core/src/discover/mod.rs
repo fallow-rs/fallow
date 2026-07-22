@@ -19,7 +19,7 @@ pub(crate) use entry_points::{
     warn_skipped_entry_summary,
 };
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-pub use infrastructure::discover_infrastructure_entry_points;
+pub(crate) use infrastructure::discover_infrastructure_entry_points;
 pub use walk::{
     HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS, discover_files,
     discover_files_and_config_candidates, discover_files_with_additional_hidden_dirs,
@@ -66,7 +66,7 @@ pub fn collect_plugin_hidden_dir_scopes(
 /// many workspace packages, doing the workspace `package.json` read once
 /// avoids quadratic I/O.
 #[must_use]
-pub fn collect_hidden_dir_scopes(
+pub(crate) fn collect_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
     workspaces: &[fallow_config::WorkspaceInfo],

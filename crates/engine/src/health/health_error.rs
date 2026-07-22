@@ -21,7 +21,7 @@ pub enum HealthError {
 impl HealthError {
     /// Build a [`HealthError::Message`] from a message and exit code.
     #[must_use]
-    pub fn message(message: impl Into<String>, exit_code: u8) -> Self {
+    pub(crate) fn message(message: impl Into<String>, exit_code: u8) -> Self {
         Self::Message {
             message: message.into(),
             exit_code,

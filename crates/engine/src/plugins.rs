@@ -189,7 +189,7 @@ impl AggregatedPluginResult {
     }
 
     /// Merge active plugin names from another result, preserving insertion order.
-    pub fn merge_active_plugins_from(&mut self, other: &Self) {
+    pub(crate) fn merge_active_plugins_from(&mut self, other: &Self) {
         self.inner.merge_active_plugins_from(&other.inner);
     }
 
@@ -250,7 +250,7 @@ pub struct PluginRegistry {
 impl PluginRegistry {
     /// Create a registry with all built-in plugins and optional external plugins.
     #[must_use]
-    pub fn new(external: Vec<ExternalPluginDef>) -> Self {
+    pub(crate) fn new(external: Vec<ExternalPluginDef>) -> Self {
         Self {
             inner: core_backend::BackendPluginRegistry::new(external),
         }
@@ -258,12 +258,12 @@ impl PluginRegistry {
 
     /// Hidden directory names that should be traversed before full plugin execution.
     #[must_use]
-    pub fn discovery_hidden_dirs(&self, pkg: &PackageJson, root: &Path) -> Vec<String> {
+    pub(crate) fn discovery_hidden_dirs(&self, pkg: &PackageJson, root: &Path) -> Vec<String> {
         self.inner.discovery_hidden_dirs(pkg, root)
     }
 
     /// Run all plugins against a project.
-    pub fn try_run(
+    pub(crate) fn try_run(
         &self,
         pkg: &PackageJson,
         root: &Path,

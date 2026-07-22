@@ -33,25 +33,25 @@ use super::{ModuleGraph, ReferenceKind};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FocusFileFacts {
     /// The changed file these facts describe.
-    pub file: FileId,
+    pub(crate) file: FileId,
     /// Count of DISTINCT files importing this file (fan-in / blast radius).
     /// Excludes the changed file itself.
-    pub fan_in: u32,
+    pub(crate) fan_in: u32,
     /// Count of DISTINCT forward-dependency files this file imports (fan-out).
     /// Excludes the changed file itself.
-    pub fan_out: u32,
+    pub(crate) fan_out: u32,
     /// Whether this file is wired through dynamic dispatch: it has any outgoing
     /// dynamic-import edge OR is referenced by another file via a `DynamicImport`
     /// reference (DI / decorators / plugin-loader / `React.lazy` patterns the
     /// static graph cannot fully resolve). Drives the `low: dynamic dispatch
     /// detected` confidence flag. Conservative (over-flags): a file that MAY be
     /// dynamically wired carries the flag.
-    pub dynamic_dispatch: bool,
+    pub(crate) dynamic_dispatch: bool,
     /// Whether this file's reachability runs through re-export indirection: it is
     /// a re-export barrel (has its own `re_exports`), is a re-export SOURCE of a
     /// barrel, or is referenced via a `ReExport` reference. Drives the `low:
     /// re-export indirection` confidence flag.
-    pub re_export_indirection: bool,
+    pub(crate) re_export_indirection: bool,
 }
 
 /// The same per-file facts with the `FileId` resolved to a root-relative,

@@ -14,7 +14,7 @@ use rustc_hash::FxHashSet;
 
 /// Extract all import source specifiers from JS/TS source code.
 #[must_use]
-pub fn extract_imports(source: &str, path: &Path) -> Vec<String> {
+pub(crate) fn extract_imports(source: &str, path: &Path) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let mut sources = Vec::new();
         for stmt in &program.body {
@@ -29,7 +29,7 @@ pub fn extract_imports(source: &str, path: &Path) -> Vec<String> {
 
 /// Extract import sources and top-level `require('...')` statements.
 #[must_use]
-pub fn extract_imports_and_requires(source: &str, path: &Path) -> Vec<String> {
+pub(crate) fn extract_imports_and_requires(source: &str, path: &Path) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let mut sources = Vec::new();
         for stmt in &program.body {
@@ -55,7 +55,11 @@ pub fn extract_imports_and_requires(source: &str, path: &Path) -> Vec<String> {
 
 /// Extract string array from a property at a nested path in a config's default export.
 #[must_use]
-pub fn extract_config_string_array(source: &str, path: &Path, prop_path: &[&str]) -> Vec<String> {
+pub(crate) fn extract_config_string_array(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         get_nested_string_array_from_object(obj, prop_path)
@@ -65,7 +69,11 @@ pub fn extract_config_string_array(source: &str, path: &Path, prop_path: &[&str]
 
 /// Extract a single string from a property at a nested path.
 #[must_use]
-pub fn extract_config_string(source: &str, path: &Path, prop_path: &[&str]) -> Option<String> {
+pub(crate) fn extract_config_string(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Option<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         get_nested_string_from_object(obj, prop_path)
@@ -74,7 +82,11 @@ pub fn extract_config_string(source: &str, path: &Path, prop_path: &[&str]) -> O
 
 /// Extract a shell command string from a property at a nested path.
 #[must_use]
-pub fn extract_config_command(source: &str, path: &Path, prop_path: &[&str]) -> Option<String> {
+pub(crate) fn extract_config_command(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Option<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         get_nested_command_from_object(obj, prop_path)
@@ -84,7 +96,7 @@ pub fn extract_config_command(source: &str, path: &Path, prop_path: &[&str]) -> 
 /// Extract string values from top-level properties of the default export or
 /// `module.exports` object.
 #[must_use]
-pub fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
+pub(crate) fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let mut values = Vec::new();
@@ -98,7 +110,7 @@ pub fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> 
 
 /// Extract only top-level string values from a property's array.
 #[must_use]
-pub fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
+pub(crate) fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let prop = find_property(obj, key)?;
@@ -109,7 +121,7 @@ pub fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> V
 
 /// Extract top-level string values from a config array, including object entries.
 #[must_use]
-pub fn extract_config_shallow_strings_or_object_property(
+pub(crate) fn extract_config_shallow_strings_or_object_property(
     source: &str,
     path: &Path,
     key: &str,
@@ -128,7 +140,7 @@ pub fn extract_config_shallow_strings_or_object_property(
 
 /// Extract shallow strings from an array property inside a nested object path.
 #[must_use]
-pub fn extract_config_nested_shallow_strings(
+pub(crate) fn extract_config_nested_shallow_strings(
     source: &str,
     path: &Path,
     outer_path: &[&str],
@@ -148,7 +160,7 @@ pub fn extract_config_nested_shallow_strings(
 }
 
 /// Public wrapper for `find_config_object`.
-pub fn find_config_object_pub<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
+pub(crate) fn find_config_object_pub<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
     find_config_object(program)
 }
 
@@ -231,7 +243,11 @@ pub(crate) fn is_disabled_expression(expr: &Expression<'_>) -> bool {
 
 /// True when a nested config property is a static `true` boolean or object value.
 #[must_use]
-pub fn extract_config_truthy_bool_or_object(source: &str, path: &Path, prop_path: &[&str]) -> bool {
+pub(crate) fn extract_config_truthy_bool_or_object(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> bool {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let expr = get_nested_expression(obj, prop_path)?;
@@ -253,7 +269,11 @@ fn is_truthy_bool_or_object(expr: &Expression<'_>) -> bool {
 
 /// Extract keys of an object property at a nested path.
 #[must_use]
-pub fn extract_config_object_keys(source: &str, path: &Path, prop_path: &[&str]) -> Vec<String> {
+pub(crate) fn extract_config_object_keys(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         get_nested_object_keys(obj, prop_path)
@@ -264,7 +284,7 @@ pub fn extract_config_object_keys(source: &str, path: &Path, prop_path: &[&str])
 /// Extract a value that may be a single string, string array, or object with
 /// string/array values.
 #[must_use]
-pub fn extract_config_string_or_array(
+pub(crate) fn extract_config_string_or_array(
     source: &str,
     path: &Path,
     prop_path: &[&str],
@@ -278,7 +298,11 @@ pub fn extract_config_string_or_array(
 
 /// Extract a statically recoverable path-like value from a property path.
 #[must_use]
-pub fn extract_config_path(source: &str, path: &Path, prop_path: &[&str]) -> Option<PathBuf> {
+pub(crate) fn extract_config_path(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Option<PathBuf> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let expr = get_nested_expression(obj, prop_path)?;
@@ -288,7 +312,7 @@ pub fn extract_config_path(source: &str, path: &Path, prop_path: &[&str]) -> Opt
 
 /// Extract string values from a property path, also searching inside array elements.
 #[must_use]
-pub fn extract_config_array_nested_string_or_array(
+pub(crate) fn extract_config_array_nested_string_or_array(
     source: &str,
     path: &Path,
     array_path: &[&str],
@@ -319,7 +343,7 @@ pub fn extract_config_array_nested_string_or_array(
 
 /// Extract string values from a property path, searching inside all values of an object.
 #[must_use]
-pub fn extract_config_object_nested_string_or_array(
+pub(crate) fn extract_config_object_nested_string_or_array(
     source: &str,
     path: &Path,
     object_path: &[&str],
@@ -332,7 +356,7 @@ pub fn extract_config_object_nested_string_or_array(
 
 /// Extract a single string value from each object under a property path.
 #[must_use]
-pub fn extract_config_object_nested_strings(
+pub(crate) fn extract_config_object_nested_strings(
     source: &str,
     path: &Path,
     object_path: &[&str],
@@ -376,7 +400,7 @@ fn extract_config_object_nested(
 
 /// Extract `require('...')` call argument strings from a property's value.
 #[must_use]
-pub fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
+pub(crate) fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let prop = find_property(obj, key)?;
@@ -387,7 +411,7 @@ pub fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> V
 
 /// Extract alias mappings from an object or array-based alias config.
 #[must_use]
-pub fn extract_config_aliases(
+pub(crate) fn extract_config_aliases(
     source: &str,
     path: &Path,
     prop_path: &[&str],
@@ -400,7 +424,7 @@ pub fn extract_config_aliases(
 
 /// Extract alias mappings where the replacement is a filesystem path value.
 #[must_use]
-pub fn extract_config_path_aliases(
+pub(crate) fn extract_config_path_aliases(
     source: &str,
     path: &Path,
     prop_path: &[&str],
@@ -440,7 +464,7 @@ pub fn extract_config_array_nested_aliases(
 
 /// Like [`extract_config_aliases`] but each tuple carries a bare-string flag.
 #[must_use]
-pub fn extract_config_aliases_kinded(
+pub(crate) fn extract_config_aliases_kinded(
     source: &str,
     path: &Path,
     prop_path: &[&str],
@@ -457,7 +481,7 @@ pub fn extract_config_aliases_kinded(
 
 /// Kinded variant of [`extract_config_array_nested_aliases`].
 #[must_use]
-pub fn extract_config_array_nested_aliases_kinded(
+pub(crate) fn extract_config_array_nested_aliases_kinded(
     source: &str,
     path: &Path,
     array_path: &[&str],
@@ -484,7 +508,7 @@ pub fn extract_config_array_nested_aliases_kinded(
 
 /// Extract kinded aliases from a default-exported ARRAY config.
 #[must_use]
-pub fn extract_default_export_array_aliases_kinded(
+pub(crate) fn extract_default_export_array_aliases_kinded(
     source: &str,
     path: &Path,
     alias_path: &[&str],
@@ -506,7 +530,7 @@ pub fn extract_default_export_array_aliases_kinded(
 
 /// True when a parsed config has neither an object nor array default export.
 #[must_use]
-pub fn config_default_export_unreachable(source: &str, path: &Path) -> bool {
+pub(crate) fn config_default_export_unreachable(source: &str, path: &Path) -> bool {
     extract_from_source(source, path, |program| {
         let reachable =
             find_config_object(program).is_some() || find_default_export_array(program).is_some();
@@ -521,7 +545,7 @@ pub fn config_default_export_unreachable(source: &str, path: &Path) -> bool {
 /// Useful for configs like:
 /// - `components: ["~/components", { path: "~/feature-components" }]`
 #[must_use]
-pub fn extract_config_array_object_strings(
+pub(crate) fn extract_config_array_object_strings(
     source: &str,
     path: &Path,
     array_path: &[&str],
@@ -565,7 +589,7 @@ pub fn extract_config_array_object_strings(
 /// Supports string entries and object entries with a string-like `from` plus
 /// optional string-like `to`.
 #[must_use]
-pub fn extract_config_static_dir_entries(
+pub(crate) fn extract_config_static_dir_entries(
     source: &str,
     path: &Path,
     array_path: &[&str],
@@ -649,7 +673,7 @@ pub fn extract_config_array_object_string_pairs(
 
 /// Extract paired shell command and string values from each object element of an array.
 #[must_use]
-pub fn extract_config_array_object_command_pairs(
+pub(crate) fn extract_config_array_object_command_pairs(
     source: &str,
     path: &Path,
     array_path: &[&str],
@@ -729,7 +753,11 @@ pub fn extract_config_array_object_command_pairs(
 /// specifiers, computed expressions) are silently skipped: callers receive
 /// only the statically-resolvable specifiers, in source order.
 #[must_use]
-pub fn extract_lazy_imports_in_array(source: &str, path: &Path, prop_path: &[&str]) -> Vec<String> {
+pub(crate) fn extract_lazy_imports_in_array(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let array_expr = get_nested_expression(obj, prop_path)?;
@@ -778,7 +806,7 @@ fn lazy_import_specifier(expr: &Expression<'_>) -> Option<String> {
 /// - `export default { expo: { plugins: [["expo-router", { root: "./src/app" }]] } }`
 /// - `{ plugins: [["expo-router", { root: "./src/routes" }]] }`
 #[must_use]
-pub fn extract_config_plugin_option_string(
+pub(crate) fn extract_config_plugin_option_string(
     source: &str,
     path: &Path,
     plugins_path: &[&str],
@@ -827,7 +855,7 @@ pub fn extract_config_plugin_option_string(
 
 /// Extract a string-like option from the first plugin array path that contains it.
 #[must_use]
-pub fn extract_config_plugin_option_string_from_paths(
+pub(crate) fn extract_config_plugin_option_string_from_paths(
     source: &str,
     path: &Path,
     plugin_paths: &[&[&str]],
@@ -842,7 +870,7 @@ pub fn extract_config_plugin_option_string_from_paths(
 /// Extract Babel plugin and preset package names configured through
 /// `@vitejs/plugin-react` options in a Vite-style `plugins` array.
 #[must_use]
-pub fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -> Vec<String> {
+pub(crate) fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let react_plugin_imports = collect_vite_react_plugin_imports(program);
         if react_plugin_imports.is_empty() {
@@ -881,7 +909,7 @@ pub fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -> Vec<S
 /// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
 /// `"/src"`, or absolute filesystem paths under `root`.
 #[must_use]
-pub fn normalize_config_path_buf(
+pub(crate) fn normalize_config_path_buf(
     raw: impl AsRef<Path>,
     config_path: &Path,
     root: &Path,
@@ -908,7 +936,7 @@ pub fn normalize_config_path_buf(
 
 /// Normalize a config-relative path to a project-root-relative forward-slash string.
 #[must_use]
-pub fn normalize_config_path(
+pub(crate) fn normalize_config_path(
     raw: impl AsRef<Path>,
     config_path: &Path,
     root: &Path,

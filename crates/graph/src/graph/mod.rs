@@ -111,11 +111,11 @@ pub struct ModuleGraph {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Edge {
     /// Source module of this import edge.
-    pub source: FileId,
+    pub(crate) source: FileId,
     /// Target module imported by `source`.
-    pub target: FileId,
+    pub(crate) target: FileId,
     /// Symbols imported across this edge.
-    pub symbols: Vec<ImportedSymbol>,
+    pub(crate) symbols: Vec<ImportedSymbol>,
 }
 
 /// A symbol imported across an edge.

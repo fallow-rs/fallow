@@ -97,7 +97,7 @@ pub mod inventory {
 /// incremental runners choose cache policy without exposing the extract crate
 /// as the public orchestration layer.
 #[must_use]
-pub fn parse_all_files(
+pub(crate) fn parse_all_files(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
     need_complexity: bool,

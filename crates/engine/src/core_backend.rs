@@ -351,7 +351,7 @@ impl BackendAggregatedPluginResult {
     }
 
     #[cfg(test)]
-    pub fn push_active_plugin_for_test(&mut self, plugin_name: impl Into<String>) {
+    pub(crate) fn push_active_plugin_for_test(&mut self, plugin_name: impl Into<String>) {
         self.active_plugins.push(plugin_name.into());
     }
 }

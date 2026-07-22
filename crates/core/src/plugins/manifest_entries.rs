@@ -151,7 +151,7 @@ pub struct RuleReport {
 /// plugin detection's file-existence fallback) to find them. Manifests under
 /// gitignored / `node_modules` directories are intentionally invisible.
 #[must_use]
-pub fn evaluate_manifest_entries(ext: &ExternalPluginDef, root: &Path) -> Vec<PathRule> {
+pub(crate) fn evaluate_manifest_entries(ext: &ExternalPluginDef, root: &Path) -> Vec<PathRule> {
     let mut out = Vec::new();
     for rule in &ext.manifest_entries {
         let report = build_rule_report(rule, root);

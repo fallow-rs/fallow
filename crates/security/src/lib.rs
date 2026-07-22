@@ -248,7 +248,7 @@ impl CalleePattern {
     /// an exact (non-wildcard) pattern, whose receiver is fixed in the pattern
     /// itself, and for any `callee_path` this pattern does not match.
     #[must_use]
-    pub fn matched_receiver<'p>(&self, callee_path: &'p str) -> Option<&'p str> {
+    pub(crate) fn matched_receiver<'p>(&self, callee_path: &'p str) -> Option<&'p str> {
         if !self.leading_wildcard || !self.matches(callee_path) {
             return None;
         }
@@ -332,13 +332,13 @@ pub struct Matcher {
 /// `ctx.req.query`); a bare path matches exactly.
 #[derive(Debug, Clone)]
 pub struct SourceMatcher {
-    pub id: String,
-    pub title: String,
-    pub enabler: Option<String>,
-    pub path_patterns: Vec<CalleePattern>,
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) enabler: Option<String>,
+    pub(crate) path_patterns: Vec<CalleePattern>,
     /// Lowercased receiver allowlist for leading-wildcard patterns (issue
     /// #1092). Empty leaves the row ungated.
-    pub receiver_allowlist: Vec<String>,
+    pub(crate) receiver_allowlist: Vec<String>,
 }
 
 impl SourceMatcher {
@@ -346,13 +346,13 @@ impl SourceMatcher {
     /// member-access path, subject to the built-in receiver allowlist.
     #[cfg(test)]
     #[must_use]
-    pub fn matches(&self, source_path: &str) -> bool {
+    pub(crate) fn matches(&self, source_path: &str) -> bool {
         let extra_receivers = FxHashSet::default();
         self.matches_with_extra_receivers(source_path, &extra_receivers)
     }
 
     #[must_use]
-    pub fn matches_with_extra_receivers(
+    pub(crate) fn matches_with_extra_receivers(
         &self,
         source_path: &str,
         extra_receivers: &FxHashSet<String>,
@@ -389,7 +389,7 @@ impl SourceMatcher {
     /// Whether this source row's framework enabler is satisfied by the
     /// project's declared dependency set. Unset means global.
     #[must_use]
-    pub fn enabler_satisfied(&self, declared_deps: &rustc_hash::FxHashSet<String>) -> bool {
+    pub(crate) fn enabler_satisfied(&self, declared_deps: &rustc_hash::FxHashSet<String>) -> bool {
         enabler_satisfied(self.enabler.as_deref(), declared_deps)
     }
 }
@@ -573,7 +573,7 @@ impl Catalogue {
     /// All untrusted-source matchers in declaration order. Test-only inspection.
     #[cfg(test)]
     #[must_use]
-    pub fn sources(&self) -> &[SourceMatcher] {
+    pub(crate) fn sources(&self) -> &[SourceMatcher] {
         &self.sources
     }
 
@@ -581,7 +581,7 @@ impl Catalogue {
     /// matches the given flattened member-access path, if any (issue #859).
     #[cfg(test)]
     #[must_use]
-    pub fn matching_source(&self, source_path: &str) -> Option<(&str, &str)> {
+    pub(crate) fn matching_source(&self, source_path: &str) -> Option<(&str, &str)> {
         let request_receivers = FxHashSet::default();
         self.sources
             .iter()
@@ -593,7 +593,7 @@ impl Catalogue {
     /// and optional framework enabler match the given source path.
     #[cfg(test)]
     #[must_use]
-    pub fn matching_source_for_deps(
+    pub(crate) fn matching_source_for_deps(
         &self,
         source_path: &str,
         declared_deps: &FxHashSet<String>,
@@ -631,13 +631,13 @@ impl Catalogue {
     /// source pattern (issue #859). Test-only convenience over `matching_source`.
     #[cfg(test)]
     #[must_use]
-    pub fn is_source_path(&self, source_path: &str) -> bool {
+    pub(crate) fn is_source_path(&self, source_path: &str) -> bool {
         self.matching_source(source_path).is_some()
     }
 
     /// The human-readable title for a category id, if any matcher declares it.
     #[must_use]
-    pub fn title_for(&self, id: &str) -> Option<&str> {
+    pub(crate) fn title_for(&self, id: &str) -> Option<&str> {
         self.matchers
             .iter()
             .find(|m| m.id == id)
@@ -654,14 +654,14 @@ pub fn catalogue_title(id: &str) -> Option<&'static str> {
 /// The catalogue id of the secret-to-network exfil category (CWE-201). Like
 /// [`HARDCODED_SECRET_CATEGORY_ID`], it is include-required: it runs only when
 /// listed in `security.categories.include`.
-pub const SECRET_TO_NETWORK_CATEGORY_ID: &str = "secret-to-network";
+pub(crate) const SECRET_TO_NETWORK_CATEGORY_ID: &str = "secret-to-network";
 
 /// Whether a `security.categories` id is include-required, i.e. it stays off
 /// even when no include list is set and fires only when named in
 /// `categories.include`. Both the standalone hardcoded-secret detector and the
 /// secret-to-network catalogue category are include-required.
 #[must_use]
-pub fn is_include_required_category(id: &str) -> bool {
+pub(crate) fn is_include_required_category(id: &str) -> bool {
     id == HARDCODED_SECRET_CATEGORY_ID || id == SECRET_TO_NETWORK_CATEGORY_ID
 }
 

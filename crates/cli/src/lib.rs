@@ -89,7 +89,7 @@ mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
 /// Structured error output for CLI and JSON formats.
-pub mod error;
+pub(crate) mod error;
 #[cfg(test)]
 use cli_format::parse_format_arg;
 use cli_format::{Format, FormatConfig};
@@ -111,7 +111,7 @@ use dupes::{DupesMode, DupesOptions};
 use error::emit_error;
 use health::{HealthOptions, SortBy};
 use list::ListOptions;
-pub use runtime_support::{AnalysisKind, GroupBy};
+pub(crate) use runtime_support::{AnalysisKind, GroupBy};
 pub(crate) use runtime_support::{
     ConfigLoadOptions, LoadConfigArgs, build_ownership_resolver, load_config,
     load_config_for_analysis,

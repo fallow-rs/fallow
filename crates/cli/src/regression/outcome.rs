@@ -30,7 +30,7 @@ impl RegressionOutcome {
     /// Build a JSON value for the regression outcome (added to JSON output envelope).
     #[must_use]
     #[cfg(test)]
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         match self {
             Self::Pass {
                 baseline_total,

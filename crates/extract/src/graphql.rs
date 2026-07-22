@@ -14,7 +14,7 @@ use fallow_types::discover::FileId;
 static GRAPHQL_IMPORT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"(?m)^[ \t]*#\s*import\s+["']([^"'\r\n]+)["']"#));
 
-pub(crate) fn is_graphql_file(path: &Path) -> bool {
+pub fn is_graphql_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "graphql" || ext == "gql")
@@ -33,7 +33,7 @@ fn span_from_usize(start: usize, end: usize) -> Span {
 }
 
 #[must_use]
-pub(crate) fn extract_graphql_imports(source: &str) -> Vec<ImportInfo> {
+pub fn extract_graphql_imports(source: &str) -> Vec<ImportInfo> {
     let mut imports = Vec::new();
 
     for cap in GRAPHQL_IMPORT_RE.captures_iter(source) {
@@ -67,11 +67,7 @@ pub(crate) fn extract_graphql_imports(source: &str) -> Vec<ImportInfo> {
     imports
 }
 
-pub(crate) fn parse_graphql_to_module(
-    file_id: FileId,
-    source: &str,
-    content_hash: u64,
-) -> ModuleInfo {
+pub fn parse_graphql_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     ModuleInfo {
         file_id,

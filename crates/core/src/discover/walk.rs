@@ -309,7 +309,7 @@ pub struct HiddenDirScope {
 }
 
 impl HiddenDirScope {
-    pub fn new(root: PathBuf, dirs: Vec<String>) -> Self {
+    pub(crate) fn new(root: PathBuf, dirs: Vec<String>) -> Self {
         Self { root, dirs }
     }
 

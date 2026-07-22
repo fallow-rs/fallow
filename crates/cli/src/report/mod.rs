@@ -1,6 +1,6 @@
 mod badge;
 pub mod ci;
-pub mod codeclimate;
+pub(crate) mod codeclimate;
 mod compact;
 pub mod dupes_grouping;
 pub mod github;
@@ -12,10 +12,10 @@ mod json;
 mod markdown;
 mod sarif;
 mod shared;
-pub mod sink;
-pub mod suggestions;
+pub(crate) mod sink;
+pub(crate) mod suggestions;
 #[cfg(test)]
-pub mod test_helpers;
+pub(crate) mod test_helpers;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -37,20 +37,20 @@ use crate::report::sink::outln;
 )]
 pub use fallow_output::strip_root_prefix;
 pub use grouping::OwnershipResolver;
-pub use human::health::{render_health_score, render_health_trend};
+pub(crate) use human::health::{render_health_score, render_health_trend};
 
 /// The three line-groups of a human `fallow review --walkthrough` render: the
 /// orientation header and final status (stderr), and the staged tour body
 /// (stdout). The entry point in `audit_brief.rs` owns the stream split; this
 /// keeps the pure line builder behind the private `human` module while exposing
 /// exactly what the entry point needs.
-pub struct WalkthroughHumanRender {
+pub(crate) struct WalkthroughHumanRender {
     /// Review Focus orientation header lines (stderr).
-    pub header: Vec<String>,
+    pub(crate) header: Vec<String>,
     /// The staged tour body lines (stdout).
-    pub body: Vec<String>,
+    pub(crate) body: Vec<String>,
     /// The final green status line (stderr).
-    pub status: String,
+    pub(crate) status: String,
 }
 
 /// The root-relative files (in `direction.order`) the local ledger marked viewed
@@ -58,7 +58,7 @@ pub struct WalkthroughHumanRender {
 /// the same viewed files into Cleared that the human surface does, keeping the two
 /// formats consistent on the same on-disk `--mark-viewed` state.
 #[must_use]
-pub fn walkthrough_viewed_files(
+pub(crate) fn walkthrough_viewed_files(
     guide: &fallow_output::StandardWalkthroughGuide,
     viewed: &crate::walkthrough_state::ViewedState,
 ) -> Vec<String> {
@@ -69,7 +69,7 @@ pub fn walkthrough_viewed_files(
 /// mutation. `viewed` decorates each file row; `show_cleared` expands the
 /// Cleared panel.
 #[must_use]
-pub fn build_walkthrough_human(
+pub(crate) fn build_walkthrough_human(
     guide: &fallow_output::StandardWalkthroughGuide,
     viewed: &crate::walkthrough_state::ViewedState,
     show_cleared: bool,
@@ -90,47 +90,47 @@ pub fn build_walkthrough_human(
 ///
 /// Bundles the common parameters that every format renderer needs,
 /// replacing per-parameter threading through the dispatch match arms.
-pub struct ReportContext<'a> {
-    pub root: &'a Path,
-    pub rules: &'a RulesConfig,
-    pub elapsed: Duration,
-    pub quiet: bool,
-    pub explain: bool,
+pub(crate) struct ReportContext<'a> {
+    pub(crate) root: &'a Path,
+    pub(crate) rules: &'a RulesConfig,
+    pub(crate) elapsed: Duration,
+    pub(crate) quiet: bool,
+    pub(crate) explain: bool,
     /// When set, group all output by this resolver.
-    pub group_by: Option<OwnershipResolver>,
+    pub(crate) group_by: Option<OwnershipResolver>,
     /// Limit displayed items per section (--top N).
-    pub top: Option<usize>,
+    pub(crate) top: Option<usize>,
     /// When set, print a concise summary instead of the full report.
-    pub summary: bool,
+    pub(crate) summary: bool,
     /// Human-only: print the summary renderer's own title line. Combined mode
     /// already prints section headers, so it disables this to avoid duplicate
     /// "Dead Code" / "Dead Code Summary" headings.
-    pub summary_heading: bool,
+    pub(crate) summary_heading: bool,
     /// Human-only: print a one-line hint pointing at `fallow explain`.
-    pub show_explain_tip: bool,
+    pub(crate) show_explain_tip: bool,
     /// When a baseline was loaded: (total entries in baseline, entries that matched).
-    pub baseline_matched: Option<(usize, usize)>,
+    pub(crate) baseline_matched: Option<(usize, usize)>,
     /// Whether config-edit actions can be applied by `fallow fix`.
     ///
     /// This is caller-provided because an explicit `--config` path is fixable
     /// even when default config discovery from the root would find nothing.
-    pub config_fixable: bool,
+    pub(crate) config_fixable: bool,
     /// When set, the human health renderer skips the `● Health score:` and
     /// trend table sections because they have already been rendered upstream
     /// (combined-mode orientation header). Standalone `fallow health` keeps
     /// the default `false` and renders both sections inline.
-    pub skip_score_and_trend: bool,
+    pub(crate) skip_score_and_trend: bool,
     /// Human-only: whether `--css` was requested. When `true` but no stylesheet
     /// was import-reachable, the CSS-health section renders an explanatory note
     /// instead of being silently omitted. Defaults `false` for non-css callers.
-    pub css_requested: bool,
+    pub(crate) css_requested: bool,
     /// Presentation style for report JSON. Non-JSON renderers ignore it.
-    pub json_style: crate::json_style::JsonStyle,
+    pub(crate) json_style: crate::json_style::JsonStyle,
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
 #[must_use]
-pub fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
+pub(crate) fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
     path.strip_prefix(root).unwrap_or(path)
 }
 
@@ -144,7 +144,7 @@ pub fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
 /// where many files share names like `index.ts`, `mod.rs`, or
 /// `*.component.ts`. See issue #547.
 #[must_use]
-pub fn format_display_path(path: &Path, root: &Path) -> String {
+pub(crate) fn format_display_path(path: &Path, root: &Path) -> String {
     relative_path(path, root)
         .display()
         .to_string()
@@ -154,14 +154,14 @@ pub fn format_display_path(path: &Path, root: &Path) -> String {
 /// Split a path string into (directory, filename) for display.
 /// Directory includes the trailing `/`. If no directory, returns `("", filename)`.
 #[must_use]
-pub fn split_dir_filename(path: &str) -> (&str, &str) {
+pub(crate) fn split_dir_filename(path: &str) -> (&str, &str) {
     path.rfind('/')
         .map_or(("", path), |pos| (&path[..=pos], &path[pos + 1..]))
 }
 
 /// Return `"s"` for plural or `""` for singular.
 #[must_use]
-pub const fn plural(n: usize) -> &'static str {
+pub(crate) const fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
@@ -170,7 +170,7 @@ pub const fn plural(n: usize) -> &'static str {
 /// On success prints the JSON and returns `ExitCode::SUCCESS`.
 /// On serialization failure prints an error to stderr and returns exit code 2.
 #[must_use]
-pub fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
+pub(crate) fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
     match serde_json::to_string_pretty(value) {
         Ok(json) => {
             outln!("{json}");
@@ -185,7 +185,7 @@ pub fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
 
 /// Serialize report JSON with the requested presentation style.
 #[must_use]
-pub fn emit_report_json(
+pub(crate) fn emit_report_json(
     value: &serde_json::Value,
     kind: &str,
     style: crate::json_style::JsonStyle,
@@ -208,7 +208,7 @@ pub fn emit_report_json(
 ///
 /// Example: `elide_common_prefix("a/b/c/foo.ts", "a/b/d/bar.ts")` → `"d/bar.ts"`
 #[must_use]
-pub fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
+pub(crate) fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
     let mut last_sep = 0;
     for (i, (a, b)) in base.bytes().zip(target.bytes()).enumerate() {
         if a != b {
@@ -236,7 +236,7 @@ fn relative_uri(path: &Path, root: &Path) -> String {
 /// Brackets (`[`, `]`) are not valid in URI path segments per RFC 3986 and cause
 /// SARIF validation warnings (e.g., Next.js dynamic routes like `[slug]`).
 #[must_use]
-pub fn normalize_uri(path_str: &str) -> String {
+pub(crate) fn normalize_uri(path_str: &str) -> String {
     fallow_output::normalize_uri(path_str)
 }
 
@@ -249,7 +249,7 @@ pub enum Level {
 }
 
 #[must_use]
-pub const fn severity_to_level(s: Severity) -> Level {
+pub(crate) const fn severity_to_level(s: Severity) -> Level {
     match s {
         Severity::Error => Level::Error,
         Severity::Warn => Level::Warn,
@@ -263,7 +263,7 @@ pub const fn severity_to_level(s: Severity) -> Level {
 /// When `regression` is `Some`, the JSON format includes a `regression` key in the output envelope.
 /// When `ctx.group_by` is `Some`, results are partitioned into labeled groups before rendering.
 #[must_use]
-pub fn print_results(
+pub(crate) fn print_results(
     results: &AnalysisResults,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
@@ -452,7 +452,7 @@ fn print_grouped_results(
 
 /// Print duplication analysis results in the configured format.
 #[must_use]
-pub fn print_duplication_report(
+pub(crate) fn print_duplication_report(
     report: &DuplicationReport,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
@@ -654,7 +654,7 @@ fn warn_dupes_grouping_unsupported(grouping: &DuplicationGrouping, format: &str)
 ///   and emit a one-line stderr note pointing at `--format json` for the
 ///   richer grouped envelope.
 #[must_use]
-pub fn print_health_report(
+pub(crate) fn print_health_report(
     report: &fallow_output::HealthReport,
     grouping: Option<&fallow_output::HealthGrouping>,
     group_resolver: Option<&grouping::OwnershipResolver>,
@@ -791,7 +791,7 @@ fn warn_grouping_unsupported(grouping: Option<&fallow_output::HealthGrouping>, f
 /// Print cross-reference findings (duplicated code that is also dead code).
 ///
 /// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
-pub fn print_cross_reference_findings(
+pub(crate) fn print_cross_reference_findings(
     cross_ref: &fallow_engine::cross_reference::CrossReferenceResult,
     root: &Path,
     quiet: bool,
@@ -801,7 +801,7 @@ pub fn print_cross_reference_findings(
 }
 
 /// Print export trace results.
-pub fn print_export_trace(
+pub(crate) fn print_export_trace(
     trace: &ExportTrace,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
@@ -813,7 +813,7 @@ pub fn print_export_trace(
 }
 
 /// Print class-member trace results (the `--trace FILE:MEMBER` fallback).
-pub fn print_class_member_trace(
+pub(crate) fn print_class_member_trace(
     trace: &fallow_engine::trace::ClassMemberTrace,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
@@ -825,7 +825,7 @@ pub fn print_class_member_trace(
 }
 
 /// Print file trace results.
-pub fn print_file_trace(
+pub(crate) fn print_file_trace(
     trace: &FileTrace,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
@@ -837,7 +837,7 @@ pub fn print_file_trace(
 }
 
 /// Print dependency trace results.
-pub fn print_dependency_trace(
+pub(crate) fn print_dependency_trace(
     trace: &DependencyTrace,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
@@ -849,7 +849,7 @@ pub fn print_dependency_trace(
 }
 
 /// Print clone trace results.
-pub fn print_clone_trace(
+pub(crate) fn print_clone_trace(
     trace: &CloneTrace,
     root: &Path,
     format: OutputFormat,
@@ -863,7 +863,7 @@ pub fn print_clone_trace(
 
 /// Print impact-closure trace results. JSON only emits the structured
 /// closure; human renders a short summary.
-pub fn print_impact_closure_trace(
+pub(crate) fn print_impact_closure_trace(
     trace: &ImpactClosureTrace,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
@@ -890,7 +890,7 @@ pub fn print_impact_closure_trace(
 
 /// Print pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
-pub fn print_performance(
+pub(crate) fn print_performance(
     timings: &PipelineTimings,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
@@ -906,7 +906,7 @@ pub fn print_performance(
 
 /// Print health pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
-pub fn print_health_performance(
+pub(crate) fn print_health_performance(
     timings: &fallow_output::HealthTimings,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,

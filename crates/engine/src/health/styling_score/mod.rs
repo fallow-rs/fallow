@@ -280,19 +280,19 @@ pub struct StylingScoringInputs {
     /// Total Tailwind `@theme` tokens DEFINED across the project (the population
     /// from which `summary.unused_theme_tokens` is a subset). Denominator for the
     /// per-population token-death ratio in `dead_surface`.
-    pub theme_tokens_defined: u32,
+    pub(crate) theme_tokens_defined: u32,
     /// Declarations from CSS whose structure is meaningful: authored `.css`, SFC
     /// `<style>`, and non-atomic CSS-in-JS (vanilla-extract / emotion, object +
     /// template). The denominator for every declaration-normalized penalty and
     /// the confidence trigger.
-    pub non_atomic_declarations: u32,
+    pub(crate) non_atomic_declarations: u32,
     /// `!important` declarations from the non-atomic surface (structural numerator).
-    pub non_atomic_important_declarations: u32,
+    pub(crate) non_atomic_important_declarations: u32,
     /// Deepest nesting from the non-atomic surface (structural nesting term).
-    pub non_atomic_max_nesting_depth: u8,
+    pub(crate) non_atomic_max_nesting_depth: u8,
     /// Declarations from flat atomic object CSS-in-JS (StyleX/Panda). Excluded
     /// from the penalties; drives the predominantly-atomic confidence caveat.
-    pub atomic_declarations: u32,
+    pub(crate) atomic_declarations: u32,
 }
 
 impl StylingScoringInputs {
@@ -349,7 +349,7 @@ pub fn compute_styling_health(
 /// for the non-ratio signals (`token_erosion`, `broken_references`) and the
 /// serialized aggregates.
 #[must_use]
-pub fn compute_styling_health_with_inputs(
+pub(crate) fn compute_styling_health_with_inputs(
     report: &CssAnalyticsReport,
     inputs: &StylingScoringInputs,
 ) -> StylingHealth {

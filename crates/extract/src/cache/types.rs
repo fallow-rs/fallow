@@ -1194,19 +1194,19 @@ pub struct CachedPublicSignatureTypeReference {
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedSuppression {
     /// 1-based line this suppression applies to. 0 = file-wide.
-    pub line: u32,
+    pub(crate) line: u32,
     /// 1-based line where the comment itself appears.
-    pub comment_line: u32,
+    pub(crate) comment_line: u32,
     /// 0 = suppress all, otherwise `IssueKind` discriminant.
-    pub kind: u8,
+    pub(crate) kind: u8,
     /// Rule-pack name for scoped policy suppressions. Empty for all other
     /// suppression targets.
-    pub policy_pack: String,
+    pub(crate) policy_pack: String,
     /// Rule id for scoped policy suppressions. Empty for all other suppression
     /// targets.
-    pub policy_rule_id: String,
+    pub(crate) policy_rule_id: String,
     /// Human-authored reason after `--`, when present.
-    pub reason: Option<String>,
+    pub(crate) reason: Option<String>,
 }
 
 /// Cached unknown suppression kind token (see #449).
@@ -1226,149 +1226,149 @@ pub struct CachedUnknownSuppressionKind {
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedExport {
     /// Export name (or "default" for default exports).
-    pub name: String,
+    pub(crate) name: String,
     /// Whether this is a default export.
-    pub is_default: bool,
+    pub(crate) is_default: bool,
     /// Whether this is a type-only export.
-    pub is_type_only: bool,
+    pub(crate) is_type_only: bool,
     /// Whether this export is registered through a runtime side effect at
     /// module load time (Lit `@customElement` decorator or
     /// `customElements.define` call). Persisted so warm-cache runs continue
     /// to skip unused-export reporting for these classes.
-    pub is_side_effect_used: bool,
+    pub(crate) is_side_effect_used: bool,
     /// Visibility tag discriminant (0=None, 1=Public, 2=Internal, 3=Beta, 4=Alpha).
-    pub visibility: u8,
+    pub(crate) visibility: u8,
     /// Human-authored reason on `@expected-unused -- <reason>`, when present.
-    pub expected_unused_reason: Option<String>,
+    pub(crate) expected_unused_reason: Option<String>,
     /// The local binding name, if different.
-    pub local_name: Option<String>,
+    pub(crate) local_name: Option<String>,
     /// Byte offset of the export span start.
-    pub span_start: u32,
+    pub(crate) span_start: u32,
     /// Byte offset of the export span end.
-    pub span_end: u32,
+    pub(crate) span_end: u32,
     /// Members of this export (for enums and classes).
-    pub members: Vec<CachedMember>,
+    pub(crate) members: Vec<CachedMember>,
     /// The local name of the parent class from `extends` clause, if any.
-    pub super_class: Option<String>,
+    pub(crate) super_class: Option<String>,
 }
 
 /// Cached import data for a single import declaration.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedImport {
     /// The import specifier.
-    pub source: String,
+    pub(crate) source: String,
     /// For Named imports, the imported symbol name. Empty for other kinds.
-    pub imported_name: String,
+    pub(crate) imported_name: String,
     /// The local binding name.
-    pub local_name: String,
+    pub(crate) local_name: String,
     /// Whether this is a type-only import.
-    pub is_type_only: bool,
+    pub(crate) is_type_only: bool,
     /// Whether this import originated from an SFC `<style>` block / `<style src>` (CSS context).
-    pub from_style: bool,
+    pub(crate) from_style: bool,
     /// Import kind: 0=Named, 1=Default, 2=Namespace, 3=SideEffect.
-    pub kind: u8,
+    pub(crate) kind: u8,
     /// Byte offset of the import span start.
-    pub span_start: u32,
+    pub(crate) span_start: u32,
     /// Byte offset of the import span end.
-    pub span_end: u32,
+    pub(crate) span_end: u32,
     /// Byte offset of the source string literal span start.
-    pub source_span_start: u32,
+    pub(crate) source_span_start: u32,
     /// Byte offset of the source string literal span end.
-    pub source_span_end: u32,
+    pub(crate) source_span_end: u32,
 }
 
 /// Cached dynamic import data.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedDynamicImport {
     /// The import specifier.
-    pub source: String,
+    pub(crate) source: String,
     /// Byte offset of the span start.
-    pub span_start: u32,
+    pub(crate) span_start: u32,
     /// Byte offset of the span end.
-    pub span_end: u32,
+    pub(crate) span_end: u32,
     /// Names destructured from the import result.
-    pub destructured_names: Vec<String>,
+    pub(crate) destructured_names: Vec<String>,
     /// Local variable name for namespace imports.
-    pub local_name: Option<String>,
+    pub(crate) local_name: Option<String>,
     /// True when this dynamic import was synthesised by fallow (see
     /// `DynamicImportInfo::is_speculative`).
-    pub is_speculative: bool,
+    pub(crate) is_speculative: bool,
 }
 
 /// Cached `require()` call data.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedRequireCall {
     /// The require specifier.
-    pub source: String,
+    pub(crate) source: String,
     /// Byte offset of the span start.
-    pub span_start: u32,
+    pub(crate) span_start: u32,
     /// Byte offset of the span end.
-    pub span_end: u32,
+    pub(crate) span_end: u32,
     /// Byte offset of the specifier string-literal span start.
-    pub source_span_start: u32,
+    pub(crate) source_span_start: u32,
     /// Byte offset of the specifier string-literal span end.
-    pub source_span_end: u32,
+    pub(crate) source_span_end: u32,
     /// Names destructured from the require result.
-    pub destructured_names: Vec<String>,
+    pub(crate) destructured_names: Vec<String>,
     /// Local variable name for namespace requires.
-    pub local_name: Option<String>,
+    pub(crate) local_name: Option<String>,
 }
 
 /// Cached re-export data.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedReExport {
     /// The module being re-exported from.
-    pub source: String,
+    pub(crate) source: String,
     /// Name imported from the source.
-    pub imported_name: String,
+    pub(crate) imported_name: String,
     /// Name exported from this module.
-    pub exported_name: String,
+    pub(crate) exported_name: String,
     /// Whether this is a type-only re-export.
-    pub is_type_only: bool,
+    pub(crate) is_type_only: bool,
     /// Byte offset of the re-export span start (for line-number reporting).
-    pub span_start: u32,
+    pub(crate) span_start: u32,
     /// Byte offset of the re-export span end.
-    pub span_end: u32,
+    pub(crate) span_end: u32,
 }
 
 /// Cached enum or class member data.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedMember {
     /// Member name.
-    pub name: String,
+    pub(crate) name: String,
     /// Member kind (enum, method, or property).
-    pub kind: MemberKind,
+    pub(crate) kind: MemberKind,
     /// Byte offset of the span start.
-    pub span_start: u32,
+    pub(crate) span_start: u32,
     /// Byte offset of the span end.
-    pub span_end: u32,
+    pub(crate) span_end: u32,
     /// Whether this member has decorators.
-    pub has_decorator: bool,
+    pub(crate) has_decorator: bool,
     /// Full dotted path of each decorator (e.g. `step`, `ns.foo`).
     /// Empty for undecorated members and decorators with non-identifier
     /// expressions.
-    pub decorator_names: Vec<String>,
+    pub(crate) decorator_names: Vec<String>,
     /// True when this is a static method that returns a fresh instance of
     /// the class: body returns `new this()` / `new <SameClassName>()`, or the
     /// declared return type matches the class name. Treated as a factory.
     /// See issues #346, #387.
-    pub is_instance_returning_static: bool,
+    pub(crate) is_instance_returning_static: bool,
     /// True when this instance method's call result is an instance of the
     /// same class (declared return type matches the class name, or body's
     /// last statement is `return this`). Drives fluent-chain credit. See
     /// issue #387.
-    pub is_self_returning: bool,
+    pub(crate) is_self_returning: bool,
 }
 
 /// Cached dynamic import pattern data (template literals, `import.meta.glob`).
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedDynamicImportPattern {
     /// Static prefix of the import path.
-    pub prefix: String,
+    pub(crate) prefix: String,
     /// Static suffix, if any.
-    pub suffix: Option<String>,
+    pub(crate) suffix: Option<String>,
     /// Byte offset of the span start.
-    pub span_start: u32,
+    pub(crate) span_start: u32,
     /// Byte offset of the span end.
-    pub span_end: u32,
+    pub(crate) span_end: u32,
 }

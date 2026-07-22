@@ -158,7 +158,7 @@ struct SecurityDetectionContext<'a, 'm> {
 /// Convert a byte offset to (line, col) using pre-computed line offsets.
 /// Falls back to `(1, byte_offset)` when no line table is available.
 #[doc(hidden)]
-pub fn byte_offset_to_line_col(
+pub(crate) fn byte_offset_to_line_col(
     line_offsets_map: &LineOffsetsMap<'_>,
     file_id: FileId,
     byte_offset: u32,
@@ -791,7 +791,7 @@ fn build_dead_code_run_context<'a>(
     clippy::too_many_arguments,
     reason = "frozen deprecated public API; signature must not change"
 )]
-pub fn find_dead_code_full(
+pub(crate) fn find_dead_code_full(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],

@@ -19,7 +19,7 @@ use serde_json::Value;
 /// `%0A`. The `%` escape runs first so already-escaped input escapes again
 /// (matching the jq `esc` helper's `gsub` order).
 #[must_use]
-pub fn escape_message(text: &str) -> String {
+pub(crate) fn escape_message(text: &str) -> String {
     text.replace('%', "%25")
         .replace('\r', "%0D")
         .replace('\n', "%0A")
@@ -29,21 +29,21 @@ pub fn escape_message(text: &str) -> String {
 /// escaping plus `,` to `%2C` and `:` to `%3A`, because commas separate
 /// properties and colons terminate the command prefix.
 #[must_use]
-pub fn escape_property(text: &str) -> String {
+pub(crate) fn escape_property(text: &str) -> String {
     escape_message(text).replace(',', "%2C").replace(':', "%3A")
 }
 
 /// Clamp a line number below 1 to 1: GitHub rejects `line=0`, and the typed
 /// annotation fallback in `annotate.sh` applies the same floor.
 #[must_use]
-pub const fn clamp_line(line: u64) -> u64 {
+pub(crate) const fn clamp_line(line: u64) -> u64 {
     if line < 1 { 1 } else { line }
 }
 
 /// Convert fallow's 0-based column to GitHub's 1-based workflow-command
 /// column (the jq layer's `col + 1` convention).
 #[must_use]
-pub const fn one_based_col(col: u64) -> u64 {
+pub(crate) const fn one_based_col(col: u64) -> u64 {
     col + 1
 }
 
@@ -60,7 +60,7 @@ pub enum AnnotationLevel {
 impl AnnotationLevel {
     /// The workflow-command name (`::error`, `::warning`, `::notice`).
     #[must_use]
-    pub const fn command(self) -> &'static str {
+    pub(crate) const fn command(self) -> &'static str {
         match self {
             Self::Error => "error",
             Self::Warning => "warning",
@@ -73,22 +73,22 @@ impl AnnotationLevel {
 /// newlines; [`render_annotation`] applies the escaping contract.
 #[derive(Debug)]
 pub struct Annotation {
-    pub level: AnnotationLevel,
+    pub(crate) level: AnnotationLevel,
     /// Repo-root-relative once [`PathRebase::apply`] ran.
-    pub path: String,
+    pub(crate) path: String,
     /// Omitted from the command when `None`; clamped to 1 when below 1.
-    pub line: Option<u64>,
-    pub end_line: Option<u64>,
+    pub(crate) line: Option<u64>,
+    pub(crate) end_line: Option<u64>,
     /// Already converted to GitHub's 1-based columns.
-    pub col: Option<u64>,
-    pub title: String,
-    pub message: String,
+    pub(crate) col: Option<u64>,
+    pub(crate) title: String,
+    pub(crate) message: String,
 }
 
 /// Render one annotation as a workflow-command line. Property order matches
 /// the jq layer: `file`, `line`, `endLine`, `col`, `title`.
 #[must_use]
-pub fn render_annotation(annotation: &Annotation) -> String {
+pub(crate) fn render_annotation(annotation: &Annotation) -> String {
     use std::fmt::Write as _;
     let mut props = format!("file={}", escape_property(&annotation.path));
     if let Some(line) = annotation.line {
@@ -112,7 +112,7 @@ pub fn render_annotation(annotation: &Annotation) -> String {
 /// result ordering is path-sorted (ADR-004), so without this sort GitHub's
 /// visible 10 per type would be the lexicographically first paths, not the
 /// worst findings.
-pub fn sort_annotations(annotations: &mut [Annotation]) {
+pub(crate) fn sort_annotations(annotations: &mut [Annotation]) {
     annotations.sort_by(|a, b| {
         a.level
             .cmp(&b.level)
@@ -127,7 +127,7 @@ pub fn sort_annotations(annotations: &mut [Annotation]) {
 /// producer-side cap (the bundled action keeps its own `MAX_ANNOTATIONS`
 /// during migration).
 #[must_use]
-pub fn budget_notice(total: usize) -> Option<String> {
+pub(crate) fn budget_notice(total: usize) -> Option<String> {
     (total > 0).then(|| {
         let noun = if total == 1 {
             "annotation"
@@ -155,7 +155,7 @@ pub enum PackageManager {
 impl PackageManager {
     /// The `remove <pkg>` command for this package manager.
     #[must_use]
-    pub fn remove_command(self, package: &str) -> String {
+    pub(crate) fn remove_command(self, package: &str) -> String {
         match self {
             Self::Npm => format!("npm uninstall {package}"),
             Self::Pnpm => format!("pnpm remove {package}"),
@@ -166,7 +166,7 @@ impl PackageManager {
 
     /// The `add <pkg>` command for this package manager.
     #[must_use]
-    pub fn add_command(self, package: &str) -> String {
+    pub(crate) fn add_command(self, package: &str) -> String {
         match self {
             Self::Npm => format!("npm install {package}"),
             Self::Pnpm => format!("pnpm add {package}"),
@@ -180,7 +180,7 @@ impl PackageManager {
 /// (action parity; unrecognized values fall back to npm exactly like the jq
 /// `else` branch), otherwise lockfile sniffing at the analysis root.
 #[must_use]
-pub fn resolve_package_manager(env_value: Option<&str>, root: &Path) -> PackageManager {
+pub(crate) fn resolve_package_manager(env_value: Option<&str>, root: &Path) -> PackageManager {
     if let Some(value) = env_value {
         return match value {
             "pnpm" => PackageManager::Pnpm,
@@ -217,7 +217,7 @@ pub enum PathRebase {
 impl PathRebase {
     /// Apply the rebase to one analysis-root-relative path.
     #[must_use]
-    pub fn apply(&self, path: &str) -> String {
+    pub(crate) fn apply(&self, path: &str) -> String {
         match self {
             Self::None => path.to_owned(),
             Self::Prefix(prefix) => format!("{prefix}/{path}"),
@@ -230,7 +230,7 @@ impl PathRebase {
     /// this back off to recover the analysis-root-relative path CODEOWNERS
     /// patterns are written against.
     #[must_use]
-    pub fn prefix(&self) -> &str {
+    pub(crate) fn prefix(&self) -> &str {
         match self {
             Self::None => "",
             Self::Prefix(prefix) => prefix,
@@ -241,7 +241,7 @@ impl PathRebase {
     /// git-toplevel detection; no git and no flag means paths pass through.
     /// An explicit empty prefix disables rebasing.
     #[must_use]
-    pub fn resolve(root: &Path, explicit: Option<&str>) -> Self {
+    pub(crate) fn resolve(root: &Path, explicit: Option<&str>) -> Self {
         if let Some(prefix) = explicit {
             return Self::from_explicit_prefix(prefix);
         }
@@ -265,7 +265,7 @@ impl PathRebase {
     /// Compute the analysis root's offset below the repo toplevel. Pure so
     /// tests can pin the rebasing behavior without a live git repo.
     #[must_use]
-    pub fn from_root_offset(root: &Path, toplevel: &Path) -> Self {
+    pub(crate) fn from_root_offset(root: &Path, toplevel: &Path) -> Self {
         match root.strip_prefix(toplevel) {
             Ok(offset) if offset.as_os_str().is_empty() => Self::None,
             Ok(offset) => Self::Prefix(offset.display().to_string().replace('\\', "/")),
@@ -280,7 +280,7 @@ impl PathRebase {
 static REPORT_PATH_PREFIX: OnceLock<Option<String>> = OnceLock::new();
 
 /// Record the `--report-path-prefix` flag value. Call at most once.
-pub fn set_report_path_prefix(prefix: Option<String>) {
+pub(crate) fn set_report_path_prefix(prefix: Option<String>) {
     let _ = REPORT_PATH_PREFIX.set(prefix);
 }
 
@@ -299,14 +299,14 @@ static RESOLVED_REPORT_PREFIX: OnceLock<String> = OnceLock::new();
 
 /// Resolve the presentation prefix once, after `--report-path-prefix` is
 /// recorded. Call at most once.
-pub fn init_report_prefix(root: &Path) {
+pub(crate) fn init_report_prefix(root: &Path) {
     let _ = RESOLVED_REPORT_PREFIX.set(report_rebase(root).prefix().to_owned());
 }
 
 /// The prefix prepended to every CI-facing path emitted this run. Empty when
 /// the analysis root is the repository root, or when no CLI run resolved it.
 #[must_use]
-pub fn report_prefix() -> &'static str {
+pub(crate) fn report_prefix() -> &'static str {
     RESOLVED_REPORT_PREFIX.get().map_or("", String::as_str)
 }
 
@@ -316,7 +316,7 @@ pub fn report_prefix() -> &'static str {
 /// review and sticky-summary formats derive their paths from), so all CI
 /// surfaces address files the same way the platform does.
 #[must_use]
-pub fn report_rebase(root: &Path) -> PathRebase {
+pub(crate) fn report_rebase(root: &Path) -> PathRebase {
     PathRebase::resolve(root, report_path_prefix())
 }
 
@@ -330,7 +330,7 @@ pub struct RenderOptions {
 
 /// Resolve render options from the process environment and the analysis root.
 #[must_use]
-pub fn resolve_render_options(root: &Path) -> RenderOptions {
+pub(crate) fn resolve_render_options(root: &Path) -> RenderOptions {
     let env_pm = std::env::var("PKG_MANAGER").ok();
     RenderOptions {
         rebase: report_rebase(root),
@@ -339,7 +339,7 @@ pub fn resolve_render_options(root: &Path) -> RenderOptions {
 }
 
 /// Iterate an optional array field (`.[key][]?` in jq terms).
-pub fn arr<'a>(value: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
+pub(crate) fn arr<'a>(value: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
     value
         .get(key)
         .and_then(Value::as_array)
@@ -350,26 +350,26 @@ pub fn arr<'a>(value: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
 
 /// String field, or `""` when missing or not a string.
 #[must_use]
-pub fn s<'a>(value: &'a Value, key: &str) -> &'a str {
+pub(crate) fn s<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
 /// Unsigned number field, or 0 when missing.
 #[must_use]
-pub fn u(value: &Value, key: &str) -> u64 {
+pub(crate) fn u(value: &Value, key: &str) -> u64 {
     value.get(key).and_then(Value::as_u64).unwrap_or_default()
 }
 
 /// Boolean field, or `false` when missing.
 #[must_use]
-pub fn b(value: &Value, key: &str) -> bool {
+pub(crate) fn b(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or_default()
 }
 
 /// Format a JSON number the way jq interpolates it: integers without a
 /// decimal point, floats in shortest round-trip form.
 #[must_use]
-pub fn fmt_num(value: &Value) -> String {
+pub(crate) fn fmt_num(value: &Value) -> String {
     if let Some(int) = value.as_i64() {
         return int.to_string();
     }
@@ -384,7 +384,7 @@ pub fn fmt_num(value: &Value) -> String {
 
 /// Format a numeric field, or `"0"` when missing.
 #[must_use]
-pub fn num(value: &Value, key: &str) -> String {
+pub(crate) fn num(value: &Value, key: &str) -> String {
     value.get(key).map_or_else(|| "0".to_owned(), fmt_num)
 }
 

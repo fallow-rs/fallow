@@ -20,7 +20,7 @@ pub(crate) use detector::types;
 #[doc(hidden)]
 pub use detector::{detect, normalize, tokenize};
 
-pub type CloneGroup = fallow_types::duplicates::CloneGroup;
+pub(crate) type CloneGroup = fallow_types::duplicates::CloneGroup;
 pub type CloneInstance = fallow_types::duplicates::CloneInstance;
 pub type DefaultIgnoreSkips = fallow_types::duplicates::DefaultIgnoreSkips;
 pub type DuplicationReport = fallow_types::duplicates::DuplicationReport;
@@ -115,7 +115,7 @@ pub fn find_duplicates(
 
 /// Run cached duplication detection inside the engine boundary.
 #[must_use]
-pub fn find_duplicates_cached(
+pub(crate) fn find_duplicates_cached(
     root: &Path,
     files: &[DiscoveredFile],
     config: &DuplicatesConfig,

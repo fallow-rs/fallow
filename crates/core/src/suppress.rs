@@ -82,7 +82,7 @@ pub struct SuppressionContext<'a> {
 
 impl<'a> SuppressionContext<'a> {
     /// Build a suppression context from parsed modules.
-    pub fn new(modules: &'a [ModuleInfo]) -> Self {
+    pub(crate) fn new(modules: &'a [ModuleInfo]) -> Self {
         let by_file: FxHashMap<FileId, &[Suppression]> = modules
             .iter()
             .filter(|m| !m.suppressions.is_empty())
@@ -116,7 +116,7 @@ impl<'a> SuppressionContext<'a> {
 
     /// Build a suppression context from a pre-built map (for testing).
     #[cfg(test)]
-    pub fn from_map(by_file: FxHashMap<FileId, &'a [Suppression]>) -> Self {
+    pub(crate) fn from_map(by_file: FxHashMap<FileId, &'a [Suppression]>) -> Self {
         let used = by_file
             .iter()
             .map(|(&fid, supps)| {
@@ -137,7 +137,7 @@ impl<'a> SuppressionContext<'a> {
 
     /// Build an empty suppression context (for testing).
     #[cfg(test)]
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             by_file: FxHashMap::default(),
             used: FxHashMap::default(),
@@ -148,7 +148,7 @@ impl<'a> SuppressionContext<'a> {
     /// Check if a specific issue at a given line should be suppressed,
     /// and mark the matching suppression as consumed.
     #[must_use]
-    pub fn is_suppressed(&self, file_id: FileId, line: u32, kind: IssueKind) -> bool {
+    pub(crate) fn is_suppressed(&self, file_id: FileId, line: u32, kind: IssueKind) -> bool {
         let Some(supps) = self.by_file.get(&file_id) else {
             return false;
         };
@@ -167,7 +167,7 @@ impl<'a> SuppressionContext<'a> {
     /// Check if the entire file is suppressed for the given kind,
     /// and mark the matching suppression as consumed.
     #[must_use]
-    pub fn is_file_suppressed(&self, file_id: FileId, kind: IssueKind) -> bool {
+    pub(crate) fn is_file_suppressed(&self, file_id: FileId, kind: IssueKind) -> bool {
         let Some(supps) = self.by_file.get(&file_id) else {
             return false;
         };
@@ -185,7 +185,7 @@ impl<'a> SuppressionContext<'a> {
 
     /// Check if a policy finding at a given line should be suppressed.
     #[must_use]
-    pub fn is_policy_suppressed(
+    pub(crate) fn is_policy_suppressed(
         &self,
         file_id: FileId,
         line: u32,
@@ -214,7 +214,7 @@ impl<'a> SuppressionContext<'a> {
 
     /// Count suppression entries that matched at least one issue.
     #[must_use]
-    pub fn used_count(&self) -> usize {
+    pub(crate) fn used_count(&self) -> usize {
         self.used
             .values()
             .flat_map(|used| used.iter())
@@ -232,7 +232,7 @@ impl<'a> SuppressionContext<'a> {
     /// detector never ran, so the suppression appears unconsumed, but is
     /// not actually stale (it documents intentional dormancy and becomes
     /// valid again the moment the rule is re-enabled). See issue #482.
-    pub fn find_stale(
+    pub(crate) fn find_stale(
         &self,
         graph: &ModuleGraph,
         config: &ResolvedConfig,
@@ -273,7 +273,7 @@ impl<'a> SuppressionContext<'a> {
 
     /// Collect suppression comments that are missing `-- <reason>`.
     #[must_use]
-    pub fn find_missing_reasons(&self, graph: &ModuleGraph) -> Vec<StaleSuppression> {
+    pub(crate) fn find_missing_reasons(&self, graph: &ModuleGraph) -> Vec<StaleSuppression> {
         let mut findings = Vec::new();
         let mut seen: FxHashSet<(FileId, u32)> = FxHashSet::default();
 
@@ -346,7 +346,7 @@ impl<'a> SuppressionContext<'a> {
     /// layer rather than through this context, so capturing presence here is the
     /// single uniform mechanism that covers all three impact categories.
     #[must_use]
-    pub fn all_suppressions(&self, graph: &ModuleGraph) -> Vec<ActiveSuppression> {
+    pub(crate) fn all_suppressions(&self, graph: &ModuleGraph) -> Vec<ActiveSuppression> {
         let mut active = Vec::new();
         for (&file_id, supps) in &self.by_file {
             let path = &graph.modules[file_id.0 as usize].path;

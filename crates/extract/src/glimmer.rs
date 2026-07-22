@@ -39,7 +39,7 @@ pub fn is_glimmer_file(path: &Path) -> bool {
 /// recover template-only import/member references that the stripped JS
 /// parse pass cannot see.
 #[must_use]
-pub fn find_template_ranges(source: &str) -> Vec<Range<usize>> {
+pub(crate) fn find_template_ranges(source: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let n = source.len();
     let mut cursor = 0;

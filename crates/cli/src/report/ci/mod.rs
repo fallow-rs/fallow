@@ -1,6 +1,6 @@
 pub mod diff_filter;
-pub mod fingerprint;
+pub(crate) mod fingerprint;
 pub mod pr_comment;
 pub mod review;
-pub mod severity;
-pub mod suggestion;
+pub(crate) mod severity;
+pub(crate) mod suggestion;

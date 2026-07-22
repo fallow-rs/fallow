@@ -115,28 +115,28 @@ pub fn discover_workspace_packages_with_diagnostics(
 /// Entry points grouped by reachability role.
 #[derive(Debug, Clone, Default)]
 pub struct CategorizedEntryPoints {
-    pub all: Vec<EntryPoint>,
-    pub runtime: Vec<EntryPoint>,
-    pub test: Vec<EntryPoint>,
+    pub(crate) all: Vec<EntryPoint>,
+    pub(crate) runtime: Vec<EntryPoint>,
+    pub(crate) test: Vec<EntryPoint>,
 }
 
 impl CategorizedEntryPoints {
-    pub fn push_runtime(&mut self, entry: EntryPoint) {
+    pub(crate) fn push_runtime(&mut self, entry: EntryPoint) {
         self.runtime.push(entry.clone());
         self.all.push(entry);
     }
 
-    pub fn push_test(&mut self, entry: EntryPoint) {
+    pub(crate) fn push_test(&mut self, entry: EntryPoint) {
         self.test.push(entry.clone());
         self.all.push(entry);
     }
 
-    pub fn push_support(&mut self, entry: EntryPoint) {
+    pub(crate) fn push_support(&mut self, entry: EntryPoint) {
         self.all.push(entry);
     }
 
     #[must_use]
-    pub fn dedup(mut self) -> Self {
+    pub(crate) fn dedup(mut self) -> Self {
         dedup_entry_paths(&mut self.all);
         dedup_entry_paths(&mut self.runtime);
         dedup_entry_paths(&mut self.test);
@@ -158,17 +158,17 @@ pub struct HiddenDirScope {
 
 impl HiddenDirScope {
     #[must_use]
-    pub const fn new(root: PathBuf, dirs: Vec<String>) -> Self {
+    pub(crate) const fn new(root: PathBuf, dirs: Vec<String>) -> Self {
         Self { root, dirs }
     }
 
     #[must_use]
-    pub fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.root
     }
 
     #[must_use]
-    pub fn dirs(&self) -> &[String] {
+    pub(crate) fn dirs(&self) -> &[String] {
         &self.dirs
     }
 }
@@ -205,13 +205,13 @@ impl AnalysisDiscovery {
 
     /// Discovered source files, indexed by stable `FileId` for this session.
     #[must_use]
-    pub fn files(&self) -> &[DiscoveredFile] {
+    pub(crate) fn files(&self) -> &[DiscoveredFile] {
         &self.files
     }
 
     /// Discovered workspace packages for this session.
     #[must_use]
-    pub fn workspaces(&self) -> &[WorkspaceInfo] {
+    pub(crate) fn workspaces(&self) -> &[WorkspaceInfo] {
         &self.workspaces
     }
 
@@ -240,7 +240,7 @@ impl AnalysisDiscovery {
 
 /// Run engine-owned workspace and source discovery for a resolved project.
 #[must_use]
-pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
+pub(crate) fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
     warn_missing_node_modules(config);
 
     let workspaces_start = Instant::now();
@@ -281,7 +281,7 @@ pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery 
 /// source discovery can reuse that set instead of walking workspace manifests a
 /// second time.
 #[must_use]
-pub fn prepare_analysis_discovery_with_workspaces(
+pub(crate) fn prepare_analysis_discovery_with_workspaces(
     config: &ResolvedConfig,
     workspaces: &[WorkspaceInfo],
     workspaces_ms: f64,
@@ -457,7 +457,7 @@ fn push_plugin_hidden_dir_scope(
 
 /// Collect plugin and script-derived hidden directory scopes.
 #[must_use]
-pub fn collect_hidden_dir_scopes(
+pub(crate) fn collect_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
     workspaces: &[WorkspaceInfo],
@@ -881,13 +881,16 @@ pub fn discover_files_and_config_candidates(
 
 /// Discover configured and inferred entry points.
 #[must_use]
-pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
+pub(crate) fn discover_entry_points(
+    config: &ResolvedConfig,
+    files: &[DiscoveredFile],
+) -> Vec<EntryPoint> {
     crate::entry_points::discover_entry_points(config, files)
 }
 
 /// Discover entry points for a workspace package.
 #[must_use]
-pub fn discover_workspace_entry_points(
+pub(crate) fn discover_workspace_entry_points(
     ws_root: &Path,
     config: &ResolvedConfig,
     all_files: &[DiscoveredFile],
@@ -897,7 +900,7 @@ pub fn discover_workspace_entry_points(
 
 /// Discover entry points from plugin results.
 #[must_use]
-pub fn discover_plugin_entry_points(
+pub(crate) fn discover_plugin_entry_points(
     plugin_result: &crate::plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
     files: &[DiscoveredFile],

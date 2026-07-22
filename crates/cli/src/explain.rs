@@ -19,7 +19,7 @@ pub use fallow_api::{
 
 /// Run the standalone explain subcommand.
 #[must_use]
-pub fn run_explain(
+pub(crate) fn run_explain(
     issue_type: &str,
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,

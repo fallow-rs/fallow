@@ -284,17 +284,17 @@ pub struct HealthGateOptions {
 /// Input for deriving effective health sections from command-neutral flags.
 #[derive(Debug, Clone)]
 pub struct HealthSectionOptions {
-    pub output: OutputFormat,
-    pub complexity: bool,
-    pub file_scores: bool,
-    pub coverage_gaps: bool,
-    pub hotspots: bool,
-    pub targets: bool,
-    pub css: bool,
-    pub score: bool,
-    pub score_gate: bool,
-    pub snapshot_requested: bool,
-    pub trend: bool,
+    pub(crate) output: OutputFormat,
+    pub(crate) complexity: bool,
+    pub(crate) file_scores: bool,
+    pub(crate) coverage_gaps: bool,
+    pub(crate) hotspots: bool,
+    pub(crate) targets: bool,
+    pub(crate) css: bool,
+    pub(crate) score: bool,
+    pub(crate) score_gate: bool,
+    pub(crate) snapshot_requested: bool,
+    pub(crate) trend: bool,
 }
 
 /// Derived section selection for health runs.
@@ -417,7 +417,7 @@ pub struct HealthExecutionOptions<'a> {
 
 /// Derive effective health section flags for CLI and embedders.
 #[must_use]
-pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSections {
+pub(crate) fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSections {
     let score = options.score
         || options.score_gate
         || options.trend
@@ -506,29 +506,29 @@ fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> b
 /// Input for deriving effective programmatic complexity sections.
 #[derive(Debug, Clone)]
 pub struct ComplexitySectionOptions {
-    pub complexity: bool,
-    pub file_scores: bool,
-    pub coverage_gaps: bool,
-    pub hotspots: bool,
-    pub ownership: bool,
-    pub targets: bool,
-    pub css: bool,
-    pub score: bool,
+    pub(crate) complexity: bool,
+    pub(crate) file_scores: bool,
+    pub(crate) coverage_gaps: bool,
+    pub(crate) hotspots: bool,
+    pub(crate) ownership: bool,
+    pub(crate) targets: bool,
+    pub(crate) css: bool,
+    pub(crate) score: bool,
 }
 
 /// Derived section selection for programmatic health / complexity runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DerivedComplexityOptions {
-    pub any_section: bool,
-    pub complexity: bool,
-    pub file_scores: bool,
-    pub coverage_gaps: bool,
-    pub hotspots: bool,
-    pub ownership: bool,
-    pub targets: bool,
-    pub force_full: bool,
-    pub score_only_output: bool,
-    pub score: bool,
+    pub(crate) any_section: bool,
+    pub(crate) complexity: bool,
+    pub(crate) file_scores: bool,
+    pub(crate) coverage_gaps: bool,
+    pub(crate) hotspots: bool,
+    pub(crate) ownership: bool,
+    pub(crate) targets: bool,
+    pub(crate) force_full: bool,
+    pub(crate) score_only_output: bool,
+    pub(crate) score: bool,
 }
 
 /// Derive effective programmatic health / complexity section flags.
@@ -567,17 +567,17 @@ pub fn derive_complexity_sections(options: &ComplexitySectionOptions) -> Derived
 /// engine-backed runners.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexityRunOptions<'a> {
-    pub thresholds: HealthThresholdOverrides,
-    pub top: Option<usize>,
-    pub sort: HealthSort,
-    pub complexity_breakdown: bool,
-    pub sections: DerivedComplexityOptions,
-    pub ownership_emails: Option<EmailMode>,
-    pub effort: Option<EffortEstimate>,
-    pub css: bool,
-    pub since: Option<&'a str>,
-    pub min_commits: Option<u32>,
-    pub coverage_inputs: HealthCoverageInputs<'a>,
+    pub(crate) thresholds: HealthThresholdOverrides,
+    pub(crate) top: Option<usize>,
+    pub(crate) sort: HealthSort,
+    pub(crate) complexity_breakdown: bool,
+    pub(crate) sections: DerivedComplexityOptions,
+    pub(crate) ownership_emails: Option<EmailMode>,
+    pub(crate) effort: Option<EffortEstimate>,
+    pub(crate) css: bool,
+    pub(crate) since: Option<&'a str>,
+    pub(crate) min_commits: Option<u32>,
+    pub(crate) coverage_inputs: HealthCoverageInputs<'a>,
 }
 
 /// Command-neutral runtime coverage input for health analysis.

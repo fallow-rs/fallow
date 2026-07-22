@@ -32,7 +32,7 @@ pub fn tokenize_file(path: &Path, source: &str, skip_imports: bool) -> FileToken
 
 /// Tokenize a source file with optional type stripping for cross-language detection.
 #[must_use]
-pub fn tokenize_file_cross_language(
+pub(crate) fn tokenize_file_cross_language(
     path: &Path,
     source: &str,
     strip_types: bool,

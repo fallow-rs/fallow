@@ -44,7 +44,7 @@ pub struct LinkContext {
 impl LinkContext {
     /// Resolve from the workflow environment plus the path-rebase offset.
     #[must_use]
-    pub fn from_env(rebase: &PathRebase) -> Self {
+    pub(crate) fn from_env(rebase: &PathRebase) -> Self {
         let env = |primary: &str, fallback: &str| {
             std::env::var(primary)
                 .or_else(|_| std::env::var(fallback))
@@ -63,7 +63,7 @@ impl LinkContext {
 }
 
 /// Render and print the job-summary markdown for one envelope.
-pub fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitCode {
+pub(crate) fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitCode {
     let options = resolve_render_options(root);
     let links = LinkContext::from_env(&options.rebase);
     outln!("{}", render_summary(kind, envelope, &links));
@@ -74,7 +74,7 @@ pub fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitC
 /// envelope has no `kind` field; `fallow report --from` reaches the same
 /// renderer via [`EnvelopeKind::Fix`] (resolved by field detection), while the
 /// live `fallow fix` command calls this entry point.
-pub fn print_fix_summary(envelope: &Value) -> ExitCode {
+pub(crate) fn print_fix_summary(envelope: &Value) -> ExitCode {
     outln!("{}", render_fix_summary(envelope));
     ExitCode::SUCCESS
 }
@@ -992,7 +992,7 @@ fn check_tips(env: &Value) -> String {
 
 /// Port of `summary-check.jq`.
 #[must_use]
-pub fn render_check_summary(env: &Value) -> String {
+pub(crate) fn render_check_summary(env: &Value) -> String {
     let elapsed = num(env, "elapsed_ms");
     let total_issues = u(env, "total_issues");
     if total_issues == 0 {
@@ -1123,7 +1123,7 @@ fn dupes_details(env: &Value) -> String {
 
 /// Port of `summary-dupes.jq`.
 #[must_use]
-pub fn render_dupes_summary(env: &Value) -> String {
+pub(crate) fn render_dupes_summary(env: &Value) -> String {
     let stats = env.get("stats").cloned().unwrap_or(Value::Null);
     let elapsed = num(env, "elapsed_ms");
     if u(&stats, "clone_groups") == 0 {
@@ -1457,7 +1457,7 @@ fn health_runtime_footer(
 
 /// Port of `summary-health.jq`.
 #[must_use]
-pub fn render_health_summary(env: &Value) -> String {
+pub(crate) fn render_health_summary(env: &Value) -> String {
     let elapsed = num(env, "elapsed_ms");
     let complex = arr(env, "findings").count();
     let runtime = env.get("runtime_coverage").cloned().unwrap_or(Value::Null);
@@ -1984,7 +1984,7 @@ fn audit_duplication_section(env: &Value) -> String {
 
 /// Port of `summary-audit.jq`.
 #[must_use]
-pub fn render_audit_summary(env: &Value) -> String {
+pub(crate) fn render_audit_summary(env: &Value) -> String {
     let verdict = str_or(env, "verdict", "pass");
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let attribution = env.get("attribution").cloned().unwrap_or(Value::Null);
@@ -2047,7 +2047,7 @@ pub fn render_audit_summary(env: &Value) -> String {
 
 /// Port of `summary-security.jq`.
 #[must_use]
-pub fn render_security_summary(env: &Value) -> String {
+pub(crate) fn render_security_summary(env: &Value) -> String {
     let findings: Vec<&Value> = arr(env, "security_findings").collect();
     let gate = env.get("gate").filter(|gate| !gate.is_null());
     let count = gate.map_or_else(
@@ -2706,7 +2706,7 @@ fn combined_tips(env: &Value) -> String {
 
 /// Port of `summary-combined.jq`.
 #[must_use]
-pub fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
+pub(crate) fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
     let counts = combined_counts(env);
     let header = health_score_header(&env.get("health").cloned().unwrap_or(Value::Null));
     if counts.total() == 0 {

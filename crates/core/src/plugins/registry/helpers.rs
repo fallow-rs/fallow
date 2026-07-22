@@ -274,7 +274,7 @@ impl ConfigCandidateIndex {
     /// with non-source config candidates). Files with no parent or no file name
     /// are skipped.
     #[must_use]
-    pub fn build<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Self {
+    pub(crate) fn build<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Self {
         let mut dirs: FxHashMap<PathBuf, FxHashSet<OsString>> = FxHashMap::default();
         for path in paths {
             if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
@@ -290,7 +290,7 @@ impl ConfigCandidateIndex {
     /// the discovery walk collected. Used by file-based plugin activation to
     /// avoid a per-directory filesystem `read` probe.
     #[must_use]
-    pub fn dir_contains(&self, dir: &Path, name: &OsStr) -> bool {
+    pub(crate) fn dir_contains(&self, dir: &Path, name: &OsStr) -> bool {
         self.dirs.get(dir).is_some_and(|names| names.contains(name))
     }
 
@@ -299,7 +299,7 @@ impl ConfigCandidateIndex {
     /// a sentinel file nested anywhere under `root` (e.g. a `.env.schema` in a
     /// workspace subdirectory) without a recursive filesystem walk.
     #[must_use]
-    pub fn any_descendant_contains(&self, root: &Path, name: &OsStr) -> bool {
+    pub(crate) fn any_descendant_contains(&self, root: &Path, name: &OsStr) -> bool {
         self.dirs
             .iter()
             .any(|(dir, names)| dir.starts_with(root) && names.contains(name))
@@ -311,7 +311,11 @@ impl ConfigCandidateIndex {
     /// from a wildcard config filename (e.g. `tsconfig.*.json`) nested anywhere
     /// under `root` without a recursive filesystem walk.
     #[must_use]
-    pub fn any_descendant_matches(&self, root: &Path, matcher: &globset::GlobMatcher) -> bool {
+    pub(crate) fn any_descendant_matches(
+        &self,
+        root: &Path,
+        matcher: &globset::GlobMatcher,
+    ) -> bool {
         self.dirs.iter().any(|(dir, names)| {
             dir.starts_with(root) && names.iter().any(|name| matcher.is_match(Path::new(name)))
         })

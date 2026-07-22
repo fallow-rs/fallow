@@ -69,7 +69,7 @@ pub fn set_spawn_hook(hook: ChangedFilesSpawnHook) {
 }
 
 /// Validate a user-supplied git ref before passing it to git.
-pub fn validate_git_ref(s: &str) -> Result<&str, String> {
+pub(crate) fn validate_git_ref(s: &str) -> Result<&str, String> {
     if s.is_empty() {
         return Err("git ref cannot be empty".to_string());
     }
@@ -149,7 +149,7 @@ pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> 
 }
 
 /// Get files changed since a git ref.
-pub fn try_get_changed_files(
+pub(crate) fn try_get_changed_files(
     root: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {

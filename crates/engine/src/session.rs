@@ -233,7 +233,7 @@ impl AnalysisSession {
 
     /// Source metadata fingerprints for every discovered source file.
     #[must_use]
-    pub fn source_fingerprints(&self) -> FxHashMap<PathBuf, SourceFingerprint> {
+    pub(crate) fn source_fingerprints(&self) -> FxHashMap<PathBuf, SourceFingerprint> {
         self.discovery
             .files()
             .iter()
@@ -253,7 +253,7 @@ impl AnalysisSession {
     ///
     /// Returns an error when the ref is invalid, git is unavailable, or the
     /// root is not part of a repository.
-    pub fn changed_files_since(
+    pub(crate) fn changed_files_since(
         &self,
         git_ref: &str,
     ) -> Result<FxHashSet<PathBuf>, crate::changed_files::ChangedFilesError> {
@@ -373,7 +373,7 @@ impl AnalysisSession {
     /// session. Stable owned callers can continue using [`Self::parsed_parts`].
     #[doc(hidden)]
     #[must_use]
-    pub fn shared_parsed_modules(&self, need_complexity: bool) -> Arc<[ModuleInfo]> {
+    pub(crate) fn shared_parsed_modules(&self, need_complexity: bool) -> Arc<[ModuleInfo]> {
         self.parse_modules(need_complexity).modules
     }
 
@@ -503,7 +503,7 @@ impl AnalysisSession {
     ///
     /// Returns an error if graph construction or analysis fails.
     #[doc(hidden)]
-    pub fn analyze_dead_code_with_shared_modules(
+    pub(crate) fn analyze_dead_code_with_shared_modules(
         &self,
         modules: Arc<[ModuleInfo]>,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {

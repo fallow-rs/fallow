@@ -171,11 +171,11 @@ pub struct AnalysisOutput {
 #[derive(Debug, Clone, Copy)]
 #[doc(hidden)]
 pub struct AnalysisParseMetrics {
-    pub parse_ms: f64,
-    pub cache_ms: f64,
-    pub cache_hits: usize,
-    pub cache_misses: usize,
-    pub parse_cpu_ms: f64,
+    pub(crate) parse_ms: f64,
+    pub(crate) cache_ms: f64,
+    pub(crate) cache_hits: usize,
+    pub(crate) cache_misses: usize,
+    pub(crate) parse_cpu_ms: f64,
 }
 
 /// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
@@ -216,7 +216,7 @@ fn update_cache(
 /// `health`, `coverage analyze`) can call it without re-deriving the
 /// same fallback policy.
 #[must_use]
-pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
+pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
     config
         .cache_max_size_mb
         .map_or(cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
@@ -483,7 +483,7 @@ impl AnalysisDiscovery {
 
     /// Discovered source files, indexed by stable `FileId` for this session.
     #[must_use]
-    pub fn files(&self) -> &[discover::DiscoveredFile] {
+    pub(crate) fn files(&self) -> &[discover::DiscoveredFile] {
         &self.files
     }
 

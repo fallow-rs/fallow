@@ -40,7 +40,7 @@ pub enum EnvelopeKind {
 
 /// Render and print the annotation stream for one envelope, resolving the
 /// ambient path-rebase and package-manager options at this boundary.
-pub fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitCode {
+pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitCode {
     let options = resolve_render_options(root);
     let rendered = render_annotations(kind, envelope, &options);
     if !rendered.is_empty() {

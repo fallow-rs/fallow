@@ -43,7 +43,7 @@ impl PackageResolver {
     ///
     /// Workspace roots are stored relative to `project_root` and sorted by path
     /// length descending so the first match is always the most specific prefix.
-    pub fn new(project_root: &Path, workspaces: &[WorkspaceInfo]) -> Self {
+    pub(crate) fn new(project_root: &Path, workspaces: &[WorkspaceInfo]) -> Self {
         let mut ws: Vec<(PathBuf, String)> = workspaces
             .iter()
             .map(|w| {
@@ -66,7 +66,7 @@ impl PackageResolver {
 
 impl OwnershipResolver {
     /// Resolve the group key for a file path (relative to project root).
-    pub fn resolve(&self, rel_path: &Path) -> String {
+    pub(crate) fn resolve(&self, rel_path: &Path) -> String {
         match self {
             Self::Owner(co) => co.owner_of(rel_path).unwrap_or(UNOWNED_LABEL).to_string(),
             Self::Directory => codeowners::directory_group(rel_path).to_string(),
@@ -85,7 +85,7 @@ impl OwnershipResolver {
     /// `(directory, None)` for Directory/Package mode,
     /// `(section, Some(pattern))` for Section mode (pattern is the raw
     /// CODEOWNERS pattern from the last matching rule).
-    pub fn resolve_with_rule(&self, rel_path: &Path) -> (String, Option<String>) {
+    pub(crate) fn resolve_with_rule(&self, rel_path: &Path) -> (String, Option<String>) {
         match self {
             Self::Owner(co) => {
                 if let Some((owner, rule)) = co.owner_and_rule_of(rel_path) {
@@ -108,7 +108,7 @@ impl OwnershipResolver {
     }
 
     /// Label for the grouping mode (used in JSON `grouped_by` field).
-    pub fn mode_label(&self) -> &'static str {
+    pub(crate) fn mode_label(&self) -> &'static str {
         match self {
             Self::Owner(_) => "owner",
             Self::Directory => "directory",
@@ -122,7 +122,7 @@ impl OwnershipResolver {
     /// Returns `Some(&[...])` only in Section mode when `rel_path` resolves
     /// to a rule inside a named section. Used to emit the `owners` metadata
     /// array in grouped JSON output.
-    pub fn section_owners_of(&self, rel_path: &Path) -> Option<&[String]> {
+    pub(crate) fn section_owners_of(&self, rel_path: &Path) -> Option<&[String]> {
         if let Self::Section(co) = self
             && let Some((_, owners)) = co.section_and_owners_of(rel_path)
         {
@@ -138,7 +138,7 @@ impl OwnershipResolver {
 /// Each issue is assigned to a group by extracting its primary file path
 /// and resolving the group key via the `OwnershipResolver`.
 /// Returns groups sorted alphabetically by key, with `(unowned)` last.
-pub fn group_analysis_results(
+pub(crate) fn group_analysis_results(
     results: &AnalysisResults,
     root: &Path,
     resolver: &OwnershipResolver,
@@ -159,7 +159,7 @@ pub fn group_analysis_results(
 }
 
 /// Resolve the group key for a single path (for per-result tagging in SARIF/CodeClimate).
-pub fn resolve_owner(path: &Path, root: &Path, resolver: &OwnershipResolver) -> String {
+pub(crate) fn resolve_owner(path: &Path, root: &Path, resolver: &OwnershipResolver) -> String {
     resolver.resolve(relative_path(path, root))
 }
 

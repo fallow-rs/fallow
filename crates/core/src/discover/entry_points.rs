@@ -79,27 +79,27 @@ fn should_warn_skipped_entry(message: &str) -> bool {
 /// Entry points grouped by reachability role.
 #[derive(Debug, Clone, Default)]
 pub struct CategorizedEntryPoints {
-    pub all: Vec<EntryPoint>,
-    pub runtime: Vec<EntryPoint>,
-    pub test: Vec<EntryPoint>,
+    pub(crate) all: Vec<EntryPoint>,
+    pub(crate) runtime: Vec<EntryPoint>,
+    pub(crate) test: Vec<EntryPoint>,
 }
 
 impl CategorizedEntryPoints {
-    pub fn push_runtime(&mut self, entry: EntryPoint) {
+    pub(crate) fn push_runtime(&mut self, entry: EntryPoint) {
         self.runtime.push(entry.clone());
         self.all.push(entry);
     }
 
-    pub fn push_test(&mut self, entry: EntryPoint) {
+    pub(crate) fn push_test(&mut self, entry: EntryPoint) {
         self.test.push(entry.clone());
         self.all.push(entry);
     }
 
-    pub fn push_support(&mut self, entry: EntryPoint) {
+    pub(crate) fn push_support(&mut self, entry: EntryPoint) {
         self.all.push(entry);
     }
 
-    pub fn extend_runtime<I>(&mut self, entries: I)
+    pub(crate) fn extend_runtime<I>(&mut self, entries: I)
     where
         I: IntoIterator<Item = EntryPoint>,
     {
@@ -126,14 +126,14 @@ impl CategorizedEntryPoints {
         }
     }
 
-    pub fn extend(&mut self, other: Self) {
+    pub(crate) fn extend(&mut self, other: Self) {
         self.all.extend(other.all);
         self.runtime.extend(other.runtime);
         self.test.extend(other.test);
     }
 
     #[must_use]
-    pub fn dedup(mut self) -> Self {
+    pub(crate) fn dedup(mut self) -> Self {
         dedup_entry_paths(&mut self.all);
         dedup_entry_paths(&mut self.runtime);
         dedup_entry_paths(&mut self.test);

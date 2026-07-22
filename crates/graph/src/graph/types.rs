@@ -86,7 +86,7 @@ impl ModuleNode {
 
     /// Set whether this module is reachable from a runtime/application root.
     #[inline]
-    pub fn set_runtime_reachable(&mut self, v: bool) {
+    pub(crate) fn set_runtime_reachable(&mut self, v: bool) {
         if v {
             self.flags |= FLAG_RUNTIME_REACHABLE;
         } else {
@@ -96,7 +96,7 @@ impl ModuleNode {
 
     /// Set whether this module is reachable from a test root.
     #[inline]
-    pub fn set_test_reachable(&mut self, v: bool) {
+    pub(crate) fn set_test_reachable(&mut self, v: bool) {
         if v {
             self.flags |= FLAG_TEST_REACHABLE;
         } else {

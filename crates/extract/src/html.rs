@@ -48,14 +48,14 @@ static LINK_HREF_REVERSE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 /// Check if a path is an HTML file.
-pub(crate) fn is_html_file(path: &Path) -> bool {
+pub fn is_html_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "html")
 }
 
 /// Returns true if an HTML asset reference is a remote URL that should be skipped.
-pub(crate) fn is_remote_url(src: &str) -> bool {
+pub fn is_remote_url(src: &str) -> bool {
     src.starts_with("http://")
         || src.starts_with("https://")
         || src.starts_with("//")
@@ -76,7 +76,7 @@ pub(crate) fn is_remote_url(src: &str) -> bool {
 /// Neither shape is a legal URL or path character outside template engines,
 /// so the skip is generic across frameworks rather than gated on a plugin.
 /// Returns `true` for any `src` / `href` value that contains either marker.
-pub(crate) fn is_template_placeholder(value: &str) -> bool {
+pub fn is_template_placeholder(value: &str) -> bool {
     value.contains("{{") || value.contains("###")
 }
 
@@ -86,7 +86,7 @@ pub(crate) fn is_template_placeholder(value: &str) -> bool {
 /// between the HTML file parser and the JS/TS visitor's tagged template
 /// literal override so `` html`<script src="...">` `` in Hono/lit-html/htm
 /// layouts emits the same asset edges as a real `.html` file.
-pub(crate) fn collect_asset_refs(source: &str) -> Vec<String> {
+pub fn collect_asset_refs(source: &str) -> Vec<String> {
     let stripped = HTML_COMMENT_RE.replace_all(source, "");
     let mut refs: Vec<String> = Vec::new();
 
@@ -131,7 +131,7 @@ static CUSTOM_ELEMENT_TAG_RE: std::sync::LazyLock<regex::Regex> =
 /// commented-out `<!-- <x-foo> -->` does not credit the element. Deduped; native
 /// HTML tags are excluded by the hyphen requirement. Feeds the Lit
 /// `unrendered-component` arm's project-wide rendered-tag union.
-pub(crate) fn collect_custom_element_tags(source: &str) -> Vec<String> {
+pub fn collect_custom_element_tags(source: &str) -> Vec<String> {
     let stripped = HTML_COMMENT_RE.replace_all(source, "");
     let mut tags: Vec<String> = Vec::new();
     for cap in CUSTOM_ELEMENT_TAG_RE.captures_iter(&stripped) {
@@ -147,7 +147,7 @@ pub(crate) fn collect_custom_element_tags(source: &str) -> Vec<String> {
 
 /// Parse an HTML file, extracting script and stylesheet references as imports.
 #[cfg(test)]
-pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+pub fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     parse_html_to_module_with_complexity(file_id, source, content_hash, false)
 }
 
@@ -225,7 +225,7 @@ fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleP
 }
 
 /// Parse an HTML file and optionally compute Angular template complexity.
-pub(crate) fn parse_html_to_module_with_complexity(
+pub fn parse_html_to_module_with_complexity(
     file_id: FileId,
     source: &str,
     content_hash: u64,

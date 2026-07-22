@@ -33,7 +33,7 @@ pub fn normalize_and_hash(tokens: &[SourceToken], mode: DetectionMode) -> Vec<Ha
 ///
 /// This is the primary normalization entry point when using configurable overrides.
 #[must_use]
-pub fn normalize_and_hash_resolved(
+pub(crate) fn normalize_and_hash_resolved(
     tokens: &[SourceToken],
     normalization: ResolvedNormalization,
 ) -> Vec<HashedToken> {

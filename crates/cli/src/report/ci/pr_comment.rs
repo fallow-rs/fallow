@@ -88,11 +88,11 @@ pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) 
 /// rules a downstream consumer added without registering (rare; produces
 /// the conservative "Dead code" default).
 #[must_use]
-pub fn category_for_rule(rule_id: &str) -> &'static str {
+pub(crate) fn category_for_rule(rule_id: &str) -> &'static str {
     crate::explain::rule_by_id(rule_id).map_or("Dead code", |def| def.category)
 }
 
-pub fn max_comments() -> usize {
+pub(crate) fn max_comments() -> usize {
     std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -100,7 +100,7 @@ pub fn max_comments() -> usize {
 }
 
 #[must_use]
-pub fn pr_comment_layout_from_env() -> PrCommentLayout {
+pub(crate) fn pr_comment_layout_from_env() -> PrCommentLayout {
     match std::env::var("FALLOW_PR_COMMENT_LAYOUT").as_deref() {
         Ok("compact") => PrCommentLayout::Compact,
         Ok("gate-only") => PrCommentLayout::GateOnly,
@@ -121,7 +121,7 @@ pub fn pr_comment_layout_from_env() -> PrCommentLayout {
 /// run fallow scoped to one workspace package and post their own sticky.
 /// Without a per-workspace suffix every job edits the same marker, racing
 /// each other's bodies on every CI re-run.
-pub fn sticky_marker_id() -> String {
+pub(crate) fn sticky_marker_id() -> String {
     if let Ok(value) = std::env::var("FALLOW_COMMENT_ID")
         && !value.trim().is_empty()
     {
@@ -158,7 +158,7 @@ fn sanitize_marker_segment(value: &str) -> String {
 }
 
 #[must_use]
-pub fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
+pub(crate) fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
     let issues =
         super::diff_filter::filter_issues_for_summary(issues_from_codeclimate(codeclimate));
     let conclusion = issue_decision_conclusion(issues.is_empty());
@@ -166,7 +166,7 @@ pub fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) 
 }
 
 #[must_use]
-pub fn print_pr_comment_with_conclusion(
+pub(crate) fn print_pr_comment_with_conclusion(
     command: &str,
     provider: Provider,
     codeclimate: &Value,
@@ -208,7 +208,7 @@ fn print_pr_comment_from_ci_issues(
 }
 
 #[must_use]
-pub fn build_issue_decision_surface(
+pub(crate) fn build_issue_decision_surface(
     command: &str,
     issues: &[CiIssue],
     envelope: &PrCommentEnvelope,
@@ -276,7 +276,7 @@ fn decision_summary_markdown(conclusion: PrDecisionConclusion, issue_count: usiz
 }
 
 #[must_use]
-pub fn build_pr_details_artifact(command: &str, issues: &[CiIssue]) -> PrDetailsArtifact {
+pub(crate) fn build_pr_details_artifact(command: &str, issues: &[CiIssue]) -> PrDetailsArtifact {
     PrDetailsArtifact {
         schema: PR_DETAILS_SCHEMA.to_owned(),
         title: format!("Fallow {}", command_title(command)),
@@ -299,7 +299,7 @@ fn pr_details_row_from_issue(issue: &CiIssue) -> PrDetailsRow {
 }
 
 #[must_use]
-pub fn decision_annotation_from_issue(issue: &CiIssue) -> PrDecisionAnnotation {
+pub(crate) fn decision_annotation_from_issue(issue: &CiIssue) -> PrDecisionAnnotation {
     PrDecisionAnnotation {
         path: issue.path.clone(),
         line: u32::try_from(issue.line).unwrap_or(u32::MAX),
@@ -323,7 +323,7 @@ fn count_label(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {noun}")
 }
 
-pub fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
+pub(crate) fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
     let Ok(path) = std::env::var("FALLOW_PR_COMMENT_ENVELOPE_FILE") else {
         return;
     };
@@ -339,7 +339,7 @@ pub fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
     }
 }
 
-pub fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
+pub(crate) fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
     let Ok(path) = std::env::var("FALLOW_PR_DECISION_FILE") else {
         return;
     };
@@ -355,7 +355,7 @@ pub fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
     }
 }
 
-pub fn write_pr_details_sidecar(artifact: &PrDetailsArtifact) {
+pub(crate) fn write_pr_details_sidecar(artifact: &PrDetailsArtifact) {
     let Ok(path) = std::env::var("FALLOW_PR_DETAILS_FILE") else {
         return;
     };

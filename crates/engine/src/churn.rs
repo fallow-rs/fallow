@@ -251,7 +251,7 @@ struct ChurnFileEvent {
 /// invalid repo-relative event path, a far-future timestamp, line totals above
 /// `u32::MAX`, or an event count past `MAX_CHURN_EVENTS`. An empty `events`
 /// array is valid (no hotspots), not an error. Never runs `git`.
-pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, String> {
+pub(crate) fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, String> {
     let raw = read_churn_file_with_limit(path, MAX_CHURN_FILE_BYTES)?;
     let doc: ChurnFileDoc = serde_json::from_str(&raw)
         .map_err(|e| format!("failed to parse churn file {}: {e}", path.display()))?;
@@ -432,7 +432,7 @@ fn validate_churn_event_timestamp(
 
 /// Check if the repository is a shallow clone.
 #[must_use]
-pub fn is_shallow_clone(root: &Path) -> bool {
+pub(crate) fn is_shallow_clone(root: &Path) -> bool {
     let mut command = git_command();
     command
         .args(["rev-parse", "--is-shallow-repository"])
