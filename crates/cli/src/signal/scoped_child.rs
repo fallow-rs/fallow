@@ -90,7 +90,7 @@ impl ScopedChild {
         let id = registry::register_process_tree(Arc::clone(&process_tree));
         #[cfg(windows)]
         {
-            if let Err(error) = process_tree.start(child.id()) {
+            if let Err(error) = registry::ProcessTree::start(child.id()) {
                 registry::deregister(id);
                 let _ = process_tree.terminate();
                 terminate_failed_setup(&mut child);

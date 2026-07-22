@@ -180,7 +180,7 @@ impl ProcessTree {
     }
 
     #[cfg(windows)]
-    pub(super) fn start(&self, pid: u32) -> std::io::Result<()> {
+    pub(super) fn start(pid: u32) -> std::io::Result<()> {
         resume_suspended_process(pid)
     }
 
