@@ -50,12 +50,16 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
 
   assert.match(workflow, /^  schedule:\n    - cron: '30 5 \* \* 0'$/m);
   assert.match(workflow, /FUZZ_TIME_SECONDS:.*'schedule'.*'300'.*'30'/);
+  assert.match(workflow, /FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu/);
   assert.match(workflow, /FUZZ_TARGETS: fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts/);
   assert.match(job, /persist-credentials: false/);
   assert.match(job, /toolchain: nightly-2026-07-20/);
   assert.match(job, /tool: cargo-fuzz@0\.13\.2/);
   assert.match(job, /cargo \+nightly-2026-07-20 metadata --locked/);
-  assert.match(job, /cargo \+nightly-2026-07-20 fuzz run "\$target"/);
+  assert.match(
+    job,
+    /cargo \+nightly-2026-07-20 fuzz run --target "\$FUZZ_TARGET_TRIPLE" "\$target"/,
+  );
   assert.match(job, /-max_total_time="\$FUZZ_TIME_SECONDS" -timeout=10/);
   assert.match(job, /if ! cargo[\s\S]*failed=1[\s\S]*exit "\$failed"/);
   assert.match(job, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);

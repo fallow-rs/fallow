@@ -41,6 +41,7 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
+  FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
   FUZZ_TARGETS: fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts
   FUZZ_TIME_SECONDS: ${{ github.event_name == 'schedule' && '300' || '30' }}
 
@@ -79,7 +80,7 @@ jobs:
           failed=0
           for target in $FUZZ_TARGETS; do
             echo "::group::Fuzz ${target}"
-            if ! cargo +nightly-2026-07-20 fuzz run "$target" -- -max_total_time="$FUZZ_TIME_SECONDS" -timeout=10; then
+            if ! cargo +nightly-2026-07-20 fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" -- -max_total_time="$FUZZ_TIME_SECONDS" -timeout=10; then
               failed=1
             fi
             echo "::endgroup::"
