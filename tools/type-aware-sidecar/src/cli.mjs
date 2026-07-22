@@ -1,10 +1,18 @@
 import { analyzeClassMemberUses } from "./typescript-go.mjs";
 import { createResponse, parseRequest } from "./protocol.mjs";
 
-const readAll = async (input) => {
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+
+export const readAll = async (input, maximumBytes = MAX_REQUEST_BYTES) => {
   const chunks = [];
+  let byteLength = 0;
   for await (const chunk of input) {
-    chunks.push(chunk);
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteLength += buffer.byteLength;
+    if (byteLength > maximumBytes) {
+      throw new Error(`stdin exceeded the ${maximumBytes} byte request limit`);
+    }
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
 };

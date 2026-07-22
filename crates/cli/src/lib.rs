@@ -534,6 +534,10 @@ enum Command {
         #[arg(long)]
         type_aware: bool,
 
+        /// Experimental: TypeScript project config to use for type-aware analysis (repeatable)
+        #[arg(long, value_name = "PATH", action = clap::ArgAction::Append)]
+        type_aware_project: Vec<PathBuf>,
+
         /// Only report unused store members
         #[arg(long)]
         unused_store_members: bool,
@@ -2967,6 +2971,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
     let filters = check_issue_filters(&command);
     let Command::Check {
         type_aware,
+        type_aware_project,
         include_dupes,
         trace,
         trace_file,
@@ -2993,6 +2998,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             },
             include_dupes,
             type_aware,
+            type_aware_project,
             top,
             file,
         },
@@ -4266,6 +4272,7 @@ struct CheckDispatchArgs {
     trace_opts: TraceOptions,
     include_dupes: bool,
     type_aware: bool,
+    type_aware_project: Vec<std::path::PathBuf>,
     top: Option<usize>,
     file: Vec<std::path::PathBuf>,
 }
@@ -4398,24 +4405,8 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         Ok(production) => production,
         Err(code) => return code,
     };
-    if args.type_aware && args.filters.any_active() && !args.filters.unused_class_members {
-        return emit_error(
-            "--type-aware currently only refines unused class-member findings; combine it with --unused-class-members or omit issue filters",
-            2,
-            output,
-        );
-    }
-    if args.type_aware
-        && (args.trace_opts.trace_export.is_some()
-            || args.trace_opts.trace_file.is_some()
-            || args.trace_opts.trace_dependency.is_some()
-            || args.trace_opts.impact_closure.is_some())
-    {
-        return emit_error(
-            "--type-aware cannot be combined with focused trace or impact-closure output",
-            2,
-            output,
-        );
+    if let Some(code) = validate_type_aware_check_options(dispatch, args) {
+        return code;
     }
     check::run_check(&CheckOptions {
         root: dispatch.root,
@@ -4441,6 +4432,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         group_by: cli.group_by,
         include_dupes: args.include_dupes,
         type_aware: args.type_aware,
+        type_aware_projects: &args.type_aware_project,
         trace_opts: &args.trace_opts,
         explain: cli.explain,
         top: args.top,
@@ -4456,6 +4448,73 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         retain_modules_for_health: false,
         defer_performance: false,
     })
+}
+
+fn validate_type_aware_check_options(
+    dispatch: &DispatchContext<'_>,
+    args: &CheckDispatchArgs,
+) -> Option<ExitCode> {
+    let cli = dispatch.cli;
+    let output = dispatch.output;
+    if args.type_aware && args.filters.any_active() && !args.filters.unused_class_members {
+        return Some(emit_error(
+            "--type-aware currently only refines unused class-member findings; combine it with --unused-class-members or omit issue filters",
+            2,
+            output,
+        ));
+    }
+    if !args.type_aware_project.is_empty() && !args.type_aware {
+        return Some(emit_error(
+            "--type-aware-project requires --type-aware",
+            2,
+            output,
+        ));
+    }
+    if args.type_aware
+        && !matches!(
+            output,
+            fallow_config::OutputFormat::Human | fallow_config::OutputFormat::Json
+        )
+    {
+        return Some(emit_error(
+            "--type-aware currently supports only human and JSON output so semantic provenance is never omitted",
+            2,
+            output,
+        ));
+    }
+    if args.type_aware && cli.sarif_file.is_some() {
+        return Some(emit_error(
+            "--type-aware cannot yet emit a secondary SARIF report because SARIF provenance is not implemented",
+            2,
+            output,
+        ));
+    }
+    if args.type_aware
+        && (cli.baseline.is_some()
+            || cli.save_baseline.is_some()
+            || cli.fail_on_regression
+            || cli.regression_baseline.is_some()
+            || cli.save_regression_baseline.is_some())
+    {
+        return Some(emit_error(
+            "--type-aware cannot yet be combined with baseline or regression modes because baselines do not record the analysis mode",
+            2,
+            output,
+        ));
+    }
+    if args.type_aware
+        && (args.trace_opts.trace_export.is_some()
+            || args.trace_opts.trace_file.is_some()
+            || args.trace_opts.trace_dependency.is_some()
+            || args.trace_opts.impact_closure.is_some())
+    {
+        return Some(emit_error(
+            "--type-aware cannot be combined with focused trace or impact-closure output",
+            2,
+            output,
+        ));
+    }
+    None
 }
 
 /// Resolve the three-state `ignoreImports` CLI override from the opt-in /
@@ -5649,11 +5708,16 @@ mod tests {
             "dead-code",
             "--unused-class-members",
             "--type-aware",
+            "--type-aware-project",
+            "tsconfig.json",
+            "--type-aware-project",
+            "packages/web/tsconfig.json",
         ])
         .expect("experimental type-aware flag should parse");
         let Some(Command::Check {
             unused_class_members,
             type_aware,
+            type_aware_project,
             ..
         }) = cli.command
         else {
@@ -5661,6 +5725,13 @@ mod tests {
         };
         assert!(unused_class_members);
         assert!(type_aware);
+        assert_eq!(
+            type_aware_project,
+            [
+                PathBuf::from("tsconfig.json"),
+                PathBuf::from("packages/web/tsconfig.json")
+            ]
+        );
     }
 
     #[test]

@@ -88,6 +88,7 @@ const SCHEMA = {
         boolFlag("--unused-exports", "Only report unused exports"),
         boolFlag("--unused-deps", "Only report unused dependencies"),
         boolFlag("--type-aware", "Experimental type-aware refinement"),
+        stringFlag("--type-aware-project", "Experimental TypeScript project selection"),
         boolFlag("--trace", "Trace export usage"),
         stringFlag("--file", "Scope output to files"),
       ],

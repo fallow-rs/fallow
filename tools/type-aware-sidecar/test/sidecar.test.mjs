@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createResponse } from "../src/protocol.mjs";
+import { readAll } from "../src/cli.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const executable = path.join(sidecarRoot, "fallow-type-aware.mjs");
@@ -20,21 +22,35 @@ const write = (root, relativePath, contents) => {
 };
 
 const request = (root, candidates) => ({
-  protocol_version: 1,
+  protocol_version: 2,
   operation: "class-member-uses",
   root,
+  projects: [],
   candidates,
 });
 
-const candidate = ({ id, file, owner, member, kind = "class_method", line = 2 }) => ({
+const candidate = ({ id, file, owner, member, kind = "class_method", line = 2, col = 2 }) => ({
   id,
   path: file,
   parent_name: owner,
   member_name: member,
   kind,
   line,
-  col: 2,
+  col,
 });
+
+const utf8Position = (source, marker, occurrence = 1) => {
+  let markerOffset = -1;
+  for (let found = 0; found < occurrence; found += 1) {
+    markerOffset = source.indexOf(marker, markerOffset + 1);
+    assert.notEqual(markerOffset, -1, `marker ${marker} occurrence ${occurrence} exists`);
+  }
+  const lineStart = source.lastIndexOf("\n", markerOffset - 1) + 1;
+  return {
+    line: source.slice(0, markerOffset).split("\n").length,
+    col: Buffer.byteLength(source.slice(lineStart, markerOffset), "utf8"),
+  };
+};
 
 const runSidecar = (body) => {
   const stdout = execFileSync(executable, {
@@ -114,6 +130,209 @@ export class StringService extends BaseService<GenericClient<string>> {
     assert.deepEqual(response.selected_tsconfigs, ["tsconfig.json"]);
     assert.equal(response.backend, "typescript-go");
     assert.equal(response.backend_version, "7.0.2");
+    assert.equal(response.sidecar_version, "0.1.0");
+    assert.deepEqual(response.abstentions, []);
+    assert.ok(response.projects[0].source_file_count >= 2);
+    const { source_file_count: _sourceFileCount, ...projectResult } = response.projects[0];
+    assert.deepEqual(projectResult, {
+      config: "tsconfig.json",
+      source: "auto",
+      status: "refined",
+      candidate_count: 4,
+      confirmed_used_count: 2,
+      unresolved_count: 2,
+      abstained_count: 0,
+      blocking_diagnostic_count: 0,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("matches same-named declarations by their exact source coordinates", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    const source = `namespace First {
+  export class Service {
+    run(): void {}
+  }
+}
+namespace Second {
+  export class Service {
+    run(): void {}
+  }
+}
+new First.Service().run();
+`;
+    write(root, "src/services.ts", source);
+    const first = utf8Position(source, "run(): void {}", 1);
+    const second = utf8Position(source, "run(): void {}", 2);
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/services.ts",
+          owner: "Service",
+          member: "run",
+          ...first,
+        }),
+        candidate({
+          id: 1,
+          file: "src/services.ts",
+          owner: "Service",
+          member: "run",
+          ...second,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, [1]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("interprets protocol columns as zero-based UTF-8 byte offsets", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    const source = `const label = "🙂"; export class UnicodeService { run(): void {} }
+new UnicodeService().run();
+`;
+    write(root, "src/unicode.ts", source);
+    const declaration = utf8Position(source, "run(): void {}");
+    const utf16Col = source.slice(0, source.indexOf("run(): void {}")).length;
+    assert.notEqual(declaration.col, utf16Col);
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/unicode.ts",
+          owner: "UnicodeService",
+          member: "run",
+          ...declaration,
+        }),
+        candidate({
+          id: 1,
+          file: "src/unicode.ts",
+          owner: "UnicodeService",
+          member: "run",
+          line: declaration.line,
+          col: utf16Col,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, [1]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("matches getter and setter declarations at their keyword positions", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    const source = `export class Accessor {
+  get value(): string { return ""; }
+  set value(next: string) { console.log(next); }
+}
+const accessor = new Accessor();
+console.log(accessor.value);
+accessor.value = "next";
+`;
+    write(root, "src/accessor.ts", source);
+    const getter = utf8Position(source, "get value");
+    const setter = utf8Position(source, "set value");
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/accessor.ts",
+          owner: "Accessor",
+          member: "value",
+          ...getter,
+        }),
+        candidate({
+          id: 1,
+          file: "src/accessor.ts",
+          owner: "Accessor",
+          member: "value",
+          ...setter,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0, 1]);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("distinguishes a nested class declaration from a same-named outer class", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    const source = `export class Container {
+  make(): void {
+    class Service {
+      run(): void {}
+    }
+    new Service().run();
+  }
+}
+class Service {
+  run(): void {}
+}
+`;
+    write(root, "src/nested.ts", source);
+    const nested = utf8Position(source, "run(): void {}", 1);
+    const outer = utf8Position(source, "run(): void {}", 2);
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/nested.ts",
+          owner: "Service",
+          member: "run",
+          ...nested,
+        }),
+        candidate({
+          id: 1,
+          file: "src/nested.ts",
+          owner: "Service",
+          member: "run",
+          ...outer,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, [1]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -166,7 +385,40 @@ new Beta().stop();
   }
 });
 
-test("keeps unresolved candidates when source diagnostics exist", () => {
+test("uses an explicitly selected ancestor project outside the analysis root", () => {
+  const monorepo = makeProject();
+  const root = path.join(monorepo, "packages", "app");
+  try {
+    write(
+      monorepo,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["packages/app/src"] }),
+    );
+    write(
+      monorepo,
+      "packages/app/src/service.ts",
+      `export class Service {
+  run(): void {}
+}
+new Service().run();
+`,
+    );
+    const body = request(root, [
+      candidate({ id: 0, file: "src/service.ts", owner: "Service", member: "run" }),
+    ]);
+    body.projects = ["../../tsconfig.json"];
+
+    const response = runSidecar(body);
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.deepEqual(response.selected_tsconfigs, ["../../tsconfig.json"]);
+  } finally {
+    rmSync(monorepo, { recursive: true, force: true });
+  }
+});
+
+test("does not run a full semantic diagnostic pass before exact refinement", () => {
   const root = makeProject();
   try {
     write(
@@ -192,13 +444,55 @@ const broken: string = 1;
 
     assert.deepEqual(response.confirmed_used_candidate_ids, []);
     assert.deepEqual(response.unresolved_candidate_ids, [0]);
-    assert.match(response.warnings[0], /TypeScript diagnostics?/);
+    assert.deepEqual(response.abstentions, []);
+    assert.equal(response.projects[0].status, "refined");
+    assert.equal(response.projects[0].blocking_diagnostic_count, 0);
+    assert.deepEqual(response.warnings, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("uses an explicit marker for an inferred project", () => {
+test("abstains for every candidate when a project has blocking diagnostics", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    write(
+      root,
+      "src/service.ts",
+      `export class Service {
+  run(): void {}
+}
+new Service().run();
+const broken = ;
+`,
+    );
+
+    const response = runSidecar(
+      request(root, [
+        candidate({ id: 0, file: "src/service.ts", owner: "Service", member: "run" }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.deepEqual(response.abstentions, [{ candidate_id: 0, reason: "blocking-diagnostics" }]);
+    assert.equal(response.projects[0].status, "abstained");
+    assert.equal(response.projects[0].abstain_reason, "blocking-diagnostics");
+    assert.equal(response.projects[0].abstained_count, 1);
+    assert.ok(response.projects[0].blocking_diagnostic_count > 0);
+    assert.match(response.warnings[0], /blocking TypeScript diagnostics?/);
+    assert.match(response.warnings[0], /tsc -p tsconfig\.json --noEmit/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("uses an explicit marker when an inferred project safely abstains", () => {
   const root = makeProject();
   try {
     write(
@@ -215,9 +509,11 @@ new Service().run();
       request(root, [candidate({ id: 0, file: "service.ts", owner: "Service", member: "run" })]),
     );
 
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
     assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.deepEqual(response.abstentions, [{ candidate_id: 0, reason: "blocking-diagnostics" }]);
     assert.deepEqual(response.selected_tsconfigs, ["<inferred>"]);
+    assert.match(response.warnings[0], /pass an explicit tsconfig with --type-aware-project/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -285,41 +581,69 @@ test("rejects unknown request fields and absolute candidate paths", () => {
 
 test("bounds and normalizes warning text", () => {
   const response = createResponse({
-    selectedTsconfigs: [],
+    selectedTsconfigs: ["\u{10000}.json", "\uE000.json"],
     confirmedIds: [],
     unresolvedIds: [],
-    warnings: [`first\nwarning`, "x".repeat(600)],
+    warnings: [`first\nwarning`, "first warning", "\u{10000}", "\uE000", "x".repeat(600)],
     elapsedMs: 1,
   });
 
+  assert.deepEqual(response.selected_tsconfigs, ["\uE000.json", "\u{10000}.json"]);
+  assert.equal(response.warnings.length, 4);
   assert.equal(response.warnings[0], "first warning");
   assert.equal(response.warnings[1].length, 512);
+  assert.deepEqual(response.warnings.slice(2), ["\uE000", "\u{10000}"]);
+});
+
+test("sidecar version matches the package version", () => {
+  const packageJson = JSON.parse(readFileSync(path.join(sidecarRoot, "package.json"), "utf8"));
+  const response = createResponse({
+    selectedTsconfigs: [],
+    confirmedIds: [],
+    unresolvedIds: [],
+    warnings: [],
+    elapsedMs: 0,
+  });
+
+  assert.equal(response.sidecar_version, packageJson.version);
+});
+
+test("rejects oversized stdin while reading", async () => {
+  await assert.rejects(readAll(Readable.from(["12345"]), 4), /4 byte request limit/);
 });
 
 test("returns provenance for an empty candidate request", () => {
   const response = runSidecar(request(sidecarRoot, []));
 
-  assert.equal(response.protocol_version, 1);
+  assert.equal(response.protocol_version, 2);
+  assert.equal(response.sidecar_version, "0.1.0");
   assert.equal(response.backend, "typescript-go");
   assert.deepEqual(response.selected_tsconfigs, []);
   assert.deepEqual(response.confirmed_used_candidate_ids, []);
   assert.deepEqual(response.unresolved_candidate_ids, []);
+  assert.deepEqual(response.abstentions, []);
+  assert.deepEqual(response.projects, []);
 });
 
-test("fails when TypeScript cannot construct a project", () => {
+test("abstains when TypeScript cannot construct a project", () => {
   const root = makeProject();
   try {
-    const result = spawnSync(executable, {
-      cwd: sidecarRoot,
-      input: JSON.stringify(
-        request(root, [candidate({ id: 0, file: "missing.ts", owner: "Missing", member: "run" })]),
-      ),
-      encoding: "utf8",
-    });
+    const response = runSidecar(
+      request(root, [
+        candidate({ id: 0, file: "missing.ts", owner: "Missing", member: "run" }),
+        candidate({ id: 1, file: "missing.ts", owner: "Missing", member: "stop" }),
+      ]),
+    );
 
-    assert.equal(result.status, 2);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, /could not construct a project/);
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.deepEqual(response.abstentions, [
+      { candidate_id: 0, reason: "no-project" },
+      { candidate_id: 1, reason: "no-project" },
+    ]);
+    assert.deepEqual(response.projects, []);
+    assert.equal(response.warnings.length, 1);
+    assert.match(response.warnings[0], /No TypeScript project/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

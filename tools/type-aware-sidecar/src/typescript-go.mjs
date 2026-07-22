@@ -77,8 +77,26 @@ const declarationPathMatches = (candidate, declaration) =>
   normalizeFileName(declaration.getSourceFile().fileName) ===
   normalizeFileName(candidate.absolutePath);
 
+const declarationPosition = (declaration) => {
+  const sourceFile = declaration.getSourceFile();
+  const start = declaration.getStart(sourceFile);
+  const { line, character } = sourceFile.getLineAndCharacterOfPosition(start);
+  const lineStart = sourceFile.getPositionOfLineAndCharacter(line, 0);
+
+  // TypeScript-Go positions and JavaScript string indices use UTF-16 code units.
+  // Protocol v2 carries Oxc coordinates: 1-based lines and 0-based UTF-8 byte columns.
+  const col = Buffer.byteLength(sourceFile.text.slice(lineStart, lineStart + character), "utf8");
+  return { line: line + 1, col };
+};
+
+const declarationPositionMatches = (candidate, declaration) => {
+  const position = declarationPosition(declaration);
+  return position.line === candidate.line && position.col === candidate.col;
+};
+
 const matchesDeclaration = (candidate, declaration) => {
   const checks = [
+    declarationPositionMatches(candidate, declaration),
     declarationKind(declaration) === candidate.kind,
     declarationNameMatches(candidate, declaration),
     declarationOwnerMatches(candidate, declaration),
@@ -104,16 +122,16 @@ const collectPropertyNames = (sourceFile, candidateNames) => {
   return nodes;
 };
 
-const countDiagnostics = (project) =>
-  project.program.getConfigFileParsingDiagnostics().length +
-  project.program.getProgramDiagnostics().length +
-  project.program.getGlobalDiagnostics().length +
-  project.program.getSyntacticDiagnostics().length +
-  project.program.getBindDiagnostics().length +
-  project.program.getSemanticDiagnostics().length;
+const countBlockingDiagnostics = (project) => {
+  const configFile = project.program.getConfigFileParsingDiagnostics().length;
+  const program = project.program.getProgramDiagnostics().length;
+  const syntactic = project.program.getSyntacticDiagnostics().length;
+  const bind = project.program.getBindDiagnostics().length;
+  return configFile + program + syntactic + bind;
+};
 
 const addWarning = (warnings, warning) => {
-  if (warnings.length < MAX_WARNINGS) {
+  if (warnings.length < MAX_WARNINGS && !warnings.includes(warning)) {
     warnings.push(warning);
   }
 };
@@ -195,80 +213,161 @@ const scanProject = ({ project, candidates, confirmedIds }) => {
   }
 };
 
-const selectCandidateProjects = (snapshot, candidates, warnings) => {
+const selectCandidateProjects = (snapshot, candidates, explicitProjects, warnings) => {
   const candidatesByProject = new Map();
+  const abstentions = [];
   for (const candidate of candidates) {
-    const project = snapshot.getDefaultProjectForFile(candidate.absolutePath);
+    const matchingExplicitProjects = explicitProjects.filter((project) =>
+      project.program.getSourceFile(candidate.absolutePath),
+    );
+    const project =
+      explicitProjects.length === 0
+        ? snapshot.getDefaultProjectForFile(candidate.absolutePath)
+        : matchingExplicitProjects.length === 1
+          ? matchingExplicitProjects[0]
+          : undefined;
     if (!project) {
-      addWarning(warnings, `No TypeScript project selected for ${candidate.path}; finding kept`);
+      const ambiguous = matchingExplicitProjects.length > 1;
+      const label = ambiguous ? "Multiple TypeScript projects" : "No TypeScript project";
+      const reason = ambiguous ? "ambiguous-project" : "no-project";
+      abstentions.push({ candidate_id: candidate.id, reason });
+      addWarning(warnings, `${label} selected for ${candidate.path}; finding kept`);
       continue;
     }
     const projectCandidates = candidatesByProject.get(project) ?? [];
     projectCandidates.push(candidate);
     candidatesByProject.set(project, projectCandidates);
   }
-  return candidatesByProject;
+  return { candidatesByProject, abstentions };
 };
 
-const warnForProjectDiagnostics = (root, project, warnings) => {
-  const diagnosticCount = countDiagnostics(project);
-  if (diagnosticCount > 0) {
-    const diagnosticLabel = diagnosticCount === 1 ? "diagnostic" : "diagnostics";
-    addWarning(
-      warnings,
-      `${relativeConfigPath(root, project.configFileName)} has ${diagnosticCount} TypeScript ${diagnosticLabel}; unresolved findings were kept`,
-    );
-  }
-};
-
-const scanSelectedProjects = (root, candidatesByProject, warnings) => {
+const scanSelectedProjects = (root, candidatesByProject, explicit, warnings) => {
   const selectedTsconfigs = [];
   const confirmedIds = new Set();
+  const abstentions = [];
+  const projectResults = [];
+  let diagnosticsMs = 0;
+  let symbolScanMs = 0;
   for (const [project, projectCandidates] of candidatesByProject) {
-    selectedTsconfigs.push(relativeConfigPath(root, project.configFileName));
-    warnForProjectDiagnostics(root, project, warnings);
+    const config = relativeConfigPath(root, project.configFileName);
+    const source = explicit ? "explicit" : "auto";
+    const sourceFileCount = project.program.getSourceFileNames().length;
+    selectedTsconfigs.push(config);
+    const diagnosticsStartedAt = performance.now();
+    const blockingDiagnosticCount = countBlockingDiagnostics(project);
+    diagnosticsMs += performance.now() - diagnosticsStartedAt;
+    if (blockingDiagnosticCount > 0) {
+      const diagnosticLabel = blockingDiagnosticCount === 1 ? "diagnostic" : "diagnostics";
+      const recovery =
+        config === "<inferred>"
+          ? "pass an explicit tsconfig with --type-aware-project"
+          : `run \`tsc -p ${config} --noEmit\``;
+      addWarning(
+        warnings,
+        `${config} has ${blockingDiagnosticCount} blocking TypeScript ${diagnosticLabel}; semantic refinement abstained; ${recovery}`,
+      );
+      abstentions.push(
+        ...projectCandidates.map((candidate) => ({
+          candidate_id: candidate.id,
+          reason: "blocking-diagnostics",
+        })),
+      );
+      projectResults.push({
+        config,
+        source,
+        status: "abstained",
+        candidate_count: projectCandidates.length,
+        confirmed_used_count: 0,
+        unresolved_count: 0,
+        abstained_count: projectCandidates.length,
+        blocking_diagnostic_count: blockingDiagnosticCount,
+        source_file_count: sourceFileCount,
+        abstain_reason: "blocking-diagnostics",
+      });
+      continue;
+    }
+    const scanStartedAt = performance.now();
     scanProject({ project, candidates: projectCandidates, confirmedIds });
+    symbolScanMs += performance.now() - scanStartedAt;
+    const confirmedCount = projectCandidates.filter((candidate) =>
+      confirmedIds.has(candidate.id),
+    ).length;
+    projectResults.push({
+      config,
+      source,
+      status: "refined",
+      candidate_count: projectCandidates.length,
+      confirmed_used_count: confirmedCount,
+      unresolved_count: projectCandidates.length - confirmedCount,
+      abstained_count: 0,
+      blocking_diagnostic_count: 0,
+      source_file_count: sourceFileCount,
+    });
   }
-  return { selectedTsconfigs: new Set(selectedTsconfigs), confirmedIds };
+  return {
+    selectedTsconfigs: new Set(selectedTsconfigs),
+    confirmedIds,
+    abstentions,
+    projectResults,
+    diagnosticsMs,
+    symbolScanMs,
+  };
 };
 
 const emptyAnalysis = () => ({
   selectedTsconfigs: [],
   confirmedIds: [],
   unresolvedIds: [],
+  abstentions: [],
+  projectResults: [],
+  phaseTimings: { project_setup: 0, diagnostics: 0, symbol_scan: 0 },
   warnings: [],
 });
 
-export const analyzeClassMemberUses = ({ root, candidates }) => {
+export const analyzeClassMemberUses = ({ root, projects, candidates }) => {
   if (candidates.length === 0) {
     return emptyAnalysis();
   }
 
+  const setupStartedAt = performance.now();
   const api = new API({ cwd: root });
   try {
     const snapshot = api.updateSnapshot({
       openFiles: candidates.map((candidate) => candidate.absolutePath),
+      openProjects: projects.map((project) => project.absolutePath),
     });
     const warnings = [];
-    const candidatesByProject = selectCandidateProjects(snapshot, candidates, warnings);
-
-    if (candidatesByProject.size === 0) {
-      throw new Error("TypeScript could not construct a project for any candidate");
-    }
-    const { selectedTsconfigs, confirmedIds } = scanSelectedProjects(
+    const explicitProjects = projects
+      .map((project) => snapshot.getProject(project.absolutePath))
+      .filter(Boolean);
+    const projectSetupMs = performance.now() - setupStartedAt;
+    const selection = selectCandidateProjects(snapshot, candidates, explicitProjects, warnings);
+    const analysis = scanSelectedProjects(
       root,
-      candidatesByProject,
+      selection.candidatesByProject,
+      projects.length > 0,
       warnings,
     );
+    const abstentions = [...selection.abstentions, ...analysis.abstentions];
+    const abstainedIds = new Set(abstentions.map((abstention) => abstention.candidate_id));
 
     const unresolvedIds = candidates
-      .filter((candidate) => !confirmedIds.has(candidate.id))
+      .filter(
+        (candidate) => !analysis.confirmedIds.has(candidate.id) && !abstainedIds.has(candidate.id),
+      )
       .map((candidate) => candidate.id);
 
     return {
-      selectedTsconfigs,
-      confirmedIds,
+      selectedTsconfigs: analysis.selectedTsconfigs,
+      confirmedIds: analysis.confirmedIds,
       unresolvedIds,
+      abstentions,
+      projectResults: analysis.projectResults,
+      phaseTimings: {
+        project_setup: projectSetupMs,
+        diagnostics: analysis.diagnosticsMs,
+        symbol_scan: analysis.symbolScanMs,
+      },
       warnings,
     };
   } finally {

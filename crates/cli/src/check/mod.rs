@@ -332,6 +332,8 @@ pub struct CheckOptions<'a> {
     pub include_dupes: bool,
     /// Run the experimental TypeScript semantic refinement for class members.
     pub type_aware: bool,
+    /// Explicit TypeScript project configs used by the semantic refinement.
+    pub type_aware_projects: &'a [std::path::PathBuf],
     pub trace_opts: &'a TraceOptions,
     pub explain: bool,
     pub top: Option<usize>,
@@ -790,6 +792,19 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
     let config = prepare_check_config(opts)?;
+    if opts.type_aware
+        && config
+            .regression
+            .as_ref()
+            .and_then(|regression| regression.baseline.as_ref())
+            .is_some()
+    {
+        return Err(emit_error(
+            "--type-aware cannot use a configured regression baseline because baselines do not yet record the analysis mode",
+            2,
+            opts.output,
+        ));
+    }
 
     let ws_roots = filtering::resolve_workspace_scope(
         opts.root,
@@ -803,7 +818,6 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         .and_then(|git_ref| filtering::get_changed_files(opts.root, git_ref));
 
     let mut data = run_check_analysis(opts, &config)?;
-    let elapsed = start.elapsed();
 
     if let Err(code) = handle_trace_side_effects(
         opts,
@@ -835,22 +849,22 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     apply_rules_and_filters(opts, &config, &mut data.results);
 
     let type_aware = if opts.type_aware {
-        Some(
-            crate::type_aware::refine_unused_class_members(
-                &config.root,
-                &mut data.results.unused_class_members,
-            )
-            .map_err(|error| {
-                emit_error(
-                    &format!("Type-aware analysis failed: {error}"),
-                    2,
-                    opts.output,
-                )
-            })?,
+        crate::type_aware::refine_unused_class_members(
+            &config.root,
+            &mut data.results.unused_class_members,
+            opts.type_aware_projects,
         )
+        .map_err(|error| {
+            emit_error(
+                &format!("Type-aware analysis failed: {error}"),
+                2,
+                opts.output,
+            )
+        })?
     } else {
         None
     };
+    let elapsed = start.elapsed();
 
     let baseline_matched = handle_baseline(
         &mut data.results,
@@ -970,12 +984,14 @@ fn print_type_aware_summary(result: &CheckResult) {
 fn format_type_aware_summary(meta: &fallow_types::envelope::TypeAwareMeta) -> String {
     let candidates = count_noun(meta.candidate_count, "candidate", "candidates");
     let confirmed = count_noun(meta.confirmed_used_count, "confirmed use", "confirmed uses");
-    let retained = count_noun(
-        meta.unresolved_count,
-        "retained finding",
-        "retained findings",
-    );
-    format!("Type-aware refinement: {candidates}, {confirmed}, {retained}")
+    let retained_count = meta.unresolved_count + meta.abstained_count;
+    let retained = count_noun(retained_count, "retained finding", "retained findings");
+    let abstained = count_noun(meta.abstained_count, "abstention", "abstentions");
+    if meta.abstained_count == 0 {
+        format!("Type-aware refinement: {candidates}, {confirmed}, {retained}")
+    } else {
+        format!("Type-aware refinement: {candidates}, {confirmed}, {retained} ({abstained})")
+    }
 }
 
 fn count_noun(count: usize, singular: &str, plural: &str) -> String {
@@ -1249,6 +1265,17 @@ mod tests {
         assert_eq!(
             format_type_aware_summary(&retained),
             "Type-aware refinement: 2 candidates, 1 confirmed use, 1 retained finding"
+        );
+
+        let abstained = fallow_types::envelope::TypeAwareMeta {
+            candidate_count: 2,
+            unresolved_count: 1,
+            abstained_count: 1,
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
+        assert_eq!(
+            format_type_aware_summary(&abstained),
+            "Type-aware refinement: 2 candidates, 0 confirmed uses, 2 retained findings (1 abstention)"
         );
     }
 

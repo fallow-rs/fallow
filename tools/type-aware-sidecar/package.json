@@ -1,7 +1,17 @@
 {
-  "name": "@fallow/type-aware-sidecar",
-  "version": "0.0.0",
-  "private": true,
+  "name": "fallow-type-aware",
+  "version": "0.1.0",
+  "description": "Optional TypeScript-Go semantic refinement sidecar for Fallow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fallow-rs/fallow.git",
+    "directory": "tools/type-aware-sidecar"
+  },
+  "files": [
+    "fallow-type-aware.mjs",
+    "src"
+  ],
   "type": "module",
   "bin": {
     "fallow-type-aware": "./fallow-type-aware.mjs"
@@ -14,5 +24,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

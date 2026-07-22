@@ -124,6 +124,11 @@ fn check_output_meta(
 }
 
 fn add_type_aware_explanations(meta: &mut fallow_types::envelope::Meta) {
+    add_type_aware_field_definitions(meta);
+    add_type_aware_metric_definitions(meta);
+}
+
+fn add_type_aware_field_definitions(meta: &mut fallow_types::envelope::Meta) {
     meta.field_definitions.extend([
         (
             "type_aware.protocol_version".to_owned(),
@@ -132,6 +137,10 @@ fn add_type_aware_explanations(meta: &mut fallow_types::envelope::Meta) {
         (
             "type_aware.backend".to_owned(),
             "Semantic backend capability identifier.".to_owned(),
+        ),
+        (
+            "type_aware.sidecar_version".to_owned(),
+            "Version of the sidecar package, independent of the protocol and TypeScript backend versions.".to_owned(),
         ),
         (
             "type_aware.backend_version".to_owned(),
@@ -145,7 +154,22 @@ fn add_type_aware_explanations(meta: &mut fallow_types::envelope::Meta) {
             "type_aware.warnings".to_owned(),
             "Bounded semantic warnings. Affected candidates remain findings.".to_owned(),
         ),
+        (
+            "type_aware.projects".to_owned(),
+            "Per-project status, selection source, diagnostic count, and candidate outcomes.".to_owned(),
+        ),
+        (
+            "type_aware.phase_timings_ms".to_owned(),
+            "Semantic project setup, diagnostics, and batched symbol-scan durations in milliseconds.".to_owned(),
+        ),
+        (
+            "type_aware.abstention_reasons".to_owned(),
+            "Stable reason-code counts for candidates retained without semantic scanning.".to_owned(),
+        ),
     ]);
+}
+
+fn add_type_aware_metric_definitions(meta: &mut fallow_types::envelope::Meta) {
     meta.metrics.extend([
         (
             "type_aware.protocol_version".to_owned(),
@@ -184,6 +208,15 @@ fn add_type_aware_explanations(meta: &mut fallow_types::envelope::Meta) {
             ),
         ),
         (
+            "type_aware.abstained_count".to_owned(),
+            type_aware_metric(
+                "Type-aware Abstained Count",
+                "Candidates retained without semantic scanning because project selection or compiler state was unsafe.",
+                "[0, candidate_count]",
+                "zero means every candidate was assigned to a structurally safe TypeScript project",
+            ),
+        ),
+        (
             "type_aware.warning_count".to_owned(),
             type_aware_metric(
                 "Type-aware Warning Count",
@@ -199,6 +232,132 @@ fn add_type_aware_explanations(meta: &mut fallow_types::envelope::Meta) {
                 "Semantic pass duration reported by the sidecar in milliseconds.",
                 "[0, infinity)",
                 "lower is faster",
+            ),
+        ),
+    ]);
+    add_type_aware_phase_metric_definitions(meta);
+    add_type_aware_project_metric_definitions(meta);
+    add_type_aware_abstention_metric_definitions(meta);
+}
+
+fn add_type_aware_phase_metric_definitions(meta: &mut fallow_types::envelope::Meta) {
+    meta.metrics.extend([
+        (
+            "type_aware.phase_timings_ms.project_setup".to_owned(),
+            type_aware_metric(
+                "Type-aware Project Setup Time",
+                "Milliseconds spent constructing TypeScript projects and selecting snapshots.",
+                "[0, elapsed_ms]",
+                "lower is faster",
+            ),
+        ),
+        (
+            "type_aware.phase_timings_ms.diagnostics".to_owned(),
+            type_aware_metric(
+                "Type-aware Diagnostics Time",
+                "Milliseconds spent collecting structural diagnostics before scanning.",
+                "[0, elapsed_ms]",
+                "lower is faster",
+            ),
+        ),
+        (
+            "type_aware.phase_timings_ms.symbol_scan".to_owned(),
+            type_aware_metric(
+                "Type-aware Symbol Scan Time",
+                "Milliseconds spent on batched symbol lookup and exact declaration matching.",
+                "[0, elapsed_ms]",
+                "lower is faster",
+            ),
+        ),
+    ]);
+}
+
+fn add_type_aware_project_metric_definitions(meta: &mut fallow_types::envelope::Meta) {
+    meta.metrics.extend([
+        (
+            "type_aware.projects[].candidate_count".to_owned(),
+            type_aware_metric(
+                "Project Candidate Count",
+                "Candidates assigned to one selected TypeScript project.",
+                "[0, type_aware.candidate_count]",
+                "context only",
+            ),
+        ),
+        (
+            "type_aware.projects[].confirmed_used_count".to_owned(),
+            type_aware_metric(
+                "Project Confirmed Used Count",
+                "Project candidates confirmed as used and removed from findings.",
+                "[0, project candidate_count]",
+                "higher means the project supplied more exact semantic proof",
+            ),
+        ),
+        (
+            "type_aware.projects[].unresolved_count".to_owned(),
+            type_aware_metric(
+                "Project Unresolved Count",
+                "Project candidates scanned without an exact confirmed use.",
+                "[0, project candidate_count]",
+                "these candidates remain findings",
+            ),
+        ),
+        (
+            "type_aware.projects[].abstained_count".to_owned(),
+            type_aware_metric(
+                "Project Abstained Count",
+                "Project candidates retained without scanning because the project was unsafe.",
+                "[0, project candidate_count]",
+                "zero means this project was refined",
+            ),
+        ),
+        (
+            "type_aware.projects[].blocking_diagnostic_count".to_owned(),
+            type_aware_metric(
+                "Project Blocking Diagnostic Count",
+                "Structural diagnostics that prevented exact semantic scanning for the project.",
+                "[0, infinity)",
+                "nonzero means the project abstained",
+            ),
+        ),
+        (
+            "type_aware.projects[].source_file_count".to_owned(),
+            type_aware_metric(
+                "Project Source File Count",
+                "Source files loaded into the TypeScript program for this project.",
+                "[1, infinity)",
+                "context for project cost and scope",
+            ),
+        ),
+    ]);
+}
+
+fn add_type_aware_abstention_metric_definitions(meta: &mut fallow_types::envelope::Meta) {
+    meta.metrics.extend([
+        (
+            "type_aware.abstention_reasons.no_project".to_owned(),
+            type_aware_metric(
+                "No-project Abstention Count",
+                "Candidates not contained by a selected TypeScript project.",
+                "[0, type_aware.abstained_count]",
+                "lower means project selection covered more candidates",
+            ),
+        ),
+        (
+            "type_aware.abstention_reasons.ambiguous_project".to_owned(),
+            type_aware_metric(
+                "Ambiguous-project Abstention Count",
+                "Candidates contained by multiple explicit TypeScript projects.",
+                "[0, type_aware.abstained_count]",
+                "zero means explicit project selection was unambiguous",
+            ),
+        ),
+        (
+            "type_aware.abstention_reasons.blocking_diagnostics".to_owned(),
+            type_aware_metric(
+                "Blocking-diagnostics Abstention Count",
+                "Candidates retained because structural TypeScript diagnostics blocked scanning.",
+                "[0, type_aware.abstained_count]",
+                "lower means more candidate projects were structurally safe",
             ),
         ),
     ]);
@@ -1794,16 +1953,21 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let type_aware = fallow_types::envelope::TypeAwareMeta {
-            protocol_version: 1,
+            protocol_version: 2,
+            sidecar_version: "0.1.0".to_string(),
             backend: "typescript-go".to_string(),
             backend_version: "7.0.2".to_string(),
             selected_tsconfigs: vec!["tsconfig.json".to_string()],
             candidate_count: 2,
             confirmed_used_count: 1,
             unresolved_count: 1,
+            abstained_count: 0,
+            abstention_reasons: fallow_types::envelope::TypeAwareAbstentionCounts::default(),
+            projects: Vec::new(),
             warning_count: 1,
             warnings: vec!["unresolved finding kept".to_owned()],
             elapsed_ms: 12,
+            phase_timings_ms: fallow_types::envelope::TypeAwarePhaseTimings::default(),
         };
         let output = api_check_json_document_with_config_fixable_meta_and_extras(
             &results,
@@ -1833,8 +1997,24 @@ mod tests {
                 .contains_key("type_aware.protocol_version")
         );
         assert!(meta.metrics.contains_key("type_aware.protocol_version"));
-        assert!(meta.metrics.contains_key("type_aware.candidate_count"));
-        assert!(meta.metrics.contains_key("type_aware.elapsed_ms"));
+        for metric in [
+            "type_aware.candidate_count",
+            "type_aware.elapsed_ms",
+            "type_aware.phase_timings_ms.project_setup",
+            "type_aware.phase_timings_ms.diagnostics",
+            "type_aware.phase_timings_ms.symbol_scan",
+            "type_aware.projects[].candidate_count",
+            "type_aware.projects[].confirmed_used_count",
+            "type_aware.projects[].unresolved_count",
+            "type_aware.projects[].abstained_count",
+            "type_aware.projects[].blocking_diagnostic_count",
+            "type_aware.projects[].source_file_count",
+            "type_aware.abstention_reasons.no_project",
+            "type_aware.abstention_reasons.ambiguous_project",
+            "type_aware.abstention_reasons.blocking_diagnostics",
+        ] {
+            assert!(meta.metrics.contains_key(metric), "missing metric {metric}");
+        }
     }
 
     #[test]

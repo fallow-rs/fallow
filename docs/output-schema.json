@@ -18765,6 +18765,10 @@
           "type": "integer",
           "description": "Version of Fallow's backend-neutral sidecar protocol."
         },
+        "sidecar_version": {
+          "type": "string",
+          "description": "Version of the sidecar package implementing the protocol."
+        },
         "backend": {
           "type": "string",
           "description": "Semantic backend capability identifier."
@@ -18792,6 +18796,21 @@
           "type": "integer",
           "description": "Number of candidates retained because semantic use was unresolved."
         },
+        "abstained_count": {
+          "type": "integer",
+          "description": "Number of candidates retained because semantic analysis abstained."
+        },
+        "abstention_reasons": {
+          "description": "Stable abstention reason counts for automation and diagnostics.",
+          "$ref": "#/definitions/TypeAwareAbstentionCounts"
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TypeAwareProjectMeta"
+          },
+          "description": "Per-project semantic refinement status and evidence."
+        },
         "warning_count": {
           "type": "integer",
           "description": "Number of bounded warnings returned by the sidecar."
@@ -18806,21 +18825,183 @@
         "elapsed_ms": {
           "type": "integer",
           "description": "Semantic pass duration as reported by the sidecar."
+        },
+        "phase_timings_ms": {
+          "description": "Bounded semantic phase timings reported by the sidecar.",
+          "$ref": "#/definitions/TypeAwarePhaseTimings"
         }
       },
       "required": [
         "protocol_version",
+        "sidecar_version",
         "backend",
         "backend_version",
         "selected_tsconfigs",
         "candidate_count",
         "confirmed_used_count",
         "unresolved_count",
+        "abstained_count",
+        "abstention_reasons",
+        "projects",
         "warning_count",
         "warnings",
-        "elapsed_ms"
+        "elapsed_ms",
+        "phase_timings_ms"
       ],
       "description": "Bounded provenance emitted when the experimental type-aware pass runs."
+    },
+    "TypeAwareProjectMeta": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "string",
+          "description": "Project config relative to the analysis root, or `<inferred>`."
+        },
+        "source": {
+          "description": "How the project was selected: `auto` or `explicit`.",
+          "$ref": "#/definitions/TypeAwareProjectSource"
+        },
+        "status": {
+          "description": "Project result: `refined` or `abstained`.",
+          "$ref": "#/definitions/TypeAwareProjectStatus"
+        },
+        "candidate_count": {
+          "type": "integer",
+          "description": "Candidates assigned to this project."
+        },
+        "confirmed_used_count": {
+          "type": "integer",
+          "description": "Candidates confirmed as used and removed."
+        },
+        "unresolved_count": {
+          "type": "integer",
+          "description": "Candidates scanned but not confirmed, and therefore retained."
+        },
+        "abstained_count": {
+          "type": "integer",
+          "description": "Candidates retained without scanning because the project was unsafe."
+        },
+        "blocking_diagnostic_count": {
+          "type": "integer",
+          "description": "Config, program, syntactic, and bind diagnostics that block scanning."
+        },
+        "source_file_count": {
+          "type": "integer",
+          "description": "Source files loaded into this TypeScript program."
+        },
+        "abstain_reason": {
+          "description": "Stable reason code when `status` is `abstained`.",
+          "$ref": "#/definitions/TypeAwareAbstentionReason"
+        }
+      },
+      "required": [
+        "config",
+        "source",
+        "status",
+        "candidate_count",
+        "confirmed_used_count",
+        "unresolved_count",
+        "abstained_count",
+        "blocking_diagnostic_count",
+        "source_file_count"
+      ],
+      "description": "Bounded provenance for one TypeScript project handled by the sidecar."
+    },
+    "TypeAwarePhaseTimings": {
+      "type": "object",
+      "properties": {
+        "project_setup": {
+          "type": "integer",
+          "description": "TypeScript API construction and project snapshot selection."
+        },
+        "diagnostics": {
+          "type": "integer",
+          "description": "TypeScript diagnostics collected before any candidate refinement."
+        },
+        "symbol_scan": {
+          "type": "integer",
+          "description": "Batched symbol lookup and exact declaration matching."
+        }
+      },
+      "required": [
+        "project_setup",
+        "diagnostics",
+        "symbol_scan"
+      ],
+      "description": "Semantic sidecar timings, separated from Fallow's syntactic pipeline."
+    },
+    "TypeAwareAbstentionCounts": {
+      "type": "object",
+      "properties": {
+        "no_project": {
+          "type": "integer",
+          "description": "Candidates not contained by a selected TypeScript project."
+        },
+        "ambiguous_project": {
+          "type": "integer",
+          "description": "Candidates contained by more than one explicit TypeScript project."
+        },
+        "blocking_diagnostics": {
+          "type": "integer",
+          "description": "Candidates retained because structural diagnostics block scanning."
+        }
+      },
+      "required": [
+        "no_project",
+        "ambiguous_project",
+        "blocking_diagnostics"
+      ],
+      "description": "Closed abstention reason counts for stable machine consumption."
+    },
+    "TypeAwareProjectSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "auto",
+          "description": "Fallow selected the nearest discovered project automatically."
+        },
+        {
+          "type": "string",
+          "const": "explicit",
+          "description": "The project was supplied with `--type-aware-project`."
+        }
+      ],
+      "description": "How a TypeScript project was selected for semantic refinement."
+    },
+    "TypeAwareProjectStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "refined",
+          "description": "The project was structurally safe and its candidates were scanned."
+        },
+        {
+          "type": "string",
+          "const": "abstained",
+          "description": "Structural diagnostics prevented candidate scanning."
+        }
+      ],
+      "description": "Outcome of semantic refinement for one TypeScript project."
+    },
+    "TypeAwareAbstentionReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "no-project",
+          "description": "No selected TypeScript project contains the candidate file."
+        },
+        {
+          "type": "string",
+          "const": "ambiguous-project",
+          "description": "Multiple explicit TypeScript projects contain the candidate file."
+        },
+        {
+          "type": "string",
+          "const": "blocking-diagnostics",
+          "description": "Structural TypeScript diagnostics make exact matching unsafe."
+        }
+      ],
+      "description": "Closed set of reasons for retaining a candidate without semantic scanning."
     }
   }
 }

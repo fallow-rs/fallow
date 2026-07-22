@@ -426,10 +426,13 @@ jobs:
         run: node scripts/check-comment-quality.mjs --all
       - name: Script tests
         run: node --test scripts/*.test.mjs
-      - name: Install type-aware proof dependencies
+      - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
-      - name: Type-aware proof tests
+      - name: Type-aware sidecar tests
         run: node --test tools/type-aware-sidecar/test/*.test.mjs
+      - name: Type-aware sidecar package check
+        working-directory: tools/type-aware-sidecar
+        run: npm pack --dry-run --json
 
   npm-package:
     name: npm Package

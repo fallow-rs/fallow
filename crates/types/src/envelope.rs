@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Schema version for this output format (independent of tool version). Bump
 /// policy: ADDITIVE changes (new optional top-level fields, new optional struct
@@ -324,6 +324,8 @@ pub struct Meta {
 pub struct TypeAwareMeta {
     /// Version of Fallow's backend-neutral sidecar protocol.
     pub protocol_version: u32,
+    /// Version of the sidecar package implementing the protocol.
+    pub sidecar_version: String,
     /// Semantic backend capability identifier.
     pub backend: String,
     /// Backend compiler or engine version.
@@ -336,12 +338,110 @@ pub struct TypeAwareMeta {
     pub confirmed_used_count: usize,
     /// Number of candidates retained because semantic use was unresolved.
     pub unresolved_count: usize,
+    /// Number of candidates retained because semantic analysis abstained.
+    pub abstained_count: usize,
+    /// Stable abstention reason counts for automation and diagnostics.
+    pub abstention_reasons: TypeAwareAbstentionCounts,
+    /// Per-project semantic refinement status and evidence.
+    pub projects: Vec<TypeAwareProjectMeta>,
     /// Number of bounded warnings returned by the sidecar.
     pub warning_count: usize,
     /// Bounded semantic warnings. Findings mentioned here were retained.
     pub warnings: Vec<String>,
     /// Semantic pass duration as reported by the sidecar.
     pub elapsed_ms: u64,
+    /// Bounded semantic phase timings reported by the sidecar.
+    pub phase_timings_ms: TypeAwarePhaseTimings,
+}
+
+/// Closed set of reasons for retaining a candidate without semantic scanning.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareAbstentionReason {
+    /// No selected TypeScript project contains the candidate file.
+    #[default]
+    NoProject,
+    /// Multiple explicit TypeScript projects contain the candidate file.
+    AmbiguousProject,
+    /// Structural TypeScript diagnostics make exact matching unsafe.
+    BlockingDiagnostics,
+}
+
+/// Closed abstention reason counts for stable machine consumption.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwareAbstentionCounts {
+    /// Candidates not contained by a selected TypeScript project.
+    pub no_project: usize,
+    /// Candidates contained by more than one explicit TypeScript project.
+    pub ambiguous_project: usize,
+    /// Candidates retained because structural diagnostics block scanning.
+    pub blocking_diagnostics: usize,
+}
+
+/// How a TypeScript project was selected for semantic refinement.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareProjectSource {
+    /// Fallow selected the nearest discovered project automatically.
+    #[default]
+    Auto,
+    /// The project was supplied with `--type-aware-project`.
+    Explicit,
+}
+
+/// Outcome of semantic refinement for one TypeScript project.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareProjectStatus {
+    /// The project was structurally safe and its candidates were scanned.
+    #[default]
+    Refined,
+    /// Structural diagnostics prevented candidate scanning.
+    Abstained,
+}
+
+/// Semantic sidecar timings, separated from Fallow's syntactic pipeline.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwarePhaseTimings {
+    /// TypeScript API construction and project snapshot selection.
+    pub project_setup: u64,
+    /// TypeScript diagnostics collected before any candidate refinement.
+    pub diagnostics: u64,
+    /// Batched symbol lookup and exact declaration matching.
+    pub symbol_scan: u64,
+}
+
+/// Bounded provenance for one TypeScript project handled by the sidecar.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwareProjectMeta {
+    /// Project config relative to the analysis root, or `<inferred>`.
+    pub config: String,
+    /// How the project was selected: `auto` or `explicit`.
+    pub source: TypeAwareProjectSource,
+    /// Project result: `refined` or `abstained`.
+    pub status: TypeAwareProjectStatus,
+    /// Candidates assigned to this project.
+    pub candidate_count: usize,
+    /// Candidates confirmed as used and removed.
+    pub confirmed_used_count: usize,
+    /// Candidates scanned but not confirmed, and therefore retained.
+    pub unresolved_count: usize,
+    /// Candidates retained without scanning because the project was unsafe.
+    pub abstained_count: usize,
+    /// Config, program, syntactic, and bind diagnostics that block scanning.
+    pub blocking_diagnostic_count: usize,
+    /// Source files loaded into this TypeScript program.
+    pub source_file_count: usize,
+    /// Stable reason code when `status` is `abstained`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "TypeAwareAbstentionReason"))]
+    pub abstain_reason: Option<TypeAwareAbstentionReason>,
 }
 
 /// Privacy-safe local run metadata emitted for JSON consumers.

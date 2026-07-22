@@ -127,7 +127,7 @@ const CLI_REFERENCE_FLAG_SECTIONS = {
     command: "dead-code",
     excludeIssueFilters: true,
     // This PoC depends on an unpublished sidecar, so it is not part of the public agent contract.
-    excludedFlags: ["--type-aware"],
+    excludedFlags: ["--type-aware", "--type-aware-project"],
     globalRefs: [
       "--format",
       "--quiet",

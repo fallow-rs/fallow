@@ -139,6 +139,18 @@ export type AuditVerdict = ("pass" | "warn" | "fail")
 export type ElapsedMs = number
 export type AuditGate = ("new-only" | "all")
 /**
+ * How a TypeScript project was selected for semantic refinement.
+ */
+export type TypeAwareProjectSource = ("auto" | "explicit")
+/**
+ * Outcome of semantic refinement for one TypeScript project.
+ */
+export type TypeAwareProjectStatus = ("refined" | "abstained")
+/**
+ * Closed set of reasons for retaining a candidate without semantic scanning.
+ */
+export type TypeAwareAbstentionReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics")
+/**
  * A suggested action attached to a finding in the JSON output. Each finding
  * carries an `actions` array; consumers (agents, IDE clients, CI bots) can
  * dispatch on the `type` discriminant to choose the right remediation.
@@ -1021,6 +1033,10 @@ export interface TypeAwareMeta {
  */
 protocol_version: number
 /**
+ * Version of the sidecar package implementing the protocol.
+ */
+sidecar_version: string
+/**
  * Semantic backend capability identifier.
  */
 backend: string
@@ -1045,6 +1061,15 @@ confirmed_used_count: number
  */
 unresolved_count: number
 /**
+ * Number of candidates retained because semantic analysis abstained.
+ */
+abstained_count: number
+abstention_reasons: TypeAwareAbstentionCounts
+/**
+ * Per-project semantic refinement status and evidence.
+ */
+projects: TypeAwareProjectMeta[]
+/**
  * Number of bounded warnings returned by the sidecar.
  */
 warning_count: number
@@ -1056,6 +1081,77 @@ warnings: string[]
  * Semantic pass duration as reported by the sidecar.
  */
 elapsed_ms: number
+phase_timings_ms: TypeAwarePhaseTimings
+}
+/**
+ * Closed abstention reason counts for stable machine consumption.
+ */
+export interface TypeAwareAbstentionCounts {
+/**
+ * Candidates not contained by a selected TypeScript project.
+ */
+no_project: number
+/**
+ * Candidates contained by more than one explicit TypeScript project.
+ */
+ambiguous_project: number
+/**
+ * Candidates retained because structural diagnostics block scanning.
+ */
+blocking_diagnostics: number
+}
+/**
+ * Bounded provenance for one TypeScript project handled by the sidecar.
+ */
+export interface TypeAwareProjectMeta {
+/**
+ * Project config relative to the analysis root, or `<inferred>`.
+ */
+config: string
+source: TypeAwareProjectSource
+status: TypeAwareProjectStatus
+/**
+ * Candidates assigned to this project.
+ */
+candidate_count: number
+/**
+ * Candidates confirmed as used and removed.
+ */
+confirmed_used_count: number
+/**
+ * Candidates scanned but not confirmed, and therefore retained.
+ */
+unresolved_count: number
+/**
+ * Candidates retained without scanning because the project was unsafe.
+ */
+abstained_count: number
+/**
+ * Config, program, syntactic, and bind diagnostics that block scanning.
+ */
+blocking_diagnostic_count: number
+/**
+ * Source files loaded into this TypeScript program.
+ */
+source_file_count: number
+abstain_reason?: TypeAwareAbstentionReason
+}
+/**
+ * Semantic sidecar timings, separated from Fallow's syntactic pipeline.
+ */
+export interface TypeAwarePhaseTimings {
+/**
+ * TypeScript API construction and project snapshot selection.
+ */
+project_setup: number
+/**
+ * TypeScript diagnostics collected before any candidate refinement.
+ */
+diagnostics: number
+/**
+ * Batched symbol lookup and exact declaration matching.
+ */
+symbol_scan: number
 }
 /**
  * Single-metric definition inside [`Meta::metrics`].

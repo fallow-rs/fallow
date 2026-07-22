@@ -556,6 +556,12 @@
           ]
         },
         {
+          "name": "--type-aware-project",
+          "type": "string",
+          "required": false,
+          "description": "Experimental: TypeScript project config to use for type-aware analysis (repeatable)"
+        },
+        {
           "name": "--unused-store-members",
           "type": "bool",
           "required": false,

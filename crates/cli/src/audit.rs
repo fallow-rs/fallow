@@ -1942,6 +1942,7 @@ fn run_audit_check<'a>(
         group_by: opts.group_by,
         include_dupes: false,
         type_aware: false,
+        type_aware_projects: &[],
         trace_opts: &trace_opts,
         explain: opts.explain,
         top: None,
