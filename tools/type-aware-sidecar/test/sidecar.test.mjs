@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -9,6 +17,7 @@ import { fileURLToPath } from "node:url";
 
 import { createResponse } from "../src/protocol.mjs";
 import { readAll } from "../src/cli.mjs";
+import { canonicalFileIdentity } from "../src/typescript-go.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const executable = path.join(sidecarRoot, "fallow-type-aware.mjs");
@@ -60,6 +69,106 @@ const runSidecar = (body) => {
   });
   return JSON.parse(stdout);
 };
+
+test("uses physical file identity across alternate spellings and symlinks", () => {
+  const root = makeProject();
+  try {
+    write(root, "src/Service.ts", "export class Service {}\n");
+    symlinkSync(path.join("src", "Service.ts"), path.join(root, "service-link.ts"));
+
+    const direct = path.join(root, "src", "Service.ts");
+    const alternate = path.join(root, "src", "..", "src", ".", "Service.ts");
+    const symlink = path.join(root, "service-link.ts");
+
+    assert.equal(canonicalFileIdentity(alternate), canonicalFileIdentity(direct));
+    assert.equal(canonicalFileIdentity(symlink), canonicalFileIdentity(direct));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps case-different physical files distinct when the filesystem supports them", (t) => {
+  const root = makeProject();
+  try {
+    write(root, "src/Service.ts", "export class UpperService {}\n");
+    write(root, "src/service.ts", "export class LowerService {}\n");
+
+    const upper = path.join(root, "src", "Service.ts");
+    const lower = path.join(root, "src", "service.ts");
+    const upperStat = statSync(upper);
+    const lowerStat = statSync(lower);
+    if (upperStat.dev === lowerStat.dev && upperStat.ino === lowerStat.ino) {
+      t.skip("filesystem is case-insensitive");
+      return;
+    }
+
+    assert.notEqual(canonicalFileIdentity(upper), canonicalFileIdentity(lower));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps unresolved case-different paths distinct", () => {
+  const root = makeProject();
+  try {
+    const upper = path.join(root, "Missing.ts");
+    const lower = path.join(root, "missing.ts");
+
+    assert.notEqual(canonicalFileIdentity(upper), canonicalFileIdentity(lower));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("confirms only the used case-different candidate on case-sensitive filesystems", (t) => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    write(
+      root,
+      "src/Service.ts",
+      `export class Service {
+  run(): void {}
+}
+new Service().run();
+`,
+    );
+    write(
+      root,
+      "src/service.ts",
+      `export class Service {
+  run(): void {}
+}
+`,
+    );
+
+    const upper = path.join(root, "src", "Service.ts");
+    const lower = path.join(root, "src", "service.ts");
+    const upperStat = statSync(upper);
+    const lowerStat = statSync(lower);
+    if (upperStat.dev === lowerStat.dev && upperStat.ino === lowerStat.ino) {
+      t.skip("filesystem is case-insensitive");
+      return;
+    }
+
+    const response = runSidecar(
+      request(root, [
+        candidate({ id: 0, file: "src/Service.ts", owner: "Service", member: "run" }),
+        candidate({ id: 1, file: "src/service.ts", owner: "Service", member: "run" }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, [1]);
+    assert.deepEqual(response.abstentions, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("confirms a nested generic class-member use", () => {
   const root = makeProject();

@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 
 import { API } from "typescript/unstable/sync";
@@ -15,11 +16,25 @@ import {
 const MAX_WARNINGS = 20;
 const INFERRED_PROJECT = "<inferred>";
 
-const normalizeFileName = (fileName) => {
-  const normalized = path.normalize(path.resolve(fileName));
-  return process.platform === "win32" || process.platform === "darwin"
-    ? normalized.toLowerCase()
-    : normalized;
+export const canonicalFileIdentity = (fileName) => {
+  const absolutePath = path.normalize(path.resolve(fileName));
+  try {
+    return path.normalize(realpathSync.native(absolutePath));
+  } catch {
+    return absolutePath;
+  }
+};
+
+const sourceFileIdentities = new WeakMap();
+
+const sourceFileIdentity = (sourceFile) => {
+  const cached = sourceFileIdentities.get(sourceFile);
+  if (cached) {
+    return cached;
+  }
+  const identity = canonicalFileIdentity(sourceFile.fileName);
+  sourceFileIdentities.set(sourceFile, identity);
+  return identity;
 };
 
 const relativeConfigPath = (root, configFileName) => {
@@ -74,8 +89,7 @@ const declarationOwnerMatches = (candidate, declaration) => {
 };
 
 const declarationPathMatches = (candidate, declaration) =>
-  normalizeFileName(declaration.getSourceFile().fileName) ===
-  normalizeFileName(candidate.absolutePath);
+  sourceFileIdentity(declaration.getSourceFile()) === candidate.fileIdentity;
 
 const declarationPosition = (declaration) => {
   const sourceFile = declaration.getSourceFile();
@@ -330,10 +344,14 @@ export const analyzeClassMemberUses = ({ root, projects, candidates }) => {
   }
 
   const setupStartedAt = performance.now();
+  const candidatesWithIdentity = candidates.map((candidate) => ({
+    ...candidate,
+    fileIdentity: canonicalFileIdentity(candidate.absolutePath),
+  }));
   const api = new API({ cwd: root });
   try {
     const snapshot = api.updateSnapshot({
-      openFiles: candidates.map((candidate) => candidate.absolutePath),
+      openFiles: candidatesWithIdentity.map((candidate) => candidate.absolutePath),
       openProjects: projects.map((project) => project.absolutePath),
     });
     const warnings = [];
@@ -341,7 +359,12 @@ export const analyzeClassMemberUses = ({ root, projects, candidates }) => {
       .map((project) => snapshot.getProject(project.absolutePath))
       .filter(Boolean);
     const projectSetupMs = performance.now() - setupStartedAt;
-    const selection = selectCandidateProjects(snapshot, candidates, explicitProjects, warnings);
+    const selection = selectCandidateProjects(
+      snapshot,
+      candidatesWithIdentity,
+      explicitProjects,
+      warnings,
+    );
     const analysis = scanSelectedProjects(
       root,
       selection.candidatesByProject,
@@ -351,7 +374,7 @@ export const analyzeClassMemberUses = ({ root, projects, candidates }) => {
     const abstentions = [...selection.abstentions, ...analysis.abstentions];
     const abstainedIds = new Set(abstentions.map((abstention) => abstention.candidate_id));
 
-    const unresolvedIds = candidates
+    const unresolvedIds = candidatesWithIdentity
       .filter(
         (candidate) => !analysis.confirmedIds.has(candidate.id) && !abstainedIds.has(candidate.id),
       )

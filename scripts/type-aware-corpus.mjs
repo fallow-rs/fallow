@@ -472,6 +472,15 @@ const corpusIdentity = (projects) =>
     candidate_expectation,
   }));
 
+export const requireCompletePublicationCorpus = (manifest, discovery) => {
+  const expected = corpusIdentity(manifest.projects);
+  if (!isObject(discovery) || JSON.stringify(discovery.corpus) !== JSON.stringify(expected)) {
+    fail(
+      "publication gate requires the complete manifest corpus; rerun discover and measure without `--project`, then run evidence before summarize",
+    );
+  }
+};
+
 const discover = async (manifest, projects, options) => {
   ensureRuntimeInputs(options);
   const results = [];
@@ -651,18 +660,85 @@ const sourceLineEvidence = (project, candidate) => {
   return { path: candidate.path, line: candidate.line, excerpt };
 };
 
+export const candidateFeatureBucketFields = (
+  projectFeatureBuckets,
+  previousEntry,
+  previousSchemaVersion,
+) => {
+  const legacySuggestions =
+    previousSchemaVersion === 1 ? previousEntry?.feature_buckets : undefined;
+  return {
+    suggested_feature_buckets: [
+      ...(previousEntry?.suggested_feature_buckets ?? legacySuggestions ?? projectFeatureBuckets),
+    ],
+    adjudicated_feature_buckets:
+      previousSchemaVersion === 2 ? [...(previousEntry?.adjudicated_feature_buckets ?? [])] : [],
+  };
+};
+
+const LEDGER_REFRESH_RECOVERY =
+  "Archive the old ledger or restore the discovery that created it, then retry.";
+
+/** Validates that a ledger refresh cannot discard prior manual adjudication. */
+export const indexLedgerForRefresh = (previous, discoveredKeys) => {
+  if (previous === null) return new Map();
+  if (
+    !isObject(previous) ||
+    (previous.schema_version !== 1 && previous.schema_version !== 2) ||
+    !Array.isArray(previous.candidates)
+  ) {
+    fail(
+      `existing evidence ledger must use schema_version 1 or 2 and contain a candidates array. ${LEDGER_REFRESH_RECOVERY}`,
+    );
+  }
+
+  const previousByKey = new Map();
+  for (const entry of previous.candidates) {
+    if (!isObject(entry) || typeof entry.key !== "string" || entry.key.trim() === "") {
+      fail(
+        `every existing evidence ledger candidate must have a non-empty key. ${LEDGER_REFRESH_RECOVERY}`,
+      );
+    }
+    if (previousByKey.has(entry.key)) {
+      fail(
+        `existing evidence ledger contains duplicate candidate key ${JSON.stringify(entry.key)}. ${LEDGER_REFRESH_RECOVERY}`,
+      );
+    }
+    previousByKey.set(entry.key, entry);
+  }
+
+  for (const key of previousByKey.keys()) {
+    if (!discoveredKeys.has(key)) {
+      fail(
+        `existing evidence ledger candidate key ${JSON.stringify(key)} is missing from the current discovery. ${LEDGER_REFRESH_RECOVERY}`,
+      );
+    }
+  }
+  return previousByKey;
+};
+
 const evidence = (manifest, projects, options) => {
   const discovery = readDiscovery(options.outDir);
   const selected = new Map(projects.map((project) => [project.id, project]));
   const ledgerPath = resolve(options.outDir, "ledger.json");
   const previous = existsSync(ledgerPath) ? readJson(ledgerPath, "existing evidence ledger") : null;
-  const previousByKey = new Map((previous?.candidates ?? []).map((entry) => [entry.key, entry]));
+  const discoveredKeys = new Set(
+    (discovery.projects ?? []).flatMap((result) =>
+      (result.candidates ?? []).map((entry) => entry.key),
+    ),
+  );
+  const previousByKey = indexLedgerForRefresh(previous, discoveredKeys);
   const entries = [];
   for (const result of discovery.projects ?? []) {
     const project = selected.get(result.id);
     if (!project) continue;
     for (const candidate of result.candidates ?? []) {
       const old = previousByKey.get(candidate.key);
+      const featureBuckets = candidateFeatureBucketFields(
+        project.feature_buckets,
+        old,
+        previous?.schema_version,
+      );
       entries.push({
         key: candidate.key,
         project_id: project.id,
@@ -675,7 +751,7 @@ const evidence = (manifest, projects, options) => {
           col: candidate.col,
         },
         semantic_status: candidate.semantic_status,
-        feature_buckets: old?.feature_buckets ?? project.feature_buckets,
+        ...featureBuckets,
         truth: old?.truth ?? "pending",
         source_evidence: old?.source_evidence ?? {
           declaration: sourceLineEvidence(project, candidate),
@@ -687,7 +763,7 @@ const evidence = (manifest, projects, options) => {
   }
   entries.sort((left, right) => left.key.localeCompare(right.key));
   const ledger = {
-    schema_version: 1,
+    schema_version: 2,
     artifact_policy: "local adjudication only; never copy raw or private source into tracked files",
     corpus: discovery.corpus,
     candidates: entries,
@@ -706,6 +782,15 @@ const evidenceLocationValid = (location) =>
   typeof location.excerpt === "string" &&
   location.excerpt.trim() !== "";
 
+const featureBucketListValid = (buckets) =>
+  Array.isArray(buckets) &&
+  buckets.length > 0 &&
+  buckets.every((bucket) => typeof bucket === "string" && bucket.trim() !== "") &&
+  new Set(buckets).size === buckets.length;
+
+const optionalFeatureBucketListValid = (buckets) =>
+  buckets === undefined || featureBucketListValid(buckets);
+
 export const verifyLedgerData = (discovery, ledger) => {
   const errors = [];
   if (
@@ -715,7 +800,12 @@ export const verifyLedgerData = (discovery, ledger) => {
   ) {
     return ["discovery artifact is invalid"];
   }
-  if (!isObject(ledger) || ledger.schema_version !== 1 || !Array.isArray(ledger.candidates)) {
+  if (isObject(ledger) && ledger.schema_version === 1 && Array.isArray(ledger.candidates)) {
+    return [
+      "ledger schema_version 1 is outdated; run `npm run type-aware:corpus -- evidence` to migrate it",
+    ];
+  }
+  if (!isObject(ledger) || ledger.schema_version !== 2 || !Array.isArray(ledger.candidates)) {
     return ["ledger artifact is invalid"];
   }
   const expected = new Map();
@@ -791,13 +881,10 @@ export const verifyLedgerData = (discovery, ledger) => {
     ) {
       errors.push(`${key}: unused or indeterminate truth requires adjudication notes`);
     }
-    if (
-      !Array.isArray(entry.feature_buckets) ||
-      entry.feature_buckets.length === 0 ||
-      entry.feature_buckets.some((bucket) => typeof bucket !== "string" || bucket.trim() === "")
-    ) {
-      errors.push(`${key}: at least one feature bucket is required`);
-    }
+    if (!optionalFeatureBucketListValid(entry.suggested_feature_buckets))
+      errors.push(`${key}: suggested feature buckets must be non-empty and unique when present`);
+    if (!featureBucketListValid(entry.adjudicated_feature_buckets))
+      errors.push(`${key}: at least one explicitly adjudicated feature bucket is required`);
   }
   for (const key of actual.keys()) {
     if (!expected.has(key)) errors.push(`${key}: stale ledger entry is not present in discovery`);
@@ -805,8 +892,7 @@ export const verifyLedgerData = (discovery, ledger) => {
   return errors.toSorted();
 };
 
-const verifyLedger = (outDir) => {
-  const discovery = readDiscovery(outDir);
+const verifyLedger = (outDir, discovery = readDiscovery(outDir)) => {
   const ledger = readJson(resolve(outDir, "ledger.json"), "evidence ledger");
   if (JSON.stringify(discovery.corpus) !== JSON.stringify(ledger.corpus)) {
     fail("ledger corpus identity does not match discovery; refresh evidence");
@@ -870,6 +956,38 @@ const aggregatePhaseTimings = (runs) => {
 const safeRatio = (numerator, denominator) =>
   denominator === 0 ? null : Math.round((numerator / denominator) * 1_000_000) / 1_000_000;
 
+export const summarizeAdjudicatedFeatureBuckets = (entries) => {
+  const candidates = entries
+    .filter(
+      ({ semantic_status: semanticStatus, truth }) =>
+        semanticStatus === "confirmed-used" && truth === "used",
+    )
+    .map((entry) => ({
+      key: entry.key,
+      buckets: new Set(entry.adjudicated_feature_buckets ?? []),
+    }));
+  const confirmedFeatureBuckets = new Set(candidates.flatMap(({ buckets }) => [...buckets]));
+  let multipleFeatureBuckets = false;
+  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+    const left = candidates[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
+      const right = candidates[rightIndex];
+      if (left.key === right.key) continue;
+      if (
+        [...left.buckets].some((bucket) => [...right.buckets].some((other) => other !== bucket))
+      ) {
+        multipleFeatureBuckets = true;
+        break;
+      }
+    }
+    if (multipleFeatureBuckets) break;
+  }
+  return {
+    confirmed_feature_buckets: [...confirmedFeatureBuckets].toSorted(),
+    multiple_feature_buckets: multipleFeatureBuckets,
+  };
+};
+
 const renderSummaryMarkdown = (summary) =>
   [
     "# Type-aware corpus summary",
@@ -890,8 +1008,10 @@ const renderSummaryMarkdown = (summary) =>
     "",
   ].join("\n");
 
-const summarize = (outDir) => {
-  const { discovery, ledger } = verifyLedger(outDir);
+const summarize = (manifest, outDir) => {
+  const discovery = readDiscovery(outDir);
+  requireCompletePublicationCorpus(manifest, discovery);
+  const { ledger } = verifyLedger(outDir, discovery);
   const measurements = readJson(resolve(outDir, "measurements.json"), "measurements artifact");
   if (JSON.stringify(discovery.corpus) !== JSON.stringify(measurements.corpus)) {
     fail("measurement corpus identity does not match discovery; rerun measure");
@@ -928,24 +1048,22 @@ const summarize = (outDir) => {
     }
   }
   const confirmedProjects = new Set(correctConfirmed.map(({ project_id }) => project_id));
-  const confirmedBuckets = new Set(
-    correctConfirmed.flatMap(({ feature_buckets }) => feature_buckets),
-  );
+  const featureBucketValue = summarizeAdjudicatedFeatureBuckets(entries);
   const zeroControlsClean = discovery.projects
     .filter(({ role }) => role === "zero-control")
     .every(({ baseline_candidate_count }) => baseline_candidate_count === 0);
   const summary = {
-    schema_version: 1,
+    schema_version: 2,
     gate: {
       go:
         incorrectConfirmed.length === 0 &&
         zeroControlsClean &&
         confirmedProjects.size >= 2 &&
-        confirmedBuckets.size >= 2,
+        featureBucketValue.multiple_feature_buckets,
       known_incorrect_removals: incorrectConfirmed.length,
       zero_controls_clean: zeroControlsClean,
       multiple_repositories: confirmedProjects.size >= 2,
-      multiple_feature_buckets: confirmedBuckets.size >= 2,
+      multiple_feature_buckets: featureBucketValue.multiple_feature_buckets,
     },
     accuracy: {
       candidate_count: entries.length,
@@ -967,7 +1085,7 @@ const summarize = (outDir) => {
     value: {
       confirmed_repository_count: confirmedProjects.size,
       confirmed_repositories: [...confirmedProjects].toSorted(),
-      confirmed_feature_buckets: [...confirmedBuckets].toSorted(),
+      confirmed_feature_buckets: featureBucketValue.confirmed_feature_buckets,
     },
     performance: {
       baseline_wall_ms: {
@@ -1036,7 +1154,7 @@ export const main = async (argv = process.argv.slice(2)) => {
   else if (options.command === "measure") await measure(manifest, projects, options);
   else if (options.command === "evidence") evidence(manifest, manifest.projects, options);
   else if (options.command === "verify-ledger") verifyLedger(options.outDir);
-  else if (options.command === "summarize") summarize(options.outDir);
+  else if (options.command === "summarize") summarize(manifest, options.outDir);
   console.log(`${options.command}: artifacts written to target/type-aware-corpus`);
   return 0;
 };

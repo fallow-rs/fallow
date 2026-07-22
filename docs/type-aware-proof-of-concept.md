@@ -77,6 +77,32 @@ regression, trace, impact-closure, SARIF, audit, combined, MCP, LSP, and watch
 integration remain disabled until those surfaces can preserve semantic
 provenance and analysis-mode identity.
 
+## Corpus adjudication
+
+The local corpus ledger uses schema version 2. Project-level feature buckets are
+copied into `suggested_feature_buckets` only as review prompts. A reviewer must
+record the buckets that genuinely apply to each candidate in
+`adjudicated_feature_buckets`; suggestions never contribute to the GO gate.
+
+Refreshing a schema-version-1 ledger preserves its truth decisions and source
+evidence. Existing `feature_buckets` move to `suggested_feature_buckets`, while
+`adjudicated_feature_buckets` starts empty because the old ledger could not
+distinguish project defaults from reviewed candidate evidence. Review and fill
+that field before running `verify-ledger` or `summarize`.
+
+```bash
+npm run type-aware:corpus -- evidence
+```
+
+Use `--project` only for iterative discovery and measurement. The publication
+gate refuses partial artifacts, so run the complete manifest corpus without
+`--project`, then refresh evidence before `summarize`.
+
+Feature-bucket value requires two separate candidates that are both manually
+classified as used and correctly confirmed by semantic refinement. The two
+candidates must provide explicitly adjudicated evidence for distinct buckets.
+A single candidate tagged with multiple buckets does not satisfy the gate.
+
 Reflection, decorators, dependency injection, computed property access, and
 framework runtime registration can remain invisible to the checker. Without
 `--type-aware`, the sidecar is never discovered or started and existing output

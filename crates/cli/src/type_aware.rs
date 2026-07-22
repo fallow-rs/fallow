@@ -426,22 +426,31 @@ fn run_sidecar(
     let mut command = sidecar_command(sidecar, root)?;
     let mut child = crate::signal::ScopedChild::spawn_process_tree(&mut command)
         .map_err(|err| format!("failed to spawn {}: {err}", sidecar.display()))?;
-    let pid = child.id();
+    let Some(terminator) = child.process_tree_terminator() else {
+        return Err("type-aware sidecar process tree was not available".to_owned());
+    };
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.take_stdin(), child.take_stdout(), child.take_stderr())
     else {
-        terminate_process_tree(pid);
+        let _ = terminator.terminate();
         let _ = child.wait();
         return Err("type-aware sidecar pipes were not available".to_owned());
     };
-    let timeout_guard = SidecarTimeout::start(pid, timeout);
+    let timeout_guard = SidecarTimeout::start(terminator.clone(), timeout);
 
     let writer = std::thread::spawn(move || write_request(stdin, &request_bytes));
+    let stdout_terminator = terminator.clone();
     let stdout_reader = std::thread::spawn(move || {
-        read_bounded_stream(stdout, MAX_RESPONSE_BYTES, "response", pid)
+        read_bounded_stream(
+            stdout,
+            MAX_RESPONSE_BYTES,
+            "response",
+            Some(stdout_terminator),
+        )
     });
-    let stderr_reader =
-        std::thread::spawn(move || read_bounded_stream(stderr, MAX_STDERR_BYTES, "stderr", pid));
+    let stderr_reader = std::thread::spawn(move || {
+        read_bounded_stream(stderr, MAX_STDERR_BYTES, "stderr", Some(terminator))
+    });
 
     let status = child
         .wait()
@@ -537,7 +546,7 @@ fn read_bounded_stream(
     reader: impl Read,
     limit: usize,
     stream: &str,
-    pid: u32,
+    terminator: Option<crate::signal::scoped_child::ProcessTreeTerminator>,
 ) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::with_capacity(limit.min(16 * 1024));
     reader
@@ -545,7 +554,9 @@ fn read_bounded_stream(
         .read_to_end(&mut bytes)
         .map_err(|err| format!("failed to read type-aware sidecar {stream}: {err}"))?;
     if bytes.len() > limit {
-        terminate_process_tree(pid);
+        if let Some(terminator) = terminator {
+            let _ = terminator.terminate();
+        }
         return Err(format!(
             "type-aware sidecar {stream} exceeded the {limit}-byte limit"
         ));
@@ -570,14 +581,17 @@ struct SidecarTimeout {
 }
 
 impl SidecarTimeout {
-    fn start(pid: u32, duration: Duration) -> Self {
+    fn start(
+        terminator: crate::signal::scoped_child::ProcessTreeTerminator,
+        duration: Duration,
+    ) -> Self {
         let timed_out = Arc::new(AtomicBool::new(false));
         let watcher_timed_out = Arc::clone(&timed_out);
         let (done, done_rx) = mpsc::channel();
         let watcher = std::thread::spawn(move || match done_rx.recv_timeout(duration) {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 watcher_timed_out.store(true, Ordering::Release);
-                terminate_process_tree(pid);
+                let _ = terminator.terminate();
             }
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
         });
@@ -601,32 +615,6 @@ impl SidecarTimeout {
         Ok(())
     }
 }
-
-#[cfg(unix)]
-#[expect(
-    unsafe_code,
-    reason = "POSIX process-group termination requires libc::kill"
-)]
-fn terminate_process_tree(pid: u32) {
-    let Ok(process_group_id) = i32::try_from(pid) else {
-        return;
-    };
-    // SAFETY: The child is placed in a dedicated process group before spawn.
-    // A negative PID targets that group and SIGKILL has no borrowed data.
-    let _ = unsafe { libc::kill(-process_group_id, libc::SIGKILL) };
-}
-
-#[cfg(windows)]
-fn terminate_process_tree(pid: u32) {
-    let _ = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-#[cfg(not(any(unix, windows)))]
-fn terminate_process_tree(_pid: u32) {}
 
 fn validate_process_output(output: &Output) -> Result<(), String> {
     if output.status.success() {
@@ -1408,7 +1396,7 @@ mod tests {
     #[test]
     fn oversized_response_is_rejected_during_read() {
         let response = std::io::Cursor::new(vec![b'x'; 65]);
-        let error = read_bounded_stream(response, 64, "response", u32::MAX)
+        let error = read_bounded_stream(response, 64, "response", None)
             .expect_err("oversized response should fail");
 
         assert!(error.contains("exceeded the 64-byte limit"));

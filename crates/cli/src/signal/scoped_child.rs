@@ -2,12 +2,11 @@
 //! PID with the process-wide signal registry on spawn and deregisters
 //! on drop or explicit consume (`wait_with_output`, `wait`).
 //!
-//! Storage model: the wrapper OWNS the `Child` outright. The registry
-//! stores only the PID. On signal, `registry::drain_and_kill` kills by
-//! PID (`kill -9 <pid>` subprocess on Unix, `TerminateProcess` on
-//! Windows), which does not require ownership of the `Child`. The
-//! wrapper's wait then returns with a non-zero status; callers handle
-//! that the same way they would handle any subprocess failure.
+//! Storage model: the wrapper owns the `Child` outright. Regular subprocesses
+//! register their PID. Process-tree subprocesses share an owned process-group
+//! or Windows Job Object handle with the signal registry and timeout watchers.
+//! Termination therefore targets the same reserved tree identity without
+//! executable lookup or PID reconstruction.
 //!
 //! Why PID-based and not Child-based: the wrapper needs to call
 //! `Child::wait_with_output(self)` which consumes the Child by value.
@@ -31,6 +30,7 @@ use std::io;
 use std::process::{
     Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio,
 };
+use std::sync::Arc;
 
 use super::registry;
 
@@ -42,6 +42,25 @@ pub struct ScopedChild {
     inner: Option<Child>,
     /// Registry key. `None` after deregister so Drop does not redo it.
     id: Option<u64>,
+    /// Shared ownership of the reserved process-tree identity, when requested.
+    process_tree: Option<registry::ProcessTreeHandle>,
+}
+
+/// Cloneable process-tree termination capability for timeout and I/O guards.
+#[derive(Clone)]
+pub struct ProcessTreeTerminator {
+    process_tree: registry::ProcessTreeHandle,
+}
+
+impl ProcessTreeTerminator {
+    pub fn terminate(&self) -> io::Result<()> {
+        self.process_tree.terminate()
+    }
+
+    #[cfg(all(test, windows))]
+    fn is_alive(&self) -> bool {
+        self.process_tree.is_alive()
+    }
 }
 
 impl ScopedChild {
@@ -52,24 +71,46 @@ impl ScopedChild {
         Ok(Self {
             inner: Some(child),
             id: Some(id),
+            process_tree: None,
         })
     }
 
     /// Spawn a subprocess wrapper in a dedicated process tree and register the
     /// tree for process-wide signal cleanup.
     pub fn spawn_process_tree(command: &mut Command) -> io::Result<Self> {
-        #[cfg(unix)]
+        registry::ProcessTree::configure_command(command);
+        let mut child = command.spawn()?;
+        let process_tree = match registry::ProcessTree::for_child(&child) {
+            Ok(process_tree) => Arc::new(process_tree),
+            Err(error) => {
+                terminate_failed_setup(&mut child);
+                return Err(error);
+            }
+        };
+        let id = registry::register_process_tree(Arc::clone(&process_tree));
+        #[cfg(windows)]
         {
-            use std::os::unix::process::CommandExt;
-
-            command.process_group(0);
+            if let Err(error) = process_tree.start(child.id()) {
+                registry::deregister(id);
+                let _ = process_tree.terminate();
+                terminate_failed_setup(&mut child);
+                return Err(error);
+            }
         }
-        let child = command.spawn()?;
-        let id = registry::register_process_tree(child.id());
         Ok(Self {
             inner: Some(child),
             id: Some(id),
+            process_tree: Some(process_tree),
         })
+    }
+
+    /// Return a cloneable handle that terminates the exact registered tree.
+    pub(crate) fn process_tree_terminator(&self) -> Option<ProcessTreeTerminator> {
+        self.process_tree
+            .as_ref()
+            .map(|process_tree| ProcessTreeTerminator {
+                process_tree: Arc::clone(process_tree),
+            })
     }
 
     /// OS-level process id of the underlying child. Returns `0` if the
@@ -115,7 +156,7 @@ impl ScopedChild {
 
     /// Consume self and wait for the child to exit, collecting stdout
     /// and stderr. The signal handler may have already killed the
-    /// child via the PID side channel; in that case wait returns
+    /// child via the registered termination target; in that case wait returns
     /// normally with a non-zero status.
     #[expect(
         clippy::expect_used,
@@ -131,8 +172,8 @@ impl ScopedChild {
         result
     }
 
-    /// Wait for the child to exit, returning the status. Same signal-
-    /// kill-by-PID semantics as `wait_with_output`.
+    /// Wait for the child to exit, returning the status. Same signal-cleanup
+    /// semantics as `wait_with_output`.
     #[expect(
         clippy::expect_used,
         reason = "ScopedChild owns inner until one terminal wait method consumes it"
@@ -146,6 +187,11 @@ impl ScopedChild {
         }
         result
     }
+}
+
+fn terminate_failed_setup(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 impl Drop for ScopedChild {
@@ -180,7 +226,7 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
     ScopedChild::spawn(command)?.wait_with_output()
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -221,5 +267,128 @@ mod tests {
         let output = output(&mut cmd).expect("echo");
         assert!(output.status.success());
         assert_eq!(output.stdout, b"hello\n");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_job_object_terminates_descendants_without_taskkill_lookup() {
+        const HELPER_ENV: &str = "FALLOW_WINDOWS_JOB_OBJECT_TEST_ROOT";
+        const TASKKILL_MARKER_ENV: &str = "FALLOW_FAKE_TASKKILL_MARKER";
+        const TEST_NAME: &str = "signal::scoped_child::tests::windows_job_object_terminates_descendants_without_taskkill_lookup";
+
+        if let Some(root) = std::env::var_os(HELPER_ENV) {
+            run_windows_job_object_helper(std::path::Path::new(&root));
+            return;
+        }
+
+        let root = tempfile::tempdir().expect("temporary Windows Job Object root");
+        compile_fake_taskkill(root.path(), TASKKILL_MARKER_ENV);
+        std::fs::write(
+            root.path().join("descendant.cmd"),
+            "@echo off\r\necho ready>descendant-ready\r\nping.exe -n 30 127.0.0.1 >NUL\r\n",
+        )
+        .expect("write descendant script");
+        std::fs::write(
+            root.path().join("leader.cmd"),
+            "@echo off\r\nstart \"\" /B cmd.exe /D /S /C call descendant.cmd\r\nping.exe -n 30 127.0.0.1 >NUL\r\n",
+        )
+        .expect("write leader script");
+        let mut search_paths = vec![root.path().to_path_buf()];
+        if let Some(path) = std::env::var_os("PATH") {
+            search_paths.extend(std::env::split_paths(&path));
+        }
+        let search_path =
+            std::env::join_paths(search_paths).expect("prepend fake taskkill to PATH");
+
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .args(["--exact", TEST_NAME, "--nocapture"])
+            .current_dir(root.path())
+            .env(HELPER_ENV, root.path())
+            .env(TASKKILL_MARKER_ENV, root.path().join("taskkill-invoked"))
+            .env("PATH", search_path)
+            .env_remove("NoDefaultCurrentDirectoryInExePath")
+            .output()
+            .expect("run Windows Job Object helper");
+
+        assert!(
+            output.status.success(),
+            "helper failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !root.path().join("taskkill-invoked").exists(),
+            "cleanup executed project-local taskkill"
+        );
+    }
+
+    #[cfg(windows)]
+    fn compile_fake_taskkill(root: &std::path::Path, marker_env: &str) {
+        let source = root.join("fake-taskkill.rs");
+        let executable = root.join("taskkill.exe");
+        std::fs::write(
+            &source,
+            format!(
+                "fn main() {{ let marker = std::env::var_os({marker_env:?}).expect(\"marker path\"); std::fs::write(marker, b\"invoked\").expect(\"write marker\"); }}"
+            ),
+        )
+        .expect("write fake taskkill source");
+        let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let output = Command::new(rustc)
+            .args(["--edition=2024", "-o"])
+            .arg(&executable)
+            .arg(&source)
+            .output()
+            .expect("compile fake taskkill executable");
+        assert!(
+            output.status.success(),
+            "fake taskkill compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(windows)]
+    fn run_windows_job_object_helper(root: &std::path::Path) {
+        use std::time::{Duration, Instant};
+
+        let mut command = Command::new("cmd.exe");
+        command
+            .args(["/D", "/S", "/C", "call leader.cmd"])
+            .current_dir(root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let child = ScopedChild::spawn_process_tree(&mut command).expect("spawn Windows job tree");
+        let terminator = child
+            .process_tree_terminator()
+            .expect("Windows process-tree terminator");
+        let ready = root.join("descendant-ready");
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() && Instant::now() < ready_deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ready.exists(), "descendant did not start inside the job");
+
+        let started = Instant::now();
+        terminator
+            .terminate()
+            .expect("terminate Windows Job Object");
+        let status = child.wait().expect("reap Windows job leader");
+        assert!(
+            !status.success(),
+            "terminated job leader exited successfully"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "wait remained blocked after Job Object termination"
+        );
+
+        let exit_deadline = Instant::now() + Duration::from_secs(2);
+        while terminator.is_alive() && Instant::now() < exit_deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !terminator.is_alive(),
+            "job descendants survived termination"
+        );
     }
 }
