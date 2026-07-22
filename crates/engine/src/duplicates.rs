@@ -20,7 +20,7 @@ pub(crate) use detector::types;
 #[doc(hidden)]
 pub use detector::{detect, normalize, tokenize};
 
-pub(crate) type CloneGroup = fallow_types::duplicates::CloneGroup;
+pub type CloneGroup = fallow_types::duplicates::CloneGroup;
 pub type CloneInstance = fallow_types::duplicates::CloneInstance;
 pub type DefaultIgnoreSkips = fallow_types::duplicates::DefaultIgnoreSkips;
 pub type DuplicationReport = fallow_types::duplicates::DuplicationReport;
