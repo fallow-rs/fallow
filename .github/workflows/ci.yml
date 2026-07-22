@@ -103,6 +103,7 @@ jobs:
               - 'crates/core/tests/integration_test/symlink_root_containment.rs'
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
+              - 'crates/engine/src/repo_refs.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
@@ -335,6 +336,8 @@ jobs:
         run: cargo test -p fallow-engine changed_files::tests
       - name: Test churn path handling
         run: cargo test -p fallow-engine churn::tests
+      - name: Test repository reference handling
+        run: cargo test -p fallow-engine repo_refs::tests
       - name: Test source and manifest symlink containment
         run: cargo test -p fallow-core symlink
       - name: Test LSP diagnostic URI handling

@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   production TypeScript configs activate alias resolution, audit snapshots
   invalidate when relevant install or generated-framework state changes, and
   GitHub Action fallback annotations safely encode workflow-command paths.
+  Audit JSON now also attributes every styling finding as introduced or
+  inherited and reports matching styling totals in the attribution block.
 
 ## [3.7.1] - 2026-07-20
 

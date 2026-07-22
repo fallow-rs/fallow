@@ -709,16 +709,18 @@ fn comparison_attribution(
 }
 
 fn snapshot_from_analyses(analyses: &AuditSubanalyses) -> AuditRuntimeKeySnapshot {
+    let styling =
+        crate::audit_keys::styling_keys(&analyses.complexity.report, &analyses.complexity.root);
+    let mut health =
+        crate::audit_keys::health_keys(&analyses.complexity.report, &analyses.complexity.root);
+    health.extend(styling.iter().cloned());
     AuditRuntimeKeySnapshot {
         public: AuditProgrammaticKeySnapshot {
             dead_code: crate::audit_keys::dead_code_keys(
                 &analyses.dead_code.output.results,
                 &analyses.dead_code.root,
             ),
-            health: crate::audit_keys::health_keys(
-                &analyses.complexity.report,
-                &analyses.complexity.root,
-            ),
+            health,
             dupes: analyses
                 .duplication
                 .output
@@ -730,10 +732,7 @@ fn snapshot_from_analyses(analyses: &AuditSubanalyses) -> AuditRuntimeKeySnapsho
                 })
                 .collect(),
         },
-        styling: crate::audit_keys::styling_keys(
-            &analyses.complexity.report,
-            &analyses.complexity.root,
-        ),
+        styling,
     }
 }
 
@@ -997,6 +996,12 @@ mod tests {
         .expect("new-only inherited audit");
         assert_eq!(inherited_only.verdict, AuditVerdict::Pass);
         assert!(inherited_only.base_snapshot.is_some());
+        let inherited_json =
+            crate::serialize_audit_programmatic_json(inherited_only).expect("inherited audit JSON");
+        assert_eq!(
+            inherited_json["complexity"]["styling_findings"][0]["introduced"],
+            false
+        );
 
         std::fs::write(
             root.join("src/styles.css"),
@@ -1015,6 +1020,21 @@ mod tests {
         })
         .expect("new-only introduced audit");
         assert_eq!(introduced.verdict, AuditVerdict::Fail);
+        let introduced_json =
+            crate::serialize_audit_programmatic_json(introduced).expect("introduced audit JSON");
+        let styling = introduced_json["complexity"]["styling_findings"]
+            .as_array()
+            .expect("styling findings");
+        assert!(
+            styling
+                .iter()
+                .any(|finding| finding["line"] == 1 && finding["introduced"] == false)
+        );
+        assert!(
+            styling
+                .iter()
+                .any(|finding| finding["line"] == 3 && finding["introduced"] == true)
+        );
     }
 
     #[test]

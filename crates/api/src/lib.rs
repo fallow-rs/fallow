@@ -65,9 +65,9 @@ pub mod ci_output {
 pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
-    AuditSarifOutputInput, AuditSummary, AuditVerdict, build_audit_codeclimate,
-    build_audit_codeclimate_issues, build_audit_header_json, build_audit_header_map,
-    build_audit_sarif, build_review_brief_header, serialize_audit_json,
+    AuditSarifOutputInput, AuditSummary, AuditVerdict, attach_audit_styling_attribution,
+    build_audit_codeclimate, build_audit_codeclimate_issues, build_audit_header_json,
+    build_audit_header_map, build_audit_sarif, build_review_brief_header, serialize_audit_json,
 };
 pub use ci_output::{
     CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,

@@ -961,6 +961,8 @@ complexity_introduced: number
 complexity_inherited: number
 duplication_introduced: number
 duplication_inherited: number
+styling_introduced: number
+styling_inherited: number
 }
 /**
  * Metric and rule definitions emitted under `_meta` when `--explain` is
@@ -7155,6 +7157,10 @@ fix_hint?: (string | null)
  * Suggested next steps (verify / suppress; never an auto-fix).
  */
 actions: CssCandidateAction[]
+/**
+ * Audit-mode flag indicating whether the finding is new versus the base snapshot.
+ */
+introduced?: (boolean | null)
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

@@ -5198,6 +5198,12 @@ fn health_css_emits_selector_and_dead_surface_styling_findings() {
         .as_array()
         .expect("styling findings array");
     assert!(
+        findings
+            .iter()
+            .all(|finding| finding.get("introduced").is_none()),
+        "standalone health must omit audit-only attribution: {findings:#?}"
+    );
+    assert!(
         findings.iter().any(|finding| {
             finding["code"] == "css-selector-complexity"
                 && finding["sub_kind"] == "high-specificity"

@@ -3000,21 +3000,36 @@ pub fn annotate_health_json(
     root: &Path,
     base: &FxHashSet<String>,
 ) {
-    let Some(items) = json
+    if let Some(items) = json
         .get_mut("findings")
         .and_then(serde_json::Value::as_array_mut)
-    else {
-        return;
-    };
-    for (item, finding) in items.iter_mut().zip(&report.findings) {
-        if let serde_json::Value::Object(map) = item {
-            map.insert(
-                "introduced".to_string(),
-                serde_json::json!(issue_was_introduced(
-                    &health_finding_key(finding, root),
-                    base
-                )),
-            );
+    {
+        for (item, finding) in items.iter_mut().zip(&report.findings) {
+            if let serde_json::Value::Object(map) = item {
+                map.insert(
+                    "introduced".to_string(),
+                    serde_json::json!(issue_was_introduced(
+                        &health_finding_key(finding, root),
+                        base
+                    )),
+                );
+            }
+        }
+    }
+    if let Some(items) = json
+        .get_mut("styling_findings")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for (item, finding) in items.iter_mut().zip(&report.styling_findings) {
+            if let serde_json::Value::Object(map) = item {
+                map.insert(
+                    "introduced".to_string(),
+                    serde_json::json!(issue_was_introduced(
+                        &styling_finding_key(finding, root),
+                        base
+                    )),
+                );
+            }
         }
     }
 }

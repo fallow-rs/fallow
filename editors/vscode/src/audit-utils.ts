@@ -78,6 +78,15 @@ export interface AuditVerdictPresentation {
   readonly background: AuditSeverityKey | null;
 }
 
+const stylingGatingCount = (audit: AuditOutput): number => {
+  const findings = audit.complexity?.styling_findings ?? [];
+  const newOnly = audit.attribution.gate === "new-only";
+  return findings.filter(
+    (finding) =>
+      finding.effective_severity === "error" && (!newOnly || finding.introduced === true),
+  ).length;
+};
+
 /**
  * Map a verdict to its status-bar icon, label, and (theme-color) background.
  * `pass` carries no background tint; `warn` and `fail` map to the built-in
@@ -108,13 +117,15 @@ export const gatingCount = (audit: AuditOutput): number => {
     return (
       audit.summary.dead_code_issues +
       audit.summary.complexity_findings +
-      audit.summary.duplication_clone_groups
+      audit.summary.duplication_clone_groups +
+      stylingGatingCount(audit)
     );
   }
   return (
     audit.attribution.dead_code_introduced +
     audit.attribution.complexity_introduced +
-    audit.attribution.duplication_introduced
+    audit.attribution.duplication_introduced +
+    stylingGatingCount(audit)
   );
 };
 
@@ -186,19 +197,24 @@ const gatingRows = (audit: AuditOutput): readonly GatingRow[] => {
     {
       count: all ? audit.summary.dead_code_issues : audit.attribution.dead_code_introduced,
       icon: "$(circle-slash)",
-      label: "dead-code candidates",
+      label: "dead-code candidate",
     },
     {
       count: all ? audit.summary.complexity_findings : audit.attribution.complexity_introduced,
       icon: "$(pulse)",
-      label: "complexity candidates",
+      label: "complexity candidate",
     },
     {
       count: all
         ? audit.summary.duplication_clone_groups
         : audit.attribution.duplication_introduced,
       icon: "$(copy)",
-      label: "duplication candidates",
+      label: "duplication candidate",
+    },
+    {
+      count: stylingGatingCount(audit),
+      icon: "$(symbol-color)",
+      label: "styling candidate",
     },
   ];
 };
@@ -236,7 +252,7 @@ export const buildAuditTooltipMarkdown = (
 
   for (const row of gatingRows(audit)) {
     if (row.count > 0) {
-      lines.push(`${row.icon} ${row.count} ${row.label}`);
+      lines.push(`${row.icon} ${row.count} ${row.label}${row.count === 1 ? "" : "s"}`);
     }
   }
 

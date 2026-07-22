@@ -346,6 +346,36 @@ mod tests {
         .expect("new-only MCP API value")
         .expect("typed API path");
         assert_eq!(new_only["verdict"], "pass");
+        assert_eq!(new_only["attribution"]["styling_introduced"], 0);
+        assert_eq!(new_only["attribution"]["styling_inherited"], 1);
+        assert_eq!(
+            new_only["complexity"]["styling_findings"][0]["introduced"],
+            false
+        );
+
+        std::fs::write(
+            project.path().join("src/styles.css"),
+            "#app .legacy .title { color: red; }\n.plain { color: blue; }\n#app .introduced .title { color: green; }\n",
+        )
+        .expect("write introduced styling change");
+        let introduced = run_audit_api_value(&AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("introduced MCP API value")
+        .expect("typed API path");
+        assert_eq!(introduced["verdict"], "fail");
+        assert_eq!(introduced["attribution"]["styling_introduced"], 1);
+        assert_eq!(introduced["attribution"]["styling_inherited"], 1);
+        assert!(
+            introduced["complexity"]["styling_findings"]
+                .as_array()
+                .expect("styling findings")
+                .iter()
+                .any(|finding| finding["line"] == 3 && finding["introduced"] == true)
+        );
     }
 
     fn audit_fixture() -> tempfile::TempDir {

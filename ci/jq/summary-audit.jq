@@ -66,6 +66,16 @@ def duplication_rows:
       introduced: .introduced
     }
   ];
+def styling_rows:
+  [(.complexity.styling_findings // [])[] |
+    {
+      location: (if (.path? | type) == "string" and (.path | length) > 0 then path_line else "-" end),
+      rule: (.code // .sub_kind // "styling"),
+      item: ((.value // "-") | tostring),
+      severity: (.effective_severity // "warn"),
+      introduced: .introduced
+    }
+  ];
 
 (.verdict // "pass") as $verdict |
 (.summary // {}) as $summary |
@@ -73,18 +83,21 @@ def duplication_rows:
 ($summary.dead_code_issues // 0) as $dead |
 ($summary.complexity_findings // 0) as $complex |
 ($summary.duplication_clone_groups // 0) as $dupes |
+((.complexity.styling_findings // []) | length) as $styling |
 (.changed_files_count // 0) as $files |
 (.elapsed_ms // 0) as $elapsed |
 dead_code_rows as $dead_rows |
 (.complexity.findings // []) as $complex_findings |
 duplication_rows as $dupe_rows |
+styling_rows as $styling_rows |
 
 "## Fallow Audit\n\n" +
 "> \($verdict | verdict_label) · \(plural($files; "changed file")) · \($elapsed)ms\n\n" +
 "| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n" +
 "| Dead code | \($dead) | \($attr.dead_code_introduced // 0) | \($attr.dead_code_inherited // 0) |\n" +
 "| Complexity | \($complex) | \($attr.complexity_introduced // 0) | \($attr.complexity_inherited // 0) |\n" +
-"| Duplication | \($dupes) | \($attr.duplication_introduced // 0) | \($attr.duplication_inherited // 0) |\n\n" +
+"| Duplication | \($dupes) | \($attr.duplication_introduced // 0) | \($attr.duplication_inherited // 0) |\n" +
+"| Styling | \($styling) | \($attr.styling_introduced // 0) | \($attr.styling_inherited // 0) |\n\n" +
 (if ($dead_rows | length) > 0 then
   "### Dead Code\n\n" +
   "| Type | Location | Item | Status |\n|:-----|:---------|:-----|:-------|\n" +
@@ -113,6 +126,15 @@ else "" end) +
     elif ($model == "static_estimated" or $model == "static_binary") then
       "\n\n*Coverage model: static (estimated). Pair with `--coverage <coverage-final.json>` for measured coverage instead of estimates.*"
     else "" end) +
+  "\n\n"
+else "" end) +
+(if ($styling_rows | length) > 0 then
+  "### Styling\n\n" +
+  "| Location | Rule | Value | Severity | Status |\n|:---------|:-----|:------|:---------|:-------|\n" +
+  ([$styling_rows[:15][] |
+    "| \(.location) | `\(.rule)` | `\(.item)` | \(.severity) | \(introduced(.introduced)) |"
+  ] | join("\n")) +
+  (if ($styling_rows | length) > 15 then "\n\n> \(($styling_rows | length) - 15) more styling findings in the full audit report" else "" end) +
   "\n\n"
 else "" end) +
 (if ($dupe_rows | length) > 0 then

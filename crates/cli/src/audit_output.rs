@@ -894,10 +894,10 @@ fn build_audit_health_json_with_report(
         Ok(mut json) => {
             let root_prefix = format!("{}/", health.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
-            if result.comparison.is_none()
-                && let Some(ref base) = result.base_snapshot
-            {
-                annotate_health_json(&mut json, report, &health.config.root, &base.health);
+            if let Some(ref base) = result.base_snapshot {
+                let mut base_health = base.health.clone();
+                base_health.extend(base.styling.iter().cloned());
+                annotate_health_json(&mut json, report, &health.config.root, &base_health);
             }
             Ok(json)
         }

@@ -483,13 +483,16 @@ fn build_brief_json(
     let audit_header =
         fallow_api::build_review_brief_header(crate::audit::audit_json_header_input(result));
     let subtract = build_brief_subtract_sections(result)?;
-    fallow_output::build_review_brief_json_output(brief, audit_header, subtract).map_err(|err| {
+    let mut output = fallow_output::build_review_brief_json_output(brief, audit_header, subtract)
+        .map_err(|err| {
         crate::error::emit_error(
             &format!("JSON serialization error: {err}"),
             2,
             fallow_config::OutputFormat::Json,
         )
-    })
+    })?;
+    fallow_api::attach_audit_styling_attribution(&mut output);
+    Ok(output)
 }
 
 /// Render the brief as JSON. Always returns `SUCCESS`; a serialization failure
@@ -1158,6 +1161,8 @@ mod tests {
         assert_eq!(value["kind"], "audit-brief");
         assert_eq!(value["command"], "audit-brief");
         assert_eq!(value["schema_version"], REVIEW_BRIEF_SCHEMA_VERSION);
+        assert_eq!(value["attribution"]["styling_introduced"], 0);
+        assert_eq!(value["attribution"]["styling_inherited"], 0);
     }
 
     #[test]

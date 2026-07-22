@@ -287,7 +287,7 @@ fn component_engine_warm_session_health(c: &mut Criterion) {
 }
 
 fn component_engine_warm_session_css_health(c: &mut Criterion) {
-    let fixture = create_warm_css_engine_fixture();
+    let fixture = create_warm_engine_fixture();
     let options = warm_css_health_options(&fixture);
     run_ungrouped_health_with_session(&options, None, &fixture.session, None)
         .expect("CSS health warm-up succeeds");
@@ -299,6 +299,22 @@ fn component_engine_warm_session_css_health(c: &mut Criterion) {
     });
 }
 
+fn component_engine_warm_session_css_health_many_files(c: &mut Criterion) {
+    let fixture = create_warm_css_engine_fixture();
+    let options = warm_css_health_options(&fixture);
+    run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+        .expect("many-file CSS health warm-up succeeds");
+    c.bench_function(
+        "component_engine_warm_session_css_health_many_files",
+        |bencher| {
+            bencher.iter(|| {
+                run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+                    .expect("warm many-file CSS health analysis succeeds")
+            });
+        },
+    );
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
@@ -308,6 +324,7 @@ criterion_group!(
     component_engine_warm_session_complexity_owned,
     component_engine_warm_session_complexity_shared,
     component_engine_warm_session_health,
-    component_engine_warm_session_css_health
+    component_engine_warm_session_css_health,
+    component_engine_warm_session_css_health_many_files
 );
 criterion_main!(benches);

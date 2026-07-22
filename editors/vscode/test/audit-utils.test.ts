@@ -47,6 +47,8 @@ const passAudit: AuditOutput = {
     complexity_inherited: 0,
     duplication_introduced: 0,
     duplication_inherited: 0,
+    styling_introduced: 0,
+    styling_inherited: 0,
   },
 };
 
@@ -77,17 +79,45 @@ const failAudit: AuditOutput = {
     complexity_inherited: 0,
     duplication_introduced: 0,
     duplication_inherited: 0,
+    styling_introduced: 0,
+    styling_inherited: 0,
   },
 };
 
+const stylingHealth = (
+  effectiveSeverity: "warn" | "error",
+  introduced?: boolean,
+): NonNullable<AuditOutput["complexity"]> => ({
+  findings: [],
+  summary: {
+    files_analyzed: 1,
+    functions_analyzed: 0,
+    functions_above_threshold: 0,
+    max_cyclomatic_threshold: 20,
+    max_cognitive_threshold: 15,
+    max_crap_threshold: 30,
+    max_unit_size_threshold: 60,
+    severity_critical_count: 0,
+    severity_high_count: 0,
+    severity_moderate_count: 0,
+  },
+  styling_findings: [
+    {
+      code: "css-selector-complexity",
+      sub_kind: "high-specificity",
+      path: "src/styles.css",
+      line: 1,
+      value: "#app .card .title",
+      effective_severity: effectiveSeverity,
+      introduced,
+      actions: [],
+    },
+  ],
+});
+
 describe("buildAuditArgs", () => {
   it("emits audit as the first positional with the json/quiet flags by default", () => {
-    expect(buildAuditArgs(baseAuditArgsOptions)).toEqual([
-      "audit",
-      "--format",
-      "json",
-      "--quiet",
-    ]);
+    expect(buildAuditArgs(baseAuditArgsOptions)).toEqual(["audit", "--format", "json", "--quiet"]);
   });
 
   it("does not append a gate flag for the default new-only gate", () => {
@@ -172,7 +202,7 @@ describe("auditVerdictPresentation", () => {
 });
 
 describe("gatingCount", () => {
-  it("sums the introduced attribution fields under the new-only gate", () => {
+  it("sums the non-styling introduced attribution fields under the new-only gate", () => {
     const audit: AuditOutput = {
       ...passAudit,
       attribution: {
@@ -183,6 +213,8 @@ describe("gatingCount", () => {
         complexity_inherited: 4,
         duplication_introduced: 3,
         duplication_inherited: 7,
+        styling_introduced: 2,
+        styling_inherited: 5,
       },
     };
     expect(gatingCount(audit)).toBe(6);
@@ -213,9 +245,49 @@ describe("gatingCount", () => {
         complexity_inherited: 2,
         duplication_introduced: 0,
         duplication_inherited: 1,
+        styling_introduced: 0,
+        styling_inherited: 3,
       },
     };
     expect(gatingCount(audit)).toBe(0);
+  });
+
+  it("does not gate an introduced warn-severity styling finding", () => {
+    const audit: AuditOutput = {
+      ...passAudit,
+      verdict: "warn",
+      complexity: stylingHealth("warn", true),
+      attribution: {
+        ...passAudit.attribution,
+        styling_introduced: 1,
+      },
+    };
+    expect(gatingCount(audit)).toBe(0);
+  });
+
+  it("gates an introduced error-severity styling finding under new-only", () => {
+    const audit: AuditOutput = {
+      ...failAudit,
+      complexity: stylingHealth("error", true),
+      attribution: {
+        ...passAudit.attribution,
+        styling_introduced: 1,
+      },
+    };
+    expect(gatingCount(audit)).toBe(1);
+  });
+
+  it("gates an error-severity styling finding under all", () => {
+    const audit: AuditOutput = {
+      ...failAudit,
+      summary: {
+        ...failAudit.summary,
+        dead_code_issues: 0,
+        dead_code_has_errors: false,
+      },
+      complexity: stylingHealth("error"),
+    };
+    expect(gatingCount(audit)).toBe(1);
   });
 });
 
@@ -238,6 +310,8 @@ describe("auditGatingSuffix", () => {
         complexity_inherited: 0,
         duplication_introduced: 0,
         duplication_inherited: 0,
+        styling_introduced: 0,
+        styling_inherited: 0,
       },
     };
     expect(auditGatingSuffix(warnAudit)).toBe(" (3)");
@@ -327,6 +401,21 @@ describe("buildAuditTooltipMarkdown", () => {
     expect(md).toContain("3 dead-code candidates");
     expect(md).not.toContain("complexity candidates");
     expect(md).not.toContain("duplication candidates");
+    expect(md).not.toContain("styling candidates");
+  });
+
+  it("lists a styling-only gating category", () => {
+    const audit: AuditOutput = {
+      ...failAudit,
+      summary: {
+        ...failAudit.summary,
+        dead_code_issues: 0,
+        dead_code_has_errors: false,
+      },
+      complexity: stylingHealth("error"),
+    };
+    const md = buildAuditTooltipMarkdown(audit);
+    expect(md).toContain("1 styling candidate");
   });
 
   it("includes both command links", () => {

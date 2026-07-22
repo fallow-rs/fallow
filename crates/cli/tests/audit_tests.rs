@@ -560,6 +560,13 @@ fn audit_css_selector_complexity_new_only_ignores_inherited_styling() {
         "inherited styling should not fail new-only audit. stdout: {}\nstderr: {}",
         inherited_output.stdout, inherited_output.stderr
     );
+    let inherited_json = parse_json(&inherited_output);
+    assert_eq!(inherited_json["attribution"]["styling_introduced"], 0);
+    assert_eq!(inherited_json["attribution"]["styling_inherited"], 1);
+    assert_eq!(
+        inherited_json["complexity"]["styling_findings"][0]["introduced"],
+        false
+    );
 
     fs::write(
         root.join("src/styles.css"),
@@ -583,6 +590,8 @@ fn audit_css_selector_complexity_new_only_ignores_inherited_styling() {
     );
     let json = parse_json(&introduced_output);
     assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(json["attribution"]["styling_introduced"], 1);
+    assert_eq!(json["attribution"]["styling_inherited"], 1);
     let findings = json["complexity"]["styling_findings"]
         .as_array()
         .expect("styling findings should be present");
@@ -591,8 +600,15 @@ fn audit_css_selector_complexity_new_only_ignores_inherited_styling() {
             finding["code"] == "css-selector-complexity"
                 && finding["sub_kind"] == "high-specificity"
                 && finding["line"] == 3
+                && finding["introduced"] == true
         }),
         "introduced selector line should appear in styling findings: {findings:#?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["line"] == 1 && finding["introduced"] == false),
+        "inherited selector should be explicitly attributed: {findings:#?}"
     );
 }
 

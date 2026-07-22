@@ -776,6 +776,32 @@ ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
 
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
+printf '%s\n' '{"command":"audit","verdict":"fail","attribution":{"gate":"new-only","dead_code_introduced":0,"complexity_introduced":0,"duplication_introduced":0,"styling_introduced":1},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0},"complexity":{"styling_findings":[{"effective_severity":"error","introduced":true}]}}'
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="audit" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
+[ "$ISSUES" = "1" ] && pass "analyze: new-only audit counts introduced styling findings" || fail "analyze: new-only styling issues" "expected 1, got '$ISSUES'"
+
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"command":"audit","verdict":"fail","attribution":{"gate":"all"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0},"complexity":{"styling_findings":[{"effective_severity":"error"},{"effective_severity":"warn"}]}}'
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="audit" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
+[ "$ISSUES" = "2" ] && pass "analyze: all-gate audit counts every styling finding" || fail "analyze: all-gate styling issues" "expected 2, got '$ISSUES'"
+
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
 case "$*" in
   *"security"*"--gate newly-reachable"*)
     printf '%s\n' '{"kind":"security","gate":{"mode":"newly-reachable","verdict":"fail","new_count":2},"summary":{"security_findings":5},"security_findings":[]}'
@@ -1227,13 +1253,17 @@ OUT_AUDIT=$(jq -n --slurpfile h "$FIXTURES/health.json" --slurpfile c "$FIXTURES
   changed_files_count: 2,
   elapsed_ms: 42,
   summary: {dead_code_issues: 1, complexity_findings: 3, duplication_clone_groups: 1},
-  attribution: {gate: "new-only", dead_code_introduced: 1, dead_code_inherited: 0, complexity_introduced: 2, complexity_inherited: 1, duplication_introduced: 0, duplication_inherited: 1},
+  attribution: {gate: "new-only", dead_code_introduced: 1, dead_code_inherited: 0, complexity_introduced: 2, complexity_inherited: 1, duplication_introduced: 0, duplication_inherited: 1, styling_introduced: 1, styling_inherited: 1},
   dead_code: ($c[0] | .unused_exports |= map(. + {introduced: true}) | .unused_dependencies |= map(. + {introduced: false})),
   complexity: ($h[0]
     | .findings |= [.[0] + {coverage_tier: "partial"}, .[1] + {coverage_tier: "high"}, .[2]]
     | .summary.coverage_model = "istanbul"
     | .summary.istanbul_matched = 8
-    | .summary.istanbul_total = 10),
+    | .summary.istanbul_total = 10
+    | .styling_findings = [
+        {code: "css-selector-complexity", sub_kind: "high-specificity", path: "src/styles.css", line: 4, value: "#app .card .title", effective_severity: "error", introduced: true},
+        {code: "css-important", sub_kind: "important", path: "src/legacy.css", line: 9, value: "!important", effective_severity: "warn", introduced: false}
+      ]),
   duplication: ($d[0] | .clone_groups |= map(. + {introduced: false}))
 }' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
 assert_valid_markdown "$OUT_AUDIT" "produces audit output"
@@ -1251,6 +1281,28 @@ assert_contains "$OUT_AUDIT" "| high |" "audit: shows alt coverage tier"
 assert_contains "$OUT_AUDIT" "| - |" "audit: missing coverage_tier renders as dash"
 assert_contains "$OUT_AUDIT" "Coverage model: istanbul" "audit: shows istanbul coverage model footer"
 assert_contains "$OUT_AUDIT" "Matched 8/10" "audit: shows istanbul match rate"
+assert_contains "$OUT_AUDIT" "### Styling" "audit: has styling details"
+assert_contains "$OUT_AUDIT" "css-selector-complexity" "audit: lists styling rule"
+assert_contains "$OUT_AUDIT" "src/styles.css:4" "audit: lists styling location"
+
+OUT_AUDIT_STYLE_NEW=$(jq -n '{
+  command: "audit", verdict: "fail", changed_files_count: 1, elapsed_ms: 4,
+  summary: {dead_code_issues: 0, complexity_findings: 0, duplication_clone_groups: 0},
+  attribution: {gate: "new-only", styling_introduced: 1, styling_inherited: 0},
+  complexity: {styling_findings: [{code: "css-important", path: "src/styles.css", line: 2, value: "!important", effective_severity: "error", introduced: true}]}
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_contains "$OUT_AUDIT_STYLE_NEW" "| Styling | 1 | 1 | 0 |" "audit: styling-only new-only totals are visible"
+assert_contains "$OUT_AUDIT_STYLE_NEW" "| new |" "audit: styling-only new-only status is visible"
+
+OUT_AUDIT_STYLE_ALL=$(jq -n '{
+  command: "audit", verdict: "fail", changed_files_count: 1, elapsed_ms: 4,
+  summary: {dead_code_issues: 0, complexity_findings: 0, duplication_clone_groups: 0},
+  attribution: {gate: "all"},
+  complexity: {styling_findings: [{code: "css-important", path: null, line: null, value: "!important", effective_severity: "error"}]}
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_contains "$OUT_AUDIT_STYLE_ALL" "| Styling | 1 | 0 | 0 |" "audit: styling-only all totals are visible"
+assert_contains "$OUT_AUDIT_STYLE_ALL" '| - | `css-important`' "audit: null styling path uses a safe placeholder"
+assert_contains "$OUT_AUDIT_STYLE_ALL" "Audit gate: all" "audit: styling-only all gate is visible"
 
 # Low match-rate variant: footer should warn about --coverage-root
 OUT_AUDIT_LOWMATCH=$(jq -n --slurpfile h "$FIXTURES/health.json" '{

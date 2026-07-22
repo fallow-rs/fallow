@@ -7384,6 +7384,12 @@
         },
         "duplication_inherited": {
           "type": "integer"
+        },
+        "styling_introduced": {
+          "type": "integer"
+        },
+        "styling_inherited": {
+          "type": "integer"
         }
       },
       "required": [
@@ -7393,7 +7399,9 @@
         "complexity_introduced",
         "complexity_inherited",
         "duplication_introduced",
-        "duplication_inherited"
+        "duplication_inherited",
+        "styling_introduced",
+        "styling_inherited"
       ],
       "description": "New-vs-inherited issue counts for audit."
     },
@@ -18062,6 +18070,13 @@
             "$ref": "#/definitions/CssCandidateAction"
           },
           "description": "Suggested next steps (verify / suppress; never an auto-fix)."
+        },
+        "introduced": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Audit-mode flag indicating whether the finding is new versus the base snapshot."
         }
       },
       "required": [

@@ -186,6 +186,7 @@ where
     Complexity: Serialize,
 {
     let header = audit_header_output(input.header);
+    let complexity = input.complexity.map(serde_json::to_value).transpose()?;
     let output = fallow_output::AuditOutput {
         schema_version: header.schema_version,
         version: header.version,
@@ -202,10 +203,52 @@ where
         meta: None,
         dead_code: input.dead_code,
         duplication: input.duplication,
-        complexity: input.complexity,
+        complexity,
         next_steps: input.next_steps,
     };
-    fallow_output::serialize_audit_json_output(output, mode, analysis_run_id)
+    let mut value = fallow_output::serialize_audit_json_output(output, mode, analysis_run_id)?;
+    attach_audit_styling_attribution(&mut value);
+    Ok(value)
+}
+
+/// Add styling attribution totals derived from annotated styling findings.
+///
+/// This keeps the public Rust attribution and finding structs source-compatible
+/// while extending audit-family JSON envelopes with the wire-only fields.
+pub fn attach_audit_styling_attribution(value: &mut serde_json::Value) {
+    let findings = value
+        .get("complexity")
+        .and_then(|complexity| complexity.get("styling_findings"))
+        .and_then(serde_json::Value::as_array);
+    let styling_introduced = findings.map_or(0, |items| {
+        items
+            .iter()
+            .filter(|item| {
+                item.get("introduced").and_then(serde_json::Value::as_bool) == Some(true)
+            })
+            .count()
+    });
+    let styling_inherited = findings.map_or(0, |items| {
+        items
+            .iter()
+            .filter(|item| {
+                item.get("introduced").and_then(serde_json::Value::as_bool) == Some(false)
+            })
+            .count()
+    });
+    if let Some(attribution) = value
+        .get_mut("attribution")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        attribution.insert(
+            "styling_introduced".to_string(),
+            serde_json::json!(styling_introduced),
+        );
+        attribution.insert(
+            "styling_inherited".to_string(),
+            serde_json::json!(styling_inherited),
+        );
+    }
 }
 
 /// Build the combined SARIF document for `fallow audit`.

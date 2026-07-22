@@ -226,9 +226,7 @@ fn serialize_audit_complexity(
     })?;
     let root_prefix = format!("{}/", output.root.display());
     strip_root_prefix(&mut json, &root_prefix);
-    if let Some(base) = base_snapshot
-        && !has_persisted_introduced_flags(&json)
-    {
+    if let Some(base) = base_snapshot {
         crate::audit_keys::annotate_health_json(
             &mut json,
             &output.report,

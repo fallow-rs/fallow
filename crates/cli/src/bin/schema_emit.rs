@@ -962,10 +962,51 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
         definitions.insert(name.clone(), value);
     }
 
+    augment_audit_wire_definitions(definitions)?;
     rewrite_fallow_output_definition(definitions)?;
     rewrite_document_root_one_of(&mut document)?;
 
     Ok(document)
+}
+
+fn augment_audit_wire_definitions(definitions: &mut Map<String, Value>) -> Result<(), String> {
+    let attribution = definitions
+        .get_mut("AuditAttribution")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "derived schema missing AuditAttribution object".to_string())?;
+    let properties = attribution
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "AuditAttribution schema missing properties".to_string())?;
+    for name in ["styling_introduced", "styling_inherited"] {
+        properties.insert(name.to_string(), serde_json::json!({"type": "integer"}));
+    }
+    let required = attribution
+        .get_mut("required")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "AuditAttribution schema missing required list".to_string())?;
+    for name in ["styling_introduced", "styling_inherited"] {
+        if !required.iter().any(|item| item.as_str() == Some(name)) {
+            required.push(Value::String(name.to_string()));
+        }
+    }
+
+    let styling = definitions
+        .get_mut("StylingFinding")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "derived schema missing StylingFinding object".to_string())?;
+    let properties = styling
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "StylingFinding schema missing properties".to_string())?;
+    properties.insert(
+        "introduced".to_string(),
+        serde_json::json!({
+            "type": ["boolean", "null"],
+            "description": "Audit-mode flag indicating whether the finding is new versus the base snapshot."
+        }),
+    );
+    Ok(())
 }
 
 /// Hand-maintained root envelopes that still need top-level `oneOf` entries.
@@ -1402,6 +1443,8 @@ mod drift_tests {
             }
             out.insert(name.clone(), value);
         }
+        augment_audit_wire_definitions(&mut out)
+            .expect("audit wire augmentation must succeed in drift checks");
         rewrite_fallow_output_definition(&mut out)
             .expect("FallowOutput postprocess must succeed in drift checks");
         out

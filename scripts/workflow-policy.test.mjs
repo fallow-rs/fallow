@@ -158,9 +158,11 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(
     windowsRustPaths.includes("crates/core/tests/integration_test/symlink_root_containment.rs"),
   );
+  assert.ok(windowsRustPaths.includes("crates/engine/src/repo_refs.rs"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
   assert.match(windowsRustJob, /cargo test -p fallow-engine changed_files::tests/);
   assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
+  assert.match(windowsRustJob, /cargo test -p fallow-engine repo_refs::tests/);
   assert.match(windowsRustJob, /cargo test -p fallow-core symlink/);
   assert.match(
     windowsRustJob,
