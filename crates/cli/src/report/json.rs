@@ -30,6 +30,7 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) root: &'a Path,
     pub(super) elapsed: Duration,
     pub(super) explain: bool,
+    pub(super) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
     pub(super) regression: Option<&'a crate::regression::RegressionOutcome>,
     pub(super) baseline_matched: Option<(usize, usize)>,
     pub(super) config_fixable: bool,
@@ -49,7 +50,7 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
         root,
         elapsed,
         config_fixable,
-        explain.then(fallow_output::check_meta),
+        check_output_meta(explain, input.type_aware),
         check_json_extras(regression, None, baseline_matched),
     ) {
         Ok(output) => emit_report_json(&output, "JSON", input.json_style),
@@ -67,6 +68,7 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) root: &'a Path,
     pub(super) elapsed: Duration,
     pub(super) explain: bool,
+    pub(super) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
     pub(super) resolver: &'a OwnershipResolver,
     pub(super) config_fixable: bool,
     pub(super) json_style: crate::json_style::JsonStyle,
@@ -80,7 +82,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         elapsed: input.elapsed,
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
-        meta: input.explain.then(fallow_output::check_meta),
+        meta: check_output_meta(input.explain, input.type_aware),
         workspace_diagnostics: workspace_diagnostics_for_output(input.root),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
             input.original,
@@ -99,6 +101,23 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
     };
 
     emit_report_json(&output, "JSON", input.json_style)
+}
+
+fn check_output_meta(
+    explain: bool,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+) -> Option<fallow_types::envelope::Meta> {
+    if !explain && type_aware.is_none() {
+        return None;
+    }
+
+    let mut meta = if explain {
+        fallow_output::check_meta()
+    } else {
+        fallow_types::envelope::Meta::default()
+    };
+    meta.type_aware = type_aware.cloned();
+    Some(meta)
 }
 
 #[allow(
@@ -1670,6 +1689,35 @@ mod tests {
         assert_eq!(output["kind"], "dead-code");
         assert_eq!(output["schema_version"], 7);
         assert_eq!(output["elapsed_ms"], 99);
+    }
+
+    #[test]
+    fn type_aware_metadata_is_emitted_without_explain() {
+        let root = PathBuf::from("/project");
+        let results = AnalysisResults::default();
+        let type_aware = fallow_types::envelope::TypeAwareMeta {
+            protocol_version: 1,
+            backend: "typescript-go".to_string(),
+            backend_version: "7.0.2".to_string(),
+            selected_tsconfigs: vec!["tsconfig.json".to_string()],
+            candidate_count: 2,
+            confirmed_used_count: 1,
+            unresolved_count: 1,
+            warning_count: 0,
+            elapsed_ms: 12,
+        };
+        let output = api_check_json_document_with_config_fixable_meta_and_extras(
+            &results,
+            &root,
+            Duration::default(),
+            false,
+            check_output_meta(false, Some(&type_aware)),
+            CheckJsonExtraOutputs::default(),
+        )
+        .expect("type-aware metadata should serialize");
+
+        assert_eq!(output["_meta"]["type_aware"]["backend"], "typescript-go");
+        assert!(output["_meta"].get("rules").is_none());
     }
 
     #[test]

@@ -396,6 +396,7 @@ fn health_report_context(
         elapsed: result.elapsed,
         quiet: options.quiet,
         explain: options.explain,
+        type_aware: None,
         group_by: None,
         top: None,
         summary: options.summary,

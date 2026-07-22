@@ -546,6 +546,16 @@
           ]
         },
         {
+          "name": "--type-aware",
+          "type": "bool",
+          "required": false,
+          "description": "Experimental: use TypeScript semantics to refine unused class-member findings",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "--unused-store-members",
           "type": "bool",
           "required": false,

@@ -44,6 +44,7 @@ Analyzes the project for unused files, exports, dependencies, types, members, an
 <!-- generated:flags:dead-code:start -->
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `--type-aware` | `bool` | `false` | Experimental: use TypeScript semantics to refine unused class-member findings |
 | `--include-dupes` | `bool` | `false` | Cross-reference with duplication findings |
 | `--trace` | `string` | - | Trace export usage chain |
 | `--trace-file` | `string` | - | Show all edges for a file |

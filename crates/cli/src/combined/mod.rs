@@ -160,6 +160,7 @@ fn build_combined_check_options<'a>(
         changed_workspaces: opts.changed_workspaces,
         group_by: opts.group_by,
         include_dupes: false,
+        type_aware: false,
         trace_opts,
         explain: opts.explain,
         top: None,

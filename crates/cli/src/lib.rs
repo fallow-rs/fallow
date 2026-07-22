@@ -80,6 +80,7 @@ mod suppressions;
 mod task_matrix;
 mod telemetry;
 mod trace_chain;
+mod type_aware;
 mod update_check;
 use fallow_engine::validate;
 use fallow_engine::vital_signs;
@@ -528,6 +529,10 @@ enum Command {
         /// Only report unused class members
         #[arg(long)]
         unused_class_members: bool,
+
+        /// Experimental: use TypeScript semantics to refine unused class-member findings
+        #[arg(long)]
+        type_aware: bool,
 
         /// Only report unused store members
         #[arg(long)]
@@ -2961,6 +2966,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
 fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     let filters = check_issue_filters(&command);
     let Command::Check {
+        type_aware,
         include_dupes,
         trace,
         trace_file,
@@ -2986,6 +2992,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
                 performance: dispatch.cli.performance,
             },
             include_dupes,
+            type_aware,
             top,
             file,
         },
@@ -4258,6 +4265,7 @@ struct CheckDispatchArgs {
     filters: IssueFilters,
     trace_opts: TraceOptions,
     include_dupes: bool,
+    type_aware: bool,
     top: Option<usize>,
     file: Vec<std::path::PathBuf>,
 }
@@ -4390,6 +4398,25 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         Ok(production) => production,
         Err(code) => return code,
     };
+    if args.type_aware && args.filters.any_active() && !args.filters.unused_class_members {
+        return emit_error(
+            "--type-aware currently only refines unused class-member findings; combine it with --unused-class-members or omit issue filters",
+            2,
+            output,
+        );
+    }
+    if args.type_aware
+        && (args.trace_opts.trace_export.is_some()
+            || args.trace_opts.trace_file.is_some()
+            || args.trace_opts.trace_dependency.is_some()
+            || args.trace_opts.impact_closure.is_some())
+    {
+        return emit_error(
+            "--type-aware cannot be combined with focused trace or impact-closure output",
+            2,
+            output,
+        );
+    }
     check::run_check(&CheckOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -4413,6 +4440,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,
         include_dupes: args.include_dupes,
+        type_aware: args.type_aware,
         trace_opts: &args.trace_opts,
         explain: cli.explain,
         top: args.top,
@@ -5612,6 +5640,27 @@ mod tests {
             panic!("dead-code --coverage should fail to parse");
         };
         assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn experimental_type_aware_flag_parses_for_class_members() {
+        let cli = Cli::try_parse_from([
+            "fallow",
+            "dead-code",
+            "--unused-class-members",
+            "--type-aware",
+        ])
+        .expect("experimental type-aware flag should parse");
+        let Some(Command::Check {
+            unused_class_members,
+            type_aware,
+            ..
+        }) = cli.command
+        else {
+            panic!("dead-code should parse as the check command");
+        };
+        assert!(unused_class_members);
+        assert!(type_aware);
     }
 
     #[test]

@@ -18,9 +18,9 @@
     "conformance:public-smoke": "node scripts/public-smoke-conformance.mjs",
     "smoke:styling-corpus": "node scripts/styling-corpus-smoke.mjs",
     "smoke:styling-prs": "node scripts/styling-pr-smoke.mjs",
-    "lint:js": "oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts commitlint.config.mjs",
-    "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts commitlint.config.mjs",
-    "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts commitlint.config.mjs"
+    "lint:js": "oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
+    "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
+    "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

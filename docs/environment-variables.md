@@ -61,6 +61,7 @@ discover these without parsing this page.
 | `FALLOW_COVERAGE_ROOT` | Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. The `--coverage-root` flag overrides it. | unset | `FALLOW_COVERAGE_ROOT=/ci/workspace` |
 | `FALLOW_COV_BIN` | Explicit path override for the `fallow-cov` runtime-coverage sidecar binary. | discovered | `FALLOW_COV_BIN=/usr/local/bin/fallow-cov` |
 | `FALLOW_COV_BINARY_PATH` | Secondary path override for the sidecar, checked after `FALLOW_COV_BIN` (air-gapped installs, distro-packaged sidecars, shared Docker images). | discovered | `FALLOW_COV_BINARY_PATH=/opt/fallow/fallow-cov` |
+| `FALLOW_TYPE_AWARE_BIN` | Experimental path override for the TypeScript semantic refinement sidecar used by `dead-code --type-aware`. | discovered | `FALLOW_TYPE_AWARE_BIN=./tools/type-aware-sidecar/fallow-type-aware.mjs` |
 | `FALLOW_RUNTIME_COVERAGE_SOURCE` | Set to `cloud` to select cloud runtime coverage in `fallow coverage analyze` without passing `--cloud`. | local | `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud` |
 
 ## Cloud API

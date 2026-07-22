@@ -96,6 +96,8 @@ pub(crate) struct ReportContext<'a> {
     pub(crate) elapsed: Duration,
     pub(crate) quiet: bool,
     pub(crate) explain: bool,
+    /// Provenance for the experimental TypeScript semantic refinement pass.
+    pub(crate) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
     /// When set, group all output by this resolver.
     pub(crate) group_by: Option<OwnershipResolver>,
     /// Limit displayed items per section (--top N).
@@ -303,6 +305,7 @@ pub(crate) fn print_results(
             root: ctx.root,
             elapsed: ctx.elapsed,
             explain: ctx.explain,
+            type_aware: ctx.type_aware,
             regression,
             baseline_matched: ctx.baseline_matched,
             config_fixable: ctx.config_fixable,
@@ -424,6 +427,7 @@ fn print_grouped_results(
             root: ctx.root,
             elapsed: ctx.elapsed,
             explain: ctx.explain,
+            type_aware: ctx.type_aware,
             resolver,
             config_fixable: ctx.config_fixable,
             json_style: ctx.json_style,
@@ -986,6 +990,7 @@ mod tests {
             elapsed: Duration::default(),
             quiet: true,
             explain: false,
+            type_aware: None,
             group_by: None,
             top: None,
             summary: false,

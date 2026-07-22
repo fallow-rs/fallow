@@ -5753,6 +5753,17 @@
           ],
           "description": "Local telemetry correlation metadata for agent follow-up runs."
         },
+        "type_aware": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeAwareMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provenance for the experimental TypeScript semantic refinement pass."
+        },
         "field_definitions": {
           "type": "object",
           "additionalProperties": {
@@ -18746,6 +18757,62 @@
         "exit_code"
       ],
       "description": "Structured JSON error emitted on stdout when `--format json` is active and a\ncommand fails. It carries no `kind` discriminator: it is distinguished from\nthe kind-tagged success envelopes by the required `error: true` field, and is\na document-root branch alongside `FallowOutput` and `CodeClimateOutput` in\n`docs/output-schema.json`. Agents that pass `--format json` and observe a\nnon-zero exit code parse this shape from stdout."
+    },
+    "TypeAwareMeta": {
+      "type": "object",
+      "properties": {
+        "protocol_version": {
+          "type": "integer",
+          "description": "Version of Fallow's backend-neutral sidecar protocol."
+        },
+        "backend": {
+          "type": "string",
+          "description": "Semantic backend capability identifier."
+        },
+        "backend_version": {
+          "type": "string",
+          "description": "Backend compiler or engine version."
+        },
+        "selected_tsconfigs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "TypeScript project configs selected for candidate files."
+        },
+        "candidate_count": {
+          "type": "integer",
+          "description": "Number of candidate findings sent to the sidecar."
+        },
+        "confirmed_used_count": {
+          "type": "integer",
+          "description": "Number of candidates confirmed as used and removed."
+        },
+        "unresolved_count": {
+          "type": "integer",
+          "description": "Number of candidates retained because semantic use was unresolved."
+        },
+        "warning_count": {
+          "type": "integer",
+          "description": "Number of bounded warnings returned by the sidecar."
+        },
+        "elapsed_ms": {
+          "type": "integer",
+          "description": "Semantic pass duration as reported by the sidecar."
+        }
+      },
+      "required": [
+        "protocol_version",
+        "backend",
+        "backend_version",
+        "selected_tsconfigs",
+        "candidate_count",
+        "confirmed_used_count",
+        "unresolved_count",
+        "warning_count",
+        "elapsed_ms"
+      ],
+      "description": "Bounded provenance emitted when the experimental type-aware pass runs."
     }
   }
 }

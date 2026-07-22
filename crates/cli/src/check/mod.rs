@@ -330,6 +330,8 @@ pub struct CheckOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
     pub include_dupes: bool,
+    /// Run the experimental TypeScript semantic refinement for class members.
+    pub type_aware: bool,
     pub trace_opts: &'a TraceOptions,
     pub explain: bool,
     pub top: Option<usize>,
@@ -362,6 +364,10 @@ pub struct CheckResult {
     pub timings: Option<fallow_types::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
+    /// Provenance for the experimental TypeScript semantic refinement pass.
+    pub type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
+    /// Bounded non-fatal diagnostics from the semantic backend.
+    pub type_aware_warnings: Vec<String>,
     /// Impact closure for the review brief: the transitive
     /// affected-but-not-in-diff set plus coordination gaps. Populated by the
     /// audit brief path from the retained graph against the changed-file set;
@@ -701,6 +707,7 @@ struct CheckCompletionInput<'a> {
     elapsed: Duration,
     regression_outcome: Option<RegressionOutcome>,
     baseline_matched: Option<(usize, usize)>,
+    type_aware: Option<crate::type_aware::TypeAwareOutcome>,
 }
 
 fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
@@ -711,6 +718,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         elapsed,
         regression_outcome,
         baseline_matched,
+        type_aware,
     } = input;
     let CheckAnalysisData {
         results,
@@ -744,6 +752,10 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     );
 
     let config_fixable = crate::fix::is_config_fixable(opts.root, opts.config_path.as_ref());
+    let (type_aware_meta, type_aware_warnings) = type_aware.map_or_else(
+        || (None, Vec::new()),
+        |outcome| (Some(outcome.meta), outcome.warnings),
+    );
 
     // Report result volume to telemetry from the real result, independent of
     // the exit-code gate. Exact counts are bucketed before serialization.
@@ -760,6 +772,8 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_matched,
         timings: trace_timings,
         shared_parse,
+        type_aware_meta,
+        type_aware_warnings,
         impact_closure: None,
         public_api_keys: None,
         partition_order: None,
@@ -820,6 +834,24 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     apply_rules_and_filters(opts, &config, &mut data.results);
 
+    let type_aware = if opts.type_aware {
+        Some(
+            crate::type_aware::refine_unused_class_members(
+                &config.root,
+                &mut data.results.unused_class_members,
+            )
+            .map_err(|error| {
+                emit_error(
+                    &format!("Type-aware analysis failed: {error}"),
+                    2,
+                    opts.output,
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+
     let baseline_matched = handle_baseline(
         &mut data.results,
         opts.save_baseline,
@@ -838,6 +870,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         elapsed,
         regression_outcome,
         baseline_matched,
+        type_aware,
     }))
 }
 
@@ -869,6 +902,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             elapsed: result.elapsed,
             quiet: opts.quiet,
             explain: opts.explain,
+            type_aware: result.type_aware_meta.as_ref(),
             group_by: opts.group_by,
             top: opts.top,
             summary: opts.summary,
@@ -912,6 +946,8 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         return report_code;
     }
 
+    print_type_aware_warnings(result, prepared.quiet);
+
     if let Some(exit) = check_regression_exit_code(result.regression.as_ref(), prepared.quiet) {
         return exit;
     }
@@ -919,6 +955,15 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
     issue_severity_exit_code(result, &prepared.effective_rules)
+}
+
+fn print_type_aware_warnings(result: &CheckResult, quiet: bool) {
+    if quiet || !matches!(result.config.output, OutputFormat::Human) {
+        return;
+    }
+    for warning in &result.type_aware_warnings {
+        eprintln!("Type-aware warning: {warning}");
+    }
 }
 
 fn check_regression_exit_code(

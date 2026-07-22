@@ -304,6 +304,9 @@ pub struct Meta {
     /// Local telemetry correlation metadata for agent follow-up runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryMeta>,
+    /// Provenance for the experimental TypeScript semantic refinement pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_aware: Option<TypeAwareMeta>,
     /// Per-field definitions for envelope fields and action payload fields.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub field_definitions: BTreeMap<String, String>,
@@ -313,6 +316,30 @@ pub struct Meta {
     /// Per-rule definitions for check command output.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rules: BTreeMap<String, MetaRule>,
+}
+
+/// Bounded provenance emitted when the experimental type-aware pass runs.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwareMeta {
+    /// Version of Fallow's backend-neutral sidecar protocol.
+    pub protocol_version: u32,
+    /// Semantic backend capability identifier.
+    pub backend: String,
+    /// Backend compiler or engine version.
+    pub backend_version: String,
+    /// TypeScript project configs selected for candidate files.
+    pub selected_tsconfigs: Vec<String>,
+    /// Number of candidate findings sent to the sidecar.
+    pub candidate_count: usize,
+    /// Number of candidates confirmed as used and removed.
+    pub confirmed_used_count: usize,
+    /// Number of candidates retained because semantic use was unresolved.
+    pub unresolved_count: usize,
+    /// Number of bounded warnings returned by the sidecar.
+    pub warning_count: usize,
+    /// Semantic pass duration as reported by the sidecar.
+    pub elapsed_ms: u64,
 }
 
 /// Privacy-safe local run metadata emitted for JSON consumers.

@@ -426,6 +426,10 @@ jobs:
         run: node scripts/check-comment-quality.mjs --all
       - name: Script tests
         run: node --test scripts/*.test.mjs
+      - name: Install type-aware proof dependencies
+        run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
+      - name: Type-aware proof tests
+        run: node --test tools/type-aware-sidecar/test/*.test.mjs
 
   npm-package:
     name: npm Package

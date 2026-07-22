@@ -318,6 +318,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         elapsed,
         quiet: opts.quiet,
         explain: opts.explain,
+        type_aware: None,
         group_by: None,
         top: None,
         summary: false,

@@ -979,6 +979,10 @@ docs?: (string | null)
  */
 telemetry?: (TelemetryMeta | null)
 /**
+ * Provenance for the experimental TypeScript semantic refinement pass.
+ */
+type_aware?: (TypeAwareMeta | null)
+/**
  * Per-field definitions for envelope fields and action payload fields.
  */
 field_definitions?: {
@@ -1007,6 +1011,47 @@ export interface TelemetryMeta {
  * machine, project, or cloud data.
  */
 analysis_run_id?: (string | null)
+}
+/**
+ * Bounded provenance emitted when the experimental type-aware pass runs.
+ */
+export interface TypeAwareMeta {
+/**
+ * Version of Fallow's backend-neutral sidecar protocol.
+ */
+protocol_version: number
+/**
+ * Semantic backend capability identifier.
+ */
+backend: string
+/**
+ * Backend compiler or engine version.
+ */
+backend_version: string
+/**
+ * TypeScript project configs selected for candidate files.
+ */
+selected_tsconfigs: string[]
+/**
+ * Number of candidate findings sent to the sidecar.
+ */
+candidate_count: number
+/**
+ * Number of candidates confirmed as used and removed.
+ */
+confirmed_used_count: number
+/**
+ * Number of candidates retained because semantic use was unresolved.
+ */
+unresolved_count: number
+/**
+ * Number of bounded warnings returned by the sidecar.
+ */
+warning_count: number
+/**
+ * Semantic pass duration as reported by the sidecar.
+ */
+elapsed_ms: number
 }
 /**
  * Single-metric definition inside [`Meta::metrics`].

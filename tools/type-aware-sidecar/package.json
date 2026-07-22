@@ -1,0 +1,18 @@
+{
+  "name": "@fallow/type-aware-sidecar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "fallow-type-aware": "./fallow-type-aware.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
