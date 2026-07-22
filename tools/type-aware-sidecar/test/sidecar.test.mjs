@@ -125,12 +125,17 @@ test("confirms only the used case-different candidate on case-sensitive filesyst
   try {
     write(
       root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      "Pkg/tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["Service.ts"] }),
     );
     write(
       root,
-      "src/Service.ts",
+      "pkg/tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["service.ts"] }),
+    );
+    write(
+      root,
+      "Pkg/Service.ts",
       `export class Service {
   run(): void {}
 }
@@ -139,15 +144,15 @@ new Service().run();
     );
     write(
       root,
-      "src/service.ts",
+      "pkg/service.ts",
       `export class Service {
   run(): void {}
 }
 `,
     );
 
-    const upper = path.join(root, "src", "Service.ts");
-    const lower = path.join(root, "src", "service.ts");
+    const upper = path.join(root, "Pkg", "Service.ts");
+    const lower = path.join(root, "pkg", "service.ts");
     const upperStat = statSync(upper);
     const lowerStat = statSync(lower);
     if (upperStat.dev === lowerStat.dev && upperStat.ino === lowerStat.ino) {
@@ -155,12 +160,12 @@ new Service().run();
       return;
     }
 
-    const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "src/Service.ts", owner: "Service", member: "run" }),
-        candidate({ id: 1, file: "src/service.ts", owner: "Service", member: "run" }),
-      ]),
-    );
+    const body = request(root, [
+      candidate({ id: 0, file: "Pkg/Service.ts", owner: "Service", member: "run" }),
+      candidate({ id: 1, file: "pkg/service.ts", owner: "Service", member: "run" }),
+    ]);
+    body.projects = ["Pkg/tsconfig.json", "pkg/tsconfig.json"];
+    const response = runSidecar(body);
 
     assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
     assert.deepEqual(response.unresolved_candidate_ids, [1]);
