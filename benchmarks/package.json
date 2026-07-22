@@ -19,7 +19,7 @@
     "bench:circular:real-world": "node bench-circular.mjs --real-world"
   },
   "dependencies": {
-    "dpdm": "^4.0.0",
+    "dpdm": "^4.2.0",
     "jscpd": "^5.0.10",
     "knip": "^6.17.1",
     "madge": "^8.0.0",
