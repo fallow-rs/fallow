@@ -187,6 +187,15 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.doesNotMatch(aggregateJob, /windows-audit-smoke|windows-arm64/);
 });
 
+test("MSRV CI forces Rust 1.92 despite the repository toolchain override", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const msrvJob = indentedBlock(workflow, "msrv", 2);
+
+  assert.match(msrvJob, /RUSTUP_TOOLCHAIN: 1\.92\.0/);
+  assert.match(msrvJob, /toolchain: '1\.92\.0'/);
+  assert.match(msrvJob, /run: cargo check --workspace/);
+});
+
 test("release runs Windows correctness and lifecycle verification without credentials", () => {
   const releaseWorkflow = readWorkflow(".github/workflows/release.yml");
   const validationWorkflow = readWorkflow(".github/workflows/release-validation.yml");
