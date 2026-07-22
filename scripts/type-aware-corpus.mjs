@@ -19,9 +19,6 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parseRequest as parseTypeAwareRequest } from "../tools/type-aware-sidecar/src/protocol.mjs";
-import { analyzeClassMemberUses } from "../tools/type-aware-sidecar/src/typescript-go.mjs";
-
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const DEFAULT_MANIFEST = resolve(REPO_ROOT, "benchmarks/type-aware-corpus.json");
@@ -1382,7 +1379,11 @@ const sourceLocationEvidence = (root, location) => {
   return { path: location.path, line: location.line, col: location.col, excerpt };
 };
 
-const collectCheckerEvidence = (project, candidates, outDir) => {
+const collectCheckerEvidence = async (project, candidates, outDir) => {
+  const [{ parseRequest: parseTypeAwareRequest }, { analyzeClassMemberUses }] = await Promise.all([
+    import("../tools/type-aware-sidecar/src/protocol.mjs"),
+    import("../tools/type-aware-sidecar/src/typescript-go.mjs"),
+  ]);
   const root = projectRoot(project, outDir);
   const request = parseTypeAwareRequest({
     protocol_version: 2,
@@ -1465,7 +1466,7 @@ export const indexLedgerForRefresh = (previous, discoveredKeys) => {
   return previousByKey;
 };
 
-const evidence = (manifest, projects, options) => {
+const evidence = async (manifest, projects, options) => {
   const discovery = readDiscovery(options.outDir);
   const selected = new Map(projects.map((project) => [project.id, project]));
   const ledgerPath = resolve(options.outDir, "ledger.json");
@@ -1481,7 +1482,7 @@ const evidence = (manifest, projects, options) => {
     const project = selected.get(result.id);
     if (!project) continue;
     const root = projectRoot(project, options.outDir);
-    const checkerEvidence = collectCheckerEvidence(
+    const checkerEvidence = await collectCheckerEvidence(
       project,
       result.candidates ?? [],
       options.outDir,
@@ -2329,7 +2330,7 @@ export const main = async (argv = process.argv.slice(2)) => {
   else if (options.command === "discover") await discover(manifest, projects, options);
   else if (options.command === "measure") await measure(manifest, projects, options);
   else if (options.command === "focused") focused(options);
-  else if (options.command === "evidence") evidence(manifest, manifest.projects, options);
+  else if (options.command === "evidence") await evidence(manifest, manifest.projects, options);
   else if (options.command === "adjudicate") adjudicate(options.outDir);
   else if (options.command === "verify-ledger") verifyLedger(options.outDir, manifest);
   else if (options.command === "summarize") summarize(manifest, options);

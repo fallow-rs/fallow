@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -145,6 +146,31 @@ test("publication verifier rejects a focused Fallow binary hash mismatch", () =>
 
   assert.throws(() => requirePublicationGo(summary, "verify"), /NO-GO.*focused_cases/);
   assert.doesNotThrow(() => requirePublicationGo(summary, "write"));
+});
+
+test("corpus harness import does not require sidecar dependencies", () => {
+  const root = mkdtempSync(resolve(tmpdir(), "fallow-sidecar-import-"));
+  try {
+    const loader = resolve(root, "reject-typescript.mjs");
+    writeFileSync(
+      loader,
+      'export const resolve = (specifier, context, nextResolve) => {\n  if (specifier === "typescript" || specifier.startsWith("typescript/")) throw new Error("unexpected TypeScript import");\n  return nextResolve(specifier, context);\n};\n',
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-loader",
+        loader,
+        "--input-type=module",
+        "--eval",
+        'await import("./scripts/type-aware-corpus.mjs")',
+      ],
+      { cwd: REPO_ROOT, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("partial runs require an isolated non-canonical output directory", () => {
