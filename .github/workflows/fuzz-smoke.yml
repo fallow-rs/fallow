@@ -7,6 +7,7 @@ on:
       - 'fuzz/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.cargo/**'
       - 'crates/extract/**'
       - 'crates/core/**'
       - 'crates/types/**'
@@ -21,6 +22,7 @@ on:
       - 'fuzz/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.cargo/**'
       - 'crates/extract/**'
       - 'crates/core/**'
       - 'crates/types/**'
@@ -42,7 +44,6 @@ permissions: {}
 env:
   CARGO_TERM_COLOR: always
   FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
-  FUZZ_TARGETS: fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts
   FUZZ_TIME_SECONDS: ${{ github.event_name == 'schedule' && '300' || '30' }}
 
 jobs:
@@ -70,6 +71,7 @@ jobs:
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: cargo-fuzz@0.13.2
+          fallback: cargo-install
 
       - name: Verify locked fuzz dependencies
         run: cargo +nightly-2026-07-20 metadata --locked --no-deps --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
@@ -77,8 +79,10 @@ jobs:
       - name: Run bounded fuzz smoke
         shell: bash
         run: |
+          set -u
+          targets=(fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts)
           failed=0
-          for target in $FUZZ_TARGETS; do
+          for target in "${targets[@]}"; do
             echo "::group::Fuzz ${target}"
             if ! cargo +nightly-2026-07-20 fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" -- -max_total_time="$FUZZ_TIME_SECONDS" -timeout=10; then
               failed=1

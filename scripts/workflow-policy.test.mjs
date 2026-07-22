@@ -44,18 +44,31 @@ test("workflow block parser rejects missing keys", () => {
 
 test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
   const workflow = readWorkflow(".github/workflows/fuzz-smoke.yml");
+  const fuzzManifest = readFileSync("fuzz/Cargo.toml", "utf8");
+  const manifestTargets = Array.from(
+    fuzzManifest.matchAll(/^\[\[bin\]\]\nname = "([^"]+)"$/gm),
+    (match) => match[1],
+  );
   const pushPaths = listedPaths(indentedBlock(workflow, "push", 2));
   const pullRequestPaths = listedPaths(indentedBlock(workflow, "pull_request", 2));
   const job = indentedBlock(workflow, "fuzz-smoke", 2);
+  const workflowTargets = job
+    .match(/targets=\(([^)]+)\)/)?.[1]
+    .trim()
+    .split(/\s+/);
 
+  assert.notEqual(manifestTargets.length, 0, "fuzz manifest must define targets");
+  assert.deepEqual(workflowTargets, manifestTargets);
   assert.match(workflow, /^  schedule:\n    - cron: '30 5 \* \* 0'$/m);
   assert.match(workflow, /FUZZ_TIME_SECONDS:.*'schedule'.*'300'.*'30'/);
   assert.match(workflow, /FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu/);
-  assert.match(workflow, /FUZZ_TARGETS: fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts/);
   assert.match(job, /persist-credentials: false/);
   assert.match(job, /toolchain: nightly-2026-07-20/);
   assert.match(job, /tool: cargo-fuzz@0\.13\.2/);
+  assert.match(job, /fallback: cargo-install/);
   assert.match(job, /cargo \+nightly-2026-07-20 metadata --locked/);
+  assert.match(job, /set -u/);
+  assert.match(job, /for target in "\$\{targets\[@\]\}"/);
   assert.match(
     job,
     /cargo \+nightly-2026-07-20 fuzz run --target "\$FUZZ_TARGET_TRIPLE" "\$target"/,
@@ -69,6 +82,7 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
     "fuzz/**",
     "Cargo.toml",
     "Cargo.lock",
+    ".cargo/**",
     "crates/extract/**",
     "crates/core/**",
     "crates/types/**",
