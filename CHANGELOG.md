@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Next.js fallback metadata exports are no longer reported as unused.** App
+  Router `not-found`, `default`, `forbidden`, `unauthorized`, and experimental
+  `global-not-found` files now credit `metadata`, `generateMetadata`,
+  `viewport`, and `generateViewport`, matching the modules Next.js reads while
+  resolving fallback head content. Arbitrary helper and route segment config
+  exports remain reportable. Thanks
+  [@BartWaardenburg](https://github.com/BartWaardenburg) for the report. (Closes
+  [#1987](https://github.com/fallow-rs/fallow/issues/1987).)
+
 - **Audit and dead-code results stay accurate across deeper class hierarchies
   and materialized project context.** Multi-hop generic inheritance and
   class-scoped `this` references now credit the correct members, nested

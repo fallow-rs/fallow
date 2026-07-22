@@ -88,7 +88,7 @@ fn nextjs_convention_exports_are_not_flagged() {
 #[test]
 fn nextjs_special_file_exports_are_not_flagged() {
     let root = fixture_path("nextjs-project");
-    let config = create_config(root);
+    let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
@@ -98,31 +98,45 @@ fn nextjs_special_file_exports_are_not_flagged() {
             (
                 e.export
                     .path
-                    .file_name()
-                    .unwrap()
+                    .strip_prefix(&root)
+                    .unwrap_or(&e.export.path)
                     .to_string_lossy()
-                    .to_string(),
+                    .replace('\\', "/"),
                 e.export.export_name.clone(),
             )
         })
         .collect();
 
     for (file, export) in [
-        ("loading.tsx", "default"),
-        ("error.tsx", "default"),
-        ("not-found.tsx", "default"),
-        ("template.tsx", "default"),
-        ("default.tsx", "default"),
-        ("global-error.tsx", "default"),
-        ("global-not-found.tsx", "default"),
-        ("global-not-found.tsx", "metadata"),
-        ("mdx-components.tsx", "useMDXComponents"),
-        ("sitemap.ts", "dynamic"),
-        ("sitemap.ts", "revalidate"),
-        ("sitemap.ts", "fetchCache"),
-        ("sitemap.ts", "runtime"),
-        ("sitemap.ts", "preferredRegion"),
-        ("sitemap.ts", "maxDuration"),
+        ("src/app/loading.tsx", "default"),
+        ("src/app/error.tsx", "default"),
+        ("src/app/not-found.tsx", "default"),
+        ("src/app/not-found.tsx", "metadata"),
+        ("src/app/not-found.tsx", "viewport"),
+        ("src/app/dynamic/not-found.tsx", "default"),
+        ("src/app/dynamic/not-found.tsx", "generateMetadata"),
+        ("src/app/dynamic/not-found.tsx", "generateViewport"),
+        ("src/app/template.tsx", "default"),
+        ("src/app/default.tsx", "default"),
+        ("src/app/default.tsx", "metadata"),
+        ("src/app/default.tsx", "viewport"),
+        ("src/app/global-error.tsx", "default"),
+        ("src/app/global-not-found.tsx", "default"),
+        ("src/app/global-not-found.tsx", "metadata"),
+        ("src/app/global-not-found.tsx", "generateViewport"),
+        ("src/app/forbidden.tsx", "default"),
+        ("src/app/forbidden.tsx", "metadata"),
+        ("src/app/forbidden.tsx", "viewport"),
+        ("src/app/unauthorized.tsx", "default"),
+        ("src/app/unauthorized.tsx", "generateMetadata"),
+        ("src/app/unauthorized.tsx", "generateViewport"),
+        ("src/mdx-components.tsx", "useMDXComponents"),
+        ("src/app/sitemap.ts", "dynamic"),
+        ("src/app/sitemap.ts", "revalidate"),
+        ("src/app/sitemap.ts", "fetchCache"),
+        ("src/app/sitemap.ts", "runtime"),
+        ("src/app/sitemap.ts", "preferredRegion"),
+        ("src/app/sitemap.ts", "maxDuration"),
     ] {
         assert!(
             !unused_exports
@@ -133,14 +147,22 @@ fn nextjs_special_file_exports_are_not_flagged() {
     }
 
     for (file, export) in [
-        ("loading.tsx", "unusedLoadingHelper"),
-        ("proxy.ts", "unusedProxyHelper"),
-        ("instrumentation.ts", "unusedInstrumentationHelper"),
-        ("instrumentation-client.ts", "unusedClientHelper"),
-        ("mdx-components.tsx", "unusedMdxHelper"),
-        ("global-not-found.tsx", "unusedGlobalNotFoundHelper"),
-        ("sitemap.ts", "dynamicParams"),
-        ("sitemap.ts", "unusedSitemapHelper"),
+        ("src/app/loading.tsx", "unusedLoadingHelper"),
+        ("src/proxy.ts", "unusedProxyHelper"),
+        ("src/instrumentation.ts", "unusedInstrumentationHelper"),
+        ("src/instrumentation-client.ts", "unusedClientHelper"),
+        ("src/mdx-components.tsx", "unusedMdxHelper"),
+        ("src/app/not-found.tsx", "unusedNotFoundHelper"),
+        (
+            "src/app/dynamic/not-found.tsx",
+            "unusedDynamicNotFoundHelper",
+        ),
+        ("src/app/default.tsx", "unusedDefaultHelper"),
+        ("src/app/global-not-found.tsx", "unusedGlobalNotFoundHelper"),
+        ("src/app/forbidden.tsx", "unusedForbiddenHelper"),
+        ("src/app/unauthorized.tsx", "unusedUnauthorizedHelper"),
+        ("src/app/sitemap.ts", "dynamicParams"),
+        ("src/app/sitemap.ts", "unusedSitemapHelper"),
     ] {
         assert!(
             unused_exports

@@ -80,7 +80,7 @@ The npm package ships the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers plu
 - [Auto-fix](https://docs.fallow.tools/analysis/auto-fix) with a dry-run preview
 - Opt-in [security candidates](docs/security-agent-verification.md) ranked by reachability from entry points (`fallow security`)
 
-Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) detect entry points automatically, so the first run needs no configuration. Fallow Runtime, the optional paid layer, merges production execution evidence into these same reports; see [Runtime intelligence (optional)](#runtime-intelligence-optional) and [static vs runtime](https://docs.fallow.tools/explanations/static-vs-runtime).
+Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) detect entry points and framework-consumed exports automatically, so the first run needs no configuration. Fallow Runtime, the optional paid layer, merges production execution evidence into these same reports; see [Runtime intelligence (optional)](#runtime-intelligence-optional) and [static vs runtime](https://docs.fallow.tools/explanations/static-vs-runtime).
 
 ## Your first run
 

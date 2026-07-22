@@ -68,6 +68,13 @@ const PAGES_ROUTER_EXPORTS: &[&str] = &[
 const PAGES_APP_EXPORTS: &[&str] = &["default", "reportWebVitals"];
 const PAGES_API_EXPORTS: &[&str] = &["default", "config"];
 const DEFAULT_ONLY_EXPORTS: &[&str] = &["default"];
+const FALLBACK_EXPORTS: &[&str] = &[
+    "default",
+    "metadata",
+    "generateMetadata",
+    "viewport",
+    "generateViewport",
+];
 const MIDDLEWARE_EXPORTS: &[&str] = &["default", "middleware", "config"];
 const PROXY_EXPORTS: &[&str] = &["default", "proxy", "config"];
 const INSTRUMENTATION_EXPORTS: &[&str] = &["register", "onRequestError"];
@@ -100,7 +107,6 @@ const OG_IMAGE_EXPORTS: &[&str] = metadata_route_exports!(
 const MANIFEST_EXPORTS: &[&str] = metadata_route_exports!("default");
 const SITEMAP_EXPORTS: &[&str] = metadata_route_exports!("default", "generateSitemaps");
 const ROBOTS_EXPORTS: &[&str] = metadata_route_exports!("default");
-const GLOBAL_NOT_FOUND_EXPORTS: &[&str] = &["default", "metadata", "generateMetadata"];
 
 define_plugin!(
     struct NextJsPlugin => "nextjs",
@@ -181,14 +187,14 @@ define_plugin!(
         ("app/**/layout.{ts,tsx,js,jsx}", LAYOUT_EXPORTS),
         ("app/**/loading.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
         ("app/**/error.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("app/**/not-found.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
+        ("app/**/not-found.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
         ("app/**/template.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("app/**/default.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
+        ("app/**/default.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
         ("app/**/route.{ts,tsx,js,jsx}", ROUTE_EXPORTS),
         ("app/**/global-error.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("app/**/forbidden.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("app/**/unauthorized.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("app/global-not-found.{ts,tsx,js,jsx}", GLOBAL_NOT_FOUND_EXPORTS),
+        ("app/**/forbidden.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
+        ("app/**/unauthorized.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
+        ("app/global-not-found.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
         ("pages/**/*.{ts,tsx,js,jsx}", PAGES_ROUTER_EXPORTS),
         ("pages/_app.{ts,tsx,js,jsx}", PAGES_APP_EXPORTS),
         ("pages/api/**/*.{ts,tsx,js,jsx}", PAGES_API_EXPORTS),
@@ -196,14 +202,14 @@ define_plugin!(
         ("src/app/**/layout.{ts,tsx,js,jsx}", LAYOUT_EXPORTS),
         ("src/app/**/loading.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
         ("src/app/**/error.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("src/app/**/not-found.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
+        ("src/app/**/not-found.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
         ("src/app/**/template.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("src/app/**/default.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
+        ("src/app/**/default.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
         ("src/app/**/route.{ts,tsx,js,jsx}", ROUTE_EXPORTS),
         ("src/app/**/global-error.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("src/app/**/forbidden.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("src/app/**/unauthorized.{ts,tsx,js,jsx}", DEFAULT_ONLY_EXPORTS),
-        ("src/app/global-not-found.{ts,tsx,js,jsx}", GLOBAL_NOT_FOUND_EXPORTS),
+        ("src/app/**/forbidden.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
+        ("src/app/**/unauthorized.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
+        ("src/app/global-not-found.{ts,tsx,js,jsx}", FALLBACK_EXPORTS),
         ("src/pages/**/*.{ts,tsx,js,jsx}", PAGES_ROUTER_EXPORTS),
         ("src/pages/_app.{ts,tsx,js,jsx}", PAGES_APP_EXPORTS),
         ("src/pages/api/**/*.{ts,tsx,js,jsx}", PAGES_API_EXPORTS),
@@ -426,6 +432,61 @@ mod tests {
             .find(|(pat, _)| *pat == "mdx-components.{ts,tsx,js,jsx}")
             .expect("should have mdx-components used exports");
         assert!(mdx_entry.1.contains(&"useMDXComponents"));
+    }
+
+    #[test]
+    fn fallback_files_include_supported_metadata_exports() {
+        let plugin = NextJsPlugin;
+        let exports = plugin.used_exports();
+        let fallback_patterns = [
+            "app/**/not-found.{ts,tsx,js,jsx}",
+            "app/**/default.{ts,tsx,js,jsx}",
+            "app/**/forbidden.{ts,tsx,js,jsx}",
+            "app/**/unauthorized.{ts,tsx,js,jsx}",
+            "app/global-not-found.{ts,tsx,js,jsx}",
+            "src/app/**/not-found.{ts,tsx,js,jsx}",
+            "src/app/**/default.{ts,tsx,js,jsx}",
+            "src/app/**/forbidden.{ts,tsx,js,jsx}",
+            "src/app/**/unauthorized.{ts,tsx,js,jsx}",
+            "src/app/global-not-found.{ts,tsx,js,jsx}",
+        ];
+
+        for pattern in fallback_patterns {
+            let (_, used) = exports
+                .iter()
+                .find(|(candidate, _)| *candidate == pattern)
+                .unwrap_or_else(|| panic!("missing fallback pattern {pattern}"));
+
+            assert_eq!(*used, FALLBACK_EXPORTS, "unexpected exports for {pattern}");
+        }
+    }
+
+    #[test]
+    fn unsupported_special_files_remain_default_only() {
+        let plugin = NextJsPlugin;
+        let exports = plugin.used_exports();
+        let default_only_patterns = [
+            "app/**/loading.{ts,tsx,js,jsx}",
+            "app/**/error.{ts,tsx,js,jsx}",
+            "app/**/template.{ts,tsx,js,jsx}",
+            "app/**/global-error.{ts,tsx,js,jsx}",
+            "src/app/**/loading.{ts,tsx,js,jsx}",
+            "src/app/**/error.{ts,tsx,js,jsx}",
+            "src/app/**/template.{ts,tsx,js,jsx}",
+            "src/app/**/global-error.{ts,tsx,js,jsx}",
+        ];
+
+        for pattern in default_only_patterns {
+            let (_, used) = exports
+                .iter()
+                .find(|(candidate, _)| *candidate == pattern)
+                .unwrap_or_else(|| panic!("missing special-file pattern {pattern}"));
+
+            assert_eq!(
+                *used, DEFAULT_ONLY_EXPORTS,
+                "unexpected exports for {pattern}"
+            );
+        }
     }
 
     #[test]
