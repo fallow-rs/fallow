@@ -4,7 +4,8 @@
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",
     "editors/vscode/test/integration/fixtures/**",
-    "apps/review-electron/test/fixtures/**"
+    "apps/review-electron/test/fixtures/**",
+    "fuzz/corpus/**"
   ],
   "ignoreUnresolvedImports": [
     "./generated/lsp-initialization-options.js",
