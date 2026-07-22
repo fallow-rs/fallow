@@ -30,7 +30,7 @@ pub use walk::{
 ///
 /// Source discovery runs before full plugin execution, so this consults
 /// package-activation checks and static plugin metadata only. Callers that
-/// also need script-derived scopes should use [`collect_hidden_dir_scopes`]
+/// also need script-derived scopes should use `collect_hidden_dir_scopes`
 /// instead, which loads each workspace's `package.json` once and feeds both
 /// passes; standalone CLI command paths can use
 /// [`discover_files_with_plugin_scopes`] when they have neither already.

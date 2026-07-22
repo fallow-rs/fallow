@@ -103,11 +103,10 @@ pub struct ModuleGraph {
 
 /// An edge in the module graph.
 ///
-/// Public surface: `fallow trace` walks the raw per-symbol `imported_name`
-/// / `local_name` in BOTH directions (callers via `reverse_deps`, callees via
-/// outgoing edges), which the flattened summary structs cannot express. The
-/// field layout (and the `Edge == 32` size assertion below) is unchanged by the
-/// visibility widen.
+/// Public consumers inspect relationships through summary methods such as
+/// [`ModuleGraph::direct_importer_summaries`] and
+/// [`ModuleGraph::outgoing_edge_summaries`]. Keeping the raw storage private
+/// preserves graph invariants and the `Edge == 32` size assertion below.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Edge {
     /// Source module of this import edge.

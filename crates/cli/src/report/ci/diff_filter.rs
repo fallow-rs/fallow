@@ -61,7 +61,7 @@ pub enum DiffSource {
     /// `--diff-file <path>` (absolute after root-join).
     Flag(PathBuf),
     /// `--diff-stdin` or `--diff-file -`. Stdin is consumed exactly once;
-    /// repeated calls to [`resolve_diff_source`] would observe EOF.
+    /// repeated calls to `resolve_diff_source` would observe EOF.
     Stdin,
     /// `$FALLOW_DIFF_FILE` (absolute after root-join). The env-var path is
     /// the load-bearing breadcrumb for the GitHub Action and the GitLab CI
@@ -81,7 +81,7 @@ impl DiffSource {
     }
 }
 
-/// Result of [`load_diff_index_for_findings`]. Carries the parsed
+/// Result of `load_diff_index_for_findings`. Carries the parsed
 /// `DiffIndex` plus the raw unified-diff text it was parsed from; the source
 /// breadcrumb is consumed by the function during load to compose warning
 /// messages and is not retained beyond that. The raw text is retained so the

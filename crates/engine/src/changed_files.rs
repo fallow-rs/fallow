@@ -208,7 +208,7 @@ pub fn try_get_changed_files_with_toplevel(
 /// Return the raw git diff from a ref's merge base through the working tree.
 ///
 /// The result includes committed, staged, unstaged, and untracked changes so it
-/// covers the same scope as [`try_get_changed_files`].
+/// covers the same scope as `try_get_changed_files`.
 pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
     validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
     let toplevel = resolve_git_toplevel(root)?;

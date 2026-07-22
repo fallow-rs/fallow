@@ -629,7 +629,7 @@ pub(crate) fn extract_config_static_dir_entries(
 /// Extract paired `(primary, optional secondary)` string values from each object
 /// element of an array at `array_path`.
 ///
-/// Mirrors [`extract_config_array_object_strings`] but keeps a per-element
+/// Mirrors `extract_config_array_object_strings` but keeps a per-element
 /// secondary value alongside the primary one, so correlated fields stay paired.
 /// An element is included only when its `primary_key` resolves to a recoverable
 /// path string; the `secondary_key` is `None` when absent or non-recoverable.

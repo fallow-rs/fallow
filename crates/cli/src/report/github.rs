@@ -70,7 +70,7 @@ impl AnnotationLevel {
 }
 
 /// One GitHub workflow-command annotation, pre-escaping. `message` holds real
-/// newlines; [`render_annotation`] applies the escaping contract.
+/// newlines; `render_annotation` applies the escaping contract.
 #[derive(Debug)]
 pub struct Annotation {
     pub(crate) level: AnnotationLevel,
