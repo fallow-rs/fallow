@@ -19,6 +19,10 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    allow:
+      # The fuzz workspace has one direct registry dependency. Its lockfile also
+      # contains the root workspace graph through the fallow-core path dependency.
+      - dependency-name: libfuzzer-sys
     open-pull-requests-limit: 10
 
   - package-ecosystem: cargo

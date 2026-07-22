@@ -5,6 +5,18 @@ import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
+const dependabotUpdate = (config, ecosystem, directory) => {
+  const update = config
+    .split(/(?=^  - package-ecosystem: )/mu)
+    .find(
+      (candidate) =>
+        candidate.includes(`package-ecosystem: ${ecosystem}`) &&
+        candidate.includes(`directory: ${directory}`),
+    );
+  assert.ok(update, `missing Dependabot update for ${ecosystem} in ${directory}`);
+  return update;
+};
+
 const documentedFields = (guide, heading) => {
   const marker = `### ${heading}`;
   const start = guide.indexOf(marker);
@@ -39,6 +51,16 @@ const missingDocumentedNodeFunctions = (declarations, readme) => {
 
 test("committed binary-signing public keys remain in parity", () => {
   assert.equal(checkRepositorySigningKeyParity().length, 32);
+});
+
+test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
+  const config = readFileSync(".github/dependabot.yml", "utf8");
+  const update = dependabotUpdate(config, "cargo", "/fuzz");
+  const allowedDependencies = [...update.matchAll(/^\s+- dependency-name: ([^\s]+)$/gmu)].map(
+    (match) => match[1],
+  );
+
+  assert.deepEqual(allowedDependencies, ["libfuzzer-sys"]);
 });
 
 test("root Node API overview follows the published declarations", () => {
