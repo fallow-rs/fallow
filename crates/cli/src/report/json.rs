@@ -116,8 +116,106 @@ fn check_output_meta(
     } else {
         fallow_types::envelope::Meta::default()
     };
+    if explain && type_aware.is_some() {
+        add_type_aware_explanations(&mut meta);
+    }
     meta.type_aware = type_aware.cloned();
     Some(meta)
+}
+
+fn add_type_aware_explanations(meta: &mut fallow_types::envelope::Meta) {
+    meta.field_definitions.extend([
+        (
+            "type_aware.protocol_version".to_owned(),
+            "Version of Fallow's backend-neutral type-aware sidecar protocol.".to_owned(),
+        ),
+        (
+            "type_aware.backend".to_owned(),
+            "Semantic backend capability identifier.".to_owned(),
+        ),
+        (
+            "type_aware.backend_version".to_owned(),
+            "Compiler or semantic engine version used by the backend.".to_owned(),
+        ),
+        (
+            "type_aware.selected_tsconfigs".to_owned(),
+            "Sorted project configs selected for candidate files. The <inferred> marker denotes a TypeScript inferred project.".to_owned(),
+        ),
+        (
+            "type_aware.warnings".to_owned(),
+            "Bounded semantic warnings. Affected candidates remain findings.".to_owned(),
+        ),
+    ]);
+    meta.metrics.extend([
+        (
+            "type_aware.protocol_version".to_owned(),
+            type_aware_metric(
+                "Type-aware Protocol Version",
+                "Version of Fallow's backend-neutral semantic sidecar protocol.",
+                "[1, infinity)",
+                "must match the protocol version supported by this Fallow build",
+            ),
+        ),
+        (
+            "type_aware.candidate_count".to_owned(),
+            type_aware_metric(
+                "Type-aware Candidate Count",
+                "Class-member findings sent to the semantic sidecar after normal Fallow filtering.",
+                "[0, infinity)",
+                "context only",
+            ),
+        ),
+        (
+            "type_aware.confirmed_used_count".to_owned(),
+            type_aware_metric(
+                "Type-aware Confirmed Used Count",
+                "Candidates whose exact declaration was resolved from a property access and removed from the findings.",
+                "[0, candidate_count]",
+                "higher means semantic analysis removed more syntactic false positives",
+            ),
+        ),
+        (
+            "type_aware.unresolved_count".to_owned(),
+            type_aware_metric(
+                "Type-aware Unresolved Count",
+                "Candidates not positively confirmed as used and therefore retained as findings.",
+                "[0, candidate_count]",
+                "lower means more candidates were resolved exactly",
+            ),
+        ),
+        (
+            "type_aware.warning_count".to_owned(),
+            type_aware_metric(
+                "Type-aware Warning Count",
+                "Bounded semantic warnings returned by the sidecar.",
+                "[0, 20]",
+                "zero means the selected projects produced no semantic warnings",
+            ),
+        ),
+        (
+            "type_aware.elapsed_ms".to_owned(),
+            type_aware_metric(
+                "Type-aware Elapsed Time",
+                "Semantic pass duration reported by the sidecar in milliseconds.",
+                "[0, infinity)",
+                "lower is faster",
+            ),
+        ),
+    ]);
+}
+
+fn type_aware_metric(
+    name: &str,
+    description: &str,
+    range: &str,
+    interpretation: &str,
+) -> fallow_types::envelope::MetaMetric {
+    fallow_types::envelope::MetaMetric {
+        name: Some(name.to_owned()),
+        description: Some(description.to_owned()),
+        range: Some(range.to_owned()),
+        interpretation: Some(interpretation.to_owned()),
+    }
 }
 
 #[allow(
@@ -1703,7 +1801,8 @@ mod tests {
             candidate_count: 2,
             confirmed_used_count: 1,
             unresolved_count: 1,
-            warning_count: 0,
+            warning_count: 1,
+            warnings: vec!["unresolved finding kept".to_owned()],
             elapsed_ms: 12,
         };
         let output = api_check_json_document_with_config_fixable_meta_and_extras(
@@ -1717,7 +1816,25 @@ mod tests {
         .expect("type-aware metadata should serialize");
 
         assert_eq!(output["_meta"]["type_aware"]["backend"], "typescript-go");
+        assert_eq!(
+            output["_meta"]["type_aware"]["warnings"][0],
+            "unresolved finding kept"
+        );
         assert!(output["_meta"].get("rules").is_none());
+    }
+
+    #[test]
+    fn type_aware_explain_defines_semantic_metrics() {
+        let type_aware = fallow_types::envelope::TypeAwareMeta::default();
+        let meta = check_output_meta(true, Some(&type_aware)).expect("metadata");
+
+        assert!(
+            meta.field_definitions
+                .contains_key("type_aware.protocol_version")
+        );
+        assert!(meta.metrics.contains_key("type_aware.protocol_version"));
+        assert!(meta.metrics.contains_key("type_aware.candidate_count"));
+        assert!(meta.metrics.contains_key("type_aware.elapsed_ms"));
     }
 
     #[test]

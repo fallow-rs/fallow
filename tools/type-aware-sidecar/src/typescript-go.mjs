@@ -13,6 +13,7 @@ import {
 } from "typescript/unstable/ast/is";
 
 const MAX_WARNINGS = 20;
+const INFERRED_PROJECT = "<inferred>";
 
 const normalizeFileName = (fileName) => {
   const normalized = path.normalize(path.resolve(fileName));
@@ -22,6 +23,10 @@ const normalizeFileName = (fileName) => {
 };
 
 const relativeConfigPath = (root, configFileName) => {
+  const normalized = configFileName.split(path.sep).join("/");
+  if (normalized.endsWith("/dev/null/inferred")) {
+    return INFERRED_PROJECT;
+  }
   const relative = path.relative(root, configFileName);
   return (relative || path.basename(configFileName)).split(path.sep).join("/");
 };
@@ -208,9 +213,10 @@ const selectCandidateProjects = (snapshot, candidates, warnings) => {
 const warnForProjectDiagnostics = (root, project, warnings) => {
   const diagnosticCount = countDiagnostics(project);
   if (diagnosticCount > 0) {
+    const diagnosticLabel = diagnosticCount === 1 ? "diagnostic" : "diagnostics";
     addWarning(
       warnings,
-      `${relativeConfigPath(root, project.configFileName)} has ${diagnosticCount} TypeScript diagnostics; unresolved findings were kept`,
+      `${relativeConfigPath(root, project.configFileName)} has ${diagnosticCount} TypeScript ${diagnosticLabel}; unresolved findings were kept`,
     );
   }
 };

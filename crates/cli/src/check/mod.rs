@@ -946,7 +946,8 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         return report_code;
     }
 
-    print_type_aware_warnings(result, prepared.quiet);
+    print_type_aware_summary(result);
+    print_type_aware_warnings(result);
 
     if let Some(exit) = check_regression_exit_code(result.regression.as_ref(), prepared.quiet) {
         return exit;
@@ -957,10 +958,32 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     issue_severity_exit_code(result, &prepared.effective_rules)
 }
 
-fn print_type_aware_warnings(result: &CheckResult, quiet: bool) {
-    if quiet || !matches!(result.config.output, OutputFormat::Human) {
+fn print_type_aware_summary(result: &CheckResult) {
+    if !matches!(result.config.output, OutputFormat::Human) {
         return;
     }
+    if let Some(meta) = &result.type_aware_meta {
+        println!("{}", format_type_aware_summary(meta));
+    }
+}
+
+fn format_type_aware_summary(meta: &fallow_types::envelope::TypeAwareMeta) -> String {
+    let candidates = count_noun(meta.candidate_count, "candidate", "candidates");
+    let confirmed = count_noun(meta.confirmed_used_count, "confirmed use", "confirmed uses");
+    let retained = count_noun(
+        meta.unresolved_count,
+        "retained finding",
+        "retained findings",
+    );
+    format!("Type-aware refinement: {candidates}, {confirmed}, {retained}")
+}
+
+fn count_noun(count: usize, singular: &str, plural: &str) -> String {
+    let noun = if count == 1 { singular } else { plural };
+    format!("{count} {noun}")
+}
+
+fn print_type_aware_warnings(result: &CheckResult) {
     for warning in &result.type_aware_warnings {
         eprintln!("Type-aware warning: {warning}");
     }
@@ -1203,6 +1226,30 @@ mod tests {
             route_collisions: false,
             dynamic_segment_name_conflicts: false,
         }
+    }
+
+    #[test]
+    fn type_aware_summary_reports_clean_and_retained_outcomes() {
+        let clean = fallow_types::envelope::TypeAwareMeta {
+            candidate_count: 1,
+            confirmed_used_count: 1,
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
+        assert_eq!(
+            format_type_aware_summary(&clean),
+            "Type-aware refinement: 1 candidate, 1 confirmed use, 0 retained findings"
+        );
+
+        let retained = fallow_types::envelope::TypeAwareMeta {
+            candidate_count: 2,
+            confirmed_used_count: 1,
+            unresolved_count: 1,
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
+        assert_eq!(
+            format_type_aware_summary(&retained),
+            "Type-aware refinement: 2 candidates, 1 confirmed use, 1 retained finding"
+        );
     }
 
     #[test]

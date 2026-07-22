@@ -28,7 +28,9 @@
 //! Documented here so future maintainers don't re-derive the trade-off.
 
 use std::io;
-use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
+use std::process::{
+    Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio,
+};
 
 use super::registry;
 
@@ -47,6 +49,23 @@ impl ScopedChild {
     pub fn spawn(command: &mut Command) -> io::Result<Self> {
         let child = command.spawn()?;
         let id = registry::register(child.id());
+        Ok(Self {
+            inner: Some(child),
+            id: Some(id),
+        })
+    }
+
+    /// Spawn a subprocess wrapper in a dedicated process tree and register the
+    /// tree for process-wide signal cleanup.
+    pub fn spawn_process_tree(command: &mut Command) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+
+            command.process_group(0);
+        }
+        let child = command.spawn()?;
+        let id = registry::register_process_tree(child.id());
         Ok(Self {
             inner: Some(child),
             id: Some(id),
@@ -86,6 +105,12 @@ impl ScopedChild {
     /// the wrapper owning the child for registry tracking and the terminal wait.
     pub fn take_stdout(&mut self) -> Option<ChildStdout> {
         self.inner.as_mut().and_then(|c| c.stdout.take())
+    }
+
+    /// Take the child's stderr handle, if it was piped. Same semantics as
+    /// `Child::stderr.take()`.
+    pub fn take_stderr(&mut self) -> Option<ChildStderr> {
+        self.inner.as_mut().and_then(|child| child.stderr.take())
     }
 
     /// Consume self and wait for the child to exit, collecting stdout

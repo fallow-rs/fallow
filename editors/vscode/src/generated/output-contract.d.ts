@@ -1049,6 +1049,10 @@ unresolved_count: number
  */
 warning_count: number
 /**
+ * Bounded semantic warnings. Findings mentioned here were retained.
+ */
+warnings: string[]
+/**
  * Semantic pass duration as reported by the sidecar.
  */
 elapsed_ms: number

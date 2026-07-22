@@ -192,7 +192,32 @@ const broken: string = 1;
 
     assert.deepEqual(response.confirmed_used_candidate_ids, []);
     assert.deepEqual(response.unresolved_candidate_ids, [0]);
-    assert.match(response.warnings[0], /TypeScript diagnostics/);
+    assert.match(response.warnings[0], /TypeScript diagnostics?/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("uses an explicit marker for an inferred project", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "service.ts",
+      `class Service {
+  run(): void {}
+}
+new Service().run();
+`,
+    );
+
+    const response = runSidecar(
+      request(root, [candidate({ id: 0, file: "service.ts", owner: "Service", member: "run" })]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.deepEqual(response.selected_tsconfigs, ["<inferred>"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

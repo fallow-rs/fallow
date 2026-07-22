@@ -338,6 +338,8 @@ pub struct TypeAwareMeta {
     pub unresolved_count: usize,
     /// Number of bounded warnings returned by the sidecar.
     pub warning_count: usize,
+    /// Bounded semantic warnings. Findings mentioned here were retained.
+    pub warnings: Vec<String>,
     /// Semantic pass duration as reported by the sidecar.
     pub elapsed_ms: u64,
 }

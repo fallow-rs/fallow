@@ -28,8 +28,9 @@ checker.
 When requested, protocol, discovery, or process failures exit with code 2.
 Ordinary TypeScript source diagnostics are returned as bounded warnings and do
 not abort the refinement. JSON output records the backend, compiler version,
-selected project configs, candidate decisions, warning count, and elapsed time
-under `_meta.type_aware`.
+selected project configs, candidate counts, bounded warnings, and elapsed time
+under `_meta.type_aware`. Projects without a `tsconfig.json` use the explicit
+`<inferred>` project marker.
 
 The environment override is `FALLOW_TYPE_AWARE_BIN`. Without `--type-aware`,
 the sidecar is never discovered or started and existing output is unchanged.

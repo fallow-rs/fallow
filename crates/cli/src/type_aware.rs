@@ -1,6 +1,6 @@
 //! Backend-neutral protocol for the experimental type-aware refinement pass.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +20,7 @@ const BACKEND_VERSION: &str = "7.0.2";
 const SIDECAR_BINARY: &str = "fallow-type-aware";
 const SIDECAR_TIMEOUT: Duration = Duration::from_mins(2);
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_STDERR_BYTES: usize = MAX_STDERR_CHARS * 4;
 const MAX_STDERR_CHARS: usize = 4_096;
 const MAX_WARNINGS: usize = 20;
 const MAX_WARNING_CHARS: usize = 512;
@@ -115,6 +116,7 @@ pub fn refine_unused_class_members(
     let confirmed_used_count = validated.confirmed_used_candidate_ids.len();
     let unresolved_count = validated.unresolved_candidate_ids.len();
     let warning_count = validated.warnings.len();
+    let warnings = validated.warnings.clone();
     Ok(TypeAwareOutcome {
         meta: TypeAwareMeta {
             protocol_version: validated.protocol_version,
@@ -125,9 +127,10 @@ pub fn refine_unused_class_members(
             confirmed_used_count,
             unresolved_count,
             warning_count,
+            warnings: warnings.clone(),
             elapsed_ms: validated.elapsed_ms,
         },
-        warnings: validated.warnings,
+        warnings,
     })
 }
 
@@ -194,7 +197,7 @@ fn discover_type_aware_sidecar(root: &Path) -> Result<PathBuf, String> {
     if let Some(value) = non_empty_env("FALLOW_TYPE_AWARE_BIN") {
         let path = PathBuf::from(&value);
         if path.is_file() {
-            return Ok(path);
+            return canonical_sidecar_path(&path);
         }
         return Err(format!(
             "FALLOW_TYPE_AWARE_BIN is set to {value}, but no file exists there. Unset it to use automatic discovery or point it at the {SIDECAR_BINARY} executable."
@@ -202,15 +205,24 @@ fn discover_type_aware_sidecar(root: &Path) -> Result<PathBuf, String> {
     }
 
     if let Some(path) = find_project_local_sidecar(root) {
-        return Ok(path);
+        return canonical_sidecar_path(&path);
     }
     if let Some(path) = find_on_path(SIDECAR_BINARY) {
-        return Ok(path);
+        return canonical_sidecar_path(&path);
     }
 
     Err(format!(
         "Type-aware sidecar `{SIDECAR_BINARY}` was not found. Build the repository reference sidecar and set FALLOW_TYPE_AWARE_BIN to its executable. The normal command still works without --type-aware."
     ))
+}
+
+fn canonical_sidecar_path(path: &Path) -> Result<PathBuf, String> {
+    path.canonicalize().map_err(|err| {
+        format!(
+            "failed to resolve type-aware sidecar {}: {err}",
+            path.display()
+        )
+    })
 }
 
 fn non_empty_env(key: &str) -> Option<String> {
@@ -259,82 +271,150 @@ fn run_sidecar(
     request: &TypeAwareRequest,
     timeout: Duration,
 ) -> Result<TypeAwareResponse, String> {
+    let mut request_bytes = serde_json::to_vec(request)
+        .map_err(|err| format!("failed to serialize type-aware request: {err}"))?;
+    request_bytes.push(b'\n');
+
     let mut command = Command::new(sidecar);
     command
         .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = crate::signal::ScopedChild::spawn(&mut command)
+    let mut child = crate::signal::ScopedChild::spawn_process_tree(&mut command)
         .map_err(|err| format!("failed to spawn {}: {err}", sidecar.display()))?;
-
-    let write_result = child
-        .take_stdin()
-        .ok_or_else(|| "type-aware sidecar stdin was not available".to_owned())
-        .and_then(|mut stdin| {
-            serde_json::to_writer(&mut stdin, request)
-                .map_err(|err| format!("failed to serialize type-aware request: {err}"))?;
-            stdin
-                .write_all(b"\n")
-                .and_then(|()| stdin.flush())
-                .map_err(|err| format!("failed to write type-aware request: {err}"))
-        });
-    if let Err(error) = write_result {
-        terminate_process(child.id());
+    let pid = child.id();
+    let (Some(stdin), Some(stdout), Some(stderr)) =
+        (child.take_stdin(), child.take_stdout(), child.take_stderr())
+    else {
+        terminate_process_tree(pid);
         let _ = child.wait();
-        return Err(error);
-    }
+        return Err("type-aware sidecar pipes were not available".to_owned());
+    };
+    let timeout_guard = SidecarTimeout::start(pid, timeout);
 
-    let output = wait_with_timeout(child, timeout)?;
+    let writer = std::thread::spawn(move || write_request(stdin, &request_bytes));
+    let stdout_reader = std::thread::spawn(move || {
+        read_bounded_stream(stdout, MAX_RESPONSE_BYTES, "response", pid)
+    });
+    let stderr_reader =
+        std::thread::spawn(move || read_bounded_stream(stderr, MAX_STDERR_BYTES, "stderr", pid));
+
+    let status = child
+        .wait()
+        .map_err(|err| format!("failed to wait for type-aware sidecar: {err}"));
+    let write_result = join_sidecar_worker("stdin writer", writer);
+    let stdout_result = join_sidecar_worker("stdout reader", stdout_reader);
+    let stderr_result = join_sidecar_worker("stderr reader", stderr_reader);
+    let timeout_result = timeout_guard.finish();
+
+    timeout_result?;
+    let stdout = stdout_result?;
+    let stderr = stderr_result?;
+    let status = status?;
+    write_result?;
+    let output = Output {
+        status,
+        stdout,
+        stderr,
+    };
     validate_process_output(&output)?;
-    if output.stdout.len() > MAX_RESPONSE_BYTES {
-        return Err(format!(
-            "type-aware sidecar response exceeded the {MAX_RESPONSE_BYTES}-byte limit"
-        ));
-    }
     serde_json::from_slice(&output.stdout)
         .map_err(|err| format!("failed to parse type-aware sidecar response: {err}"))
 }
 
-fn wait_with_timeout(
-    child: crate::signal::ScopedChild,
-    timeout: Duration,
-) -> Result<Output, String> {
-    let pid = child.id();
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let watcher_timed_out = Arc::clone(&timed_out);
-    let (done_tx, done_rx) = mpsc::channel();
-    let watcher = std::thread::spawn(move || match done_rx.recv_timeout(timeout) {
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            watcher_timed_out.store(true, Ordering::Release);
-            terminate_process(pid);
-        }
-        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
-    });
-    let output = child.wait_with_output();
-    let _ = done_tx.send(());
-    let _ = watcher.join();
+fn write_request(mut stdin: std::process::ChildStdin, request: &[u8]) -> Result<(), String> {
+    stdin
+        .write_all(request)
+        .and_then(|()| stdin.flush())
+        .map_err(|err| format!("failed to write type-aware request: {err}"))
+}
 
-    if timed_out.load(Ordering::Acquire) {
+fn read_bounded_stream(
+    reader: impl Read,
+    limit: usize,
+    stream: &str,
+    pid: u32,
+) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::with_capacity(limit.min(16 * 1024));
+    reader
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("failed to read type-aware sidecar {stream}: {err}"))?;
+    if bytes.len() > limit {
+        terminate_process_tree(pid);
         return Err(format!(
-            "type-aware sidecar timed out after {} seconds",
-            timeout.as_secs_f64()
+            "type-aware sidecar {stream} exceeded the {limit}-byte limit"
         ));
     }
-    output.map_err(|err| format!("failed to wait for type-aware sidecar: {err}"))
+    Ok(bytes)
+}
+
+fn join_sidecar_worker<T>(
+    name: &str,
+    worker: std::thread::JoinHandle<Result<T, String>>,
+) -> Result<T, String> {
+    worker
+        .join()
+        .map_err(|_| format!("type-aware sidecar {name} panicked"))?
+}
+
+struct SidecarTimeout {
+    done: mpsc::Sender<()>,
+    timed_out: Arc<AtomicBool>,
+    watcher: std::thread::JoinHandle<()>,
+    duration: Duration,
+}
+
+impl SidecarTimeout {
+    fn start(pid: u32, duration: Duration) -> Self {
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let watcher_timed_out = Arc::clone(&timed_out);
+        let (done, done_rx) = mpsc::channel();
+        let watcher = std::thread::spawn(move || match done_rx.recv_timeout(duration) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                watcher_timed_out.store(true, Ordering::Release);
+                terminate_process_tree(pid);
+            }
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        });
+        Self {
+            done,
+            timed_out,
+            watcher,
+            duration,
+        }
+    }
+
+    fn finish(self) -> Result<(), String> {
+        let _ = self.done.send(());
+        let _ = self.watcher.join();
+        if self.timed_out.load(Ordering::Acquire) {
+            return Err(format!(
+                "type-aware sidecar timed out after {} seconds",
+                self.duration.as_secs_f64()
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(unix)]
-fn terminate_process(pid: u32) {
-    let _ = Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+#[expect(
+    unsafe_code,
+    reason = "POSIX process-group termination requires libc::kill"
+)]
+fn terminate_process_tree(pid: u32) {
+    let Ok(process_group_id) = i32::try_from(pid) else {
+        return;
+    };
+    // SAFETY: The child is placed in a dedicated process group before spawn.
+    // A negative PID targets that group and SIGKILL has no borrowed data.
+    let _ = unsafe { libc::kill(-process_group_id, libc::SIGKILL) };
 }
 
 #[cfg(windows)]
-fn terminate_process(pid: u32) {
+fn terminate_process_tree(pid: u32) {
     let _ = Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdout(Stdio::null())
@@ -343,7 +423,7 @@ fn terminate_process(pid: u32) {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn terminate_process(_pid: u32) {}
+fn terminate_process_tree(_pid: u32) {}
 
 fn validate_process_output(output: &Output) -> Result<(), String> {
     if output.status.success() {
@@ -652,5 +732,40 @@ mod tests {
     fn process_error_output_is_bounded() {
         let text = bounded_text(&vec![b'x'; MAX_STDERR_CHARS + 100], MAX_STDERR_CHARS);
         assert_eq!(text.chars().count(), MAX_STDERR_CHARS);
+    }
+
+    #[test]
+    fn oversized_response_is_rejected_during_read() {
+        let response = std::io::Cursor::new(vec![b'x'; 65]);
+        let error = read_bounded_stream(response, 64, "response", u32::MAX)
+            .expect_err("oversized response should fail");
+
+        assert!(error.contains("exceeded the 64-byte limit"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_covers_blocked_stdin() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
+
+        let root = tempfile::tempdir().expect("temporary sidecar root");
+        let sidecar = root.path().join("blocked-sidecar.sh");
+        fs::write(&sidecar, "#!/bin/sh\nsleep 30\n").expect("write sidecar");
+        let mut permissions = fs::metadata(&sidecar)
+            .expect("sidecar metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&sidecar, permissions).expect("make sidecar executable");
+
+        let mut request = request_with_candidates();
+        request.candidates[0].parent_name = "x".repeat(4 * 1024 * 1024);
+        let started = Instant::now();
+        let error = run_sidecar(&sidecar, root.path(), &request, Duration::from_millis(100))
+            .expect_err("blocked sidecar should time out");
+
+        assert!(error.contains("timed out"), "unexpected error: {error}");
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

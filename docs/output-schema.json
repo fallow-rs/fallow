@@ -18796,6 +18796,13 @@
           "type": "integer",
           "description": "Number of bounded warnings returned by the sidecar."
         },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Bounded semantic warnings. Findings mentioned here were retained."
+        },
         "elapsed_ms": {
           "type": "integer",
           "description": "Semantic pass duration as reported by the sidecar."
@@ -18810,6 +18817,7 @@
         "confirmed_used_count",
         "unresolved_count",
         "warning_count",
+        "warnings",
         "elapsed_ms"
       ],
       "description": "Bounded provenance emitted when the experimental type-aware pass runs."

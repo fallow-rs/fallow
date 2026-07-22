@@ -1049,6 +1049,7 @@ dependencies = [
  "insta",
  "jsonc-parser",
  "jsonschema",
+ "libc",
  "miette",
  "notify",
  "open",
