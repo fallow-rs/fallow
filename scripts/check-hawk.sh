@@ -20,6 +20,7 @@ hawk_args=(
   --exclude-crate fallow_types
   --exclude-crate fallow_output
   --exclude-crate fallow_config
+  --exclude-crate fallow_license
   --color never
 )
 

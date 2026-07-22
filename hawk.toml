@@ -1,6 +1,6 @@
 # Hawk treats workspace libraries as internal unless excluded on the command
-# line. scripts/check-hawk.sh protects fallow's supported facade and the
-# contract crates whose types it re-exports.
+# line. scripts/check-hawk.sh protects fallow's supported facade, the contract
+# crates whose types it re-exports, and the license crate used by the sidecar.
 preserve-uniform-field-visibility = true
 
 [[production]]
