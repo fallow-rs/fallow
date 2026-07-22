@@ -25,7 +25,7 @@ fallow-security = { version = "3.7.1", path = "crates/security" }
 fallow-types = { version = "3.7.1", path = "crates/types" }
 
 # Parsing & analysis
-oxc_allocator = "0.126"
+oxc_allocator = "0.140"
 oxc_ast = "0.126"
 oxc_ast_visit = "0.126"
 oxc_parser = "0.126"
