@@ -39,7 +39,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "5.2.0",
     "babel-plugin-react-compiler": "^1.0.0",
-    "electron": "43.1.0",
+    "electron": "43.1.1",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "oxfmt": "^0.55.0",
