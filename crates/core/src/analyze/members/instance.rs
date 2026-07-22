@@ -61,7 +61,7 @@ pub(super) fn propagate_accesses_through_instance_exports(
     }
 }
 
-pub(super) fn build_typed_instance_binding_targets(
+fn build_typed_instance_binding_targets(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     indexes: &MemberPassIndexes<'_>,
@@ -372,7 +372,7 @@ pub(super) fn chained_typed_instance_targets(
     current
 }
 
-pub(super) fn resolve_typed_instance_chain_targets(
+fn resolve_typed_instance_chain_targets(
     graph: &ModuleGraph,
     typed_instance_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
@@ -473,7 +473,7 @@ pub(super) fn propagate_accesses_through_typed_instance_bindings(
 
 /// Credit each ordinary member access in one module onto the typed-instance
 /// chain's target export keys.
-pub(super) fn propagate_typed_member_accesses(
+fn propagate_typed_member_accesses(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
     typed_instance_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
@@ -518,7 +518,7 @@ pub(super) fn propagate_typed_member_accesses(
 
 /// Mark each ordinary whole-object use in one module as whole-object-used on the
 /// typed-instance chain's target export keys.
-pub(super) fn propagate_typed_whole_object_uses(
+fn propagate_typed_whole_object_uses(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
     typed_instance_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,

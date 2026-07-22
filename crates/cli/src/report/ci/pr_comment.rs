@@ -88,7 +88,7 @@ pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) 
 /// rules a downstream consumer added without registering (rare; produces
 /// the conservative "Dead code" default).
 #[must_use]
-pub(crate) fn category_for_rule(rule_id: &str) -> &'static str {
+fn category_for_rule(rule_id: &str) -> &'static str {
     crate::explain::rule_by_id(rule_id).map_or("Dead code", |def| def.category)
 }
 
@@ -208,7 +208,7 @@ fn print_pr_comment_from_ci_issues(
 }
 
 #[must_use]
-pub(crate) fn build_issue_decision_surface(
+fn build_issue_decision_surface(
     command: &str,
     issues: &[CiIssue],
     envelope: &PrCommentEnvelope,

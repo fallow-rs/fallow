@@ -108,7 +108,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
 pub(crate) const SCHEMA_VERSION: u32 = 7;
 
 #[cfg(test)]
-pub(super) fn api_check_json_document(
+fn api_check_json_document(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
@@ -122,7 +122,7 @@ pub(super) fn api_check_json_document(
 }
 
 #[cfg(test)]
-pub(super) fn api_check_json_document_with_config_fixable(
+fn api_check_json_document_with_config_fixable(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
@@ -355,7 +355,7 @@ pub(super) fn api_health_json_document(
     Ok(output)
 }
 
-pub(super) fn api_grouped_health_json_document(
+fn api_grouped_health_json_document(
     report: &fallow_output::HealthReport,
     grouping: &fallow_output::HealthGrouping,
     root: &Path,
@@ -457,7 +457,7 @@ pub(super) fn print_duplication_json(
     }
 }
 
-pub(super) fn api_grouped_duplication_json_document(
+fn api_grouped_duplication_json_document(
     report: &DuplicationReport,
     grouping: &DuplicationGrouping,
     root: &Path,

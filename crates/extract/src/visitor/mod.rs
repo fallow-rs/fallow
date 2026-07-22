@@ -57,13 +57,13 @@ pub(crate) fn infer_props_field_array_element_type(
 
 #[derive(Debug, Clone)]
 pub(crate) struct LocalClassExportInfo {
-    pub(crate) members: Vec<MemberInfo>,
-    pub(crate) super_class: Option<String>,
-    pub(crate) implemented_interfaces: Vec<String>,
-    pub(crate) type_parameters: Vec<String>,
-    pub(crate) instance_bindings: Vec<(String, String)>,
-    pub(crate) super_class_type_args: Vec<String>,
-    pub(crate) generic_instance_bindings: Vec<(String, usize)>,
+    members: Vec<MemberInfo>,
+    super_class: Option<String>,
+    implemented_interfaces: Vec<String>,
+    type_parameters: Vec<String>,
+    instance_bindings: Vec<(String, String)>,
+    super_class_type_args: Vec<String>,
+    generic_instance_bindings: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,9 +112,9 @@ struct StructuralClassCallCandidate {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FactoryCallCandidate {
-    pub(crate) local_name: String,
-    pub(crate) callee_object: String,
-    pub(crate) callee_method: String,
+    local_name: String,
+    callee_object: String,
+    callee_method: String,
 }
 
 /// `const local = useApi()` where `useApi` is a same-file function whose body
@@ -122,8 +122,8 @@ pub(crate) struct FactoryCallCandidate {
 /// time so `local.member` credits the constructed class. See issue #1441.
 #[derive(Debug, Clone)]
 pub(crate) struct FactoryReturnCandidate {
-    pub(crate) local_name: String,
-    pub(crate) callee_name: String,
+    local_name: String,
+    callee_name: String,
 }
 
 /// An unresolved object-literal property value captured while visiting a factory
@@ -144,12 +144,12 @@ pub(crate) enum ObjectPropValueRef {
 /// See issue #1858.
 #[derive(Debug, Clone)]
 pub(crate) struct FactoryReturnObjectCandidate {
-    pub(crate) fn_name: String,
+    fn_name: String,
     /// Whether this function qualifies for the cross-module (strict) map: sync,
     /// non-generator, unanimous-terminal object-literal return.
-    pub(crate) is_strict_eligible: bool,
+    is_strict_eligible: bool,
     /// `(dotted_property_path, value_ref)` for each statically-known property.
-    pub(crate) properties: Vec<(String, ObjectPropValueRef)>,
+    properties: Vec<(String, ObjectPropValueRef)>,
 }
 
 /// The classified right-hand side of a module-local assignment, used to build a
@@ -209,9 +209,9 @@ enum TypedPropertyExpansion {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingPlaywrightFactory {
-    pub(crate) test_name: String,
-    pub(crate) base_name: String,
-    pub(crate) type_bindings: Vec<(String, String)>,
+    test_name: String,
+    base_name: String,
+    type_bindings: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -254,15 +254,15 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) exports: Vec<ExportInfo>,
     pub(crate) imports: Vec<ImportInfo>,
     pub(crate) re_exports: Vec<ReExportInfo>,
-    pub(crate) dynamic_imports: Vec<DynamicImportInfo>,
-    pub(crate) dynamic_import_patterns: Vec<DynamicImportPattern>,
-    pub(crate) require_calls: Vec<RequireCallInfo>,
-    pub(crate) package_path_references: Vec<String>,
+    dynamic_imports: Vec<DynamicImportInfo>,
+    dynamic_import_patterns: Vec<DynamicImportPattern>,
+    require_calls: Vec<RequireCallInfo>,
+    package_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
-    pub(crate) semantic_facts: Vec<SemanticFact>,
+    semantic_facts: Vec<SemanticFact>,
     pub(crate) whole_object_uses: Vec<String>,
-    pub(crate) has_cjs_exports: bool,
-    pub(crate) has_angular_component_template_url: bool,
+    has_cjs_exports: bool,
+    has_angular_component_template_url: bool,
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
     namespace_binding_names: Vec<String>,
@@ -303,12 +303,12 @@ pub(crate) struct ModuleInfoExtractor {
     structural_class_call_candidates: Vec<StructuralClassCallCandidate>,
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
-    pub(crate) class_heritage: Vec<ClassHeritageInfo>,
+    class_heritage: Vec<ClassHeritageInfo>,
     /// `(token_export_name, interface_name)` for `new InjectionToken<I>(...)`
     /// declarations imported from `@angular/core`. See issue #920.
-    pub(crate) injection_tokens: Vec<(String, String)>,
-    pub(crate) local_type_declarations: Vec<LocalTypeDeclaration>,
-    pub(crate) public_signature_type_references: Vec<PublicSignatureTypeReference>,
+    injection_tokens: Vec<(String, String)>,
+    local_type_declarations: Vec<LocalTypeDeclaration>,
+    public_signature_type_references: Vec<PublicSignatureTypeReference>,
     local_signature_type_references: Vec<LocalSignatureTypeReference>,
     local_class_exports: FxHashMap<String, LocalClassExportInfo>,
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
@@ -318,7 +318,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// templates receive raw values, so interpolation should not credit
     /// `toString` coercion for the quasi itself.
     in_tagged_template_quasi: bool,
-    pub(crate) class_super_stack: Vec<Option<String>>,
+    class_super_stack: Vec<Option<String>>,
     /// Monotonic per-module class-scope id source: incremented each time a
     /// class body is entered so every class gets a unique id, paired with
     /// `class_scope_stack`. A `this.<field>` binding key is qualified with the
@@ -333,11 +333,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// unqualified (behavior unchanged). See issue #1821 (Fix B).
     class_scope_stack: Vec<u32>,
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
-    pub(crate) side_effect_registered_class_names: FxHashSet<String>,
+    side_effect_registered_class_names: FxHashSet<String>,
     lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
-    pub(crate) registered_custom_elements: Vec<fallow_types::extract::RegisteredCustomElement>,
-    pub(crate) used_custom_element_tags: FxHashSet<String>,
-    pub(crate) factory_call_candidates: Vec<FactoryCallCandidate>,
+    registered_custom_elements: Vec<fallow_types::extract::RegisteredCustomElement>,
+    used_custom_element_tags: FxHashSet<String>,
+    factory_call_candidates: Vec<FactoryCallCandidate>,
     /// Same-file functions whose body returns `new Class()`, mapped to the class
     /// name, plus the `const x = fn()` bindings to resolve against them. See #1441.
     factory_return_functions: FxHashMap<String, String>,
@@ -401,50 +401,50 @@ pub(crate) struct ModuleInfoExtractor {
     /// function itself, so an assignment in an unrelated/sibling function does not
     /// falsely prove it. See #1441 (Part A).
     alias_in_body_assignments: FxHashMap<String, Vec<FactoryAssignedValue>>,
-    pub(crate) node_module_register_url_bindings: FxHashMap<String, Vec<String>>,
-    pub(crate) child_process_fork_bindings: FxHashSet<String>,
-    pub(crate) child_process_namespace_bindings: FxHashSet<String>,
-    pub(crate) node_path_namespace_bindings: FxHashSet<String>,
-    pub(crate) node_url_file_url_to_path_bindings: FxHashSet<String>,
-    pub(crate) current_module_file_path_bindings: FxHashSet<String>,
-    pub(crate) child_process_fork_target_bindings: FxHashMap<String, Vec<String>>,
-    pub(crate) static_string_bindings: FxHashMap<String, String>,
-    pub(crate) static_string_arrays: FxHashMap<String, Vec<String>>,
-    pub(crate) static_object_property_values: FxHashMap<String, FxHashMap<String, Vec<String>>>,
-    pub(crate) loop_string_bindings: Vec<FxHashMap<String, Vec<String>>>,
-    pub(crate) loop_object_property_values: Vec<FxHashMap<String, FxHashMap<String, Vec<String>>>>,
-    pub(crate) package_resolution_function_args: FxHashMap<String, usize>,
-    pub(crate) nested_declaration_stack: Vec<FxHashSet<String>>,
-    pub(crate) class_type_param_constraints: Vec<FxHashMap<String, Option<String>>>,
-    pub(crate) pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
-    pub(crate) pending_playwright_factory_aliases: Vec<(String, String)>,
+    node_module_register_url_bindings: FxHashMap<String, Vec<String>>,
+    child_process_fork_bindings: FxHashSet<String>,
+    child_process_namespace_bindings: FxHashSet<String>,
+    node_path_namespace_bindings: FxHashSet<String>,
+    node_url_file_url_to_path_bindings: FxHashSet<String>,
+    current_module_file_path_bindings: FxHashSet<String>,
+    child_process_fork_target_bindings: FxHashMap<String, Vec<String>>,
+    static_string_bindings: FxHashMap<String, String>,
+    static_string_arrays: FxHashMap<String, Vec<String>>,
+    static_object_property_values: FxHashMap<String, FxHashMap<String, Vec<String>>>,
+    loop_string_bindings: Vec<FxHashMap<String, Vec<String>>>,
+    loop_object_property_values: Vec<FxHashMap<String, FxHashMap<String, Vec<String>>>>,
+    package_resolution_function_args: FxHashMap<String, usize>,
+    nested_declaration_stack: Vec<FxHashSet<String>>,
+    class_type_param_constraints: Vec<FxHashMap<String, Option<String>>>,
+    pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
+    pending_playwright_factory_aliases: Vec<(String, String)>,
     /// Local `const X = base.extend<T>({...})` fixture definitions keyed by the
     /// const's local name. A helper wrapping `<X>.extend(...)` (issue #1791)
     /// inherits these bindings through `pending_playwright_factory_aliases`, even
     /// when the wrapping `.extend({})` carries no type argument of its own.
-    pub(crate) playwright_local_fixture_defs: FxHashMap<String, Vec<(String, String)>>,
+    playwright_local_fixture_defs: FxHashMap<String, Vec<(String, String)>>,
     source_returning_helpers: FxHashMap<String, SourceReturningHelper>,
     /// File-level string directives (`"use client"`, `"use server"`) captured
     /// from `Program::directives`. Consumed by the security `client-server-leak`
     /// detector to identify React Server Component client boundaries.
-    pub(crate) directives: Vec<String>,
+    directives: Vec<String>,
     /// Byte-offset starts of dynamic `import()` expressions wrapped in
     /// `next/dynamic(() => import('./X'), { ssr: false })`. Consumed by the
     /// security `client-server-leak` BFS to exclude the ssr:false client-only
     /// escape hatch.
-    pub(crate) client_only_dynamic_import_spans: Vec<u32>,
+    client_only_dynamic_import_spans: Vec<u32>,
     /// Captured security sink sites (category-blind). Consumed by the
     /// catalogue-driven `tainted_sink` detector.
-    pub(crate) security_sinks: Vec<SinkSite>,
+    security_sinks: Vec<SinkSite>,
     /// Count of sink-shaped nodes whose callee could not be flattened to a
     /// static path (dynamic dispatch, computed members, aliased bindings).
-    pub(crate) security_sinks_skipped: u32,
+    security_sinks_skipped: u32,
     /// Span-level diagnostics for skipped security sink callees.
-    pub(crate) security_unresolved_callee_sites: Vec<SkippedSecurityCalleeSite>,
+    security_unresolved_callee_sites: Vec<SkippedSecurityCalleeSite>,
     /// Local bindings tied to the member-access path they were sourced from
     /// (e.g. `const id = req.query.id`). Feeds the security `tainted_sink`
     /// source-to-sink association in the analyze layer.
-    pub(crate) tainted_bindings: Vec<TaintedBinding>,
+    tainted_bindings: Vec<TaintedBinding>,
     /// Chain-hop depth per recorded tainted binding, aligned 1:1 with
     /// `tainted_bindings` (index `i` describes `tainted_bindings[i]`, so the
     /// depth is tracked per `(local, source_path)` pair, never approximated
@@ -456,25 +456,25 @@ pub(crate) struct ModuleInfoExtractor {
     /// drops it together with this extractor's binding lookup, so a
     /// cross-block chain cannot form and the hop accounting cannot drift from
     /// the bindings it describes).
-    pub(crate) tainted_binding_hops: Vec<u8>,
+    tainted_binding_hops: Vec<u8>,
     /// Direct sink arguments recognized as sanitizer calls.
-    pub(crate) sanitized_sink_args: Vec<SanitizedSinkArg>,
+    sanitized_sink_args: Vec<SanitizedSinkArg>,
     /// Defensive control call sites for security surface output.
-    pub(crate) security_control_sites: Vec<SecurityControlSite>,
+    security_control_sites: Vec<SecurityControlSite>,
     /// Statically flattenable callee paths, deduped per unique path (first
     /// occurrence wins). Consumed by the `boundaries.calls.forbidden`
     /// detector.
-    pub(crate) callee_uses: Vec<CalleeUse>,
+    callee_uses: Vec<CalleeUse>,
     /// Dedup guard for `callee_uses`. Working state only: not persisted and
     /// not merged across SFC script blocks (each block dedups independently;
     /// the detector matches per unique path, so cross-block duplicates only
     /// cost one extra entry).
-    pub(crate) seen_callee_paths: FxHashSet<String>,
+    seen_callee_paths: FxHashSet<String>,
     /// `"use client"` / `"use server"` directive strings written as expression
     /// statements in `program.body` (misplaced, NOT in the leading
     /// prologue), so the RSC bundler silently ignores them. Captured by
     /// `visit_program` and consumed by the `misplaced-directive` detector.
-    pub(crate) misplaced_directives: Vec<MisplacedDirectiveSite>,
+    misplaced_directives: Vec<MisplacedDirectiveSite>,
     /// Export LOCAL NAMES of exported functions / const-arrows whose body has an
     /// inline `"use server"` directive. Captured by `extract_declaration_exports`
     /// and consumed by the `unused-server-action` reclassifier. Only EXPORTED
@@ -482,52 +482,52 @@ pub(crate) struct ModuleInfoExtractor {
     /// path), so a non-exported local function with a use-server body is never
     /// recorded; even if it were, the reclassifier only matches against
     /// unused-EXPORT names, so a stray name is inert.
-    pub(crate) inline_server_action_exports: Vec<String>,
+    inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
     /// keyed by a stable identifier symbol. Consumed by the `unprovided-inject`
     /// detector.
-    pub(crate) di_key_sites: Vec<DiKeySite>,
+    di_key_sites: Vec<DiKeySite>,
     /// `true` when a `provide`/`setContext` keyed by an unknowable key (a
     /// non-identifier, a spread, or a transient nested-scope local) was seen.
     /// Forces the `unprovided-inject` detector to abstain project-wide.
-    pub(crate) has_dynamic_provide: bool,
+    has_dynamic_provide: bool,
     /// Module-scope `const NAME = "literal"` names: a DI key bound to a string
     /// literal has STRING identity (a provider supplying the literal, often
     /// inside a package, matches it), so its `di_key_sites` are dropped at
     /// finalize. Working state, not persisted.
-    pub(crate) string_keyed_di_consts: FxHashSet<String>,
+    string_keyed_di_consts: FxHashSet<String>,
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
-    pub(crate) dompurify_bindings: FxHashSet<String>,
+    dompurify_bindings: FxHashSet<String>,
     /// Module-scope local helpers whose return value is a proven sanitizer
     /// output for a narrow sink domain.
-    pub(crate) module_sanitizer_helpers: FxHashMap<String, SanitizerScope>,
+    module_sanitizer_helpers: FxHashMap<String, SanitizerScope>,
     /// Module-scope local sanitizer bindings. `None` means the name is declared
     /// but not sanitizer-backed, shadowing any outer match.
-    pub(crate) module_sanitizer_bindings: FxHashMap<String, Option<SanitizerScope>>,
+    module_sanitizer_bindings: FxHashMap<String, Option<SanitizerScope>>,
     /// Nested lexical sanitizer binding stack for functions and blocks.
-    pub(crate) sanitizer_binding_stack: Vec<FxHashMap<String, Option<SanitizerScope>>>,
+    sanitizer_binding_stack: Vec<FxHashMap<String, Option<SanitizerScope>>>,
     /// Module-scope literal-backed string allowlists. `false` means the name
     /// shadows an outer allowlist but is not trusted itself.
-    pub(crate) module_literal_allowlist_bindings: FxHashMap<String, bool>,
+    module_literal_allowlist_bindings: FxHashMap<String, bool>,
     /// Module-scope literal constants that can be propagated into security sink
     /// argument classification.
-    pub(crate) module_static_sink_literals: FxHashMap<String, SinkLiteralValue>,
+    module_static_sink_literals: FxHashMap<String, SinkLiteralValue>,
     /// Nested lexical literal allowlist bindings.
-    pub(crate) literal_allowlist_binding_stack: Vec<FxHashMap<String, bool>>,
+    literal_allowlist_binding_stack: Vec<FxHashMap<String, bool>>,
     /// Module-scope locals initialized from risky literal regex patterns.
     /// `None` means the name shadows an outer risky regex but is not itself risky.
-    pub(crate) module_risky_regex_bindings: FxHashMap<String, Option<String>>,
+    module_risky_regex_bindings: FxHashMap<String, Option<String>>,
     /// Nested lexical risky regex bindings.
-    pub(crate) risky_regex_binding_stack: Vec<FxHashMap<String, Option<String>>>,
+    risky_regex_binding_stack: Vec<FxHashMap<String, Option<String>>>,
     /// Module-scope locals initialized from a path sink call.
-    pub(crate) module_path_sink_bindings: FxHashMap<String, Option<SecurityPathSinkBinding>>,
+    module_path_sink_bindings: FxHashMap<String, Option<SecurityPathSinkBinding>>,
     /// Nested lexical locals initialized from a path sink call.
-    pub(crate) path_sink_binding_stack: Vec<FxHashMap<String, Option<SecurityPathSinkBinding>>>,
+    path_sink_binding_stack: Vec<FxHashMap<String, Option<SecurityPathSinkBinding>>>,
     /// Module-scope `path.relative(base, resolved)` aliases.
-    pub(crate) module_path_relative_bindings: FxHashMap<String, Option<String>>,
+    module_path_relative_bindings: FxHashMap<String, Option<String>>,
     /// Nested lexical `path.relative(base, resolved)` aliases.
-    pub(crate) path_relative_binding_stack: Vec<FxHashMap<String, Option<String>>>,
+    path_relative_binding_stack: Vec<FxHashMap<String, Option<String>>>,
     /// Harvested Pinia store members keyed by the store binding's local name
     /// (`export const useFoo = defineStore('foo', {...})` -> `"useFoo"` maps to
     /// its `state` / `getters` / `actions` keys, or setup-store returned keys,
@@ -557,7 +557,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// Basename-gated to page-load producers in `parse.rs` (cleared for any
     /// non-`+page.{ts,server.ts,js,server.js}` file). Consumed by the
     /// `unused-load-data-key` detector.
-    pub(crate) load_return_keys: Vec<fallow_types::extract::LoadReturnKey>,
+    load_return_keys: Vec<fallow_types::extract::LoadReturnKey>,
     /// Which route-data producer names should be harvested for this file. Set by
     /// `parse.rs` before the AST walk because SvelteKit and conventional route
     /// modules use different export names but share the same cached field.
@@ -565,11 +565,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// `true` when a `load` export was seen whose body could not be harvested
     /// safely (spread/non-literal/multi-return/computed-key/wrapped). Forces the
     /// `unused-load-data-key` detector to abstain on the whole file.
-    pub(crate) has_unharvestable_load: bool,
+    has_unharvestable_load: bool,
     /// `true` when this file passes the whole `data` binding opaquely
     /// (`const X = data`, `fn(data)` / `fn(...data)`). Name-gated on `data`.
     /// Consumed only by the `unused-load-data-key` detector (FP-1).
-    pub(crate) has_load_data_whole_use: bool,
+    has_load_data_whole_use: bool,
     /// Locals bound to `useLoaderData()`. Reads on these locals are mirrored to
     /// the reserved route-data marker for React Router and Remix route modules.
     /// Working state only, not persisted.
@@ -581,26 +581,26 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) jsx_capable: bool,
     /// React component definitions captured during the JSX walk. Empty unless
     /// `jsx_capable`.
-    pub(crate) component_functions: Vec<ComponentFunction>,
+    component_functions: Vec<ComponentFunction>,
     /// React component props (reuses `ComponentProp`; `used_in_template` always
     /// false, `used_in_script` = used-in-body). Empty unless `jsx_capable`.
-    pub(crate) react_props: Vec<ComponentProp>,
+    react_props: Vec<ComponentProp>,
     /// React hook call sites. Empty unless `jsx_capable`.
-    pub(crate) hook_uses: Vec<HookUse>,
+    hook_uses: Vec<HookUse>,
     /// React render edges (child name captured; resolution deferred to graph
     /// build). Empty unless `jsx_capable`.
-    pub(crate) render_edges: Vec<RenderEdge>,
+    render_edges: Vec<RenderEdge>,
     /// Stack of enclosing React component names, pushed when a component
     /// function/arrow is entered and popped on exit. The top is the
     /// `parent_component` for any render edge or hook captured inside.
-    pub(crate) component_stack: Vec<String>,
+    component_stack: Vec<String>,
     /// Pending React-component metadata for a named arrow / function-expression
     /// binding, keyed by the arrow/function span. Populated in
     /// `visit_variable_declaration` BEFORE the walk descends into the init, then
     /// consumed by `visit_arrow_function_expression` /
     /// `visit_function` to push the component stack with the binding name. Working
     /// state only (not persisted, not merged across SFC blocks).
-    pub(crate) pending_component_arrows: FxHashMap<Span, PendingComponentArrow>,
+    pending_component_arrows: FxHashMap<Span, PendingComponentArrow>,
     /// Same-file object-type declarations eligible to back a React component's
     /// bare-identifier typed props param (`(props: Props) => ...`). Maps the
     /// type/interface name to its `(prop_name, span_start)` members, populated
@@ -610,67 +610,67 @@ pub(crate) struct ModuleInfoExtractor {
     /// generic / mapped / imported type never enters this map, so a pending typed
     /// props harvest that misses it abstains (ADR-001, zero-FP). Working state,
     /// not persisted.
-    pub(crate) react_object_type_props: FxHashMap<String, Vec<(String, u32)>>,
+    react_object_type_props: FxHashMap<String, Vec<(String, u32)>>,
     /// React components whose first param is a bare identifier with a
     /// same-file-resolvable object-type annotation, deferred to finalize because
     /// the backing interface/type may hoist (be declared after the component).
     /// The `props.<name>` member-access usage is computed at capture time (the
     /// body is in hand then); the prop-name SET is resolved in finalize against
     /// `react_object_type_props`. Working state, not persisted.
-    pub(crate) pending_typed_react_props: Vec<PendingTypedReactProps>,
+    pending_typed_react_props: Vec<PendingTypedReactProps>,
     /// Angular component/directive inputs harvested from Angular-decorated
     /// classes (`@Input()` decorators and signal `input()` / `model()`
     /// initializers). Accumulated across every Angular class in the module and
     /// copied onto `ModuleInfo.angular_inputs`. Consumed by the
     /// `unused-component-input` detector.
-    pub(crate) angular_inputs: Vec<AngularInputMember>,
+    angular_inputs: Vec<AngularInputMember>,
     /// Angular component/directive outputs harvested from Angular-decorated
     /// classes (`@Output()` decorators and signal `output()` /
     /// `outputFromObservable()` initializers). Accumulated across every Angular
     /// class in the module and copied onto `ModuleInfo.angular_outputs`. Consumed
     /// by the `unused-component-output` detector.
-    pub(crate) angular_outputs: Vec<AngularOutputMember>,
+    angular_outputs: Vec<AngularOutputMember>,
     /// Spans of Angular classes already harvested into `angular_inputs` /
     /// `angular_outputs`. An `export class FooComponent` is visited by both the
     /// named-export declaration path and the top-level class-declaration path, so
     /// this dedups the harvest and prevents one declared input/output from being
     /// flagged twice.
-    pub(crate) harvested_angular_class_spans: FxHashSet<Span>,
+    harvested_angular_class_spans: FxHashSet<Span>,
     /// Angular `@Component` declarations with their `selector` value(s), harvested
     /// from `@Component({ selector })` decorators. Accumulated across every
     /// Angular component class in the module and copied onto
     /// `ModuleInfo.angular_component_selectors`. Consumed by the Angular arm of
     /// the `unrendered-component` detector.
-    pub(crate) angular_component_selectors: Vec<AngularComponentSelector>,
+    angular_component_selectors: Vec<AngularComponentSelector>,
     /// Custom element selector tags referenced in this file's Angular templates
     /// (inline `template:` blocks). External `templateUrl` `.html` files are
     /// scanned separately when that file is parsed. Copied onto
     /// `ModuleInfo.angular_used_selectors`.
-    pub(crate) angular_used_selectors: Vec<String>,
+    angular_used_selectors: Vec<String>,
     /// Angular component class names referenced as a route entry or bootstrap
     /// target (route `component:` / `loadComponent`, `bootstrapApplication` /
     /// `bootstrap: [...]`). Copied onto `ModuleInfo.angular_entry_component_refs`
     /// (the Angular `unrendered-component` entry-point abstain).
-    pub(crate) angular_entry_component_refs: Vec<String>,
+    angular_entry_component_refs: Vec<String>,
     /// `true` when a dynamic component render was seen
     /// (`*.createComponent(<ident>)`). Copied onto
     /// `ModuleInfo.has_dynamic_component_render` (the Angular
     /// `unrendered-component` project-wide abstain).
-    pub(crate) has_dynamic_component_render: bool,
+    has_dynamic_component_render: bool,
     /// Local binding names bound from `const dispatch = createEventDispatcher()`
     /// (where `createEventDispatcher` is imported from `svelte`). A
     /// `dispatch('<name>')` call through one of these bindings records a
     /// `DispatchedEvent`. Working state, then copied as the gate for the dispatch
     /// harvest. Not persisted.
-    pub(crate) event_dispatch_bindings: FxHashSet<String>,
+    event_dispatch_bindings: FxHashSet<String>,
     /// Svelte custom events dispatched via `dispatch('<name>')` (literal arg).
     /// Copied onto `ModuleInfo.svelte_dispatched_events`. Consumed by the
     /// `unused-svelte-event` detector.
-    pub(crate) svelte_dispatched_events: Vec<DispatchedEvent>,
+    svelte_dispatched_events: Vec<DispatchedEvent>,
     /// `true` when a `dispatch(<nonLiteral>)` call was seen, or a `dispatch`
     /// binding was used as a whole value (passed / returned). Forces the
     /// `unused-svelte-event` detector to abstain on the whole component.
-    pub(crate) has_dynamic_dispatch: bool,
+    has_dynamic_dispatch: bool,
 }
 
 /// Metadata for a named arrow / function-expression that may be a React
@@ -678,11 +678,11 @@ pub(crate) struct ModuleInfoExtractor {
 #[derive(Debug, Clone)]
 pub(crate) struct PendingComponentArrow {
     /// The binding name.
-    pub(crate) name: String,
+    name: String,
     /// The component kind (`Arrow`, or a `forwardRef` / `memo` wrapper).
-    pub(crate) kind: fallow_types::extract::ComponentFunctionKind,
+    kind: fallow_types::extract::ComponentFunctionKind,
     /// Whether the binding is exported.
-    pub(crate) is_exported: bool,
+    is_exported: bool,
     /// For a `forwardRef<Ref, Props>((props, ref) => ...)` wrapper, the bare
     /// single-name SECOND generic type argument (`Props`). The inner render
     /// function's `props` param carries no annotation in this shape, so the props
@@ -690,7 +690,7 @@ pub(crate) struct PendingComponentArrow {
     /// `react_object_type_props` in finalize, exactly like an inline
     /// `(props: Props)` annotation. `None` for every non-generic / unresolvable
     /// shape (the inner param's own annotation, if any, still wins).
-    pub(crate) props_type_name: Option<String>,
+    props_type_name: Option<String>,
 }
 
 /// A React component whose first param is a bare identifier carrying a
@@ -702,25 +702,25 @@ pub(crate) struct PendingComponentArrow {
 #[derive(Debug, Clone)]
 pub(crate) struct PendingTypedReactProps {
     /// The enclosing component name (`ComponentProp.component`).
-    pub(crate) component: String,
+    component: String,
     /// The bare-identifier props parameter local (e.g. `props`).
-    pub(crate) props_local: String,
+    props_local: String,
     /// The annotation type name to resolve against `react_object_type_props`.
-    pub(crate) type_name: String,
+    type_name: String,
     /// Prop names read via `<props_local>.<name>` member access (or via a
     /// `const { name } = props` destructure local) anywhere in the body. A name
     /// in this set is credited `used_in_script = true`.
-    pub(crate) member_uses: FxHashSet<String>,
+    member_uses: FxHashSet<String>,
     /// `true` when the props binding is consumed as a whole object (passed to a
     /// call/hook, spread, returned, or assigned). The prop set is then opaque, so
     /// the whole component abstains (`has_unharvestable_props`).
-    pub(crate) has_whole_object_use: bool,
+    has_whole_object_use: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SecurityPathSinkBinding {
-    pub(crate) span_start: u32,
-    pub(crate) arg_index: u32,
+    span_start: u32,
+    arg_index: u32,
 }
 
 impl ModuleInfoExtractor {
@@ -732,7 +732,7 @@ impl ModuleInfoExtractor {
         self.route_load_harvest_mode = mode;
     }
 
-    pub(crate) fn record_local_class_export(&mut self, name: String, info: LocalClassExportInfo) {
+    fn record_local_class_export(&mut self, name: String, info: LocalClassExportInfo) {
         self.local_class_exports.insert(name, info);
     }
 
@@ -898,14 +898,14 @@ impl ModuleInfoExtractor {
             .or_insert(BindingTarget::Class(target));
     }
 
-    pub(crate) fn record_angular_template_member_fact(&mut self, member: String) {
+    fn record_angular_template_member_fact(&mut self, member: String) {
         self.semantic_facts
             .push(SemanticFact::AngularTemplateMemberAccess(
                 AngularTemplateMemberAccessFact { member },
             ));
     }
 
-    pub(crate) fn record_angular_component_field_array_type_fact(
+    fn record_angular_component_field_array_type_fact(
         &mut self,
         field: String,
         element_class: String,
@@ -919,12 +919,12 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    pub(crate) fn record_angular_this_spread_fact(&mut self) {
+    fn record_angular_this_spread_fact(&mut self) {
         self.semantic_facts
             .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
     }
 
-    pub(crate) fn record_dynamic_custom_element_render_fact(&mut self) {
+    fn record_dynamic_custom_element_render_fact(&mut self) {
         self.semantic_facts
             .push(SemanticFact::DynamicCustomElementRender(
                 DynamicCustomElementRenderFact,
@@ -1005,7 +1005,7 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    pub(crate) fn record_fluent_chain_member_fact(
+    fn record_fluent_chain_member_fact(
         &mut self,
         root_object: String,
         root_method: String,
@@ -1023,7 +1023,7 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    pub(crate) fn record_fluent_chain_new_member_fact(
+    fn record_fluent_chain_new_member_fact(
         &mut self,
         class_name: String,
         chain: Vec<String>,
@@ -1039,7 +1039,7 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    pub(crate) fn record_playwright_fixture_use_fact(
+    fn record_playwright_fixture_use_fact(
         &mut self,
         test_name: String,
         fixture_name: String,
@@ -1054,7 +1054,7 @@ impl ModuleInfoExtractor {
         ));
     }
 
-    pub(crate) fn record_playwright_fixture_definition_fact(
+    fn record_playwright_fixture_definition_fact(
         &mut self,
         test_name: String,
         fixture_name: String,
@@ -1070,11 +1070,7 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    pub(crate) fn record_playwright_fixture_alias_fact(
-        &mut self,
-        test_name: String,
-        base_name: String,
-    ) {
+    fn record_playwright_fixture_alias_fact(&mut self, test_name: String, base_name: String) {
         self.semantic_facts
             .push(SemanticFact::PlaywrightFixtureAlias(
                 PlaywrightFixtureAliasFact {
@@ -1084,7 +1080,7 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    pub(crate) fn record_playwright_fixture_type_fact(
+    fn record_playwright_fixture_type_fact(
         &mut self,
         alias_name: String,
         fixture_name: String,
@@ -1100,7 +1096,7 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    pub(crate) fn record_local_declaration_name(&mut self, name: &str) {
+    fn record_local_declaration_name(&mut self, name: &str) {
         self.local_declaration_names.insert(name.to_string());
     }
 
@@ -1267,7 +1263,7 @@ impl ModuleInfoExtractor {
         })
     }
 
-    pub(crate) fn is_node_module_register(&self, local_name: &str, via_namespace: bool) -> bool {
+    fn is_node_module_register(&self, local_name: &str, via_namespace: bool) -> bool {
         const NODE_MODULE_SOURCES: &[&str] = &["node:module", "module"];
 
         self.imports.iter().any(|import| {
@@ -2681,7 +2677,7 @@ impl ModuleInfoExtractor {
 /// A nested pattern (`{ a: { b } }`) yields `a` only. `b` belongs to whatever type
 /// `a` has, not to the factory's class, and crediting it would credit a same-named
 /// member of an unrelated class.
-pub(super) fn destructured_factory_keys(obj_pat: &ObjectPattern<'_>) -> Option<Vec<String>> {
+fn destructured_factory_keys(obj_pat: &ObjectPattern<'_>) -> Option<Vec<String>> {
     if obj_pat.rest.is_some() {
         return None;
     }
@@ -2841,7 +2837,7 @@ fn try_extract_arrow_wrapped_import<'a, 'b>(
 
 #[must_use]
 /// Extract an import expression from a return statement body.
-pub(crate) fn extract_import_from_return_body<'a, 'b>(
+fn extract_import_from_return_body<'a, 'b>(
     stmts: &'b [Statement<'a>],
 ) -> Option<&'b ImportExpression<'a>> {
     for stmt in stmts.iter().rev() {

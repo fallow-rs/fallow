@@ -6,13 +6,13 @@ pub(super) enum PlaywrightTestKey {
     Local { file_id: FileId, local_name: String },
 }
 
-pub(super) fn push_playwright_test_key(keys: &mut Vec<PlaywrightTestKey>, key: PlaywrightTestKey) {
+fn push_playwright_test_key(keys: &mut Vec<PlaywrightTestKey>, key: PlaywrightTestKey) {
     if !keys.contains(&key) {
         keys.push(key);
     }
 }
 
-pub(super) fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<String> {
+fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<String> {
     let mut names = FxHashSet::default();
     let definition_facts = playwright_fixture_definitions(resolved);
     for access in &definition_facts {
@@ -25,7 +25,7 @@ pub(super) fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> 
     names
 }
 
-pub(super) fn playwright_test_keys_for_local(
+fn playwright_test_keys_for_local(
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
     local_playwright_test_names: &FxHashSet<String>,
     file_id: FileId,
@@ -47,7 +47,7 @@ pub(super) fn playwright_test_keys_for_local(
     Vec::new()
 }
 
-pub(super) fn build_playwright_fixture_targets(
+fn build_playwright_fixture_targets(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     indexes: &MemberPassIndexes<'_>,
@@ -90,7 +90,7 @@ pub(super) fn build_playwright_fixture_targets(
 
 /// Collect fixture-definition facts for one module, recording each fixture's
 /// POM type export keys under its owning test key.
-pub(super) fn collect_playwright_fixture_def_targets(
+fn collect_playwright_fixture_def_targets(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
@@ -127,7 +127,7 @@ pub(super) fn collect_playwright_fixture_def_targets(
 
 /// Collect wrapper-alias facts for one module, recording each alias's base test
 /// keys (origins expanded) under its owning test key.
-pub(super) fn collect_playwright_fixture_aliases(
+fn collect_playwright_fixture_aliases(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
@@ -167,7 +167,7 @@ pub(super) fn collect_playwright_fixture_aliases(
     }
 }
 
-pub(super) fn expand_playwright_fixture_aliases(
+fn expand_playwright_fixture_aliases(
     targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
     aliases_by_test: &FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
 ) {
@@ -201,7 +201,7 @@ pub(super) fn expand_playwright_fixture_aliases(
     }
 }
 
-pub(super) fn push_playwright_fixture_target(
+fn push_playwright_fixture_target(
     graph: &ModuleGraph,
     type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     fixture_targets: &mut FxHashMap<String, Vec<ExportKey>>,
@@ -225,7 +225,7 @@ pub(super) fn push_playwright_fixture_target(
     }
 }
 
-pub(super) fn push_playwright_fixture_type_target(
+fn push_playwright_fixture_type_target(
     type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     fixture_targets: &mut FxHashMap<String, Vec<ExportKey>>,
     fixture_name: &str,
@@ -243,7 +243,7 @@ pub(super) fn push_playwright_fixture_type_target(
     }
 }
 
-pub(super) fn build_playwright_fixture_type_targets(
+fn build_playwright_fixture_type_targets(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     indexes: &MemberPassIndexes<'_>,

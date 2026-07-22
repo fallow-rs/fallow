@@ -16,7 +16,7 @@ pub enum DiffFilterMode {
 
 impl DiffFilterMode {
     #[must_use]
-    pub(crate) fn from_env() -> Self {
+    fn from_env() -> Self {
         match std::env::var("FALLOW_DIFF_FILTER")
             .unwrap_or_else(|_| "added".into())
             .as_str()
@@ -91,8 +91,8 @@ impl DiffSource {
 /// changed set.
 #[derive(Debug)]
 pub struct LoadedDiff {
-    pub(crate) index: DiffIndex,
-    pub(crate) raw: String,
+    index: DiffIndex,
+    raw: String,
 }
 
 /// Resolve a diff source from CLI input.
@@ -169,7 +169,7 @@ pub(crate) fn resolve_diff_source(
 /// Stdin is consumed exactly once. The first call drains it; downstream
 /// callers must reuse the returned `LoadedDiff` rather than re-loading.
 #[must_use]
-pub(crate) fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
+fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
     match source {
         DiffSource::Stdin => load_diff_index_from_stdin(quiet),
         DiffSource::Flag(path) | DiffSource::EnvVar(path) => {
@@ -555,7 +555,7 @@ where
 }
 
 #[must_use]
-pub(crate) fn filter_issues_from_path(
+fn filter_issues_from_path(
     issues: Vec<CiIssue>,
     path: &Path,
     mode: DiffFilterMode,

@@ -70,7 +70,7 @@ fn low_confidence_skip_reason(
     None
 }
 
-pub(super) struct ExportFix {
+struct ExportFix {
     line_idx: usize,
     export_name: String,
     enum_declaration: Option<EnumDeclarationRange>,

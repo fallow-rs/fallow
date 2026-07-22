@@ -171,11 +171,11 @@ pub struct AnalysisOutput {
 #[derive(Debug, Clone, Copy)]
 #[doc(hidden)]
 pub struct AnalysisParseMetrics {
-    pub(crate) parse_ms: f64,
-    pub(crate) cache_ms: f64,
-    pub(crate) cache_hits: usize,
-    pub(crate) cache_misses: usize,
-    pub(crate) parse_cpu_ms: f64,
+    parse_ms: f64,
+    cache_ms: f64,
+    cache_hits: usize,
+    cache_misses: usize,
+    parse_cpu_ms: f64,
 }
 
 /// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
@@ -216,7 +216,7 @@ fn update_cache(
 /// `health`, `coverage analyze`) can call it without re-deriving the
 /// same fallback policy.
 #[must_use]
-pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
+fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
     config
         .cache_max_size_mb
         .map_or(cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
@@ -483,7 +483,7 @@ impl AnalysisDiscovery {
 
     /// Discovered source files, indexed by stable `FileId` for this session.
     #[must_use]
-    pub(crate) fn files(&self) -> &[discover::DiscoveredFile] {
+    fn files(&self) -> &[discover::DiscoveredFile] {
         &self.files
     }
 
@@ -2444,7 +2444,7 @@ fn collect_config_search_roots(
 ///
 /// Returns an error when an explicit config cannot be loaded or automatic
 /// config discovery finds an invalid config.
-pub(crate) fn config_for_project(
+fn config_for_project(
     root: &Path,
     config_path: Option<&Path>,
 ) -> Result<(ResolvedConfig, Option<std::path::PathBuf>), FallowError> {

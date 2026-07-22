@@ -204,11 +204,7 @@ impl ModuleInfoExtractor {
         });
     }
 
-    pub(crate) fn extract_binding_pattern_names(
-        &mut self,
-        pattern: &BindingPattern<'_>,
-        is_type_only: bool,
-    ) {
+    fn extract_binding_pattern_names(&mut self, pattern: &BindingPattern<'_>, is_type_only: bool) {
         for id in pattern.get_binding_identifiers() {
             self.exports.push(ExportInfo {
                 name: ExportName::Named(id.name.to_string()),

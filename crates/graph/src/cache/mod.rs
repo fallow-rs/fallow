@@ -105,9 +105,9 @@ impl CachedResolveResult {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CachedResolvedImport {
     /// Import metadata mirrored from extraction or resolver synthesis.
-    pub(crate) info: CachedImportInfo,
+    info: CachedImportInfo,
     /// Resolved target for this import edge.
-    pub(crate) target: CachedResolveResult,
+    target: CachedResolveResult,
 }
 
 impl CachedResolvedImport {
@@ -136,9 +136,9 @@ impl CachedResolvedImport {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CachedResolvedReExport {
     /// Re-export metadata mirrored from extraction.
-    pub(crate) info: CachedReExportInfo,
+    info: CachedReExportInfo,
     /// Resolved target for this re-export source.
-    pub(crate) target: CachedResolveResult,
+    target: CachedResolveResult,
 }
 
 impl CachedResolvedReExport {
@@ -167,19 +167,19 @@ impl CachedResolvedReExport {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CachedImportInfo {
     /// Import source specifier.
-    pub(crate) source: String,
+    source: String,
     /// Imported binding shape.
-    pub(crate) imported_name: fallow_types::extract::ImportedName,
+    imported_name: fallow_types::extract::ImportedName,
     /// Local binding name.
-    pub(crate) local_name: String,
+    local_name: String,
     /// Whether this import is type-only.
-    pub(crate) is_type_only: bool,
+    is_type_only: bool,
     /// Whether this import originated from a style context.
-    pub(crate) from_style: bool,
+    from_style: bool,
     /// Span of the full import declaration.
-    pub(crate) span: [u32; 2],
+    span: [u32; 2],
     /// Span of the import source literal.
-    pub(crate) source_span: [u32; 2],
+    source_span: [u32; 2],
 }
 
 impl From<&ImportInfo> for CachedImportInfo {
@@ -214,15 +214,15 @@ impl From<CachedImportInfo> for ImportInfo {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CachedReExportInfo {
     /// Re-export source specifier.
-    pub(crate) source: String,
+    source: String,
     /// Imported name from the source module.
-    pub(crate) imported_name: String,
+    imported_name: String,
     /// Exported name from this module.
-    pub(crate) exported_name: String,
+    exported_name: String,
     /// Whether this re-export is type-only.
-    pub(crate) is_type_only: bool,
+    is_type_only: bool,
     /// Span of the re-export declaration.
-    pub(crate) span: [u32; 2],
+    span: [u32; 2],
 }
 
 impl From<&ReExportInfo> for CachedReExportInfo {
@@ -253,15 +253,15 @@ impl From<CachedReExportInfo> for ReExportInfo {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CachedResolvedModule {
     /// Stable identity of the source module.
-    pub(crate) key: StableFileKey,
+    key: StableFileKey,
     /// Static import and require edges after resolution.
-    pub(crate) resolved_imports: Vec<CachedResolvedImport>,
+    resolved_imports: Vec<CachedResolvedImport>,
     /// Literal dynamic import edges after resolution.
-    pub(crate) resolved_dynamic_imports: Vec<CachedResolvedImport>,
+    resolved_dynamic_imports: Vec<CachedResolvedImport>,
     /// Re-export source edges after resolution.
-    pub(crate) re_exports: Vec<CachedResolvedReExport>,
+    re_exports: Vec<CachedResolvedReExport>,
     /// Dynamic import pattern targets, aligned with current extracted patterns.
-    pub(crate) resolved_dynamic_pattern_targets: Vec<Vec<StableFileKey>>,
+    resolved_dynamic_pattern_targets: Vec<Vec<StableFileKey>>,
 }
 
 impl CachedResolvedModule {
@@ -613,7 +613,7 @@ pub struct GraphCacheFile {
 impl GraphCacheFile {
     /// Build a graph-cache file row from a discovered file and fingerprint.
     #[must_use]
-    pub(crate) fn from_discovered_file(
+    fn from_discovered_file(
         root: &Path,
         file: &DiscoveredFile,
         fingerprint: SourceFingerprint,
@@ -640,7 +640,7 @@ pub struct GraphCacheManifest {
 impl GraphCacheManifest {
     /// Build a manifest and sort files by stable key for deterministic compare.
     #[must_use]
-    pub(crate) fn new(mode: GraphCacheMode, mut files: Vec<GraphCacheFile>) -> Self {
+    fn new(mode: GraphCacheMode, mut files: Vec<GraphCacheFile>) -> Self {
         sort_files(&mut files);
         Self {
             version: GRAPH_CACHE_VERSION,

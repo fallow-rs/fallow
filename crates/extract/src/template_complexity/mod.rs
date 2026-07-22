@@ -297,7 +297,7 @@ pub fn compute_angular_template_complexity(source: &str) -> Option<FunctionCompl
 /// scanners to mask `<script>` / `<style>` / comment regions before scanning,
 /// matching the masking convention in `crate::sfc_template`. Building a fresh
 /// `String` (rather than mutating in place) keeps the crate `unsafe`-free.
-pub(in crate::template_complexity) fn mask_ranges(source: &str, regex: &regex::Regex) -> String {
+fn mask_ranges(source: &str, regex: &regex::Regex) -> String {
     let mut spans: Vec<(usize, usize)> = regex
         .find_iter(source)
         .map(|m| (m.start(), m.end()))

@@ -18,7 +18,7 @@ pub(super) const THEME_USAGE_SOURCE_EXTS: &[&str] = &[
 /// dashed SHAPE, never a bare word, so a dictionary-word theme name
 /// (`brand`/`card`/`muted`) is credited only by a real `-<name>` utility suffix,
 /// not by the word appearing anywhere in source.
-pub(super) fn collect_class_shaped_tokens(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
+fn collect_class_shaped_tokens(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
     let bytes = source.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -78,7 +78,7 @@ pub(super) fn collect_class_shaped_tokens_located(
     }
 }
 
-pub(super) fn line_at_offset(source: &str, offset: usize) -> u32 {
+fn line_at_offset(source: &str, offset: usize) -> u32 {
     let count = source
         .get(..offset)
         .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
@@ -166,7 +166,7 @@ pub(super) fn classify_theme_token_candidates_from_tokens(
 
 /// Build the utility-shaped usage surface: every class-shaped token from `@apply`
 /// bodies plus non-CSS source (markup class attributes, `clsx` args, CSS-in-JS).
-pub(super) fn collect_theme_usage_tokens(
+fn collect_theme_usage_tokens(
     input: &UnusedThemeTokenScanInput<'_>,
 ) -> rustc_hash::FxHashSet<String> {
     let mut utility_tokens: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
@@ -192,7 +192,7 @@ pub(super) fn collect_theme_usage_tokens(
 
 /// The `var()` read surface: CSS-side `@theme` reads plus referenced custom
 /// properties (leading dashes trimmed to the property key form).
-pub(super) fn collect_theme_var_reads(tokens: &CssTokenSets) -> rustc_hash::FxHashSet<String> {
+fn collect_theme_var_reads(tokens: &CssTokenSets) -> rustc_hash::FxHashSet<String> {
     let mut var_reads: rustc_hash::FxHashSet<String> = tokens.theme_var_reads.clone();
     for referenced in &tokens.referenced_custom_props {
         var_reads.insert(referenced.trim_start_matches('-').to_owned());

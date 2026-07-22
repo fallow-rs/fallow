@@ -11,7 +11,7 @@ type JsonMap = Map<String, Value>;
 /// unknown to fallow (typo, future knip rule, or an issue type the migrator
 /// has not yet catalogued). Users follow it to either fix the typo or report
 /// the missing mapping.
-pub(super) const MIGRATION_DOCS_URL: &str = "https://docs.fallow.tools/migration/from-knip";
+const MIGRATION_DOCS_URL: &str = "https://docs.fallow.tools/migration/from-knip";
 
 /// Emit a `MigrationWarning` for one rule-key-equivalent input that the
 /// migrator did not translate. Used by `migrate_rules`, `migrate_exclude`, and

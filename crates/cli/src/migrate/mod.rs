@@ -20,10 +20,10 @@ use toml_gen::generate_toml;
 /// A warning about a config field that could not be migrated.
 #[derive(Debug)]
 struct MigrationWarning {
-    pub(super) source: &'static str,
-    pub(super) field: String,
-    pub(super) message: String,
-    pub(super) suggestion: Option<String>,
+    source: &'static str,
+    field: String,
+    message: String,
+    suggestion: Option<String>,
 }
 
 impl std::fmt::Display for MigrationWarning {
@@ -39,9 +39,9 @@ impl std::fmt::Display for MigrationWarning {
 /// Result of migrating one or more source configs.
 #[derive(Debug)]
 struct MigrationResult {
-    pub(super) config: serde_json::Value,
-    pub(super) warnings: Vec<MigrationWarning>,
-    pub(super) sources: Vec<String>,
+    config: serde_json::Value,
+    warnings: Vec<MigrationWarning>,
+    sources: Vec<String>,
 }
 
 /// Output format selection for the generated fallow config.

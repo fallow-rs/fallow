@@ -11,7 +11,7 @@ use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
 /// Detect test/mock path conventions. Kept as a simple substring scan
 /// against forward-slash normalized paths so it works uniformly on the
 /// relative paths we use for display.
-pub(super) fn is_test_path(relative: &std::path::Path) -> bool {
+fn is_test_path(relative: &std::path::Path) -> bool {
     let s = relative.to_string_lossy().replace('\\', "/");
     s.contains("/__tests__/")
         || s.contains("/__mocks__/")
@@ -223,7 +223,7 @@ fn imported_since() -> crate::churn::SinceDuration {
 /// Find the maximum weighted-commits and complexity-density across eligible files.
 ///
 /// Used to normalize hotspot scores into the 0-100 range.
-pub(super) fn compute_normalization_maxima(
+fn compute_normalization_maxima(
     file_scores: &[FileHealthScore],
     churn_files: &rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn>,
     min_commits: u32,
@@ -243,7 +243,7 @@ pub(super) fn compute_normalization_maxima(
 
 /// Check whether a file should be excluded from hotspot results
 /// based on workspace filter and ignore patterns.
-pub(super) fn is_excluded_from_hotspots(
+fn is_excluded_from_hotspots(
     path: &std::path::Path,
     root: &std::path::Path,
     ignore_set: &globset::GlobSet,
@@ -267,7 +267,7 @@ pub(super) fn is_excluded_from_hotspots(
 ///
 /// Both inputs are normalized against their respective maxima so the result
 /// falls in the 0-100 range (rounded to one decimal).
-pub(super) fn compute_hotspot_score(
+fn compute_hotspot_score(
     weighted_commits: f64,
     max_weighted: f64,
     complexity_density: f64,

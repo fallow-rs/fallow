@@ -149,7 +149,7 @@ pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> 
 }
 
 /// Get files changed since a git ref.
-pub(crate) fn try_get_changed_files(
+fn try_get_changed_files(
     root: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {

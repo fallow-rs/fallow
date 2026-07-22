@@ -11,7 +11,7 @@ pub(super) struct TokenConsumersInput<'a> {
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
 }
 
-pub(super) fn collect_located_utility_consumers(
+fn collect_located_utility_consumers(
     input: &TokenConsumersInput<'_>,
 ) -> Vec<(String, String, u32)> {
     let mut located: Vec<(String, String, u32)> = Vec::new();
@@ -56,7 +56,7 @@ pub(super) fn build_token_consumers(
     out
 }
 
-pub(super) fn should_build_token_consumers(input: &TokenConsumersInput<'_>) -> bool {
+fn should_build_token_consumers(input: &TokenConsumersInput<'_>) -> bool {
     if input.changed_files.is_some() || input.ws_roots.is_some() {
         return false;
     }
@@ -66,9 +66,7 @@ pub(super) fn should_build_token_consumers(input: &TokenConsumersInput<'_>) -> b
     !project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root)
 }
 
-pub(super) fn token_consumer_candidates(
-    input: &TokenConsumersInput<'_>,
-) -> Vec<ThemeTokenCandidate> {
+fn token_consumer_candidates(input: &TokenConsumersInput<'_>) -> Vec<ThemeTokenCandidate> {
     let mut summary = fallow_output::CssAnalyticsSummary::default();
     classify_theme_token_candidates(&UnusedThemeTokenScanInput {
         tokens: input.tokens,
@@ -82,7 +80,7 @@ pub(super) fn token_consumer_candidates(
     })
 }
 
-pub(super) fn build_token_consumer(
+fn build_token_consumer(
     input: &TokenConsumersInput<'_>,
     candidate: ThemeTokenCandidate,
     utility_located: &[(String, String, u32)],
@@ -103,7 +101,7 @@ pub(super) fn build_token_consumer(
     }
 }
 
-pub(super) fn token_consumer_locations(
+fn token_consumer_locations(
     input: &TokenConsumersInput<'_>,
     candidate: &ThemeTokenCandidate,
     utility_located: &[(String, String, u32)],
@@ -140,7 +138,7 @@ pub(super) fn token_consumer_locations(
     consumers
 }
 
-pub(super) fn append_exact_token_consumers(
+fn append_exact_token_consumers(
     consumers: &mut Vec<fallow_output::TokenConsumerLocation>,
     located: &[(String, String, u32)],
     expected: &str,
@@ -157,7 +155,7 @@ pub(super) fn append_exact_token_consumers(
     }
 }
 
-pub(super) fn append_suffix_token_consumers(
+fn append_suffix_token_consumers(
     consumers: &mut Vec<fallow_output::TokenConsumerLocation>,
     located: &[(String, String, u32)],
     suffix: &str,
@@ -174,9 +172,7 @@ pub(super) fn append_suffix_token_consumers(
     }
 }
 
-pub(super) fn sort_token_consumer_locations(
-    consumers: &mut [fallow_output::TokenConsumerLocation],
-) {
+fn sort_token_consumer_locations(consumers: &mut [fallow_output::TokenConsumerLocation]) {
     consumers.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
@@ -204,18 +200,18 @@ pub(super) struct CssInJsDefiners {
     pub(super) paths: rustc_hash::FxHashSet<std::path::PathBuf>,
 }
 
-pub(super) type CssInJsConsumerKey = (usize, String);
-pub(super) type CssInJsConsumerHit = (String, u32, fallow_output::ConsumerKind);
-pub(super) type CssInJsConsumerHits =
+type CssInJsConsumerKey = (usize, String);
+type CssInJsConsumerHit = (String, u32, fallow_output::ConsumerKind);
+type CssInJsConsumerHits =
     rustc_hash::FxHashMap<CssInJsConsumerKey, rustc_hash::FxHashSet<CssInJsConsumerHit>>;
-pub(super) type CssInJsImportKey = (fallow_types::discover::FileId, String, String, String);
-pub(super) type ResolvedCssInJsImportTargets =
+type CssInJsImportKey = (fallow_types::discover::FileId, String, String, String);
+type ResolvedCssInJsImportTargets =
     rustc_hash::FxHashMap<CssInJsImportKey, fallow_types::discover::FileId>;
 
 /// Whether a specifier names a CSS-in-JS token-DEFINITION library. `@vanilla-extract/recipes`
 /// is excluded: it exports no token-definition function (`createTheme` family lives
 /// in `@vanilla-extract/css`), so it is not a definer-pass pre-filter source.
-pub(super) fn is_css_in_js_token_lib(specifier: &str) -> bool {
+fn is_css_in_js_token_lib(specifier: &str) -> bool {
     matches!(
         specifier,
         "@stylexjs/stylex" | "@vanilla-extract/css" | "@pandacss/dev"
@@ -225,7 +221,7 @@ pub(super) fn is_css_in_js_token_lib(specifier: &str) -> bool {
 /// A cheap source pre-filter: only re-parse a token-lib-importing file as a
 /// potential definer if its source mentions a token-definition function, so a
 /// StyleX file that only calls `stylex.create` (no `defineVars`) is not parsed.
-pub(super) fn source_mentions_token_definer(source: &str) -> bool {
+fn source_mentions_token_definer(source: &str) -> bool {
     source.contains("defineVars")
         || source.contains("createThemeContract")
         || source.contains("createGlobalTheme")
@@ -234,17 +230,15 @@ pub(super) fn source_mentions_token_definer(source: &str) -> bool {
         || source.contains("defineConfig")
 }
 
-pub(super) fn source_mentions_theme_definer(source: &str) -> bool {
+fn source_mentions_theme_definer(source: &str) -> bool {
     source.contains("theme") || source.contains("Theme")
 }
 
-pub(super) fn is_theme_provider_source(specifier: &str) -> bool {
+fn is_theme_provider_source(specifier: &str) -> bool {
     matches!(specifier, "styled-components" | "@emotion/react")
 }
 
-pub(super) fn project_imports_theme_provider(
-    modules: &[fallow_types::extract::ModuleInfo],
-) -> bool {
+fn project_imports_theme_provider(modules: &[fallow_types::extract::ModuleInfo]) -> bool {
     use fallow_types::extract::ImportedName;
 
     modules.iter().any(|module| {
@@ -259,24 +253,24 @@ pub(super) fn project_imports_theme_provider(
 /// Whether an import specifier is a relative path. The shared graph resolver
 /// handles tsconfig aliases and workspace packages first; this light resolver is
 /// the zero-FP local fallback for cases where a graph edge was not available.
-pub(super) fn is_relative_specifier(specifier: &str) -> bool {
+fn is_relative_specifier(specifier: &str) -> bool {
     specifier.starts_with('.')
 }
 
-pub(super) fn is_panda_generated_specifier(specifier: &str) -> bool {
+fn is_panda_generated_specifier(specifier: &str) -> bool {
     specifier
         .split(['/', '\\'])
         .any(|segment| segment == "styled-system")
 }
 
-pub(super) fn is_panda_style_function(name: &str) -> bool {
+fn is_panda_style_function(name: &str) -> bool {
     matches!(name, "css" | "cva" | "sva" | "recipe" | "styled")
 }
 
 /// Lexically normalize a path (resolve `.` / `..` without touching the
 /// filesystem), so a consumer-relative join compares equal to a definer's
 /// discovered absolute path regardless of `./` / `../` segments.
-pub(super) fn lexical_normalize(path: &std::path::Path) -> std::path::PathBuf {
+fn lexical_normalize(path: &std::path::Path) -> std::path::PathBuf {
     let mut out = std::path::PathBuf::new();
     for comp in path.components() {
         match comp {
@@ -295,7 +289,7 @@ pub(super) fn lexical_normalize(path: &std::path::Path) -> std::path::PathBuf {
 /// matched, normalized definer path or `None`. Zero-FP for relative imports: a
 /// specifier that resolves to a non-definer path yields `None`, so an unrelated
 /// `import { vars } from './other'` is never matched against a design-token `vars`.
-pub(super) fn resolve_relative_specifier(
+fn resolve_relative_specifier(
     consumer_abs: &std::path::Path,
     specifier: &str,
     definer_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
@@ -326,7 +320,7 @@ pub(super) fn resolve_relative_specifier(
     None
 }
 
-pub(super) fn css_in_js_import_key(
+fn css_in_js_import_key(
     file_id: fallow_types::discover::FileId,
     import: &fallow_types::extract::ImportInfo,
 ) -> Option<CssInJsImportKey> {
@@ -341,7 +335,7 @@ pub(super) fn css_in_js_import_key(
     ))
 }
 
-pub(super) fn resolve_css_in_js_import_targets(
+fn resolve_css_in_js_import_targets(
     files: &[fallow_types::discover::DiscoveredFile],
     modules: &[fallow_types::extract::ModuleInfo],
     config: &ResolvedConfig,
@@ -379,7 +373,7 @@ pub(super) fn resolve_css_in_js_import_targets(
     targets
 }
 
-pub(super) fn resolve_css_in_js_definer_import(
+fn resolve_css_in_js_definer_import(
     consumer_file_id: fallow_types::discover::FileId,
     consumer_abs: &std::path::Path,
     import: &fallow_types::extract::ImportInfo,
@@ -472,7 +466,7 @@ pub(super) fn collect_css_in_js_definers(
 /// through the shared graph resolver or local relative fallback, re-parse it and
 /// collect located member-access reads, deduped by `(consumer file, line)` per
 /// `(definer, leaf token path)`.
-pub(super) fn collect_css_in_js_consumers(
+fn collect_css_in_js_consumers(
     modules: &[fallow_types::extract::ModuleInfo],
     path_by_id: &rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path>,
     config: &ResolvedConfig,
@@ -544,7 +538,7 @@ pub(super) fn collect_css_in_js_consumers(
     hits
 }
 
-pub(super) fn css_in_js_definer_matches<'a>(
+fn css_in_js_definer_matches<'a>(
     module: &'a fallow_types::extract::ModuleInfo,
     consumer_abs: &std::path::Path,
     definers: &CssInJsDefiners,
@@ -572,7 +566,7 @@ pub(super) fn css_in_js_definer_matches<'a>(
     matches
 }
 
-pub(super) fn has_panda_generated_alias(module: &fallow_types::extract::ModuleInfo) -> bool {
+fn has_panda_generated_alias(module: &fallow_types::extract::ModuleInfo) -> bool {
     use fallow_types::extract::ImportedName;
 
     module.imports.iter().any(|import| {
@@ -587,7 +581,7 @@ pub(super) fn has_panda_generated_alias(module: &fallow_types::extract::ModuleIn
 
 /// The local aliases a module imports PandaCSS's generated `token` helper under
 /// (from a `styled-system` specifier). Borrows the module's import strings.
-pub(super) fn module_panda_token_aliases(module: &fallow_types::extract::ModuleInfo) -> Vec<&str> {
+fn module_panda_token_aliases(module: &fallow_types::extract::ModuleInfo) -> Vec<&str> {
     use fallow_types::extract::ImportedName;
 
     module
@@ -604,7 +598,7 @@ pub(super) fn module_panda_token_aliases(module: &fallow_types::extract::ModuleI
 
 /// The local aliases a module imports PandaCSS style functions (`css`, `cva`, ...)
 /// under from a `styled-system` specifier.
-pub(super) fn module_panda_style_aliases(
+fn module_panda_style_aliases(
     module: &fallow_types::extract::ModuleInfo,
 ) -> rustc_hash::FxHashSet<String> {
     use fallow_types::extract::ImportedName;
@@ -621,7 +615,7 @@ pub(super) fn module_panda_style_aliases(
         .collect()
 }
 
-pub(super) type ConsumerQueryPlan<'a> = (
+type ConsumerQueryPlan<'a> = (
     Vec<fallow_extract::ConsumerQuery<'a>>,
     Vec<(usize, fallow_output::ConsumerKind)>,
 );
@@ -630,7 +624,7 @@ pub(super) type ConsumerQueryPlan<'a> = (
 /// mapping each query position to its `(definer index, ConsumerKind)`. The single
 /// scan of the consumer source returns `(query_index, hit)` pairs the caller folds
 /// back through this attribution, preserving the old per-definer kinds exactly.
-pub(super) fn build_module_consumer_queries<'a>(
+fn build_module_consumer_queries<'a>(
     matches: &[(usize, &'a str)],
     leaf_sets: &'a [rustc_hash::FxHashSet<String>],
     theme_definer_indices: &[usize],
@@ -753,7 +747,7 @@ pub(super) fn build_css_in_js_token_consumers(
     out
 }
 
-pub(super) fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
+fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
     use fallow_output::ConsumerKind;
     match kind {
         ConsumerKind::ThemeVar => 0,

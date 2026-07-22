@@ -6,7 +6,7 @@ use oxc_ast::ast::{
     ImportDeclarationSpecifier, ObjectExpression, Program, Statement,
 };
 
-pub(super) const REACT_COMPILER_BABEL_PLUGIN: &str = "babel-plugin-react-compiler";
+const REACT_COMPILER_BABEL_PLUGIN: &str = "babel-plugin-react-compiler";
 const VITE_REACT_PLUGIN_SOURCE: &str = "@vitejs/plugin-react";
 const ROLLDOWN_BABEL_PLUGIN_SOURCE: &str = "@rolldown/plugin-babel";
 

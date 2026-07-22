@@ -53,137 +53,137 @@ fn retain_new_by_keys<T>(
 /// Baseline data for comparison.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct BaselineData {
-    pub(crate) unused_files: Vec<String>,
-    pub(crate) unused_exports: Vec<String>,
-    pub(crate) unused_types: Vec<String>,
+    unused_files: Vec<String>,
+    unused_exports: Vec<String>,
+    unused_types: Vec<String>,
     #[serde(default)]
-    pub(crate) private_type_leaks: Vec<String>,
+    private_type_leaks: Vec<String>,
     /// Unused dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
     /// baselines saved by older fallow versions.
-    pub(crate) unused_dependencies: Vec<String>,
+    unused_dependencies: Vec<String>,
     /// Unused dev dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
     /// baselines saved by older fallow versions.
-    pub(crate) unused_dev_dependencies: Vec<String>,
+    unused_dev_dependencies: Vec<String>,
     /// Circular dependency chains, keyed by sorted file paths joined with `->`.
     #[serde(default)]
-    pub(crate) circular_dependencies: Vec<String>,
+    circular_dependencies: Vec<String>,
     /// Re-export cycles, keyed by `kind:sorted_file_paths_joined_with_<->`
     /// (where `kind` is `multi-node` or `self-loop`). The kind prefix keeps
     /// self-loops from keyspace-colliding with future single-file multi-node
     /// shapes.
     #[serde(default)]
-    pub(crate) re_export_cycles: Vec<String>,
+    re_export_cycles: Vec<String>,
     /// Unused optional dependencies, keyed by `package.json:package_name`.
     /// Legacy bare `package_name` keys are still matched for back-compat
     /// with baselines saved by older fallow versions.
     #[serde(default)]
-    pub(crate) unused_optional_dependencies: Vec<String>,
+    unused_optional_dependencies: Vec<String>,
     /// Unused enum members, keyed by `file:parent.member`.
     #[serde(default)]
-    pub(crate) unused_enum_members: Vec<String>,
+    unused_enum_members: Vec<String>,
     /// Unused class members, keyed by `file:parent.member`.
     #[serde(default)]
-    pub(crate) unused_class_members: Vec<String>,
+    unused_class_members: Vec<String>,
     /// Unused store members, keyed by `file:parent.member`.
     #[serde(default)]
-    pub(crate) unused_store_members: Vec<String>,
+    unused_store_members: Vec<String>,
     /// Unprovided injects, keyed by `file:key_name`.
     #[serde(default)]
-    pub(crate) unprovided_injects: Vec<String>,
+    unprovided_injects: Vec<String>,
     /// Unrendered components, keyed by `file:component_name`.
     #[serde(default)]
-    pub(crate) unrendered_components: Vec<String>,
+    unrendered_components: Vec<String>,
     /// Unused component props, keyed by `file:prop_name`.
     #[serde(default)]
-    pub(crate) unused_component_props: Vec<String>,
+    unused_component_props: Vec<String>,
     /// Unused component emits, keyed by `file:emit_name`.
     #[serde(default)]
-    pub(crate) unused_component_emits: Vec<String>,
+    unused_component_emits: Vec<String>,
     /// Unused component inputs, keyed by `file:input_name`.
     #[serde(default)]
-    pub(crate) unused_component_inputs: Vec<String>,
+    unused_component_inputs: Vec<String>,
     /// Unused component outputs, keyed by `file:output_name`.
     #[serde(default)]
-    pub(crate) unused_component_outputs: Vec<String>,
+    unused_component_outputs: Vec<String>,
     /// Unused Svelte dispatched events, keyed by `file:event_name`.
     #[serde(default)]
-    pub(crate) unused_svelte_events: Vec<String>,
+    unused_svelte_events: Vec<String>,
     /// Unused server actions, keyed by `file:action_name`.
     #[serde(default)]
-    pub(crate) unused_server_actions: Vec<String>,
+    unused_server_actions: Vec<String>,
     /// Unused SvelteKit load() data keys, keyed by `file:key_name`.
     #[serde(default)]
-    pub(crate) unused_load_data_keys: Vec<String>,
+    unused_load_data_keys: Vec<String>,
     /// Unresolved imports, keyed by `file:specifier`.
     #[serde(default)]
-    pub(crate) unresolved_imports: Vec<String>,
+    unresolved_imports: Vec<String>,
     /// Unlisted dependencies, keyed by package name.
     #[serde(default)]
-    pub(crate) unlisted_dependencies: Vec<String>,
+    unlisted_dependencies: Vec<String>,
     /// Duplicate exports, keyed by export name.
     #[serde(default)]
-    pub(crate) duplicate_exports: Vec<String>,
+    duplicate_exports: Vec<String>,
     /// Type-only dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
     /// baselines saved by older fallow versions.
     #[serde(default)]
-    pub(crate) type_only_dependencies: Vec<String>,
+    type_only_dependencies: Vec<String>,
     /// Test-only dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
     /// baselines saved by older fallow versions.
     #[serde(default)]
-    pub(crate) test_only_dependencies: Vec<String>,
+    test_only_dependencies: Vec<String>,
     /// Dev dependencies used in production, keyed by `package.json:package_name`.
     #[serde(default)]
-    pub(crate) dev_dependencies_in_production: Vec<String>,
+    dev_dependencies_in_production: Vec<String>,
     /// Boundary violations, keyed by `from_path->to_path`.
     #[serde(default)]
-    pub(crate) boundary_violations: Vec<String>,
+    boundary_violations: Vec<String>,
     /// Boundary coverage violations, keyed by `path`.
     #[serde(default)]
-    pub(crate) boundary_coverage_violations: Vec<String>,
+    boundary_coverage_violations: Vec<String>,
     /// Boundary call violations, keyed by `path:callee`.
     #[serde(default)]
-    pub(crate) boundary_call_violations: Vec<String>,
+    boundary_call_violations: Vec<String>,
     /// Rule-pack policy violations, keyed by `path:pack/rule_id:matched`.
     #[serde(default)]
-    pub(crate) policy_violations: Vec<String>,
+    policy_violations: Vec<String>,
     /// Stale suppressions, keyed by `file:line`.
     #[serde(default)]
-    pub(crate) stale_suppressions: Vec<String>,
+    stale_suppressions: Vec<String>,
     /// Unused pnpm catalog entries, keyed by `catalog_name:entry_name`.
     #[serde(default)]
-    pub(crate) unused_catalog_entries: Vec<String>,
+    unused_catalog_entries: Vec<String>,
     /// Empty pnpm catalog groups, keyed by `catalog_name`.
     #[serde(default)]
-    pub(crate) empty_catalog_groups: Vec<String>,
+    empty_catalog_groups: Vec<String>,
     /// Unresolved catalog references, keyed by `path:line:catalog_name:entry_name`.
     #[serde(default)]
-    pub(crate) unresolved_catalog_references: Vec<String>,
+    unresolved_catalog_references: Vec<String>,
     /// Unused pnpm dependency overrides, keyed by `source:raw_key`.
     #[serde(default)]
-    pub(crate) unused_dependency_overrides: Vec<String>,
+    unused_dependency_overrides: Vec<String>,
     /// Misconfigured pnpm dependency overrides, keyed by `source:raw_key`.
     #[serde(default)]
-    pub(crate) misconfigured_dependency_overrides: Vec<String>,
+    misconfigured_dependency_overrides: Vec<String>,
     /// Invalid `"use client"` exports, keyed by `path:export_name`.
     #[serde(default)]
-    pub(crate) invalid_client_exports: Vec<String>,
+    invalid_client_exports: Vec<String>,
     /// Mixed client/server barrels, keyed by `path:client_origin:server_origin`.
     #[serde(default)]
-    pub(crate) mixed_client_server_barrels: Vec<String>,
+    mixed_client_server_barrels: Vec<String>,
     /// Misplaced `"use client"` / `"use server"` directives, keyed by
     /// `path:line:directive`.
     #[serde(default)]
-    pub(crate) misplaced_directives: Vec<String>,
+    misplaced_directives: Vec<String>,
     /// Next.js route collisions, keyed by `path:url`.
     #[serde(default)]
-    pub(crate) route_collisions: Vec<String>,
+    route_collisions: Vec<String>,
     /// Next.js dynamic-segment name conflicts, keyed by `path:position`.
     #[serde(default)]
-    pub(crate) dynamic_segment_name_conflicts: Vec<String>,
+    dynamic_segment_name_conflicts: Vec<String>,
 }
 
 impl BaselineData {
@@ -1596,7 +1596,7 @@ pub struct HealthBaselineData {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HealthBaselineCount {
-    pub(crate) count: usize,
+    count: usize,
 }
 
 type HealthFindingCountMap = BTreeMap<String, BTreeMap<String, HealthBaselineCount>>;

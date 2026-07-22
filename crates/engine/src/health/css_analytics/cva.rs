@@ -90,7 +90,7 @@ pub(super) fn scan_cva_variant_token_drifts(
     out
 }
 
-pub(super) fn collect_cva_file_token_drifts(
+fn collect_cva_file_token_drifts(
     out: &mut Vec<fallow_output::CvaVariantTokenDrift>,
     seen: &mut rustc_hash::FxHashSet<(String, u32, String, String)>,
     rel: &str,
@@ -141,7 +141,7 @@ pub(super) fn collect_cva_file_token_drifts(
     }
 }
 
-pub(super) fn cva_arbitrary_value_metric(
+fn cva_arbitrary_value_metric(
     class_token: &str,
 ) -> Option<(&'static str, String, ThemeTokenMetric)> {
     let marker = "-[";
@@ -165,7 +165,7 @@ pub(super) fn cva_arbitrary_value_metric(
     Some((namespace, value, metric))
 }
 
-pub(super) fn nearest_styling_token<'a>(
+fn nearest_styling_token<'a>(
     namespace: &str,
     metric: &ThemeTokenMetric,
     candidates: &'a [ComparableThemeTokenCandidate],
@@ -184,7 +184,7 @@ pub(super) fn nearest_styling_token<'a>(
         })
 }
 
-pub(super) fn read_js_style_scan_source(
+fn read_js_style_scan_source(
     file: &fallow_types::discover::DiscoveredFile,
     ctx: HealthScanCtx<'_>,
 ) -> Option<(String, String)> {
@@ -235,13 +235,13 @@ pub(super) fn read_js_style_scan_source(
     Some((rel, source))
 }
 
-pub(super) fn source_contains_cva_variants(source: &str) -> bool {
+fn source_contains_cva_variants(source: &str) -> bool {
     source.contains("cva(")
         && source.contains("variants")
         && (source.contains("class-variance-authority") || source.contains("styled-system"))
 }
 
-pub(super) fn collect_cva_class_blocks(source: &str) -> Vec<(String, u32)> {
+fn collect_cva_class_blocks(source: &str) -> Vec<(String, u32)> {
     let mut out = Vec::new();
     let mut search = 0usize;
     while let Some(rel) = source[search..].find("cva(") {
@@ -259,11 +259,11 @@ pub(super) fn collect_cva_class_blocks(source: &str) -> Vec<(String, u32)> {
     out
 }
 
-pub(super) fn is_identifier_byte(b: u8) -> bool {
+fn is_identifier_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
 }
 
-pub(super) fn scan_call_end(source: &str, open_paren: usize) -> Option<usize> {
+fn scan_call_end(source: &str, open_paren: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut i = open_paren;
     let mut depth = 0usize;
@@ -300,11 +300,7 @@ pub(super) fn scan_call_end(source: &str, open_paren: usize) -> Option<usize> {
     None
 }
 
-pub(super) fn collect_quoted_cva_class_blocks(
-    source: &str,
-    base_line: u32,
-    out: &mut Vec<(String, u32)>,
-) {
+fn collect_quoted_cva_class_blocks(source: &str, base_line: u32, out: &mut Vec<(String, u32)>) {
     let bytes = source.as_bytes();
     let mut i = 0;
     let mut line = base_line;
@@ -351,7 +347,7 @@ pub(super) fn collect_quoted_cva_class_blocks(
     }
 }
 
-pub(super) fn normalize_cva_class_block(value: &str) -> Option<String> {
+fn normalize_cva_class_block(value: &str) -> Option<String> {
     let tokens: Vec<_> = value.split_whitespace().collect();
     if tokens.len() < 3 {
         return None;
@@ -374,7 +370,7 @@ pub(super) fn normalize_cva_class_block(value: &str) -> Option<String> {
 
 /// True for a byte that can appear inside a Tailwind class token (used to anchor
 /// the `animate-` prefix at a token boundary so `xanimate-` does not match).
-pub(super) fn is_tailwind_class_byte(b: u8) -> bool {
+fn is_tailwind_class_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
 }
 
@@ -383,10 +379,7 @@ pub(super) fn is_tailwind_class_byte(b: u8) -> bool {
 /// `_`/`]`) and after a bare `animate-<name>` utility. The `animate-` prefix must
 /// sit at a token boundary. Names are collected raw; the caller filters them to
 /// actually-defined keyframes.
-pub(super) fn collect_animate_keyframe_names(
-    source: &str,
-    out: &mut rustc_hash::FxHashSet<String>,
-) {
+fn collect_animate_keyframe_names(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
     let bytes = source.as_bytes();
     const PREFIX: &str = "animate-";
     let mut search = 0;

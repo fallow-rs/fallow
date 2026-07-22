@@ -52,7 +52,7 @@ pub(super) fn env_diff_file() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-pub(super) fn env_changed_since() -> Option<String> {
+fn env_changed_since() -> Option<String> {
     std::env::var("FALLOW_CHANGED_SINCE")
         .ok()
         .filter(|value| !value.is_empty())

@@ -82,14 +82,14 @@ fn control_object(callee_path: &str) -> Option<&str> {
         .map(|(object, _)| object.rsplit('.').next().unwrap_or(object))
 }
 
-pub(super) fn import_source_matches_package(source: &str, package: &str) -> bool {
+fn import_source_matches_package(source: &str, package: &str) -> bool {
     source == package
         || source
             .strip_prefix(package)
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
-pub(super) fn route_method_leaf(callee_path: &str) -> Option<&str> {
+fn route_method_leaf(callee_path: &str) -> Option<&str> {
     let leaf = callee_path.rsplit('.').next()?;
     matches!(
         leaf,

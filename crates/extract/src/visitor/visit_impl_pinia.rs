@@ -15,7 +15,7 @@ use super::{
 /// Whether a call's callee is a bare `defineStore` identifier (Pinia). The
 /// harvest is loose here; the analyzer's `pinia` / `@pinia/nuxt` dependency
 /// gate is the activation boundary.
-pub(super) fn is_define_store_callee(callee: &Expression<'_>) -> bool {
+fn is_define_store_callee(callee: &Expression<'_>) -> bool {
     matches!(callee, Expression::Identifier(id) if id.name.as_str() == "defineStore")
 }
 
@@ -25,7 +25,7 @@ pub(super) fn is_define_store_callee(callee: &Expression<'_>) -> bool {
 /// keys. Names starting with `$` (Pinia's `$patch` / `$reset` / `$subscribe`
 /// API) are excluded. A setup store whose returned object spreads
 /// (`return { ...base, count }`) abstains, keeping the whole store opaque.
-pub(super) fn harvest_define_store_members(args: &[Argument<'_>]) -> Option<Vec<MemberInfo>> {
+fn harvest_define_store_members(args: &[Argument<'_>]) -> Option<Vec<MemberInfo>> {
     let second = args.get(1)?.as_expression()?;
     match unwrap_paren_expr(second) {
         Expression::ObjectExpression(obj) => Some(harvest_option_store(obj)),

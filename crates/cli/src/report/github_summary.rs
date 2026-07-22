@@ -992,7 +992,7 @@ fn check_tips(env: &Value) -> String {
 
 /// Port of `summary-check.jq`.
 #[must_use]
-pub(crate) fn render_check_summary(env: &Value) -> String {
+fn render_check_summary(env: &Value) -> String {
     let elapsed = num(env, "elapsed_ms");
     let total_issues = u(env, "total_issues");
     if total_issues == 0 {
@@ -1123,7 +1123,7 @@ fn dupes_details(env: &Value) -> String {
 
 /// Port of `summary-dupes.jq`.
 #[must_use]
-pub(crate) fn render_dupes_summary(env: &Value) -> String {
+fn render_dupes_summary(env: &Value) -> String {
     let stats = env.get("stats").cloned().unwrap_or(Value::Null);
     let elapsed = num(env, "elapsed_ms");
     if u(&stats, "clone_groups") == 0 {
@@ -1457,7 +1457,7 @@ fn health_runtime_footer(
 
 /// Port of `summary-health.jq`.
 #[must_use]
-pub(crate) fn render_health_summary(env: &Value) -> String {
+fn render_health_summary(env: &Value) -> String {
     let elapsed = num(env, "elapsed_ms");
     let complex = arr(env, "findings").count();
     let runtime = env.get("runtime_coverage").cloned().unwrap_or(Value::Null);
@@ -1984,7 +1984,7 @@ fn audit_duplication_section(env: &Value) -> String {
 
 /// Port of `summary-audit.jq`.
 #[must_use]
-pub(crate) fn render_audit_summary(env: &Value) -> String {
+fn render_audit_summary(env: &Value) -> String {
     let verdict = str_or(env, "verdict", "pass");
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let attribution = env.get("attribution").cloned().unwrap_or(Value::Null);
@@ -2047,7 +2047,7 @@ pub(crate) fn render_audit_summary(env: &Value) -> String {
 
 /// Port of `summary-security.jq`.
 #[must_use]
-pub(crate) fn render_security_summary(env: &Value) -> String {
+fn render_security_summary(env: &Value) -> String {
     let findings: Vec<&Value> = arr(env, "security_findings").collect();
     let gate = env.get("gate").filter(|gate| !gate.is_null());
     let count = gate.map_or_else(
@@ -2706,7 +2706,7 @@ fn combined_tips(env: &Value) -> String {
 
 /// Port of `summary-combined.jq`.
 #[must_use]
-pub(crate) fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
+fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
     let counts = combined_counts(env);
     let header = health_score_header(&env.get("health").cloned().unwrap_or(Value::Null));
     if counts.total() == 0 {

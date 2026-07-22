@@ -1,9 +1,9 @@
 use super::*;
 
-pub(super) const NEAR_DUPLICATE_COLOR_DISTANCE: f64 = 2.0;
-pub(super) const NEAR_DUPLICATE_LENGTH_DISTANCE_PX: f64 = 0.5;
-pub(super) const NEAR_DUPLICATE_DURATION_DISTANCE_MS: f64 = 10.0;
-pub(super) const NEAR_DUPLICATE_SHADOW_DISTANCE_PX: f64 = 1.0;
+const NEAR_DUPLICATE_COLOR_DISTANCE: f64 = 2.0;
+const NEAR_DUPLICATE_LENGTH_DISTANCE_PX: f64 = 0.5;
+const NEAR_DUPLICATE_DURATION_DISTANCE_MS: f64 = 10.0;
+const NEAR_DUPLICATE_SHADOW_DISTANCE_PX: f64 = 1.0;
 
 #[derive(Clone, Debug)]
 pub(super) struct ComparableThemeTokenCandidate {
@@ -72,9 +72,9 @@ impl ThemeTokenMetric {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct OklabColor {
-    pub(super) l: f64,
-    pub(super) a: f64,
-    pub(super) b: f64,
+    l: f64,
+    a: f64,
+    b: f64,
 }
 
 pub(super) fn scan_near_duplicate_theme_tokens(
@@ -259,7 +259,7 @@ pub(super) fn annotate_raw_style_value_nearest_tokens(
     }
 }
 
-pub(super) fn raw_style_value_counts(
+fn raw_style_value_counts(
     raw_values: &[fallow_output::RawStyleValue],
 ) -> rustc_hash::FxHashMap<(String, String), u32> {
     let mut counts = rustc_hash::FxHashMap::default();
@@ -310,7 +310,7 @@ pub(super) fn comparable_css_in_js_token_candidates(
     candidates
 }
 
-pub(super) fn css_in_js_token_namespace(
+fn css_in_js_token_namespace(
     origin: fallow_extract::CssInJsTokenOrigin,
     path: &str,
 ) -> Option<&'static str> {
@@ -334,7 +334,7 @@ pub(super) fn css_in_js_token_namespace(
     }
 }
 
-pub(super) fn raw_style_token_namespace(axis: &str) -> Option<&'static str> {
+fn raw_style_token_namespace(axis: &str) -> Option<&'static str> {
     match axis {
         "color" => Some("color"),
         "font-size" => Some("text"),
@@ -419,20 +419,20 @@ pub(super) fn comparable_project_vocabulary_candidates(
 
 #[derive(Clone, Debug)]
 pub(super) struct ProjectVocabularyValue {
-    pub(super) namespace: String,
-    pub(super) value: String,
-    pub(super) path: String,
-    pub(super) line: u32,
-    pub(super) count: u32,
-    pub(super) metric: ThemeTokenMetric,
+    namespace: String,
+    value: String,
+    path: String,
+    line: u32,
+    count: u32,
+    metric: ThemeTokenMetric,
 }
 
-pub(super) fn project_vocabulary_token_name(namespace: &str, value: &str) -> String {
+fn project_vocabulary_token_name(namespace: &str, value: &str) -> String {
     let stable_value = value.split_whitespace().collect::<Vec<_>>().join("_");
     format!("project-vocabulary.{namespace}.{stable_value}")
 }
 
-pub(super) fn color_value_has_alpha(value: &str) -> bool {
+fn color_value_has_alpha(value: &str) -> bool {
     let trimmed = value.trim();
     let Some(hex) = trimmed.strip_prefix('#') else {
         return false;
@@ -440,7 +440,7 @@ pub(super) fn color_value_has_alpha(value: &str) -> bool {
     matches!(hex.len(), 4 | 8)
 }
 
-pub(super) fn custom_property_token_namespace(token: &str) -> Option<&'static str> {
+fn custom_property_token_namespace(token: &str) -> Option<&'static str> {
     let key = token.trim_start_matches('-');
     if key.starts_with("color-") {
         Some("color")
@@ -477,7 +477,7 @@ pub(super) fn comparable_theme_token_candidates(
         .collect()
 }
 
-pub(super) fn find_nearest_duplicate_theme_token<'a>(
+fn find_nearest_duplicate_theme_token<'a>(
     candidate: &'a ComparableThemeTokenCandidate,
     candidates: &'a [ComparableThemeTokenCandidate],
     include_later_tokens: bool,
@@ -521,7 +521,7 @@ pub(super) fn theme_token_sort_key(candidate: &ComparableThemeTokenCandidate) ->
     (&candidate.path, candidate.line, &candidate.token)
 }
 
-pub(super) fn normalize_theme_token_value(value: &str) -> String {
+fn normalize_theme_token_value(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -537,7 +537,7 @@ pub(super) fn parse_theme_token_metric(namespace: &str, value: &str) -> Option<T
     }
 }
 
-pub(super) fn parse_length_px(value: &str) -> Option<f64> {
+fn parse_length_px(value: &str) -> Option<f64> {
     let (number, unit) = parse_number_with_unit(value.trim())?;
     match unit {
         "" if number == 0.0 => Some(0.0),
@@ -547,7 +547,7 @@ pub(super) fn parse_length_px(value: &str) -> Option<f64> {
     }
 }
 
-pub(super) fn parse_duration_ms(value: &str) -> Option<f64> {
+fn parse_duration_ms(value: &str) -> Option<f64> {
     let (number, unit) = parse_number_with_unit(value.trim())?;
     match unit {
         "ms" => Some(number),
@@ -556,7 +556,7 @@ pub(super) fn parse_duration_ms(value: &str) -> Option<f64> {
     }
 }
 
-pub(super) fn parse_shadow_lengths_px(value: &str) -> Option<Vec<f64>> {
+fn parse_shadow_lengths_px(value: &str) -> Option<Vec<f64>> {
     if value.contains(',') {
         return None;
     }
@@ -574,7 +574,7 @@ pub(super) fn parse_shadow_lengths_px(value: &str) -> Option<Vec<f64>> {
     }
 }
 
-pub(super) fn parse_number_with_unit(value: &str) -> Option<(f64, &str)> {
+fn parse_number_with_unit(value: &str) -> Option<(f64, &str)> {
     let split = value
         .char_indices()
         .find(|(idx, c)| *idx > 0 && !matches!(c, '0'..='9' | '.' | '+' | '-'))
@@ -592,7 +592,7 @@ pub(super) fn parse_number_with_unit(value: &str) -> Option<(f64, &str)> {
     clippy::suboptimal_flops,
     reason = "OKLab conversion mirrors the reference matrix; mul_add obscures the coefficients."
 )]
-pub(super) fn rgb_to_oklab((red, green, blue): (f64, f64, f64)) -> OklabColor {
+fn rgb_to_oklab((red, green, blue): (f64, f64, f64)) -> OklabColor {
     let linear_red = srgb_to_linear(red / 255.0);
     let linear_green = srgb_to_linear(green / 255.0);
     let linear_blue = srgb_to_linear(blue / 255.0);
@@ -618,7 +618,7 @@ pub(super) fn rgb_to_oklab((red, green, blue): (f64, f64, f64)) -> OklabColor {
     }
 }
 
-pub(super) fn srgb_to_linear(channel: f64) -> f64 {
+fn srgb_to_linear(channel: f64) -> f64 {
     if channel <= 0.04045 {
         channel / 12.92
     } else {
@@ -630,7 +630,7 @@ pub(super) fn srgb_to_linear(channel: f64) -> f64 {
     clippy::suboptimal_flops,
     reason = "Distance formula is clearer in expanded Euclidean form."
 )]
-pub(super) fn oklab_distance(left: OklabColor, right: OklabColor) -> f64 {
+fn oklab_distance(left: OklabColor, right: OklabColor) -> f64 {
     let l = left.l - right.l;
     let a = left.a - right.a;
     let b = left.b - right.b;
@@ -641,11 +641,7 @@ pub(super) fn round_distance(distance: f64) -> f64 {
     (distance * 100.0).round() / 100.0
 }
 
-pub(super) fn theme_token_names_are_deliberate_pair(
-    namespace: &str,
-    left: &str,
-    right: &str,
-) -> bool {
+fn theme_token_names_are_deliberate_pair(namespace: &str, left: &str, right: &str) -> bool {
     if namespace == "color" && color_token_name_is_semantic_ui_role(left, right) {
         return true;
     }
@@ -668,7 +664,7 @@ pub(super) fn theme_token_names_are_deliberate_pair(
     })
 }
 
-pub(super) fn color_token_name_is_semantic_ui_role(left: &str, right: &str) -> bool {
+fn color_token_name_is_semantic_ui_role(left: &str, right: &str) -> bool {
     const ROLES: &[&str] = &[
         "accent",
         "accent-foreground",
@@ -693,7 +689,7 @@ pub(super) fn color_token_name_is_semantic_ui_role(left: &str, right: &str) -> b
     ROLES.contains(&left) || ROLES.contains(&right)
 }
 
-pub(super) fn split_numeric_suffix(name: &str) -> Option<(&str, &str)> {
+fn split_numeric_suffix(name: &str) -> Option<(&str, &str)> {
     let split = name
         .char_indices()
         .rev()

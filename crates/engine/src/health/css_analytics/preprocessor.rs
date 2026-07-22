@@ -4,7 +4,7 @@ pub(super) fn preprocessor_virtual_stylesheet(source: &str) -> Option<String> {
     (!output.trim().is_empty()).then_some(output)
 }
 
-pub(super) fn strip_preprocessor_comments(source: &str) -> String {
+fn strip_preprocessor_comments(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let bytes = source.as_bytes();
     let mut cursor = 0;
@@ -27,12 +27,7 @@ pub(super) fn strip_preprocessor_comments(source: &str) -> String {
     out
 }
 
-pub(super) fn render_preprocessor_children(
-    source: &str,
-    start: usize,
-    end: usize,
-    indent: usize,
-) -> String {
+fn render_preprocessor_children(source: &str, start: usize, end: usize, indent: usize) -> String {
     let bytes = source.as_bytes();
     let mut output = String::new();
     let mut statement_start = start;
@@ -58,7 +53,7 @@ pub(super) fn render_preprocessor_children(
     output
 }
 
-pub(super) fn render_preprocessor_block(
+fn render_preprocessor_block(
     source: &str,
     prelude: &str,
     body_start: usize,
@@ -121,7 +116,7 @@ pub(super) fn render_preprocessor_block(
     Some(output)
 }
 
-pub(super) fn render_preprocessor_body(
+fn render_preprocessor_body(
     source: &str,
     body_start: usize,
     body_end: usize,
@@ -161,7 +156,7 @@ pub(super) fn render_preprocessor_body(
     (declarations, children)
 }
 
-pub(super) fn clean_preprocessor_selector_list(prelude: &str) -> Option<String> {
+fn clean_preprocessor_selector_list(prelude: &str) -> Option<String> {
     let children: Vec<&str> = prelude
         .split(',')
         .map(str::trim)
@@ -179,7 +174,7 @@ pub(super) fn clean_preprocessor_selector_list(prelude: &str) -> Option<String> 
     }
 }
 
-pub(super) fn normalize_preprocessor_declaration(statement: &str) -> Option<String> {
+fn normalize_preprocessor_declaration(statement: &str) -> Option<String> {
     let statement = statement.trim().trim_end_matches(';').trim();
     if statement.is_empty()
         || statement.starts_with('$')
@@ -204,7 +199,7 @@ pub(super) fn normalize_preprocessor_declaration(statement: &str) -> Option<Stri
     ))
 }
 
-pub(super) fn normalize_preprocessor_value(value: &str) -> String {
+fn normalize_preprocessor_value(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let bytes = value.as_bytes();
     let mut cursor = 0;
@@ -226,21 +221,21 @@ pub(super) fn normalize_preprocessor_value(value: &str) -> String {
     out
 }
 
-pub(super) fn is_preprocessor_ident_start(byte: Option<&u8>) -> bool {
+fn is_preprocessor_ident_start(byte: Option<&u8>) -> bool {
     byte.is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_' || *b == b'-')
 }
 
-pub(super) fn is_preprocessor_ident_continue(byte: u8) -> bool {
+fn is_preprocessor_ident_continue(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
-pub(super) fn push_indent(output: &mut String, indent: usize) {
+fn push_indent(output: &mut String, indent: usize) {
     for _ in 0..indent {
         output.push_str("  ");
     }
 }
 
-pub(super) fn find_matching_brace(source: &str, open: usize, limit: usize) -> Option<usize> {
+fn find_matching_brace(source: &str, open: usize, limit: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut depth = 0usize;
     let mut i = open;

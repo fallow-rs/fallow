@@ -116,8 +116,8 @@ pub fn discover_workspace_packages_with_diagnostics(
 #[derive(Debug, Clone, Default)]
 pub struct CategorizedEntryPoints {
     pub(crate) all: Vec<EntryPoint>,
-    pub(crate) runtime: Vec<EntryPoint>,
-    pub(crate) test: Vec<EntryPoint>,
+    runtime: Vec<EntryPoint>,
+    test: Vec<EntryPoint>,
 }
 
 impl CategorizedEntryPoints {
@@ -158,17 +158,17 @@ pub struct HiddenDirScope {
 
 impl HiddenDirScope {
     #[must_use]
-    pub(crate) const fn new(root: PathBuf, dirs: Vec<String>) -> Self {
+    const fn new(root: PathBuf, dirs: Vec<String>) -> Self {
         Self { root, dirs }
     }
 
     #[must_use]
-    pub(crate) fn root(&self) -> &Path {
+    fn root(&self) -> &Path {
         &self.root
     }
 
     #[must_use]
-    pub(crate) fn dirs(&self) -> &[String] {
+    fn dirs(&self) -> &[String] {
         &self.dirs
     }
 }

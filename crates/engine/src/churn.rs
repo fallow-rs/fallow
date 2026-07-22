@@ -432,7 +432,7 @@ fn validate_churn_event_timestamp(
 
 /// Check if the repository is a shallow clone.
 #[must_use]
-pub(crate) fn is_shallow_clone(root: &Path) -> bool {
+fn is_shallow_clone(root: &Path) -> bool {
     let mut command = git_command();
     command
         .args(["rev-parse", "--is-shallow-repository"])

@@ -43,10 +43,7 @@ pub(super) fn declares_exported_enum(line: &str, enum_name: &str) -> bool {
         .is_some_and(|ch| ch.is_whitespace() || ch == '{')
 }
 
-pub(super) fn find_enum_declaration_range(
-    lines: &[&str],
-    line_idx: usize,
-) -> Option<EnumDeclarationRange> {
+fn find_enum_declaration_range(lines: &[&str], line_idx: usize) -> Option<EnumDeclarationRange> {
     let start_line = lines.get(line_idx)?;
     let export_col = start_line.find("export")?;
     if !start_line[..export_col].trim().is_empty() {

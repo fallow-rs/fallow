@@ -291,7 +291,7 @@ fn find_gitlab_sticky_note(
     Ok(None)
 }
 
-pub(super) fn apply_github_pr_comment_plan(
+fn apply_github_pr_comment_plan(
     agent: &ureq::Agent,
     api: &str,
     repo: &str,

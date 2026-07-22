@@ -189,7 +189,7 @@ impl ProcessTree {
         unsafe_code,
         reason = "POSIX process-group termination requires libc::kill"
     )]
-    pub(super) fn terminate(&self) -> io::Result<()> {
+    fn terminate(&self) -> io::Result<()> {
         // SAFETY: A negative PID targets the dedicated process group created by
         // `process_group(0)`. SIGKILL has no borrowed-memory requirements.
         if unsafe { libc::kill(-self.process_group_id, libc::SIGKILL) } == 0 {

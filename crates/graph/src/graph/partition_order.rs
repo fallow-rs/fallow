@@ -40,9 +40,9 @@ pub struct ReviewUnit {
     /// The module directory the unit covers (root-relative, forward-slashed).
     /// The empty string is the repository-root group for changed files with no
     /// parent directory.
-    pub(crate) module_dir: String,
+    module_dir: String,
     /// The changed files in this unit, `FileId`-sorted (== path-sorted, ADR-004).
-    pub(crate) files: Vec<FileId>,
+    files: Vec<FileId>,
 }
 
 /// Result of a partition + order computation, keyed by `FileId` / `module_dir`.
@@ -51,11 +51,11 @@ pub struct ReviewUnit {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PartitionOrder {
     /// The by-module units, sorted by `module_dir` string.
-    pub(crate) units: Vec<ReviewUnit>,
+    units: Vec<ReviewUnit>,
     /// The dependency-sensible review order: `module_dir` strings, definitions
     /// before consumers, mechanical/leaf units last, ties broken by the path
     /// sort. One entry per unit; a permutation of the `units` `module_dir` set.
-    pub(crate) order: Vec<String>,
+    order: Vec<String>,
 }
 
 /// The same partition + order with each unit's `FileId`s resolved to

@@ -152,7 +152,7 @@ impl<'a> ModuleInfoExtractor {
 
     /// Whether `local_name` is bound to the default import of `source`
     /// (`import dynamic from "next/dynamic"`, or an aliased default).
-    pub(super) fn is_default_import_from(&self, local_name: &str, source: &str) -> bool {
+    fn is_default_import_from(&self, local_name: &str, source: &str) -> bool {
         self.imports.iter().any(|import| {
             import.source == source
                 && import.local_name == local_name

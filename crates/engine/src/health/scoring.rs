@@ -83,20 +83,20 @@ struct FileScoreOutputParts<'a> {
 #[derive(Clone, Default)]
 pub struct AnalysisCountsSnapshot {
     /// One entry per unused file.
-    pub(crate) unused_file_paths: Vec<std::path::PathBuf>,
+    unused_file_paths: Vec<std::path::PathBuf>,
     /// One entry per unused value or type export, keyed by the file containing
     /// the export.
-    pub(crate) unused_export_paths: Vec<std::path::PathBuf>,
+    unused_export_paths: Vec<std::path::PathBuf>,
     /// One entry per unused dependency across `dependencies`,
     /// `devDependencies`, and `optionalDependencies`, keyed by the
     /// `package.json` path that declared it.
-    pub(crate) unused_dep_package_paths: Vec<std::path::PathBuf>,
+    unused_dep_package_paths: Vec<std::path::PathBuf>,
     /// Each cycle as the set of file paths it contains. Used to count cycles
     /// that touch any file inside a workspace.
-    pub(crate) circular_dep_groups: Vec<Vec<std::path::PathBuf>>,
+    circular_dep_groups: Vec<Vec<std::path::PathBuf>>,
     /// Total exports per module (`module.exports.len()` in the graph), used
     /// as the denominator for `dead_export_pct`.
-    pub(crate) module_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+    module_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
 }
 
 impl AnalysisCountsSnapshot {
@@ -185,7 +185,7 @@ fn dep_in_subset(subset: &crate::health::SubsetFilter<'_>, dep_path: &std::path:
     clippy::cast_possible_truncation,
     reason = "line count is bounded by source file size"
 )]
-pub(super) fn aggregate_complexity(module: &crate::source::ModuleInfo) -> (u32, u32, usize, u32) {
+fn aggregate_complexity(module: &crate::source::ModuleInfo) -> (u32, u32, usize, u32) {
     let cyc: u32 = module
         .complexity
         .iter()
@@ -208,7 +208,7 @@ pub(super) fn aggregate_complexity(module: &crate::source::ModuleInfo) -> (u32, 
 /// numerator and denominator to avoid inflating the ratio for well-typed
 /// codebases. Returns 1.0 if the entire file is unused, 0.0 if it has no
 /// value exports.
-pub(super) fn compute_dead_code_ratio(
+fn compute_dead_code_ratio(
     path: &std::path::Path,
     exports: &[fallow_graph::graph::ExportSymbol],
     unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
@@ -228,7 +228,7 @@ pub(super) fn compute_dead_code_ratio(
 /// Compute complexity density: total cyclomatic / lines of code.
 ///
 /// Returns 0.0 when the file has no lines.
-pub(super) fn compute_complexity_density(total_cyclomatic: u32, lines: u32) -> f64 {
+fn compute_complexity_density(total_cyclomatic: u32, lines: u32) -> f64 {
     if lines > 0 {
         f64::from(total_cyclomatic) / f64::from(lines)
     } else {
@@ -302,7 +302,7 @@ pub struct PerFunctionCrap {
 }
 
 /// Istanbul CRAP result: CRAP scores plus match statistics.
-pub(super) struct IstanbulCrapResult {
+struct IstanbulCrapResult {
     pub max_crap: f64,
     pub above_threshold: usize,
     /// Functions that found a match in Istanbul data.
@@ -432,7 +432,7 @@ const MAX_DIRECT_CALLER_EVIDENCE: usize = 5;
 /// Applies the canonical CRAP formula with these estimates.
 /// Returns `(max_crap, count_above_threshold)`.
 /// Estimated CRAP result: score aggregates plus per-function data.
-pub(super) struct EstimatedCrapResult {
+struct EstimatedCrapResult {
     pub max_crap: f64,
     pub above_threshold: usize,
     pub per_function: Vec<PerFunctionCrap>,
@@ -1031,7 +1031,7 @@ fn compute_function_statement_coverage(
 ///
 /// Type-only exports (interfaces, type aliases) are intentionally excluded ---
 /// they are a different concern than unused functions/components.
-pub(super) fn count_unused_exports_by_path(
+fn count_unused_exports_by_path(
     unused_exports: &[crate::results::UnusedExportFinding],
 ) -> rustc_hash::FxHashMap<&std::path::Path, usize> {
     let mut map: rustc_hash::FxHashMap<&std::path::Path, usize> = rustc_hash::FxHashMap::default();
@@ -1060,7 +1060,7 @@ pub(super) fn count_unused_exports_by_path(
 /// composition-root files from being unfairly penalized.
 ///
 /// Clamped to \[0, 100\]. Higher is better.
-pub(super) fn compute_maintainability_index(
+fn compute_maintainability_index(
     complexity_density: f64,
     dead_code_ratio: f64,
     fan_out: usize,

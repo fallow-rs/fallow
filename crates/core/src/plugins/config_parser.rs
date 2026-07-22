@@ -806,7 +806,7 @@ fn lazy_import_specifier(expr: &Expression<'_>) -> Option<String> {
 /// - `export default { expo: { plugins: [["expo-router", { root: "./src/app" }]] } }`
 /// - `{ plugins: [["expo-router", { root: "./src/routes" }]] }`
 #[must_use]
-pub(crate) fn extract_config_plugin_option_string(
+fn extract_config_plugin_option_string(
     source: &str,
     path: &Path,
     plugins_path: &[&str],
@@ -1315,7 +1315,7 @@ pub(crate) fn find_property<'a>(
 }
 
 /// Check if a property key matches a string.
-pub(crate) fn property_key_matches(key: &PropertyKey, name: &str) -> bool {
+fn property_key_matches(key: &PropertyKey, name: &str) -> bool {
     match key {
         PropertyKey::StaticIdentifier(id) => id.name == name,
         PropertyKey::StringLiteral(s) => s.value == name,

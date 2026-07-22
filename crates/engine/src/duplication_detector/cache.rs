@@ -206,7 +206,7 @@ impl TokenCache {
     }
 
     #[cfg(test)]
-    pub(super) fn save(&self) -> Result<(), String> {
+    fn save(&self) -> Result<(), String> {
         self.save_if_dirty().map(|_| ())
     }
 }

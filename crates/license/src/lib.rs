@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_HARD_FAIL_DAYS: u64 = 30;
 
 /// Days post-expiry after which the public output gains a visible watermark.
-pub(crate) const WATERMARK_DAYS: u64 = 7;
+const WATERMARK_DAYS: u64 = 7;
 
 /// Default tolerance (in seconds) for `iat` clock skew: 24h.
 ///
@@ -57,10 +57,10 @@ pub(crate) const WATERMARK_DAYS: u64 = 7;
 /// [`LicenseError::ClockSkew`]. Override via
 /// `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS` (consumed by
 /// [`skew_tolerance_seconds_from_env`]).
-pub(crate) const DEFAULT_SKEW_TOLERANCE_SECONDS: i64 = 86_400;
+const DEFAULT_SKEW_TOLERANCE_SECONDS: i64 = 86_400;
 
 /// Env var name for overriding [`DEFAULT_SKEW_TOLERANCE_SECONDS`].
-pub(crate) const SKEW_TOLERANCE_ENV: &str = "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS";
+const SKEW_TOLERANCE_ENV: &str = "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS";
 
 /// JWT claims emitted by `api.fallow.cloud` for fallow CLI licenses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,7 +121,7 @@ impl Feature {
     /// through [`Feature::Other`] so older CLIs do not error on newer license
     /// payloads.
     #[must_use]
-    pub(crate) fn parse(s: &str) -> Self {
+    fn parse(s: &str) -> Self {
         match s {
             "runtime_coverage" => Self::RuntimeCoverage,
             "portfolio_dashboard" => Self::PortfolioDashboard,
@@ -135,7 +135,7 @@ impl Feature {
 impl LicenseClaims {
     /// True if the license's `features` claim contains the requested feature.
     #[must_use]
-    pub(crate) fn has_feature(&self, feature: &Feature) -> bool {
+    fn has_feature(&self, feature: &Feature) -> bool {
         self.features.iter().any(|s| Feature::parse(s) == *feature)
     }
 }
@@ -367,7 +367,7 @@ pub fn verify_jwt_with_skew(
 /// Map a verified [`LicenseClaims`] to a [`LicenseStatus`] using the 7/cap/hard-fail
 /// ladder.
 #[must_use]
-pub(crate) fn grace_state(claims: LicenseClaims, now: i64, hard_fail_days: u64) -> LicenseStatus {
+fn grace_state(claims: LicenseClaims, now: i64, hard_fail_days: u64) -> LicenseStatus {
     let delta_seconds = i64::from(claims.exp != 0) * (claims.exp - now);
     if delta_seconds >= 0 {
         return LicenseStatus::Valid {

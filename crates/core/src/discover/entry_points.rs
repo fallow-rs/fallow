@@ -85,17 +85,17 @@ pub struct CategorizedEntryPoints {
 }
 
 impl CategorizedEntryPoints {
-    pub(crate) fn push_runtime(&mut self, entry: EntryPoint) {
+    fn push_runtime(&mut self, entry: EntryPoint) {
         self.runtime.push(entry.clone());
         self.all.push(entry);
     }
 
-    pub(crate) fn push_test(&mut self, entry: EntryPoint) {
+    fn push_test(&mut self, entry: EntryPoint) {
         self.test.push(entry.clone());
         self.all.push(entry);
     }
 
-    pub(crate) fn push_support(&mut self, entry: EntryPoint) {
+    fn push_support(&mut self, entry: EntryPoint) {
         self.all.push(entry);
     }
 

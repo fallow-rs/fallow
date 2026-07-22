@@ -33,7 +33,7 @@ use fallow_security::{CalleePattern, Matcher, catalogue};
 
 /// The inline suppression kind token for the tainted-sink catalogue rule. ONE
 /// token covers every catalogue category.
-pub(super) const SUPPRESS_KIND: &str = "security-sink";
+const SUPPRESS_KIND: &str = "security-sink";
 
 /// Include/exclude scope over catalogue category ids. Built from
 /// `config.security.categories`; both unset admits every category.
@@ -369,13 +369,13 @@ fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source: Option<(&str,
 
 /// The catalogue id of the secret-to-network exfil category (issue #890). The
 /// only category that carries a [`SecurityNetworkContext`] destination signal.
-pub(super) const NETWORK_EXFIL_CATEGORY: &str = "secret-to-network";
+const NETWORK_EXFIL_CATEGORY: &str = "secret-to-network";
 
 /// Catalogue categories admitted ONLY when explicitly listed in
 /// `security.categories.include` (issue #890). A `secret-to-network` candidate
 /// fires on intended auth as often as on exfil, so it must be opt-in; an absent
 /// include list never admits it.
-pub(super) const INCLUDE_REQUIRED_CATEGORIES: &[&str] = &[NETWORK_EXFIL_CATEGORY];
+const INCLUDE_REQUIRED_CATEGORIES: &[&str] = &[NETWORK_EXFIL_CATEGORY];
 
 /// Shared options for the catalogue-driven tainted-sink detector.
 pub struct TaintedSinkContext<'a> {

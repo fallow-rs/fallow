@@ -37,11 +37,7 @@ pub struct CloneFingerprintKey {
 impl CloneFingerprintKey {
     /// Build a fingerprint key from clone-group parts.
     #[must_use]
-    pub(crate) fn from_parts(
-        instances: &[CloneInstance],
-        token_count: usize,
-        line_count: usize,
-    ) -> Self {
+    fn from_parts(instances: &[CloneInstance], token_count: usize, line_count: usize) -> Self {
         let first = instances.first();
         Self {
             representative_fragment: first.map_or_else(String::new, |inst| inst.fragment.clone()),
@@ -114,7 +110,7 @@ impl CloneFingerprintSet {
     /// Return the assigned fingerprint for a key, falling back to the legacy
     /// short content handle when the key was not present in this report.
     #[must_use]
-    pub(crate) fn fingerprint_for_key(&self, key: &CloneFingerprintKey) -> String {
+    fn fingerprint_for_key(&self, key: &CloneFingerprintKey) -> String {
         self.by_key
             .get(key)
             .cloned()

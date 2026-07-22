@@ -99,7 +99,7 @@ pub fn resolve_workspace_filter_roots_for_project(
 ///
 /// Returns a typed scope error when no workspaces are available, a pattern is
 /// invalid, a positive pattern is unmatched, or negation excludes everything.
-pub(crate) fn resolve_workspace_filter_roots(
+fn resolve_workspace_filter_roots(
     root: &Path,
     patterns: &[String],
     workspaces: &[WorkspaceInfo],
@@ -155,7 +155,7 @@ pub fn resolve_changed_workspace_roots_for_project(
 /// # Errors
 ///
 /// Returns a typed scope error when no workspaces are available or git fails.
-pub(crate) fn resolve_changed_workspace_roots(
+fn resolve_changed_workspace_roots(
     root: &Path,
     git_ref: &str,
     workspaces: &[WorkspaceInfo],

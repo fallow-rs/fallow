@@ -13,21 +13,21 @@ pub(super) struct MarkupCssCandidates {
     pub(super) near_duplicate_css_in_js_tokens: Vec<fallow_output::NearDuplicateThemeToken>,
 }
 
-pub(super) struct MarkupTokenCandidates {
-    pub(super) tailwind_arbitrary_values: Vec<fallow_output::TailwindArbitraryValue>,
-    pub(super) cva_duplicate_variant_blocks: Vec<fallow_output::CvaDuplicateVariantBlock>,
-    pub(super) cva_variant_token_drifts: Vec<fallow_output::CvaVariantTokenDrift>,
+struct MarkupTokenCandidates {
+    tailwind_arbitrary_values: Vec<fallow_output::TailwindArbitraryValue>,
+    cva_duplicate_variant_blocks: Vec<fallow_output::CvaDuplicateVariantBlock>,
+    cva_variant_token_drifts: Vec<fallow_output::CvaVariantTokenDrift>,
 }
 
-pub(super) struct MarkupReferenceCandidates {
-    pub(super) unresolved_class_references: Vec<fallow_output::UnresolvedClassReference>,
-    pub(super) unreferenced_css_classes: Vec<fallow_output::UnreferencedCssClass>,
+struct MarkupReferenceCandidates {
+    unresolved_class_references: Vec<fallow_output::UnresolvedClassReference>,
+    unreferenced_css_classes: Vec<fallow_output::UnreferencedCssClass>,
 }
 
-pub(super) struct ThemeTokenCandidates {
-    pub(super) unused: Vec<fallow_output::UnusedThemeToken>,
-    pub(super) near_duplicates: Vec<fallow_output::NearDuplicateThemeToken>,
-    pub(super) css_in_js_near_duplicates: Vec<fallow_output::NearDuplicateThemeToken>,
+struct ThemeTokenCandidates {
+    unused: Vec<fallow_output::UnusedThemeToken>,
+    near_duplicates: Vec<fallow_output::NearDuplicateThemeToken>,
+    css_in_js_near_duplicates: Vec<fallow_output::NearDuplicateThemeToken>,
 }
 
 /// Run the markup / source-scanning CSS candidates (Tailwind arbitrary values,
@@ -68,9 +68,7 @@ pub(super) fn scan_markup_css_candidates(
     }
 }
 
-pub(super) fn scan_markup_token_candidates(
-    input: &mut MarkupCssCandidateInput<'_>,
-) -> MarkupTokenCandidates {
+fn scan_markup_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> MarkupTokenCandidates {
     let ctx = markup_scan_ctx(input);
     MarkupTokenCandidates {
         tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
@@ -87,7 +85,7 @@ pub(super) fn scan_markup_token_candidates(
     }
 }
 
-pub(super) fn scan_markup_reference_candidates(
+fn scan_markup_reference_candidates(
     input: &mut MarkupCssCandidateInput<'_>,
 ) -> MarkupReferenceCandidates {
     let ctx = markup_scan_ctx(input);
@@ -111,9 +109,7 @@ pub(super) fn scan_markup_reference_candidates(
     }
 }
 
-pub(super) fn scan_theme_token_candidates(
-    input: &mut MarkupCssCandidateInput<'_>,
-) -> ThemeTokenCandidates {
+fn scan_theme_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> ThemeTokenCandidates {
     let unused_theme_tokens = scan_unused_theme_tokens(&mut UnusedThemeTokenScanInput {
         tokens: input.tokens,
         files: input.files,
@@ -158,7 +154,7 @@ pub(super) fn scan_theme_token_candidates(
     }
 }
 
-pub(super) fn markup_scan_ctx<'a>(input: &MarkupCssCandidateInput<'a>) -> HealthScanCtx<'a> {
+fn markup_scan_ctx<'a>(input: &MarkupCssCandidateInput<'a>) -> HealthScanCtx<'a> {
     HealthScanCtx {
         config: input.config,
         ignore_set: input.ignore_set,
@@ -305,7 +301,7 @@ pub(super) fn css_report_scan_items<'a>(
     }
 }
 
-pub(super) fn sfc_css_scan_items(source: &str) -> Vec<CssScanItem<'_>> {
+fn sfc_css_scan_items(source: &str) -> Vec<CssScanItem<'_>> {
     use std::borrow::Cow;
 
     let mut items = Vec::new();
@@ -328,10 +324,7 @@ pub(super) fn sfc_css_scan_items(source: &str) -> Vec<CssScanItem<'_>> {
     items
 }
 
-pub(super) fn css_in_js_scan_items<'a>(
-    source: &'a str,
-    path: &std::path::Path,
-) -> Vec<CssScanItem<'a>> {
+fn css_in_js_scan_items<'a>(source: &'a str, path: &std::path::Path) -> Vec<CssScanItem<'a>> {
     use std::borrow::Cow;
 
     let mut items = Vec::new();

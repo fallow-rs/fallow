@@ -460,7 +460,7 @@ pub(super) fn build_local_to_export_keys(
 ///
 /// Prefers real re-export edges over barrel stubs and handles renamed or
 /// star re-exports.
-pub(super) fn walk_re_export_origins(
+fn walk_re_export_origins(
     graph: &ModuleGraph,
     start_file: FileId,
     start_name: &str,
@@ -775,8 +775,8 @@ pub struct UnusedMemberResults {
 /// `build_local_to_export_keys`), so the struct is built where that slice
 /// outlives all passes (`find_unused_members_with_public_api_entry_points` holds
 /// `input` for the whole scan).
-pub(super) struct MemberPassIndexes<'a> {
-    pub(super) module_by_id: FxHashMap<FileId, &'a ResolvedModule>,
+struct MemberPassIndexes<'a> {
+    module_by_id: FxHashMap<FileId, &'a ResolvedModule>,
     local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
     empty: FxHashMap<&'a str, Vec<ExportKey>>,
 }
@@ -785,7 +785,7 @@ impl<'a> MemberPassIndexes<'a> {
     /// Build both maps eagerly in one loop over `resolved_modules`. Eager (not
     /// lazy) because every pass iterates all modules anyway, and eager building
     /// keeps the borrow lifetimes simple.
-    pub(super) fn build(resolved_modules: &'a [ResolvedModule]) -> Self {
+    fn build(resolved_modules: &'a [ResolvedModule]) -> Self {
         let mut module_by_id: FxHashMap<FileId, &'a ResolvedModule> = FxHashMap::default();
         let mut local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>> =
             FxHashMap::default();
@@ -804,7 +804,7 @@ impl<'a> MemberPassIndexes<'a> {
     /// Every module in `resolved_modules` is present; a `file_id` outside the
     /// slice (never reached by the passes, which only look up resolved modules)
     /// returns a shared empty map so callers stay branchless.
-    pub(super) fn local_keys(&self, file_id: FileId) -> &FxHashMap<&'a str, Vec<ExportKey>> {
+    fn local_keys(&self, file_id: FileId) -> &FxHashMap<&'a str, Vec<ExportKey>> {
         self.local_keys_by_file.get(&file_id).unwrap_or(&self.empty)
     }
 }

@@ -21,7 +21,7 @@ pub(super) fn heritage_clause(rule: &ScopedUsedClassMemberRule) -> String {
 /// binding resolves to; the member is credited on every class implementing any
 /// candidate interface (and directly on the resolved export, harmless for a
 /// memberless token const).
-pub(super) struct AngularTokenChainCreditInput<'a, 'b> {
+struct AngularTokenChainCreditInput<'a, 'b> {
     graph: &'a ModuleGraph,
     type_name: &'a str,
     member: &'a str,
@@ -31,7 +31,7 @@ pub(super) struct AngularTokenChainCreditInput<'a, 'b> {
     accessed_members: &'a mut FxHashMap<ExportKey, FxHashSet<String>>,
 }
 
-pub(super) fn credit_angular_token_chain_member(input: &mut AngularTokenChainCreditInput<'_, '_>) {
+fn credit_angular_token_chain_member(input: &mut AngularTokenChainCreditInput<'_, '_>) {
     let mut interface_names: Vec<&str> = vec![input.type_name];
     if let Some(export_keys) = input.local_to_export_keys.get(input.type_name) {
         for export_key in export_keys {
@@ -61,7 +61,7 @@ pub(super) fn credit_angular_token_chain_member(input: &mut AngularTokenChainCre
     }
 }
 
-pub(super) fn build_angular_template_refs(
+fn build_angular_template_refs(
     resolved_modules: &[ResolvedModule],
 ) -> FxHashMap<FileId, Vec<&str>> {
     resolved_modules
@@ -80,7 +80,7 @@ pub(super) fn build_angular_template_refs(
         .collect()
 }
 
-pub(super) fn build_angular_template_chain_accesses(
+fn build_angular_template_chain_accesses(
     resolved_modules: &[ResolvedModule],
 ) -> FxHashMap<FileId, Vec<(&str, &str)>> {
     resolved_modules
@@ -106,7 +106,7 @@ pub(super) fn build_angular_template_chain_accesses(
         .collect()
 }
 
-pub(super) struct AngularTemplateRefContext<'a, 'b> {
+struct AngularTemplateRefContext<'a, 'b> {
     refs: &'b FxHashMap<FileId, Vec<&'a str>>,
     self_accessed_members: &'b mut FxHashMap<FileId, FxHashSet<String>>,
 }
@@ -144,7 +144,7 @@ impl AngularTemplateRefContext<'_, '_> {
     }
 }
 
-pub(super) fn component_bindings(
+fn component_bindings(
     resolved: &ResolvedModule,
     class_heritage: &[fallow_types::extract::ClassHeritageInfo],
 ) -> FxHashMap<String, String> {
@@ -277,7 +277,7 @@ pub(super) fn propagate_angular_template_member_accesses(
     angular_chain_context.propagate(resolved_modules, indexes);
 }
 
-pub(super) struct AngularTemplateChainContext<'a, 'b> {
+struct AngularTemplateChainContext<'a, 'b> {
     graph: &'b ModuleGraph,
     class_heritage_by_file: &'b FxHashMap<FileId, &'a [fallow_types::extract::ClassHeritageInfo]>,
     chain_accesses: &'b FxHashMap<FileId, Vec<(&'b str, &'b str)>>,
@@ -286,7 +286,7 @@ pub(super) struct AngularTemplateChainContext<'a, 'b> {
     accessed_members: &'b mut FxHashMap<ExportKey, FxHashSet<String>>,
 }
 
-pub(super) struct AngularTemplateComponentContext<'b> {
+struct AngularTemplateComponentContext<'b> {
     component_bindings: FxHashMap<String, String>,
     local_to_export_keys: FxHashMap<&'b str, Vec<ExportKey>>,
 }
@@ -418,7 +418,7 @@ pub(super) fn propagate_class_inheritance(
     }
 }
 
-pub(super) fn collect_self_access_inheritance_propagations(
+fn collect_self_access_inheritance_propagations(
     parent_key: &ExportKey,
     children: &[ExportKey],
     self_accessed_members: &FxHashMap<FileId, FxHashSet<String>>,
@@ -445,7 +445,7 @@ pub(super) fn collect_self_access_inheritance_propagations(
     }
 }
 
-pub(super) fn propagate_member_accesses_through_inheritance(
+fn propagate_member_accesses_through_inheritance(
     parent_key: &ExportKey,
     children: &[ExportKey],
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
@@ -476,7 +476,7 @@ pub(super) fn propagate_member_accesses_through_inheritance(
     }
 }
 
-pub(super) fn build_interface_to_implementers(
+fn build_interface_to_implementers(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,

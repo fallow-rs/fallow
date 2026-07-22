@@ -233,7 +233,7 @@ impl AnalysisSession {
 
     /// Source metadata fingerprints for every discovered source file.
     #[must_use]
-    pub(crate) fn source_fingerprints(&self) -> FxHashMap<PathBuf, SourceFingerprint> {
+    fn source_fingerprints(&self) -> FxHashMap<PathBuf, SourceFingerprint> {
         self.discovery
             .files()
             .iter()

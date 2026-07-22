@@ -34,7 +34,7 @@ pub(in crate::report) fn print_performance_human(t: &PipelineTimings) {
 }
 
 /// Build human-readable output lines for pipeline performance timings.
-pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
+fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
     let mut lines = Vec::new();
 
     push_performance_header(&mut lines);

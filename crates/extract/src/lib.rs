@@ -98,7 +98,7 @@ pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
     clippy::expect_used,
     reason = "static regex patterns are hard-coded analyzer invariants covered by extraction tests"
 )]
-pub(crate) fn static_regex(pattern: &str) -> regex::Regex {
+fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
 
@@ -123,7 +123,7 @@ const PARALLEL_PARSE_FILE_THRESHOLD: usize = 32;
 /// `fallow_config` layer (`config_writer.rs::BOM`) so config-shaped sources
 /// and source-code-shaped sources are processed symmetrically. See issue #475.
 #[must_use]
-pub(crate) fn strip_bom(source: &str) -> &str {
+fn strip_bom(source: &str) -> &str {
     source.strip_prefix(BOM_CHAR).unwrap_or(source)
 }
 

@@ -5,7 +5,7 @@ use super::*;
 /// type, else every re-export-walked import origin whose `type_member_types`
 /// carries the origin export name. A name that resolves to no declaring site
 /// (a global, a class, a wrong annotation) contributes nothing.
-pub(super) fn typed_property_declaring_sites<'a>(
+fn typed_property_declaring_sites<'a>(
     graph: &ModuleGraph,
     indexes: &MemberPassIndexes<'a>,
     module: &'a ResolvedModule,

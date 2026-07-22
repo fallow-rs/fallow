@@ -361,7 +361,7 @@ impl ModuleInfoExtractor {
             .copied()
     }
 
-    pub(super) fn html_template_is_sanitized(&self, template: &TemplateLiteral<'_>) -> bool {
+    fn html_template_is_sanitized(&self, template: &TemplateLiteral<'_>) -> bool {
         !template.expressions.is_empty()
             && template
                 .expressions

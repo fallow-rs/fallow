@@ -1556,7 +1556,7 @@ fn extract_nullable_union_name(union: &oxc_ast::ast::TSUnionType<'_>) -> Option<
     found
 }
 
-pub(super) fn decorator_path(expr: &Expression<'_>) -> String {
+fn decorator_path(expr: &Expression<'_>) -> String {
     match expr {
         Expression::Identifier(id) => id.name.to_string(),
         Expression::StaticMemberExpression(member) => {

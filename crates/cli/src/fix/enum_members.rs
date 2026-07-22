@@ -8,7 +8,7 @@ use super::enum_helpers::{
 };
 use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check, stage_fixed_content};
 
-pub(super) struct EnumMemberFix {
+struct EnumMemberFix {
     line_idx: usize,
     member_name: String,
     parent_name: String,

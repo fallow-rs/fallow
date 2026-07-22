@@ -544,7 +544,7 @@ pub(super) fn is_token_like_security_name(name: &str) -> bool {
 
 /// Whether a call expression is, or contains in its callee / arguments, a
 /// `Math.random()` use.
-pub(super) fn call_contains_math_random(call: &CallExpression<'_>) -> bool {
+fn call_contains_math_random(call: &CallExpression<'_>) -> bool {
     is_math_random_zero_arg_call(call)
         || expression_callee_contains_math_random(&call.callee)
         || call

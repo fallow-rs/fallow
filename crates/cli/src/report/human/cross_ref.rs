@@ -43,7 +43,7 @@ pub(in crate::report) fn print_cross_reference_findings(
 }
 
 /// Build human-readable output lines for cross-reference findings.
-pub(in crate::report) fn build_cross_reference_lines(
+fn build_cross_reference_lines(
     cross_ref: &fallow_engine::cross_reference::CrossReferenceResult,
     root: &Path,
 ) -> Vec<String> {

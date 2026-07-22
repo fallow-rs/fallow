@@ -49,9 +49,7 @@ impl ModuleInfoExtractor {
             );
     }
 
-    pub(super) fn collect_type_refs_from_annotation(
-        annotation: &TSTypeAnnotation<'_>,
-    ) -> Vec<(String, Span)> {
+    fn collect_type_refs_from_annotation(annotation: &TSTypeAnnotation<'_>) -> Vec<(String, Span)> {
         let mut collector = SignatureTypeCollector::default();
         collector.visit_ts_type_annotation(annotation);
         collector.refs
@@ -81,9 +79,7 @@ impl ModuleInfoExtractor {
         collector.refs
     }
 
-    pub(super) fn collect_arrow_signature_refs(
-        arrow: &ArrowFunctionExpression<'_>,
-    ) -> Vec<(String, Span)> {
+    fn collect_arrow_signature_refs(arrow: &ArrowFunctionExpression<'_>) -> Vec<(String, Span)> {
         let mut collector = SignatureTypeCollector::default();
         if let Some(type_parameters) = arrow.type_parameters.as_deref() {
             collector.visit_ts_type_parameter_declaration(type_parameters);
@@ -128,7 +124,7 @@ impl ModuleInfoExtractor {
     /// Collect signature type references from a class's heritage clauses: type
     /// parameters, the `extends` super class plus its type arguments, and each
     /// `implements` interface plus its type arguments.
-    pub(super) fn collect_class_heritage_signature_refs(
+    fn collect_class_heritage_signature_refs(
         class: &Class<'_>,
         collector: &mut SignatureTypeCollector,
     ) {

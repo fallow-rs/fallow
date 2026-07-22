@@ -18,7 +18,7 @@ use super::build::{export_matches, is_css_module_path};
 /// Check whether an import binding is unused in the source file.
 ///
 /// Returns `true` if the binding should be skipped (unused).
-pub(super) fn is_unused_import_binding(
+fn is_unused_import_binding(
     sym_local_name: &str,
     sym_imported_name: &ImportedName,
     source_mod: Option<&&ResolvedModule>,
@@ -29,10 +29,7 @@ pub(super) fn is_unused_import_binding(
 }
 
 /// Extract member access names for a given local variable from a resolved module.
-pub(super) fn extract_accessed_members(
-    source_mod: Option<&&ResolvedModule>,
-    local_name: &str,
-) -> Vec<String> {
+fn extract_accessed_members(source_mod: Option<&&ResolvedModule>, local_name: &str) -> Vec<String> {
     source_mod
         .map(|m| {
             m.member_accesses
@@ -138,7 +135,7 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
 ///
 /// If member accesses can be determined, only those exports are marked as used.
 /// Otherwise, all exports are conservatively marked as referenced.
-pub(super) fn narrow_namespace_references(
+fn narrow_namespace_references(
     module: &mut ModuleNode,
     source_id: FileId,
     sym_local_name: &str,
@@ -196,7 +193,7 @@ pub(super) fn narrow_namespace_references(
 /// `import styles from './Button.module.css'` — member accesses like `styles.primary`
 /// mark the `primary` named export as referenced, since CSS module default imports act
 /// as namespace objects where each property corresponds to a class name (named export).
-pub(super) fn narrow_css_module_references(
+fn narrow_css_module_references(
     exports: &mut Vec<ExportSymbol>,
     source_id: FileId,
     sym_local_name: &str,
@@ -227,7 +224,7 @@ pub(super) fn narrow_css_module_references(
 }
 
 /// Determine the `ReferenceKind` for an imported name.
-pub(super) const fn reference_kind_for(imported_name: &ImportedName) -> ReferenceKind {
+const fn reference_kind_for(imported_name: &ImportedName) -> ReferenceKind {
     match imported_name {
         ImportedName::Named(_) => ReferenceKind::NamedImport,
         ImportedName::Default => ReferenceKind::DefaultImport,

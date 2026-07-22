@@ -330,14 +330,14 @@ fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
 impl CommitOutcome {
     /// Sentinel used by the orchestrator on the dry-run path to avoid
     /// touching disk while still satisfying the post-commit code shape.
-    pub(super) fn empty_for_dry_run() -> Self {
+    fn empty_for_dry_run() -> Self {
         Self {
             written: rustc_hash::FxHashSet::default(),
             failed: Vec::new(),
         }
     }
 
-    pub(super) fn had_failures(&self) -> bool {
+    fn had_failures(&self) -> bool {
         !self.failed.is_empty()
     }
 }

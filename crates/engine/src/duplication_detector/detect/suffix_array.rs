@@ -272,7 +272,7 @@ fn lms_substrings_equal(s: &[usize], is_s: &[bool], lhs: usize, rhs: usize) -> b
     clippy::cast_possible_truncation,
     reason = "ranks are bounded by text length which fits in usize"
 )]
-pub(super) fn build_suffix_array_doubling(text: &[i64]) -> Vec<usize> {
+fn build_suffix_array_doubling(text: &[i64]) -> Vec<usize> {
     let n = text.len();
     if n == 0 {
         return vec![];

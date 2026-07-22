@@ -92,10 +92,7 @@ fn print_duplication_stats(report: &DuplicationReport, elapsed: Duration) {
 }
 
 /// Build human-readable output lines for duplication report.
-pub(in crate::report) fn build_duplication_human_lines(
-    report: &DuplicationReport,
-    root: &Path,
-) -> Vec<String> {
+fn build_duplication_human_lines(report: &DuplicationReport, root: &Path) -> Vec<String> {
     build_duplication_human_lines_with_explain(report, root, false)
 }
 
@@ -343,12 +340,12 @@ impl DuplicationHumanBuilder<'_> {
 
 /// A detected mirrored directory pattern: two directory prefixes that contain
 /// identical files (e.g., `src/` and `deno/lib/`).
-pub(super) struct MirroredDirs {
-    pub(super) dir_a: String,
-    pub(super) dir_b: String,
-    pub(super) files: Vec<String>,
-    pub(super) file_count: usize,
-    pub(super) total_lines: usize,
+struct MirroredDirs {
+    dir_a: String,
+    dir_b: String,
+    files: Vec<String>,
+    file_count: usize,
+    total_lines: usize,
 }
 
 /// Detect mirrored directory patterns in clone families.
@@ -359,7 +356,7 @@ pub(super) struct MirroredDirs {
 /// are returned as non-mirrored.
 ///
 /// Minimum 3 families must share a pattern to qualify as "mirrored".
-pub(super) fn detect_mirrored_families<'a>(
+fn detect_mirrored_families<'a>(
     families: &'a [fallow_types::duplicates::CloneFamily],
     root: &Path,
 ) -> (

@@ -19,7 +19,7 @@ use serde_json::Value;
 /// `%0A`. The `%` escape runs first so already-escaped input escapes again
 /// (matching the jq `esc` helper's `gsub` order).
 #[must_use]
-pub(crate) fn escape_message(text: &str) -> String {
+fn escape_message(text: &str) -> String {
     text.replace('%', "%25")
         .replace('\r', "%0D")
         .replace('\n', "%0A")
@@ -29,14 +29,14 @@ pub(crate) fn escape_message(text: &str) -> String {
 /// escaping plus `,` to `%2C` and `:` to `%3A`, because commas separate
 /// properties and colons terminate the command prefix.
 #[must_use]
-pub(crate) fn escape_property(text: &str) -> String {
+fn escape_property(text: &str) -> String {
     escape_message(text).replace(',', "%2C").replace(':', "%3A")
 }
 
 /// Clamp a line number below 1 to 1: GitHub rejects `line=0`, and the typed
 /// annotation fallback in `annotate.sh` applies the same floor.
 #[must_use]
-pub(crate) const fn clamp_line(line: u64) -> u64 {
+const fn clamp_line(line: u64) -> u64 {
     if line < 1 { 1 } else { line }
 }
 
@@ -60,7 +60,7 @@ pub enum AnnotationLevel {
 impl AnnotationLevel {
     /// The workflow-command name (`::error`, `::warning`, `::notice`).
     #[must_use]
-    pub(crate) const fn command(self) -> &'static str {
+    const fn command(self) -> &'static str {
         match self {
             Self::Error => "error",
             Self::Warning => "warning",
@@ -180,7 +180,7 @@ impl PackageManager {
 /// (action parity; unrecognized values fall back to npm exactly like the jq
 /// `else` branch), otherwise lockfile sniffing at the analysis root.
 #[must_use]
-pub(crate) fn resolve_package_manager(env_value: Option<&str>, root: &Path) -> PackageManager {
+fn resolve_package_manager(env_value: Option<&str>, root: &Path) -> PackageManager {
     if let Some(value) = env_value {
         return match value {
             "pnpm" => PackageManager::Pnpm,
@@ -230,7 +230,7 @@ impl PathRebase {
     /// this back off to recover the analysis-root-relative path CODEOWNERS
     /// patterns are written against.
     #[must_use]
-    pub(crate) fn prefix(&self) -> &str {
+    fn prefix(&self) -> &str {
         match self {
             Self::None => "",
             Self::Prefix(prefix) => prefix,
@@ -241,7 +241,7 @@ impl PathRebase {
     /// git-toplevel detection; no git and no flag means paths pass through.
     /// An explicit empty prefix disables rebasing.
     #[must_use]
-    pub(crate) fn resolve(root: &Path, explicit: Option<&str>) -> Self {
+    fn resolve(root: &Path, explicit: Option<&str>) -> Self {
         if let Some(prefix) = explicit {
             return Self::from_explicit_prefix(prefix);
         }
@@ -265,7 +265,7 @@ impl PathRebase {
     /// Compute the analysis root's offset below the repo toplevel. Pure so
     /// tests can pin the rebasing behavior without a live git repo.
     #[must_use]
-    pub(crate) fn from_root_offset(root: &Path, toplevel: &Path) -> Self {
+    fn from_root_offset(root: &Path, toplevel: &Path) -> Self {
         match root.strip_prefix(toplevel) {
             Ok(offset) if offset.as_os_str().is_empty() => Self::None,
             Ok(offset) => Self::Prefix(offset.display().to_string().replace('\\', "/")),
@@ -316,7 +316,7 @@ pub(crate) fn report_prefix() -> &'static str {
 /// review and sticky-summary formats derive their paths from), so all CI
 /// surfaces address files the same way the platform does.
 #[must_use]
-pub(crate) fn report_rebase(root: &Path) -> PathRebase {
+fn report_rebase(root: &Path) -> PathRebase {
     PathRebase::resolve(root, report_path_prefix())
 }
 

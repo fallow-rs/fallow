@@ -13,9 +13,9 @@ use super::{static_member_object_name, unwrap_static_expr};
 
 pub(super) const PINO_PACKAGE: &str = "pino";
 pub(super) const PINO_FACTORY_EXPORT: &str = "pino";
-pub(super) const PINO_TRANSPORT_KEY: &str = "transport";
-pub(super) const PINO_TARGET_KEY: &str = "target";
-pub(super) const PINO_TARGETS_KEY: &str = "targets";
+const PINO_TRANSPORT_KEY: &str = "transport";
+const PINO_TARGET_KEY: &str = "target";
+const PINO_TARGETS_KEY: &str = "targets";
 pub(super) const FRAMEWORK_REQUEST_SOURCE: &str = "framework.request";
 pub(super) const NEXT_REQUEST_SOURCE: &str = "next.request";
 pub(super) const NEXT_FORM_DATA_SOURCE: &str = "next.form-data";
@@ -268,7 +268,7 @@ pub(super) fn collect_pino_config_targets(expr: &Expression<'_>, out: &mut Vec<S
     }
 }
 
-pub(super) fn collect_pino_transport_targets(expr: &Expression<'_>, out: &mut Vec<String>) {
+fn collect_pino_transport_targets(expr: &Expression<'_>, out: &mut Vec<String>) {
     match unwrap_static_expr(expr) {
         Expression::ObjectExpression(obj) => collect_pino_transport_object_targets(obj, out),
         Expression::ConditionalExpression(cond) => {
@@ -279,10 +279,7 @@ pub(super) fn collect_pino_transport_targets(expr: &Expression<'_>, out: &mut Ve
     }
 }
 
-pub(super) fn collect_pino_transport_object_targets(
-    obj: &ObjectExpression<'_>,
-    out: &mut Vec<String>,
-) {
+fn collect_pino_transport_object_targets(obj: &ObjectExpression<'_>, out: &mut Vec<String>) {
     for prop in &obj.properties {
         let ObjectPropertyKind::ObjectProperty(prop) = prop else {
             continue;
@@ -295,13 +292,13 @@ pub(super) fn collect_pino_transport_object_targets(
     }
 }
 
-pub(super) fn record_pino_target_value(expr: &Expression<'_>, out: &mut Vec<String>) {
+fn record_pino_target_value(expr: &Expression<'_>, out: &mut Vec<String>) {
     if let Expression::StringLiteral(lit) = unwrap_static_expr(expr) {
         record_pino_target(lit.value.as_str(), out);
     }
 }
 
-pub(super) fn record_pino_targets_array(expr: &Expression<'_>, out: &mut Vec<String>) {
+fn record_pino_targets_array(expr: &Expression<'_>, out: &mut Vec<String>) {
     let Expression::ArrayExpression(array) = unwrap_static_expr(expr) else {
         return;
     };
@@ -320,7 +317,7 @@ pub(super) fn record_pino_targets_array(expr: &Expression<'_>, out: &mut Vec<Str
     }
 }
 
-pub(super) fn record_pino_target(source: &str, out: &mut Vec<String>) {
+fn record_pino_target(source: &str, out: &mut Vec<String>) {
     if source.is_empty() || out.iter().any(|existing| existing == source) {
         return;
     }
@@ -383,7 +380,7 @@ pub(super) fn node_module_register_specifier(call: &CallExpression<'_>) -> Optio
 }
 
 /// Allowlisted loader-hook exports for `module.register()`.
-pub(super) const NODE_MODULE_REGISTER_HOOK_EXPORTS: &[&str] = &[
+const NODE_MODULE_REGISTER_HOOK_EXPORTS: &[&str] = &[
     "initialize",
     "resolve",
     "load",
@@ -822,7 +819,7 @@ fn expression_identifier_name<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
     }
 }
 
-pub(super) fn extract_binding_local_name<'a>(pattern: &'a BindingPattern<'a>) -> Option<&'a str> {
+fn extract_binding_local_name<'a>(pattern: &'a BindingPattern<'a>) -> Option<&'a str> {
     match pattern {
         BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
         BindingPattern::AssignmentPattern(assign) => extract_binding_local_name(&assign.left),
@@ -860,7 +857,7 @@ pub(super) fn extract_object_pattern_bindings(
     bindings
 }
 
-pub(super) fn collect_object_pattern_bindings(
+fn collect_object_pattern_bindings(
     pattern: &ObjectPattern<'_>,
     path_prefix: &str,
     bindings: &mut FxHashMap<String, String>,
@@ -1122,7 +1119,7 @@ fn collect_fixture_type_binding_from_member(
     }
 }
 
-pub(super) fn fixture_type_reference_name(ty: &TSType<'_>) -> Option<(String, Span)> {
+fn fixture_type_reference_name(ty: &TSType<'_>) -> Option<(String, Span)> {
     match ty {
         TSType::TSTypeReference(type_ref) => type_name_root(&type_ref.type_name),
         TSType::TSParenthesizedType(paren) => fixture_type_reference_name(&paren.type_annotation),

@@ -33,7 +33,7 @@ pub struct RetainedModuleGraph {
 impl RetainedModuleGraph {
     /// Wrap a freshly built module graph for engine result contracts.
     #[must_use]
-    pub(crate) const fn new(inner: ModuleGraph) -> Self {
+    const fn new(inner: ModuleGraph) -> Self {
         Self { inner }
     }
 

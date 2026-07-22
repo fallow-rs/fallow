@@ -154,21 +154,21 @@ pub enum VizFileStatus {
 #[derive(Serialize)]
 pub struct VizFunction {
     /// Function name, or `<anonymous>`.
-    pub(crate) name: String,
+    name: String,
     /// 1-based start line.
-    pub(crate) line: u32,
+    line: u32,
     /// McCabe cyclomatic complexity.
-    pub(crate) cyclomatic: u16,
+    cyclomatic: u16,
     /// SonarSource cognitive complexity.
-    pub(crate) cognitive: u16,
+    cognitive: u16,
     /// Body line count.
-    pub(crate) lines: u32,
+    lines: u32,
     /// React hook calls made directly in the body.
-    pub(crate) hooks: u16,
+    hooks: u16,
     /// Deepest JSX nesting in the body.
-    pub(crate) jsx_depth: u16,
+    jsx_depth: u16,
     /// Props destructured from the first parameter.
-    pub(crate) props: u16,
+    props: u16,
 }
 
 /// Project-wide totals for the header stat boxes.
@@ -210,68 +210,68 @@ pub struct VizSummary {
 #[derive(Serialize)]
 pub struct VizWorkspace {
     /// Package name.
-    pub(crate) name: String,
+    name: String,
     /// Root-relative workspace root.
-    pub(crate) root: String,
+    root: String,
 }
 
 /// One configured boundary zone.
 #[derive(Serialize)]
 pub struct VizZone {
     /// Zone name from the boundaries config.
-    pub(crate) name: String,
+    name: String,
     /// Number of files classified into this zone.
-    pub(crate) files: u32,
+    files: u32,
 }
 
 /// One clone group resolved to file indices.
 #[derive(Serialize)]
 pub struct VizCloneGroup {
     /// Lines per duplicated block.
-    pub(crate) lines: usize,
+    lines: usize,
     /// Tokens per duplicated block.
-    pub(crate) tokens: usize,
+    tokens: usize,
     /// Where the duplicated block appears.
-    pub(crate) instances: Vec<VizCloneInstance>,
+    instances: Vec<VizCloneInstance>,
     /// Source preview: a context window around the duplicated block, the
     /// copied lines flanked by up to `CLONE_PREVIEW_CONTEXT` surrounding
     /// source lines on each side.
-    pub(crate) preview: String,
+    preview: String,
     /// 0-based index, among the lines of `preview`, of the first copied
     /// line. Lines before it are dimmed context.
-    pub(crate) highlight_start: u32,
+    highlight_start: u32,
     /// Number of copied lines present in `preview`. The frontend highlights
     /// `preview` lines `[highlight_start, highlight_start + highlight_lines)`
     /// and dims the rest.
-    pub(crate) highlight_lines: u32,
+    highlight_lines: u32,
 }
 
 /// One location of a duplicated block.
 #[derive(Serialize)]
 pub struct VizCloneInstance {
     /// File index into `VizData.files`.
-    pub(crate) file: u32,
+    file: u32,
     /// 1-based start line.
-    pub(crate) start_line: u32,
+    start_line: u32,
     /// 1-based end line.
-    pub(crate) end_line: u32,
+    end_line: u32,
 }
 
 /// One boundary violation resolved to file indices.
 #[derive(Serialize)]
 pub struct VizViolation {
     /// Importing file index.
-    pub(crate) from: u32,
+    from: u32,
     /// Imported file index.
-    pub(crate) to: u32,
+    to: u32,
     /// Index into `VizData.zones` for the importing file's zone.
-    pub(crate) from_zone: u16,
+    from_zone: u16,
     /// Index into `VizData.zones` for the imported file's zone.
-    pub(crate) to_zone: u16,
+    to_zone: u16,
     /// 1-based line of the offending import.
-    pub(crate) line: u32,
+    line: u32,
     /// Raw import specifier.
-    pub(crate) specifier: String,
+    specifier: String,
 }
 
 /// Build the viz payload from one project analysis run.

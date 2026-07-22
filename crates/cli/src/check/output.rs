@@ -186,7 +186,7 @@ pub fn run_cross_reference(
 /// The format is `FILE:EXPORT_NAME`. Uses `rsplit_once` so that colons
 /// in Windows drive letters (e.g., `C:\src\utils.ts:foo`) are handled
 /// correctly, only the last colon is used as the separator.
-pub(super) fn parse_trace_spec(spec: &str) -> Option<(&str, &str)> {
+fn parse_trace_spec(spec: &str) -> Option<(&str, &str)> {
     spec.rsplit_once(':')
 }
 

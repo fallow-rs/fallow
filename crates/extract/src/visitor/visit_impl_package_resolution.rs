@@ -11,7 +11,7 @@ use super::{
     StaticPackageLoopBindings, for_of_binding_name, object_values_or_entries_argument_name,
 };
 
-pub(super) fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
+fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     let Expression::StaticMemberExpression(member) = expr else {
         return false;
     };
@@ -21,7 +21,7 @@ pub(super) fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     object.name == "require" && member.property.name == "resolve"
 }
 
-pub(super) fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
+fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
     if !is_package_resolution_specifier(specifier) {
         return None;
     }
@@ -69,14 +69,14 @@ fn package_name_from_specifier(specifier: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(super) fn package_values_from_raw_values(values: &[String]) -> Vec<String> {
+fn package_values_from_raw_values(values: &[String]) -> Vec<String> {
     values
         .iter()
         .filter_map(|value| package_from_resolution_specifier(value))
         .collect()
 }
 
-pub(super) fn static_object_string_property_values(
+fn static_object_string_property_values(
     obj: &ObjectExpression<'_>,
 ) -> FxHashMap<String, Vec<String>> {
     let mut values = FxHashMap::default();

@@ -30,7 +30,7 @@ pub fn render_review_envelope(
 /// cache (which is `OnceLock`-bounded and not reentrant under cargo test's
 /// parallel runner).
 #[must_use]
-pub(crate) fn render_review_envelope_with_diff(
+fn render_review_envelope_with_diff(
     command: &str,
     provider: Provider,
     issues: &[CiIssue],

@@ -3,7 +3,7 @@
 use super::types::RN_PLATFORM_PREFIXES;
 
 /// Check if React Native or Expo plugins are active.
-pub(super) fn has_react_native_plugin(active_plugins: &[String]) -> bool {
+fn has_react_native_plugin(active_plugins: &[String]) -> bool {
     active_plugins
         .iter()
         .any(|p| p == "react-native" || p == "expo")

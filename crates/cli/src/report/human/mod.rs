@@ -418,13 +418,13 @@ where
     P: Fn(&'items T) -> &'items Path,
     F: Fn(&T) -> String,
 {
-    pub(super) lines: &'out mut Vec<String>,
-    pub(super) items: &'items [T],
-    pub(super) root: &'out Path,
-    pub(super) get_path: P,
-    pub(super) format_detail: &'out F,
-    pub(super) max_files: usize,
-    pub(super) max_items_per_file: usize,
+    lines: &'out mut Vec<String>,
+    items: &'items [T],
+    root: &'out Path,
+    get_path: P,
+    format_detail: &'out F,
+    max_files: usize,
+    max_items_per_file: usize,
 }
 
 pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(

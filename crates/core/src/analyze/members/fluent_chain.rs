@@ -1,7 +1,7 @@
 use super::*;
 
 /// Validate a fluent chain against a single class export.
-pub(super) fn export_validates_fluent_chain(
+fn export_validates_fluent_chain(
     export: &crate::extract::ExportInfo,
     origin: &ExportKey,
     root_method: &str,
@@ -70,7 +70,7 @@ pub(super) fn propagate_fluent_chain_accesses(
 }
 
 /// Validate a constructor-rooted fluent chain against a single class export.
-pub(super) fn export_validates_fluent_chain_new(
+fn export_validates_fluent_chain_new(
     export: &crate::extract::ExportInfo,
     origin: &ExportKey,
     chain: &[&str],

@@ -267,7 +267,7 @@ fn print_suppression_footer(results: &AnalysisResults) {
 /// Each section (unused files, exports, etc.) produces a header line followed by
 /// detail lines. Empty sections are omitted entirely.
 #[cfg(test)]
-pub(in crate::report) fn build_human_lines(
+fn build_human_lines(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,

@@ -178,7 +178,7 @@ impl FixPlan {
     }
 
     /// Return the currently-staged content for `path`, if any.
-    pub(super) fn staged_content(&self, path: &Path) -> Option<&[u8]> {
+    fn staged_content(&self, path: &Path) -> Option<&[u8]> {
         self.entries
             .iter()
             .find(|e| e.path == path)

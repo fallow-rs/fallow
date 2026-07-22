@@ -95,32 +95,32 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
 #[derive(Debug, Default)]
 pub struct PluginResult {
     /// Additional entry point glob patterns discovered from config.
-    pub(crate) entry_patterns: Vec<PathRule>,
+    entry_patterns: Vec<PathRule>,
     /// When true, `entry_patterns` from config replace the plugin's static
     /// `entry_patterns()` defaults instead of adding to them. Tools like Vitest
     /// and Jest treat their config's include/testMatch as a replacement for built-in
     /// defaults, so when the config is explicit the static patterns must be dropped.
-    pub(crate) replace_entry_patterns: bool,
+    replace_entry_patterns: bool,
     /// When true, `used_exports` from config replace the plugin's static
     /// `used_export_rules()` defaults instead of adding to them.
-    pub(crate) replace_used_export_rules: bool,
+    replace_used_export_rules: bool,
     /// Additional export-usage rules discovered from config.
-    pub(crate) used_exports: Vec<UsedExportRule>,
+    used_exports: Vec<UsedExportRule>,
     /// Class member rules that should never be flagged as unused. Contributed
     /// by plugins that know their framework invokes these methods at runtime
     /// and may scope suppression via `extends` / `implements` constraints when
     /// the method name is too common to allowlist globally.
-    pub(crate) used_class_members: Vec<UsedClassMemberRule>,
+    used_class_members: Vec<UsedClassMemberRule>,
     /// Dependencies referenced in config files (should not be flagged as unused).
-    pub(crate) referenced_dependencies: Vec<String>,
+    referenced_dependencies: Vec<String>,
     /// Additional files that are always considered used.
-    pub(crate) always_used_files: Vec<String>,
+    always_used_files: Vec<String>,
     /// Path alias mappings discovered from config (prefix -> replacement directory).
-    pub(crate) path_aliases: Vec<(String, String)>,
+    path_aliases: Vec<(String, String)>,
     /// Setup/helper files referenced from config.
-    pub(crate) setup_files: Vec<PathBuf>,
+    setup_files: Vec<PathBuf>,
     /// Test fixture glob patterns discovered from config.
-    pub(crate) fixture_patterns: Vec<String>,
+    fixture_patterns: Vec<String>,
     /// Absolute directories to include when resolving SCSS/Sass `@import` and
     /// `@use` specifiers. Contributed by framework plugins that read their
     /// tool's equivalent of `includePaths` (e.g. Angular's
@@ -128,22 +128,22 @@ pub struct PluginResult {
     /// `project.json`). Bare SCSS specifiers that fail to resolve relative to
     /// the importing file retry against each include path using the SCSS
     /// partial / directory-index conventions.
-    pub(crate) scss_include_paths: Vec<PathBuf>,
+    scss_include_paths: Vec<PathBuf>,
     /// URL-to-filesystem static directory mappings discovered from tool config.
     /// Each tuple is `(absolute_source_dir, normalized_url_mount)`.
-    pub(crate) static_dir_mappings: Vec<(PathBuf, String)>,
+    static_dir_mappings: Vec<(PathBuf, String)>,
     /// File-scoped dependency providers. Matching imports are considered
     /// available from the framework runtime and are not unlisted dependencies.
-    pub(crate) provided_dependencies: Vec<ProvidedDependencyRule>,
+    provided_dependencies: Vec<ProvidedDependencyRule>,
 }
 
 impl PluginResult {
-    pub(crate) fn push_entry_pattern(&mut self, pattern: impl Into<String>) {
+    fn push_entry_pattern(&mut self, pattern: impl Into<String>) {
         self.entry_patterns
             .push(PathRule::new(normalize_entry_pattern(pattern.into())));
     }
 
-    pub(crate) fn extend_entry_patterns<I, S>(&mut self, patterns: I)
+    fn extend_entry_patterns<I, S>(&mut self, patterns: I)
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -155,7 +155,7 @@ impl PluginResult {
         );
     }
 
-    pub(crate) fn push_used_export_rule(
+    fn push_used_export_rule(
         &mut self,
         pattern: impl Into<String>,
         exports: impl IntoIterator<Item = impl Into<String>>,
@@ -165,7 +165,7 @@ impl PluginResult {
     }
 
     #[must_use]
-    pub(crate) const fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.entry_patterns.is_empty()
             && self.used_exports.is_empty()
             && self.used_class_members.is_empty()
@@ -215,7 +215,7 @@ impl PathRule {
     }
 
     #[must_use]
-    pub(crate) fn from_static(pattern: &'static str) -> Self {
+    fn from_static(pattern: &'static str) -> Self {
         Self::new(pattern)
     }
 
@@ -231,7 +231,7 @@ impl PathRule {
     }
 
     #[must_use]
-    pub(crate) fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
+    fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -242,7 +242,7 @@ impl PathRule {
     }
 
     #[must_use]
-    pub(crate) fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
+    fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -253,7 +253,7 @@ impl PathRule {
     }
 
     #[must_use]
-    pub(crate) fn prefixed(&self, ws_prefix: &str) -> Self {
+    fn prefixed(&self, ws_prefix: &str) -> Self {
         Self {
             pattern: prefix_workspace_pattern(&self.pattern, ws_prefix),
             exclude_globs: self
@@ -291,12 +291,12 @@ impl UsedExportRule {
     }
 
     #[must_use]
-    pub(crate) fn from_static(pattern: &'static str, exports: &'static [&'static str]) -> Self {
+    fn from_static(pattern: &'static str, exports: &'static [&'static str]) -> Self {
         Self::new(pattern, exports.iter().copied())
     }
 
     #[must_use]
-    pub(crate) fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
+    fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -306,7 +306,7 @@ impl UsedExportRule {
     }
 
     #[must_use]
-    pub(crate) fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
+    fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -316,7 +316,7 @@ impl UsedExportRule {
     }
 
     #[must_use]
-    pub(crate) fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
+    fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -326,7 +326,7 @@ impl UsedExportRule {
     }
 
     #[must_use]
-    pub(crate) fn prefixed(&self, ws_prefix: &str) -> Self {
+    fn prefixed(&self, ws_prefix: &str) -> Self {
         Self {
             path: self.path.prefixed(ws_prefix),
             exports: self.exports.clone(),
@@ -351,7 +351,7 @@ impl PluginUsedExportRule {
     }
 
     #[must_use]
-    pub(crate) fn prefixed(&self, ws_prefix: &str) -> Self {
+    fn prefixed(&self, ws_prefix: &str) -> Self {
         Self {
             plugin_name: self.plugin_name.clone(),
             rule: self.rule.prefixed(ws_prefix),
@@ -363,13 +363,13 @@ impl PluginUsedExportRule {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProvidedDependencyRule {
     pub(crate) path: PathRule,
-    pub(crate) exact_specifiers: Vec<String>,
-    pub(crate) specifier_prefixes: Vec<String>,
+    exact_specifiers: Vec<String>,
+    specifier_prefixes: Vec<String>,
 }
 
 impl ProvidedDependencyRule {
     #[must_use]
-    pub(crate) fn new(
+    fn new(
         pattern: impl Into<String>,
         exact_specifiers: impl IntoIterator<Item = impl Into<String>>,
         specifier_prefixes: impl IntoIterator<Item = impl Into<String>>,
@@ -382,7 +382,7 @@ impl ProvidedDependencyRule {
     }
 
     #[must_use]
-    pub(crate) fn prefixed(&self, ws_prefix: &str) -> Self {
+    fn prefixed(&self, ws_prefix: &str) -> Self {
         Self {
             path: self.path.prefixed(ws_prefix),
             exact_specifiers: self.exact_specifiers.clone(),

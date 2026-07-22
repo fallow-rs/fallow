@@ -167,7 +167,7 @@ pub struct PluginRegexValidationError {
 }
 
 impl PluginRegexValidationError {
-    pub(crate) fn new(input: PluginRegexValidationErrorInput<'_>) -> Self {
+    fn new(input: PluginRegexValidationErrorInput<'_>) -> Self {
         Self {
             plugin_name: input.plugin_name.to_owned(),
             config_path: input.config_path.map(Path::to_path_buf),
@@ -182,13 +182,13 @@ impl PluginRegexValidationError {
 
 #[derive(Clone, Copy)]
 pub(crate) struct PluginRegexValidationErrorInput<'a> {
-    pub(crate) plugin_name: &'a str,
-    pub(crate) config_path: Option<&'a Path>,
-    pub(crate) rule_kind: &'static str,
-    pub(crate) field: &'static str,
-    pub(crate) rule_pattern: &'a str,
-    pub(crate) regex_pattern: &'a str,
-    pub(crate) source: &'a regex::Error,
+    plugin_name: &'a str,
+    config_path: Option<&'a Path>,
+    rule_kind: &'static str,
+    field: &'static str,
+    rule_pattern: &'a str,
+    regex_pattern: &'a str,
+    source: &'a regex::Error,
 }
 
 impl fmt::Display for PluginRegexValidationError {
@@ -462,7 +462,7 @@ impl PluginRegistry {
     /// This discovers which plugins are active, collects their static patterns,
     /// then parses any config files to extract dynamic information.
     #[cfg(test)]
-    pub(crate) fn run(
+    fn run(
         &self,
         pkg: &PackageJson,
         root: &Path,
@@ -1075,7 +1075,7 @@ pub(crate) enum PluginDiagnostic {
 /// [`builtin::create_builtin_plugins`]. External plugins (file-loaded plus
 /// inline `framework[]`) run AFTER built-ins, so they cannot displace a
 /// built-in's `resolve_config` result for the same file.
-pub(crate) fn detect_pattern_collisions(
+fn detect_pattern_collisions(
     builtin_active: &[&dyn Plugin],
     external_active: &[&ExternalPluginDef],
 ) -> Vec<PluginDiagnostic> {
@@ -1150,7 +1150,7 @@ pub(crate) fn detect_pattern_collisions(
 ///
 /// Matches the established #467 / #510 pattern: tracing-warn with a `did you
 /// mean` suggestion at the call site. No exit non-zero, no new CLI flag.
-pub(crate) fn detect_enabler_typos(
+fn detect_enabler_typos(
     external_plugins: &[ExternalPluginDef],
     all_deps: &[String],
 ) -> Vec<PluginDiagnostic> {

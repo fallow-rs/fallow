@@ -5,16 +5,16 @@ use super::*;
 /// short real words (`catch` vs `match`, `list` vs `last`) rather than a typo.
 /// Real component-class typos are compound / hyphenated and comfortably longer.
 /// (Real-world smoke on Svelte: `catch` vs `match` in test fixtures.)
-pub(super) const MIN_DEFINED_CLASS_LEN: usize = 6;
+const MIN_DEFINED_CLASS_LEN: usize = 6;
 /// Shortest markup token worth typo-checking, for the same reason. One below the
 /// defined floor, since a one-edit pair differs in length by at most one.
-pub(super) const MIN_TOKEN_LEN: usize = 5;
+const MIN_TOKEN_LEN: usize = 5;
 
 /// Count plain-CSS vs preprocessor (`.scss`/`.sass`/`.less`) stylesheet files in
 /// the project (ignore-filtered). Used to abstain from class-typo detection when
 /// preprocessors dominate, because the parser cannot expand their loops/mixins,
 /// so the defined-class set is unreliable.
-pub(super) fn count_stylesheet_kinds(
+fn count_stylesheet_kinds(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -43,7 +43,7 @@ pub(super) fn count_stylesheet_kinds(
 /// is NOT narrowed by `changed_files` / `ws_roots`: a class defined in an
 /// unchanged file must still count as defined, or a markup token referencing it
 /// would false-positive as unresolved. Only the ignore filter applies.
-pub(super) fn collect_defined_css_classes(
+fn collect_defined_css_classes(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -93,7 +93,7 @@ pub(super) fn collect_defined_css_classes(
 /// classes, using a length-bucketed index so only classes of length `len-1`,
 /// `len`, `len+1` are compared. Returns the lexicographically smallest defined
 /// class at edit distance one (deterministic), or `None`.
-pub(super) fn best_class_suggestion<'a>(
+fn best_class_suggestion<'a>(
     token: &str,
     by_len: &'a rustc_hash::FxHashMap<usize, Vec<&'a str>>,
 ) -> Option<&'a str> {
@@ -120,7 +120,7 @@ pub(super) fn best_class_suggestion<'a>(
 /// True when a markup class token is Tailwind-flavored (a variant prefix `:`,
 /// an opacity `/`, or an arbitrary-value bracket), so it is not an authored CSS
 /// class and never a typo candidate.
-pub(super) fn is_tailwind_shaped(token: &str) -> bool {
+fn is_tailwind_shaped(token: &str) -> bool {
     token.contains([':', '/', '[', ']'])
 }
 
@@ -128,7 +128,7 @@ pub(super) fn is_tailwind_shaped(token: &str) -> bool {
 /// Drops names ending in `-` / `_`: those are SCSS interpolation artifacts
 /// (`.display-#{$i}` parsed by lightningcss as a partial `display-`), never a
 /// real typo target.
-pub(super) fn build_typo_target_index(
+fn build_typo_target_index(
     defined: &rustc_hash::FxHashSet<String>,
 ) -> rustc_hash::FxHashMap<usize, Vec<&str>> {
     let mut by_len: rustc_hash::FxHashMap<usize, Vec<&str>> = rustc_hash::FxHashMap::default();
@@ -142,7 +142,7 @@ pub(super) fn build_typo_target_index(
 
 /// Collect the likely-typo class references in one markup source into `out`,
 /// deduping by `(rel, line, value)` via `seen`.
-pub(super) fn collect_unresolved_class_refs_in_file<'a>(
+fn collect_unresolved_class_refs_in_file<'a>(
     source: &str,
     rel: &str,
     defined: &rustc_hash::FxHashSet<String>,
@@ -242,7 +242,7 @@ pub(super) fn scan_unresolved_class_references(
 /// `{`, and `}` boundaries are ASCII, so replacing the whole block range with
 /// spaces preserves UTF-8 validity (any multi-byte family name inside the block
 /// is fully within the replaced range).
-pub(super) fn mask_font_face_blocks(lower_source: &str) -> String {
+fn mask_font_face_blocks(lower_source: &str) -> String {
     if !lower_source.contains("@font-face") {
         return lower_source.to_owned();
     }
@@ -355,7 +355,7 @@ pub(super) fn font_families_referenced_in_source(
 /// Shortest global class worth reporting as unreferenced. Shorter names are
 /// substring-prone (their literal appears inside many longer strings, so the
 /// substring reference check already keeps them safe) and low-signal.
-pub(super) const MIN_UNREF_CLASS_LEN: usize = 5;
+const MIN_UNREF_CLASS_LEN: usize = 5;
 
 /// Extract class-shaped tokens from quoted string literals (`'...'` / `"..."` /
 /// `` `...` ``) in a source string and add them to `out`, crediting a name
@@ -416,7 +416,7 @@ pub(super) fn collect_quoted_class_tokens(
 /// always surface as a (false) unreferenced-class candidate. `:global` is the
 /// author's explicit "not locally scoped, applied elsewhere" marker, so excluding
 /// these from the candidate set is semantically correct, not a heuristic guess.
-pub(super) fn collect_global_scoped_classes(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
+fn collect_global_scoped_classes(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
     let bytes = source.as_bytes();
     let mut i = 0;
     while let Some(rel) = source[i..].find(":global(") {
@@ -443,7 +443,7 @@ pub(super) fn collect_global_scoped_classes(source: &str, out: &mut rustc_hash::
 /// Push every `.class` token in a CSS selector fragment (the bare name, no dot)
 /// into `out`. A class name is a dot followed by `[A-Za-z_-]` then any run of
 /// `[A-Za-z0-9_-]`.
-pub(super) fn extract_dotted_class_names(selector: &str, out: &mut rustc_hash::FxHashSet<String>) {
+fn extract_dotted_class_names(selector: &str, out: &mut rustc_hash::FxHashSet<String>) {
     let bytes = selector.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -476,7 +476,7 @@ pub(super) fn extract_dotted_class_names(selector: &str, out: &mut rustc_hash::F
 /// the unreferenced-global-class candidate. Classes wrapped in `:global(...)`
 /// are dropped: they target externally-applied DOM and are never authored in
 /// markup.
-pub(super) fn collect_defined_css_classes_located(
+fn collect_defined_css_classes_located(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -529,9 +529,9 @@ pub(super) fn collect_defined_css_classes_located(
 
 #[derive(Clone, Debug)]
 pub(super) struct CssClassInventory {
-    pub(super) css_files: usize,
-    pub(super) preprocessor_files: usize,
-    pub(super) defined_classes: Vec<(String, Vec<(String, u32)>)>,
+    css_files: usize,
+    preprocessor_files: usize,
+    defined_classes: Vec<(String, Vec<(String, u32)>)>,
 }
 
 pub(super) fn css_class_inventory(
@@ -631,10 +631,10 @@ pub(super) fn scan_unreferenced_css_classes(
 
 #[derive(Clone, Debug)]
 pub(super) struct CssReferenceSurface {
-    pub(super) static_tokens: rustc_hash::FxHashSet<String>,
-    pub(super) dynamic_corpus: String,
-    pub(super) source_corpus: String,
-    pub(super) dynamic_interpolants: rustc_hash::FxHashSet<String>,
+    static_tokens: rustc_hash::FxHashSet<String>,
+    dynamic_corpus: String,
+    source_corpus: String,
+    dynamic_interpolants: rustc_hash::FxHashSet<String>,
 }
 
 impl CssReferenceSurface {
@@ -686,7 +686,7 @@ impl CssReferenceSurface {
     }
 }
 
-pub(super) fn css_module_property_alias(class: &str) -> Option<String> {
+fn css_module_property_alias(class: &str) -> Option<String> {
     if !class.contains('-') {
         return None;
     }
@@ -707,7 +707,7 @@ pub(super) fn css_module_property_alias(class: &str) -> Option<String> {
     (alias != class && is_valid_js_property_ident(&alias)).then_some(alias)
 }
 
-pub(super) fn is_valid_js_property_ident(value: &str) -> bool {
+fn is_valid_js_property_ident(value: &str) -> bool {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -716,14 +716,14 @@ pub(super) fn is_valid_js_property_ident(value: &str) -> bool {
         && chars.all(|c| c == '_' || c == '$' || c.is_ascii_alphanumeric())
 }
 
-pub(super) fn is_plain_dynamic_class_value(class: &str) -> bool {
+fn is_plain_dynamic_class_value(class: &str) -> bool {
     class.len() >= MIN_UNREF_CLASS_LEN
         && class
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
-pub(super) fn class_literal_occurrences<'a>(
+fn class_literal_occurrences<'a>(
     source: &'a str,
     class: &'a str,
 ) -> impl Iterator<Item = usize> + 'a {
@@ -739,10 +739,7 @@ pub(super) fn class_literal_occurrences<'a>(
     })
 }
 
-pub(super) fn class_name_occurrences<'a>(
-    source: &'a str,
-    class: &'a str,
-) -> impl Iterator<Item = usize> + 'a {
+fn class_name_occurrences<'a>(source: &'a str, class: &'a str) -> impl Iterator<Item = usize> + 'a {
     source.match_indices(class).filter_map(move |(offset, _)| {
         let before = source.as_bytes().get(offset.wrapping_sub(1)).copied();
         let after = source.as_bytes().get(offset + class.len()).copied();
@@ -754,14 +751,11 @@ pub(super) fn class_name_occurrences<'a>(
     })
 }
 
-pub(super) fn is_class_name_byte(byte: u8) -> bool {
+fn is_class_name_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
 }
 
-pub(super) fn collect_dynamic_class_interpolants(
-    source: &str,
-    out: &mut rustc_hash::FxHashSet<String>,
-) {
+fn collect_dynamic_class_interpolants(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
     let bytes = source.as_bytes();
     let mut i = 0usize;
     while let Some(rel) = source.get(i..).and_then(|tail| tail.find("${")) {
@@ -798,11 +792,11 @@ pub(super) fn collect_dynamic_class_interpolants(
     }
 }
 
-pub(super) fn is_js_identifier_start(byte: u8) -> bool {
+fn is_js_identifier_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_' || byte == b'$'
 }
 
-pub(super) fn is_js_identifier_continue(byte: u8) -> bool {
+fn is_js_identifier_continue(byte: u8) -> bool {
     is_js_identifier_start(byte) || byte.is_ascii_digit()
 }
 
@@ -824,7 +818,7 @@ pub(super) fn css_reference_surface(
     surface
 }
 
-pub(super) fn collect_css_reference_surface_file(
+fn collect_css_reference_surface_file(
     surface: &mut CssReferenceSurface,
     file: &fallow_types::discover::DiscoveredFile,
     config: &ResolvedConfig,
@@ -862,7 +856,7 @@ pub(super) fn collect_css_reference_surface_file(
     }
 }
 
-pub(super) fn collect_markdown_reference_surface_files(
+fn collect_markdown_reference_surface_files(
     surface: &mut CssReferenceSurface,
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -870,7 +864,7 @@ pub(super) fn collect_markdown_reference_surface_files(
     collect_markdown_reference_surface_dir(surface, &config.root, config, ignore_set);
 }
 
-pub(super) fn collect_markdown_reference_surface_dir(
+fn collect_markdown_reference_surface_dir(
     surface: &mut CssReferenceSurface,
     dir: &std::path::Path,
     config: &ResolvedConfig,
@@ -914,7 +908,7 @@ pub(super) fn collect_markdown_reference_surface_dir(
     }
 }
 
-pub(super) fn is_skipped_markdown_reference_path(relative: &std::path::Path) -> bool {
+fn is_skipped_markdown_reference_path(relative: &std::path::Path) -> bool {
     relative.components().any(|component| {
         let std::path::Component::Normal(name) = component else {
             return false;
@@ -945,7 +939,7 @@ pub(super) fn is_markup_source_extension(extension: &str) -> bool {
     )
 }
 
-pub(super) fn push_unreferenced_css_class_candidates(
+fn push_unreferenced_css_class_candidates(
     out: &mut Vec<fallow_output::UnreferencedCssClass>,
     rel: &str,
     classes: Vec<(String, u32)>,

@@ -121,7 +121,7 @@ impl CodeModeTool {
         }
     }
 
-    pub(super) fn is_api_backed(self) -> bool {
+    fn is_api_backed(self) -> bool {
         API_BACKED_CODE_MODE_TOOLS.contains(&self)
     }
 
@@ -159,7 +159,7 @@ pub(super) const CODE_MODE_ALIASES: &[(&str, &str)] = &[
     ("getCleanupCandidates", "get_cleanup_candidates"),
 ];
 
-pub(super) const API_BACKED_CODE_MODE_TOOLS: &[CodeModeTool] = &[
+const API_BACKED_CODE_MODE_TOOLS: &[CodeModeTool] = &[
     CodeModeTool::Analyze,
     CodeModeTool::Combined,
     CodeModeTool::CheckChanged,

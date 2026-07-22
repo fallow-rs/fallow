@@ -15,7 +15,7 @@ const ALIAS_SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs
 
 /// True when `spec` is a bare npm package specifier (not a relative path, URL,
 /// `data:`, or `@/` / `~/` / `#` style path alias key).
-pub(super) fn is_bare_package_specifier(spec: &str) -> bool {
+fn is_bare_package_specifier(spec: &str) -> bool {
     crate::resolve::is_bare_specifier(spec)
         && crate::resolve::is_valid_package_name(spec)
         && !crate::resolve::is_path_alias(spec)
