@@ -10,7 +10,7 @@ path = "src/fallow.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+ed25519-dalek = { version = "3", default-features = false, features = ["std"] }
 zed_extension_api = "0.7.0"
 
 [workspace]
