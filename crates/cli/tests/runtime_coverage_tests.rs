@@ -180,7 +180,7 @@ mod gated {
         let json: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
             panic!(
                 "expected JSON output; err={err}; stdout head={}",
-                &stdout.chars().take(400).collect::<String>()
+                stdout.chars().take(400).collect::<String>()
             )
         });
         assert_eq!(
@@ -238,12 +238,12 @@ mod gated {
             code,
             0,
             "happy path must exit 0; stderr={stderr}; stdout head={}",
-            &stdout.chars().take(400).collect::<String>()
+            stdout.chars().take(400).collect::<String>()
         );
         let json: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
             panic!(
                 "expected JSON output; err={err}; stdout head={}",
-                &stdout.chars().take(400).collect::<String>()
+                stdout.chars().take(400).collect::<String>()
             )
         });
         assert!(
@@ -272,7 +272,7 @@ mod gated {
             code,
             0,
             "security runtime coverage must exit 0; stderr={stderr}; stdout head={}",
-            &stdout.chars().take(400).collect::<String>()
+            stdout.chars().take(400).collect::<String>()
         );
         let json: serde_json::Value =
             serde_json::from_str(&stdout).expect("security output should be JSON");
