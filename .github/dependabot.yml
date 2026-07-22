@@ -83,6 +83,15 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    ignore:
+      # electron-vite 5 supports Vite through version 7. Remove this when its
+      # peer dependency range includes Vite 8.
+      - dependency-name: vite
+        update-types: ["version-update:semver-major"]
+      # Electron 43 embeds Node 24. Keep the type surface aligned with the
+      # runtime and raise this together with Electron.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm

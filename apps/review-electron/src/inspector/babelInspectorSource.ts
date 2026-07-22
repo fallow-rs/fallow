@@ -1,8 +1,5 @@
-import type { PluginObj, PluginPass } from "@babel/core";
-import type * as BabelTypes from "@babel/types";
+import type { PluginAPI, PluginObject, PluginPass } from "@babel/core";
 import { isAbsolute, relative } from "node:path";
-
-type Api = { types: typeof BabelTypes };
 
 /** `root`: the review/project root, so stamped paths match Fallow's workspace-relative paths. */
 type Options = { root?: string };
@@ -17,7 +14,10 @@ type Options = { root?: string };
  * as `fallow review` output, which is what lets the inspector JOIN a selection to
  * grounded facts.
  */
-export const babelInspectorSource = ({ types: t }: Api, options: Options = {}): PluginObj => ({
+export const babelInspectorSource = (
+  { types: t }: PluginAPI,
+  options: Options = {},
+): PluginObject => ({
   name: "fallow-inspector-source",
   visitor: {
     JSXOpeningElement(path, state: PluginPass) {

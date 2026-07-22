@@ -13,8 +13,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "types": ["node", "vitest/globals"],
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/renderer/src/*"] },
+    "paths": { "@/*": ["./src/renderer/src/*"] },
     "noEmit": true
   },
   "include": ["src", "test", "electron.vite.config.ts"],

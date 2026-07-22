@@ -61,7 +61,7 @@
     "test": "node test.mjs"
   },
   "devDependencies": {
-    "@napi-rs/cli": "3.6.0"
+    "@napi-rs/cli": "3.7.3"
   },
   "optionalDependencies": {
     "@fallow-cli/fallow-node-darwin-arm64": "3.7.1",
