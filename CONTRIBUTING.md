@@ -57,6 +57,25 @@ release and publish jobs, and network or real-project smoke tests remain
 CI-only. Run `npm run verify:full -- --help` to review the exact local scope and
 exclusions.
 
+### Workspace visibility audit
+
+[Hawk](https://github.com/astral-sh/hawk) audits Rust workspace visibility and
+dead public declarations across crate boundaries. The scheduled workflow uses
+Hawk 0.1.9 with Rust 1.97.1 and keeps the supported `fallow-api` facade plus its
+re-exported contract crates out of scope.
+
+Install the matching Hawk release, then run:
+
+```bash
+./scripts/check-hawk.sh dead-public  # Report dead public declarations
+./scripts/check-hawk.sh all          # Include visibility reduction suggestions
+```
+
+Hawk is experimental, so its findings are review input rather than an automatic
+fix list. Before deleting a declaration or narrowing its visibility, confirm it
+is unused by every relevant feature profile and release target. The scheduled
+workflow stores its complete output as an artifact for review.
+
 ### Running locally
 
 ```bash

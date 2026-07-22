@@ -1,0 +1,31 @@
+# Hawk treats workspace libraries as internal unless excluded on the command
+# line. scripts/check-hawk.sh protects fallow's supported facade and the
+# contract crates whose types it re-exports.
+preserve-uniform-field-visibility = true
+
+[[production]]
+package = "fallow-cli"
+bin = "fallow"
+reason = "Primary CLI binary included in platform packages"
+
+[[production]]
+package = "fallow-lsp"
+bin = "fallow-lsp"
+reason = "Language server binary included in releases"
+
+[[production]]
+package = "fallow-mcp"
+bin = "fallow-mcp"
+reason = "MCP server binary included in releases"
+
+[[production]]
+package = "fallow-multicall"
+bin = "fallow-multicall"
+reason = "Combined binary included in platform packages"
+
+[[feature-profile]]
+name = "default"
+
+[[feature-profile]]
+name = "all"
+all-features = true

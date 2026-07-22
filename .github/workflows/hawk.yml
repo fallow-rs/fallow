@@ -1,0 +1,79 @@
+name: Hawk
+
+on:
+  schedule:
+    # Every Monday at 05:00 UTC
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hawk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
+  HAWK_ARCHIVE: cargo-hawk-x86_64-unknown-linux-gnu.tar.gz
+  HAWK_SHA256: 027124444baddf7fa3597ce2d76d1eff48e95902be303beada2558e3687c1bff
+  HAWK_VERSION: 0.1.9
+
+jobs:
+  audit:
+    name: Workspace visibility audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: '1.97.1'
+          cache-key: hawk
+
+      - name: Install Hawk
+        shell: bash
+        run: |
+          archive_url="https://github.com/astral-sh/hawk/releases/download/${HAWK_VERSION}/${HAWK_ARCHIVE}"
+          install_root="${RUNNER_TEMP}/cargo-hawk"
+          mkdir -p "${install_root}"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            --output "${RUNNER_TEMP}/${HAWK_ARCHIVE}" \
+            "${archive_url}"
+          printf '%s *%s\n' "${HAWK_SHA256}" "${RUNNER_TEMP}/${HAWK_ARCHIVE}" \
+            | sha256sum --check --strict
+          tar --extract --gzip \
+            --file "${RUNNER_TEMP}/${HAWK_ARCHIVE}" \
+            --strip-components 1 \
+            --directory "${install_root}"
+          printf '%s\n' "${install_root}" >> "${GITHUB_PATH}"
+
+      - name: Run warning-only dead-public audit
+        shell: bash
+        run: |
+          set -o pipefail
+          ./scripts/check-hawk.sh dead-public 2>&1 | tee hawk.log
+
+      - name: Write summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Hawk workspace visibility audit'
+            echo
+            echo 'This scheduled audit is informational. Review the attached log before changing visibility or deleting declarations.'
+            echo
+            echo 'A declaration is safe to delete only after its identity is absent from every relevant release target.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload audit log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hawk-audit-log
+          path: hawk.log
+          if-no-files-found: warn
+          retention-days: 30
