@@ -1981,7 +1981,7 @@ fn run_audit_dupes<'a>(
     changed_files: Option<&'a FxHashSet<PathBuf>>,
     pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
 ) -> Result<Option<DupesResult>, ExitCode> {
-    let dupes_cfg = match crate::load_config_for_analysis(
+    let dupes_cfg = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
         crate::ConfigLoadOptions {
@@ -1995,10 +1995,8 @@ fn run_audit_dupes<'a>(
             allow_remote_extends: opts.allow_remote_extends,
         },
         fallow_config::ProductionAnalysis::Dupes,
-    ) {
-        Ok(c) => c.duplicates,
-        Err(code) => return Err(code),
-    };
+    )?
+    .duplicates;
     let dupes_opts = build_audit_dupes_options(opts, changed_since, changed_files, &dupes_cfg);
     let dupes_run = if let Some(files) = pre_discovered {
         crate::dupes::execute_dupes_with_files(&dupes_opts, files)
@@ -2062,16 +2060,13 @@ fn run_audit_health<'a>(
     shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
 ) -> Result<Option<HealthResult>, ExitCode> {
     let runtime_coverage = match opts.runtime_coverage {
-        Some(path) => match crate::health::coverage::prepare_options(
+        Some(path) => Some(crate::health::coverage::prepare_options(
             path,
             opts.min_invocations_hot,
             None,
             None,
             opts.output,
-        ) {
-            Ok(options) => Some(options),
-            Err(code) => return Err(code),
-        },
+        )?),
         None => None,
     };
 

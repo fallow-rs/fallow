@@ -226,7 +226,7 @@ mod tests {
             &serde_json::json!(["lodash"])
         );
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].field == "ignoreDependencies");
+        assert_eq!(warnings[0].field, "ignoreDependencies");
     }
 
     #[test]

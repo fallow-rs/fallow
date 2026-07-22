@@ -1187,14 +1187,14 @@ mod tests {
     fn split_respects_quotes() {
         let segments = shell::split_shell_operators("echo 'a && b' && jest");
         assert_eq!(segments.len(), 2);
-        assert!(segments[1].trim() == "jest");
+        assert_eq!(segments[1].trim(), "jest");
     }
 
     #[test]
     fn split_double_quotes() {
         let segments = shell::split_shell_operators("echo \"a || b\" || jest");
         assert_eq!(segments.len(), 2);
-        assert!(segments[1].trim() == "jest");
+        assert_eq!(segments[1].trim(), "jest");
     }
 
     #[test]

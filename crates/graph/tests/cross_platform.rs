@@ -221,7 +221,7 @@ fn very_long_filename_does_not_panic() {
     let filename = "a".repeat(200) + ".ts";
     let path = PathBuf::from(format!("/project/src/{filename}"));
     assert!(path.to_str().is_some());
-    assert!(path.extension().and_then(OsStr::to_str) == Some("ts"));
+    assert_eq!(path.extension().and_then(OsStr::to_str), Some("ts"));
 }
 
 #[test]

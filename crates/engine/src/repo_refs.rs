@@ -966,7 +966,7 @@ impl BatchBlobReader {
         self.stdout
             .read_exact(&mut terminator)
             .map_err(|error| materialization_error(path, error))?;
-        if terminator != [b'\n'] {
+        if terminator != *b"\n" {
             return Err(EngineError::new(format!(
                 "Git object response for `{}` had no terminator",
                 path.display()
