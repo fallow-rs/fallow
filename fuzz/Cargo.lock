@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.2.0"
+version = "3.7.1"
 dependencies = [
  "dunce",
  "fallow-types",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.2.0"
+version = "3.7.1"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -496,7 +496,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
- "tempfile",
  "toml",
  "tracing",
 ]
@@ -514,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.2.0"
+version = "3.7.1"
 dependencies = [
  "bitcode",
  "fallow-cov-protocol",
@@ -544,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.2.0"
+version = "3.7.1"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -564,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.2.0"
+version = "3.7.1"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -575,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.2.0"
+version = "3.7.1"
 dependencies = [
  "bitcode",
  "oxc_span",
@@ -936,9 +935,9 @@ dependencies = [
 
 [[package]]
 name = "jsonc-parser"
-version = "0.32.4"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "840785e1a8b4fdb27be18440a35a81af64820dc185c3973ff8b012d4c6282512"
+checksum = "362fdb0bfedf94ebd31e4e82ff38ba705b6b82417b3b25f0c4bbb024dd11f552"
 dependencies = [
  "serde",
  "serde_json",
@@ -1600,9 +1599,9 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
 name = "rayon"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
 dependencies = [
  "either",
  "rayon-core",
