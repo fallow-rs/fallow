@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
@@ -30,6 +31,15 @@ import {
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
+const SIDECAR_PACKAGE = resolve(REPO_ROOT, "tools/type-aware-sidecar/package.json");
+const SIDECAR_TYPESCRIPT_AVAILABLE = (() => {
+  try {
+    createRequire(SIDECAR_PACKAGE).resolve("typescript/unstable/sync");
+    return true;
+  } catch {
+    return false;
+  }
+})();
 const manifest = JSON.parse(
   readFileSync(resolve(REPO_ROOT, "benchmarks/type-aware-corpus.json"), "utf8"),
 );
@@ -195,7 +205,14 @@ test("partial runs require an isolated non-canonical output directory", () => {
 
 test(
   "focused verification executes the exact sidecar artifact it hashes",
-  { skip: process.platform === "win32" },
+  {
+    skip:
+      process.platform === "win32"
+        ? "sentinel executable requires Unix permissions"
+        : !SIDECAR_TYPESCRIPT_AVAILABLE
+          ? "requires installed sidecar dependencies"
+          : false,
+  },
   async () => {
     const root = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-sentinel-"));
     try {
