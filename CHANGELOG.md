@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Type-aware class-member refinement now covers string-literal element access
+  and cross-project consumers.** Explicit TypeScript projects are scanned
+  together, so a use in an application project can confirm a declaration in a
+  referenced library project. Dynamic computed access, decorators, dependency
+  injection, and runtime registration still retain the finding when exact
+  symbol evidence is unavailable. Explicit solution configs without source
+  files now fail closed with per-candidate abstention instead of invalid project
+  metadata. The release corpus enforces pinned clean sources, repeated
+  deterministic output, independent source review, and accuracy, resource, and
+  abstention limits.
+
 ## [3.8.0] - 2026-07-22
 
 ### Added

@@ -20,7 +20,9 @@ import { readAll } from "../src/cli.mjs";
 import { canonicalFileIdentity } from "../src/typescript-go.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const executable = path.join(sidecarRoot, "fallow-type-aware.mjs");
+const executable = process.env.FALLOW_TYPE_AWARE_BIN
+  ? path.resolve(process.env.FALLOW_TYPE_AWARE_BIN)
+  : path.join(sidecarRoot, "fallow-type-aware.mjs");
 
 const makeProject = () => mkdtempSync(path.join(tmpdir(), "fallow-type-aware-"));
 
@@ -356,7 +358,7 @@ new UnicodeService().run();
   }
 });
 
-test("matches getter and setter declarations at their keyword positions", () => {
+test("treats getter and setter declarations as one logical property", () => {
   const root = makeProject();
   try {
     write(
@@ -370,7 +372,6 @@ test("matches getter and setter declarations at their keyword positions", () => 
 }
 const accessor = new Accessor();
 console.log(accessor.value);
-accessor.value = "next";
 `;
     write(root, "src/accessor.ts", source);
     const getter = utf8Position(source, "get value");
@@ -397,6 +398,364 @@ accessor.value = "next";
 
     assert.deepEqual(response.confirmed_used_candidate_ids, [0, 1]);
     assert.deepEqual(response.unresolved_candidate_ids, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("confirms a generic class member through string-literal element access", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    write(
+      root,
+      "src/client.ts",
+      `export class Client {
+  execute(): void {}
+}
+export const call = <T extends Client>(client: T): void => client["execute"]();
+`,
+    );
+
+    const response = runSidecar(
+      request(root, [
+        candidate({ id: 0, file: "src/client.ts", owner: "Client", member: "execute" }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("confirms a generic class member through mapped type and indexed access", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    write(
+      root,
+      "src/client.ts",
+      `export class Client {
+  execute(): void {}
+}
+type ClientView<T> = { [K in keyof T]: T[K] };
+const view: ClientView<Client> = new Client();
+view["execute"]();
+`,
+    );
+
+    const response = runSidecar(
+      request(root, [
+        candidate({ id: 0, file: "src/client.ts", owner: "Client", member: "execute" }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("confirms a class member in allowJs and checkJs projects", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { allowJs: true, checkJs: true, noEmit: true },
+        include: ["src"],
+      }),
+    );
+    const source = `export class JavaScriptClient {
+  execute() {}
+}
+/** @template {JavaScriptClient} T @param {T} client */
+export const call = (client) => client.execute();
+`;
+    write(root, "src/client.js", source);
+    const declaration = utf8Position(source, "execute() {}");
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/client.js",
+          owner: "JavaScriptClient",
+          member: "execute",
+          ...declaration,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retains decorator and string-registered members without an exact source use", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { experimentalDecorators: true, strict: true },
+        include: ["src"],
+      }),
+    );
+    const source = `declare const Injectable: MethodDecorator;
+export class RegisteredService {
+  @Injectable
+  execute(): void {}
+}
+export const registry = new Map([["execute", RegisteredService]]);
+`;
+    write(root, "src/service.ts", source);
+    const declaration = utf8Position(source, "execute(): void {}");
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/service.ts",
+          owner: "RegisteredService",
+          member: "execute",
+          ...declaration,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
+    assert.deepEqual(response.unresolved_candidate_ids, [0]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retains Angular template-only members without claiming a checker use", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { experimentalDecorators: true, strict: true },
+        include: ["src"],
+      }),
+    );
+    const source = `declare const Component: ClassDecorator;
+@Component
+export class GreetingComponent {
+  label = "hello";
+}
+export const template = "{{ label }}";
+`;
+    write(root, "src/component.ts", source);
+    const declaration = utf8Position(source, 'label = "hello"');
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/component.ts",
+          owner: "GreetingComponent",
+          member: "label",
+          kind: "class_property",
+          ...declaration,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
+    assert.deepEqual(response.unresolved_candidate_ids, [0]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retains Vue template-only members without claiming a checker use", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    const source = `export class ViewModel {
+  title = "hello";
+}
+`;
+    write(root, "src/model.ts", source);
+    write(root, "src/component.vue", "<template>{{ model.title }}</template>\n");
+    const declaration = utf8Position(source, 'title = "hello"');
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/model.ts",
+          owner: "ViewModel",
+          member: "title",
+          kind: "class_property",
+          ...declaration,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
+    assert.deepEqual(response.unresolved_candidate_ids, [0]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retains Astro template-only members without claiming a checker use", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    const source = `export class ViewModel {
+  title = "hello";
+}
+`;
+    write(root, "src/model.ts", source);
+    write(root, "src/component.astro", "<h1>{model.title}</h1>\n");
+    const declaration = utf8Position(source, 'title = "hello"');
+
+    const response = runSidecar(
+      request(root, [
+        candidate({
+          id: 0,
+          file: "src/model.ts",
+          owner: "ViewModel",
+          member: "title",
+          kind: "class_property",
+          ...declaration,
+        }),
+      ]),
+    );
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
+    assert.deepEqual(response.unresolved_candidate_ids, [0]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("finds a class member used only from an explicitly opened consumer project", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "packages/lib/tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { composite: true, strict: true },
+        include: ["src"],
+      }),
+    );
+    write(
+      root,
+      "packages/lib/src/client.ts",
+      `export class Client {
+  execute(): void {}
+}
+`,
+    );
+    write(
+      root,
+      "packages/app/tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true },
+        include: ["src"],
+        references: [{ path: "../lib" }],
+      }),
+    );
+    write(
+      root,
+      "packages/app/src/main.ts",
+      `import { Client } from "../../lib/src/client.js";
+new Client().execute();
+`,
+    );
+
+    const body = request(root, [
+      candidate({
+        id: 0,
+        file: "packages/lib/src/client.ts",
+        owner: "Client",
+        member: "execute",
+      }),
+    ]);
+    body.projects = ["packages/lib/tsconfig.json", "packages/app/tsconfig.json"];
+    const response = runSidecar(body);
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.deepEqual(response.abstentions, []);
+    assert.deepEqual(response.selected_tsconfigs, [
+      "packages/app/tsconfig.json",
+      "packages/lib/tsconfig.json",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("safely abstains when an explicit solution project has no source files", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ files: [], references: [{ path: "packages/lib" }] }),
+    );
+    write(
+      root,
+      "packages/lib/tsconfig.json",
+      JSON.stringify({ compilerOptions: { composite: true, strict: true }, include: ["src"] }),
+    );
+    write(
+      root,
+      "packages/lib/src/client.ts",
+      `export class Client {
+  execute(): void {}
+}
+`,
+    );
+
+    const body = request(root, [
+      candidate({
+        id: 0,
+        file: "packages/lib/src/client.ts",
+        owner: "Client",
+        member: "execute",
+      }),
+    ]);
+    body.projects = ["tsconfig.json"];
+    const response = runSidecar(body);
+
+    assert.deepEqual(response.confirmed_used_candidate_ids, []);
+    assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.deepEqual(response.abstentions, [{ candidate_id: 0, reason: "no-project" }]);
+    assert.deepEqual(response.selected_tsconfigs, []);
+    assert.deepEqual(response.projects, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

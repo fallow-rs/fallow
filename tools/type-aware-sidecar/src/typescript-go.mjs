@@ -5,15 +5,18 @@ import { API } from "typescript/unstable/sync";
 import {
   isClassDeclaration,
   isClassExpression,
+  isElementAccessExpression,
   isGetAccessorDeclaration,
   isMethodDeclaration,
   isPrivateIdentifier,
   isPropertyAccessExpression,
   isPropertyDeclaration,
   isSetAccessorDeclaration,
+  isStringLiteralLikeNode,
 } from "typescript/unstable/ast/is";
 
 const MAX_WARNINGS = 20;
+const MAX_USE_EVIDENCE_PER_CANDIDATE = 20;
 const INFERRED_PROJECT = "<inferred>";
 
 export const canonicalFileIdentity = (fileName) => {
@@ -108,6 +111,20 @@ const declarationPositionMatches = (candidate, declaration) => {
   return position.line === candidate.line && position.col === candidate.col;
 };
 
+const useLocation = (root, node) => {
+  const sourceFile = node.getSourceFile();
+  const start = node.getStart(sourceFile);
+  const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+  return {
+    path: path.relative(root, sourceFile.fileName).split(path.sep).join("/"),
+    line: line + 1,
+    col: Buffer.byteLength(
+      sourceFile.text.slice(sourceFile.getPositionOfLineAndCharacter(line, 0), start),
+      "utf8",
+    ),
+  };
+};
+
 const matchesDeclaration = (candidate, declaration) => {
   const checks = [
     declarationPositionMatches(candidate, declaration),
@@ -128,6 +145,12 @@ const collectPropertyNames = (sourceFile, candidateNames) => {
       candidateNames.has(node.name.text)
     ) {
       nodes.push(node.name);
+    } else if (
+      isElementAccessExpression(node) &&
+      isStringLiteralLikeNode(node.argumentExpression) &&
+      candidateNames.has(node.argumentExpression.text)
+    ) {
+      nodes.push(node.argumentExpression);
     }
     node.forEachChild(visit);
     return undefined;
@@ -178,7 +201,16 @@ const matchingCandidateIds = (declarationHandle, project, possibleCandidates) =>
 
 const symbolDeclarations = (symbol) => (symbol ? symbol.declarations : []);
 
-const confirmSymbolUses = ({ symbol, memberName, candidatesByMember, project, confirmedIds }) => {
+const confirmSymbolUses = ({
+  symbol,
+  memberName,
+  useNode,
+  root,
+  candidatesByMember,
+  project,
+  confirmedIds,
+  confirmedUses,
+}) => {
   const possibleCandidates = candidatesByMember.get(memberName) ?? [];
   for (const declarationHandle of symbolDeclarations(symbol)) {
     for (const candidateId of matchingCandidateIds(
@@ -187,6 +219,20 @@ const confirmSymbolUses = ({ symbol, memberName, candidatesByMember, project, co
       possibleCandidates,
     )) {
       confirmedIds.add(candidateId);
+      const locations = confirmedUses.get(candidateId) ?? [];
+      const location = useLocation(root, useNode);
+      if (
+        locations.length < MAX_USE_EVIDENCE_PER_CANDIDATE &&
+        !locations.some(
+          (existing) =>
+            existing.path === location.path &&
+            existing.line === location.line &&
+            existing.col === location.col,
+        )
+      ) {
+        locations.push(location);
+        confirmedUses.set(candidateId, locations);
+      }
     }
   }
 };
@@ -197,6 +243,8 @@ const scanSourceFile = ({
   candidatesByMember,
   project,
   confirmedIds,
+  confirmedUses,
+  root,
 }) => {
   const propertyNames = collectPropertyNames(sourceFile, candidateNames);
   if (propertyNames.length === 0) {
@@ -207,14 +255,17 @@ const scanSourceFile = ({
     confirmSymbolUses({
       symbol: symbols[index],
       memberName: propertyNames[index].text,
+      useNode: propertyNames[index],
+      root,
       candidatesByMember,
       project,
       confirmedIds,
+      confirmedUses,
     });
   }
 };
 
-const scanProject = ({ project, candidates, confirmedIds }) => {
+const scanProject = ({ root, project, candidates, confirmedIds, confirmedUses }) => {
   const candidatesByMember = groupCandidatesByMember(candidates);
   const candidateNames = new Set(candidatesByMember.keys());
 
@@ -223,7 +274,15 @@ const scanProject = ({ project, candidates, confirmedIds }) => {
     if (shouldSkipSourceFile(project, sourceFile)) {
       continue;
     }
-    scanSourceFile({ sourceFile, candidateNames, candidatesByMember, project, confirmedIds });
+    scanSourceFile({
+      sourceFile,
+      candidateNames,
+      candidatesByMember,
+      project,
+      confirmedIds,
+      confirmedUses,
+      root,
+    });
   }
 };
 
@@ -231,21 +290,16 @@ const selectCandidateProjects = (snapshot, candidates, explicitProjects, warning
   const candidatesByProject = new Map();
   const abstentions = [];
   for (const candidate of candidates) {
-    const matchingExplicitProjects = explicitProjects.filter((project) =>
+    const matchingExplicitProject = explicitProjects.find((project) =>
       project.program.getSourceFile(candidate.absolutePath),
     );
     const project =
       explicitProjects.length === 0
         ? snapshot.getDefaultProjectForFile(candidate.absolutePath)
-        : matchingExplicitProjects.length === 1
-          ? matchingExplicitProjects[0]
-          : undefined;
+        : matchingExplicitProject;
     if (!project) {
-      const ambiguous = matchingExplicitProjects.length > 1;
-      const label = ambiguous ? "Multiple TypeScript projects" : "No TypeScript project";
-      const reason = ambiguous ? "ambiguous-project" : "no-project";
-      abstentions.push({ candidate_id: candidate.id, reason });
-      addWarning(warnings, `${label} selected for ${candidate.path}; finding kept`);
+      abstentions.push({ candidate_id: candidate.id, reason: "no-project" });
+      addWarning(warnings, `No TypeScript project selected for ${candidate.path}; finding kept`);
       continue;
     }
     const projectCandidates = candidatesByProject.get(project) ?? [];
@@ -255,14 +309,16 @@ const selectCandidateProjects = (snapshot, candidates, explicitProjects, warning
   return { candidatesByProject, abstentions };
 };
 
-const scanSelectedProjects = (root, candidatesByProject, explicit, warnings) => {
+const scanSelectedProjects = (root, candidatesByProject, scanProjects, explicit, warnings) => {
   const selectedTsconfigs = [];
   const confirmedIds = new Set();
+  const confirmedUses = new Map();
   const abstentions = [];
-  const projectResults = [];
+  const projectStates = [];
   let diagnosticsMs = 0;
   let symbolScanMs = 0;
-  for (const [project, projectCandidates] of candidatesByProject) {
+  for (const project of scanProjects) {
+    const projectCandidates = candidatesByProject.get(project) ?? [];
     const config = relativeConfigPath(root, project.configFileName);
     const source = explicit ? "explicit" : "auto";
     const sourceFileCount = project.program.getSourceFileNames().length;
@@ -280,47 +336,69 @@ const scanSelectedProjects = (root, candidatesByProject, explicit, warnings) => 
         warnings,
         `${config} has ${blockingDiagnosticCount} blocking TypeScript ${diagnosticLabel}; semantic refinement abstained; ${recovery}`,
       );
-      abstentions.push(
-        ...projectCandidates.map((candidate) => ({
-          candidate_id: candidate.id,
-          reason: "blocking-diagnostics",
-        })),
-      );
-      projectResults.push({
+      projectStates.push({
+        project,
+        projectCandidates,
         config,
         source,
         status: "abstained",
-        candidate_count: projectCandidates.length,
-        confirmed_used_count: 0,
-        unresolved_count: 0,
-        abstained_count: projectCandidates.length,
         blocking_diagnostic_count: blockingDiagnosticCount,
         source_file_count: sourceFileCount,
         abstain_reason: "blocking-diagnostics",
       });
       continue;
     }
-    const scanStartedAt = performance.now();
-    scanProject({ project, candidates: projectCandidates, confirmedIds });
-    symbolScanMs += performance.now() - scanStartedAt;
-    const confirmedCount = projectCandidates.filter((candidate) =>
-      confirmedIds.has(candidate.id),
-    ).length;
-    projectResults.push({
+    projectStates.push({
+      project,
+      projectCandidates,
       config,
       source,
       status: "refined",
-      candidate_count: projectCandidates.length,
-      confirmed_used_count: confirmedCount,
-      unresolved_count: projectCandidates.length - confirmedCount,
-      abstained_count: 0,
       blocking_diagnostic_count: 0,
       source_file_count: sourceFileCount,
     });
   }
+
+  const abstainedCandidateIds = new Set();
+  for (const state of projectStates) {
+    if (state.status !== "abstained") continue;
+    for (const candidate of state.projectCandidates) {
+      abstentions.push({ candidate_id: candidate.id, reason: "blocking-diagnostics" });
+      abstainedCandidateIds.add(candidate.id);
+    }
+  }
+  const activeCandidates = [...candidatesByProject.values()]
+    .flat()
+    .filter((candidate) => !abstainedCandidateIds.has(candidate.id));
+  for (const state of projectStates) {
+    if (state.status !== "refined" || activeCandidates.length === 0) continue;
+    const scanStartedAt = performance.now();
+    scanProject({
+      root,
+      project: state.project,
+      candidates: activeCandidates,
+      confirmedIds,
+      confirmedUses,
+    });
+    symbolScanMs += performance.now() - scanStartedAt;
+  }
+
+  const projectResults = projectStates.map(({ project, projectCandidates, ...state }) => {
+    const confirmedCount = projectCandidates.filter((candidate) =>
+      confirmedIds.has(candidate.id),
+    ).length;
+    return {
+      ...state,
+      candidate_count: projectCandidates.length,
+      confirmed_used_count: confirmedCount,
+      unresolved_count: state.status === "refined" ? projectCandidates.length - confirmedCount : 0,
+      abstained_count: state.status === "abstained" ? projectCandidates.length : 0,
+    };
+  });
   return {
     selectedTsconfigs: new Set(selectedTsconfigs),
     confirmedIds,
+    confirmedUses,
     abstentions,
     projectResults,
     diagnosticsMs,
@@ -331,6 +409,7 @@ const scanSelectedProjects = (root, candidatesByProject, explicit, warnings) => 
 const emptyAnalysis = () => ({
   selectedTsconfigs: [],
   confirmedIds: [],
+  confirmedUses: new Map(),
   unresolvedIds: [],
   abstentions: [],
   projectResults: [],
@@ -351,7 +430,7 @@ export const analyzeClassMemberUses = ({ root, projects, candidates }) => {
   const api = new API({ cwd: root });
   try {
     const snapshot = api.updateSnapshot({
-      openFiles: candidatesWithIdentity.map((candidate) => candidate.absolutePath),
+      openFiles: [...new Set(candidatesWithIdentity.map((candidate) => candidate.absolutePath))],
       openProjects: projects.map((project) => project.absolutePath),
     });
     const warnings = [];
@@ -365,9 +444,13 @@ export const analyzeClassMemberUses = ({ root, projects, candidates }) => {
       explicitProjects,
       warnings,
     );
+    const scanProjects = (
+      explicitProjects.length > 0 ? explicitProjects : [...selection.candidatesByProject.keys()]
+    ).filter((project) => project.program.getSourceFileNames().length > 0);
     const analysis = scanSelectedProjects(
       root,
       selection.candidatesByProject,
+      scanProjects,
       projects.length > 0,
       warnings,
     );
@@ -383,6 +466,7 @@ export const analyzeClassMemberUses = ({ root, projects, candidates }) => {
     return {
       selectedTsconfigs: analysis.selectedTsconfigs,
       confirmedIds: analysis.confirmedIds,
+      confirmedUses: analysis.confirmedUses,
       unresolvedIds,
       abstentions,
       projectResults: analysis.projectResults,

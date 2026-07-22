@@ -1,6 +1,14 @@
 {
   "schema_version": 1,
   "artifact_directory": "target/type-aware-corpus",
+  "gates": {
+    "minimum_confirmation_precision": 1,
+    "minimum_used_recall": 0.5,
+    "minimum_correct_unused_retention": 1,
+    "maximum_abstention": 0.5,
+    "maximum_p95_marginal_overhead_ms": 5000,
+    "maximum_p95_refined_rss_kb": 2621440
+  },
   "projects": [
     {
       "id": "svelte",

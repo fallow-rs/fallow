@@ -5,8 +5,9 @@ or TypeScript. `dead-code --type-aware` adds an optional semantic refinement for
 `unused-class-members` findings. Fallow completes its normal filtering first,
 then asks a TypeScript-Go sidecar to resolve only the remaining candidates.
 
-The sidecar is not published yet. Publication remains gated on an adjudicated
-corpus accuracy review. Repository development uses the checked-in package:
+The sidecar is not published yet. The adjudicated corpus gate now passes, but
+package publication remains a separate release action. Repository development
+uses the checked-in package:
 
 ```bash
 npm ci --prefix tools/type-aware-sidecar
@@ -26,7 +27,8 @@ FALLOW_TYPE_AWARE_BIN="$PWD/node_modules/.bin/fallow-type-aware" \
 The sidecar pins `typescript@7.0.2` and uses `typescript/unstable/sync`, which
 runs the native TypeScript-Go backend. A finding is removed only when a property
 access resolves to the exact declaration path, owner, kind, line, and UTF-8 byte
-column supplied by Fallow. Name-only matches are never enough.
+column supplied by Fallow. Name-only matches are never enough. Static property
+access and string-literal element access are supported.
 
 ## Fail-closed behavior
 
@@ -42,12 +44,13 @@ structure unsafe. Ordinary semantic diagnostics do not invalidate an exact
 declaration match, so Fallow does not request a separate full semantic
 diagnostic pass before scanning. It also avoids TypeScript's project-wide
 global diagnostic pass, which eagerly checks the whole program without adding
-confidence to an exact declaration match. Fallow also abstains
-when no project can be selected or multiple explicit projects contain the same
-file. Warnings and stable reason codes explain each abstention class.
+confidence to an exact declaration match. Fallow also abstains when no project
+can be selected. Warnings and stable reason codes explain each abstention class.
 
 Use repeatable `--type-aware-project PATH` options when automatic project
-selection is ambiguous. Paths may point to an ancestor config outside `--root`:
+selection does not include a consumer project. Every healthy explicit project
+is scanned, so a member declared in one referenced package can be confirmed by
+a use in another. Paths may point to an ancestor config outside `--root`:
 
 ```bash
 fallow dead-code --root packages/app --unused-class-members --type-aware \
@@ -77,33 +80,61 @@ regression, trace, impact-closure, SARIF, audit, combined, MCP, LSP, and watch
 integration remain disabled until those surfaces can preserve semantic
 provenance and analysis-mode identity.
 
-## Corpus adjudication
+## Corpus adjudication and release gate
 
 The local corpus ledger uses schema version 2. Project-level feature buckets are
 copied into `suggested_feature_buckets` only as review prompts. A reviewer must
 record the buckets that genuinely apply to each candidate in
 `adjudicated_feature_buckets`; suggestions never contribute to the GO gate.
 
-Refreshing a schema-version-1 ledger preserves its truth decisions and source
-evidence. Existing `feature_buckets` move to `suggested_feature_buckets`, while
-`adjudicated_feature_buckets` starts empty because the old ledger could not
-distinguish project defaults from reviewed candidate evidence. Review and fill
-that field before running `verify-ledger` or `summarize`.
+The corpus uses clean worktrees at exact public refs and does not reuse fixture
+`node_modules`. Discovery records the manifest, release binary, full sidecar
+runtime, TypeScript installation, platform, and fixture commits. Partial runs
+must use a separate output directory, so they cannot overwrite canonical
+publication artifacts.
 
 ```bash
+npm run type-aware:corpus -- prepare
+npm run type-aware:corpus -- focused \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
+npm run type-aware:corpus -- discover \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
+npm run type-aware:corpus -- measure \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 npm run type-aware:corpus -- evidence
+npm run type-aware:corpus -- adjudicate
+npm run type-aware:corpus -- verify-ledger
+npm run type-aware:corpus -- summarize \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
+npm run type-aware:corpus -- supplemental \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
+npm run type-aware:corpus -- verify-publication \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 ```
 
-Use `--project` only for iterative discovery and measurement. The publication
-gate refuses partial artifacts, so run the complete manifest corpus without
-`--project`, then refresh evidence before `summarize`.
+Use `--project` only with a non-canonical `--out-dir` for iteration. The
+publication gate requires the complete manifest, repeated normalized output,
+complete paired measurements, source-current evidence, checked-in review
+decisions, independent signoff, and explicit accuracy, abstention, runtime, and
+memory thresholds. The publication verifier rejects drift in the tracked
+evidence, summary, and supplemental smoke. The supplemental command
+materializes the exact pinned Vitest commit without dependencies, reruns it
+twice, and binds its canonical candidate sets to the independently reviewed
+set. Publication verification repeats that clean supplemental run instead of
+trusting stored hashes.
 
 Feature-bucket value requires two separate candidates that are both manually
 classified as used and correctly confirmed by semantic refinement. The two
 candidates must provide explicitly adjudicated evidence for distinct buckets.
-A single candidate tagged with multiple buckets does not satisfy the gate.
+A single candidate tagged with multiple buckets does not satisfy the gate. The
+current compact result is in
+[`benchmarks/type-aware-corpus-summary.md`](../benchmarks/type-aware-corpus-summary.md),
+with source coordinates and provenance in
+[`benchmarks/type-aware-corpus-evidence.json`](../benchmarks/type-aware-corpus-evidence.json).
+An additional clean Vitest smoke is recorded in
+[`benchmarks/type-aware-supplemental-smoke.json`](../benchmarks/type-aware-supplemental-smoke.json).
 
-Reflection, decorators, dependency injection, computed property access, and
-framework runtime registration can remain invisible to the checker. Without
-`--type-aware`, the sidecar is never discovered or started and existing output
-is unchanged.
+Reflection, decorators, dependency injection, destructuring, dynamic computed
+property access, and framework runtime registration can remain invisible to the
+checker. These cases stay visible as findings. Without `--type-aware`, the
+sidecar is never discovered or started and existing output is unchanged.

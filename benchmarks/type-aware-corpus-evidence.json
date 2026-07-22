@@ -1,0 +1,4645 @@
+{
+  "schema_version": 1,
+  "generated_from": {
+    "discovery_provenance": {
+      "generated_at": "2026-07-22T19:48:59.659Z",
+      "manifest_sha256": "777b47ffc6a5d007de985c86419c1368a0592f853df6093c08678efa62c92b4f",
+      "fallow": {
+        "version": "fallow 3.8.0",
+        "sha256": "679b32f344cfb738b4e64ee70c451c26c3b56a72e4df2564caa7c770ab293e58"
+      },
+      "sidecar": {
+        "sha256": "9feca64e7afdd249b1490b34aaa09ff9424d4e90f71c12d6ce9e462c14fce29e"
+      },
+      "runtime": {
+        "platform": "darwin",
+        "architecture": "arm64",
+        "node": "v22.22.1"
+      },
+      "fixtures": [
+        {
+          "id": "svelte",
+          "repo": "sveltejs/svelte",
+          "ref": "svelte@5.54.1",
+          "commit": "db69b7e345090edd4aa7949c52478adc05a61d61"
+        },
+        {
+          "id": "vue-core",
+          "repo": "vuejs/core",
+          "ref": "v3.5.30",
+          "commit": "fdd863f617f98c3d41cb8b2401d8e550d8a44d34"
+        },
+        {
+          "id": "astro",
+          "repo": "withastro/astro",
+          "ref": "astro@6.3.1",
+          "commit": "868892ba788369128a09ba7640f0364678190431"
+        },
+        {
+          "id": "typescript",
+          "repo": "microsoft/TypeScript",
+          "ref": "v5.9.3",
+          "commit": "c63de15a992d37f0d6cec03ac7631872838602cb"
+        },
+        {
+          "id": "next.js",
+          "repo": "vercel/next.js",
+          "ref": "v16.2.1",
+          "commit": "ed7d2cef246dcb3e2955c018fd8b2027e0ff8eed"
+        },
+        {
+          "id": "preact",
+          "repo": "preactjs/preact",
+          "ref": "10.25.4",
+          "commit": "055cc5b8c62326fbb0fcaccb9816504e82f121b8"
+        },
+        {
+          "id": "query",
+          "repo": "TanStack/query",
+          "ref": "v5.90.3",
+          "commit": "4d8da1e29e97ad5b0c151822d4962849515b4478"
+        },
+        {
+          "id": "vite",
+          "repo": "vitejs/vite",
+          "ref": "v8.0.1",
+          "commit": "028ff86dd68f679dac659024b18c4e0a0d511c22"
+        },
+        {
+          "id": "fastify",
+          "repo": "fastify/fastify",
+          "ref": "v5.2.1",
+          "commit": "eafe0aa25ced21033310ae708b33e645ffb0d532"
+        },
+        {
+          "id": "zod",
+          "repo": "colinhacks/zod",
+          "ref": "v3.24.2",
+          "commit": "e30870369d5b8f31ff4d0130d4439fd997deb523"
+        }
+      ]
+    },
+    "adjudication": {
+      "decisions_sha256": "2c33d55d8bba7d45bbc660cf279a6d96a30ab3919bfeeb46212e62150a19431c",
+      "reviewed_on": "2026-07-22",
+      "reviewer": "primary-source-adjudication",
+      "method": "Every semantic removal requires an exact checker-resolved declaration and concrete source use. Retained candidates are indeterminate unless a repository-wide exact-name search and source review prove that only the declaration exists.",
+      "independent_signoff": {
+        "verdict": "approved",
+        "reviews": [
+          {
+            "project_id": "astro",
+            "candidate_count": 38,
+            "candidate_set_sha256": "b27ec0b783397217150a326be2be038cf800533cb8ffa9b0a4fb3876ac4a5cfb",
+            "evidence_sha256": "41985e52dd6db30b7e902cb0fdff4eb96d8298a974685e5da5d42134689ae4ed",
+            "reviewer": "independent-source-review-astro",
+            "method": "Every declaration and use location was checked against the pinned source, including union getters and DOM type mappings.",
+            "verdict": "approved"
+          },
+          {
+            "project_id": "typescript",
+            "candidate_count": 135,
+            "candidate_set_sha256": "a8b0ab23007f31efeaafcce67cc579e15792f6ba5bc686a98634f2f1834842c1",
+            "evidence_sha256": "1dfafde1656dac9bc57d62aa6c7c3f8d7b53ae2d30f86d5d1b501409a902f682",
+            "reviewer": "independent-source-review-typescript",
+            "method": "Every declaration was checked against the pinned source and every candidate had an independently resolved exact symbol use.",
+            "verdict": "approved"
+          }
+        ]
+      }
+    }
+  },
+  "summary": {
+    "schema_version": 2,
+    "gate": {
+      "go": true,
+      "checks": {
+        "zero_incorrect_removals": true,
+        "zero_controls_clean": true,
+        "multiple_repositories": true,
+        "multiple_feature_buckets": true,
+        "deterministic_output": true,
+        "focused_cases": true,
+        "confirmation_precision": true,
+        "used_recall": true,
+        "correct_unused_retention": true,
+        "abstention": true,
+        "marginal_overhead": true,
+        "refined_rss": true,
+        "independent_signoff": true
+      },
+      "thresholds": {
+        "minimum_confirmation_precision": 1,
+        "minimum_used_recall": 0.5,
+        "minimum_correct_unused_retention": 1,
+        "maximum_abstention": 0.5,
+        "maximum_p95_marginal_overhead_ms": 5000,
+        "maximum_p95_refined_rss_kb": 2621440
+      },
+      "known_incorrect_removals": 0,
+      "zero_controls_clean": true,
+      "multiple_repositories": true,
+      "multiple_feature_buckets": true
+    },
+    "accuracy": {
+      "candidate_count": 559,
+      "confirmed_used_count": 173,
+      "retained_count": 386,
+      "truth_counts": {
+        "used": 173,
+        "unused": 2,
+        "indeterminate": 384
+      },
+      "confirmation_precision": 1,
+      "used_recall": 1,
+      "correct_unused_retention": 1,
+      "abstained_count": 237,
+      "abstention": 0.423971,
+      "unresolved_count": 149,
+      "unresolved": 0.266547
+    },
+    "value": {
+      "confirmed_repository_count": 2,
+      "confirmed_repositories": [
+        "astro",
+        "typescript"
+      ],
+      "confirmed_feature_buckets": [
+        "exact-cross-file-symbol-use",
+        "generic-class",
+        "generic-inheritance"
+      ]
+    },
+    "performance": {
+      "baseline_wall_ms": {
+        "median": 595.892,
+        "p95": 4203.528
+      },
+      "refined_wall_ms": {
+        "median": 689.946,
+        "p95": 4674.177
+      },
+      "marginal_overhead_ms": {
+        "median": 66.109,
+        "p95": 626.684
+      },
+      "process_tree_peak_rss_kb": {
+        "baseline_p95": 798435.2,
+        "refined_p95": 1317299.2
+      },
+      "program_counts": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        4,
+        4,
+        4,
+        4,
+        2,
+        2,
+        2,
+        2,
+        4,
+        4,
+        4,
+        4,
+        1,
+        1,
+        1,
+        1
+      ],
+      "source_files_per_program": [
+        3313,
+        3313,
+        3313,
+        3313,
+        614,
+        614,
+        614,
+        614,
+        839,
+        235,
+        208,
+        224,
+        839,
+        235,
+        208,
+        224,
+        839,
+        235,
+        208,
+        224,
+        839,
+        235,
+        208,
+        224,
+        249,
+        445,
+        249,
+        445,
+        249,
+        445,
+        249,
+        445,
+        118,
+        68,
+        1753,
+        244,
+        118,
+        68,
+        1753,
+        244,
+        118,
+        68,
+        1753,
+        244,
+        118,
+        68,
+        1753,
+        244,
+        84,
+        84,
+        84,
+        84
+      ],
+      "phase_timings_ms": {
+        "diagnostics": {
+          "median": 1,
+          "p95": 1
+        },
+        "project_setup": {
+          "median": 90.5,
+          "p95": 202.25
+        },
+        "symbol_scan": {
+          "median": 31.5,
+          "p95": 541.55
+        }
+      },
+      "reason_counts": {
+        "ambiguous_project": 0,
+        "blocking_diagnostics": 948,
+        "no_project": 0
+      }
+    }
+  },
+  "confirmations": [
+    {
+      "key": "tac_0025e4a3380d2164fa49",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2901,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3295,
+          "col": 54
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3296,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_00530fea3fe4fb81fc5b",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 2444,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2973,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_052e72fc94dbaa0890d9",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 785,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3111,
+          "col": 39
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3161,
+          "col": 63
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_06561417b6e4718c6097",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1328,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2755,
+          "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_071b7bf1dc7b7f5db837",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 481,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2386,
+          "col": 30
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3477,
+          "col": 34
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_07a28376e3a5fd5d921e",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/vite-plugin-app/app.ts",
+        "line": 142,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/vite-plugin-app/createAstroServerApp.ts",
+          "line": 88,
+          "col": 7
+        }
+      ],
+      "feature_buckets": [
+        "generic-inheritance"
+      ]
+    },
+    {
+      "key": "tac_0935deb14d9fa757e01c",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5585,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2195,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_0aa865a98a5a81cb9e45",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/compiler/semver.ts",
+        "line": 227,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/compiler/moduleNameResolver.ts",
+          "line": 2984,
+          "col": 17
+        },
+        {
+          "path": "src/compiler/moduleNameResolver.ts",
+          "line": 470,
+          "col": 21
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_0d7af96ce96fe865cce3",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1586,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1528,
+          "col": 28
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 153,
+          "col": 36
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 200,
+          "col": 36
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 224,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_0fc597b5939de9cd5312",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1696,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 3002,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_0fda24538fafee88b402",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3061,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2937,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1110370565d39bebc595",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 626,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2322,
+          "col": 25
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3751,
+          "col": 21
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_11d0aaca712585127e8d",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2224,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3551,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_12b5e2ca9f8e7f524fc3",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 527,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1133,
+          "col": 53
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1181,
+          "col": 17
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1340,
+          "col": 17
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1674,
+          "col": 22
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1805,
+          "col": 31
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_153adf44354aefbf029a",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1326,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2281,
+          "col": 36
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2344,
+          "col": 18
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3116,
+          "col": 32
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3161,
+          "col": 32
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4169,
+          "col": 25
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 564,
+          "col": 14
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_160e41f6096e48ffe23e",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/fetch/fetch-state.ts",
+        "line": 552,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 501,
+          "col": 17
+        },
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 906,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_178d329df6f526dd2161",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 2807,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 3003,
+          "col": 28
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 3174,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_17a15cbd907a79e211b6",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/errors/errors.ts",
+        "line": 82,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/errors/errors.ts",
+          "line": 89,
+          "col": 33
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_17c5070451b78262781c",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1320,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 569,
+          "col": 18
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1b4ed42fc82930996578",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/vite-plugin-app/app.ts",
+        "line": 90,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/vite-plugin-app/createAstroServerApp.ts",
+          "line": 81,
+          "col": 7
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1b953f62f1c11f244660",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3942,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3649,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1bea3e8f0259f4a4362f",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/compiler/semver.ts",
+        "line": 213,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/compiler/moduleNameResolver.ts",
+          "line": 2982,
+          "col": 31
+        },
+        {
+          "path": "src/compiler/moduleNameResolver.ts",
+          "line": 430,
+          "col": 65
+        },
+        {
+          "path": "src/compiler/moduleNameResolver.ts",
+          "line": 464,
+          "col": 38
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1bfaa3b7896ac53d9cff",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1915,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1236,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1d0d5889e05a470242c7",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/errors/errors.ts",
+        "line": 102,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/errors/errors.ts",
+          "line": 105,
+          "col": 33
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1d69450a08569dfd40fd",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1041,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2934,
+          "col": 20
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5389,
+          "col": 44
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1e1e6ccfb0662b12011d",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/errors/errors.ts",
+        "line": 39,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/errors/errors.ts",
+          "line": 77,
+          "col": 30
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1f7706fc824519ffd889",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 676,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5162,
+          "col": 23
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2334,
+          "col": 38
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2340,
+          "col": 42
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1fa7761f4364fe8939d5",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 704,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3931,
+          "col": 85
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2042,
+          "col": 41
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2043,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2307,
+          "col": 72
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2435,
+          "col": 41
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2436,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2468,
+          "col": 36
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2688,
+          "col": 33
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2689,
+          "col": 31
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2925,
+          "col": 74
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3116,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3125,
+          "col": 37
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3455,
+          "col": 49
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3456,
+          "col": 47
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1fddadd4f6fc8700e402",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/server-islands/shared-state.ts",
+        "line": 114,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 145,
+          "col": 47
+        },
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 180,
+          "col": 45
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2045881eda8cd7dc6f6e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5517,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3854,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_205db6d3e0d6bb6ac194",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2179,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5576,
+          "col": 54
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_207acd9951766ee72fd8",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3129,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3189,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_21240caca1a8a70bf000",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptVersionCache.ts",
+        "line": 329,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 233,
+          "col": 28
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 340,
+          "col": 41
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_23059d40d68dd4386d96",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 435,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1045,
+          "col": 17
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1897,
+          "col": 27
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1943,
+          "col": 27
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2382,
+          "col": 27
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2485,
+          "col": 28
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2540,
+          "col": 26
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2646,
+          "col": 20
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3141,
+          "col": 35
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4973,
+          "col": 22
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4992,
+          "col": 47
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1300,
+          "col": 26
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2467,
+          "col": 26
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 705,
+          "col": 73
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3214,
+          "col": 26
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2516f5262028a3e1529f",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 709,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1586,
+          "col": 56
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 1587,
+          "col": 54
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2013,
+          "col": 37
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2022,
+          "col": 50
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2023,
+          "col": 48
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2247,
+          "col": 56
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 241,
+          "col": 26
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2415,
+          "col": 34
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2416,
+          "col": 32
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 242,
+          "col": 24
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2511,
+          "col": 34
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2512,
+          "col": 32
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2650,
+          "col": 38
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2651,
+          "col": 36
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2786,
+          "col": 46
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2787,
+          "col": 44
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3163,
+          "col": 30
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3164,
+          "col": 28
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3985,
+          "col": 26
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3986,
+          "col": 24
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_26f7418f1db2d28b474a",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptVersionCache.ts",
+        "line": 348,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptVersionCache.ts",
+          "line": 401,
+          "col": 34
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2995385373bebb7df1f2",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5414,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 595,
+          "col": 113
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2ab441272a39193ac9f2",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 514,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5446,
+          "col": 42
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2ae20a9cc0990b20cd1a",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1612,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 230,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2b39e18fb6de71829cbb",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/errors/errors.ts",
+        "line": 181,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/errors/errors.ts",
+          "line": 194,
+          "col": 34
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2d74ea88be84b5368a29",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 557,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1946,
+          "col": 13
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2eac6f41b6bdb55385a8",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 480,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 226,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_34c9350effbb4c28e5aa",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/rewrites/handler.ts",
+        "line": 106,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 287,
+          "col": 45
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_34da02bdd35967946786",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 951,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1533,
+          "col": 38
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_355cbfa4feecb05a5d90",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1203,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3102,
+          "col": 44
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 562,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_398f62c4c7f485b2466f",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5084,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3444,
+          "col": 32
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3466,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3ab7e5f3334e9dce4b9f",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/build/app.ts",
+        "line": 22,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/build/default-prerenderer.ts",
+          "line": 46,
+          "col": 7
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3cba767c94e23e02352a",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/preferences/store.ts",
+        "line": 59,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/preferences/index.ts",
+          "line": 107,
+          "col": 21
+        },
+        {
+          "path": "packages/astro/src/preferences/index.ts",
+          "line": 108,
+          "col": 22
+        },
+        {
+          "path": "packages/astro/src/preferences/index.ts",
+          "line": 118,
+          "col": 29
+        },
+        {
+          "path": "packages/astro/src/preferences/index.ts",
+          "line": 119,
+          "col": 31
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3da88eb5ab1320baa323",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1426,
+        "col": 21
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1728,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3dbdc8875a67ab0dbd71",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 389,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1528,
+          "col": 13
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1534,
+          "col": 28
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1534,
+          "col": 52
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1534,
+          "col": 87
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3918,
+          "col": 17
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3918,
+          "col": 46
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3e7a8760c41544ec4f23",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 497,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1885,
+          "col": 72
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3ef2b2da0bdf367d478b",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/fetch/fetch-state.ts",
+        "line": 403,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 343,
+          "col": 40
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3fc0fe2dfdfa807df0a8",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3938,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1074,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3fdf71b546318dce31a5",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1990,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5070,
+          "col": 29
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_42f109a051e33ffa156c",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 575,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1815,
+          "col": 65
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1847,
+          "col": 23
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2175,
+          "col": 20
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_4527e965a59cef5bfd05",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2494,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2340,
+          "col": 22
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_454f290136747417d5a1",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2896,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1687,
+          "col": 16
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1697,
+          "col": 43
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1701,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_483ab394508184963ec6",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 376,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3510,
+          "col": 27
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3520,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3530,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3645,
+          "col": 17
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3646,
+          "col": 17
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3647,
+          "col": 17
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4032,
+          "col": 22
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_484d0c754beab3131a44",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5693,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2311,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_49481f0a0d63aaef909e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1846,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3782,
+          "col": 24
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_4998068a7dd82734d527",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/vite-plugin-app/app.ts",
+        "line": 82,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/vite-plugin-app/createAstroServerApp.ts",
+          "line": 74,
+          "col": 7
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_4adee57a6975392befb1",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3474,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2153,
+          "col": 52
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 827,
+          "col": 60
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_4dd26908767fe98f5d34",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/server-islands/shared-state.ts",
+        "line": 73,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 27,
+          "col": 58
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_5159d61ecb9033fc0bf7",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 651,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 746,
+          "col": 29
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_515c90b6e299989701bb",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1330,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2521,
+          "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_537dd95eb8bf5e80cbec",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/assets/fonts/infra/build-url-resolver.ts",
+        "line": 52,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/assets/fonts/vite-plugin-fonts.ts",
+          "line": 204,
+          "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_56d8eacbb8bb5f140ee3",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 475,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2849,
+          "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_57850407e5f32726a85b",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5616,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2200,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_57faa59112016dc3dff8",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3216,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2319,
+          "col": 32
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2793,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_5934b3476a1a68eaeae5",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 335,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3829,
+          "col": 40
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 1358,
+          "col": 96
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_5a7460800e00c3858f86",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 450,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2309,
+          "col": 13
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_5aa59b2a52bfa3e4a2a6",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1505,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1597,
+          "col": 24
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_5b70aec724d75a06d9ea",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 457,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3282,
+          "col": 16
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4285,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4888,
+          "col": 24
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4889,
+          "col": 24
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_5caaafb59cab8f75396a",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5428,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2140,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_612a2271ce136ddc823b",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptVersionCache.ts",
+        "line": 290,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 134,
+          "col": 42
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_634571a0d455b974c885",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/runtime/client/dev-toolbar/toolbar.ts",
+        "line": 555,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/runtime/client/dev-toolbar/apps/settings.ts",
+          "line": 29,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_69a9a29e96fecfcf0acf",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3771,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 978,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_6a38032a68fc37b45853",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 632,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3946,
+          "col": 21
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_6c5baeaac8bed7a6ae65",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptVersionCache.ts",
+        "line": 337,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 270,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_7106daf21e709a83aac3",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/server-islands/shared-state.ts",
+        "line": 98,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 170,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_72e447024a66fb9722fa",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/session.ts",
+        "line": 3815,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1190,
+          "col": 21
+        }
+      ],
+      "feature_buckets": [
+        "generic-class"
+      ]
+    },
+    {
+      "key": "tac_750c26e8db8a1e332d1b",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2144,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5483,
+          "col": 20
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_796b79e543194e1dfca1",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1427,
+        "col": 21
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 646,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_7a211d4fb6f7b48840c5",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1298,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1451,
+          "col": 25
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 775,
+          "col": 25
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 850,
+          "col": 16
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 867,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 869,
+          "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_7ad3915f028c1c0bfafd",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptVersionCache.ts",
+        "line": 341,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 250,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_7bb2343ecd03d815bb8e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 799,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1732,
+          "col": 49
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 1743,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_7e380c598bc4f7426001",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 4010,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1567,
+          "col": 52
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1580,
+          "col": 52
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1834,
+          "col": 32
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1880,
+          "col": 36
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 844,
+          "col": 32
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 856,
+          "col": 32
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 898,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_7edc505a98d5913a0a55",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 993,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2612,
+          "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_7fea0da2c2d02b8f96e3",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 705,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3931,
+          "col": 85
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2042,
+          "col": 41
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2043,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2307,
+          "col": 72
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2435,
+          "col": 41
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2436,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2468,
+          "col": 36
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2688,
+          "col": 33
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2689,
+          "col": 31
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2925,
+          "col": 74
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3116,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3125,
+          "col": 37
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3455,
+          "col": 49
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3456,
+          "col": 47
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_82a316f53f69823114ba",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3054,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 995,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_8546367a858312fdc24a",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2773,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2270,
+          "col": 44
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_85f23b82821c3c60a378",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/content/data-store.ts",
+        "line": 78,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/content/runtime.ts",
+          "line": 112,
+          "col": 12
+        },
+        {
+          "path": "packages/astro/src/content/runtime.ts",
+          "line": 200,
+          "col": 12
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_8cde9caced707d4865a8",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1979,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1770,
+          "col": 24
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2857,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_8e0085cc997aa93120a1",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1384,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 508,
+          "col": 20
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 534,
+          "col": 28
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 540,
+          "col": 28
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 544,
+          "col": 28
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 551,
+          "col": 28
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 565,
+          "col": 14
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_8e888fce39fbbd432b6e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 2634,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 605,
+          "col": 82
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_8ed491ed1da3685bed6f",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1548,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1047,
+          "col": 28
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1079,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9348cae55af46a4a1dd0",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 694,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 4073,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_94320c9cc07d0e021bfc",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1373,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3987,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9881a90b734447232dba",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 687,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1815,
+          "col": 41
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1830,
+          "col": 27
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2237,
+          "col": 26
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2294,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4199,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4355,
+          "col": 17
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4366,
+          "col": 27
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4974,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4992,
+          "col": 71
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_98995ec78d19cce8b122",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1888,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3964,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9ac49e8f57ea4da007dd",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 4744,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2828,
+          "col": 32
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3038,
+          "col": 28
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 789,
+          "col": 27
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9bc83d5e63dc5e3f0a1f",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/preferences/store.ts",
+        "line": 54,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/preferences/index.ts",
+          "line": 97,
+          "col": 20
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9c3962d24695253d854b",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 732,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2036,
+          "col": 100
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9c8c213075550ed3dd76",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1378,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5677,
+          "col": 64
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9d71cd8de8a8b2291f9f",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/fetch/fetch-state.ts",
+        "line": 653,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 484,
+          "col": 17
+        },
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 897,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_9edcb6d8c43ddc461bf2",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1970,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1771,
+          "col": 24
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2933,
+          "col": 20
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3173,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a17591d16cc1487d49c8",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3036,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1095,
+          "col": 12
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2925,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a22d1b4537f317511aad",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/fetch/fetch-state.ts",
+        "line": 523,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 474,
+          "col": 17
+        },
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 878,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a275af22b4c2767619b6",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 877,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1053,
+          "col": 12
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1060,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a386a9c77e9a50d56b51",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/errors/errors.ts",
+        "line": 118,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/errors/errors.ts",
+          "line": 130,
+          "col": 34
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a3c57808df11b22a3b84",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/content/content-layer.ts",
+        "line": 89,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/dev/dev.ts",
+          "line": 129,
+          "col": 15
+        },
+        {
+          "path": "packages/astro/src/core/sync/index.ts",
+          "line": 159,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a7fadbd91b68fc65a02c",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1425,
+        "col": 21
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1078,
+          "col": 28
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1793,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a99808a5d3adfc6a60bb",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1883,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3960,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b0366ee1875d06611693",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1588,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1528,
+          "col": 28
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 153,
+          "col": 36
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 200,
+          "col": 36
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 224,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b316254a46a867fec29e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3042,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 825,
+          "col": 29
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b4005a63b0ca09a7d2a1",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3448,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3149,
+          "col": 47
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b44cdce38433e3c957ec",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/build/app.ts",
+        "line": 44,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/build/generate.ts",
+          "line": 239,
+          "col": 33
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b4a961b134cc1a827389",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 756,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 744,
+          "col": 45
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b5570accc0e7f3e8b2d7",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 501,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1314,
+          "col": 13
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 1771,
+          "col": 28
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 727,
+          "col": 23
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b586aab5e4fc695228b4",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2315,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1680,
+          "col": 41
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b65eea92f7395524b8a5",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 955,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1772,
+          "col": 24
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2798,
+          "col": 16
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3416,
+          "col": 16
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5391,
+          "col": 40
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b72618a6b07619e00657",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1903,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1221,
+          "col": 47
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 1605,
+          "col": 35
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2243,
+          "col": 42
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 228,
+          "col": 35
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 239,
+          "col": 31
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2937,
+          "col": 35
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2944,
+          "col": 35
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2965,
+          "col": 49
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2980,
+          "col": 35
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2992,
+          "col": 262
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2998,
+          "col": 213
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3059,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ba001c09f56df72aaaa9",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/server-islands/shared-state.ts",
+        "line": 69,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 119,
+          "col": 26
+        },
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 35,
+          "col": 22
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_bbc0bb683a87aac8ac9e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptVersionCache.ts",
+        "line": 333,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 264,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_bcc7bc80ffb4a3e166aa",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/assets/fonts/infra/dev-url-resolver.ts",
+        "line": 41,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/assets/fonts/vite-plugin-fonts.ts",
+          "line": 209,
+          "col": 22
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_bcf1b253bd9149f5cde1",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1710,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1799,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_bcf79c253c6bab1bc338",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1532,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1613,
+          "col": 48
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_bd8f634194e20c902790",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 702,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3931,
+          "col": 85
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2042,
+          "col": 41
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2043,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2307,
+          "col": 72
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2435,
+          "col": 41
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2436,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2468,
+          "col": 36
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2688,
+          "col": 33
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2689,
+          "col": 31
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2925,
+          "col": 74
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3116,
+          "col": 39
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3125,
+          "col": 37
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3455,
+          "col": 49
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3456,
+          "col": 47
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_be426219addfd509bbe9",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 216,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 193,
+          "col": 57
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_bf73d890c100b024df07",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/server-islands/shared-state.ts",
+        "line": 35,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 105,
+          "col": 40
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c1307dbbbddbc5331aac",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/errors/errors.ts",
+        "line": 94,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/errors/errors.ts",
+          "line": 97,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c13c522275ed919110e4",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 4290,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 897,
+          "col": 94
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 901,
+          "col": 102
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 905,
+          "col": 101
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c4fc2f5ee7625fae2129",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1272,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 1527,
+          "col": 43
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c5eaf1fb50f492a89b69",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5681,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2231,
+          "col": 32
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2238,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c6b03fcb3d5195ed2764",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3594,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2306,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c747e07ac2e48c1ed53d",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1589,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 1528,
+          "col": 28
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 153,
+          "col": 36
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 200,
+          "col": 36
+        },
+        {
+          "path": "src/server/typingInstallerAdapter.ts",
+          "line": 224,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c80a27028d7c13ba2423",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 3187,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2990,
+          "col": 45
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_cbdf679276e04262e141",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 231,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2478,
+          "col": 74
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_cc2f9611311ba2ae4148",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/vite-plugin-app/app.ts",
+        "line": 94,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/vite-plugin-app/app.ts",
+          "line": 206,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_cf7c92c786dcf391f341",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 657,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2716,
+          "col": 23
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_cfe95268112a1a496f88",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 662,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1905,
+          "col": 17
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1948,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d0412daf223c4624a594",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1851,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2141,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d19f6995d599e253b531",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5188,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3415,
+          "col": 32
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d24cbf9ae7795e5c78d6",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1670,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 286,
+          "col": 63
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d35912c54a606256bdb0",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 494,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1880,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d434dc19107ee0e3a483",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 668,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2709,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d4c2f0825b0cb2e639f6",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/server-islands/shared-state.ts",
+        "line": 65,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 112,
+          "col": 44
+        },
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 28,
+          "col": 26
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d6d16d1540576123d042",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3101,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2924,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d6d6e059fb1f8d24ad38",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/assets/fonts/infra/dev-url-resolver.ts",
+        "line": 37,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/assets/fonts/vite-plugin-fonts.ts",
+          "line": 204,
+          "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_dd112524354dfe36aedf",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1014,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2628,
+          "col": 53
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ddb66743056e01377351",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1351,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2334,
+          "col": 26
+        },
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 683,
+          "col": 14
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_df03d43f06db14d34fc8",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2890,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1124,
+          "col": 16
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2819,
+          "col": 70
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2915,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 2916,
+          "col": 20
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e313936c8365d3c84a1e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3097,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3293,
+          "col": 36
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4339,
+          "col": 61
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e5b47e61871a30674c7e",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 967,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 4228,
+          "col": 20
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 897,
+          "col": 47
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 901,
+          "col": 55
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 905,
+          "col": 54
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e5d103076e116424d256",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/base-pipeline.ts",
+        "line": 308,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/session/handler.ts",
+          "line": 30,
+          "col": 38
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e63e470555e264e8688f",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1733,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2062,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e6bb4bbef2c1518067e6",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1326,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2447,
+          "col": 27
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e747ecd127e9cb23ffbd",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/fetch/fetch-state.ts",
+        "line": 644,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 481,
+          "col": 17
+        },
+        {
+          "path": "packages/astro/src/core/fetch/fetch-state.ts",
+          "line": 894,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e9f455b9db60f9c97107",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 439,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 3749,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ea1537e1a08fc31bee97",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/server-islands/shared-state.ts",
+        "line": 83,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 142,
+          "col": 43
+        },
+        {
+          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
+          "line": 175,
+          "col": 36
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_effeb4e85f42c7975578",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/scriptInfo.ts",
+        "line": 716,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 5032,
+          "col": 98
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2469,
+          "col": 47
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2472,
+          "col": 71
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2482,
+          "col": 66
+        },
+        {
+          "path": "src/server/project.ts",
+          "line": 2483,
+          "col": 71
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 229,
+          "col": 41
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f0505d8321872ecc6ace",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 4224,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 816,
+          "col": 56
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f3beebbf9c918fa3ae46",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1223,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/utilitiesPublic.ts",
+          "line": 47,
+          "col": 128
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f3f8f62da45fc0cf95ee",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/assets/fonts/infra/build-url-resolver.ts",
+        "line": 56,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/assets/fonts/vite-plugin-fonts.ts",
+          "line": 209,
+          "col": 22
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f4fdd31d9ba846e652be",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5075,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3425,
+          "col": 47
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f63cb05fa0b23a839e73",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 5574,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 3236,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f6a72f3c9b1a11b5f7ac",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/vite-plugin-app/app.ts",
+        "line": 72,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/vite-plugin-app/createAstroServerApp.ts",
+          "line": 64,
+          "col": 8
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f6deeb9f6dbd5e554c47",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 2538,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/project.ts",
+          "line": 2468,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_f6e52ff25629199df314",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 1346,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/scriptInfo.ts",
+          "line": 628,
+          "col": 14
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_fb09b4fce4a26aeca4f0",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/runtime/client/dev-toolbar/toolbar.ts",
+        "line": 564,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/runtime/client/dev-toolbar/apps/settings.ts",
+          "line": 60,
+          "col": 50
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_fc49054781de732d7552",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/editorServices.ts",
+        "line": 1878,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/session.ts",
+          "line": 2533,
+          "col": 35
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 2570,
+          "col": 57
+        },
+        {
+          "path": "src/server/session.ts",
+          "line": 3956,
+          "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ff2575c621f3103302f0",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/build/app.ts",
+        "line": 26,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/astro/src/core/build/default-prerenderer.ts",
+          "line": 47,
+          "col": 7
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ff40c58405f68d305190",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2878,
+        "col": 4
+      },
+      "uses": [
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 1094,
+          "col": 12
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 869,
+          "col": 59
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 891,
+          "col": 29
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 984,
+          "col": 21
+        },
+        {
+          "path": "src/server/editorServices.ts",
+          "line": 984,
+          "col": 64
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    }
+  ],
+  "known_unused_retained": [
+    {
+      "key": "tac_30f22fc455c0944fcff9",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/content/content-layer.ts",
+        "line": 98,
+        "col": 1
+      }
+    },
+    {
+      "key": "tac_32088e6c4f7a2034f692",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2209,
+        "col": 4
+      }
+    }
+  ]
+}
