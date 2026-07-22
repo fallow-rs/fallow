@@ -73,6 +73,10 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
   );
   assert.match(
     update,
+    /- dependency-name: "@vitejs\/plugin-react"\s+update-types: \["version-update:semver-major"\]/u,
+  );
+  assert.match(
+    update,
     /- dependency-name: "@types\/node"\s+update-types: \["version-update:semver-major"\]/u,
   );
 });
