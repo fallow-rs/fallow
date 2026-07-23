@@ -7,10 +7,10 @@ shared project configuration.
 
 ## Pinned source
 
-Both clients use trigger-tree v1.21.2 from tag commit
-`d788d46a024309dcd67fc2b21b1a501b26e52c33`.
+Both clients use trigger-tree v1.21.3 from tag commit
+`8b6489402c24e415e205ba00277b7fa53890c403`.
 
-Version 1.21.2 supports Python 3.10 through 3.14. The project status line
+Version 1.21.3 supports Python 3.10 through 3.14. The project status line
 prefers `python3.13`, then falls back to `python3` and `python`.
 
 Claude Code declares the tagged marketplace and enabled plugin in
@@ -18,7 +18,7 @@ Claude Code declares the tagged marketplace and enabled plugin in
 
 Codex currently installs plugins for the user rather than one project. Its
 local marketplace lives at
-`~/.codex/local-marketplaces/trigger-tree-v1.21.2-off`. That snapshot differs
+`~/.codex/local-marketplaces/trigger-tree-v1.21.3-off`. That snapshot differs
 from upstream only to keep installation deterministic and privacy-safe:
 
 - Both fallback `TT_LOG_PROMPTS` values are `off`.
@@ -28,7 +28,7 @@ from upstream only to keep installation deterministic and privacy-safe:
 Codex reviews plugin hooks by hash. After installing or updating trigger-tree,
 start Codex interactively and choose `Trust all and continue` for its four
 hooks. Non-interactive sessions skip untrusted hooks without recording events.
-Version 1.21.2 reports persisted Codex hook trust in `tt doctor`; an upgrade
+Version 1.21.3 reports persisted Codex hook trust in `tt doctor`; an upgrade
 that changes a hook still requires another interactive review.
 
 Repositories without a project configuration therefore store prompt markers
@@ -42,7 +42,7 @@ Runtime files such as `history.jsonl`, rotated histories, session state,
 reports, and badges are ignored. They are never required for a clean checkout
 or CI.
 
-Version 1.21.2 scans the Git-visible documentation set, includes `.agents/`
+Version 1.21.3 scans the Git-visible documentation set, includes `.agents/`
 and `.codex/`, and records the originating client on new events. Existing
 v1.19.1 events remain valid and appear with client `unknown`.
 
