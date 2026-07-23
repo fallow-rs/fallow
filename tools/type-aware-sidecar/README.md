@@ -3,11 +3,27 @@
 Optional TypeScript-Go semantic refinement sidecar for Fallow. It accepts one
 versioned JSON request on stdin and writes one JSON response to stdout.
 
-The sidecar is deliberately narrower than a general type-aware linter. It
-receives Fallow's filtered unused class-member candidates, loads each applicable
-TypeScript project once, batches property-access symbol lookups, and confirms a
-use only when the resolved declaration matches the exact candidate identity.
-Unsafe project state produces explicit abstentions and never removes findings.
+The sidecar is deliberately narrower than a general type-aware linter. Protocol
+v3 accepts a bounded batch of tagged `symbol-use`, `symbol-trace`, `api-surface`,
+`symbol-impact`, and `type-coupling` queries. Each selected TypeScript project
+creates one Program, and every requested capability reuses it. Bulk symbol-use
+queries share one indexed source traversal per Program.
+
+Symbol identities include the canonical project-relative path, value or type
+namespace, declaration kind, exported and local name, one-based line,
+zero-based UTF-8 byte column, and optional owner. Results keep their semantic
+assertion separate from `complete`, `partial`, or `unavailable` status. Evidence
+and every operation-specific array are deterministic and bounded, with totals,
+omissions, reason codes, actions, and truncation reported explicitly.
+
+Unsafe project state never manufactures certainty. Structural diagnostics,
+unknown identities, missing projects, unsupported syntax, dynamic behavior,
+and capacity limits retain syntactic findings or produce an explicit advisory
+gap. The sidecar does not emit TypeScript compiler diagnostics as Fallow
+findings and does not implement generic typed lint rules.
+
+Protocol v2 `class-member-uses` requests remain supported for the existing
+unused class-member refinement path.
 
 ## Run locally
 
@@ -25,7 +41,7 @@ for the Fallow integration contract, safety policy, and current limitations.
 
 ## Release
 
-Publication is not enabled yet. It remains gated on the adjudicated corpus
-accuracy review described in the integration contract. Before the first
-release, add a reviewer-protected GitHub environment, protected release tags,
-and an npm trusted publisher that uses OIDC without a long-lived token.
+Publication remains a separate release action. The package is designed to be
+installed as an exact-version optional companion and launched through a
+verified absolute path supplied by Fallow. It does not search the analyzed
+project or arbitrary PATH entries for a backend.

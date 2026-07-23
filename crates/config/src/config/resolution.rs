@@ -19,7 +19,7 @@ use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
 use super::IgnoreExportsUsedInFileConfig;
-use super::{BoundaryConfig, FallowConfig, ProductionConfig, SecurityConfig};
+use super::{BoundaryConfig, FallowConfig, ProductionConfig, SecurityConfig, TypeAwareConfig};
 
 /// Process-local dedup state for inter-file rule warnings.
 static INTER_FILE_WARN_SEEN: OnceLock<Mutex<FxHashSet<u64>>> = OnceLock::new();
@@ -191,6 +191,7 @@ pub struct ResolvedConfig {
     pub unused_component_props_ignore: Option<regex::Regex>,
     pub duplicates: DuplicatesConfig,
     pub health: HealthConfig,
+    pub type_aware: TypeAwareConfig,
     pub rules: RulesConfig,
     pub boundaries: ResolvedBoundaryConfig,
     /// Rule packs loaded from the `rulePacks` config key, in config order.
@@ -650,6 +651,7 @@ impl FallowConfig {
             unused_component_props_ignore,
             duplicates: self.duplicates,
             health: self.health,
+            type_aware: self.type_aware,
             rules: production_rules.rules,
             boundaries: path_policy.boundaries,
             rule_packs: plugins.rule_packs,
@@ -755,6 +757,7 @@ mod tests {
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
+            type_aware: crate::TypeAwareConfig::default(),
             audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
@@ -813,6 +816,7 @@ mod tests {
                 },
             }],
             regression: None,
+            type_aware: crate::TypeAwareConfig::default(),
             audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
@@ -885,6 +889,7 @@ mod tests {
                 },
             ],
             regression: None,
+            type_aware: crate::TypeAwareConfig::default(),
             audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
@@ -948,6 +953,7 @@ mod tests {
                 },
             }],
             regression: None,
+            type_aware: crate::TypeAwareConfig::default(),
             audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
@@ -1050,6 +1056,7 @@ mod tests {
                 },
             }],
             regression: None,
+            type_aware: crate::TypeAwareConfig::default(),
             audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
@@ -1106,6 +1113,7 @@ mod tests {
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
+            type_aware: crate::TypeAwareConfig::default(),
             audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],

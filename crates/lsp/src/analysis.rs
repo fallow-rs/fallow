@@ -9,7 +9,7 @@ use fallow_config::DuplicatesConfig;
 use ls_types::MessageType;
 use rustc_hash::FxHashSet;
 
-use crate::initialization::LspDuplicationOptions;
+use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
 
 /// Run dead-code + duplicates analysis for a single project root, appending
@@ -23,6 +23,7 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub duplication_options: Option<&'a LspDuplicationOptions>,
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
+    pub type_aware_options: Option<&'a LspTypeAwareOptions>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
@@ -36,6 +37,7 @@ pub struct BlockingAnalysisInput {
     pub duplication_options: Option<LspDuplicationOptions>,
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
+    pub type_aware_options: Option<LspTypeAwareOptions>,
     pub root: PathBuf,
     pub toplevel: Option<PathBuf>,
     pub changed_since: Option<String>,
@@ -164,7 +166,7 @@ fn run_typed_project_analysis(
     session: &AnalysisSession,
     duplicates_config: &DuplicatesConfig,
 ) -> Result<(), ProjectAnalysisError> {
-    let output = session
+    let mut output = session
         .analyze_project_with_changed_files(
             duplicates_config,
             input.inline_complexity_enabled,
@@ -174,6 +176,23 @@ fn run_typed_project_analysis(
             project_root: input.project_root.to_path_buf(),
             message: error.to_string(),
         })?;
+    if let Some(options) = input.type_aware_options.filter(|options| options.enabled) {
+        let type_aware = fallow_api::TypeAwareOptions {
+            enabled: true,
+            projects: options.projects.iter().map(PathBuf::from).collect(),
+            require: options.require.unwrap_or_default(),
+        };
+        session
+            .refine_type_aware_dead_code(
+                &type_aware,
+                &fallow_api::DeadCodeFilters::default(),
+                &mut output.dead_code,
+            )
+            .map_err(|error| ProjectAnalysisError {
+                project_root: input.project_root.to_path_buf(),
+                message: error.message,
+            })?;
+    }
     if input.inline_complexity_enabled {
         input
             .merged_inline_complexity
@@ -206,6 +225,7 @@ pub fn run_blocking_analysis(
             duplication_options: input.duplication_options.as_ref(),
             production_override: input.production_override,
             inline_complexity_enabled: input.inline_complexity_enabled,
+            type_aware_options: input.type_aware_options.as_ref(),
             changed_files: changed_scope.files.as_ref(),
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,

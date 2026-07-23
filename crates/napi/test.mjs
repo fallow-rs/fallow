@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strict as assert } from "node:assert";
@@ -221,6 +221,34 @@ writeFileSync(join(root, "src", "main.ts"), "export const value = 1;\n");
   });
 }
 
+function runLoaderCompanionFixture(companionVersion) {
+  const work = mkdtempSync(join(tmpdir(), "fallow-node-loader-"));
+  const packageRoot = join(work, "node_modules", "fallow-type-aware");
+  mkdirSync(packageRoot, { recursive: true });
+  writeFileSync(
+    join(work, "package.json"),
+    JSON.stringify({ name: "@fallow-cli/fallow-node", version: "3.8.0" }),
+  );
+  writeFileSync(
+    join(work, "index.js"),
+    "module.exports = { companion: process.env.FALLOW_TYPE_AWARE_BIN || null };\n",
+  );
+  writeFileSync(join(work, "loader.js"), readFileSync(join(process.cwd(), "loader.js"), "utf8"));
+  writeFileSync(
+    join(packageRoot, "package.json"),
+    JSON.stringify({ name: "fallow-type-aware", version: companionVersion }),
+  );
+  writeFileSync(join(packageRoot, "fallow-type-aware.mjs"), "#!/usr/bin/env node\n");
+  const { FALLOW_TYPE_AWARE_BIN: _ignored, ...env } = process.env;
+  const child = spawnSync(
+    process.execPath,
+    ["-e", "process.stdout.write(JSON.stringify(require('./loader.js').companion))"],
+    { cwd: work, encoding: "utf8", env },
+  );
+  rmSync(work, { recursive: true, force: true });
+  return child;
+}
+
 console.log("Testing @fallow-cli/fallow-node...\n");
 
 const root = makeFixture();
@@ -347,6 +375,17 @@ writeFileSync(
   assert.equal(child.status, 0, child.stderr);
   assert.match(child.stdout, /CAUGHT:FALLOW_PANIC:FallowNodeError/);
   console.log("  [PASS] panic boundary");
+}
+
+{
+  const matching = runLoaderCompanionFixture("3.8.0");
+  assert.equal(matching.status, 0, matching.stderr);
+  assert.match(matching.stdout, /fallow-type-aware\.mjs"$/);
+
+  const mismatched = runLoaderCompanionFixture("3.7.0");
+  assert.equal(mismatched.status, 0, mismatched.stderr);
+  assert.equal(mismatched.stdout, "null");
+  console.log("  [PASS] type-aware companion loader");
 }
 
 {

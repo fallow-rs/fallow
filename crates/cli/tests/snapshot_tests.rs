@@ -87,6 +87,7 @@ fn api_health_json_document(
         root,
         elapsed,
         explain,
+        type_aware: None,
         grouped_by: None,
         groups: None,
         workspace_diagnostics: Vec::new(),

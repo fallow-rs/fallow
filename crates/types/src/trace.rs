@@ -27,6 +27,9 @@ pub struct ExportTrace {
     pub re_export_chains: Vec<ReExportChain>,
     /// Human-readable reason summary.
     pub reason: String,
+    /// Exact checker-backed references when type-aware tracing is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<crate::semantic::SemanticSymbolTrace>,
 }
 
 /// Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
@@ -62,6 +65,9 @@ pub struct ClassMemberTrace {
     /// Human-readable reason summary plus the follow-up command to inspect the
     /// member finding.
     pub reason: String,
+    /// Exact checker-backed member references when type-aware tracing is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<crate::semantic::SemanticSymbolTrace>,
 }
 
 /// A direct reference to an export.

@@ -22,11 +22,13 @@ fallow-output = { workspace = true }
 fallow-types = { workspace = true }
 dunce = { workspace = true }
 globset = { workspace = true }
+libc = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true, optional = true }
+sha2 = { workspace = true }
 xxhash-rust = { workspace = true }
 
 [features]

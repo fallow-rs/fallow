@@ -44,6 +44,9 @@ pub struct CombinedOptions<'a> {
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
+    pub type_aware: bool,
+    pub type_aware_projects: &'a [std::path::PathBuf],
+    pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
     pub explain: bool,
     pub explain_skipped: bool,
     pub performance: bool,
@@ -103,6 +106,7 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
         trace_file: None,
         trace_dependency: None,
         impact_closure: None,
+        symbol_impact: None,
         performance: opts.performance,
     };
     let check_opts = build_combined_check_options(opts, &filters, &trace_opts);
@@ -160,8 +164,9 @@ fn build_combined_check_options<'a>(
         changed_workspaces: opts.changed_workspaces,
         group_by: opts.group_by,
         include_dupes: false,
-        type_aware: false,
-        type_aware_projects: &[],
+        type_aware: opts.type_aware,
+        type_aware_projects: opts.type_aware_projects,
+        type_aware_require: opts.type_aware_require,
         trace_opts,
         explain: opts.explain,
         top: None,
@@ -233,6 +238,22 @@ fn finish_combined_run(
         Err(code) => return code,
     };
 
+    let require_complete = check_result
+        .map(|result| result.config.type_aware.require)
+        .or_else(|| health_result.map(|result| result.config.type_aware.require))
+        == Some(fallow_config::TypeAwareRequire::Complete);
+    if require_complete
+        && check_result
+            .and_then(|result| result.type_aware_meta.as_ref())
+            .or_else(|| health_result.and_then(|result| result.type_aware_meta.as_ref()))
+            .and_then(|meta| meta.identity.as_ref())
+            .is_some_and(|identity| {
+                identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
+            })
+    {
+        max_exit = max_exit.max(1);
+    }
+
     handle_regression_and_summary(
         &mut max_exit,
         opts.quiet,
@@ -242,7 +263,7 @@ fn finish_combined_run(
         health_result,
     );
 
-    record_combined_impact(opts, check_result, dupes_result, health_result);
+    let _ = record_combined_impact(opts, check_result, dupes_result, health_result);
 
     ExitCode::from(max_exit)
 }
@@ -256,7 +277,58 @@ fn run_combined_health(
         return Ok(());
     }
 
-    let health_opts = build_health_opts(opts);
+    let mut health_opts = build_health_opts(opts);
+    if check_result.is_none() {
+        let (config, config_ms) = crate::health::load_health_config(&health_opts)?;
+        let resolved = crate::health::resolve_type_aware_health_options(
+            &crate::health::TypeAwareHealthOptions {
+                enabled: opts.type_aware,
+                requested: false,
+                unfiltered: true,
+                projects: opts.type_aware_projects,
+                require: opts.type_aware_require,
+            },
+            &config,
+        )
+        .map_err(|message| crate::error::emit_error(&message, 2, opts.output))?;
+        let semantic = if resolved.enabled {
+            Some(
+                crate::semantic_queries::type_coupling(
+                    opts.root,
+                    &resolved.projects,
+                    &[],
+                    fallow_config::TypeAwareRequire::BestEffort,
+                )
+                .map_err(|error| {
+                    crate::error::emit_error(
+                        &format!("Type-aware coupling failed: {error}"),
+                        2,
+                        opts.output,
+                    )
+                })?,
+            )
+        } else {
+            None
+        };
+        if let Some(identity) = semantic
+            .as_ref()
+            .and_then(|outcome| outcome.type_aware.meta.identity.clone())
+        {
+            health_opts.analysis_identity = identity;
+        }
+        let mut result =
+            crate::health::execute_health_with_config(&health_opts, config, config_ms)?;
+        result.type_aware_meta = semantic.map(|outcome| outcome.type_aware.meta);
+        *health_result = Some(result);
+        return Ok(());
+    }
+    if let Some(identity) = check_result
+        .as_ref()
+        .and_then(|check| check.type_aware_meta.as_ref())
+        .and_then(|meta| meta.identity.clone())
+    {
+        health_opts.analysis_identity = identity;
+    }
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let shared = if check_production == health_production {
@@ -264,13 +336,71 @@ fn run_combined_health(
     } else {
         None
     };
-    let result = if let Some(shared_data) = shared {
+    let mut result = if let Some(shared_data) = shared {
         crate::health::execute_health_with_shared_parse(&health_opts, shared_data)?
     } else {
         crate::health::execute_health(&health_opts)?
     };
+    attach_combined_type_coupling(opts, check_result, &mut result)?;
     *health_result = Some(result);
 
+    Ok(())
+}
+
+fn attach_combined_type_coupling(
+    opts: &CombinedOptions<'_>,
+    check_result: &mut Option<CheckResult>,
+    health_result: &mut HealthResult,
+) -> Result<(), ExitCode> {
+    let Some(check) = check_result.as_mut() else {
+        return Ok(());
+    };
+    if !check.config.type_aware.enabled {
+        return Ok(());
+    }
+    if let Some(report) = check.type_coupling.take() {
+        let mut meta = check.type_aware_meta.clone().unwrap_or_default();
+        meta.identity = Some(report.identity.clone());
+        meta.queries.retain(|query| {
+            query.capability == fallow_types::semantic::SemanticCapability::TypeCoupling
+        });
+        meta.symbol_traces.clear();
+        meta.api_surface = None;
+        meta.symbol_impacts.clear();
+        meta.type_coupling = Some(report);
+        meta.candidate_count = 0;
+        meta.confirmed_used_count = 0;
+        meta.unresolved_count = 0;
+        meta.abstained_count = 0;
+        health_result.type_aware_meta = Some(meta);
+        return Ok(());
+    }
+    let projects = check
+        .config
+        .type_aware
+        .projects
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    let outcome = crate::semantic_queries::type_coupling(
+        opts.root,
+        &projects,
+        &[],
+        fallow_config::TypeAwareRequire::BestEffort,
+    )
+    .map_err(|error| {
+        crate::error::emit_error(
+            &format!("Type-aware coupling failed: {error}"),
+            2,
+            opts.output,
+        )
+    })?;
+    let coupling_meta = outcome.type_aware.meta;
+    health_result.type_aware_meta = Some(coupling_meta.clone());
+    match check.type_aware_meta.as_mut() {
+        Some(meta) => crate::semantic_queries::merge_type_aware_meta(meta, coupling_meta),
+        None => check.type_aware_meta = Some(coupling_meta),
+    }
     Ok(())
 }
 
@@ -433,6 +563,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         performance: opts.performance,
         runtime_coverage: None,
         churn_file: opts.churn_file,
+        analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: opts.group_by.map(Into::into),
     }
@@ -537,6 +668,9 @@ mod tests {
             workspace: None,
             changed_workspaces: None,
             group_by: None,
+            type_aware: false,
+            type_aware_projects: &[],
+            type_aware_require: None,
             explain: false,
             explain_skipped: false,
             performance: false,

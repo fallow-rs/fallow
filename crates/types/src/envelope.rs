@@ -15,6 +15,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::semantic::{
+    ApiSurfaceResult, SemanticAnalysisIdentity, SemanticGapReason, SemanticQuerySummary,
+    SemanticSymbolImpact, SemanticSymbolTrace, TypeCouplingReport,
+};
+
 /// Schema version for this output format (independent of tool version). Bump
 /// policy: ADDITIVE changes (new optional top-level fields, new optional struct
 /// fields, new array entries, new MCP tools, new CLI flags that map to new
@@ -304,7 +309,7 @@ pub struct Meta {
     /// Local telemetry correlation metadata for agent follow-up runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryMeta>,
-    /// Provenance for the experimental TypeScript semantic refinement pass.
+    /// Provenance for the opt-in TypeScript semantic analysis pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_aware: Option<TypeAwareMeta>,
     /// Per-field definitions for envelope fields and action payload fields.
@@ -318,10 +323,28 @@ pub struct Meta {
     pub rules: BTreeMap<String, MetaRule>,
 }
 
-/// Bounded provenance emitted when the experimental type-aware pass runs.
+/// Bounded provenance emitted when the opt-in type-aware pass runs.
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeAwareMeta {
+    /// Compatibility identity used by audit, baselines, snapshots, and stores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<SemanticAnalysisIdentity>,
+    /// Compact status for every requested semantic query.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<SemanticQuerySummary>,
+    /// Checker-backed trace evidence requested by focused symbol queries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbol_traces: Vec<SemanticSymbolTrace>,
+    /// Package-public surface and confirmed private type leaks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_surface: Option<ApiSurfaceResult>,
+    /// Exact-symbol blast radius and targeted-test recommendations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbol_impacts: Vec<SemanticSymbolImpact>,
+    /// Advisory project-local public-signature coupling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_coupling: Option<TypeCouplingReport>,
     /// Version of Fallow's backend-neutral sidecar protocol.
     pub protocol_version: u32,
     /// Version of the sidecar package implementing the protocol.
@@ -402,6 +425,10 @@ pub enum TypeAwareProjectStatus {
     Refined,
     /// Structural diagnostics prevented candidate scanning.
     Abstained,
+    /// All v3 semantic queries assigned to this Program completed.
+    Complete,
+    /// The Program could not answer its assigned semantic queries safely.
+    Unavailable,
 }
 
 /// Semantic sidecar timings, separated from Fallow's syntactic pipeline.
@@ -438,6 +465,12 @@ pub struct TypeAwareProjectMeta {
     pub blocking_diagnostic_count: usize,
     /// Source files loaded into this TypeScript program.
     pub source_file_count: usize,
+    /// Whether this Program served more than one semantic query in the batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_reused: Option<bool>,
+    /// Stable v3 project-level gap reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<SemanticGapReason>,
     /// Stable reason code when `status` is `abstained`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "TypeAwareAbstentionReason"))]

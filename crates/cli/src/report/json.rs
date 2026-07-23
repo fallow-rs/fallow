@@ -608,12 +608,14 @@ pub(super) fn api_health_json_document(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         report: report.clone(),
         root,
         elapsed,
         explain,
+        type_aware: type_aware.cloned(),
         grouped_by: None,
         groups: None,
         workspace_diagnostics: workspace_diagnostics_for_output(root),
@@ -637,12 +639,14 @@ fn api_grouped_health_json_document(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         report: report.clone(),
         root,
         elapsed,
         explain,
+        type_aware: type_aware.cloned(),
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         groups: Some(grouping.groups.clone()),
         workspace_diagnostics: workspace_diagnostics_for_output(root),
@@ -664,9 +668,10 @@ pub(super) fn print_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match api_health_json_document(report, root, elapsed, explain) {
+    match api_health_json_document(report, root, elapsed, explain, type_aware) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
@@ -675,15 +680,20 @@ pub(super) fn print_health_json(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "grouped health output keeps render options and semantic provenance explicit"
+)]
 pub(super) fn print_grouped_health_json(
     report: &fallow_output::HealthReport,
     grouping: &fallow_output::HealthGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match api_grouped_health_json_document(report, grouping, root, elapsed, explain) {
+    match api_grouped_health_json_document(report, grouping, root, elapsed, explain, type_aware) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
@@ -1065,6 +1075,7 @@ mod tests {
             &root,
             Duration::ZERO,
             false,
+            None,
         )
         .expect("grouped health JSON should serialize");
 
@@ -1953,6 +1964,12 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let type_aware = fallow_types::envelope::TypeAwareMeta {
+            identity: None,
+            queries: Vec::new(),
+            symbol_traces: Vec::new(),
+            api_surface: None,
+            symbol_impacts: Vec::new(),
+            type_coupling: None,
             protocol_version: 2,
             sidecar_version: "0.1.0".to_string(),
             backend: "typescript-go".to_string(),

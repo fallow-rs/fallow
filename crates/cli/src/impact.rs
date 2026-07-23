@@ -15,7 +15,7 @@ use crate::audit::{AuditSummary, AuditVerdict};
 use crate::report::ci::fingerprint::fingerprint_hash;
 use crate::report::format_display_path;
 
-const STORE_SCHEMA_VERSION: u32 = 5;
+const STORE_SCHEMA_VERSION: u32 = 6;
 
 const MAX_RECORDS: usize = 200;
 
@@ -145,6 +145,10 @@ pub struct ImpactStore {
     /// by older builds. v5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Compatibility identity shared by every comparable record in this store.
+    /// Legacy stores deserialize as syntactic analysis.
+    #[serde(default)]
+    pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
 }
 
 /// Deserialize-only view of a pre-relocation in-repo store (schema <= 3), whose
@@ -213,6 +217,7 @@ impl LegacyFlatStore {
             last_digest_epoch: self.last_digest_epoch,
             // Legacy stores carry no label; the next recorded run backfills it.
             label: None,
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         }
     }
 }
@@ -751,9 +756,14 @@ pub struct AuditRunRecord<'a> {
     pub version: &'a str,
     pub timestamp: &'a str,
     pub attribution: Option<&'a AttributionInput<'a>>,
+    pub analysis_identity: &'a fallow_types::semantic::SemanticAnalysisIdentity,
 }
 
-pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRecord<'_>) {
+pub fn record_audit_run(
+    root: &Path,
+    summary: &AuditSummary,
+    record: &AuditRunRecord<'_>,
+) -> Result<(), String> {
     let AuditRunRecord {
         verdict,
         gate,
@@ -761,22 +771,25 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
         version,
         timestamp,
         attribution,
+        analysis_identity,
     } = record;
     // Impact is a LOCAL-DEV signal. Never record in CI: a user-global default
     // baked into a devcontainer/dotfiles image would otherwise start writing
     // per-project files on every CI run (pre-relocation this was emergent from
     // a fresh CI checkout having no in-repo store file; now it is explicit).
     if record_gate_is_ci() {
-        return;
+        return Ok(());
     }
     // Serialise the load -> mutate -> save window so two worktrees of the same
     // repo (same store key) cannot lost-update each other's record.
     let _lock = ImpactStoreLock::acquire(root);
     let mut store = load(root);
     if !resolve_enabled(&store).0 {
-        return;
+        return Ok(());
     }
+    validate_store_identity(&store, analysis_identity)?;
     store.schema_version = STORE_SCHEMA_VERSION;
+    store.analysis_identity = (*analysis_identity).clone();
     // Capture the repo basename for the cross-repo view (memoized; no extra git
     // probe). Refreshed each run so a renamed repo folder updates its label.
     store.label = project_identity(root).2;
@@ -809,9 +822,14 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
     if let Some(max_age) = resolve_store_max_age() {
         sweep_old_stores(&project_identity(root).0, max_age);
     }
+    Ok(())
 }
 
 /// Record a whole-project combined run into the project track.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "historical impact writes keep provenance and analysis identity explicit"
+)]
 pub fn record_combined_run(
     root: &Path,
     counts: ImpactCounts,
@@ -819,16 +837,19 @@ pub fn record_combined_run(
     version: &str,
     timestamp: &str,
     attribution: Option<&AttributionInput<'_>>,
-) {
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+) -> Result<(), String> {
     if record_gate_is_ci() {
-        return;
+        return Ok(());
     }
     let _lock = ImpactStoreLock::acquire(root);
     let mut store = load(root);
     if !resolve_enabled(&store).0 {
-        return;
+        return Ok(());
     }
+    validate_store_identity(&store, analysis_identity)?;
     store.schema_version = STORE_SCHEMA_VERSION;
+    store.analysis_identity = analysis_identity.clone();
     store.label = project_identity(root).2;
 
     if store.first_recorded.is_none() {
@@ -862,6 +883,28 @@ pub fn record_combined_run(
     if let Some(max_age) = resolve_store_max_age() {
         sweep_old_stores(&project_identity(root).0, max_age);
     }
+    Ok(())
+}
+
+fn validate_store_identity(
+    store: &ImpactStore,
+    current: &fallow_types::semantic::SemanticAnalysisIdentity,
+) -> Result<(), String> {
+    let has_history = !store.records.is_empty()
+        || !store.project_records.is_empty()
+        || !store.frontier.is_empty()
+        || !store.clone_frontier.is_empty();
+    if !has_history {
+        return Ok(());
+    }
+    let incompatible = store.analysis_identity.incompatible_fields(current);
+    if incompatible.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "impact history has an incompatible analysis identity ({}); run `fallow impact reset` before switching semantic analysis modes or capability sets",
+        incompatible.join(", ")
+    ))
 }
 
 /// Update pending/contained state from a gate run's verdict.
@@ -2559,8 +2602,10 @@ mod tests {
                 version,
                 timestamp,
                 attribution: None,
+                analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
             },
-        );
+        )
+        .unwrap();
     }
 
     /// Create a real file under `root` (attribution prunes frontier entries for
@@ -2619,8 +2664,10 @@ mod tests {
                 version: "2.0.0",
                 timestamp: ts,
                 attribution: Some(&input),
+                analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
             },
-        );
+        )
+        .unwrap();
     }
 
     #[test]
@@ -3449,7 +3496,9 @@ mod tests {
             "2.0.0",
             ts,
             Some(&input),
-        );
+            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -4372,7 +4421,9 @@ mod tests {
             "2.0.0",
             "t0",
             None,
-        );
+            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        )
+        .unwrap();
         TEST_FORCE_CI.with(|c| c.set(false));
         assert!(
             load(root).project_records.is_empty(),
@@ -4393,11 +4444,53 @@ mod tests {
             "2.0.0",
             "t0",
             None,
-        );
+            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        )
+        .unwrap();
         assert!(
             load(root).project_records.is_empty(),
             "combined run must not record when disabled"
         );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn record_combined_run_rejects_incompatible_analysis_history() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        record_combined_run(
+            root,
+            ImpactCounts::from_combined(1, 0, 0),
+            None,
+            "2.0.0",
+            "t0",
+            None,
+            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        )
+        .unwrap();
+
+        let type_aware = fallow_types::semantic::SemanticAnalysisIdentity {
+            mode: fallow_types::semantic::SemanticAnalysisMode::TypeAware,
+            semantic_schema_version: 1,
+            capabilities: vec![fallow_types::semantic::SemanticCapability::TypeCoupling],
+            project_config_hash: "sha256:test".to_string(),
+            backend_family: "typescript-go".to_string(),
+            completeness: fallow_types::semantic::SemanticCompleteness::Complete,
+        };
+        let error = record_combined_run(
+            root,
+            ImpactCounts::from_combined(1, 0, 0),
+            None,
+            "2.0.0",
+            "t1",
+            None,
+            &type_aware,
+        )
+        .expect_err("mixed semantic history must be rejected");
+
+        assert!(error.contains("mode"), "{error}");
+        assert!(error.contains("fallow impact reset"), "{error}");
     }
 
     #[test]
@@ -4427,7 +4520,9 @@ mod tests {
             "2.0.0",
             "overflow",
             None,
-        );
+            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        )
+        .unwrap();
         let store = load(root);
         assert_eq!(
             store.project_records.len(),

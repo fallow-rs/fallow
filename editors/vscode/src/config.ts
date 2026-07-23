@@ -39,6 +39,23 @@ export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 export const getAllowRemoteExtends = (): boolean =>
   getConfig().get<boolean>("allowRemoteExtends", false);
 
+export type TypeAwareRequireSetting = "best-effort" | "complete";
+
+export interface TypeAwareSettings {
+  readonly enabled: boolean;
+  readonly projects: readonly string[];
+  readonly require: TypeAwareRequireSetting;
+}
+
+export const getTypeAwareSettings = (): TypeAwareSettings => ({
+  enabled: getConfig().get<boolean>("typeAware.enabled", false),
+  projects: getConfig()
+    .get<readonly string[]>("typeAware.projects", [])
+    .map((project) => project.trim())
+    .filter((project) => project.length > 0),
+  require: getConfig().get<TypeAwareRequireSetting>("typeAware.require", "best-effort"),
+});
+
 const getConfigPath = (resource?: vscode.Uri): string =>
   getConfig(resource).get<string>("configPath", "").trim();
 

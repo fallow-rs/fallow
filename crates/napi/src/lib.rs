@@ -14,6 +14,14 @@ use napi_derive::napi;
 
 #[napi(object)]
 #[derive(Default)]
+pub struct TypeAwareOptions {
+    pub enabled: Option<bool>,
+    pub projects: Option<Vec<String>>,
+    pub require: Option<String>,
+}
+
+#[napi(object)]
+#[derive(Default)]
 pub struct DeadCodeOptions {
     pub root: Option<String>,
     pub config_path: Option<String>,
@@ -26,6 +34,7 @@ pub struct DeadCodeOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
+    pub type_aware: Option<TypeAwareOptions>,
     pub unused_files: Option<bool>,
     pub unused_exports: Option<bool>,
     pub unused_deps: Option<bool>,
@@ -118,6 +127,7 @@ pub struct ComplexityOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
+    pub type_aware: Option<TypeAwareOptions>,
     pub max_cyclomatic: Option<u32>,
     pub max_cognitive: Option<u32>,
     pub max_crap: Option<f64>,
@@ -153,6 +163,7 @@ struct CommonOptionsInput {
     workspace: Option<Vec<String>>,
     changed_workspaces: Option<String>,
     explain: Option<bool>,
+    type_aware: Option<TypeAwareOptions>,
 }
 
 fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOptions> {
@@ -167,6 +178,7 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOp
             )
         })?;
 
+    let type_aware = map_type_aware_options(input.type_aware)?;
     Ok(api::AnalysisOptions {
         root: input.root.map(std::path::PathBuf::from),
         config_path: input.config_path.map(std::path::PathBuf::from),
@@ -180,6 +192,34 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOp
         workspace: input.workspace,
         changed_workspaces: input.changed_workspaces,
         explain: input.explain.unwrap_or(false),
+        type_aware,
+    })
+}
+
+fn map_type_aware_options(input: Option<TypeAwareOptions>) -> napi::Result<api::TypeAwareOptions> {
+    let Some(input) = input else {
+        return Ok(api::TypeAwareOptions::default());
+    };
+    let require = match input.require.as_deref() {
+        None | Some("best-effort") => api::TypeAwareRequire::BestEffort,
+        Some("complete") => api::TypeAwareRequire::Complete,
+        Some(value) => {
+            return Err(invalid_enum_value(
+                "typeAware.require",
+                value,
+                &["best-effort", "complete"],
+            ));
+        }
+    };
+    Ok(api::TypeAwareOptions {
+        enabled: input.enabled.unwrap_or(false),
+        projects: input
+            .projects
+            .unwrap_or_default()
+            .into_iter()
+            .map(std::path::PathBuf::from)
+            .collect(),
+        require,
     })
 }
 
@@ -292,6 +332,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
+                type_aware: value.type_aware,
             })?,
             filters: api::DeadCodeFilters {
                 unused_files: value.unused_files.unwrap_or(false),
@@ -355,6 +396,7 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
+                type_aware: None,
             })?,
             mode: parse_duplication_mode(value.mode)?,
             min_tokens: value.min_tokens.map(|n| n as usize),
@@ -397,6 +439,7 @@ impl TryFrom<FeatureFlagsOptions> for api::FeatureFlagsOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
+                type_aware: None,
             })?,
             top: value.top.map(|n| n as usize),
         })
@@ -420,6 +463,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
+                type_aware: value.type_aware,
             })?,
             max_cyclomatic: value
                 .max_cyclomatic
@@ -702,6 +746,11 @@ mod tests {
             workspace: Some(vec!["apps/web".to_string()]),
             changed_workspaces: None,
             explain: Some(true),
+            type_aware: Some(TypeAwareOptions {
+                enabled: Some(true),
+                projects: Some(vec!["tsconfig.json".to_string()]),
+                require: Some("complete".to_string()),
+            }),
             unused_files: Some(true),
             unused_exports: Some(true),
             unused_deps: Some(true),

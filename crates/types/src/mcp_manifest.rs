@@ -372,6 +372,30 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
+        name: "symbol_trace",
+        kind: "trace",
+        description: "Trace exact TypeScript symbol references, namespaces, aliases, and re-export hops without surfacing compiler diagnostics",
+        cli_command: Some(
+            "fallow dead-code --type-aware --trace <file:export> --format json --quiet",
+        ),
+        key_params: &["file", "export_name", "type_aware_projects"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
+        name: "symbol_impact",
+        kind: "trace",
+        description: "Return exact-symbol consumers, affected files, and targeted tests for a TypeScript export",
+        cli_command: Some(
+            "fallow dead-code --type-aware --symbol-impact <file:export> --format json --quiet",
+        ),
+        key_params: &["file", "export_name", "type_aware_projects"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
         name: "trace_file",
         kind: "trace",
         description: "Trace all module-graph edges for a file (imports, exports, importers, re-exports)",
@@ -585,6 +609,24 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         mcp_tool: Some("trace_export"),
         omission_note: Some(
             "Export usage trace. No napi export; the trace family is CLI, MCP, and api only (and emits an un-enveloped programmatic shape, see the plan-028 schema-conformance note).",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "exact TypeScript symbol trace",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("symbol_trace"),
+        omission_note: Some(
+            "Dedicated type-aware symbol trace. MCP shells out to the CLI; type-aware dead-code refinement is available through run_dead_code and detectDeadCode, but neither surface exposes this dedicated trace query.",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "exact TypeScript symbol impact",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("symbol_impact"),
+        omission_note: Some(
+            "Dedicated type-aware symbol impact query. MCP shells out to the CLI; no dedicated run_* runner or napi export exists.",
         ),
     },
     CapabilityParityRow {

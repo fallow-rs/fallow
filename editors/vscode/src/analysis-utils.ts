@@ -1,4 +1,5 @@
 import type { DuplicationMode, FallowCheckResult, FallowDupesResult } from "./types.js";
+import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
 
 /**
  * Analysis flags that did not exist in every CLI release the extension may
@@ -44,6 +45,7 @@ interface AnalysisArgsOptions {
    */
   readonly workspace: string;
   readonly configPath: string;
+  readonly typeAware?: TypeAwareArgsOptions;
   readonly dupesMode: DuplicationMode | undefined;
   readonly dupesThreshold: number | undefined;
   readonly dupesMinTokens: number | undefined;
@@ -140,6 +142,8 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
   if (options.configPath) {
     args.push("--config", options.configPath);
   }
+
+  appendTypeAwareArgs(args, options.typeAware);
 
   if (options.dupesMode !== undefined) {
     args.push("--dupes-mode", options.dupesMode);

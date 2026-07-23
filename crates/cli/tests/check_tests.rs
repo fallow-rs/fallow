@@ -9,7 +9,7 @@ mod common;
 
 use common::{
     fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
-    run_fallow_raw,
+    run_fallow_raw, run_fallow_raw_with_env,
 };
 
 #[test]
@@ -73,6 +73,50 @@ fn check_json_format_produces_valid_json() {
         "JSON output should have schema_version"
     );
     assert!(json.is_object(), "JSON output should be an object");
+}
+
+#[test]
+fn empty_type_aware_candidate_set_starts_no_companion() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"clean-type-aware","exports":"./src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"strict":true,"noEmit":true},"include":["src/**/*.ts"]}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const live = 1;\n").unwrap();
+    let root_arg = root.to_string_lossy();
+    let missing_companion = root.join("missing-type-aware-companion");
+    let missing_companion_arg = missing_companion.to_string_lossy();
+
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--type-aware",
+            "--unused-exports",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &missing_companion_arg)],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["total_issues"], 0);
+    assert_eq!(json["_meta"]["type_aware"]["elapsed_ms"], 0);
+    assert_eq!(
+        json["_meta"]["type_aware"]["identity"]["capabilities"],
+        serde_json::json!(["symbol-use"])
+    );
 }
 
 #[test]

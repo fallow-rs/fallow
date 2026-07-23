@@ -245,6 +245,18 @@ inputs:
     description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis; also configurable persistently via includeEntryExports in your fallow config.'
     required: false
     default: 'false'
+  type-aware:
+    description: 'Enable optional project-wide TypeScript semantic evidence. Does not emit compiler diagnostics or generic typed lint findings.'
+    required: false
+    default: 'false'
+  type-aware-projects:
+    description: 'Comma-separated tsconfig paths for type-aware analysis. Empty uses automatic project discovery.'
+    required: false
+    default: ''
+  type-aware-require:
+    description: 'Semantic completeness policy: best-effort or complete.'
+    required: false
+    default: 'best-effort'
   # Audit-specific inputs
   gate:
     description: 'Audit verdict gate: new-only (default) fails only introduced findings, all fails on every finding in changed files.'
@@ -405,6 +417,9 @@ runs:
         INPUT_TREND: ${{ inputs.trend }}
         INPUT_ISSUE_TYPES: ${{ inputs.issue-types }}
         INPUT_INCLUDE_ENTRY_EXPORTS: ${{ inputs.include-entry-exports }}
+        INPUT_TYPE_AWARE: ${{ inputs.type-aware }}
+        INPUT_TYPE_AWARE_PROJECTS: ${{ inputs.type-aware-projects }}
+        INPUT_TYPE_AWARE_REQUIRE: ${{ inputs.type-aware-require }}
         INPUT_GATE: ${{ inputs.gate }}
         INPUT_SECURITY_GATE: ${{ inputs.security-gate }}
         INPUT_DEAD_CODE_BASELINE: ${{ inputs.dead-code-baseline }}

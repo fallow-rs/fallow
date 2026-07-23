@@ -19,6 +19,7 @@ fn create_boundary_config_with_entry(
     entry: &str,
 ) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![entry.to_string()],
@@ -348,6 +349,7 @@ fn no_violations_when_rule_is_off() {
         }],
     };
     let config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec!["src/ui/App.ts".to_string()],
@@ -408,6 +410,7 @@ fn preset_detects_boundary_violation() {
         rules: vec![],
     };
     let config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec!["src/adapters/http.ts".to_string()],
@@ -508,6 +511,7 @@ fn root_field_classifies_per_subtree() {
         ],
     };
     let config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec!["packages/app/src/login.tsx".to_string()],
@@ -612,6 +616,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         }],
     };
     let flat_config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec!["packages/app/src/login.tsx".to_string()],
@@ -684,6 +689,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         }],
     };
     let scoped_config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec!["packages/app/src/login.tsx".to_string()],
@@ -824,6 +830,7 @@ fn bulletproof_preset_detects_violation() {
         rules: vec![],
     };
     let config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec!["src/app/page.ts".to_string()],
@@ -929,6 +936,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         rules: vec![],
     };
     let config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec!["src/app/page.ts".to_string()],

@@ -818,6 +818,7 @@ fn collect_module_private_type_leaks(
             line,
             col,
             span_start: reference.span.start,
+            semantic: None,
         });
     }
 }

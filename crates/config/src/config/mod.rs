@@ -160,6 +160,47 @@ pub enum CatalogPrecedingCommentPolicy {
     Never,
 }
 
+/// Completeness policy for opt-in TypeScript semantic analysis.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareRequire {
+    /// Keep conservative findings and report semantic gaps without failing.
+    #[default]
+    BestEffort,
+    /// Fail the quality gate when any requested semantic query is incomplete.
+    Complete,
+}
+
+/// Shared opt-in configuration for TypeScript semantic analysis.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct TypeAwareConfig {
+    /// Enable the optional TypeScript semantic pass. Disabled by default.
+    #[serde(default)]
+    pub enabled: bool,
+    /// TypeScript project config paths, resolved relative to the project root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<String>,
+    /// Decide whether partial semantic analysis is advisory or gating.
+    #[serde(default, skip_serializing_if = "is_default_type_aware_require")]
+    pub require: TypeAwareRequire,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if callbacks receive field values by reference"
+)]
+fn is_default_type_aware_require(value: &TypeAwareRequire) -> bool {
+    matches!(value, TypeAwareRequire::BestEffort)
+}
+
+impl TypeAwareConfig {
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        !self.enabled && self.projects.is_empty() && self.require == TypeAwareRequire::BestEffort
+    }
+}
+
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FallowConfig {
@@ -226,6 +267,12 @@ pub struct FallowConfig {
     /// Sets complexity and health thresholds for `fallow health` (also applied in combined `fallow` and `fallow audit`): `maxCyclomatic` (20), `maxCognitive` (15), `maxCrap` (30.0, findings at or above this are reported), `crapRefactorBand` (5, cyclomatic band below `maxCyclomatic` where a secondary refactor action is added), `maxUnitSize` (max function lines before a large-function finding, 60), `coverage`/`coverageRoot` (Istanbul coverage path and path-prefix strip for accurate CRAP), `ignore` globs (remove files from findings AND the health score), `thresholdOverrides` (per-file/per-function ceilings via `files`/`functions`/`maxCyclomatic`/`maxCognitive`/`maxCrap`/`maxUnitSize`/`reason`), `ownership` (`botPatterns` and `emailMode` for `--ownership`), and `suggestInlineSuppression` (true, emit `suppress-line` action hints in JSON). Raise thresholds to relax which functions are flagged, wire `coverage` for real CRAP scores, or exempt generated/test files via `ignore` (drops them from the score too) or `thresholdOverrides` (keeps them visible under a higher ceiling).
     #[serde(default)]
     pub health: HealthConfig,
+
+    /// Opts into TypeScript semantic analysis for project-wide symbol use,
+    /// provenance, API surface, symbol impact, and public-signature coupling.
+    /// This does not surface compiler diagnostics or typed lint rules.
+    #[serde(default, skip_serializing_if = "TypeAwareConfig::is_default")]
+    pub type_aware: TypeAwareConfig,
 
     /// Sets per-issue-type severity, keyed by kebab-case rule id: `error` reports and fails CI (non-zero exit), `warn` reports without failing, `off` disables detection and reporting entirely (e.g. `{ "unused-files": "error", "unused-exports": "warn", "private-type-leaks": "off" }`). Set a rule `off` to silence it, `warn` to demote below CI gating, or `error` to promote a warn/off-default rule to gating; most rules default to `error`, dev/optional-dependency and component/store/inject/CSS/catalog rules default to `warn`, and opt-in rules (`private-type-leaks`, `security-*`, `prop-drilling`, `thin-wrapper`, `duplicate-prop-shape`, `coverage-gaps`, `feature-flags`, `require-suppression-reason`) default to `off`. Singular aliases (`unused-file`) and `warning`/`none` severity spellings are accepted.
     #[serde(default)]
@@ -569,6 +616,10 @@ pub struct RegressionConfig {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RegressionBaseline {
+    /// Compatibility identity for the analysis that produced these counts.
+    /// Missing values in existing configs are treated as syntactic.
+    #[serde(default)]
+    pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
     #[serde(default)]
     pub total_issues: usize,
     #[serde(default)]
@@ -668,6 +719,28 @@ mod tests {
         let config: FallowConfig = serde_json::from_str("{}").unwrap();
         assert!(config.entry.is_empty());
         assert!(!config.production);
+        assert!(!config.type_aware.enabled);
+        assert_eq!(config.type_aware.require, TypeAwareRequire::BestEffort);
+    }
+
+    #[test]
+    fn deserialize_type_aware_config() {
+        let config: FallowConfig = serde_json::from_str(
+            r#"{"typeAware":{"enabled":true,"projects":["tsconfig.app.json"],"require":"complete"}}"#,
+        )
+        .unwrap();
+
+        assert!(config.type_aware.enabled);
+        assert_eq!(config.type_aware.projects, ["tsconfig.app.json"]);
+        assert_eq!(config.type_aware.require, TypeAwareRequire::Complete);
+    }
+
+    #[test]
+    fn deserialize_type_aware_config_rejects_unknown_fields() {
+        let result = serde_json::from_str::<FallowConfig>(
+            r#"{"typeAware":{"enabled":true,"compilerDiagnostics":true}}"#,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

@@ -22,7 +22,7 @@
       "project_id": "astro",
       "candidate_count": 38,
       "candidate_set_sha256": "b27ec0b783397217150a326be2be038cf800533cb8ffa9b0a4fb3876ac4a5cfb",
-      "evidence_sha256": "41985e52dd6db30b7e902cb0fdff4eb96d8298a974685e5da5d42134689ae4ed",
+      "evidence_sha256": "3119d23abef54292f1a32522b243f1ecc0a7bedc87379337eba707cbe81b2f37",
       "reviewer": "independent-source-review-astro",
       "method": "Every declaration and use location was checked against the pinned source, including union getters and DOM type mappings.",
       "verdict": "approved"
@@ -31,7 +31,7 @@
       "project_id": "typescript",
       "candidate_count": 135,
       "candidate_set_sha256": "a8b0ab23007f31efeaafcce67cc579e15792f6ba5bc686a98634f2f1834842c1",
-      "evidence_sha256": "1dfafde1656dac9bc57d62aa6c7c3f8d7b53ae2d30f86d5d1b501409a902f682",
+      "evidence_sha256": "419b295389521f6ad30fe44da7bed8dcc4251cb72f010744550d4fb1c699eac3",
       "reviewer": "independent-source-review-typescript",
       "method": "Every declaration was checked against the pinned source and every candidate had an independently resolved exact symbol use.",
       "verdict": "approved"

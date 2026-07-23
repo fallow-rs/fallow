@@ -632,6 +632,7 @@ mod severity_gate {
                                 line: 1,
                                 col: 0,
                                 span_start: 0,
+                                semantic: None,
                             },
                         ),
                     );

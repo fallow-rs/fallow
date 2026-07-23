@@ -23,6 +23,8 @@ import {
   getChangedSince,
   getResolvedConfigPath,
   getAutoDownload,
+  getTypeAwareSettings,
+  type TypeAwareSettings,
 } from "./config.js";
 import {
   buildAnalysisArgs,
@@ -49,6 +51,7 @@ import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-u
 import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js";
 import { registerChild, unregisterChild } from "./process-registry.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
+import { appendTypeAwareArgs } from "./type-aware-utils.js";
 import {
   cacheWorkspacesOutput,
   getCachedWorkspacesOutput,
@@ -412,13 +415,18 @@ export interface RunAnalysisOptions {
 
 export interface InspectArgsOptions {
   readonly filePath: string;
+  readonly symbol?: string;
   readonly production: boolean | undefined;
   readonly workspace: string;
   readonly configPath: string;
+  readonly typeAware?: TypeAwareSettings;
 }
 
 export const buildInspectArgs = (options: InspectArgsOptions): string[] => {
-  const args = ["inspect", "--file", options.filePath, "--format", "json", "--quiet"];
+  const targetArgs = options.symbol
+    ? ["--symbol", `${options.filePath}:${options.symbol}`]
+    : ["--file", options.filePath];
+  const args = ["inspect", ...targetArgs, "--format", "json", "--quiet"];
 
   if (options.workspace) {
     args.push("--workspace", options.workspace);
@@ -432,6 +440,10 @@ export const buildInspectArgs = (options: InspectArgsOptions): string[] => {
 
   if (options.configPath) {
     args.push("--config", options.configPath);
+  }
+
+  if (options.symbol) {
+    appendTypeAwareArgs(args, options.typeAware);
   }
 
   return args;
@@ -689,6 +701,7 @@ export const runAnalysis = async (
       dupesSkipLocal: getDuplicationSkipLocalOverride(),
       dupesCrossLanguage: getDuplicationCrossLanguageOverride(),
       dupesIgnoreImports: getDuplicationIgnoreImportsOverride(),
+      typeAware: getTypeAwareSettings(),
       cliVersion,
     });
     backoffKey = buildAnalysisBackoffKey(root, analysisArgs);
@@ -859,6 +872,7 @@ export const runAudit = async (
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
       gate: getAuditGate(),
+      typeAware: getTypeAwareSettings(),
     });
 
     const output = await execFallow(cliBinary, auditArgs, root);
@@ -911,6 +925,7 @@ const activeEditorInspectTarget = (): {
 export const runInspectActiveFile = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
+  symbol?: string,
 ): Promise<FallowInspectResult | null> => {
   const target = activeEditorInspectTarget();
   if (!target) {
@@ -931,9 +946,11 @@ export const runInspectActiveFile = async (
     const { binary } = await resolveCliForRun(context, outputChannel);
     const args = buildInspectArgs({
       filePath: target.filePath,
+      symbol,
       production: getProductionOverride(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(target.root),
+      typeAware: getTypeAwareSettings(),
     });
 
     const output = await execInspectWithManagedFallback(
@@ -949,16 +966,37 @@ export const runInspectActiveFile = async (
     }
 
     const result = JSON.parse(output) as FallowInspectResult;
-    outputChannel?.appendLine(`Fallow inspect: ${target.filePath}`);
+    const label = symbol ? `${target.filePath}:${symbol}` : target.filePath;
+    outputChannel?.appendLine(`Fallow inspect: ${label}`);
     outputChannel?.appendLine(JSON.stringify(result, null, 2));
     outputChannel?.show();
-    void vscode.window.showInformationMessage(`Fallow inspect complete: ${target.filePath}`);
+    void vscode.window.showInformationMessage(`Fallow inspect complete: ${label}`);
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow inspect failed: ${message}`);
     return null;
   }
+};
+
+export const runInspectActiveSymbol = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<FallowInspectResult | null> => {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== "file") {
+    void vscode.window.showWarningMessage("Fallow: no active file to inspect.");
+    return null;
+  }
+  const range = editor.document.getWordRangeAtPosition(editor.selection.active);
+  const symbol = range ? editor.document.getText(range).trim() : "";
+  if (!symbol) {
+    void vscode.window.showWarningMessage(
+      "Fallow: place the cursor on an exported symbol to inspect it.",
+    );
+    return null;
+  }
+  return runInspectActiveFile(context, outputChannel, symbol);
 };
 
 export const runFix = async (
@@ -1067,6 +1105,7 @@ export const runHealthAnalysis = async (
       production: getProductionOverride(),
       workspace: resolveActiveWorkspaceScope(context),
       complexityBreakdown: breakdownEnabled,
+      typeAware: getTypeAwareSettings(),
     });
 
     const output = await execAnalysisTolerant(args, root, binary, outputChannel);

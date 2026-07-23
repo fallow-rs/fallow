@@ -160,6 +160,17 @@ build_common_args() {
   [ -n "${INPUT_CHANGED_WORKSPACES:-}" ] && ARGS+=(--changed-workspaces "$INPUT_CHANGED_WORKSPACES")
   [ "${INPUT_NO_CACHE:-}" = "true" ] && ARGS+=(--no-cache)
   [ -n "${INPUT_THREADS:-}" ] && ARGS+=(--threads "$INPUT_THREADS")
+  if [ "${INPUT_TYPE_AWARE:-}" = "true" ]; then
+    ARGS+=(--type-aware)
+    if [ -n "${INPUT_TYPE_AWARE_PROJECTS:-}" ]; then
+      IFS=',' read -ra TYPE_AWARE_PROJECTS <<< "$INPUT_TYPE_AWARE_PROJECTS"
+      for project in "${TYPE_AWARE_PROJECTS[@]}"; do
+        [ -n "$project" ] && ARGS+=(--type-aware-project "$project")
+      done
+    fi
+    [ -n "${INPUT_TYPE_AWARE_REQUIRE:-}" ] && \
+      ARGS+=(--type-aware-require "$INPUT_TYPE_AWARE_REQUIRE")
+  fi
 
   if [ -z "$INPUT_COMMAND" ]; then
     [ -n "${INPUT_ONLY:-}" ] && ARGS+=(--only "$INPUT_ONLY")
@@ -624,20 +635,15 @@ if jq -e '.error == true' "$RESULTS_FILE" > /dev/null 2>&1; then
   exit "$EXIT_CODE"
 fi
 
-# --- Fallback SARIF generation ---
+# --- Analyze-once SARIF generation ---
 
 if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && \
    [ "$INPUT_COMMAND" != "fix" ] && \
    { [ ! -f "$SARIF_FILE" ] || ! jq -e '.' "$SARIF_FILE" > /dev/null 2>&1; }; then
-  ARGS=()
-  build_common_args sarif
-  build_command_args false  # omit --top for SARIF
-
-  # Validate the produced file rather than gating on the exit code: fallow exits
-  # 1 when issues are found (e.g. health with complexity findings), which is not
-  # a generation failure. Only an empty or invalid SARIF file is a real failure,
-  # matching this block's entry condition and fallow's exit-code semantics (>=2).
-  fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+  # Render the saved JSON envelope instead of running semantic analysis again.
+  # Only an empty or invalid SARIF file is a real generation failure.
+  fallow report --from "$RESULTS_FILE" --root "$INPUT_ROOT" --quiet --format sarif \
+    > "$SARIF_FILE" 2>/dev/null || true
   if [ ! -s "$SARIF_FILE" ] || ! jq -e '.' "$SARIF_FILE" > /dev/null 2>&1; then
     echo "::warning::SARIF generation failed"
   fi

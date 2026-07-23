@@ -49,6 +49,8 @@ pub struct InspectOutput {
     pub identity: InspectIdentity,
     pub evidence: InspectEvidence,
     pub warnings: Vec<String>,
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<fallow_types::envelope::Meta>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,6 +114,22 @@ pub struct InspectEvidence {
     /// best-effort and not part of the trusted ranked evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol_chain: Option<InspectEvidenceSection>,
+    /// Checker-backed declaration, alias, re-export, and use-site evidence.
+    /// Present only for a symbol target in type-aware mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_trace: Option<InspectEvidenceSection>,
+    /// Package-public TypeScript surface and private-type reachability.
+    /// Present only for a symbol target in type-aware mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_surface: Option<InspectEvidenceSection>,
+    /// Exact-symbol consumers and transitive affected files.
+    /// Present only for a symbol target in type-aware mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol_impact: Option<InspectEvidenceSection>,
+    /// Test entry points reachable from the exact symbol, with provenance.
+    /// Present only for a symbol target in type-aware mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub targeted_tests: Option<InspectEvidenceSection>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -259,8 +277,20 @@ mod tests {
                 ),
                 churn: None,
                 symbol_chain: None,
+                semantic_trace: None,
+                api_surface: None,
+                symbol_impact: None,
+                targeted_tests: None,
             },
             warnings: Vec::new(),
+            meta: Some(fallow_types::envelope::Meta {
+                type_aware: Some(fallow_types::envelope::TypeAwareMeta {
+                    protocol_version: 3,
+                    backend: "typescript-go".to_string(),
+                    ..fallow_types::envelope::TypeAwareMeta::default()
+                }),
+                ..fallow_types::envelope::Meta::default()
+            }),
         };
 
         let value =
@@ -272,6 +302,8 @@ mod tests {
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-inspect"
         );
+        assert_eq!(value["_meta"]["type_aware"]["protocol_version"], 3);
+        assert_eq!(value["_meta"]["type_aware"]["backend"], "typescript-go");
         assert!(value["evidence"].get("churn").is_none());
     }
 

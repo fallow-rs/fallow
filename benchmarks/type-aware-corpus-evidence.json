@@ -2,14 +2,14 @@
   "schema_version": 1,
   "generated_from": {
     "discovery_provenance": {
-      "generated_at": "2026-07-22T19:48:59.659Z",
+      "generated_at": "2026-07-23T06:10:24.558Z",
       "manifest_sha256": "777b47ffc6a5d007de985c86419c1368a0592f853df6093c08678efa62c92b4f",
       "fallow": {
         "version": "fallow 3.8.0",
-        "sha256": "679b32f344cfb738b4e64ee70c451c26c3b56a72e4df2564caa7c770ab293e58"
+        "sha256": "06847e8b1396dbd872f859ce9a57154a84176ec1dbe63119e68c42ea97b9bd16"
       },
       "sidecar": {
-        "sha256": "9feca64e7afdd249b1490b34aaa09ff9424d4e90f71c12d6ce9e462c14fce29e"
+        "sha256": "dc8c0eb0f75917845de89e915800a8826adc4b7db0918ce0267e6dcfcde7117c"
       },
       "runtime": {
         "platform": "darwin",
@@ -80,7 +80,7 @@
       ]
     },
     "adjudication": {
-      "decisions_sha256": "2c33d55d8bba7d45bbc660cf279a6d96a30ab3919bfeeb46212e62150a19431c",
+      "decisions_sha256": "ccac875db3e3a935fcf174059d18ca22b8e10c286ab31388680228f5d1dfbfe2",
       "reviewed_on": "2026-07-22",
       "reviewer": "primary-source-adjudication",
       "method": "Every semantic removal requires an exact checker-resolved declaration and concrete source use. Retained candidates are indeterminate unless a repository-wide exact-name search and source review prove that only the declaration exists.",
@@ -91,7 +91,7 @@
             "project_id": "astro",
             "candidate_count": 38,
             "candidate_set_sha256": "b27ec0b783397217150a326be2be038cf800533cb8ffa9b0a4fb3876ac4a5cfb",
-            "evidence_sha256": "41985e52dd6db30b7e902cb0fdff4eb96d8298a974685e5da5d42134689ae4ed",
+            "evidence_sha256": "3119d23abef54292f1a32522b243f1ecc0a7bedc87379337eba707cbe81b2f37",
             "reviewer": "independent-source-review-astro",
             "method": "Every declaration and use location was checked against the pinned source, including union getters and DOM type mappings.",
             "verdict": "approved"
@@ -100,7 +100,7 @@
             "project_id": "typescript",
             "candidate_count": 135,
             "candidate_set_sha256": "a8b0ab23007f31efeaafcce67cc579e15792f6ba5bc686a98634f2f1834842c1",
-            "evidence_sha256": "1dfafde1656dac9bc57d62aa6c7c3f8d7b53ae2d30f86d5d1b501409a902f682",
+            "evidence_sha256": "419b295389521f6ad30fe44da7bed8dcc4251cb72f010744550d4fb1c699eac3",
             "reviewer": "independent-source-review-typescript",
             "method": "Every declaration was checked against the pinned source and every candidate had an independently resolved exact symbol use.",
             "verdict": "approved"
@@ -153,16 +153,17 @@
       "confirmation_precision": 1,
       "used_recall": 1,
       "correct_unused_retention": 1,
-      "abstained_count": 237,
-      "abstention": 0.423971,
-      "unresolved_count": 149,
-      "unresolved": 0.266547
+      "abstained_count": 238,
+      "abstention": 0.42576,
+      "unresolved_count": 148,
+      "unresolved": 0.264758
     },
     "value": {
-      "confirmed_repository_count": 2,
+      "confirmed_repository_count": 3,
       "confirmed_repositories": [
         "astro",
-        "typescript"
+        "typescript",
+        "vitest"
       ],
       "confirmed_feature_buckets": [
         "exact-cross-file-symbol-use",
@@ -172,20 +173,20 @@
     },
     "performance": {
       "baseline_wall_ms": {
-        "median": 595.892,
-        "p95": 4203.528
+        "median": 505.136,
+        "p95": 3582.756
       },
       "refined_wall_ms": {
-        "median": 689.946,
-        "p95": 4674.177
+        "median": 558.051,
+        "p95": 5932.895
       },
       "marginal_overhead_ms": {
-        "median": 66.109,
-        "p95": 626.684
+        "median": 85.393,
+        "p95": 2339.333
       },
       "process_tree_peak_rss_kb": {
-        "baseline_p95": 798435.2,
-        "refined_p95": 1317299.2
+        "baseline_p95": 799188,
+        "refined_p95": 1355067.2
       },
       "program_counts": [
         1,
@@ -196,10 +197,10 @@
         1,
         1,
         1,
-        4,
-        4,
-        4,
-        4,
+        5,
+        5,
+        5,
+        5,
         2,
         2,
         2,
@@ -208,10 +209,10 @@
         4,
         4,
         4,
-        1,
-        1,
-        1,
-        1
+        2,
+        2,
+        2,
+        2
       ],
       "source_files_per_program": [
         3313,
@@ -226,18 +227,22 @@
         235,
         208,
         224,
+        219,
         839,
         235,
         208,
         224,
+        219,
         839,
         235,
         208,
         224,
+        219,
         839,
         235,
         208,
         224,
+        219,
         249,
         445,
         249,
@@ -249,40 +254,44 @@
         118,
         68,
         1753,
-        244,
+        2023,
         118,
         68,
         1753,
-        244,
+        2023,
         118,
         68,
         1753,
-        244,
+        2023,
         118,
         68,
         1753,
-        244,
+        2023,
         84,
+        40,
         84,
+        40,
         84,
-        84
+        40,
+        84,
+        40
       ],
       "phase_timings_ms": {
         "diagnostics": {
           "median": 1,
-          "p95": 1
+          "p95": 3
         },
         "project_setup": {
-          "median": 90.5,
-          "p95": 202.25
+          "median": 40.5,
+          "p95": 426
         },
         "symbol_scan": {
-          "median": 31.5,
-          "p95": 541.55
+          "median": 0,
+          "p95": 672.05
         }
       },
       "reason_counts": {
-        "ambiguous_project": 0,
+        "ambiguous_project": 4,
         "blocking_diagnostics": 948,
         "no_project": 0
       }
@@ -302,11 +311,6 @@
           "path": "src/server/editorServices.ts",
           "line": 3295,
           "col": 54
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3296,
-          "col": 16
         }
       ],
       "feature_buckets": [
@@ -345,11 +349,6 @@
           "path": "src/server/editorServices.ts",
           "line": 3111,
           "col": 39
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3161,
-          "col": 63
         }
       ],
       "feature_buckets": [
@@ -388,11 +387,6 @@
           "path": "src/server/editorServices.ts",
           "line": 2386,
           "col": 30
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3477,
-          "col": 34
         }
       ],
       "feature_buckets": [
@@ -448,11 +442,6 @@
       "uses": [
         {
           "path": "src/compiler/moduleNameResolver.ts",
-          "line": 2984,
-          "col": 17
-        },
-        {
-          "path": "src/compiler/moduleNameResolver.ts",
           "line": 470,
           "col": 21
         }
@@ -474,21 +463,6 @@
           "path": "src/server/project.ts",
           "line": 1528,
           "col": 28
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 153,
-          "col": 36
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 200,
-          "col": 36
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 224,
-          "col": 36
         }
       ],
       "feature_buckets": [
@@ -546,11 +520,6 @@
           "path": "src/server/editorServices.ts",
           "line": 2322,
           "col": 25
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3751,
-          "col": 21
         }
       ],
       "feature_buckets": [
@@ -589,26 +558,6 @@
           "path": "src/server/project.ts",
           "line": 1133,
           "col": 53
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1181,
-          "col": 17
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1340,
-          "col": 17
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1674,
-          "col": 22
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1805,
-          "col": 31
         }
       ],
       "feature_buckets": [
@@ -624,31 +573,6 @@
         "col": 4
       },
       "uses": [
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2281,
-          "col": 36
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2344,
-          "col": 18
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3116,
-          "col": 32
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3161,
-          "col": 32
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4169,
-          "col": 25
-        },
         {
           "path": "src/server/scriptInfo.ts",
           "line": 564,
@@ -672,11 +596,6 @@
           "path": "packages/astro/src/core/fetch/fetch-state.ts",
           "line": 501,
           "col": 17
-        },
-        {
-          "path": "packages/astro/src/core/fetch/fetch-state.ts",
-          "line": 906,
-          "col": 17
         }
       ],
       "feature_buckets": [
@@ -695,11 +614,6 @@
         {
           "path": "src/server/project.ts",
           "line": 3003,
-          "col": 28
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 3174,
           "col": 28
         }
       ],
@@ -794,18 +708,8 @@
       "uses": [
         {
           "path": "src/compiler/moduleNameResolver.ts",
-          "line": 2982,
-          "col": 31
-        },
-        {
-          "path": "src/compiler/moduleNameResolver.ts",
           "line": 430,
           "col": 65
-        },
-        {
-          "path": "src/compiler/moduleNameResolver.ts",
-          "line": 464,
-          "col": 38
         }
       ],
       "feature_buckets": [
@@ -863,11 +767,6 @@
           "path": "src/server/editorServices.ts",
           "line": 2934,
           "col": 20
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 5389,
-          "col": 44
         }
       ],
       "feature_buckets": [
@@ -903,19 +802,9 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 5162,
-          "col": 23
-        },
-        {
           "path": "src/server/project.ts",
           "line": 2334,
           "col": 38
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 2340,
-          "col": 42
         }
       ],
       "feature_buckets": [
@@ -932,74 +821,9 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 3931,
-          "col": 85
-        },
-        {
           "path": "src/server/session.ts",
           "line": 2042,
           "col": 41
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2043,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2307,
-          "col": 72
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2435,
-          "col": 41
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2436,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2468,
-          "col": 36
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2688,
-          "col": 33
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2689,
-          "col": 31
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2925,
-          "col": 74
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3116,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3125,
-          "col": 37
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3455,
-          "col": 49
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3456,
-          "col": 47
         }
       ],
       "feature_buckets": [
@@ -1019,11 +843,6 @@
           "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
           "line": 145,
           "col": 47
-        },
-        {
-          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
-          "line": 180,
-          "col": 45
         }
       ],
       "feature_buckets": [
@@ -1100,11 +919,6 @@
           "path": "src/server/scriptInfo.ts",
           "line": 233,
           "col": 28
-        },
-        {
-          "path": "src/server/scriptInfo.ts",
-          "line": 340,
-          "col": 41
         }
       ],
       "feature_buckets": [
@@ -1121,74 +935,9 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 1045,
-          "col": 17
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1897,
-          "col": 27
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1943,
-          "col": 27
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2382,
-          "col": 27
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2485,
-          "col": 28
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2540,
-          "col": 26
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2646,
-          "col": 20
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3141,
-          "col": 35
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4973,
-          "col": 22
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4992,
-          "col": 47
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1300,
-          "col": 26
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 2467,
-          "col": 26
-        },
-        {
           "path": "src/server/project.ts",
           "line": 705,
           "col": 73
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3214,
-          "col": 26
         }
       ],
       "feature_buckets": [
@@ -1206,103 +955,8 @@
       "uses": [
         {
           "path": "src/server/session.ts",
-          "line": 1586,
-          "col": 56
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 1587,
-          "col": 54
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2013,
-          "col": 37
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2022,
-          "col": 50
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2023,
-          "col": 48
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2247,
-          "col": 56
-        },
-        {
-          "path": "src/server/session.ts",
           "line": 241,
           "col": 26
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2415,
-          "col": 34
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2416,
-          "col": 32
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 242,
-          "col": 24
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2511,
-          "col": 34
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2512,
-          "col": 32
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2650,
-          "col": 38
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2651,
-          "col": 36
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2786,
-          "col": 46
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2787,
-          "col": 44
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3163,
-          "col": 30
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3164,
-          "col": 28
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3985,
-          "col": 26
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3986,
-          "col": 24
         }
       ],
       "feature_buckets": [
@@ -1490,11 +1144,6 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 3102,
-          "col": 44
-        },
-        {
           "path": "src/server/scriptInfo.ts",
           "line": 562,
           "col": 35
@@ -1516,11 +1165,6 @@
         {
           "path": "src/server/session.ts",
           "line": 3444,
-          "col": 32
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3466,
           "col": 32
         }
       ],
@@ -1560,21 +1204,6 @@
           "path": "packages/astro/src/preferences/index.ts",
           "line": 107,
           "col": 21
-        },
-        {
-          "path": "packages/astro/src/preferences/index.ts",
-          "line": 108,
-          "col": 22
-        },
-        {
-          "path": "packages/astro/src/preferences/index.ts",
-          "line": 118,
-          "col": 29
-        },
-        {
-          "path": "packages/astro/src/preferences/index.ts",
-          "line": 119,
-          "col": 31
         }
       ],
       "feature_buckets": [
@@ -1613,31 +1242,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1528,
           "col": 13
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1534,
-          "col": 28
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1534,
-          "col": 52
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1534,
-          "col": 87
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3918,
-          "col": 17
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3918,
-          "col": 46
         }
       ],
       "feature_buckets": [
@@ -1730,16 +1334,6 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 1815,
-          "col": 65
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1847,
-          "col": 23
-        },
-        {
           "path": "src/server/session.ts",
           "line": 2175,
           "col": 20
@@ -1781,16 +1375,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1687,
           "col": 16
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1697,
-          "col": 43
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1701,
-          "col": 16
         }
       ],
       "feature_buckets": [
@@ -1810,36 +1394,6 @@
           "path": "src/server/editorServices.ts",
           "line": 3510,
           "col": 27
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3520,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3530,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3645,
-          "col": 17
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3646,
-          "col": 17
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3647,
-          "col": 17
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4032,
-          "col": 22
         }
       ],
       "feature_buckets": [
@@ -1912,11 +1466,6 @@
         "col": 4
       },
       "uses": [
-        {
-          "path": "src/server/session.ts",
-          "line": 2153,
-          "col": 52
-        },
         {
           "path": "src/server/session.ts",
           "line": 827,
@@ -2054,11 +1603,6 @@
           "path": "src/server/project.ts",
           "line": 2319,
           "col": 32
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 2793,
-          "col": 28
         }
       ],
       "feature_buckets": [
@@ -2074,11 +1618,6 @@
         "col": 4
       },
       "uses": [
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3829,
-          "col": 40
-        },
         {
           "path": "src/server/session.ts",
           "line": 1358,
@@ -2140,21 +1679,6 @@
           "path": "src/server/editorServices.ts",
           "line": 3282,
           "col": 16
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4285,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4888,
-          "col": 24
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4889,
-          "col": 24
         }
       ],
       "feature_buckets": [
@@ -2362,28 +1886,8 @@
       "uses": [
         {
           "path": "src/server/session.ts",
-          "line": 1451,
-          "col": 25
-        },
-        {
-          "path": "src/server/session.ts",
           "line": 775,
           "col": 25
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 850,
-          "col": 16
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 867,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 869,
-          "col": 39
         }
       ],
       "feature_buckets": [
@@ -2422,11 +1926,6 @@
           "path": "src/server/session.ts",
           "line": 1732,
           "col": 49
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 1743,
-          "col": 28
         }
       ],
       "feature_buckets": [
@@ -2444,37 +1943,7 @@
       "uses": [
         {
           "path": "src/server/project.ts",
-          "line": 1567,
-          "col": 52
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1580,
-          "col": 52
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1834,
-          "col": 32
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1880,
-          "col": 36
-        },
-        {
-          "path": "src/server/project.ts",
           "line": 844,
-          "col": 32
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 856,
-          "col": 32
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 898,
           "col": 32
         }
       ],
@@ -2511,74 +1980,9 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 3931,
-          "col": 85
-        },
-        {
           "path": "src/server/session.ts",
           "line": 2042,
           "col": 41
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2043,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2307,
-          "col": 72
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2435,
-          "col": 41
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2436,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2468,
-          "col": 36
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2688,
-          "col": 33
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2689,
-          "col": 31
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2925,
-          "col": 74
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3116,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3125,
-          "col": 37
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3455,
-          "col": 49
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3456,
-          "col": 47
         }
       ],
       "feature_buckets": [
@@ -2636,11 +2040,6 @@
           "path": "packages/astro/src/content/runtime.ts",
           "line": 112,
           "col": 12
-        },
-        {
-          "path": "packages/astro/src/content/runtime.ts",
-          "line": 200,
-          "col": 12
         }
       ],
       "feature_buckets": [
@@ -2660,11 +2059,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1770,
           "col": 24
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2857,
-          "col": 16
         }
       ],
       "feature_buckets": [
@@ -2684,31 +2078,6 @@
           "path": "src/server/scriptInfo.ts",
           "line": 508,
           "col": 20
-        },
-        {
-          "path": "src/server/scriptInfo.ts",
-          "line": 534,
-          "col": 28
-        },
-        {
-          "path": "src/server/scriptInfo.ts",
-          "line": 540,
-          "col": 28
-        },
-        {
-          "path": "src/server/scriptInfo.ts",
-          "line": 544,
-          "col": 28
-        },
-        {
-          "path": "src/server/scriptInfo.ts",
-          "line": 551,
-          "col": 28
-        },
-        {
-          "path": "src/server/scriptInfo.ts",
-          "line": 565,
-          "col": 14
         }
       ],
       "feature_buckets": [
@@ -2746,11 +2115,6 @@
         {
           "path": "src/server/project.ts",
           "line": 1047,
-          "col": 28
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1079,
           "col": 28
         }
       ],
@@ -2809,46 +2173,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1815,
           "col": 41
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1830,
-          "col": 27
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2237,
-          "col": 26
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2294,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4199,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4355,
-          "col": 17
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4366,
-          "col": 27
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4974,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4992,
-          "col": 71
         }
       ],
       "feature_buckets": [
@@ -2883,16 +2207,6 @@
         "col": 4
       },
       "uses": [
-        {
-          "path": "src/server/session.ts",
-          "line": 2828,
-          "col": 32
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3038,
-          "col": 28
-        },
         {
           "path": "src/server/session.ts",
           "line": 789,
@@ -2973,11 +2287,6 @@
           "path": "packages/astro/src/core/fetch/fetch-state.ts",
           "line": 484,
           "col": 17
-        },
-        {
-          "path": "packages/astro/src/core/fetch/fetch-state.ts",
-          "line": 897,
-          "col": 17
         }
       ],
       "feature_buckets": [
@@ -2997,16 +2306,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1771,
           "col": 24
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2933,
-          "col": 20
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3173,
-          "col": 16
         }
       ],
       "feature_buckets": [
@@ -3026,11 +2325,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1095,
           "col": 12
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2925,
-          "col": 16
         }
       ],
       "feature_buckets": [
@@ -3049,11 +2343,6 @@
         {
           "path": "packages/astro/src/core/fetch/fetch-state.ts",
           "line": 474,
-          "col": 17
-        },
-        {
-          "path": "packages/astro/src/core/fetch/fetch-state.ts",
-          "line": 878,
           "col": 17
         }
       ],
@@ -3074,11 +2363,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1053,
           "col": 12
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1060,
-          "col": 16
         }
       ],
       "feature_buckets": [
@@ -3114,11 +2398,6 @@
       },
       "uses": [
         {
-          "path": "packages/astro/src/core/dev/dev.ts",
-          "line": 129,
-          "col": 15
-        },
-        {
           "path": "packages/astro/src/core/sync/index.ts",
           "line": 159,
           "col": 17
@@ -3140,11 +2419,6 @@
         {
           "path": "src/server/project.ts",
           "line": 1078,
-          "col": 28
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1793,
           "col": 28
         }
       ],
@@ -3184,21 +2458,6 @@
           "path": "src/server/project.ts",
           "line": 1528,
           "col": 28
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 153,
-          "col": 36
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 200,
-          "col": 36
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 224,
-          "col": 36
         }
       ],
       "feature_buckets": [
@@ -3292,16 +2551,6 @@
       "uses": [
         {
           "path": "src/server/project.ts",
-          "line": 1314,
-          "col": 13
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 1771,
-          "col": 28
-        },
-        {
-          "path": "src/server/project.ts",
           "line": 727,
           "col": 23
         }
@@ -3342,21 +2591,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1772,
           "col": 24
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2798,
-          "col": 16
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 3416,
-          "col": 16
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 5391,
-          "col": 40
         }
       ],
       "feature_buckets": [
@@ -3374,62 +2608,7 @@
       "uses": [
         {
           "path": "src/server/session.ts",
-          "line": 1221,
-          "col": 47
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 1605,
-          "col": 35
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2243,
-          "col": 42
-        },
-        {
-          "path": "src/server/session.ts",
           "line": 228,
-          "col": 35
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 239,
-          "col": 31
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2937,
-          "col": 35
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2944,
-          "col": 35
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2965,
-          "col": 49
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2980,
-          "col": 35
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2992,
-          "col": 262
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2998,
-          "col": 213
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3059,
           "col": 35
         }
       ],
@@ -3446,11 +2625,6 @@
         "col": 1
       },
       "uses": [
-        {
-          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
-          "line": 119,
-          "col": 26
-        },
         {
           "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
           "line": 35,
@@ -3547,74 +2721,9 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 3931,
-          "col": 85
-        },
-        {
           "path": "src/server/session.ts",
           "line": 2042,
           "col": 41
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2043,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2307,
-          "col": 72
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2435,
-          "col": 41
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2436,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2468,
-          "col": 36
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2688,
-          "col": 33
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2689,
-          "col": 31
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2925,
-          "col": 74
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3116,
-          "col": 39
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3125,
-          "col": 37
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3455,
-          "col": 49
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3456,
-          "col": 47
         }
       ],
       "feature_buckets": [
@@ -3691,16 +2800,6 @@
           "path": "src/server/session.ts",
           "line": 897,
           "col": 94
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 901,
-          "col": 102
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 905,
-          "col": 101
         }
       ],
       "feature_buckets": [
@@ -3739,11 +2838,6 @@
           "path": "src/server/project.ts",
           "line": 2231,
           "col": 32
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 2238,
-          "col": 35
         }
       ],
       "feature_buckets": [
@@ -3782,21 +2876,6 @@
           "path": "src/server/project.ts",
           "line": 1528,
           "col": 28
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 153,
-          "col": 36
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 200,
-          "col": 36
-        },
-        {
-          "path": "src/server/typingInstallerAdapter.ts",
-          "line": 224,
-          "col": 36
         }
       ],
       "feature_buckets": [
@@ -3891,11 +2970,6 @@
         {
           "path": "src/server/editorServices.ts",
           "line": 1905,
-          "col": 17
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 1948,
           "col": 17
         }
       ],
@@ -4009,11 +3083,6 @@
       "uses": [
         {
           "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
-          "line": 112,
-          "col": 44
-        },
-        {
-          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
           "line": 28,
           "col": 26
         }
@@ -4089,11 +3158,6 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 2334,
-          "col": 26
-        },
-        {
           "path": "src/server/scriptInfo.ts",
           "line": 683,
           "col": 14
@@ -4116,21 +3180,6 @@
           "path": "src/server/editorServices.ts",
           "line": 1124,
           "col": 16
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2819,
-          "col": 70
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2915,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 2916,
-          "col": 20
         }
       ],
       "feature_buckets": [
@@ -4150,11 +3199,6 @@
           "path": "src/server/editorServices.ts",
           "line": 3293,
           "col": 36
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 4339,
-          "col": 61
         }
       ],
       "feature_buckets": [
@@ -4171,24 +3215,9 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 4228,
-          "col": 20
-        },
-        {
           "path": "src/server/session.ts",
           "line": 897,
           "col": 47
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 901,
-          "col": 55
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 905,
-          "col": 54
         }
       ],
       "feature_buckets": [
@@ -4265,11 +3294,6 @@
           "path": "packages/astro/src/core/fetch/fetch-state.ts",
           "line": 481,
           "col": 17
-        },
-        {
-          "path": "packages/astro/src/core/fetch/fetch-state.ts",
-          "line": 894,
-          "col": 17
         }
       ],
       "feature_buckets": [
@@ -4308,11 +3332,6 @@
           "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
           "line": 142,
           "col": 43
-        },
-        {
-          "path": "packages/astro/src/core/server-islands/vite-plugin-server-islands.ts",
-          "line": 175,
-          "col": 36
         }
       ],
       "feature_buckets": [
@@ -4329,34 +3348,9 @@
       },
       "uses": [
         {
-          "path": "src/server/editorServices.ts",
-          "line": 5032,
-          "col": 98
-        },
-        {
           "path": "src/server/project.ts",
           "line": 2469,
           "col": 47
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 2472,
-          "col": 71
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 2482,
-          "col": 66
-        },
-        {
-          "path": "src/server/project.ts",
-          "line": 2483,
-          "col": 71
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 229,
-          "col": 41
         }
       ],
       "feature_buckets": [
@@ -4547,16 +3541,6 @@
           "path": "src/server/session.ts",
           "line": 2533,
           "col": 35
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 2570,
-          "col": 57
-        },
-        {
-          "path": "src/server/session.ts",
-          "line": 3956,
-          "col": 35
         }
       ],
       "feature_buckets": [
@@ -4593,28 +3577,8 @@
       "uses": [
         {
           "path": "src/server/editorServices.ts",
-          "line": 1094,
-          "col": 12
-        },
-        {
-          "path": "src/server/editorServices.ts",
           "line": 869,
           "col": 59
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 891,
-          "col": 29
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 984,
-          "col": 21
-        },
-        {
-          "path": "src/server/editorServices.ts",
-          "line": 984,
-          "col": 64
         }
       ],
       "feature_buckets": [

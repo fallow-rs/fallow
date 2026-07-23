@@ -139,13 +139,33 @@ export type AuditVerdict = ("pass" | "warn" | "fail")
 export type ElapsedMs = number
 export type AuditGate = ("new-only" | "all")
 /**
+ * Analysis mode stored with baselines, snapshots, audit sides, and impact data.
+ */
+export type SemanticAnalysisMode = ("syntactic" | "type-aware")
+/**
+ * Semantic capabilities that can share one TypeScript Program session.
+ */
+export type SemanticCapability = ("symbol-use" | "symbol-trace" | "api-surface" | "symbol-impact" | "type-coupling")
+/**
+ * Whether the semantic backend answered every requested query safely.
+ */
+export type SemanticCompleteness = ("complete" | "partial" | "unavailable")
+/**
+ * Stable reason why semantic evidence is partial or unavailable.
+ */
+export type SemanticGapReason = ("no-project" | "blocking-diagnostics" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "capacity" | "unsupported-syntax")
+/**
+ * Value or type namespace for one exact declaration or reference.
+ */
+export type SemanticNamespace = ("value" | "type")
+/**
  * How a TypeScript project was selected for semantic refinement.
  */
 export type TypeAwareProjectSource = ("auto" | "explicit")
 /**
  * Outcome of semantic refinement for one TypeScript project.
  */
-export type TypeAwareProjectStatus = ("refined" | "abstained")
+export type TypeAwareProjectStatus = ("refined" | "abstained" | "complete" | "unavailable")
 /**
  * Closed set of reasons for retaining a candidate without semantic scanning.
  */
@@ -991,7 +1011,7 @@ docs?: (string | null)
  */
 telemetry?: (TelemetryMeta | null)
 /**
- * Provenance for the experimental TypeScript semantic refinement pass.
+ * Provenance for the opt-in TypeScript semantic analysis pass.
  */
 type_aware?: (TypeAwareMeta | null)
 /**
@@ -1025,9 +1045,33 @@ export interface TelemetryMeta {
 analysis_run_id?: (string | null)
 }
 /**
- * Bounded provenance emitted when the experimental type-aware pass runs.
+ * Bounded provenance emitted when the opt-in type-aware pass runs.
  */
 export interface TypeAwareMeta {
+/**
+ * Compatibility identity used by audit, baselines, snapshots, and stores.
+ */
+identity?: (SemanticAnalysisIdentity | null)
+/**
+ * Compact status for every requested semantic query.
+ */
+queries?: SemanticQuerySummary[]
+/**
+ * Checker-backed trace evidence requested by focused symbol queries.
+ */
+symbol_traces?: SemanticSymbolTrace[]
+/**
+ * Package-public surface and confirmed private type leaks.
+ */
+api_surface?: (ApiSurfaceResult | null)
+/**
+ * Exact-symbol blast radius and targeted-test recommendations.
+ */
+symbol_impacts?: SemanticSymbolImpact[]
+/**
+ * Advisory project-local public-signature coupling.
+ */
+type_coupling?: (TypeCouplingReport | null)
 /**
  * Version of Fallow's backend-neutral sidecar protocol.
  */
@@ -1084,6 +1128,505 @@ elapsed_ms: number
 phase_timings_ms: TypeAwarePhaseTimings
 }
 /**
+ * Compatibility identity for comparing two analysis results.
+ */
+export interface SemanticAnalysisIdentity {
+mode: SemanticAnalysisMode
+/**
+ * Version of the semantic result schema, independent of tool versions.
+ */
+semantic_schema_version: number
+/**
+ * Sorted capability set requested for the analysis.
+ */
+capabilities: SemanticCapability[]
+/**
+ * Hash of normalized project ownership and compiler configuration.
+ */
+project_config_hash: string
+/**
+ * Backend family, such as `typescript-go`.
+ */
+backend_family: string
+completeness: SemanticCompleteness
+}
+/**
+ * Compact per-query status embedded in run metadata.
+ */
+export interface SemanticQuerySummary {
+/**
+ * Stable query identifier within this analysis run.
+ */
+query_id: number
+capability: SemanticCapability
+/**
+ * Operation-specific assertion, never a generic compiler verdict.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Stable primary gap reason when partial or unavailable.
+ */
+reason_code?: (SemanticGapReason | null)
+/**
+ * Evidence count before bounding.
+ */
+total_evidence_count: number
+/**
+ * Whether evidence or payload arrays were truncated.
+ */
+truncated: boolean
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * Counted omission attached to a partial or unavailable result.
+ */
+export interface SemanticOmission {
+reason_code: SemanticGapReason
+/**
+ * Number of omitted items or relations.
+ */
+count: number
+}
+/**
+ * Typed semantic trace attached to an existing syntactic trace.
+ */
+export interface SemanticSymbolTrace {
+target: SemanticSymbol
+identity: SemanticAnalysisIdentity
+/**
+ * TypeScript project selected for this symbol.
+ */
+selected_project: string
+/**
+ * Concrete assertion, such as `references-found`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Bounded reference evidence.
+ */
+references: SemanticReference[]
+/**
+ * Count before evidence bounding.
+ */
+total_reference_count: number
+/**
+ * Exact reference locations found by the TypeScript checker.
+ */
+checker_evidence_count: number
+/**
+ * Alias and re-export hops derived from the semantic graph.
+ */
+graph_evidence_count: number
+/**
+ * Whether reference evidence was truncated.
+ */
+truncated: boolean
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions for a user or automation consumer.
+ */
+actions?: string[]
+}
+/**
+ * Stable identity for a declaration sent to or returned by the backend.
+ */
+export interface SemanticSymbol {
+/**
+ * Project-root-relative declaration path.
+ */
+path: string
+namespace: SemanticNamespace
+/**
+ * Stable declaration kind, such as `function` or `class-method`.
+ */
+declaration_kind: string
+/**
+ * Name exposed to consumers.
+ */
+exported_name: string
+/**
+ * Local declaration name.
+ */
+local_name: string
+/**
+ * Optional owning class or namespace.
+ */
+owner?: (string | null)
+/**
+ * One-based declaration line.
+ */
+line: number
+/**
+ * Zero-based UTF-8 byte column.
+ */
+col: number
+}
+/**
+ * Located semantic reference evidence.
+ */
+export interface SemanticReference {
+/**
+ * Project-root-relative reference path.
+ */
+path: string
+/**
+ * One-based source line.
+ */
+line: number
+/**
+ * Zero-based UTF-8 byte column.
+ */
+col: number
+/**
+ * Reference role, such as `read`, `type`, `alias`, or `re-export`.
+ */
+role: string
+namespace: SemanticNamespace
+/**
+ * Alias and re-export hops between the reference and declaration.
+ */
+via?: SemanticAliasHop[]
+}
+/**
+ * One alias or re-export hop in semantic provenance.
+ */
+export interface SemanticAliasHop {
+/**
+ * Project-root-relative hop path.
+ */
+path: string
+/**
+ * Name before this hop.
+ */
+from_name: string
+/**
+ * Name exposed after this hop.
+ */
+to_name: string
+/**
+ * Relation, such as `import-alias` or `re-export`.
+ */
+relation: string
+}
+/**
+ * Package API surface result shared by inspect and private-leak analysis.
+ */
+export interface ApiSurfaceResult {
+/**
+ * Concrete assertion, such as `leak-confirmed`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Public API entries.
+ */
+entries: ApiSurfaceEntry[]
+/**
+ * Confirmed private type leaks.
+ */
+private_type_leaks: SemanticPrivateTypeLeak[]
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * One package-public API entry described by the semantic backend.
+ */
+export interface ApiSurfaceEntry {
+exposed: SemanticSymbol
+origin: SemanticSymbol
+/**
+ * Stable normalized signature fingerprint.
+ */
+signature_fingerprint: string
+/**
+ * Project-local types referenced by the signature.
+ */
+referenced_types: PublicTypeReference[]
+}
+/**
+ * One project-local type referenced by a public signature.
+ */
+export interface PublicTypeReference {
+declaration: SemanticSymbol
+/**
+ * Signature relation, such as return type or generic constraint.
+ */
+relation: string
+}
+/**
+ * Exact semantic evidence for a private type leak.
+ */
+export interface SemanticPrivateTypeLeak {
+exposed: SemanticSymbol
+private_declaration: SemanticSymbol
+/**
+ * Signature relation through which the type is exposed.
+ */
+relation: string
+/**
+ * Stable TypeScript diagnostic code used as supporting evidence.
+ */
+diagnostic_code?: (number | null)
+}
+/**
+ * Exact-symbol impact and targeted-test recommendation.
+ */
+export interface SemanticSymbolImpact {
+target: SemanticSymbol
+identity: SemanticAnalysisIdentity
+/**
+ * TypeScript project selected for this symbol.
+ */
+selected_project: string
+/**
+ * Concrete assertion, such as `consumers-found`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Files that reference the exact symbol directly.
+ */
+direct_consumers: SemanticImpactPath[]
+/**
+ * Direct consumer count before evidence bounding.
+ */
+total_direct_consumer_count: number
+/**
+ * Transitively affected production files.
+ */
+affected_files: SemanticImpactPath[]
+/**
+ * Transitive affected-file count before evidence bounding.
+ */
+total_affected_file_count: number
+/**
+ * Directly relevant test entry points.
+ */
+targeted_tests: SemanticImpactPath[]
+/**
+ * Targeted-test count before evidence bounding.
+ */
+total_targeted_test_count: number
+/**
+ * Confidence after accounting for dynamic behavior.
+ */
+confidence: string
+/**
+ * Counted omissions, including dynamic behavior.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * One production file or test reached by exact-symbol impact analysis.
+ */
+export interface SemanticImpactPath {
+/**
+ * Project-root-relative affected path.
+ */
+path: string
+/**
+ * Relation to the target, such as `direct-value-consumer`.
+ */
+relation: string
+/**
+ * Shortest graph distance from the target.
+ */
+distance: number
+/**
+ * Located provenance path.
+ */
+via?: string[]
+}
+/**
+ * Advisory project-local public-signature coupling report.
+ */
+export interface TypeCouplingReport {
+identity: SemanticAnalysisIdentity
+/**
+ * Concrete assertion, such as `coupling-found`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Project summary. Absent when analysis is unavailable, never a fake zero.
+ */
+summary?: (TypeCouplingSummary | null)
+/**
+ * Per-file coupling details.
+ */
+files: TypeCouplingFile[]
+/**
+ * Highest-degree files contributing to project coupling.
+ */
+top_contributors?: TypeCouplingFile[]
+/**
+ * Located project-local type cycles.
+ */
+cycles?: TypeCouplingCycle[]
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * Project summary for advisory type coupling.
+ */
+export interface TypeCouplingSummary {
+/**
+ * Measurement boundary, currently project-local public signatures.
+ */
+scope: string
+/**
+ * Edge direction, currently directed.
+ */
+direction: string
+/**
+ * Distinct project files in the selected TypeScript projects.
+ */
+project_size: number
+/**
+ * Distinct project files included in the denominator.
+ */
+files_analyzed: number
+/**
+ * Files participating in at least one project-local type edge.
+ */
+distinct_coupled_files: number
+/**
+ * Project-local public-signature edge count before evidence bounding.
+ */
+edge_count: number
+/**
+ * Percentage of analyzed files participating in a type edge.
+ */
+coupled_file_pct: number
+/**
+ * Median distinct-file type connections.
+ */
+p50_distinct_connections: number
+/**
+ * P90 distinct-file type connections.
+ */
+p90_distinct_connections: number
+/**
+ * P95 incoming distinct-file type coupling.
+ */
+p95_public_types_used_by: number
+/**
+ * P95 outgoing distinct-file type coupling.
+ */
+p95_public_api_depends_on: number
+/**
+ * Percentage of files above the adaptive high-coupling threshold.
+ */
+high_coupling_pct: number
+/**
+ * Share of edge endpoints represented by the top contributors.
+ */
+concentration: number
+/**
+ * Number of project-local public-signature cycles.
+ */
+cycle_count: number
+}
+/**
+ * Per-file project-local public-signature coupling.
+ */
+export interface TypeCouplingFile {
+/**
+ * Project-root-relative file path.
+ */
+path: string
+/**
+ * Distinct files this file's public API depends on.
+ */
+public_api_depends_on: number
+/**
+ * Located project files this file's public API depends on.
+ */
+public_api_depends_on_files?: string[]
+/**
+ * Distinct files whose public types use this file.
+ */
+public_types_used_by: number
+/**
+ * Located project files whose public types use this file.
+ */
+public_types_used_by_files?: string[]
+/**
+ * Located public-signature edges.
+ */
+edges: TypeCouplingEdge[]
+}
+/**
+ * One project-local public-signature type edge.
+ */
+export interface TypeCouplingEdge {
+source: SemanticSymbol
+target: SemanticSymbol
+/**
+ * Signature relation.
+ */
+relation: string
+evidence: SemanticSourceLocation
+/**
+ * Scope, such as `module-export` or `package-public`.
+ */
+scope: string
+}
+/**
+ * One project-root-relative source location used as semantic evidence.
+ */
+export interface SemanticSourceLocation {
+/**
+ * Project-root-relative source path.
+ */
+path: string
+/**
+ * One-based source line.
+ */
+line: number
+/**
+ * Zero-based UTF-8 byte column.
+ */
+col: number
+}
+/**
+ * One project-local cycle through public-signature type dependencies.
+ */
+export interface TypeCouplingCycle {
+/**
+ * Ordered project-root-relative files, ending at the start file.
+ */
+files: string[]
+}
+/**
  * Closed abstention reason counts for stable machine consumption.
  */
 export interface TypeAwareAbstentionCounts {
@@ -1134,6 +1677,14 @@ blocking_diagnostic_count: number
  * Source files loaded into this TypeScript program.
  */
 source_file_count: number
+/**
+ * Whether this Program served more than one semantic query in the batch.
+ */
+program_reused?: (boolean | null)
+/**
+ * Stable v3 project-level gap reason.
+ */
+reason_code?: (SemanticGapReason | null)
 abstain_reason?: TypeAwareAbstentionReason
 }
 /**
@@ -2048,6 +2599,11 @@ col: number
  * Byte offset of the type reference.
  */
 span_start: number
+/**
+ * Exact checker-backed provenance when type-aware analysis confirmed the
+ * package-public leak across files or re-exports.
+ */
+semantic?: (SemanticPrivateTypeLeak | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -7332,6 +7888,7 @@ target: InspectTargetDescriptor
 identity: InspectIdentity
 evidence: InspectEvidence
 warnings: string[]
+_meta?: (Meta | null)
 }
 export interface InspectFileIdentity {
 file: string
@@ -7369,6 +7926,26 @@ churn?: (InspectEvidenceSection | null)
  * best-effort and not part of the trusted ranked evidence.
  */
 symbol_chain?: (InspectEvidenceSection | null)
+/**
+ * Checker-backed declaration, alias, re-export, and use-site evidence.
+ * Present only for a symbol target in type-aware mode.
+ */
+semantic_trace?: (InspectEvidenceSection | null)
+/**
+ * Package-public TypeScript surface and private-type reachability.
+ * Present only for a symbol target in type-aware mode.
+ */
+api_surface?: (InspectEvidenceSection | null)
+/**
+ * Exact-symbol consumers and transitive affected files.
+ * Present only for a symbol target in type-aware mode.
+ */
+symbol_impact?: (InspectEvidenceSection | null)
+/**
+ * Test entry points reachable from the exact symbol, with provenance.
+ * Present only for a symbol target in type-aware mode.
+ */
+targeted_tests?: (InspectEvidenceSection | null)
 }
 export interface InspectEvidenceSection {
 status: InspectSectionStatus

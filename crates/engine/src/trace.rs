@@ -39,6 +39,28 @@ pub fn trace_export(
     trace_impl::trace_export(graph.as_graph(), root, file_path, export_name)
 }
 
+/// Resolve the source identity for an exact semantic export query.
+#[must_use]
+pub fn semantic_symbol_for_export(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    file_path: &str,
+    export_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    trace_impl::semantic_symbol_for_export(graph.as_graph(), root, file_path, export_name)
+}
+
+/// Resolve the source identity for an exact semantic class-member query.
+#[must_use]
+pub fn semantic_symbol_for_class_member(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    file_path: &str,
+    member_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    trace_impl::semantic_symbol_for_class_member(graph.as_graph(), root, file_path, member_name)
+}
+
 /// Trace a class / enum / store member (the `--trace FILE:MEMBER` fallback when
 /// `MEMBER` is not a top-level export). See issue #1744.
 #[must_use]

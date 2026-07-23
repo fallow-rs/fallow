@@ -26,6 +26,22 @@ impl EmailModeParam {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareRequireParam {
+    BestEffort,
+    Complete,
+}
+
+impl TypeAwareRequireParam {
+    pub const fn as_cli(self) -> &'static str {
+        match self {
+            Self::BestEffort => "best-effort",
+            Self::Complete => "complete",
+        }
+    }
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct AnalyzeParams {
     pub root: Option<String>,
@@ -66,6 +82,15 @@ pub struct AnalyzeParams {
     pub no_cache: Option<bool>,
 
     pub threads: Option<usize>,
+
+    /// Refine project-wide public API findings with TypeScript symbol identity.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -337,6 +362,15 @@ pub struct InspectTargetParams {
 
     pub threads: Option<usize>,
 
+    /// Include project-wide TypeScript semantic evidence for symbol targets.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
+
     /// OPT-IN (default off): attach target-level git churn evidence. Missing
     /// git history is returned as an explicit unavailable evidence section.
     pub include_churn: Option<bool>,
@@ -398,6 +432,32 @@ pub struct TraceExportParams {
     pub production: Option<bool>,
 
     pub workspace: Option<String>,
+
+    pub no_cache: Option<bool>,
+
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SemanticSymbolParams {
+    #[schemars(length(min = 1))]
+    pub file: String,
+
+    #[schemars(length(min = 1))]
+    pub export_name: String,
+
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    pub allow_remote_extends: Option<bool>,
+
+    /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
 
     pub no_cache: Option<bool>,
 
@@ -645,6 +705,18 @@ pub struct HealthParams {
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 
+    /// Enable the TypeScript semantic backend.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
+
+    /// Include advisory project-local public-signature type coupling.
+    pub type_coupling: Option<bool>,
+
     /// Compare current metrics against the most recent saved snapshot and show per-metric deltas.
     /// Implies --score. Reads from `.fallow/snapshots/`.
     pub trend: Option<bool>,
@@ -831,6 +903,15 @@ pub struct AuditParams {
 
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
+
+    /// Refine both audit sides with TypeScript symbol identity before attribution.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
 
     /// Group audit findings by CODEOWNERS ownership, directory, workspace
     /// package, or GitLab CODEOWNERS section. Values: "owner", "directory",

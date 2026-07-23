@@ -3,8 +3,7 @@
 //! flow: `fallow --format json -o results.json`, then one `report` call per
 //! rendered surface).
 //!
-//! v1 supports only the GitHub-native text formats; SARIF and markdown
-//! re-rendering from a saved envelope is a recorded follow-up. Dispatch is on
+//! Supports the GitHub-native text formats plus CodeClimate and SARIF. Dispatch is on
 //! the envelope's `kind` field, so any envelope produced by `--format json`
 //! (dead-code, dupes, health, audit, security, or the bare combined run)
 //! renders byte-identically to the direct `--format` run. The `fallow fix`
@@ -22,13 +21,14 @@ use crate::telemetry;
 
 /// Run `fallow report --from <file>` with the global `--format` and `--root`.
 pub fn run_report(from: &Path, output: OutputFormat, root: &Path) -> ExitCode {
-    let summary = match output {
-        OutputFormat::GithubAnnotations => false,
-        OutputFormat::GithubSummary => true,
+    let target = match output {
+        OutputFormat::GithubAnnotations => ReportTarget::GithubAnnotations,
+        OutputFormat::GithubSummary => ReportTarget::GithubSummary,
+        OutputFormat::CodeClimate => ReportTarget::CodeClimate,
+        OutputFormat::Sarif => ReportTarget::Sarif,
         _ => {
             return crate::emit_known_failure(
-                "fallow report supports --format github-annotations or github-summary only \
-                 (re-rendering saved envelopes as sarif or markdown is a recorded follow-up)",
+                "fallow report supports --format github-annotations, github-summary, codeclimate, or sarif only",
                 2,
                 output,
                 telemetry::FailureReason::UnsupportedFormat,
@@ -43,11 +43,24 @@ pub fn run_report(from: &Path, output: OutputFormat, root: &Path) -> ExitCode {
         Ok(kind) => kind,
         Err(code) => return code,
     };
-    if summary {
-        github_summary::print_summary(kind, &envelope, root)
-    } else {
-        github_annotations::print_annotations(kind, &envelope, root)
+    match target {
+        ReportTarget::GithubAnnotations => {
+            github_annotations::print_annotations(kind, &envelope, root)
+        }
+        ReportTarget::GithubSummary => github_summary::print_summary(kind, &envelope, root),
+        ReportTarget::CodeClimate => {
+            crate::report::codeclimate::print_envelope_codeclimate(kind, &envelope, root)
+        }
+        ReportTarget::Sarif => crate::report::sarif::print_envelope_sarif(kind, &envelope, root),
     }
+}
+
+#[derive(Clone, Copy)]
+enum ReportTarget {
+    GithubAnnotations,
+    GithubSummary,
+    CodeClimate,
+    Sarif,
 }
 
 fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value, ExitCode> {

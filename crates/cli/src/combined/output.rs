@@ -805,6 +805,9 @@ fn build_combined_json_output(
         root: input.root,
         elapsed: input.elapsed,
         explain: input.explain,
+        type_aware: input
+            .check_result
+            .and_then(|result| result.type_aware_meta.clone()),
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -879,8 +882,9 @@ fn print_combined_sarif(
     let mut all_runs = Vec::new();
 
     if let Some(result) = check {
-        let sarif =
+        let mut sarif =
             report::api_sarif_document(&result.results, &result.config.root, &result.config.rules);
+        report::sarif::annotate_type_aware_sarif(&mut sarif, result.type_aware_meta.as_ref());
         if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
             all_runs.extend(runs.iter().cloned());
         }

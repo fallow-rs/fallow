@@ -35,6 +35,12 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
         params.threads,
     );
     push_remote_extends(&mut args, params.allow_remote_extends);
+    super::push_type_aware(
+        &mut args,
+        params.type_aware,
+        params.type_aware_projects.as_deref(),
+        params.type_aware_require,
+    );
     if params.production == Some(false) {
         args.push("--no-production".to_string());
         push_scope(&mut args, None, params.workspace.as_deref());
@@ -84,6 +90,9 @@ mod tests {
             allow_remote_extends: None,
             no_cache: None,
             threads: None,
+            type_aware: None,
+            type_aware_projects: None,
+            type_aware_require: None,
             production: Some(false),
             workspace: Some("pkg-a".to_string()),
             target: InspectTarget::File {
@@ -108,6 +117,9 @@ mod tests {
             allow_remote_extends: None,
             no_cache: None,
             threads: None,
+            type_aware: None,
+            type_aware_projects: None,
+            type_aware_require: None,
             production: None,
             workspace: None,
             target: InspectTarget::Symbol {
@@ -134,6 +146,9 @@ mod tests {
             allow_remote_extends: None,
             no_cache: None,
             threads: None,
+            type_aware: None,
+            type_aware_projects: None,
+            type_aware_require: None,
             production: None,
             workspace: None,
             target: InspectTarget::Symbol {
@@ -156,6 +171,9 @@ mod tests {
             allow_remote_extends: None,
             no_cache: None,
             threads: None,
+            type_aware: None,
+            type_aware_projects: None,
+            type_aware_require: None,
             production: None,
             workspace: None,
             target: InspectTarget::File {
@@ -178,6 +196,9 @@ mod tests {
             allow_remote_extends: None,
             no_cache: None,
             threads: None,
+            type_aware: None,
+            type_aware_projects: None,
+            type_aware_require: None,
             production: None,
             workspace: None,
             target: InspectTarget::File {

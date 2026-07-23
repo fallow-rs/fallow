@@ -233,6 +233,13 @@ RUNNER_TMP="$INSTALL_TMP/runner"
 mkdir -p "$RUNNER_TMP/bin" "$RUNNER_TMP/root"
 cat > "$RUNNER_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
+if [ -n "${FALLOW_TEST_ENV_FILE:-}" ]; then
+  printf '%s\n' \
+    "FALLOW_TYPE_AWARE=${FALLOW_TYPE_AWARE:-}" \
+    "FALLOW_TYPE_AWARE_PROJECTS=${FALLOW_TYPE_AWARE_PROJECTS:-}" \
+    "FALLOW_TYPE_AWARE_REQUIRE=${FALLOW_TYPE_AWARE_REQUIRE:-}" \
+    > "$FALLOW_TEST_ENV_FILE"
+fi
 printf '{"total_issues":0}\n'
 SH
 chmod +x "$RUNNER_TMP/bin/fallow"
@@ -308,6 +315,10 @@ OUT=$(cd "$RUNNER_TMP" && env \
   FALLOW_DRY_RUN=true \
   FALLOW_NO_CACHE=false \
   FALLOW_THREADS= \
+  FALLOW_TYPE_AWARE=true \
+  FALLOW_TYPE_AWARE_PROJECTS=tsconfig.app.json,tsconfig.test.json \
+  FALLOW_TYPE_AWARE_REQUIRE=complete \
+  FALLOW_TEST_ENV_FILE="$RUNNER_TMP/type-aware-env" \
   FALLOW_ONLY= \
   FALLOW_SKIP= \
   FALLOW_SCRIPTS_REF= \
@@ -321,6 +332,10 @@ fi
 ARGS=$(cat "$RUNNER_TMP/fallow-analysis-args.sh")
 assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "run writer: forwards coverage to default combined command"
 assert_contains "$ARGS" "--coverage-root /ci/workspace" "run writer: forwards coverage-root to default combined command"
+TYPE_AWARE_ENV=$(cat "$RUNNER_TMP/type-aware-env")
+assert_contains "$TYPE_AWARE_ENV" "FALLOW_TYPE_AWARE=true" "run writer: preserves type-aware enablement"
+assert_contains "$TYPE_AWARE_ENV" "FALLOW_TYPE_AWARE_PROJECTS=tsconfig.app.json,tsconfig.test.json" "run writer: preserves type-aware projects"
+assert_contains "$TYPE_AWARE_ENV" "FALLOW_TYPE_AWARE_REQUIRE=complete" "run writer: preserves type-aware completeness policy"
 
 # =========================================================================
 # Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml

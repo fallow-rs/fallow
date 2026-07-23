@@ -24,7 +24,7 @@ update_optional_deps() {
     pkg.version = '$VERSION';
     if (pkg.optionalDependencies) {
       for (const key of Object.keys(pkg.optionalDependencies)) {
-        if (key.startsWith('@fallow-cli/')) {
+        if (key.startsWith('@fallow-cli/') || key === 'fallow-type-aware') {
           pkg.optionalDependencies[key] = '$VERSION';
         }
       }
@@ -43,7 +43,7 @@ update_napi_lockfile() {
       lock.packages[''].version = '$VERSION';
       if (lock.packages[''].optionalDependencies) {
         for (const key of Object.keys(lock.packages[''].optionalDependencies)) {
-          if (key.startsWith('@fallow-cli/fallow-node')) {
+          if (key.startsWith('@fallow-cli/fallow-node') || key === 'fallow-type-aware') {
             lock.packages[''].optionalDependencies[key] = '$VERSION';
           }
         }
@@ -84,6 +84,9 @@ echo "  Updated fallow/package.json → $VERSION"
 # Update Node bindings package (version + optionalDependencies)
 update_optional_deps "$ROOT/crates/napi/package.json"
 echo "  Updated crates/napi/package.json → $VERSION"
+
+update_version "$ROOT/tools/type-aware-sidecar/package.json"
+echo "  Updated tools/type-aware-sidecar/package.json → $VERSION"
 
 if [ -f "$ROOT/crates/napi/package-lock.json" ]; then
   update_napi_lockfile "$ROOT/crates/napi/package-lock.json"

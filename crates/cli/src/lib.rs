@@ -74,6 +74,7 @@ mod runtime_support;
 mod schema;
 mod security;
 mod security_help;
+mod semantic_queries;
 mod setup_hooks;
 mod signal;
 mod suppressions;
@@ -162,7 +163,7 @@ Setup and configuration:
 Automation and CI:
   ci             Build PR/MR feedback envelopes
   ci-template    Print or vendor CI integration templates
-  report         Re-render a saved --format json results file (GitHub formats)
+  report         Re-render saved JSON as GitHub or CodeClimate output
   hooks          Install or remove fallow-managed Git and agent hooks
   setup-hooks    Legacy agent-hook installer
 
@@ -495,6 +496,25 @@ struct Cli {
     /// Report unused exports in entry files instead of auto-marking them as used.
     #[arg(long, global = true)]
     include_entry_exports: bool,
+
+    /// Opt in to TypeScript semantic analysis for project-wide symbol evidence.
+    /// This does not emit compiler diagnostics or typed lint findings.
+    #[arg(long, global = true)]
+    type_aware: bool,
+
+    /// TypeScript project config to use for type-aware analysis (repeatable).
+    #[arg(long, global = true, value_name = "PATH", action = clap::ArgAction::Append)]
+    type_aware_project: Vec<PathBuf>,
+
+    /// Decide whether incomplete type-aware analysis is advisory or gating.
+    #[arg(long, global = true, value_enum)]
+    type_aware_require: Option<TypeAwareRequireArg>,
+}
+
+#[derive(Clone, Copy, Subcommand)]
+enum TypeAwareCli {
+    /// Report companion availability and version compatibility without analysis.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -529,14 +549,6 @@ enum Command {
         /// Only report unused class members
         #[arg(long)]
         unused_class_members: bool,
-
-        /// Experimental: use TypeScript semantics to refine unused class-member findings
-        #[arg(long)]
-        type_aware: bool,
-
-        /// Experimental: TypeScript project config to use for type-aware analysis (repeatable)
-        #[arg(long, value_name = "PATH", action = clap::ArgAction::Append)]
-        type_aware_project: Vec<PathBuf>,
 
         /// Only report unused store members
         #[arg(long)]
@@ -652,6 +664,10 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         impact_closure: Option<String>,
 
+        /// Compute exact-symbol consumers, affected files, and targeted tests.
+        #[arg(long, value_name = "FILE:EXPORT")]
+        symbol_impact: Option<String>,
+
         /// Show only the top N items per category
         #[arg(long)]
         top: Option<usize>,
@@ -668,6 +684,12 @@ enum Command {
         /// Don't clear the screen between re-analyses
         #[arg(long)]
         no_clear: bool,
+    },
+
+    /// Inspect the optional TypeScript semantic companion.
+    TypeAware {
+        #[command(subcommand)]
+        subcommand: TypeAwareCli,
     },
 
     /// Inspect one file or exported symbol as a bundled evidence query
@@ -1034,6 +1056,11 @@ enum Command {
         /// coupling, churn, and dead code signals. Requires full analysis pipeline.
         #[arg(long)]
         targets: bool,
+
+        /// Show advisory project-local public-signature type coupling. Requires
+        /// type-aware analysis and does not change the health score.
+        #[arg(long)]
+        type_coupling: bool,
 
         /// Add structural CSS analytics: specificity hotspots, !important density,
         /// over-complex selectors, deep nesting, and conservative cleanup
@@ -1484,8 +1511,8 @@ enum Command {
 
     /// Render a saved `--format json` results file in another format without
     /// re-running analysis (analyze once, render annotations and the job
-    /// summary from the same file). v1 renders the GitHub-native formats only:
-    /// `--format github-annotations` or `--format github-summary`.
+    /// summary from the same file). Supports `github-annotations`,
+    /// `github-summary`, `codeclimate`, and `sarif`.
     Report {
         /// Path to a fallow JSON results file produced by `--format json`
         /// (dead-code, dupes, health, audit, security, or bare combined).
@@ -2248,6 +2275,24 @@ enum CiProviderArg {
     Gitlab,
 }
 
+/// CLI mirror of [`fallow_config::TypeAwareRequire`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum TypeAwareRequireArg {
+    /// Keep conservative findings and report semantic gaps.
+    BestEffort,
+    /// Fail the quality gate when a requested semantic query is incomplete.
+    Complete,
+}
+
+impl From<TypeAwareRequireArg> for fallow_config::TypeAwareRequire {
+    fn from(value: TypeAwareRequireArg) -> Self {
+        match value {
+            TypeAwareRequireArg::BestEffort => Self::BestEffort,
+            TypeAwareRequireArg::Complete => Self::Complete,
+        }
+    }
+}
+
 /// Filter refactoring targets by effort level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum EffortFilter {
@@ -2839,6 +2884,9 @@ fn run_bare_combined(
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,
+        type_aware: cli.type_aware,
+        type_aware_projects: &cli.type_aware_project,
+        type_aware_require: cli.type_aware_require.map(Into::into),
         explain: cli.explain,
         explain_skipped: cli.explain_skipped,
         performance: cli.performance,
@@ -2879,6 +2927,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
     match command {
         check @ Command::Check { .. } => dispatch_check_command(check, dispatch),
         Command::Watch { no_clear } => dispatch_watch(dispatch, no_clear),
+        Command::TypeAware { subcommand } => dispatch_type_aware_command(dispatch, subcommand),
         Command::Inspect {
             file,
             symbol,
@@ -2966,17 +3015,61 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
     }
 }
 
+fn dispatch_type_aware_command(
+    dispatch: &DispatchContext<'_>,
+    subcommand: TypeAwareCli,
+) -> ExitCode {
+    match subcommand {
+        TypeAwareCli::Status => {
+            let status = type_aware::status(dispatch.root);
+            match dispatch.output {
+                fallow_config::OutputFormat::Json => match dispatch.json_style.serialize(&status) {
+                    Ok(json) => {
+                        crate::report::sink::outln!("{json}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => emit_error(
+                        &format!("failed to serialize type-aware status: {error}"),
+                        2,
+                        dispatch.output,
+                    ),
+                },
+                fallow_config::OutputFormat::Human => {
+                    if status.available {
+                        crate::report::sink::outln!(
+                            "Type-aware companion: available ({}, protocol {}, TypeScript {})",
+                            status.package_version.as_deref().unwrap_or("unknown"),
+                            status.protocol_version,
+                            status.backend_version.as_deref().unwrap_or("unknown"),
+                        );
+                    } else {
+                        crate::report::sink::outln!("Type-aware companion: unavailable");
+                        if let Some(remediation) = status.remediation {
+                            crate::report::sink::outln!("Action: {remediation}");
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                _ => emit_error(
+                    "type-aware status supports human and json output",
+                    2,
+                    dispatch.output,
+                ),
+            }
+        }
+    }
+}
+
 /// Destructure the `Command::Check` arm and forward to `dispatch_check`.
 fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     let filters = check_issue_filters(&command);
     let Command::Check {
-        type_aware,
-        type_aware_project,
         include_dupes,
         trace,
         trace_file,
         trace_dependency,
         impact_closure,
+        symbol_impact,
         top,
         file,
         ..
@@ -2994,11 +3087,13 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
                 trace_file,
                 trace_dependency,
                 impact_closure,
+                symbol_impact,
                 performance: dispatch.cli.performance,
             },
             include_dupes,
-            type_aware,
-            type_aware_project,
+            type_aware: dispatch.cli.type_aware,
+            type_aware_project: dispatch.cli.type_aware_project.clone(),
+            type_aware_require: dispatch.cli.type_aware_require,
             top,
             file,
         },
@@ -3200,6 +3295,9 @@ fn dispatch_inspect_command(
             .as_ref()
             .map(|config| config.cache_dir.as_path()),
         symbol_chain,
+        type_aware: dispatch.cli.type_aware,
+        type_aware_projects: &dispatch.cli.type_aware_project,
+        type_aware_require: dispatch.cli.type_aware_require.map(Into::into),
     })
 }
 
@@ -3618,6 +3716,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         ownership,
         ownership_emails,
         targets,
+        type_coupling,
         css,
         effort,
         score,
@@ -3655,6 +3754,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         ownership,
         ownership_emails: ownership_emails.map(EmailModeArg::to_config),
         targets,
+        type_coupling,
         css,
         effort,
         score,
@@ -4273,6 +4373,7 @@ struct CheckDispatchArgs {
     include_dupes: bool,
     type_aware: bool,
     type_aware_project: Vec<std::path::PathBuf>,
+    type_aware_require: Option<TypeAwareRequireArg>,
     top: Option<usize>,
     file: Vec<std::path::PathBuf>,
 }
@@ -4342,6 +4443,9 @@ fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
         clear_screen: !no_clear,
         explain: cli.explain,
         include_entry_exports: cli.include_entry_exports,
+        type_aware: cli.type_aware,
+        type_aware_projects: &cli.type_aware_project,
+        type_aware_require: cli.type_aware_require.map(Into::into),
     })
 }
 
@@ -4433,6 +4537,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         include_dupes: args.include_dupes,
         type_aware: args.type_aware,
         type_aware_projects: &args.type_aware_project,
+        type_aware_require: args.type_aware_require.map(Into::into),
         trace_opts: &args.trace_opts,
         explain: cli.explain,
         top: args.top,
@@ -4454,15 +4559,7 @@ fn validate_type_aware_check_options(
     dispatch: &DispatchContext<'_>,
     args: &CheckDispatchArgs,
 ) -> Option<ExitCode> {
-    let cli = dispatch.cli;
     let output = dispatch.output;
-    if args.type_aware && args.filters.any_active() && !args.filters.unused_class_members {
-        return Some(emit_error(
-            "--type-aware currently only refines unused class-member findings; combine it with --unused-class-members or omit issue filters",
-            2,
-            output,
-        ));
-    }
     if !args.type_aware_project.is_empty() && !args.type_aware {
         return Some(emit_error(
             "--type-aware-project requires --type-aware",
@@ -4470,46 +4567,33 @@ fn validate_type_aware_check_options(
             output,
         ));
     }
+    if args.type_aware_require.is_some() && !args.type_aware {
+        return Some(emit_error(
+            "--type-aware-require requires --type-aware",
+            2,
+            output,
+        ));
+    }
+    if args.trace_opts.symbol_impact.is_some() && !args.type_aware {
+        return Some(emit_error(
+            "--symbol-impact requires --type-aware",
+            2,
+            output,
+        ));
+    }
     if args.type_aware
         && !matches!(
             output,
-            fallow_config::OutputFormat::Human | fallow_config::OutputFormat::Json
+            fallow_config::OutputFormat::Human
+                | fallow_config::OutputFormat::Json
+                | fallow_config::OutputFormat::Sarif
+                | fallow_config::OutputFormat::Compact
+                | fallow_config::OutputFormat::Markdown
+                | fallow_config::OutputFormat::CodeClimate
         )
     {
         return Some(emit_error(
-            "--type-aware currently supports only human and JSON output so semantic provenance is never omitted",
-            2,
-            output,
-        ));
-    }
-    if args.type_aware && cli.sarif_file.is_some() {
-        return Some(emit_error(
-            "--type-aware cannot yet emit a secondary SARIF report because SARIF provenance is not implemented",
-            2,
-            output,
-        ));
-    }
-    if args.type_aware
-        && (cli.baseline.is_some()
-            || cli.save_baseline.is_some()
-            || cli.fail_on_regression
-            || cli.regression_baseline.is_some()
-            || cli.save_regression_baseline.is_some())
-    {
-        return Some(emit_error(
-            "--type-aware cannot yet be combined with baseline or regression modes because baselines do not record the analysis mode",
-            2,
-            output,
-        ));
-    }
-    if args.type_aware
-        && (args.trace_opts.trace_export.is_some()
-            || args.trace_opts.trace_file.is_some()
-            || args.trace_opts.trace_dependency.is_some()
-            || args.trace_opts.impact_closure.is_some())
-    {
-        return Some(emit_error(
-            "--type-aware cannot be combined with focused trace or impact-closure output",
+            "--type-aware supports human, JSON, SARIF, compact, markdown, and CodeClimate output; pair CodeClimate with the JSON artifact to preserve semantic provenance",
             2,
             output,
         ));
@@ -4731,7 +4815,7 @@ fn run_resolved_audit(
     inputs: &ResolvedAuditInputs,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    audit::run_audit(
+    audit::run_audit_with_type_aware(
         &audit::AuditOptions {
             root: dispatch.root,
             config_path: &cli.config,
@@ -4778,6 +4862,11 @@ fn run_resolved_audit(
             show_deprioritized: args.show_deprioritized,
         },
         args.gate_marker.as_deref(),
+        audit::AuditTypeAwareOptions {
+            enabled: cli.type_aware,
+            projects: &cli.type_aware_project,
+            require: cli.type_aware_require.map(Into::into),
+        },
     )
 }
 
@@ -4891,6 +4980,7 @@ struct HealthDispatchArgs<'a> {
     ownership: bool,
     ownership_emails: Option<fallow_config::EmailMode>,
     targets: bool,
+    type_coupling: bool,
     css: bool,
     effort: Option<EffortFilter>,
     score: bool,
@@ -5051,29 +5141,46 @@ fn derive_health_dispatch_run<'a>(
     coverage_inputs: &'a ResolvedHealthCoverageInputs,
     runtime_coverage: Option<fallow_engine::health::RuntimeCoverageOptions>,
 ) -> fallow_engine::health::HealthRunOptions<'a> {
-    fallow_engine::health::derive_health_run_options(fallow_engine::health::HealthRunOptionsInput {
-        output,
-        thresholds: health_threshold_overrides(args),
-        top: args.top,
-        sort: args.sort.clone().into(),
-        complexity: args.complexity,
-        file_scores: args.file_scores,
-        coverage_gaps: args.coverage_gaps,
-        hotspots: args.hotspots,
-        ownership: args.ownership,
-        ownership_emails: args.ownership_emails,
-        targets: args.targets,
-        css: args.css,
-        effort: args.effort.map(EffortFilter::to_estimate),
-        score: args.score,
-        gates: health_gate_options(args),
-        snapshot_requested: args.save_snapshot.is_some(),
-        trend: args.trend,
-        since: args.since,
-        min_commits: args.min_commits,
-        coverage_inputs: health_coverage_inputs(coverage_inputs),
-        runtime_coverage,
-    })
+    let mut run = fallow_engine::health::derive_health_run_options(
+        fallow_engine::health::HealthRunOptionsInput {
+            output,
+            thresholds: health_threshold_overrides(args),
+            top: args.top,
+            sort: args.sort.clone().into(),
+            complexity: args.complexity,
+            file_scores: args.file_scores,
+            coverage_gaps: args.coverage_gaps,
+            hotspots: args.hotspots,
+            ownership: args.ownership,
+            ownership_emails: args.ownership_emails,
+            targets: args.targets,
+            css: args.css,
+            effort: args.effort.map(EffortFilter::to_estimate),
+            score: args.score,
+            gates: health_gate_options(args),
+            snapshot_requested: args.save_snapshot.is_some(),
+            trend: args.trend,
+            since: args.since,
+            min_commits: args.min_commits,
+            coverage_inputs: health_coverage_inputs(coverage_inputs),
+            runtime_coverage,
+        },
+    );
+    if args.type_coupling && !run.sections.any_section {
+        run.sections = fallow_engine::health::DerivedHealthSections {
+            any_section: true,
+            complexity: false,
+            file_scores: false,
+            coverage_gaps: false,
+            hotspots: false,
+            targets: false,
+            css: false,
+            score: false,
+            force_full: false,
+            score_only_output: false,
+        };
+    }
+    run
 }
 
 fn health_threshold_overrides(
@@ -5173,11 +5280,33 @@ fn run_health_dispatch(
             performance: cli.performance,
             runtime_coverage: run.runtime_coverage,
             churn_file: cli.churn_file.as_deref(),
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             complexity_breakdown: args.complexity_breakdown,
             group_by: cli.group_by.map(Into::into),
         },
         dispatch.json_style,
+        &health::TypeAwareHealthOptions {
+            enabled: cli.type_aware,
+            requested: args.type_coupling,
+            unfiltered: health_type_coupling_is_default_section(args),
+            projects: &cli.type_aware_project,
+            require: cli.type_aware_require.map(Into::into),
+        },
     )
+}
+
+fn health_type_coupling_is_default_section(args: &HealthDispatchArgs<'_>) -> bool {
+    !args.complexity
+        && !args.file_scores
+        && !args.coverage_gaps
+        && !args.hotspots
+        && !args.ownership
+        && !args.targets
+        && !args.css
+        && !args.score
+        && args.min_score.is_none()
+        && args.min_severity.is_none()
+        && args.runtime_coverage.is_none()
 }
 
 #[cfg(test)]
@@ -5702,7 +5831,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_type_aware_flag_parses_for_class_members() {
+    fn type_aware_flags_parse_for_semantic_analysis() {
         let cli = Cli::try_parse_from([
             "fallow",
             "dead-code",
@@ -5713,25 +5842,23 @@ mod tests {
             "--type-aware-project",
             "packages/web/tsconfig.json",
         ])
-        .expect("experimental type-aware flag should parse");
+        .expect("type-aware flag should parse");
+        assert!(cli.type_aware);
+        assert_eq!(
+            cli.type_aware_project,
+            [
+                PathBuf::from("tsconfig.json"),
+                PathBuf::from("packages/web/tsconfig.json")
+            ]
+        );
         let Some(Command::Check {
             unused_class_members,
-            type_aware,
-            type_aware_project,
             ..
         }) = cli.command
         else {
             panic!("dead-code should parse as the check command");
         };
         assert!(unused_class_members);
-        assert!(type_aware);
-        assert_eq!(
-            type_aware_project,
-            [
-                PathBuf::from("tsconfig.json"),
-                PathBuf::from("packages/web/tsconfig.json")
-            ]
-        );
     }
 
     #[test]

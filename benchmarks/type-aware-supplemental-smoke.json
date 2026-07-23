@@ -22,8 +22,8 @@
     "dependency_installation": "none"
   },
   "artifacts": {
-    "fallow_sha256": "679b32f344cfb738b4e64ee70c451c26c3b56a72e4df2564caa7c770ab293e58",
-    "sidecar_sha256": "9feca64e7afdd249b1490b34aaa09ff9424d4e90f71c12d6ce9e462c14fce29e",
+    "fallow_sha256": "06847e8b1396dbd872f859ce9a57154a84176ec1dbe63119e68c42ea97b9bd16",
+    "sidecar_sha256": "dc8c0eb0f75917845de89e915800a8826adc4b7db0918ce0267e6dcfcde7117c",
     "source_runs": [
       {
         "mode": "baseline",
@@ -41,13 +41,13 @@
         "mode": "refined",
         "iteration": 0,
         "path": "target/type-aware-corpus/supplemental/vitest-refined.json",
-        "normalized_sha256": "0ac34f14d69b08364bd1a4b4e11946f51b942635df84d34bf3cdfe0a6323adde"
+        "normalized_sha256": "b8eab5a888a3afd1254b7d6397bb3b4eb9c0e12098826321435aaad1b29eb51f"
       },
       {
         "mode": "refined",
         "iteration": 1,
         "path": "target/type-aware-corpus/supplemental/vitest-refined-2.json",
-        "normalized_sha256": "0ac34f14d69b08364bd1a4b4e11946f51b942635df84d34bf3cdfe0a6323adde"
+        "normalized_sha256": "b8eab5a888a3afd1254b7d6397bb3b4eb9c0e12098826321435aaad1b29eb51f"
       }
     ]
   },
@@ -55,8 +55,8 @@
     "baseline_candidates": 147,
     "refined_candidates": 86,
     "confirmed_used": 61,
-    "unresolved_retained": 72,
-    "abstained_retained": 14,
+    "unresolved_retained": 65,
+    "abstained_retained": 21,
     "added_candidates": 0,
     "normalized_runs": 2,
     "deterministic": true,

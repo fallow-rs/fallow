@@ -638,6 +638,10 @@ fn git_branch(root: &Path) -> Option<String> {
 }
 
 /// Build a snapshot from vital signs and input data.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "snapshot construction keeps every persisted compatibility input explicit"
+)]
 pub(crate) fn build_snapshot(
     vital_signs: VitalSigns,
     counts: VitalSignsCounts,
@@ -645,6 +649,7 @@ pub(crate) fn build_snapshot(
     shallow_clone: bool,
     health_score: Option<&HealthScore>,
     coverage_model: Option<fallow_output::CoverageModel>,
+    analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> VitalSignsSnapshot {
     let now = chrono_timestamp();
 
@@ -660,6 +665,7 @@ pub(crate) fn build_snapshot(
         score: health_score.map(|s| s.score),
         grade: health_score.map(|s| s.grade.to_string()),
         coverage_model,
+        analysis_identity,
     }
 }
 
@@ -1374,7 +1380,15 @@ mod tests {
             ..Default::default()
         };
         let health_score = compute_health_score(&vs, 1200);
-        let snapshot = build_snapshot(vs, counts, root, false, Some(&health_score), None);
+        let snapshot = build_snapshot(
+            vs,
+            counts,
+            root,
+            false,
+            Some(&health_score),
+            None,
+            fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        );
         let saved_path = save_snapshot(&snapshot, root, None).unwrap();
 
         assert!(saved_path.exists());
@@ -1400,7 +1414,15 @@ mod tests {
             ..Default::default()
         };
         let counts = VitalSignsCounts::default();
-        let snapshot = build_snapshot(vs, counts, root, false, None, None);
+        let snapshot = build_snapshot(
+            vs,
+            counts,
+            root,
+            false,
+            None,
+            None,
+            fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        );
         let saved = save_snapshot(&snapshot, root, Some(&explicit)).unwrap();
         assert_eq!(saved, explicit);
         assert!(explicit.exists());
@@ -1417,7 +1439,15 @@ mod tests {
             ..Default::default()
         };
         let counts = VitalSignsCounts::default();
-        let snapshot = build_snapshot(vs, counts, root, false, None, None);
+        let snapshot = build_snapshot(
+            vs,
+            counts,
+            root,
+            false,
+            None,
+            None,
+            fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        );
         let saved = save_snapshot(&snapshot, root, Some(&nested)).unwrap();
         assert_eq!(saved, nested);
         assert!(nested.exists());
@@ -1871,6 +1901,7 @@ mod tests {
             score,
             grade: score.map(|s| letter_grade(s).to_string()),
             coverage_model: None,
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         }
     }
 }

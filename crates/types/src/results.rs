@@ -1601,6 +1601,10 @@ pub struct PrivateTypeLeak {
     pub col: u32,
     /// Byte offset of the type reference.
     pub span_start: u32,
+    /// Exact checker-backed provenance when type-aware analysis confirmed the
+    /// package-public leak across files or re-exports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<crate::semantic::SemanticPrivateTypeLeak>,
 }
 
 /// A `"use client"` file that exports a Next.js server-only / route-segment

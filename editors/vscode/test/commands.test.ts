@@ -16,6 +16,15 @@ let mockBinaryVersions: Readonly<Record<string, string | null>> = {};
 let mockConfigPathSetting = "";
 let mockResolvedConfigRoots: string[] = [];
 let mockComplexityBreakdownEnabled = false;
+let mockTypeAwareSettings: {
+  enabled: boolean;
+  projects: readonly string[];
+  require: "best-effort" | "complete";
+} = {
+  enabled: false,
+  projects: [],
+  require: "best-effort",
+};
 let mockActiveTextEditor:
   | {
       readonly document: {
@@ -25,7 +34,10 @@ let mockActiveTextEditor:
         };
         readonly isDirty: boolean;
         readonly save: () => Promise<boolean>;
+        readonly getWordRangeAtPosition: () => object | undefined;
+        readonly getText: () => string;
       };
+      readonly selection: { readonly active: object };
     }
   | undefined;
 
@@ -81,6 +93,7 @@ vi.mock("../src/config.js", () => ({
   getLspPath: () => mockLspPath,
   getAutoDownload: () => mockAutoDownload,
   getProductionOverride: () => undefined,
+  getTypeAwareSettings: () => mockTypeAwareSettings,
   getAuditGate: () => "new-only",
   getDuplicationCrossLanguageOverride: () => undefined,
   getDuplicationIgnoreImportsOverride: () => undefined,
@@ -137,6 +150,7 @@ import {
   findCliBinary,
   buildInspectArgs,
   runInspectActiveFile,
+  runInspectActiveSymbol,
   resolveCliBinary,
   resolveCliForRun,
   runAnalysis,
@@ -155,6 +169,7 @@ const workspaceContext = {
 beforeEach(() => {
   mockConfigPathSetting = "";
   mockResolvedConfigRoots = [];
+  mockTypeAwareSettings = { enabled: false, projects: [], require: "best-effort" };
 });
 
 const emptyCheck = {
@@ -238,6 +253,7 @@ const setWorkspaceRoot = (root: string | null): void => {
 interface ActiveEditorOptions {
   readonly isDirty?: boolean;
   readonly save?: () => Promise<boolean>;
+  readonly symbol?: string;
 }
 
 const setActiveEditor = (fsPath: string | null, options: ActiveEditorOptions = {}): void => {
@@ -249,7 +265,10 @@ const setActiveEditor = (fsPath: string | null, options: ActiveEditorOptions = {
             uri: { scheme: "file", fsPath },
             isDirty: options.isDirty ?? false,
             save: options.save ?? (() => Promise.resolve(true)),
+            getWordRangeAtPosition: () => (options.symbol ? {} : undefined),
+            getText: () => options.symbol ?? "",
           },
+          selection: { active: {} },
         };
 };
 
@@ -784,6 +803,76 @@ describe("runInspectActiveFile", () => {
       "--config",
       "/repo/.fallowrc.json",
     ]);
+  });
+
+  it("forwards type-aware settings for exact-symbol inspect", () => {
+    expect(
+      buildInspectArgs({
+        filePath: "src/extension.ts",
+        symbol: "activate",
+        production: undefined,
+        workspace: "",
+        configPath: "",
+        typeAware: {
+          enabled: true,
+          projects: ["tsconfig.json", "packages/app/tsconfig.json"],
+          require: "complete",
+        },
+      }),
+    ).toEqual([
+      "inspect",
+      "--symbol",
+      "src/extension.ts:activate",
+      "--format",
+      "json",
+      "--quiet",
+      "--type-aware",
+      "--type-aware-project",
+      "tsconfig.json",
+      "--type-aware-project",
+      "packages/app/tsconfig.json",
+      "--type-aware-require",
+      "complete",
+    ]);
+  });
+
+  it("inspects the exported symbol at the cursor with semantic settings", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-inspect-symbol-"));
+    const script = join(dir, "fallow-cli.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          'process.stdout.write(\'{"kind":"inspect_target","warnings":[]}\');',
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      mockTypeAwareSettings = {
+        enabled: true,
+        projects: ["tsconfig.json"],
+        require: "best-effort",
+      };
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath, { symbol: "activate" });
+
+      await expect(runInspectActiveSymbol(workspaceContext)).resolves.not.toBeNull();
+      const calls = await readSpawnLog(logPath);
+      expect(calls[0]?.args).toContain("src/extension.ts:activate");
+      expect(calls[0]?.args).toContain("--type-aware");
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("resolves relative inspect config paths from the active editor workspace root", async () => {

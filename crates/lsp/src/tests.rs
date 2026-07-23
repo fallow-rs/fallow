@@ -40,6 +40,7 @@ fn analyze_project_root_for_test(
         duplication_options,
         production_override,
         inline_complexity_enabled,
+        type_aware_options: None,
         changed_files: None,
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
@@ -283,6 +284,7 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         duplication_options: None,
         production_override: None,
         inline_complexity_enabled: false,
+        type_aware_options: None,
         root: root.clone(),
         toplevel: Some(root.clone()),
         changed_since: None,
@@ -944,6 +946,11 @@ fn parse_initialization_options_reads_full_payload() {
         "health": {
             "inlineComplexity": true
         },
+        "typeAware": {
+            "enabled": true,
+            "projects": ["tsconfig.app.json", "tsconfig.test.json"],
+            "require": "complete"
+        },
         "futureClientOnly": true
     });
 
@@ -972,6 +979,17 @@ fn parse_initialization_options_reads_full_payload() {
             .as_ref()
             .and_then(|health| health.inline_complexity)
             .unwrap_or(false)
+    );
+    assert_eq!(
+        parsed.type_aware,
+        Some(LspTypeAwareOptions {
+            enabled: true,
+            projects: vec![
+                "tsconfig.app.json".to_string(),
+                "tsconfig.test.json".to_string(),
+            ],
+            require: Some(fallow_config::TypeAwareRequire::Complete),
+        })
     );
 }
 
@@ -1717,6 +1735,7 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
                     line: 14,
                     col: 0,
                     span_start: 0,
+                    semantic: None,
                 },
             ),
         ],
@@ -2126,6 +2145,7 @@ fn changed_since_input(
         duplication_options,
         production_override: None,
         inline_complexity_enabled: false,
+        type_aware_options: None,
         root: root.to_path_buf(),
         toplevel: Some(root.to_path_buf()),
         changed_since: Some(changed_since.to_string()),

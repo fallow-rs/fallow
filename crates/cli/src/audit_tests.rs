@@ -1910,6 +1910,8 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         base_sha: "abc123".to_string(),
     };
     let snapshot = AuditKeySnapshot {
+        type_aware_identity: None,
+        type_aware_gap_signature: Vec::new(),
         dead_code: ["dead:a".to_string(), "dead:b".to_string()]
             .into_iter()
             .collect(),
@@ -2005,6 +2007,8 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         base_sha: "abc123".to_string(),
     };
     let snapshot = AuditKeySnapshot {
+        type_aware_identity: None,
+        type_aware_gap_signature: Vec::new(),
         dead_code: std::iter::once("dead:a".to_string()).collect(),
         health: std::iter::once("health:a".to_string()).collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),

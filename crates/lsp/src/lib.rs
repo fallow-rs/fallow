@@ -58,7 +58,8 @@ use fallow_config::DetectionMode;
 #[cfg(test)]
 use fallow_config::DuplicatesConfig;
 use initialization::{
-    LspDuplicationOptions, initialization_config_path, parse_initialization_options,
+    LspDuplicationOptions, LspTypeAwareOptions, initialization_config_path,
+    parse_initialization_options,
 };
 #[cfg(test)]
 use initialization::{
@@ -120,6 +121,8 @@ struct FallowLspServer {
     production_override: Arc<RwLock<Option<bool>>>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
+    /// Optional semantic TypeScript refinement for editor diagnostics.
+    type_aware_options: Arc<RwLock<Option<LspTypeAwareOptions>>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -212,6 +215,7 @@ impl LanguageServer for FallowLspServer {
                 .health
                 .and_then(|health| health.inline_complexity)
                 .unwrap_or(false);
+            *self.type_aware_options.write().await = parsed_options.type_aware;
         }
 
         let advertise_pull_diagnostics =
@@ -446,6 +450,7 @@ impl FallowLspServer {
             duplication_options: Arc::new(RwLock::new(None)),
             production_override: Arc::new(RwLock::new(None)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
+            type_aware_options: Arc::new(RwLock::new(None)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
             client_pulls: Arc::new(AtomicBool::new(false)),
@@ -574,6 +579,7 @@ impl FallowLspServer {
         let duplication_options = self.duplication_options.read().await.clone();
         let production_override = *self.production_override.read().await;
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
+        let type_aware_options = self.type_aware_options.read().await.clone();
 
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
         let blocking_root = root.clone();
@@ -587,6 +593,7 @@ impl FallowLspServer {
                 duplication_options,
                 production_override,
                 inline_complexity_enabled,
+                type_aware_options,
                 root: blocking_root,
                 toplevel: blocking_toplevel,
                 changed_since,

@@ -5,6 +5,7 @@ use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
 
 fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],

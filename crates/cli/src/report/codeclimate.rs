@@ -5,15 +5,16 @@ use fallow_config::RulesConfig;
 #[cfg(test)]
 use fallow_config::Severity;
 use fallow_output::{
-    CodeClimateAnnotationField, CodeClimateIssue, HealthReport, annotate_codeclimate_issues,
-    codeclimate_issues_to_value,
+    CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
+    CodeClimateLocation, CodeClimateSeverity, HealthReport, annotate_codeclimate_issues,
+    codeclimate_fingerprint_hash, codeclimate_issues_to_value,
 };
-#[cfg(test)]
-use fallow_output::{CodeClimateSeverity, codeclimate_fingerprint_hash};
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 
 use super::github::report_prefix;
+use super::github::{AnnotationLevel, resolve_render_options};
+use super::github_annotations::{EnvelopeKind, collect_annotations};
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
 
@@ -45,6 +46,64 @@ fn emit_codeclimate(mut issues: Vec<CodeClimateIssue>) -> ExitCode {
     rebase_codeclimate_paths(&mut issues);
     let value = codeclimate_issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
+}
+
+/// Re-render a stored JSON envelope as a CodeClimate issue array without
+/// repeating analysis. Semantic provenance stays in the paired JSON artifact.
+pub fn print_envelope_codeclimate(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+) -> ExitCode {
+    emit_codeclimate(envelope_codeclimate_issues(kind, envelope, root))
+}
+
+fn envelope_codeclimate_issues(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+) -> Vec<CodeClimateIssue> {
+    let options = resolve_render_options(root);
+    collect_annotations(kind, envelope, options.pm)
+        .into_iter()
+        .map(|annotation| {
+            let path = options.rebase.apply(&annotation.path);
+            let line = annotation.line.unwrap_or(1).clamp(1, u64::from(u32::MAX)) as u32;
+            let severity = match annotation.level {
+                AnnotationLevel::Error => CodeClimateSeverity::Major,
+                AnnotationLevel::Warning => CodeClimateSeverity::Minor,
+                AnnotationLevel::Notice => CodeClimateSeverity::Info,
+            };
+            let description = format!("{}: {}", annotation.title, annotation.message);
+            let fingerprint = codeclimate_fingerprint_hash(&[
+                annotation.title.as_str(),
+                path.as_str(),
+                &line.to_string(),
+                annotation.message.as_str(),
+            ]);
+            CodeClimateIssue {
+                kind: CodeClimateIssueKind::Issue,
+                check_name: format!(
+                    "fallow/{}",
+                    annotation
+                        .title
+                        .to_ascii_lowercase()
+                        .replace(|character: char| !character.is_ascii_alphanumeric(), "-")
+                        .trim_matches('-')
+                ),
+                description,
+                categories: vec!["Bug Risk".to_string()],
+                severity,
+                fingerprint,
+                location: CodeClimateLocation {
+                    path,
+                    lines: CodeClimateLines { begin: line },
+                },
+                owner: None,
+                group: None,
+            }
+        })
+        .collect()
 }
 
 /// Map fallow severity to CodeClimate severity.
@@ -300,6 +359,25 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn stored_dead_code_envelope_renders_codeclimate_without_analysis() {
+        let envelope = serde_json::json!({
+            "kind": "dead-code",
+            "unused_files": [{ "path": "src/dead.ts" }]
+        });
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
+        let issues = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &envelope, root);
+
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].check_name, "fallow/unused-file");
+        assert_eq!(issues[0].location.path, "src/dead.ts");
+        assert_eq!(issues[0].location.lines.begin, 1);
     }
 
     #[test]
@@ -1548,6 +1626,7 @@ mod tests {
                 line: 7,
                 col: 0,
                 span_start: 0,
+                semantic: None,
             }));
         // private_type_leaks defaults to Off; enable it so the issue is emitted.
         let rules = RulesConfig {

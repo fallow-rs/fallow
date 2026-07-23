@@ -29,6 +29,10 @@ const SUPPLEMENTAL_VITEST_ROOT = resolve(DEFAULT_OUT_DIR, "supplemental/vitest")
 const SUPPLEMENTAL_VITEST_REPO = "https://github.com/vitest-dev/vitest.git";
 const SUPPLEMENTAL_VITEST_COMMIT = "8fbfcb054a07410e03bd37e6682d15ef5b240ad8";
 const SUPPLEMENTAL_ARTIFACT = resolve(REPO_ROOT, "benchmarks/type-aware-supplemental-smoke.json");
+const CAPABILITIES_ARTIFACT = resolve(
+  REPO_ROOT,
+  "benchmarks/type-aware-semantic-capabilities.json",
+);
 const DEFAULT_RUNS = 4;
 const DEFAULT_WARMUPS = 1;
 const DEFAULT_DISCOVERY_RUNS = 2;
@@ -44,7 +48,16 @@ const REQUIRED_FOCUSED_CASES = [
   "retains Vue template-only members without claiming a checker use",
   "finds a class member used only from an explicitly opened consumer project",
   "full CLI safely abstains for an explicit solution tsconfig",
+  "protocol v3 discovers public entry points from a nested package project",
+  "protocol v3 includes a direct test consumer in targeted tests",
   "treats getter and setter declarations as one logical property",
+];
+const REQUIRED_SEMANTIC_CAPABILITIES = [
+  "dead-code-refinement",
+  "semantic-symbol-trace",
+  "public-api-surface",
+  "semantic-impact-targeted-tests",
+  "public-type-coupling",
 ];
 const REQUIRED_PROJECTS = new Map([
   ["svelte", "accuracy-core"],
@@ -201,6 +214,7 @@ export const parseArgs = (argv) => {
       "summarize",
       "verify-publication",
       "supplemental",
+      "capabilities",
     ]).has(command)
   ) {
     fail(`unknown command: ${command}`);
@@ -264,6 +278,7 @@ Commands:
   summarize      Verify the ledger and write compact gate metrics
   verify-publication  Check tracked evidence and summary for generator drift
   supplemental   Regenerate and verify the clean public Vitest smoke
+  capabilities   Prove all five semantic capabilities on Astro and Vitest
 
 Options:
   --manifest PATH     Default: benchmarks/type-aware-corpus.json
@@ -1380,33 +1395,523 @@ const sourceLocationEvidence = (root, location) => {
 };
 
 const collectCheckerEvidence = async (project, candidates, outDir) => {
-  const [{ parseRequest: parseTypeAwareRequest }, { analyzeClassMemberUses }] = await Promise.all([
+  const [{ parseRequest: parseTypeAwareRequest }, { analyzeSemanticQueries }] = await Promise.all([
     import("../tools/type-aware-sidecar/src/protocol.mjs"),
-    import("../tools/type-aware-sidecar/src/typescript-go.mjs"),
+    import("../tools/type-aware-sidecar/src/semantic.mjs"),
   ]);
   const root = projectRoot(project, outDir);
   const request = parseTypeAwareRequest({
-    protocol_version: 2,
-    operation: "class-member-uses",
+    protocol_version: 3,
+    operation: "semantic-queries",
     root,
     projects: [],
-    candidates: candidates.map((candidate, id) => ({
+    evidence_limit: 40,
+    queries: candidates.map((candidate, id) => ({
       id,
-      path: candidate.path,
-      parent_name: candidate.parent_name,
-      member_name: candidate.member_name,
-      kind: candidate.kind,
-      line: candidate.line,
-      col: candidate.col,
+      operation: "symbol-use",
+      symbol: {
+        path: candidate.path,
+        namespace: "value",
+        declaration_kind: candidate.kind,
+        exported_name: candidate.member_name,
+        local_name: candidate.member_name,
+        line: candidate.line,
+        col: candidate.col,
+        owner: candidate.parent_name,
+      },
     })),
   });
-  const analysis = analyzeClassMemberUses(request);
+  const analysis = analyzeSemanticQueries(request);
   return new Map(
-    [...analysis.confirmedUses].map(([id, locations]) => [
-      candidates[id].key,
-      locations.map((location) => sourceLocationEvidence(root, location)),
-    ]),
+    analysis.results
+      .filter(({ assertion }) => assertion === "confirmed-used")
+      .map(({ queryId, evidence: locations }) => [
+        candidates[queryId].key,
+        locations.map((location) => sourceLocationEvidence(root, location)),
+      ]),
   );
+};
+
+const firstNonEmptyLineEvidence = (root, path) => {
+  const sourcePath = resolve(root, path);
+  const relativeToRoot = relative(root, sourcePath);
+  if (relativeToRoot.startsWith(`..${sep}`) || relativeToRoot === "..") {
+    fail(`source evidence path escapes its prepared fixture: ${path}`);
+  }
+  const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
+  const lineIndex = lines.findIndex((line) => line.trim() !== "");
+  if (lineIndex < 0) fail(`source evidence file is empty: ${path}`);
+  return sourceLocationEvidence(root, { path, line: lineIndex + 1, col: 0 });
+};
+
+const capabilityProcess = async (options, id, root, args) => {
+  const rawPath = resolve(DEFAULT_OUT_DIR, "capabilities", `${id}.json`);
+  const result = await runProcess(
+    options.fallowBin,
+    [...args, "--format", "json", "--quiet", "--no-cache"],
+    REPO_ROOT,
+    options.sidecarBin,
+  );
+  mkdirSync(dirname(rawPath), { recursive: true });
+  writeFileSync(rawPath, result.stdout);
+  writeFileSync(rawPath.replace(/\.json$/, ".stderr.txt"), result.stderr);
+  if (result.status === null || result.status >= 2) {
+    fail(`${id} capability run failed with ${result.status ?? result.signal}`);
+  }
+  let output;
+  try {
+    output = JSON.parse(result.stdout);
+  } catch (error) {
+    fail(
+      `${id} capability run emitted invalid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!isObject(output)) fail(`${id} capability run emitted an invalid output envelope`);
+  return { output, root };
+};
+
+const compactPrograms = (output) =>
+  (output._meta?.type_aware?.projects ?? []).map(
+    ({ config, source, status, source_file_count: sourceFileCount, program_reused: reused }) => ({
+      config,
+      source,
+      status,
+      source_file_count: sourceFileCount,
+      program_reused: reused,
+    }),
+  );
+
+const compactRefinement = (candidate, confirmedCount, evidence, reviewed) => ({
+  assertion: "confirmed-used",
+  confirmed_used_count: confirmedCount,
+  candidate: {
+    key: candidate.key,
+    path: candidate.path,
+    parent_name: candidate.parent_name,
+    member_name: candidate.member_name,
+    kind: candidate.kind,
+    line: candidate.line,
+    col: candidate.col,
+  },
+  reviewed,
+  source_evidence: evidence,
+});
+
+const semanticCapabilityProof = (root, inspectOutput, couplingOutput) => {
+  const trace = inspectOutput.evidence?.semantic_trace?.data;
+  const api = inspectOutput.evidence?.api_surface?.data;
+  const impact = inspectOutput.evidence?.symbol_impact?.data;
+  const targetedTests = inspectOutput.evidence?.targeted_tests?.data;
+  const coupling = couplingOutput._meta?.type_aware?.type_coupling;
+  if (!isObject(trace) || !isObject(api) || !isObject(impact) || !isObject(coupling)) {
+    fail("semantic capability run omitted a required result section");
+  }
+  const traceEvidence = trace.references
+    .slice(0, 3)
+    .map((reference) => sourceLocationEvidence(root, reference));
+  const apiEvidence = api.entries
+    .slice(0, 3)
+    .map(({ exposed }) => sourceLocationEvidence(root, exposed));
+  const impactEvidence = [
+    ...impact.direct_consumers.slice(0, 2).map(({ path }) => firstNonEmptyLineEvidence(root, path)),
+    ...impact.targeted_tests.slice(0, 2).map(({ path }) => firstNonEmptyLineEvidence(root, path)),
+  ];
+  const couplingEdges = coupling.files.flatMap(({ edges = [] }) => edges);
+  const couplingEvidence = couplingEdges
+    .slice(0, 3)
+    .map(({ evidence }) => sourceLocationEvidence(root, evidence));
+  return {
+    programs: {
+      inspect: compactPrograms(inspectOutput),
+      coupling: compactPrograms(couplingOutput),
+    },
+    capabilities: {
+      "semantic-symbol-trace": {
+        assertion: trace.assertion,
+        status: trace.status,
+        selected_project: trace.selected_project,
+        total_reference_count: trace.total_reference_count,
+        checker_evidence_count: trace.checker_evidence_count,
+        graph_evidence_count: trace.graph_evidence_count,
+        source_evidence: traceEvidence,
+      },
+      "public-api-surface": {
+        assertion: api.assertion,
+        status: api.status,
+        public_entry_count: api.entries.length,
+        private_type_leak_count: api.private_type_leaks.length,
+        source_evidence: apiEvidence,
+      },
+      "semantic-impact-targeted-tests": {
+        assertion: impact.assertion,
+        status: impact.status,
+        direct_consumer_count: impact.total_direct_consumer_count,
+        affected_file_count: impact.total_affected_file_count,
+        targeted_test_count: impact.total_targeted_test_count,
+        targeted_tests: targetedTests?.tests ?? impact.targeted_tests,
+        confidence: impact.confidence,
+        source_evidence: impactEvidence,
+      },
+      "public-type-coupling": {
+        assertion: coupling.assertion,
+        status: coupling.status,
+        summary: coupling.summary,
+        top_contributors: coupling.top_contributors,
+        cycles: coupling.cycles,
+        source_evidence: couplingEvidence,
+      },
+    },
+  };
+};
+
+const refinementProofs = (manifest, options) => {
+  const discovery = readDiscovery(options.outDir);
+  const astro = discovery.projects.find(({ id }) => id === "astro");
+  if (!astro) fail("capability proof requires the Astro corpus discovery");
+  const astroCandidate = astro.candidates.find(
+    ({ semantic_status: semanticStatus }) => semanticStatus === "confirmed-used",
+  );
+  if (!astroCandidate) fail("Astro discovery has no confirmed semantic refinement");
+  const ledger = readJson(resolve(options.outDir, "ledger.json"), "corpus evidence ledger");
+  const astroLedger = ledger.candidates?.find(({ key }) => key === astroCandidate.key);
+  const astroRoot = projectRoot(
+    manifest.projects.find(({ id }) => id === "astro"),
+    options.outDir,
+  );
+  const astroEvidence = [
+    sourceLineEvidence(astroRoot, astroCandidate),
+    ...(astroLedger?.source_evidence?.uses ?? []).slice(0, 2),
+  ];
+
+  const supplementalArtifact = validateSupplementalArtifactData(
+    readJson(SUPPLEMENTAL_ARTIFACT, "tracked supplemental artifact"),
+    readJson(DEFAULT_ADJUDICATION, "adjudication decisions"),
+    {
+      fallowSha256: sha256File(options.fallowBin),
+      sidecarSha256: sidecarArtifactHash(options.sidecarBin),
+      sourceRoot: REPO_ROOT,
+    },
+  );
+  const baseline = parseMachineOutput(
+    readFileSync(resolve(DEFAULT_OUT_DIR, "supplemental/vitest-baseline.json"), "utf8"),
+    "vitest",
+  );
+  const refined = parseMachineOutput(
+    readFileSync(resolve(DEFAULT_OUT_DIR, "supplemental/vitest-refined.json"), "utf8"),
+    "vitest",
+  );
+  const refinedKeys = new Set(refined.candidates.map(({ key }) => key));
+  const reviewedKeys = new Set(supplementalArtifact.independent_review.reviewed_candidate_keys);
+  const vitestCandidate = baseline.candidates.find(
+    ({ key }) => !refinedKeys.has(key) && reviewedKeys.has(key),
+  );
+  if (!vitestCandidate) fail("Vitest supplemental proof has no reviewed semantic refinement");
+
+  return {
+    astro: compactRefinement(
+      astroCandidate,
+      astro.confirmed_used_count,
+      astroEvidence,
+      astroLedger?.truth === "used",
+    ),
+    vitest: compactRefinement(
+      vitestCandidate,
+      supplementalArtifact.result.confirmed_used,
+      [sourceLineEvidence(SUPPLEMENTAL_VITEST_ROOT, vitestCandidate)],
+      true,
+    ),
+  };
+};
+
+const validateCapabilityEvidence = (root, evidence, capability) => {
+  if (!Array.isArray(evidence) || evidence.length === 0) {
+    fail(`${capability} requires concrete source evidence`);
+  }
+  for (const location of evidence) {
+    const current = sourceLocationEvidence(root, location);
+    if (JSON.stringify(current) !== JSON.stringify(location)) {
+      fail(`${capability} source evidence no longer matches the pinned source`);
+    }
+  }
+};
+
+/** Validates that all five semantic capabilities add non-compiler, non-linter value. */
+export const validateCapabilitiesArtifactData = (artifact, context) => {
+  if (!isObject(artifact) || artifact.schema_version !== 1) {
+    fail("semantic capabilities artifact schema_version must be 1");
+  }
+  if (
+    artifact.artifacts?.fallow_sha256 !== context.fallowSha256 ||
+    artifact.artifacts?.sidecar_sha256 !== context.sidecarSha256
+  ) {
+    fail("semantic capabilities artifact runtime hashes do not match");
+  }
+  if (
+    JSON.stringify(artifact.excludes) !==
+    JSON.stringify(["compiler-diagnostics", "syntax-and-style-lint-rules"])
+  ) {
+    fail("semantic capabilities artifact must exclude tsc and Oxlint responsibilities");
+  }
+  if (
+    JSON.stringify(artifact.coverage?.capability_ids) !==
+      JSON.stringify(REQUIRED_SEMANTIC_CAPABILITIES) ||
+    artifact.coverage.repository_count !== 2 ||
+    artifact.coverage.all_capabilities_proven_on_each_repository !== true
+  ) {
+    fail("semantic capabilities artifact does not cover all five capabilities on both projects");
+  }
+  const repositories = artifact.repositories;
+  if (
+    !Array.isArray(repositories) ||
+    JSON.stringify(repositories.map(({ id }) => id)) !== JSON.stringify(["astro", "vitest"])
+  ) {
+    fail("semantic capabilities artifact requires Astro and Vitest in stable order");
+  }
+  for (const repository of repositories) {
+    const root = context.roots[repository.id];
+    if (
+      typeof root !== "string" ||
+      repository.commit !== context.commits[repository.id] ||
+      repository.tracked_source_clean !== true
+    ) {
+      fail(`${repository.id} capability provenance does not match its pinned clean source`);
+    }
+    if (
+      JSON.stringify(Object.keys(repository.capabilities)) !==
+      JSON.stringify(REQUIRED_SEMANTIC_CAPABILITIES)
+    ) {
+      fail(`${repository.id} does not contain all five semantic capabilities`);
+    }
+    const programs = [...repository.programs.inspect, ...repository.programs.coupling];
+    if (
+      programs.length === 0 ||
+      programs.some(
+        (program) =>
+          typeof program.config !== "string" ||
+          program.status !== "complete" ||
+          !Number.isSafeInteger(program.source_file_count) ||
+          program.source_file_count <= 0 ||
+          program.program_reused !== true,
+      )
+    ) {
+      fail(`${repository.id} did not reuse one semantic Program per selected config`);
+    }
+    const refinement = repository.capabilities["dead-code-refinement"];
+    if (
+      refinement.assertion !== "confirmed-used" ||
+      refinement.confirmed_used_count <= 0 ||
+      refinement.reviewed !== true
+    ) {
+      fail(`${repository.id} has no reviewed dead-code refinement proof`);
+    }
+    validateCapabilityEvidence(
+      root,
+      refinement.source_evidence,
+      `${repository.id} dead-code refinement`,
+    );
+    const trace = repository.capabilities["semantic-symbol-trace"];
+    if (
+      trace.assertion !== "references-found" ||
+      !new Set(["complete", "partial"]).has(trace.status) ||
+      trace.total_reference_count <= 0 ||
+      trace.checker_evidence_count <= 0
+    ) {
+      fail(`${repository.id} has no semantic symbol trace proof`);
+    }
+    validateCapabilityEvidence(root, trace.source_evidence, `${repository.id} symbol trace`);
+    const api = repository.capabilities["public-api-surface"];
+    if (
+      !new Set(["leak-confirmed", "no-leak-confirmed"]).has(api.assertion) ||
+      !new Set(["complete", "partial"]).has(api.status) ||
+      api.public_entry_count <= 0
+    ) {
+      fail(`${repository.id} has no public API surface proof`);
+    }
+    validateCapabilityEvidence(root, api.source_evidence, `${repository.id} API surface`);
+    const impact = repository.capabilities["semantic-impact-targeted-tests"];
+    if (
+      impact.assertion !== "consumers-found" ||
+      !new Set(["complete", "partial"]).has(impact.status) ||
+      impact.direct_consumer_count <= 0 ||
+      impact.targeted_test_count <= 0 ||
+      !Array.isArray(impact.targeted_tests) ||
+      impact.targeted_tests.length === 0
+    ) {
+      fail(`${repository.id} has no impact or targeted-test proof`);
+    }
+    validateCapabilityEvidence(root, impact.source_evidence, `${repository.id} impact`);
+    const coupling = repository.capabilities["public-type-coupling"];
+    const summary = coupling.summary;
+    if (
+      coupling.assertion !== "coupling-found" ||
+      !new Set(["complete", "partial"]).has(coupling.status) ||
+      summary?.scope !== "project-local-public-signatures" ||
+      summary?.direction !== "directed" ||
+      summary?.project_size <= 0 ||
+      summary?.distinct_coupled_files <= 0 ||
+      summary?.edge_count <= 0 ||
+      !Number.isFinite(summary?.coupled_file_pct) ||
+      !Number.isFinite(summary?.p50_distinct_connections) ||
+      !Number.isFinite(summary?.p90_distinct_connections) ||
+      !Number.isFinite(summary?.concentration) ||
+      !Array.isArray(coupling.top_contributors) ||
+      coupling.top_contributors.length === 0 ||
+      !Array.isArray(coupling.cycles) ||
+      coupling.cycles.length === 0
+    ) {
+      fail(`${repository.id} has no rich public type-coupling proof`);
+    }
+    validateCapabilityEvidence(root, coupling.source_evidence, `${repository.id} type coupling`);
+  }
+  return artifact;
+};
+
+const capabilities = async (manifest, options, publicationMode = "write") => {
+  ensureRuntimeInputs(options);
+  prepareSupplementalFixture();
+  const astroProject = manifest.projects.find(({ id }) => id === "astro");
+  if (!astroProject) fail("capability proof requires the Astro corpus project");
+  const astroRoot = projectRoot(astroProject, options.outDir);
+  validatePreparedFixture(astroProject, options.outDir);
+  const vitestCommit = git(
+    SUPPLEMENTAL_VITEST_ROOT,
+    ["rev-parse", "HEAD"],
+    "Vitest capability fixture HEAD",
+  );
+  if (vitestCommit !== SUPPLEMENTAL_VITEST_COMMIT) {
+    fail(`Vitest capability fixture is at ${vitestCommit}, expected ${SUPPLEMENTAL_VITEST_COMMIT}`);
+  }
+  for (const [id, root] of [
+    ["astro", astroRoot],
+    ["vitest", SUPPLEMENTAL_VITEST_ROOT],
+  ]) {
+    const dirty = git(root, ["status", "--porcelain", "--untracked-files=all"], `${id} status`);
+    if (dirty !== "") fail(`${id} capability fixture has tracked modifications`);
+    assertDependencyFreeFixture(root, id);
+  }
+
+  const astroInspect = await capabilityProcess(options, "astro-inspect", astroRoot, [
+    "inspect",
+    "--root",
+    astroRoot,
+    "--symbol",
+    "packages/telemetry/src/index.ts:AstroTelemetry",
+    "--type-aware",
+    "--type-aware-project",
+    "packages/telemetry/tsconfig.build.json",
+    "--type-aware-project",
+    "packages/telemetry/tsconfig.test.json",
+  ]);
+  const vitestInspect = await capabilityProcess(
+    options,
+    "vitest-inspect",
+    SUPPLEMENTAL_VITEST_ROOT,
+    [
+      "inspect",
+      "--root",
+      SUPPLEMENTAL_VITEST_ROOT,
+      "--symbol",
+      "packages/vitest/src/public/config.ts:defineConfig",
+      "--type-aware",
+      "--type-aware-project",
+      "packages/vitest/tsconfig.json",
+      "--type-aware-project",
+      "test/tsconfig.json",
+    ],
+  );
+  const astroCoupling = await capabilityProcess(options, "astro-coupling", astroRoot, [
+    "health",
+    "--root",
+    astroRoot,
+    "--type-aware",
+    "--type-coupling",
+    "--type-aware-project",
+    "packages/astro/tsconfig.build.json",
+  ]);
+  const vitestCoupling = await capabilityProcess(
+    options,
+    "vitest-coupling",
+    SUPPLEMENTAL_VITEST_ROOT,
+    [
+      "health",
+      "--root",
+      SUPPLEMENTAL_VITEST_ROOT,
+      "--type-aware",
+      "--type-coupling",
+      "--type-aware-project",
+      "packages/vitest/tsconfig.json",
+    ],
+  );
+  const refinements = refinementProofs(manifest, options);
+  const astroSemantic = semanticCapabilityProof(
+    astroRoot,
+    astroInspect.output,
+    astroCoupling.output,
+  );
+  const vitestSemantic = semanticCapabilityProof(
+    SUPPLEMENTAL_VITEST_ROOT,
+    vitestInspect.output,
+    vitestCoupling.output,
+  );
+  const artifact = {
+    schema_version: 1,
+    purpose:
+      "Prove semantic codebase-intelligence capabilities that are not compiler diagnostics or syntax/style lint rules.",
+    excludes: ["compiler-diagnostics", "syntax-and-style-lint-rules"],
+    artifacts: {
+      fallow_sha256: sha256File(options.fallowBin),
+      sidecar_sha256: sidecarArtifactHash(options.sidecarBin),
+    },
+    coverage: {
+      capability_ids: REQUIRED_SEMANTIC_CAPABILITIES,
+      repository_count: 2,
+      all_capabilities_proven_on_each_repository: true,
+    },
+    repositories: [
+      {
+        id: "astro",
+        repo: astroProject.repo,
+        commit: git(astroRoot, ["rev-parse", "HEAD"], "Astro capability fixture HEAD"),
+        tracked_source_clean: true,
+        programs: astroSemantic.programs,
+        capabilities: {
+          "dead-code-refinement": refinements.astro,
+          ...astroSemantic.capabilities,
+        },
+      },
+      {
+        id: "vitest",
+        repo: "vitest-dev/vitest",
+        commit: vitestCommit,
+        tracked_source_clean: true,
+        programs: vitestSemantic.programs,
+        capabilities: {
+          "dead-code-refinement": refinements.vitest,
+          ...vitestSemantic.capabilities,
+        },
+      },
+    ],
+  };
+  validateCapabilitiesArtifactData(artifact, {
+    fallowSha256: sha256File(options.fallowBin),
+    sidecarSha256: sidecarArtifactHash(options.sidecarBin),
+    roots: { astro: astroRoot, vitest: SUPPLEMENTAL_VITEST_ROOT },
+    commits: {
+      astro: artifact.repositories[0].commit,
+      vitest: SUPPLEMENTAL_VITEST_COMMIT,
+    },
+  });
+  if (publicationMode === "write") {
+    writeJson(CAPABILITIES_ARTIFACT, artifact);
+  } else if (
+    JSON.stringify(readJson(CAPABILITIES_ARTIFACT, "tracked capabilities artifact")) !==
+    JSON.stringify(artifact)
+  ) {
+    fail("tracked semantic capabilities artifact has generator drift; rerun capabilities");
+  }
+  return artifact;
 };
 
 export const candidateFeatureBucketFields = (
@@ -1481,17 +1986,16 @@ const evidence = async (manifest, projects, options) => {
   for (const result of discovery.projects ?? []) {
     const project = selected.get(result.id);
     if (!project) continue;
+    const confirmedCandidates = (result.candidates ?? []).filter(
+      ({ semantic_status: semanticStatus }) => semanticStatus === "confirmed-used",
+    );
     const root = projectRoot(project, options.outDir);
     const checkerEvidence = await collectCheckerEvidence(
       project,
-      result.candidates ?? [],
+      confirmedCandidates,
       options.outDir,
     );
-    const expectedConfirmed = new Set(
-      (result.candidates ?? [])
-        .filter(({ semantic_status: semanticStatus }) => semanticStatus === "confirmed-used")
-        .map(({ key }) => key),
-    );
+    const expectedConfirmed = new Set(confirmedCandidates.map(({ key }) => key));
     if (
       JSON.stringify([...checkerEvidence.keys()].toSorted()) !==
       JSON.stringify([...expectedConfirmed].toSorted())
@@ -2148,6 +2652,22 @@ const summarize = (manifest, options, publicationMode = "write") => {
     }
   }
   const confirmedProjects = new Set(correctConfirmed.map(({ project_id }) => project_id));
+  const adjudication = readJson(DEFAULT_ADJUDICATION, "adjudication decisions");
+  const supplementalArtifact = validateSupplementalArtifactData(
+    readJson(SUPPLEMENTAL_ARTIFACT, "tracked supplemental artifact"),
+    adjudication,
+    {
+      fallowSha256: discovery.provenance.fallow.sha256,
+      sidecarSha256: discovery.provenance.sidecar.sha256,
+      sourceRoot: REPO_ROOT,
+    },
+  );
+  if (
+    supplementalArtifact.result.confirmed_used > 0 &&
+    supplementalArtifact.independent_review.verdict === "approved"
+  ) {
+    confirmedProjects.add("vitest");
+  }
   const featureBucketValue = summarizeAdjudicatedFeatureBuckets(entries);
   const zeroControlsClean = discovery.projects
     .filter(({ role }) => role === "zero-control")
@@ -2337,12 +2857,16 @@ export const main = async (argv = process.argv.slice(2)) => {
   else if (options.command === "verify-publication") {
     summarize(manifest, options, "verify");
     await supplemental(options, "verify");
+    await capabilities(manifest, options, "verify");
   } else if (options.command === "supplemental") await supplemental(options);
+  else if (options.command === "capabilities") await capabilities(manifest, options);
   if (options.command === "verify-ledger") console.log("verify-ledger: evidence ledger is valid");
   else if (options.command === "verify-publication")
     console.log("verify-publication: tracked evidence matches the generator");
   else if (options.command === "supplemental")
     console.log(`supplemental: artifact written to ${SUPPLEMENTAL_ARTIFACT}`);
+  else if (options.command === "capabilities")
+    console.log(`capabilities: artifact written to ${CAPABILITIES_ARTIFACT}`);
   else console.log(`${options.command}: artifacts written to ${options.outDir}`);
   return 0;
 };

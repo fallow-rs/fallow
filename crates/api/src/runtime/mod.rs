@@ -371,6 +371,7 @@ fn derive_programmatic_health_execution_options<'a>(
         performance: false,
         runtime_coverage: None,
         churn_file: None,
+        analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         group_by: None,
         ownership_emails: run
             .ownership_emails

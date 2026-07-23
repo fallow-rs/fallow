@@ -21,6 +21,7 @@ pub fn create_test_config(root: PathBuf) -> fallow_config::ResolvedConfig {
 #[must_use]
 pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],

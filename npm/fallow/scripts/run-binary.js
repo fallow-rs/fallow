@@ -129,6 +129,30 @@ function readResolvedVersion(manifestPath) {
   }
 }
 
+function resolveTypeAwareCompanion(
+  fallowVersion,
+  resolvePackage = require.resolve,
+  readFile = fs.readFileSync,
+) {
+  try {
+    const manifestPath = resolvePackage("fallow-type-aware/package.json");
+    const manifest = JSON.parse(readFile(manifestPath, "utf8"));
+    if (manifest.version !== fallowVersion) return undefined;
+    const companion = path.join(path.dirname(manifestPath), "fallow-type-aware.mjs");
+    return fs.existsSync(companion) ? companion : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function childEnvironment(resolvedVersion) {
+  if (process.env.FALLOW_TYPE_AWARE_BIN) return process.env;
+  const companion = resolveTypeAwareCompanion(resolvedVersion);
+  return companion === undefined
+    ? process.env
+    : { ...process.env, FALLOW_TYPE_AWARE_BIN: companion };
+}
+
 // Swallow EPIPE on stdout. When fallow's output is piped into a reader that
 // closes early (e.g. `fallow --version | head`), the trailing `verified:`
 // status line would otherwise surface as an unhandled EPIPE 'error' event and
@@ -174,7 +198,10 @@ function runBinary(binaryBaseName, options = {}) {
   }
 
   try {
-    execFileSync(binaryPath, [...prependArgs, ...process.argv.slice(2)], { stdio: "inherit" });
+    execFileSync(binaryPath, [...prependArgs, ...process.argv.slice(2)], {
+      stdio: "inherit",
+      env: childEnvironment(resolvedVersion),
+    });
   } catch (e) {
     if (e.status === undefined) throw e;
     if (e.status === null) {
@@ -195,4 +222,5 @@ module.exports = {
   isVersionQuery, // test-only
   guardBrokenStdout, // test-only
   exitCodeForChildFailure, // test-only
+  resolveTypeAwareCompanion, // test-only
 };

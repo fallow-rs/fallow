@@ -209,6 +209,66 @@ const buildTargetLeaves = (report: HealthReport): HealthLeafItem[] =>
     });
   });
 
+type TypeCouplingReport = NonNullable<
+  NonNullable<NonNullable<HealthOutput["_meta"]>["type_aware"]>["type_coupling"]
+>;
+
+const typeCouplingReport = (report: HealthOutput): TypeCouplingReport | null =>
+  report._meta?.type_aware?.type_coupling ?? null;
+
+const buildTypeCouplingLeaves = (report: HealthOutput): HealthLeafItem[] => {
+  const coupling = typeCouplingReport(report);
+  if (!coupling) {
+    return [];
+  }
+  if (!coupling.summary) {
+    const message = coupling.actions?.[0] ?? `Semantic analysis is ${coupling.status}.`;
+    return [new HealthLeafItem(message, "info", { tooltip: message })];
+  }
+
+  const summary = coupling.summary;
+  const summaryText = `${summary.distinct_coupled_files} of ${summary.project_size} files coupled, ${summary.edge_count} edges, ${summary.cycle_count} cycles`;
+  const summaryTooltip = new vscode.MarkdownString();
+  summaryTooltip.appendMarkdown(
+    `**Type coupling summary**\n\n${escapeHealthMarkdown(summaryText)}\n\nScope: ${escapeHealthMarkdown(summary.scope)}, ${escapeHealthMarkdown(summary.direction)}. P50 connections: ${summary.p50_distinct_connections.toFixed(1)}, P90: ${summary.p90_distinct_connections.toFixed(1)}, concentration: ${(summary.concentration * 100).toFixed(1)}%.\n\nAdvisory TypeScript public-signature coupling. It does not affect the health score.`,
+  );
+  const summaryLeaf = new HealthLeafItem(summaryText, "info", { tooltip: summaryTooltip });
+
+  const topContributors = coupling.top_contributors ?? [];
+  const contributors = topContributors.length > 0 ? topContributors : coupling.files;
+  const contributorLeaves = contributors
+    .toSorted(
+      (left, right) =>
+        right.public_api_depends_on +
+        right.public_types_used_by -
+        (left.public_api_depends_on + left.public_types_used_by),
+    )
+    .slice(0, getHealthTopFindings())
+    .map((file) => {
+      const { relative } = resolveFilePath(file.path);
+      const detailText = `public API depends on ${file.public_api_depends_on}, public types used by ${file.public_types_used_by}`;
+      const tooltip = new vscode.MarkdownString();
+      tooltip.appendMarkdown(
+        `**${escapeHealthMarkdown(relative)}**\n\n${escapeHealthMarkdown(detailText)}\n\nAdvisory TypeScript public-signature coupling. It does not affect the health score.`,
+      );
+      const detail = new HealthLeafItem(detailText, undefined, {
+        tooltip,
+        open: { path: file.path, line: 1, col: 0 },
+      });
+      return new HealthLeafItem(middleElidePath(relative), "references", {
+        tooltip,
+        children: [detail],
+      });
+    });
+
+  const cycleLeaves = (coupling.cycles ?? []).slice(0, getHealthTopFindings()).map((cycle) => {
+    const path = cycle.files.join(" -> ");
+    return new HealthLeafItem(`Cycle: ${path}`, "references", { tooltip: path });
+  });
+
+  return [summaryLeaf, ...contributorLeaves, ...cycleLeaves];
+};
+
 export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
   private report: HealthOutput | null = null;
   private view: vscode.TreeView<HealthItem> | null = null;
@@ -272,6 +332,8 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
     );
     addSection("hotspots", buildHotspotLeaves(this.report), this.report.hotspots?.length ?? 0);
     addSection("targets", buildTargetLeaves(this.report), this.report.targets?.length ?? 0);
+    const coupling = typeCouplingReport(this.report);
+    addSection("typeCoupling", buildTypeCouplingLeaves(this.report), coupling?.files.length ?? 0);
 
     return sections;
   }

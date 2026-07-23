@@ -179,6 +179,8 @@ pub struct DuplicationAnalysis {
 #[derive(Debug)]
 pub struct HealthAnalysisResult<GroupResolver = ()> {
     pub report: HealthReport,
+    /// Optional TypeScript semantic metadata for advisory health overlays.
+    pub type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
     /// Per-group health output when grouping is active.
     ///
     /// `None` for the default run; `Some` for any grouped invocation. The
@@ -203,6 +205,7 @@ impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
     pub fn without_group_resolver(self) -> HealthAnalysisResult<()> {
         HealthAnalysisResult {
             report: self.report,
+            type_aware_meta: self.type_aware_meta,
             grouping: self.grouping,
             group_resolver: None,
             config: self.config,
@@ -250,6 +253,7 @@ mod tests {
             timings: None,
             coverage_gaps_has_findings: true,
             should_fail_on_coverage_gaps: true,
+            type_aware_meta: None,
         };
 
         let neutral = result.without_group_resolver();

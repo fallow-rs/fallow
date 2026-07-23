@@ -12,6 +12,14 @@ pub struct LspHealthOptions {
     pub inline_complexity: Option<bool>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LspTypeAwareOptions {
+    pub enabled: bool,
+    pub projects: Vec<String>,
+    pub require: Option<fallow_config::TypeAwareRequire>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LspInitializationOptions {
@@ -22,6 +30,7 @@ pub struct LspInitializationOptions {
     pub duplication: Option<LspDuplicationOptions>,
     pub production: Option<bool>,
     pub health: Option<LspHealthOptions>,
+    pub type_aware: Option<LspTypeAwareOptions>,
 }
 
 #[must_use]
@@ -63,6 +72,9 @@ pub fn parse_initialization_options(opts: Option<&serde_json::Value>) -> LspInit
                     .and_then(serde_json::Value::as_bool),
             })
         }),
+        type_aware: obj
+            .get("typeAware")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
     }
 }
 

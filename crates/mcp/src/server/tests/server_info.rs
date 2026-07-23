@@ -32,6 +32,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"fix_apply".to_string()));
     assert!(names.contains(&"project_info".to_string()));
     assert!(names.contains(&"trace_export".to_string()));
+    assert!(names.contains(&"symbol_trace".to_string()));
+    assert!(names.contains(&"symbol_impact".to_string()));
     assert!(names.contains(&"trace_file".to_string()));
     assert!(names.contains(&"impact_closure".to_string()));
     assert!(names.contains(&"trace_dependency".to_string()));
@@ -52,7 +54,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
     assert!(names.contains(&"recommend".to_string()));
-    assert_eq!(tools.len(), 31);
+    assert_eq!(tools.len(), 33);
 }
 
 #[test]
@@ -70,6 +72,8 @@ fn read_only_tools_have_annotations() {
         "fix_preview",
         "project_info",
         "trace_export",
+        "symbol_trace",
+        "symbol_impact",
         "trace_file",
         "impact_closure",
         "trace_dependency",
@@ -151,6 +155,8 @@ fn open_world_hint_on_analysis_tools() {
         "fix_preview",
         "project_info",
         "trace_export",
+        "symbol_trace",
+        "symbol_impact",
         "trace_file",
         "impact_closure",
         "trace_dependency",

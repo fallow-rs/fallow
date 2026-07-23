@@ -1004,6 +1004,7 @@ fn package_exports_array_fallback_resolves_self_package_source() {
 fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
     let root = fixture_path("ignore-patterns-workspace-package-json");
     let config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],

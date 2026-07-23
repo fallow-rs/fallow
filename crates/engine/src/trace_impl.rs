@@ -162,6 +162,100 @@ pub fn trace_export(
         direct_references,
         re_export_chains,
         reason,
+        semantic: None,
+    })
+}
+
+/// Resolve the exact source identity required by the semantic sidecar for a
+/// graph export. This does not perform semantic analysis itself.
+#[must_use]
+pub fn semantic_symbol_for_export(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    export_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
+
+    let module = graph
+        .modules
+        .iter()
+        .find(|module| path_matches(&module.path, root, file_path))?;
+    let export = module
+        .exports
+        .iter()
+        .filter(|export| export_name_matches(export, export_name))
+        .max_by_key(|export| (!export.references.is_empty(), !export.is_type_only))?;
+    let source = std::fs::read_to_string(&module.path).ok()?;
+    let offsets = fallow_types::extract::compute_line_offsets(&source);
+    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
+    Some(SemanticSymbol {
+        path: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        namespace: if export.is_type_only {
+            SemanticNamespace::Type
+        } else {
+            SemanticNamespace::Value
+        },
+        declaration_kind: "export".to_string(),
+        exported_name: export_name.to_string(),
+        local_name: export_name.to_string(),
+        owner: None,
+        line,
+        col,
+    })
+}
+
+/// Resolve the source identity for a public class member semantic query.
+#[must_use]
+pub fn semantic_symbol_for_class_member(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    member_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    use fallow_types::extract::MemberKind;
+    use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
+
+    let module = graph
+        .modules
+        .iter()
+        .find(|module| path_matches(&module.path, root, file_path))?;
+    let (owner, member) = module
+        .exports
+        .iter()
+        .filter_map(|export| {
+            export
+                .members
+                .iter()
+                .find(|member| member.name == member_name)
+                .map(|member| (export, member))
+        })
+        .max_by_key(|(export, _)| (!export.references.is_empty(), !export.is_type_only))?;
+    let declaration_kind = match member.kind {
+        MemberKind::ClassMethod => "class_method",
+        MemberKind::ClassProperty => "class_property",
+        _ => return None,
+    };
+    let source = std::fs::read_to_string(&module.path).ok()?;
+    let offsets = fallow_types::extract::compute_line_offsets(&source);
+    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
+    Some(SemanticSymbol {
+        path: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        namespace: SemanticNamespace::Value,
+        declaration_kind: declaration_kind.to_string(),
+        exported_name: member_name.to_string(),
+        local_name: member_name.to_string(),
+        owner: Some(owner.name.to_string()),
+        line,
+        col,
     })
 }
 
@@ -236,6 +330,7 @@ pub fn trace_class_member(
         owner_direct_references: owner_trace.direct_references,
         owner_re_export_chains: owner_trace.re_export_chains,
         reason,
+        semantic: None,
     })
 }
 
@@ -1476,6 +1571,7 @@ mod tests {
                 reference_count: 1,
             }],
             reason: "ok".to_string(),
+            semantic: None,
         };
         let json = serde_json::to_string(&trace).expect("serializes");
         assert!(

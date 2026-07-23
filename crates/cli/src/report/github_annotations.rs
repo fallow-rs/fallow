@@ -67,7 +67,7 @@ pub fn render_annotations(kind: EnvelopeKind, envelope: &Value, options: &Render
     lines.join("\n")
 }
 
-fn collect_annotations(
+pub(crate) fn collect_annotations(
     kind: EnvelopeKind,
     envelope: &Value,
     pm: PackageManager,

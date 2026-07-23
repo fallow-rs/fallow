@@ -19,6 +19,7 @@ mod process_tree;
 mod project_info;
 mod recommend;
 mod security;
+mod semantic;
 mod suppressions;
 mod trace;
 
@@ -55,6 +56,7 @@ pub use list_boundaries::{build_list_boundaries_args, run_list_boundaries};
 pub use project_info::{build_project_info_args, run_project_info};
 pub use recommend::run_recommend;
 pub use security::{build_security_candidates_args, run_security_candidates};
+pub use semantic::{run_symbol_impact, run_symbol_trace};
 #[cfg(test)]
 pub use suppressions::build_list_suppressions_args;
 pub use suppressions::run_list_suppressions;
@@ -88,6 +90,29 @@ fn push_str_flag(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
         && !s.is_empty()
     {
         args.extend([flag.to_string(), s.to_string()]);
+    }
+}
+
+fn push_type_aware(
+    args: &mut Vec<String>,
+    enabled: Option<bool>,
+    projects: Option<&[String]>,
+    require: Option<crate::params::TypeAwareRequireParam>,
+) {
+    if enabled == Some(true) || projects.is_some_and(|items| !items.is_empty()) || require.is_some()
+    {
+        args.push("--type-aware".to_string());
+    }
+    if let Some(projects) = projects {
+        for project in projects.iter().filter(|project| !project.is_empty()) {
+            args.extend(["--type-aware-project".to_string(), project.clone()]);
+        }
+    }
+    if let Some(require) = require {
+        args.extend([
+            "--type-aware-require".to_string(),
+            require.as_cli().to_string(),
+        ]);
     }
 }
 

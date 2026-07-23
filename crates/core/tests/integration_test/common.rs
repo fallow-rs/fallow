@@ -15,6 +15,7 @@ pub fn fixture_path(name: &str) -> PathBuf {
 
 pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -75,6 +76,7 @@ pub fn create_config_with_cache(
     cache_dir: std::path::PathBuf,
 ) -> fallow_config::ResolvedConfig {
     let mut config = FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -124,6 +126,7 @@ where
     let mut rules = RulesConfig::default();
     modify(&mut rules);
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -176,6 +179,7 @@ pub fn create_config_with_overrides(
         })
         .collect();
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -221,6 +225,7 @@ pub fn create_config_with_ignore_decorators(
     ignore_decorators: Vec<String>,
 ) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],

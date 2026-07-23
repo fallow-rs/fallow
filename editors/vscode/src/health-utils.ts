@@ -1,5 +1,6 @@
 import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { FindingSeverity, HealthReport, HealthScorePenalties } from "./types.js";
+import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
 
 /**
  * Options for {@link buildHealthArgs}. Kept as a plain data object (no config
@@ -32,6 +33,7 @@ export interface HealthArgsOptions {
    * forwarded when true. Drives the inline editor decorations.
    */
   readonly complexityBreakdown?: boolean;
+  readonly typeAware?: TypeAwareArgsOptions;
 }
 
 /**
@@ -74,6 +76,11 @@ export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
   if (options.configPath) {
     args.push("--config", options.configPath);
   }
+
+  if (options.typeAware?.enabled) {
+    args.push("--type-coupling");
+  }
+  appendTypeAwareArgs(args, options.typeAware);
 
   return args;
 };

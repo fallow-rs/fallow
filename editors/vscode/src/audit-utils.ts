@@ -1,5 +1,6 @@
 import { escapeMarkdownText } from "./markdown-utils.js";
 import type { AuditGate, AuditOutput, AuditVerdict } from "./types.js";
+import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
 
 interface AuditArgsOptions {
   /**
@@ -19,6 +20,7 @@ interface AuditArgsOptions {
    * the workspace forwarding in `buildAnalysisArgs`.
    */
   readonly workspace: string;
+  readonly typeAware?: TypeAwareArgsOptions;
 }
 
 /**
@@ -56,6 +58,8 @@ export const buildAuditArgs = (options: AuditArgsOptions): string[] => {
   if (options.configPath) {
     args.push("--config", options.configPath);
   }
+
+  appendTypeAwareArgs(args, options.typeAware);
 
   if (options.gate === "all") {
     args.push("--gate", "all");

@@ -47,6 +47,7 @@ mod runtime_json;
 mod runtime_output;
 pub mod sarif_output;
 pub mod security_output;
+mod type_aware;
 pub mod ci_output {
     //! Compatibility re-exports for CI output builders now owned by
     //! `fallow-output`.
@@ -110,7 +111,7 @@ pub use explain::{
     rule_docs_url, rule_guide, security_meta, serialize_explain_programmatic_json,
     unknown_explain_error,
 };
-pub use fallow_config::AuditGate;
+pub use fallow_config::{AuditGate, TypeAwareRequire};
 pub use fallow_output::RootEnvelopeMode;
 pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
@@ -176,6 +177,7 @@ pub use sarif_output::{
     build_health_sarif,
 };
 pub use security_output::SecurityGateMode;
+pub use type_aware::refine_dead_code as refine_type_aware_dead_code;
 
 pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "root",
@@ -260,6 +262,17 @@ pub struct AnalysisOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: bool,
+    /// Optional project-wide TypeScript semantic analysis. Disabled by default
+    /// and never changes compiler or typed-lint ownership.
+    pub type_aware: TypeAwareOptions,
+}
+
+/// Typed options for Fallow's optional TypeScript semantic companion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TypeAwareOptions {
+    pub enabled: bool,
+    pub projects: Vec<PathBuf>,
+    pub require: fallow_config::TypeAwareRequire,
 }
 
 /// Issue-type filters for the dead-code analysis.
@@ -298,6 +311,39 @@ pub struct DeadCodeFilters {
 }
 
 impl DeadCodeFilters {
+    fn any_active(&self) -> bool {
+        self.unused_files
+            || self.unused_exports
+            || self.unused_deps
+            || self.unused_types
+            || self.private_type_leaks
+            || self.unused_enum_members
+            || self.unused_class_members
+            || self.unused_store_members
+            || self.unprovided_injects
+            || self.unrendered_components
+            || self.unused_component_props
+            || self.unused_component_emits
+            || self.unused_component_inputs
+            || self.unused_component_outputs
+            || self.unused_svelte_events
+            || self.unused_server_actions
+            || self.unused_load_data_keys
+            || self.unresolved_imports
+            || self.unlisted_deps
+            || self.duplicate_exports
+            || self.circular_deps
+            || self.re_export_cycles
+            || self.boundary_violations
+            || self.policy_violations
+            || self.stale_suppressions
+            || self.unused_catalog_entries
+            || self.empty_catalog_groups
+            || self.unresolved_catalog_references
+            || self.unused_dependency_overrides
+            || self.misconfigured_dependency_overrides
+    }
+
     /// Enable the issue filter addressed by a shared registry selector.
     ///
     /// Returns `false` when the selector is not registered for dead-code

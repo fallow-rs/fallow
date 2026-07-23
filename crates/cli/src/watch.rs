@@ -33,6 +33,9 @@ pub struct WatchOptions<'a> {
     pub explain: bool,
     /// Mirror of the global `--include-entry-exports` flag.
     pub include_entry_exports: bool,
+    pub type_aware: bool,
+    pub type_aware_projects: &'a [PathBuf],
+    pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
 }
 
 type LoadConfigFn = fn(
@@ -297,16 +300,51 @@ fn print_waiting(opts: &WatchOptions<'_>) {
 
 fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    let results =
-        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-            .analyze_dead_code_with_artifacts(false, false)
-        {
-            Ok(analysis) => analysis.results,
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let mut analysis =
+        match session.analyze_dead_code_with_artifacts(false, config.type_aware.enabled) {
+            Ok(analysis) => analysis,
             Err(e) => {
                 eprintln!("Analysis error: {e}");
                 return ExitCode::from(2);
             }
         };
+    let type_aware = if config.type_aware.enabled {
+        let projects = config
+            .type_aware
+            .projects
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        let entry_points = analysis.graph.as_ref().map_or_else(Vec::new, |graph| {
+            fallow_engine::project_analysis::public_api_entry_paths_for_graph(
+                graph,
+                config,
+                session.workspaces(),
+            )
+        });
+        match crate::semantic_queries::refine_dead_code(
+            &config.root,
+            &mut analysis.results,
+            &projects,
+            &entry_points,
+            config.rules.unused_exports != fallow_config::Severity::Off
+                || config.rules.unused_types != fallow_config::Severity::Off
+                || config.rules.unused_class_members != fallow_config::Severity::Off,
+            config.rules.private_type_leaks != fallow_config::Severity::Off,
+            false,
+            config.type_aware.require,
+        ) {
+            Ok(outcome) => outcome.map(|outcome| outcome.type_aware.meta),
+            Err(error) => {
+                eprintln!("Type-aware analysis failed: {error}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        None
+    };
+    let results = analysis.results;
     // Note find-state for telemetry (issue #1650 follow-up): watch emits a
     // `code_quality_review` workflow event at process exit, so each analysis
     // cycle records its find-state (the accumulator is sticky across cycles).
@@ -318,7 +356,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         elapsed,
         quiet: opts.quiet,
         explain: opts.explain,
-        type_aware: None,
+        type_aware: type_aware.as_ref(),
         group_by: None,
         top: None,
         summary: false,
@@ -334,7 +372,18 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
     if report_code != ExitCode::SUCCESS {
         eprintln!("Warning: report output failed");
     }
-    ExitCode::SUCCESS
+    if config.type_aware.require == fallow_config::TypeAwareRequire::Complete
+        && type_aware
+            .as_ref()
+            .and_then(|meta| meta.identity.as_ref())
+            .is_some_and(|identity| {
+                identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
+            })
+    {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn reload_config_or_keep_previous(
@@ -530,6 +579,13 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedC
     if opts.include_entry_exports {
         config.include_entry_exports = true;
     }
+    crate::check::apply_type_aware_overrides_from(
+        opts.output,
+        opts.type_aware,
+        opts.type_aware_projects,
+        opts.type_aware_require,
+        &mut config,
+    )?;
     Ok(config)
 }
 
@@ -1026,6 +1082,7 @@ mod tests {
             unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
+            type_aware: fallow_config::TypeAwareConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
@@ -1068,6 +1125,9 @@ mod tests {
             clear_screen: false,
             explain: false,
             include_entry_exports: false,
+            type_aware: false,
+            type_aware_projects: &[],
+            type_aware_require: None,
         }
     }
 

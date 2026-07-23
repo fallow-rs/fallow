@@ -4275,6 +4275,17 @@
         "span_start": {
           "type": "integer",
           "description": "Byte offset of the type reference."
+        },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticPrivateTypeLeak"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact checker-backed provenance when type-aware analysis confirmed the\npackage-public leak across files or re-exports."
         }
       },
       "required": [
@@ -5762,7 +5773,7 @@
               "type": "null"
             }
           ],
-          "description": "Provenance for the experimental TypeScript semantic refinement pass."
+          "description": "Provenance for the opt-in TypeScript semantic analysis pass."
         },
         "field_definitions": {
           "type": "object",
@@ -8892,6 +8903,17 @@
         "span_start": {
           "type": "integer",
           "description": "Byte offset of the type reference."
+        },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticPrivateTypeLeak"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact checker-backed provenance when type-aware analysis confirmed the\npackage-public leak across files or re-exports."
         },
         "actions": {
           "type": "array",
@@ -15982,6 +16004,50 @@
             }
           ],
           "description": "OPT-IN symbol-level call chain. Present only when `--symbol-chain` was\nrequested AND the target is a SYMBOL (best-effort, syntactic, OFF the\nranked path). `None` (omitted) by default: symbol-level chains are\nbest-effort and not part of the trusted ranked evidence."
+        },
+        "semantic_trace": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectEvidenceSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Checker-backed declaration, alias, re-export, and use-site evidence.\nPresent only for a symbol target in type-aware mode."
+        },
+        "api_surface": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectEvidenceSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Package-public TypeScript surface and private-type reachability.\nPresent only for a symbol target in type-aware mode."
+        },
+        "symbol_impact": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectEvidenceSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact-symbol consumers and transitive affected files.\nPresent only for a symbol target in type-aware mode."
+        },
+        "targeted_tests": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectEvidenceSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Test entry points reachable from the exact symbol, with provenance.\nPresent only for a symbol target in type-aware mode."
         }
       },
       "required": [
@@ -16073,6 +16139,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -18761,6 +18837,60 @@
     "TypeAwareMeta": {
       "type": "object",
       "properties": {
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticAnalysisIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Compatibility identity used by audit, baselines, snapshots, and stores."
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticQuerySummary"
+          },
+          "description": "Compact status for every requested semantic query."
+        },
+        "symbol_traces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticSymbolTrace"
+          },
+          "description": "Checker-backed trace evidence requested by focused symbol queries."
+        },
+        "api_surface": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApiSurfaceResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Package-public surface and confirmed private type leaks."
+        },
+        "symbol_impacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticSymbolImpact"
+          },
+          "description": "Exact-symbol blast radius and targeted-test recommendations."
+        },
+        "type_coupling": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeCouplingReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Advisory project-local public-signature coupling."
+        },
         "protocol_version": {
           "type": "integer",
           "description": "Version of Fallow's backend-neutral sidecar protocol."
@@ -18848,7 +18978,7 @@
         "elapsed_ms",
         "phase_timings_ms"
       ],
-      "description": "Bounded provenance emitted when the experimental type-aware pass runs."
+      "description": "Bounded provenance emitted when the opt-in type-aware pass runs."
     },
     "TypeAwareProjectMeta": {
       "type": "object",
@@ -18888,6 +19018,24 @@
         "source_file_count": {
           "type": "integer",
           "description": "Source files loaded into this TypeScript program."
+        },
+        "program_reused": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether this Program served more than one semantic query in the batch."
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stable v3 project-level gap reason."
         },
         "abstain_reason": {
           "description": "Stable reason code when `status` is `abstained`.",
@@ -18979,6 +19127,16 @@
           "type": "string",
           "const": "abstained",
           "description": "Structural diagnostics prevented candidate scanning."
+        },
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "All v3 semantic queries assigned to this Program completed."
+        },
+        {
+          "type": "string",
+          "const": "unavailable",
+          "description": "The Program could not answer its assigned semantic queries safely."
         }
       ],
       "description": "Outcome of semantic refinement for one TypeScript project."
@@ -19002,6 +19160,959 @@
         }
       ],
       "description": "Closed set of reasons for retaining a candidate without semantic scanning."
+    },
+    "SemanticPrivateTypeLeak": {
+      "type": "object",
+      "properties": {
+        "exposed": {
+          "description": "Public symbol whose signature exposes the type.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "private_declaration": {
+          "description": "Project-local declaration that is not package-public.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "relation": {
+          "type": "string",
+          "description": "Signature relation through which the type is exposed."
+        },
+        "diagnostic_code": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Stable TypeScript diagnostic code used as supporting evidence."
+        }
+      },
+      "required": [
+        "exposed",
+        "private_declaration",
+        "relation"
+      ],
+      "description": "Exact semantic evidence for a private type leak."
+    },
+    "SemanticSymbol": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative declaration path."
+        },
+        "namespace": {
+          "description": "Value or type namespace.",
+          "$ref": "#/definitions/SemanticNamespace"
+        },
+        "declaration_kind": {
+          "type": "string",
+          "description": "Stable declaration kind, such as `function` or `class-method`."
+        },
+        "exported_name": {
+          "type": "string",
+          "description": "Name exposed to consumers."
+        },
+        "local_name": {
+          "type": "string",
+          "description": "Local declaration name."
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional owning class or namespace."
+        },
+        "line": {
+          "type": "integer",
+          "description": "One-based declaration line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "Zero-based UTF-8 byte column."
+        }
+      },
+      "required": [
+        "path",
+        "namespace",
+        "declaration_kind",
+        "exported_name",
+        "local_name",
+        "line",
+        "col"
+      ],
+      "description": "Stable identity for a declaration sent to or returned by the backend."
+    },
+    "SemanticNamespace": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "value",
+          "description": "Runtime value namespace."
+        },
+        {
+          "type": "string",
+          "const": "type",
+          "description": "Type-only namespace."
+        }
+      ],
+      "description": "Value or type namespace for one exact declaration or reference."
+    },
+    "SemanticAnalysisIdentity": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "Syntactic or type-aware analysis mode.",
+          "$ref": "#/definitions/SemanticAnalysisMode"
+        },
+        "semantic_schema_version": {
+          "type": "integer",
+          "description": "Version of the semantic result schema, independent of tool versions."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticCapability"
+          },
+          "description": "Sorted capability set requested for the analysis."
+        },
+        "project_config_hash": {
+          "type": "string",
+          "description": "Hash of normalized project ownership and compiler configuration."
+        },
+        "backend_family": {
+          "type": "string",
+          "description": "Backend family, such as `typescript-go`."
+        },
+        "completeness": {
+          "description": "Completeness of the resulting semantic analysis.",
+          "$ref": "#/definitions/SemanticCompleteness"
+        }
+      },
+      "required": [
+        "mode",
+        "semantic_schema_version",
+        "capabilities",
+        "project_config_hash",
+        "backend_family",
+        "completeness"
+      ],
+      "description": "Compatibility identity for comparing two analysis results."
+    },
+    "SemanticAnalysisMode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "syntactic",
+          "description": "Normal Fallow analysis with no TypeScript semantic backend."
+        },
+        {
+          "type": "string",
+          "const": "type-aware",
+          "description": "Opt-in analysis with one or more semantic capabilities."
+        }
+      ],
+      "description": "Analysis mode stored with baselines, snapshots, audit sides, and impact data."
+    },
+    "SemanticCapability": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "symbol-use",
+          "description": "Confirm exact project-wide symbol use for an existing finding."
+        },
+        {
+          "type": "string",
+          "const": "symbol-trace",
+          "description": "Explain exact declarations, references, aliases, and re-exports."
+        },
+        {
+          "type": "string",
+          "const": "api-surface",
+          "description": "Describe package-public signatures and private type leaks."
+        },
+        {
+          "type": "string",
+          "const": "symbol-impact",
+          "description": "Find exact symbol consumers, affected files, and targeted tests."
+        },
+        {
+          "type": "string",
+          "const": "type-coupling",
+          "description": "Measure project-local public-signature coupling."
+        }
+      ],
+      "description": "Semantic capabilities that can share one TypeScript Program session."
+    },
+    "SemanticCompleteness": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "Every requested query completed without omissions."
+        },
+        {
+          "type": "string",
+          "const": "partial",
+          "description": "Some evidence is valid, but bounded or unsupported relations remain."
+        },
+        {
+          "type": "string",
+          "const": "unavailable",
+          "description": "No safe semantic assertion could be made."
+        }
+      ],
+      "description": "Whether the semantic backend answered every requested query safely."
+    },
+    "SemanticQuerySummary": {
+      "type": "object",
+      "properties": {
+        "query_id": {
+          "type": "integer",
+          "description": "Stable query identifier within this analysis run."
+        },
+        "capability": {
+          "description": "Capability that answered the query.",
+          "$ref": "#/definitions/SemanticCapability"
+        },
+        "assertion": {
+          "type": "string",
+          "description": "Operation-specific assertion, never a generic compiler verdict."
+        },
+        "status": {
+          "description": "Completeness of this query.",
+          "$ref": "#/definitions/SemanticCompleteness"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stable primary gap reason when partial or unavailable."
+        },
+        "total_evidence_count": {
+          "type": "integer",
+          "description": "Evidence count before bounding."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "Whether evidence or payload arrays were truncated."
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticOmission"
+          },
+          "description": "Counted omissions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Plain next actions."
+        }
+      },
+      "required": [
+        "query_id",
+        "capability",
+        "assertion",
+        "status",
+        "total_evidence_count",
+        "truncated"
+      ],
+      "description": "Compact per-query status embedded in run metadata."
+    },
+    "SemanticGapReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "no-project",
+          "description": "No selected TypeScript project owns the target."
+        },
+        {
+          "type": "string",
+          "const": "blocking-diagnostics",
+          "description": "Structural diagnostics make the selected project unsafe to query."
+        },
+        {
+          "type": "string",
+          "const": "unknown-symbol",
+          "description": "The exact declaration could not be resolved."
+        },
+        {
+          "type": "string",
+          "const": "unknown-entry-point",
+          "description": "A requested package-public entry point could not be resolved."
+        },
+        {
+          "type": "string",
+          "const": "evidence-limit",
+          "description": "Evidence was truncated at the configured limit."
+        },
+        {
+          "type": "string",
+          "const": "dynamic-behavior",
+          "description": "Dynamic runtime behavior is outside checker-visible semantics."
+        },
+        {
+          "type": "string",
+          "const": "capacity",
+          "description": "A configured request or response capacity was reached."
+        },
+        {
+          "type": "string",
+          "const": "unsupported-syntax",
+          "description": "The requested syntax or declaration kind is unsupported."
+        }
+      ],
+      "description": "Stable reason why semantic evidence is partial or unavailable."
+    },
+    "SemanticOmission": {
+      "type": "object",
+      "properties": {
+        "reason_code": {
+          "description": "Stable omission reason.",
+          "$ref": "#/definitions/SemanticGapReason"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of omitted items or relations."
+        }
+      },
+      "required": [
+        "reason_code",
+        "count"
+      ],
+      "description": "Counted omission attached to a partial or unavailable result."
+    },
+    "SemanticSymbolTrace": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "Exact target declaration.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "identity": {
+          "description": "Semantic mode, capabilities, project selection, and completeness.",
+          "$ref": "#/definitions/SemanticAnalysisIdentity"
+        },
+        "selected_project": {
+          "type": "string",
+          "description": "TypeScript project selected for this symbol."
+        },
+        "assertion": {
+          "type": "string",
+          "description": "Concrete assertion, such as `references-found`."
+        },
+        "status": {
+          "description": "Completeness of the trace.",
+          "$ref": "#/definitions/SemanticCompleteness"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticReference"
+          },
+          "description": "Bounded reference evidence."
+        },
+        "total_reference_count": {
+          "type": "integer",
+          "description": "Count before evidence bounding."
+        },
+        "checker_evidence_count": {
+          "type": "integer",
+          "description": "Exact reference locations found by the TypeScript checker."
+        },
+        "graph_evidence_count": {
+          "type": "integer",
+          "description": "Alias and re-export hops derived from the semantic graph."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "Whether reference evidence was truncated."
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticOmission"
+          },
+          "description": "Counted omissions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Plain next actions for a user or automation consumer."
+        }
+      },
+      "required": [
+        "target",
+        "identity",
+        "selected_project",
+        "assertion",
+        "status",
+        "references",
+        "total_reference_count",
+        "checker_evidence_count",
+        "graph_evidence_count",
+        "truncated"
+      ],
+      "description": "Typed semantic trace attached to an existing syntactic trace."
+    },
+    "SemanticReference": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative reference path."
+        },
+        "line": {
+          "type": "integer",
+          "description": "One-based source line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "Zero-based UTF-8 byte column."
+        },
+        "role": {
+          "type": "string",
+          "description": "Reference role, such as `read`, `type`, `alias`, or `re-export`."
+        },
+        "namespace": {
+          "description": "Value or type namespace used at this location.",
+          "$ref": "#/definitions/SemanticNamespace"
+        },
+        "via": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticAliasHop"
+          },
+          "description": "Alias and re-export hops between the reference and declaration."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "role",
+        "namespace"
+      ],
+      "description": "Located semantic reference evidence."
+    },
+    "SemanticAliasHop": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative hop path."
+        },
+        "from_name": {
+          "type": "string",
+          "description": "Name before this hop."
+        },
+        "to_name": {
+          "type": "string",
+          "description": "Name exposed after this hop."
+        },
+        "relation": {
+          "type": "string",
+          "description": "Relation, such as `import-alias` or `re-export`."
+        }
+      },
+      "required": [
+        "path",
+        "from_name",
+        "to_name",
+        "relation"
+      ],
+      "description": "One alias or re-export hop in semantic provenance."
+    },
+    "ApiSurfaceResult": {
+      "type": "object",
+      "properties": {
+        "assertion": {
+          "type": "string",
+          "description": "Concrete assertion, such as `leak-confirmed`."
+        },
+        "status": {
+          "description": "Completeness of package-public traversal.",
+          "$ref": "#/definitions/SemanticCompleteness"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApiSurfaceEntry"
+          },
+          "description": "Public API entries."
+        },
+        "private_type_leaks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticPrivateTypeLeak"
+          },
+          "description": "Confirmed private type leaks."
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticOmission"
+          },
+          "description": "Counted omissions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Plain next actions."
+        }
+      },
+      "required": [
+        "assertion",
+        "status",
+        "entries",
+        "private_type_leaks"
+      ],
+      "description": "Package API surface result shared by inspect and private-leak analysis."
+    },
+    "ApiSurfaceEntry": {
+      "type": "object",
+      "properties": {
+        "exposed": {
+          "description": "Symbol exposed through a package entry point.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "origin": {
+          "description": "Canonical origin after aliases and re-exports.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "signature_fingerprint": {
+          "type": "string",
+          "description": "Stable normalized signature fingerprint."
+        },
+        "referenced_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PublicTypeReference"
+          },
+          "description": "Project-local types referenced by the signature."
+        }
+      },
+      "required": [
+        "exposed",
+        "origin",
+        "signature_fingerprint",
+        "referenced_types"
+      ],
+      "description": "One package-public API entry described by the semantic backend."
+    },
+    "PublicTypeReference": {
+      "type": "object",
+      "properties": {
+        "declaration": {
+          "description": "Referenced declaration.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "relation": {
+          "type": "string",
+          "description": "Signature relation, such as return type or generic constraint."
+        }
+      },
+      "required": [
+        "declaration",
+        "relation"
+      ],
+      "description": "One project-local type referenced by a public signature."
+    },
+    "SemanticSymbolImpact": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "Exact target declaration.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "identity": {
+          "description": "Semantic mode, capabilities, project selection, and completeness.",
+          "$ref": "#/definitions/SemanticAnalysisIdentity"
+        },
+        "selected_project": {
+          "type": "string",
+          "description": "TypeScript project selected for this symbol."
+        },
+        "assertion": {
+          "type": "string",
+          "description": "Concrete assertion, such as `consumers-found`."
+        },
+        "status": {
+          "description": "Completeness of impact analysis.",
+          "$ref": "#/definitions/SemanticCompleteness"
+        },
+        "direct_consumers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticImpactPath"
+          },
+          "description": "Files that reference the exact symbol directly."
+        },
+        "total_direct_consumer_count": {
+          "type": "integer",
+          "description": "Direct consumer count before evidence bounding."
+        },
+        "affected_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticImpactPath"
+          },
+          "description": "Transitively affected production files."
+        },
+        "total_affected_file_count": {
+          "type": "integer",
+          "description": "Transitive affected-file count before evidence bounding."
+        },
+        "targeted_tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticImpactPath"
+          },
+          "description": "Directly relevant test entry points."
+        },
+        "total_targeted_test_count": {
+          "type": "integer",
+          "description": "Targeted-test count before evidence bounding."
+        },
+        "confidence": {
+          "type": "string",
+          "description": "Confidence after accounting for dynamic behavior."
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticOmission"
+          },
+          "description": "Counted omissions, including dynamic behavior."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Plain next actions."
+        }
+      },
+      "required": [
+        "target",
+        "identity",
+        "selected_project",
+        "assertion",
+        "status",
+        "direct_consumers",
+        "total_direct_consumer_count",
+        "affected_files",
+        "total_affected_file_count",
+        "targeted_tests",
+        "total_targeted_test_count",
+        "confidence"
+      ],
+      "description": "Exact-symbol impact and targeted-test recommendation."
+    },
+    "SemanticImpactPath": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative affected path."
+        },
+        "relation": {
+          "type": "string",
+          "description": "Relation to the target, such as `direct-value-consumer`."
+        },
+        "distance": {
+          "type": "integer",
+          "description": "Shortest graph distance from the target."
+        },
+        "via": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Located provenance path."
+        }
+      },
+      "required": [
+        "path",
+        "relation",
+        "distance"
+      ],
+      "description": "One production file or test reached by exact-symbol impact analysis."
+    },
+    "TypeCouplingReport": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "description": "Semantic mode, capability, project selection, and completeness.",
+          "$ref": "#/definitions/SemanticAnalysisIdentity"
+        },
+        "assertion": {
+          "type": "string",
+          "description": "Concrete assertion, such as `coupling-found`."
+        },
+        "status": {
+          "description": "Completeness of coupling traversal.",
+          "$ref": "#/definitions/SemanticCompleteness"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeCouplingSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Project summary. Absent when analysis is unavailable, never a fake zero."
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TypeCouplingFile"
+          },
+          "description": "Per-file coupling details."
+        },
+        "top_contributors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TypeCouplingFile"
+          },
+          "description": "Highest-degree files contributing to project coupling."
+        },
+        "cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TypeCouplingCycle"
+          },
+          "description": "Located project-local type cycles."
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticOmission"
+          },
+          "description": "Counted omissions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Plain next actions."
+        }
+      },
+      "required": [
+        "identity",
+        "assertion",
+        "status",
+        "files"
+      ],
+      "description": "Advisory project-local public-signature coupling report."
+    },
+    "TypeCouplingSummary": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "description": "Measurement boundary, currently project-local public signatures."
+        },
+        "direction": {
+          "type": "string",
+          "description": "Edge direction, currently directed."
+        },
+        "project_size": {
+          "type": "integer",
+          "description": "Distinct project files in the selected TypeScript projects."
+        },
+        "files_analyzed": {
+          "type": "integer",
+          "description": "Distinct project files included in the denominator."
+        },
+        "distinct_coupled_files": {
+          "type": "integer",
+          "description": "Files participating in at least one project-local type edge."
+        },
+        "edge_count": {
+          "type": "integer",
+          "description": "Project-local public-signature edge count before evidence bounding."
+        },
+        "coupled_file_pct": {
+          "type": "number",
+          "description": "Percentage of analyzed files participating in a type edge."
+        },
+        "p50_distinct_connections": {
+          "type": "number",
+          "description": "Median distinct-file type connections."
+        },
+        "p90_distinct_connections": {
+          "type": "number",
+          "description": "P90 distinct-file type connections."
+        },
+        "p95_public_types_used_by": {
+          "type": "number",
+          "description": "P95 incoming distinct-file type coupling."
+        },
+        "p95_public_api_depends_on": {
+          "type": "number",
+          "description": "P95 outgoing distinct-file type coupling."
+        },
+        "high_coupling_pct": {
+          "type": "number",
+          "description": "Percentage of files above the adaptive high-coupling threshold."
+        },
+        "concentration": {
+          "type": "number",
+          "description": "Share of edge endpoints represented by the top contributors."
+        },
+        "cycle_count": {
+          "type": "integer",
+          "description": "Number of project-local public-signature cycles."
+        }
+      },
+      "required": [
+        "scope",
+        "direction",
+        "project_size",
+        "files_analyzed",
+        "distinct_coupled_files",
+        "edge_count",
+        "coupled_file_pct",
+        "p50_distinct_connections",
+        "p90_distinct_connections",
+        "p95_public_types_used_by",
+        "p95_public_api_depends_on",
+        "high_coupling_pct",
+        "concentration",
+        "cycle_count"
+      ],
+      "description": "Project summary for advisory type coupling."
+    },
+    "TypeCouplingFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative file path."
+        },
+        "public_api_depends_on": {
+          "type": "integer",
+          "description": "Distinct files this file's public API depends on."
+        },
+        "public_api_depends_on_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Located project files this file's public API depends on."
+        },
+        "public_types_used_by": {
+          "type": "integer",
+          "description": "Distinct files whose public types use this file."
+        },
+        "public_types_used_by_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Located project files whose public types use this file."
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TypeCouplingEdge"
+          },
+          "description": "Located public-signature edges."
+        }
+      },
+      "required": [
+        "path",
+        "public_api_depends_on",
+        "public_types_used_by",
+        "edges"
+      ],
+      "description": "Per-file project-local public-signature coupling."
+    },
+    "TypeCouplingEdge": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Public API declaration that owns the signature.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "target": {
+          "description": "Project-local type used by that signature.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "relation": {
+          "type": "string",
+          "description": "Signature relation."
+        },
+        "evidence": {
+          "description": "Source location where the public signature references the target type.",
+          "$ref": "#/definitions/SemanticSourceLocation"
+        },
+        "scope": {
+          "type": "string",
+          "description": "Scope, such as `module-export` or `package-public`."
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "relation",
+        "evidence",
+        "scope"
+      ],
+      "description": "One project-local public-signature type edge."
+    },
+    "TypeCouplingCycle": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered project-root-relative files, ending at the start file."
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "description": "One project-local cycle through public-signature type dependencies."
+    },
+    "SemanticSourceLocation": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative source path."
+        },
+        "line": {
+          "type": "integer",
+          "description": "One-based source line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "Zero-based UTF-8 byte column."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "One project-root-relative source location used as semantic evidence."
     }
   }
 }

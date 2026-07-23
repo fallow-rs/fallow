@@ -21,6 +21,10 @@ pub struct RegressionBaseline {
     /// Git SHA at baseline time, if available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_sha: Option<String>,
+    /// Compatibility identity for the analysis that produced these counts.
+    /// Missing values in version 1 files are interpreted as syntactic.
+    #[serde(default)]
+    pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
     /// Dead code issue counts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<CheckCounts>,
@@ -29,7 +33,7 @@ pub struct RegressionBaseline {
     pub dupes: Option<DupesCounts>,
 }
 
-pub const REGRESSION_SCHEMA_VERSION: u32 = 1;
+pub const REGRESSION_SCHEMA_VERSION: u32 = 2;
 
 /// Per-type issue counts for dead code analysis.
 ///
@@ -200,8 +204,9 @@ impl CheckCounts {
 
     /// Convert to config-embeddable baseline.
     #[must_use]
-    pub const fn to_config_baseline(&self) -> fallow_config::RegressionBaseline {
+    pub fn to_config_baseline(&self) -> fallow_config::RegressionBaseline {
         fallow_config::RegressionBaseline {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
             total_issues: self.total_issues,
             unused_files: self.unused_files,
             unused_exports: self.unused_exports,
@@ -373,6 +378,7 @@ mod tests {
     #[test]
     fn regression_baseline_roundtrip() {
         let baseline = RegressionBaseline {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             schema_version: 1,
             fallow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),
@@ -704,6 +710,7 @@ mod tests {
     #[test]
     fn baseline_without_check_section() {
         let baseline = RegressionBaseline {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             schema_version: 1,
             fallow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),
@@ -723,6 +730,7 @@ mod tests {
     #[test]
     fn baseline_without_dupes_section() {
         let baseline = RegressionBaseline {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             schema_version: 1,
             fallow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),
@@ -744,6 +752,7 @@ mod tests {
     #[test]
     fn baseline_without_git_sha() {
         let baseline = RegressionBaseline {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             schema_version: 1,
             fallow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),

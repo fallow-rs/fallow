@@ -649,6 +649,34 @@ fi
 assert_contains "$(cat "$ANALYZE_TMP/input-output-valid-scalars")" "changed_since=refs/remotes/origin/main~1" "analyze: preserves valid relative ref"
 assert_contains "$(cat "$ANALYZE_TMP/input-env-valid-scalars")" "FALLOW_DIFF_FILE=$VALID_DIFF" "analyze: preserves diff-file path containing spaces"
 
+TYPE_AWARE_WORK="$ANALYZE_TMP/type-aware-options"
+mkdir -p "$TYPE_AWARE_WORK"
+OUT=$(
+  cd "$TYPE_AWARE_WORK" || exit 1
+  PATH="$ANALYZE_TMP/bin:$PATH" \
+    GITHUB_OUTPUT="$ANALYZE_TMP/type-aware-output" \
+    GITHUB_ENV="$ANALYZE_TMP/type-aware-env" \
+    INPUT_ROOT="." \
+    INPUT_COMMAND="dead-code" \
+    INPUT_FORMAT="json" \
+    INPUT_AUTO_CHANGED_SINCE="false" \
+    INPUT_TYPE_AWARE="true" \
+    INPUT_TYPE_AWARE_PROJECTS="tsconfig.app.json,tsconfig.test.json" \
+    INPUT_TYPE_AWARE_REQUIRE="complete" \
+    bash "$DIR/../scripts/analyze.sh"
+)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "analyze: type-aware inputs run successfully"
+else
+  fail "analyze: type-aware inputs run successfully" "exit $cmd_status, output: $OUT"
+fi
+ARGS=$(cat "$TYPE_AWARE_WORK/fallow-analysis-args.sh")
+assert_contains "$ARGS" "--type-aware" "analyze: forwards type-aware"
+assert_contains "$ARGS" "--type-aware-project tsconfig.app.json" "analyze: forwards first type-aware project"
+assert_contains "$ARGS" "--type-aware-project tsconfig.test.json" "analyze: forwards second type-aware project"
+assert_contains "$ARGS" "--type-aware-require complete" "analyze: forwards type-aware completeness policy"
+
 run_analyze_scope_case() {
   local case_name=$1
   local changed_files=$2
@@ -945,13 +973,12 @@ else
 fi
 assert_contains "$OUT" "artifacts-dir must be a relative path inside the workspace" "analyze: artifacts-dir traversal error is clear"
 
-# Issue #813: the fallback SARIF block must validate the produced file, not gate
-# on the exit code. fallow exits 1 when issues are found (e.g. `health` with
-# complexity findings), which is not a generation failure. `health` never gets
-# --sarif-file support (HAS_SARIF_FILE stays false), so the fallback block always
-# runs for it. The mock writes valid SARIF and exits 1 to mimic findings-present.
+# Issue #813: the saved-envelope SARIF renderer must validate the produced file,
+# not gate on the exit code. The primary analysis may exit 1 when findings exist.
+# The renderer must still produce valid SARIF without a second health analysis.
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
+[ -n "${MOCK_CALL_LOG:-}" ] && printf '%s\n' "$*" >> "$MOCK_CALL_LOG"
 fmt=""
 prev=""
 for arg in "$@"; do
@@ -974,12 +1001,16 @@ chmod +x "$ANALYZE_TMP/bin/fallow"
 SARIF_OK_WORK="$ANALYZE_TMP/sarif-exit1-valid"
 mkdir -p "$SARIF_OK_WORK"
 cd "$SARIF_OK_WORK" && rm -f "$ANALYZE_TMP/output"
+rm -f "$ANALYZE_TMP/sarif-calls"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" MOCK_SARIF_MODE="valid" \
+  MOCK_CALL_LOG="$ANALYZE_TMP/sarif-calls" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
 assert_not_contains "$OUT" "SARIF generation failed" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
 [ -s "$SARIF_OK_WORK/fallow-results.sarif" ] && pass "analyze: valid SARIF + exit 1 still writes the file" || fail "analyze: valid SARIF + exit 1 still writes the file" "missing sarif file"
+HEALTH_ANALYSIS_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-calls" || true)
+[ "$HEALTH_ANALYSIS_CALLS" -eq 1 ] && pass "analyze: SARIF reuses the saved JSON analysis" || fail "analyze: SARIF reuses the saved JSON analysis" "expected one health analysis, got $HEALTH_ANALYSIS_CALLS"
 
 SARIF_BAD_WORK="$ANALYZE_TMP/sarif-empty"
 mkdir -p "$SARIF_BAD_WORK"

@@ -3312,6 +3312,7 @@ mod tests {
                 line: 7,
                 col: 12,
                 span_start: 64,
+                semantic: None,
             }));
         results
             .unused_dev_dependencies

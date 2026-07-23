@@ -1,13 +1,17 @@
-# Experimental type-aware class-member refinement
+# Type-aware TypeScript analysis
 
 Fallow's default analysis remains fast, syntactic, and independent of Node.js
-or TypeScript. `dead-code --type-aware` adds an optional semantic refinement for
-`unused-class-members` findings. Fallow completes its normal filtering first,
-then asks a TypeScript-Go sidecar to resolve only the remaining candidates.
+or TypeScript. `--type-aware` opts into a bounded TypeScript-Go semantic pass
+after Fallow's normal project analysis. It provides five project-wide
+capabilities:
 
-The sidecar is not published yet. The adjudicated corpus gate now passes, but
-package publication remains a separate release action. Repository development
-uses the checked-in package:
+- exact symbol-use confirmation for existing dead-code candidates
+- symbol traces with namespaces, aliases, and re-export hops
+- package API surfaces and cross-file private type leaks
+- exact-symbol impact paths and targeted-test suggestions
+- advisory public-signature type coupling
+
+Repository development uses the checked-in companion:
 
 ```bash
 npm ci --prefix tools/type-aware-sidecar
@@ -16,19 +20,71 @@ FALLOW_TYPE_AWARE_BIN="$PWD/tools/type-aware-sidecar/fallow-type-aware.mjs" \
   --format json --quiet
 ```
 
-After publication, the intended installation is:
+Normal npm installations receive the exact matching optional companion package:
 
 ```bash
-npm install --save-dev fallow-type-aware
-FALLOW_TYPE_AWARE_BIN="$PWD/node_modules/.bin/fallow-type-aware" \
-  fallow dead-code --unused-class-members --type-aware --format json --quiet
+npm install --save-dev fallow
+npx fallow dead-code --unused-class-members --type-aware --format json --quiet
 ```
 
-The sidecar pins `typescript@7.0.2` and uses `typescript/unstable/sync`, which
-runs the native TypeScript-Go backend. A finding is removed only when a property
-access resolves to the exact declaration path, owner, kind, line, and UTF-8 byte
-column supplied by Fallow. Name-only matches are never enough. Static property
-access and string-literal element access are supported.
+Install `fallow-type-aware` at the same version manually only when optional npm
+dependencies are disabled. The `fallow` launcher discovers an exact version
+match and passes its trusted executable path to the native binary.
+
+The companion pins `typescript@7.0.2` and uses `typescript/unstable/sync`, which
+runs the native TypeScript-Go backend. Fallow only changes a finding when the
+checker resolves an exact declaration identity. Name-only matches are never
+enough.
+
+## Ownership boundary with tsc and Oxlint
+
+Type-aware Fallow does not emit TypeScript compiler diagnostics or general
+typed lint findings. Keep `tsc --noEmit` responsible for compiler correctness.
+Keep Oxlint responsible for local lint rules, including unused ECMAScript
+`#private` members. TypeScript already reports unused TypeScript `private`
+members when the relevant compiler checks are enabled.
+
+Fallow owns the project-wide questions those tools do not answer: why an exact
+symbol is reachable, how a public export crosses package boundaries, which
+tests are affected, and where public signatures create coupling. The companion
+returns only semantic evidence, completeness, omissions, and stable reason
+codes. It never forwards a compiler diagnostic as a Fallow issue.
+
+## Five semantic capabilities
+
+Refine existing dead-code findings conservatively:
+
+```bash
+fallow dead-code --type-aware --unused-exports --unused-types \
+  --unused-class-members --format json --quiet
+```
+
+Trace one exact exported symbol through aliases and re-exports:
+
+```bash
+fallow dead-code --type-aware --trace src/api.ts:Client \
+  --format json --quiet
+```
+
+Inspect the package API surface and cross-file private type leaks:
+
+```bash
+fallow dead-code --type-aware --private-type-leaks --format json --quiet
+```
+
+Find exact consumers, affected files, and targeted tests:
+
+```bash
+fallow dead-code --type-aware --symbol-impact src/api.ts:Client \
+  --format json --quiet
+```
+
+Inspect advisory public-signature type coupling without changing the health
+score:
+
+```bash
+fallow health --type-aware --type-coupling --format json --quiet
+```
 
 ## Fail-closed behavior
 
@@ -65,20 +121,26 @@ process receives a minimal environment. Relative, missing, and project-local
 search-path entries are removed before its Node interpreter is resolved. Its
 complete process group is terminated on timeout.
 
-## Output contract
+## Output and integration contract
 
 Protocol version, sidecar version, backend version, selected configs,
 per-project status, outcome counts, abstention reasons, warnings, total elapsed
 time, and project setup, diagnostics, and symbol-scan timings are recorded under
 `_meta.type_aware` in JSON output. The command's top-level `elapsed_ms` includes
-the semantic pass. When no class-member candidates remain after normal Fallow
-filtering, the sidecar is not started and `_meta.type_aware` is omitted because
-no semantic pass was computed. Explicit project paths are still validated.
+the semantic pass. Human, compact, markdown, JSON, grouped JSON, and SARIF
+preserve the semantic analysis identity or a bounded provenance summary.
 
-The experimental mode currently supports human and JSON output only. Baseline,
-regression, trace, impact-closure, SARIF, audit, combined, MCP, LSP, and watch
-integration remain disabled until those surfaces can preserve semantic
-provenance and analysis-mode identity.
+Combined analysis, audit, MCP, LSP, VS Code, the Rust API, and Node bindings use
+the same exact-version protocol. The VS Code package bundles the companion and
+its TypeScript runtime. CI integrations install the matching optional package.
+Baseline and regression comparisons include semantic mode identity so a
+syntactic run is never silently compared with a type-aware run.
+
+When no semantic query is needed, the companion is not started and
+`_meta.type_aware` is omitted because no semantic pass was computed. Explicit
+project paths are still validated. `--type-aware-require complete` turns an
+incomplete semantic result into an analysis error after the conservative result
+has been produced; the default `best-effort` policy keeps it advisory.
 
 ## Corpus adjudication and release gate
 

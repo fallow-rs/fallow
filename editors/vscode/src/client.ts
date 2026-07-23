@@ -19,6 +19,7 @@ import {
   getResolvedConfigPath,
   getAllowRemoteExtends,
   getProductionOverride,
+  getTypeAwareSettings,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
   getDuplicationMinLinesOverride,
@@ -61,6 +62,7 @@ export const createInitializationOptions = (): LspInitializationOptions => ({
   configPath: getResolvedConfigPath(),
   allowRemoteExtends: getAllowRemoteExtends(),
   production: getProductionOverride(),
+  typeAware: getTypeAwareSettings(),
   // `fallow.health.inlineComplexity` is rendered by the extension's own
   // ComplexityLensProvider (so the lens can toggle the per-line breakdown), so
   // it is NOT forwarded to the LSP. The LSP complexity lens stays opt-in for

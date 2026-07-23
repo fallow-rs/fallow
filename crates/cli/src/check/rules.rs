@@ -949,6 +949,7 @@ mod tests {
             unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
+            type_aware: fallow_config::TypeAwareConfig::default(),
             rules,
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
@@ -1325,6 +1326,7 @@ mod tests {
             unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
+            type_aware: fallow_config::TypeAwareConfig::default(),
             rules: RulesConfig::default(), // all Error
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
@@ -1380,6 +1382,7 @@ mod tests {
             unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
+            type_aware: fallow_config::TypeAwareConfig::default(),
             rules: RulesConfig::default(),
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
@@ -1435,6 +1438,7 @@ mod tests {
             unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
+            type_aware: fallow_config::TypeAwareConfig::default(),
             rules: RulesConfig::default(),
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
@@ -2033,6 +2037,7 @@ mod tests {
             unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
+            type_aware: fallow_config::TypeAwareConfig::default(),
             rules: RulesConfig::default(),
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
@@ -2340,6 +2345,7 @@ mod tests {
                 line: 5,
                 col: 0,
                 span_start: 0,
+                semantic: None,
             }));
         let config = config_with_override_for_rule("src/generated/**", |p| {
             p.private_type_leaks = Some(Severity::Off);
@@ -2860,6 +2866,7 @@ mod tests {
                 line: 3,
                 col: 0,
                 span_start: 0,
+                semantic: None,
             }));
         let rules = RulesConfig {
             private_type_leaks: Severity::Off,
@@ -3164,6 +3171,7 @@ mod tests {
                 line: 3,
                 col: 0,
                 span_start: 0,
+                semantic: None,
             }));
         // Override generated files to Warn (not Error); should not produce an error.
         let config = config_with_override_for_rule("src/generated/**", |p| {

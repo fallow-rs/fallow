@@ -143,6 +143,22 @@ test("exitCodeForChildFailure preserves status codes and maps signal deaths", ()
   assert.equal(exitCodeForChildFailure({ status: null, signal: "NOT_A_SIGNAL" }), 1);
 });
 
+test("resolveTypeAwareCompanion accepts only an exact matching package", (t) => {
+  const { resolveTypeAwareCompanion } = require(RUN_BINARY);
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-type-aware-package-"));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const manifestPath = path.join(work, "package.json");
+  const companionPath = path.join(work, "fallow-type-aware.mjs");
+  fs.writeFileSync(companionPath, "#!/usr/bin/env node\n");
+  const resolvePackage = () => manifestPath;
+
+  fs.writeFileSync(manifestPath, JSON.stringify({ version: "3.8.0" }));
+  assert.equal(resolveTypeAwareCompanion("3.8.0", resolvePackage), companionPath);
+
+  fs.writeFileSync(manifestPath, JSON.stringify({ version: "3.7.0" }));
+  assert.equal(resolveTypeAwareCompanion("3.8.0", resolvePackage), undefined);
+});
+
 test(
   "fallow-lsp executes the multicall binary with the lsp-server subcommand",
   { skip: process.platform === "win32" },

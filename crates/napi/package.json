@@ -1,17 +1,18 @@
 {
   "name": "@fallow-cli/fallow-node",
-  "version": "3.7.1",
+  "version": "3.8.0",
   "description": "Native Node.js bindings for fallow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling drift. Optional runtime intelligence layer (Fallow Runtime) adds production execution evidence.",
-  "main": "index.js",
+  "main": "loader.js",
   "types": "index.d.ts",
   "exports": {
     ".": {
       "types": "./index.d.ts",
-      "default": "./index.js"
+      "default": "./loader.js"
     }
   },
   "files": [
     "index.js",
+    "loader.js",
     "index.d.ts",
     "README.md"
   ],
@@ -64,13 +65,14 @@
     "@napi-rs/cli": "3.7.3"
   },
   "optionalDependencies": {
-    "@fallow-cli/fallow-node-darwin-arm64": "3.7.1",
-    "@fallow-cli/fallow-node-darwin-x64": "3.7.1",
-    "@fallow-cli/fallow-node-linux-arm64-gnu": "3.7.1",
-    "@fallow-cli/fallow-node-linux-arm64-musl": "3.7.1",
-    "@fallow-cli/fallow-node-linux-x64-gnu": "3.7.1",
-    "@fallow-cli/fallow-node-linux-x64-musl": "3.7.1",
-    "@fallow-cli/fallow-node-win32-arm64-msvc": "3.7.1",
-    "@fallow-cli/fallow-node-win32-x64-msvc": "3.7.1"
+    "fallow-type-aware": "3.8.0",
+    "@fallow-cli/fallow-node-darwin-arm64": "3.8.0",
+    "@fallow-cli/fallow-node-darwin-x64": "3.8.0",
+    "@fallow-cli/fallow-node-linux-arm64-gnu": "3.8.0",
+    "@fallow-cli/fallow-node-linux-arm64-musl": "3.8.0",
+    "@fallow-cli/fallow-node-linux-x64-gnu": "3.8.0",
+    "@fallow-cli/fallow-node-linux-x64-musl": "3.8.0",
+    "@fallow-cli/fallow-node-win32-arm64-msvc": "3.8.0",
+    "@fallow-cli/fallow-node-win32-x64-msvc": "3.8.0"
   }
 }

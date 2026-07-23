@@ -33,6 +33,7 @@ pub struct CombinedJsonOutputInput<'a> {
     pub root: &'a Path,
     pub elapsed: Duration,
     pub explain: bool,
+    pub type_aware: Option<fallow_types::envelope::TypeAwareMeta>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
@@ -65,13 +66,27 @@ pub fn serialize_combined_json(
     let dupes = serialize_combined_dupes_json(input.dupes, input.root)?;
     let health = serialize_combined_health_json(health_report.as_ref(), input.root)?;
 
+    let mut meta = input
+        .explain
+        .then(|| combined_meta_for_output(check.is_some(), dupes.is_some(), health.is_some()));
+    if let Some(type_aware) = input.type_aware {
+        let combined_meta = meta.get_or_insert(CombinedMeta {
+            check: None,
+            dupes: None,
+            health: None,
+            telemetry: None,
+        });
+        let check_meta = combined_meta
+            .check
+            .get_or_insert_with(fallow_types::envelope::Meta::default);
+        check_meta.type_aware = Some(type_aware);
+    }
+
     let output = CombinedOutput {
         schema_version: SchemaVersion(CHECK_SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed_ms_for_output(input.elapsed)),
-        meta: input
-            .explain
-            .then(|| combined_meta_for_output(check.is_some(), dupes.is_some(), health.is_some())),
+        meta,
         check,
         dupes,
         health,
@@ -172,6 +187,7 @@ mod tests {
             root: std::path::Path::new("."),
             elapsed: Duration::from_millis(42),
             explain: false,
+            type_aware: None,
             next_steps: Vec::new(),
             envelope_mode: RootEnvelopeMode::Tagged,
             telemetry_analysis_run_id: None,
@@ -261,6 +277,7 @@ mod tests {
             root,
             elapsed: Duration::ZERO,
             explain: false,
+            type_aware: None,
             next_steps: Vec::new(),
             envelope_mode: RootEnvelopeMode::Tagged,
             telemetry_analysis_run_id: None,

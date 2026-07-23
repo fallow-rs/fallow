@@ -20,6 +20,7 @@ struct DupesInput {
 
 fn make_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],

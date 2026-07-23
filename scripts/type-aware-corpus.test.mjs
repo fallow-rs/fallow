@@ -22,6 +22,7 @@ import {
   requirePublicationGo,
   runOrderForIteration,
   summarizeAdjudicatedFeatureBuckets,
+  validateCapabilitiesArtifactData,
   validateManifest,
   validateMeasurements,
   validatePartialOutput,
@@ -128,6 +129,150 @@ test("tracked supplemental smoke is internally reproducible and review-bound", (
     );
   } finally {
     rmSync(sourceRoot, { recursive: true, force: true });
+  }
+});
+
+test("semantic capability proof cannot be neutered or reassigned to tsc and Oxlint", () => {
+  const root = mkdtempSync(resolve(tmpdir(), "fallow-semantic-capabilities-"));
+  const roots = {
+    astro: resolve(root, "astro"),
+    vitest: resolve(root, "vitest"),
+  };
+  try {
+    for (const projectRoot of Object.values(roots)) {
+      mkdirSync(projectRoot, { recursive: true });
+      writeFileSync(resolve(projectRoot, "src.ts"), "export const value = 1;\n");
+    }
+    const evidence = () => [
+      { path: "src.ts", line: 1, col: 0, excerpt: "export const value = 1;" },
+    ];
+    const capabilities = () => ({
+      "dead-code-refinement": {
+        assertion: "confirmed-used",
+        confirmed_used_count: 1,
+        reviewed: true,
+        source_evidence: evidence(),
+      },
+      "semantic-symbol-trace": {
+        assertion: "references-found",
+        status: "complete",
+        total_reference_count: 1,
+        checker_evidence_count: 1,
+        source_evidence: evidence(),
+      },
+      "public-api-surface": {
+        assertion: "no-leak-confirmed",
+        status: "complete",
+        public_entry_count: 1,
+        private_type_leak_count: 0,
+        source_evidence: evidence(),
+      },
+      "semantic-impact-targeted-tests": {
+        assertion: "consumers-found",
+        status: "complete",
+        direct_consumer_count: 1,
+        targeted_test_count: 1,
+        targeted_tests: [{ path: "src.ts" }],
+        source_evidence: evidence(),
+      },
+      "public-type-coupling": {
+        assertion: "coupling-found",
+        status: "complete",
+        summary: {
+          scope: "project-local-public-signatures",
+          direction: "directed",
+          project_size: 2,
+          distinct_coupled_files: 2,
+          edge_count: 1,
+          coupled_file_pct: 100,
+          p50_distinct_connections: 1,
+          p90_distinct_connections: 1,
+          concentration: 1,
+        },
+        top_contributors: [{ path: "src.ts" }],
+        cycles: [{ files: ["src.ts", "other.ts"] }],
+        source_evidence: evidence(),
+      },
+    });
+    const program = {
+      config: "tsconfig.json",
+      source: "explicit",
+      status: "complete",
+      source_file_count: 2,
+      program_reused: true,
+    };
+    const artifact = {
+      schema_version: 1,
+      excludes: ["compiler-diagnostics", "syntax-and-style-lint-rules"],
+      artifacts: {
+        fallow_sha256: "a".repeat(64),
+        sidecar_sha256: "b".repeat(64),
+      },
+      coverage: {
+        capability_ids: [
+          "dead-code-refinement",
+          "semantic-symbol-trace",
+          "public-api-surface",
+          "semantic-impact-targeted-tests",
+          "public-type-coupling",
+        ],
+        repository_count: 2,
+        all_capabilities_proven_on_each_repository: true,
+      },
+      repositories: ["astro", "vitest"].map((id) => ({
+        id,
+        commit: `${id}-commit`,
+        tracked_source_clean: true,
+        programs: { inspect: [program], coupling: [program] },
+        capabilities: capabilities(),
+      })),
+    };
+    const context = {
+      fallowSha256: "a".repeat(64),
+      sidecarSha256: "b".repeat(64),
+      roots,
+      commits: { astro: "astro-commit", vitest: "vitest-commit" },
+    };
+    assert.deepEqual(validateCapabilitiesArtifactData(artifact, context), artifact);
+
+    const missing = structuredClone(artifact);
+    delete missing.repositories[0].capabilities["semantic-symbol-trace"];
+    assert.throws(
+      () => validateCapabilitiesArtifactData(missing, context),
+      /does not contain all five semantic capabilities/,
+    );
+
+    const noCoupling = structuredClone(artifact);
+    noCoupling.repositories[1].capabilities["public-type-coupling"].summary.edge_count = 0;
+    assert.throws(
+      () => validateCapabilitiesArtifactData(noCoupling, context),
+      /no rich public type-coupling proof/,
+    );
+
+    const noTargetedTests = structuredClone(artifact);
+    noTargetedTests.repositories[0].capabilities["semantic-impact-targeted-tests"].targeted_tests =
+      [];
+    assert.throws(
+      () => validateCapabilitiesArtifactData(noTargetedTests, context),
+      /no impact or targeted-test proof/,
+    );
+
+    const staleSource = structuredClone(artifact);
+    staleSource.repositories[0].capabilities["public-api-surface"].source_evidence[0].excerpt =
+      "stale";
+    assert.throws(
+      () => validateCapabilitiesArtifactData(staleSource, context),
+      /source evidence no longer matches/,
+    );
+
+    const compilerDuplicate = structuredClone(artifact);
+    compilerDuplicate.excludes = [];
+    assert.throws(
+      () => validateCapabilitiesArtifactData(compilerDuplicate, context),
+      /exclude tsc and Oxlint responsibilities/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

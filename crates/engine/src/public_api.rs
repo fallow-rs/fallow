@@ -60,6 +60,32 @@ pub fn public_export_keys_for_graph(
     graph.public_export_keys(&public_entries, root)
 }
 
+/// Resolve exports-aware package entry points to their source paths for
+/// semantic API-surface queries.
+#[must_use]
+pub fn public_api_entry_paths_for_graph(
+    graph: &RetainedModuleGraph,
+    config: &ResolvedConfig,
+    workspaces: &[WorkspaceInfo],
+) -> Vec<PathBuf> {
+    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let public_entries =
+        public_api_package_entry_points(graph, config, root_pkg.as_ref(), workspaces);
+    let mut paths = public_entries
+        .into_iter()
+        .filter_map(|file_id| {
+            graph
+                .as_graph()
+                .modules
+                .get(file_id.0 as usize)
+                .map(|module| module.path.clone())
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 fn graph_path_to_file_id(graph: &fallow_graph::graph::ModuleGraph) -> FxHashMap<PathBuf, FileId> {
     graph
         .modules
