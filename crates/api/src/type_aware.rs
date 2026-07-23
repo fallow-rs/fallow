@@ -165,7 +165,7 @@ struct EvidenceLocation {
     col: u32,
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum Operation {
     SymbolUse,
@@ -817,19 +817,26 @@ fn validate_response(request: &Request, response: &Response) -> Result<(), Progr
     let expected = request
         .queries
         .iter()
-        .map(Query::id)
-        .collect::<BTreeSet<_>>();
-    let actual = response
-        .results
-        .iter()
-        .map(|result| result.query_id)
-        .collect::<BTreeSet<_>>();
-    if expected != actual {
-        return Err(semantic_error(
-            "semantic response did not classify every query",
-        ));
-    }
+        .map(|query| {
+            let operation = match query {
+                Query::SymbolUse { .. } => Operation::SymbolUse,
+                Query::ApiSurface { .. } => Operation::ApiSurface,
+            };
+            (query.id(), operation)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut seen = BTreeSet::new();
     for result in &response.results {
+        let Some(operation) = expected.get(&result.query_id) else {
+            return Err(semantic_error(
+                "semantic response returned an unknown query",
+            ));
+        };
+        if *operation != result.operation || !seen.insert(result.query_id) {
+            return Err(semantic_error(
+                "semantic response returned a duplicate or mismatched query",
+            ));
+        }
         if result.total_evidence_count < result.evidence.len() {
             return Err(semantic_error("semantic evidence totals are inconsistent"));
         }
@@ -842,6 +849,11 @@ fn validate_response(request: &Request, response: &Response) -> Result<(), Progr
                 "incomplete semantic result omitted its reason and next action",
             ));
         }
+    }
+    if seen.len() != expected.len() {
+        return Err(semantic_error(
+            "semantic response did not classify every query",
+        ));
     }
     Ok(())
 }
@@ -985,4 +997,247 @@ fn semantic_error(message: impl Into<String>) -> ProgrammaticError {
     ProgrammaticError::new(message.into(), 2)
         .with_code("FALLOW_TYPE_AWARE_FAILED")
         .with_context("analysis.typeAware")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    fn symbol() -> SemanticSymbol {
+        SemanticSymbol {
+            path: PathBuf::from("src/index.ts"),
+            namespace: SemanticNamespace::Value,
+            declaration_kind: "function".to_string(),
+            exported_name: "run".to_string(),
+            local_name: "run".to_string(),
+            owner: None,
+            line: 1,
+            col: 0,
+        }
+    }
+
+    fn request() -> Request {
+        Request {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION,
+            root: ".".to_string(),
+            projects: vec!["tsconfig.json".to_string()],
+            evidence_limit: EVIDENCE_LIMIT,
+            queries: vec![
+                Query::SymbolUse {
+                    id: 0,
+                    symbol: symbol(),
+                },
+                Query::ApiSurface {
+                    id: 1,
+                    entry_points: vec!["src/index.ts".to_string()],
+                    include_cycles: true,
+                },
+            ],
+            requested_capabilities: vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::ApiSurface,
+            ],
+        }
+    }
+
+    fn query_response(id: usize, operation: Operation) -> QueryResponse {
+        QueryResponse {
+            query_id: id,
+            operation,
+            assertion: "complete".to_string(),
+            status: SemanticCompleteness::Complete,
+            reason_code: None,
+            actions: Vec::new(),
+            evidence: vec![json!({"path": "src/index.ts"})],
+            total_evidence_count: 1,
+            truncated: false,
+            omissions: Vec::new(),
+            data: json!({}),
+        }
+    }
+
+    fn response() -> Response {
+        Response {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION.to_string(),
+            sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
+            backend: BACKEND_FAMILY.to_string(),
+            backend_version: BACKEND_VERSION.to_string(),
+            selected_tsconfigs: vec!["tsconfig.json".to_string()],
+            projects: Vec::new(),
+            results: vec![
+                query_response(0, Operation::SymbolUse),
+                query_response(1, Operation::ApiSurface),
+            ],
+            phase_timings_ms: PhaseTimings {
+                project_setup: 1,
+                diagnostics: 2,
+                semantic_queries: 3,
+            },
+            warnings: Vec::new(),
+            elapsed_ms: 6,
+        }
+    }
+
+    #[test]
+    fn validates_protocol_contract_and_incomplete_evidence_requirements() {
+        let request = request();
+        let mut response = response();
+        assert!(validate_response(&request, &response).is_ok());
+
+        response.protocol_version += 1;
+        assert!(validate_response(&request, &response).is_err());
+        response.protocol_version = PROTOCOL_VERSION;
+
+        response.sidecar_version = "0.0.0".to_string();
+        assert!(validate_response(&request, &response).is_err());
+        response.sidecar_version = env!("CARGO_PKG_VERSION").to_string();
+
+        response.backend = "other".to_string();
+        assert!(validate_response(&request, &response).is_err());
+        response.backend = BACKEND_FAMILY.to_string();
+
+        response.backend_version = "0".to_string();
+        assert!(validate_response(&request, &response).is_err());
+        response.backend_version = BACKEND_VERSION.to_string();
+
+        response.results.pop();
+        assert!(validate_response(&request, &response).is_err());
+        response
+            .results
+            .push(query_response(1, Operation::ApiSurface));
+
+        response
+            .results
+            .push(query_response(1, Operation::ApiSurface));
+        assert!(validate_response(&request, &response).is_err());
+        response.results.pop();
+
+        response.results[0].operation = Operation::ApiSurface;
+        assert!(validate_response(&request, &response).is_err());
+        response.results[0].operation = Operation::SymbolUse;
+
+        response.results[0].query_id = 99;
+        assert!(validate_response(&request, &response).is_err());
+        response.results[0].query_id = 0;
+
+        response.results[0].total_evidence_count = 0;
+        assert!(validate_response(&request, &response).is_err());
+        response.results[0].total_evidence_count = 1;
+
+        response.results[0].status = SemanticCompleteness::Partial;
+        assert!(validate_response(&request, &response).is_err());
+        response.results[0].reason_code = Some(SemanticGapReason::DynamicBehavior);
+        response.results[0].actions = vec!["Review dynamic use.".to_string()];
+        response.results[0].omissions = vec![SemanticOmission {
+            reason_code: SemanticGapReason::DynamicBehavior,
+            count: 1,
+        }];
+        assert!(validate_response(&request, &response).is_ok());
+    }
+
+    #[test]
+    fn normalizes_paths_projects_hashes_and_member_kinds() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        fs::create_dir(root.join("src")).expect("source directory");
+        fs::write(root.join("tsconfig.json"), "{}").expect("tsconfig");
+
+        assert_eq!(
+            protocol_path(root, &root.join("src/index.ts")).expect("root-relative path"),
+            PathBuf::from("src/index.ts")
+        );
+        assert!(protocol_path(root, Path::new("../outside.ts")).is_err());
+        assert!(protocol_path(root, &root.join("../outside.ts")).is_err());
+
+        assert_eq!(
+            identity_project_configs(root, &[]),
+            vec!["tsconfig.json".to_string()]
+        );
+        assert_eq!(
+            identity_project_configs(
+                root,
+                &[
+                    "configs/tsconfig.json".to_string(),
+                    "configs/tsconfig.json".to_string(),
+                    root.join("tsconfig.json").to_string_lossy().into_owned(),
+                ],
+            ),
+            vec![
+                "configs/tsconfig.json".to_string(),
+                "tsconfig.json".to_string()
+            ]
+        );
+        assert_eq!(digest_hex([0, 15, 255]), "000fff");
+        assert_eq!(
+            project_config_hash(root, &["tsconfig.json".to_string()]),
+            project_config_hash(root, &["tsconfig.json".to_string()])
+        );
+
+        assert_eq!(member_kind_name(MemberKind::ClassMethod), "class_method");
+        assert_eq!(
+            member_kind_name(MemberKind::ClassProperty),
+            "class_property"
+        );
+        assert_eq!(member_kind_name(MemberKind::EnumMember), "enum_member");
+        assert_eq!(
+            member_kind_name(MemberKind::NamespaceMember),
+            "namespace_member"
+        );
+        assert_eq!(member_kind_name(MemberKind::StoreMember), "store_member");
+    }
+
+    #[test]
+    fn classifies_queries_completeness_and_confirmed_items() {
+        let request = request();
+        assert_eq!(request.queries[0].id(), 0);
+        assert_eq!(request.queries[1].id(), 1);
+        assert_eq!(
+            Operation::SymbolUse.capability(),
+            SemanticCapability::SymbolUse
+        );
+        assert_eq!(
+            Operation::ApiSurface.capability(),
+            SemanticCapability::ApiSurface
+        );
+
+        let complete = query_response(0, Operation::SymbolUse);
+        let mut partial = query_response(1, Operation::ApiSurface);
+        partial.status = SemanticCompleteness::Partial;
+        let mut unavailable = query_response(2, Operation::ApiSurface);
+        unavailable.status = SemanticCompleteness::Unavailable;
+        assert_eq!(
+            aggregate_completeness(&[complete]),
+            SemanticCompleteness::Complete
+        );
+        assert_eq!(
+            aggregate_completeness(&[partial]),
+            SemanticCompleteness::Partial
+        );
+        assert_eq!(
+            aggregate_completeness(&[unavailable]),
+            SemanticCompleteness::Unavailable
+        );
+
+        let mut items = vec!["zero", "one", "two", "three"];
+        retain_unconfirmed(&mut items, &BTreeSet::from([1, 3]));
+        assert_eq!(items, vec!["zero", "two"]);
+    }
+
+    #[test]
+    fn bounded_reader_reports_overflow_without_losing_prefix() {
+        let (bytes, overflowed) = read_bounded(&b"abcdef"[..], 3).expect("bounded read succeeds");
+        assert_eq!(bytes, b"abc");
+        assert!(overflowed);
+
+        let (bytes, overflowed) = read_bounded(&b"ok"[..], 3).expect("short bounded read succeeds");
+        assert_eq!(bytes, b"ok");
+        assert!(!overflowed);
+    }
 }

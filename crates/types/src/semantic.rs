@@ -518,3 +518,34 @@ pub struct TypeCouplingReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semantic_identity_reports_each_compatibility_dimension() {
+        let syntactic = SemanticAnalysisIdentity::syntactic();
+        assert!(syntactic.incompatible_fields(&syntactic).is_empty());
+
+        let type_aware = SemanticAnalysisIdentity {
+            mode: SemanticAnalysisMode::TypeAware,
+            semantic_schema_version: 2,
+            capabilities: vec![SemanticCapability::SymbolUse],
+            project_config_hash: "sha256:project".to_string(),
+            backend_family: "typescript-go".to_string(),
+            completeness: SemanticCompleteness::Partial,
+        };
+        assert_eq!(
+            syntactic.incompatible_fields(&type_aware),
+            vec![
+                "mode",
+                "semantic_schema_version",
+                "capabilities",
+                "project_config_hash",
+                "backend_family",
+                "completeness",
+            ]
+        );
+    }
+}
