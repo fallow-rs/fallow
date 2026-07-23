@@ -93,6 +93,14 @@ pub struct CloudRuntimeContext {
     #[serde(default)]
     pub repo: String,
     #[serde(default)]
+    pub actionable: Option<bool>,
+    #[serde(default)]
+    pub actionability_reason: Option<String>,
+    #[serde(default)]
+    pub verdict: Option<String>,
+    #[serde(default)]
+    pub provenance: Option<CloudRuntimeProvenance>,
+    #[serde(default)]
     pub window: CloudRuntimeWindow,
     pub summary: CloudRuntimeSummary,
     #[serde(default)]
@@ -103,6 +111,38 @@ pub struct CloudRuntimeContext {
     pub importance: Vec<CloudRuntimeImportanceEntry>,
     #[serde(default)]
     pub warnings: Vec<CloudRuntimeWarning>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CloudRuntimeProvenance {
+    #[serde(default)]
+    pub is_production: Option<CloudRuntimeProductionStatus>,
+    #[serde(default)]
+    pub freshness_days: Option<u32>,
+    #[serde(default)]
+    pub untracked_ratio: Option<f64>,
+    #[serde(default)]
+    pub unresolved_ratio: Option<f64>,
+    #[serde(default)]
+    pub stale: Option<bool>,
+    #[serde(default)]
+    pub stale_after_days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum CloudRuntimeProductionStatus {
+    Known(bool),
+    Unknown(String),
+}
+
+impl CloudRuntimeProductionStatus {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Known(value) => value.to_string(),
+            Self::Unknown(value) => value.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -513,8 +553,8 @@ mod tests {
         // Mirrors the fallow-cloud Wave 1 runtime-context response: the
         // `{ "data": ... }` envelope, null measurement fields, risk_band
         // "unknown", plus new top-level fields (actionable / verdict /
-        // provenance) and per-entry fields (context_unavailable_reason) the CLI
-        // does not model. None may break deserialization (no deny_unknown_fields).
+        // provenance) and per-entry fields (context_unavailable_reason). Unknown
+        // fields remain forward-compatible because the structs do not deny them.
         let body = r#"{
           "data": {
             "schema_version": "fallow-cloud-runtime-v1",
@@ -556,6 +596,26 @@ mod tests {
             .expect("new-cloud runtime-context envelope must deserialize")
             .into_context();
         assert_eq!(context.repo, "owner/repo");
+        assert_eq!(context.actionable, Some(true));
+        assert_eq!(context.actionability_reason, None);
+        assert_eq!(context.verdict, None);
+        let provenance = context
+            .provenance
+            .as_ref()
+            .expect("cloud provenance must be retained");
+        assert_eq!(
+            provenance
+                .is_production
+                .as_ref()
+                .map(CloudRuntimeProductionStatus::label)
+                .as_deref(),
+            Some("unknown")
+        );
+        assert_eq!(provenance.freshness_days, Some(2));
+        assert_eq!(provenance.untracked_ratio, Some(0.1));
+        assert_eq!(provenance.unresolved_ratio, None);
+        assert_eq!(provenance.stale, Some(false));
+        assert_eq!(provenance.stale_after_days, Some(14));
         assert_eq!(context.blast_radius[0].caller_count, None);
         assert_eq!(
             context.blast_radius[0].caller_count_weighted_by_traffic,

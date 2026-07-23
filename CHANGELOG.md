@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cloud runtime analysis now preserves the server's evidence floor and
+  provenance.** `fallow coverage analyze --cloud` previously treated any
+  tracked function as actionable, even when fallow.cloud explicitly reported
+  that the active deployment had not collected enough isolated runtime
+  observations. The CLI now carries through the cloud's actionability verdict,
+  reason, production classification, freshness, staleness, and source-resolution
+  quality. Older cloud responses keep the existing tracked-function fallback.
+
 ## [3.8.0] - 2026-07-22
 
 ### Added

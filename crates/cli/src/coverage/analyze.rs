@@ -12,8 +12,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
 use crate::coverage::cloud_client::{
-    CloudError, CloudRequest, CloudRuntimeContext, CloudRuntimeFunction, CloudRuntimeWarning,
-    CloudTrackingState, fetch_runtime_context,
+    CloudError, CloudRequest, CloudRuntimeContext, CloudRuntimeFunction, CloudRuntimeProvenance,
+    CloudRuntimeWarning, CloudTrackingState, fetch_runtime_context,
 };
 use crate::error::emit_error;
 use crate::health::HealthOptions;
@@ -556,10 +556,7 @@ fn merge_cloud_snapshot(
     let importance = cloud_importance_entries(snapshot, synthesized_importance);
 
     let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
-    let trust_output = cloud_runtime_trust_output(
-        snapshot.summary.functions_tracked,
-        snapshot.summary.functions_untracked,
-    );
+    let trust_output = cloud_runtime_trust_output(snapshot);
 
     RuntimeCoverageReport {
         schema_version: RuntimeCoverageSchemaVersion::V1,
@@ -629,23 +626,60 @@ struct RuntimeTrustOutput {
     provenance: RuntimeCoverageProvenance,
 }
 
-fn cloud_runtime_trust_output(
+fn cloud_runtime_trust_output(snapshot: &CloudRuntimeContext) -> RuntimeTrustOutput {
+    let functions_tracked = snapshot.summary.functions_tracked;
+    let functions_untracked = snapshot.summary.functions_untracked;
+    let fallback_actionable = functions_tracked > 0;
+    let actionable = snapshot.actionable.unwrap_or(fallback_actionable);
+    let (actionability_reason, actionability_verdict) = if actionable {
+        (None, None)
+    } else {
+        (
+            snapshot
+                .actionability_reason
+                .clone()
+                .or_else(|| runtime_actionability_reason(functions_tracked)),
+            snapshot
+                .verdict
+                .clone()
+                .or_else(|| runtime_actionability_verdict(functions_tracked))
+                .or_else(|| Some("insufficient_evidence".to_owned())),
+        )
+    };
+
+    RuntimeTrustOutput {
+        actionable,
+        actionability_reason,
+        actionability_verdict,
+        provenance: cloud_runtime_provenance(
+            snapshot.provenance.as_ref(),
+            functions_tracked,
+            functions_untracked,
+        ),
+    }
+}
+
+fn cloud_runtime_provenance(
+    provenance: Option<&CloudRuntimeProvenance>,
     functions_tracked: usize,
     functions_untracked: usize,
-) -> RuntimeTrustOutput {
-    RuntimeTrustOutput {
-        actionable: functions_tracked > 0,
-        actionability_reason: runtime_actionability_reason(functions_tracked),
-        actionability_verdict: runtime_actionability_verdict(functions_tracked),
-        provenance: RuntimeCoverageProvenance {
-            data_source: RuntimeCoverageDataSource::Cloud,
-            is_production: "unknown".to_owned(),
-            freshness_days: None,
-            untracked_ratio: runtime_untracked_ratio(functions_tracked, functions_untracked),
-            unresolved_ratio: 0.0,
-            stale: false,
-            stale_after_days: RUNTIME_STALE_AFTER_DAYS,
-        },
+) -> RuntimeCoverageProvenance {
+    RuntimeCoverageProvenance {
+        data_source: RuntimeCoverageDataSource::Cloud,
+        is_production: provenance
+            .and_then(|value| value.is_production.as_ref())
+            .map_or_else(|| "unknown".to_owned(), |value| value.label()),
+        freshness_days: provenance.and_then(|value| value.freshness_days),
+        untracked_ratio: provenance
+            .and_then(|value| value.untracked_ratio)
+            .unwrap_or_else(|| runtime_untracked_ratio(functions_tracked, functions_untracked)),
+        unresolved_ratio: provenance
+            .and_then(|value| value.unresolved_ratio)
+            .unwrap_or(0.0),
+        stale: provenance.and_then(|value| value.stale).unwrap_or(false),
+        stale_after_days: provenance
+            .and_then(|value| value.stale_after_days)
+            .unwrap_or(RUNTIME_STALE_AFTER_DAYS),
     }
 }
 
@@ -1611,49 +1645,19 @@ mod tests {
             .entry(("src/a.ts".to_owned(), "oldFlow".to_owned()))
             .or_default()
             .push(info);
-        let snapshot = CloudRuntimeContext {
-            repo: "acme/web".to_owned(),
-            window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
-            summary: crate::coverage::cloud_client::CloudRuntimeSummary {
-                trace_count: 100,
-                deployments_seen: 2,
-                functions_tracked: 1,
-                functions_hit: 0,
-                functions_unhit: 1,
-                functions_untracked: 0,
-                coverage_percent: 0.0,
-                last_received_at: Some("2026-04-30T10:00:00.000Z".to_owned()),
-            },
-            blast_radius: vec![],
-            importance: vec![],
-            functions: vec![
-                CloudRuntimeFunction {
-                    file_path: "src/a.ts".to_owned(),
-                    function_name: "oldFlow".to_owned(),
-                    stable_id: None,
-                    line_number: Some(10),
-                    start_line: Some(10),
-                    end_line: Some(20),
-                    hit_count: Some(0),
-                    tracking_state: CloudTrackingState::NeverCalled,
-                    deployments_observed: 2,
-                    untracked_reason: None,
-                },
-                CloudRuntimeFunction {
-                    file_path: "src/missing.ts".to_owned(),
-                    function_name: "missingInAst".to_owned(),
-                    stable_id: None,
-                    line_number: Some(1),
-                    start_line: Some(1),
-                    end_line: Some(3),
-                    hit_count: Some(0),
-                    tracking_state: CloudTrackingState::NeverCalled,
-                    deployments_observed: 2,
-                    untracked_reason: None,
-                },
-            ],
-            warnings: vec![],
-        };
+        let mut snapshot = cloud_context(1, 0);
+        snapshot.summary.trace_count = 100;
+        snapshot.summary.deployments_seen = 2;
+        snapshot.summary.functions_hit = 0;
+        snapshot.summary.functions_unhit = 1;
+        snapshot.summary.coverage_percent = 0.0;
+        snapshot.summary.last_received_at = Some("2026-04-30T10:00:00.000Z".to_owned());
+        let mut matched = cloud_function("src/a.ts", "oldFlow", Some(10), Some(10), Some(20));
+        matched.deployments_observed = 2;
+        let mut unmatched =
+            cloud_function("src/missing.ts", "missingInAst", Some(1), Some(1), Some(3));
+        unmatched.deployments_observed = 2;
+        snapshot.functions = vec![matched, unmatched];
         let report = merge_cloud_snapshot(&snapshot, &static_index, 100);
         assert_eq!(report.findings.len(), 1);
         assert_eq!(
@@ -1700,6 +1704,10 @@ mod tests {
         function.deployments_observed = 4;
         let snapshot = CloudRuntimeContext {
             repo: "acme/web".to_owned(),
+            actionable: None,
+            actionability_reason: None,
+            verdict: None,
+            provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 14 },
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 10,
@@ -1838,6 +1846,10 @@ mod tests {
     fn cloud_warnings_dedupe_server_and_cli_no_runtime_data() {
         let snapshot = CloudRuntimeContext {
             repo: "nonexistent-repo".to_owned(),
+            actionable: None,
+            actionability_reason: None,
+            verdict: None,
+            provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
@@ -1875,6 +1887,10 @@ mod tests {
     fn cloud_warnings_dedupe_when_server_message_includes_project_id() {
         let snapshot = CloudRuntimeContext {
             repo: "fallow-cloud".to_owned(),
+            actionable: None,
+            actionability_reason: None,
+            verdict: None,
+            provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
@@ -1911,6 +1927,10 @@ mod tests {
     fn cloud_capture_quality_reports_untracked_ratio_only_when_data_exists() {
         let mut snapshot = CloudRuntimeContext {
             repo: "acme/web".to_owned(),
+            actionable: None,
+            actionability_reason: None,
+            verdict: None,
+            provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 7 },
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
@@ -1938,6 +1958,58 @@ mod tests {
         assert_eq!(quality.instances_observed, 2);
         assert!((quality.untracked_ratio_percent - 75.0).abs() < f64::EPSILON);
         assert!(quality.lazy_parse_warning);
+    }
+
+    #[test]
+    fn cloud_report_preserves_non_actionable_server_verdict_and_provenance() {
+        let mut snapshot = cloud_context(1, 0);
+        snapshot.actionable = Some(false);
+        snapshot.actionability_reason =
+            Some("7 of 10,000 required observations collected.".to_owned());
+        snapshot.verdict = Some("insufficient_evidence".to_owned());
+        snapshot.provenance = Some(CloudRuntimeProvenance {
+            is_production: Some(
+                crate::coverage::cloud_client::CloudRuntimeProductionStatus::Known(true),
+            ),
+            freshness_days: Some(3),
+            untracked_ratio: Some(0.25),
+            unresolved_ratio: Some(0.4),
+            stale: Some(false),
+            stale_after_days: Some(14),
+        });
+
+        let report = merge_cloud_snapshot(&snapshot, &StaticIndex::default(), 100);
+
+        assert!(!report.actionable);
+        assert_eq!(
+            report.actionability_reason.as_deref(),
+            Some("7 of 10,000 required observations collected.")
+        );
+        assert_eq!(
+            report.actionability_verdict.as_deref(),
+            Some("insufficient_evidence")
+        );
+        assert_eq!(report.provenance.is_production, "true");
+        assert_eq!(report.provenance.freshness_days, Some(3));
+        assert!((report.provenance.untracked_ratio - 0.25).abs() < f64::EPSILON);
+        assert!((report.provenance.unresolved_ratio - 0.4).abs() < f64::EPSILON);
+        assert!(!report.provenance.stale);
+        assert_eq!(report.provenance.stale_after_days, 14);
+    }
+
+    #[test]
+    fn cloud_report_uses_legacy_actionability_fallback_when_fields_are_absent() {
+        let report = merge_cloud_snapshot(&cloud_context(1, 2), &StaticIndex::default(), 100);
+
+        assert!(report.actionable);
+        assert_eq!(report.actionability_reason, None);
+        assert_eq!(report.actionability_verdict, None);
+        assert_eq!(report.provenance.is_production, "unknown");
+        assert_eq!(report.provenance.freshness_days, None);
+        assert!((report.provenance.untracked_ratio - (2.0 / 3.0)).abs() < f64::EPSILON);
+        assert!(report.provenance.unresolved_ratio.abs() < f64::EPSILON);
+        assert!(!report.provenance.stale);
+        assert_eq!(report.provenance.stale_after_days, RUNTIME_STALE_AFTER_DAYS);
     }
 
     #[test]
@@ -2155,6 +2227,31 @@ mod tests {
             tracking_state: CloudTrackingState::NeverCalled,
             deployments_observed: 1,
             untracked_reason: None,
+        }
+    }
+
+    fn cloud_context(functions_tracked: usize, functions_untracked: usize) -> CloudRuntimeContext {
+        CloudRuntimeContext {
+            repo: "acme/web".to_owned(),
+            actionable: None,
+            actionability_reason: None,
+            verdict: None,
+            provenance: None,
+            window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
+            summary: crate::coverage::cloud_client::CloudRuntimeSummary {
+                trace_count: 7,
+                deployments_seen: 1,
+                functions_tracked,
+                functions_hit: functions_tracked,
+                functions_unhit: 0,
+                functions_untracked,
+                coverage_percent: 100.0,
+                last_received_at: Some("2026-07-23T08:00:00.000Z".to_owned()),
+            },
+            functions: vec![],
+            blast_radius: vec![],
+            importance: vec![],
+            warnings: vec![],
         }
     }
 
