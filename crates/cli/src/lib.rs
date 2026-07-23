@@ -2696,6 +2696,7 @@ fn is_impact_statusline(cli: &Cli) -> bool {
         cli.command.as_ref(),
         Some(Command::Impact {
             subcommand: Some(ImpactCli::Statusline),
+            all: false,
             ..
         })
     )
@@ -5149,6 +5150,10 @@ mod tests {
 
         let status = Cli::try_parse_from(["fallow", "impact", "status"]).expect("argv parses");
         assert!(!is_impact_statusline(&status));
+
+        let all_statusline =
+            Cli::try_parse_from(["fallow", "impact", "--all", "statusline"]).expect("argv parses");
+        assert!(!is_impact_statusline(&all_statusline));
     }
 
     #[test]

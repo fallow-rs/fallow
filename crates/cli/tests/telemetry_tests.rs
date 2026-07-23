@@ -161,6 +161,29 @@ fn impact_statusline_bypasses_telemetry_inspect_output() {
 }
 
 #[test]
+fn impact_statusline_rejects_cross_repo_flag() {
+    let home = tempfile::tempdir().expect("temp home");
+    let root = tempfile::tempdir().expect("temp project");
+    let output = Command::new(fallow_bin())
+        .env("FALLOW_TELEMETRY", "inspect")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["--root", &root.path().to_string_lossy()])
+        .args(["impact", "--all", "statusline"])
+        .output()
+        .expect("failed to run fallow binary");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("cannot be combined with a subcommand")
+    );
+}
+
+#[test]
 fn telemetry_inspect_reports_safe_followup_fields() {
     let mut cmd = Command::new(fallow_bin());
     let home = tempfile::tempdir().expect("temp home");
