@@ -365,37 +365,38 @@ fn apply_response(
                 result.query_id
             )));
         };
-        if result.assertion == "confirmed-used" {
-            match target {
-                Target::ClassMember(index) => {
-                    class_members.insert(*index);
-                }
-                Target::UnusedExport(index) => {
-                    exports.insert(*index);
-                }
-                Target::UnusedType(index) => {
-                    types.insert(*index);
-                }
-                Target::ApiSurface => {
-                    api_surface = Some(apply_api_surface(
-                        Path::new(&request.root),
-                        results,
-                        result,
-                    )?);
-                }
+        match target {
+            Target::ApiSurface => {
+                api_surface = Some(apply_api_surface(
+                    Path::new(&request.root),
+                    results,
+                    result,
+                )?);
             }
-            confirmed_used_count += 1;
-        } else if !matches!(target, Target::ApiSurface) {
-            if result.status == SemanticCompleteness::Complete {
-                unresolved_count += 1;
-            } else {
-                abstained_count += 1;
-                match result.reason_code {
-                    Some(SemanticGapReason::NoProject) => abstention_reasons.no_project += 1,
-                    Some(SemanticGapReason::BlockingDiagnostics) => {
-                        abstention_reasons.blocking_diagnostics += 1;
+            Target::ClassMember(index) if result.assertion == "confirmed-used" => {
+                class_members.insert(*index);
+                confirmed_used_count += 1;
+            }
+            Target::UnusedExport(index) if result.assertion == "confirmed-used" => {
+                exports.insert(*index);
+                confirmed_used_count += 1;
+            }
+            Target::UnusedType(index) if result.assertion == "confirmed-used" => {
+                types.insert(*index);
+                confirmed_used_count += 1;
+            }
+            Target::ClassMember(_) | Target::UnusedExport(_) | Target::UnusedType(_) => {
+                if result.status == SemanticCompleteness::Complete {
+                    unresolved_count += 1;
+                } else {
+                    abstained_count += 1;
+                    match result.reason_code {
+                        Some(SemanticGapReason::NoProject) => abstention_reasons.no_project += 1,
+                        Some(SemanticGapReason::BlockingDiagnostics) => {
+                            abstention_reasons.blocking_diagnostics += 1;
+                        }
+                        _ => abstention_reasons.ambiguous_project += 1,
                     }
-                    _ => abstention_reasons.ambiguous_project += 1,
                 }
             }
         }
@@ -1007,6 +1008,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use fallow_types::output_dead_code::{
+        UnusedClassMemberFinding, UnusedExportFinding, UnusedTypeFinding,
+    };
+    use fallow_types::results::{UnusedExport, UnusedMember};
 
     fn symbol() -> SemanticSymbol {
         SemanticSymbol {
@@ -1228,6 +1233,289 @@ mod tests {
         let mut items = vec!["zero", "one", "two", "three"];
         retain_unconfirmed(&mut items, &BTreeSet::from([1, 3]));
         assert_eq!(items, vec!["zero", "two"]);
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the protocol transaction fixture keeps every wire field visible"
+    )]
+    fn builds_and_applies_a_complete_semantic_batch() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        fs::create_dir(root.join("src")).expect("source directory");
+        fs::write(root.join("tsconfig.json"), "{}").expect("tsconfig");
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/class.ts"),
+                parent_name: "Service".to_string(),
+                member_name: "run".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 2,
+                col: 0,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "run".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/types.ts"),
+                export_name: "Options".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+
+        let entry_points = vec![PathBuf::from("src/index.ts")];
+        let (queries, targets) =
+            build_queries(root, &results, &entry_points, true).expect("semantic queries");
+        assert_eq!(queries.len(), 4);
+        let request = Request {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION,
+            root: root.to_string_lossy().into_owned(),
+            projects: vec!["tsconfig.json".to_string()],
+            evidence_limit: EVIDENCE_LIMIT,
+            queries,
+            requested_capabilities: vec![
+                SemanticCapability::ApiSurface,
+                SemanticCapability::SymbolUse,
+                SemanticCapability::ApiSurface,
+            ],
+        };
+
+        let mut class_result = query_response(0, Operation::SymbolUse);
+        class_result.assertion = "confirmed-used".to_string();
+        let mut export_result = query_response(1, Operation::SymbolUse);
+        export_result.assertion = "confirmed-used".to_string();
+        let mut type_result = query_response(2, Operation::SymbolUse);
+        type_result.assertion = "unreferenced".to_string();
+        let mut api_result = query_response(3, Operation::ApiSurface);
+        api_result.assertion = "leak-confirmed".to_string();
+        api_result.data = json!({
+            "exports": [symbol()],
+            "total_export_count": 1,
+            "entries": [{
+                "exposed": symbol(),
+                "origin": symbol(),
+                "signature_fingerprint": "sig:run",
+                "referenced_types": [{
+                    "declaration": {
+                        "path": "src/private.ts",
+                        "namespace": "type",
+                        "declaration_kind": "interface",
+                        "exported_name": "PrivateOptions",
+                        "local_name": "PrivateOptions",
+                        "owner": null,
+                        "line": 1,
+                        "col": 0
+                    },
+                    "relation": "return-type"
+                }],
+                "total_referenced_type_count": 1
+            }],
+            "total_entry_count": 1,
+            "leaks": [{
+                "exposed_symbol": symbol(),
+                "private_declaration": {
+                    "path": "src/private.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "PrivateOptions",
+                    "local_name": "PrivateOptions",
+                    "owner": null,
+                    "line": 1,
+                    "col": 0
+                },
+                "relation": "return-type",
+                "evidence": {
+                    "path": "src/index.ts",
+                    "line": 1,
+                    "col": 0
+                }
+            }],
+            "total_leak_count": 1,
+            "public_signature_edges": [{"source": "run", "target": "PrivateOptions"}],
+            "total_public_signature_edge_count": 1
+        });
+        let semantic_response = Response {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION.to_string(),
+            sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
+            backend: BACKEND_FAMILY.to_string(),
+            backend_version: BACKEND_VERSION.to_string(),
+            selected_tsconfigs: vec!["tsconfig.json".to_string()],
+            projects: vec![ProjectResponse {
+                config: "tsconfig.json".to_string(),
+                source: TypeAwareProjectSource::Explicit,
+                status: TypeAwareProjectStatus::Complete,
+                reason_code: None,
+                blocking_diagnostic_count: 0,
+                source_file_count: 4,
+                program_reused: false,
+            }],
+            results: vec![class_result, export_result, type_result, api_result],
+            phase_timings_ms: PhaseTimings {
+                project_setup: 1,
+                diagnostics: 2,
+                semantic_queries: 3,
+            },
+            warnings: vec!["bounded warning".to_string()],
+            elapsed_ms: 6,
+        };
+
+        let meta = apply_response(&mut results, &request, &targets, semantic_response)
+            .expect("applied semantic response")
+            .expect("semantic metadata");
+
+        assert!(results.unused_class_members.is_empty());
+        assert!(results.unused_exports.is_empty());
+        assert_eq!(results.unused_types.len(), 1);
+        assert_eq!(results.private_type_leaks.len(), 1);
+        assert_eq!(meta.candidate_count, 3);
+        assert_eq!(meta.confirmed_used_count, 2);
+        assert_eq!(meta.unresolved_count, 1);
+        assert_eq!(meta.warning_count, 1);
+        assert_eq!(
+            meta.identity.expect("semantic identity").capabilities,
+            vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::ApiSurface
+            ]
+        );
+        let surface = meta.api_surface.expect("API surface");
+        assert_eq!(surface.entries.len(), 1);
+        assert_eq!(surface.private_type_leaks.len(), 1);
+
+        let wire = ApiLeakData {
+            exposed_symbol: symbol(),
+            private_declaration: SemanticSymbol {
+                path: PathBuf::from("src/private.ts"),
+                namespace: SemanticNamespace::Type,
+                declaration_kind: "interface".to_string(),
+                exported_name: "PrivateOptions".to_string(),
+                local_name: "PrivateOptions".to_string(),
+                owner: None,
+                line: 1,
+                col: 0,
+            },
+            relation: "return-type".to_string(),
+            evidence: EvidenceLocation {
+                path: PathBuf::from("src/index.ts"),
+                line: 1,
+                col: 0,
+            },
+        };
+        attach_or_add_private_type_leak(
+            root,
+            &mut results,
+            &wire,
+            surface.private_type_leaks[0].clone(),
+        );
+        assert_eq!(results.private_type_leaks.len(), 1);
+    }
+
+    #[test]
+    fn counts_each_abstention_reason_and_rejects_unknown_targets() {
+        let root = tempdir().expect("temporary directory");
+        let request = Request {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION,
+            root: root.path().to_string_lossy().into_owned(),
+            projects: Vec::new(),
+            evidence_limit: EVIDENCE_LIMIT,
+            queries: vec![
+                Query::SymbolUse {
+                    id: 0,
+                    symbol: symbol(),
+                },
+                Query::SymbolUse {
+                    id: 1,
+                    symbol: symbol(),
+                },
+                Query::SymbolUse {
+                    id: 2,
+                    symbol: symbol(),
+                },
+            ],
+            requested_capabilities: vec![SemanticCapability::SymbolUse],
+        };
+        let targets = BTreeMap::from([
+            (0, Target::UnusedExport(0)),
+            (1, Target::UnusedType(0)),
+            (2, Target::ClassMember(0)),
+        ]);
+        let incomplete = |id, reason_code| QueryResponse {
+            query_id: id,
+            operation: Operation::SymbolUse,
+            assertion: "abstained".to_string(),
+            status: SemanticCompleteness::Unavailable,
+            reason_code: Some(reason_code),
+            actions: vec!["Review retained finding.".to_string()],
+            evidence: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: vec![SemanticOmission {
+                reason_code,
+                count: 1,
+            }],
+            data: json!({}),
+        };
+        let abstention_response = Response {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION.to_string(),
+            sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
+            backend: BACKEND_FAMILY.to_string(),
+            backend_version: BACKEND_VERSION.to_string(),
+            selected_tsconfigs: Vec::new(),
+            projects: Vec::new(),
+            results: vec![
+                incomplete(0, SemanticGapReason::NoProject),
+                incomplete(1, SemanticGapReason::BlockingDiagnostics),
+                incomplete(2, SemanticGapReason::DynamicBehavior),
+            ],
+            phase_timings_ms: PhaseTimings {
+                project_setup: 0,
+                diagnostics: 0,
+                semantic_queries: 0,
+            },
+            warnings: Vec::new(),
+            elapsed_ms: 0,
+        };
+        let meta = apply_response(
+            &mut AnalysisResults::default(),
+            &request,
+            &targets,
+            abstention_response,
+        )
+        .expect("abstention response")
+        .expect("abstention metadata");
+        assert_eq!(meta.abstained_count, 3);
+        assert_eq!(meta.abstention_reasons.no_project, 1);
+        assert_eq!(meta.abstention_reasons.blocking_diagnostics, 1);
+        assert_eq!(meta.abstention_reasons.ambiguous_project, 1);
+
+        let unknown = Response {
+            results: vec![query_response(99, Operation::SymbolUse)],
+            ..response()
+        };
+        assert!(
+            apply_response(&mut AnalysisResults::default(), &request, &targets, unknown).is_err()
+        );
     }
 
     #[test]

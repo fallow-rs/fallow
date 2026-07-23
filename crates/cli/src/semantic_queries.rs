@@ -1700,7 +1700,10 @@ fn digest_hex(bytes: impl AsRef<[u8]>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use serde_json::json;
+    use tempfile::tempdir;
 
     use super::*;
 
@@ -1715,6 +1718,332 @@ mod tests {
             line: 4,
             col: 0,
         }
+    }
+
+    fn request_with_all_operations(root: &Path) -> SemanticRequest {
+        let symbol = symbol();
+        SemanticRequest {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION,
+            root: root.to_string_lossy().into_owned(),
+            projects: vec!["tsconfig.json".to_string()],
+            evidence_limit: EVIDENCE_LIMIT,
+            queries: vec![
+                SemanticQuery::SymbolUse {
+                    id: 0,
+                    symbol: symbol.clone(),
+                },
+                SemanticQuery::SymbolTrace {
+                    id: 1,
+                    symbol: symbol.clone(),
+                },
+                SemanticQuery::SymbolImpact { id: 2, symbol },
+                SemanticQuery::ApiSurface {
+                    id: 3,
+                    entry_points: vec!["src/config.ts".to_string()],
+                    include_cycles: true,
+                },
+                SemanticQuery::TypeCoupling {
+                    id: 4,
+                    entry_points: vec!["src/config.ts".to_string()],
+                    include_cycles: true,
+                },
+            ],
+        }
+    }
+
+    fn complete_result(id: usize, operation: SemanticOperation) -> SemanticQueryResponse {
+        SemanticQueryResponse {
+            query_id: id,
+            operation,
+            assertion: "complete".to_string(),
+            status: SemanticCompleteness::Complete,
+            reason_code: None,
+            actions: Vec::new(),
+            evidence: vec![json!({"path": "src/config.ts"})],
+            total_evidence_count: 1,
+            truncated: false,
+            omissions: Vec::new(),
+            data: json!({}),
+        }
+    }
+
+    fn complete_response(request: &SemanticRequest) -> SemanticResponse {
+        SemanticResponse {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION.to_string(),
+            sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
+            backend: BACKEND_FAMILY.to_string(),
+            backend_version: BACKEND_VERSION.to_string(),
+            selected_tsconfigs: vec!["tsconfig.json".to_string()],
+            projects: Vec::new(),
+            results: request
+                .queries
+                .iter()
+                .map(|query| complete_result(query.id(), query.operation()))
+                .collect(),
+            phase_timings_ms: SemanticPhaseTimings {
+                project_setup: 1,
+                diagnostics: 2,
+                semantic_queries: 3,
+            },
+            warnings: Vec::new(),
+            elapsed_ms: 6,
+        }
+    }
+
+    #[test]
+    fn validates_every_semantic_operation_and_response_invariant() {
+        let request = request_with_all_operations(Path::new("."));
+        let response = complete_response(&request);
+        assert!(validate_response(&request, &response).is_ok());
+        assert_eq!(
+            request
+                .queries
+                .iter()
+                .map(|query| query.operation().capability())
+                .collect::<Vec<_>>(),
+            vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::SymbolTrace,
+                SemanticCapability::SymbolImpact,
+                SemanticCapability::ApiSurface,
+                SemanticCapability::TypeCoupling,
+            ]
+        );
+
+        let mut invalid = response.clone();
+        invalid.protocol_version += 1;
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.sidecar_version = "0.0.0".to_string();
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.backend = "other".to_string();
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.backend_version = "0".to_string();
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.results[0].query_id = 99;
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.results[0].operation = SemanticOperation::ApiSurface;
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.results.push(invalid.results[0].clone());
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.results[0].total_evidence_count = 0;
+        assert!(validate_response(&request, &invalid).is_err());
+
+        invalid = response.clone();
+        invalid.results[0].status = SemanticCompleteness::Partial;
+        assert!(validate_response(&request, &invalid).is_err());
+        invalid.results[0].reason_code = Some(SemanticGapReason::DynamicBehavior);
+        invalid.results[0].actions = vec!["Review dynamic use.".to_string()];
+        invalid.results[0].omissions = vec![SemanticOmission {
+            reason_code: SemanticGapReason::DynamicBehavior,
+            count: 1,
+        }];
+        assert!(validate_response(&request, &invalid).is_ok());
+
+        invalid = response;
+        invalid.results.pop();
+        assert!(validate_response(&request, &invalid).is_err());
+    }
+
+    #[test]
+    fn merges_semantic_batches_conservatively() {
+        let mut base = TypeAwareMeta {
+            identity: Some(SemanticAnalysisIdentity {
+                mode: SemanticAnalysisMode::TypeAware,
+                semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
+                capabilities: vec![SemanticCapability::SymbolUse],
+                project_config_hash: "sha256:project".to_string(),
+                backend_family: BACKEND_FAMILY.to_string(),
+                completeness: SemanticCompleteness::Complete,
+            }),
+            selected_tsconfigs: vec!["tsconfig.base.json".to_string()],
+            warning_count: 1,
+            warnings: vec!["base warning".to_string()],
+            elapsed_ms: 5,
+            phase_timings_ms: TypeAwarePhaseTimings {
+                project_setup: 1,
+                diagnostics: 2,
+                symbol_scan: 3,
+            },
+            ..TypeAwareMeta::default()
+        };
+        let overlay = TypeAwareMeta {
+            identity: Some(SemanticAnalysisIdentity {
+                mode: SemanticAnalysisMode::TypeAware,
+                semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
+                capabilities: vec![
+                    SemanticCapability::SymbolUse,
+                    SemanticCapability::TypeCoupling,
+                ],
+                project_config_hash: "sha256:project".to_string(),
+                backend_family: BACKEND_FAMILY.to_string(),
+                completeness: SemanticCompleteness::Unavailable,
+            }),
+            selected_tsconfigs: vec![
+                "tsconfig.app.json".to_string(),
+                "tsconfig.base.json".to_string(),
+            ],
+            warning_count: 2,
+            warnings: vec!["overlay warning".to_string()],
+            elapsed_ms: 7,
+            phase_timings_ms: TypeAwarePhaseTimings {
+                project_setup: 4,
+                diagnostics: 5,
+                symbol_scan: 6,
+            },
+            ..TypeAwareMeta::default()
+        };
+
+        merge_type_aware_meta(&mut base, overlay);
+
+        let identity = base.identity.expect("merged identity");
+        assert_eq!(
+            identity.capabilities,
+            vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::TypeCoupling
+            ]
+        );
+        assert_eq!(identity.completeness, SemanticCompleteness::Unavailable);
+        assert_eq!(
+            base.selected_tsconfigs,
+            vec![
+                "tsconfig.app.json".to_string(),
+                "tsconfig.base.json".to_string()
+            ]
+        );
+        assert_eq!(base.warning_count, 3);
+        assert_eq!(base.warnings.len(), 2);
+        assert_eq!(base.elapsed_ms, 12);
+        assert_eq!(base.phase_timings_ms.project_setup, 5);
+        assert_eq!(base.phase_timings_ms.diagnostics, 7);
+        assert_eq!(base.phase_timings_ms.symbol_scan, 9);
+
+        let mut missing = None;
+        merge_semantic_identity(&mut missing, None);
+        assert!(missing.is_none());
+        merge_semantic_identity(&mut missing, Some(identity));
+        assert!(missing.is_some());
+    }
+
+    #[test]
+    fn normalizes_semantic_paths_identity_and_impact_helpers() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        fs::write(root.join("tsconfig.json"), "{}").expect("tsconfig");
+
+        assert_eq!(
+            protocol_path(root, &root.join("src/config.ts")).expect("relative path"),
+            PathBuf::from("src/config.ts")
+        );
+        assert!(protocol_path(root, Path::new("../outside.ts")).is_err());
+        assert!(protocol_path(root, &root.join("../outside.ts")).is_err());
+        assert_eq!(namespace_name(SemanticNamespace::Value), "value");
+        assert_eq!(namespace_name(SemanticNamespace::Type), "type");
+        assert_eq!(digest_hex([0, 15, 255]), "000fff");
+
+        let projects = vec![
+            PathBuf::from("tsconfig.json"),
+            root.join("tsconfig.json"),
+            PathBuf::from("tsconfig.json"),
+        ];
+        assert_eq!(
+            identity_project_configs(root, &projects),
+            vec!["tsconfig.json".to_string()]
+        );
+        assert_eq!(
+            identity_project_config_strings(
+                root,
+                &[
+                    "tsconfig.json".to_string(),
+                    root.join("tsconfig.json").to_string_lossy().into_owned(),
+                ],
+            ),
+            vec!["tsconfig.json".to_string()]
+        );
+        assert_eq!(
+            project_config_hash(root, &["tsconfig.json".to_string()]),
+            project_config_hash(root, &["tsconfig.json".to_string()])
+        );
+
+        let paths = impact_paths(
+            vec![
+                ImpactPathData {
+                    path: PathBuf::from("src/direct.ts"),
+                    provenance: Vec::new(),
+                },
+                ImpactPathData {
+                    path: PathBuf::from("src/transitive.ts"),
+                    provenance: vec![
+                        PathBuf::from("src/config.ts"),
+                        PathBuf::from("src/transitive.ts"),
+                    ],
+                },
+            ],
+            "affected",
+        );
+        assert_eq!(paths[0].distance, 1);
+        assert_eq!(paths[1].distance, 2);
+        assert_eq!(paths[1].relation, "affected");
+
+        let outcome = empty_semantic_outcome(
+            root,
+            &[],
+            vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::ApiSurface,
+            ],
+        );
+        let identity = outcome
+            .type_aware
+            .meta
+            .identity
+            .expect("empty semantic identity");
+        assert_eq!(identity.mode, SemanticAnalysisMode::TypeAware);
+        assert_eq!(identity.completeness, SemanticCompleteness::Complete);
+        assert!(outcome.type_coupling.is_none());
+    }
+
+    #[test]
+    fn summarizes_completeness_and_retains_only_unconfirmed_items() {
+        let mut complete = complete_result(0, SemanticOperation::SymbolUse);
+        let summary = query_summary(&complete);
+        assert_eq!(summary.capability, SemanticCapability::SymbolUse);
+        assert_eq!(summary.total_evidence_count, 1);
+
+        assert_eq!(
+            aggregate_completeness(&[complete.clone()]),
+            SemanticCompleteness::Complete
+        );
+        complete.status = SemanticCompleteness::Partial;
+        assert_eq!(
+            aggregate_completeness(&[complete.clone()]),
+            SemanticCompleteness::Partial
+        );
+        complete.status = SemanticCompleteness::Unavailable;
+        assert_eq!(
+            aggregate_completeness(&[complete]),
+            SemanticCompleteness::Unavailable
+        );
+
+        let mut items = vec!["zero", "one", "two", "three"];
+        retain_unconfirmed(&mut items, &BTreeSet::from([0, 2]));
+        assert_eq!(items, vec!["one", "three"]);
     }
 
     #[test]
