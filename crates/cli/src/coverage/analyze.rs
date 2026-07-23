@@ -1660,6 +1660,7 @@ mod tests {
         snapshot.summary.coverage_percent = 0.0;
         snapshot.summary.last_received_at = Some("2026-04-30T10:00:00.000Z".to_owned());
         let mut matched = cloud_function("src/a.ts", "oldFlow", Some(10), Some(10), Some(20));
+        matched.never_called_source = CloudNeverCalledSource::RuntimeObserved;
         matched.deployments_observed = 2;
         let mut unmatched =
             cloud_function("src/missing.ts", "missingInAst", Some(1), Some(1), Some(3));
