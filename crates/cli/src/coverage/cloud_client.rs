@@ -177,6 +177,7 @@ pub enum CloudNeverCalledSource {
     RuntimeObserved,
     InventoryBackfill,
     #[default]
+    #[serde(other)]
     Unknown,
 }
 
@@ -584,6 +585,12 @@ mod tests {
         )
         .expect("legacy cloud responses must remain deserializable");
         assert_eq!(legacy.never_called_source, CloudNeverCalledSource::Unknown);
+
+        let future: CloudRuntimeFunction = serde_json::from_str(
+            r#"{"file_path":"src/a.ts","function_name":"a","tracking_state":"never_called","never_called_source":"future_source"}"#,
+        )
+        .expect("future provenance values must remain deserializable");
+        assert_eq!(future.never_called_source, CloudNeverCalledSource::Unknown);
     }
 
     #[test]
