@@ -11,8 +11,9 @@ published user documentation. Each fact has one authored source.
 | Maintainer workflows | `fallow/.agents/skills/` | Codex directly, generated Claude adapters |
 | Claude runtime constraints | `fallow/.claude/rules/` | Claude, with durable facts routed to `docs/` |
 | Public CLI, config, MCP, and output contracts | Public Fallow source and generated schemas | Public docs, skills, integrations, private consumers |
+| Released Fallow skill contract | `fallow/npm/fallow/skills/fallow/` | npm package and portable skill packaging |
 | Public user documentation | `fallow-docs` | Documentation site and private site builds |
-| Portable public end-user skills | `fallow-skills` | Agent plugin packages |
+| Portable plugin packaging and additional end-user skills | `fallow-skills` | Agent hosts and plugin marketplaces |
 | Cloud-facing runtime protocol | `fallow-cov-protocol` | Public producers and private consumers |
 | Private architecture, operations, roadmap, and security knowledge | Private repository only | Authorized private workflows |
 
@@ -53,6 +54,8 @@ Public examples must be generic or come from an explicitly public fixture.
 - A private site consumes an exact public docs revision or deterministic
   artifact and records its provenance.
 - Public contract changes originate in the public code or protocol repository.
+- The portable Fallow skill consumes the exact released skill contract, with
+  only declared host compatibility transforms.
 - Private consumers test compatibility with the supported public contract
   versions.
 - Generated adapters and artifacts are reproducible and checked with a

@@ -43,6 +43,7 @@ must remain equivalent and pass the knowledge architecture gate.
 
 ## Public end-user skills
 
-This tree is for developing Fallow itself. Public skills that teach external
-agents how to use a released Fallow version live in the separate public
-`fallow-skills` repository.
+This tree is for developing Fallow itself. The released product skill contract
+under `npm/fallow/skills/fallow/` is consumed by the separate public
+`fallow-skills` repository, which owns portable plugin packaging and additional
+end-user workflows.

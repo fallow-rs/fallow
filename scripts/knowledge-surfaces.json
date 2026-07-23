@@ -175,8 +175,8 @@
     },
     {
       "repository": "fallow-rs/fallow-skills",
-      "role": "portable-public-end-user-skills",
-      "direction": "public-to-consumer"
+      "role": "portable-public-skill-packaging",
+      "direction": "canonical-contract-to-public-consumer"
     },
     {
       "repository": "fallow-rs/fallow-cov-protocol",

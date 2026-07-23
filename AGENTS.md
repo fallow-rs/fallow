@@ -107,7 +107,9 @@ evidence as complete.
 - This repository owns open-source maintainer knowledge and public product
   contracts.
 - `fallow-docs` owns authored public user documentation.
-- `fallow-skills` owns portable public end-user skills.
+- This repository owns the released Fallow skill contract.
+- `fallow-skills` consumes that contract and owns portable plugin packaging
+  plus additional public end-user skills.
 - Private repositories may consume pinned public artifacts and contracts.
 - Never automate copying private prose into this repository or another public
   artifact. Public promotion is a deliberate, reviewed rewrite.
