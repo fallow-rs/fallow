@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "entryPoints": [
+    {
+      "path": "AGENTS.md",
+      "client": "codex",
+      "routes": [
+        "docs/README.md",
+        "docs/development/task-context-map.md",
+        ".agents/skills"
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "client": "claude",
+      "routes": [
+        "docs/README.md",
+        "docs/development/task-context-map.md",
+        ".claude/skills"
+      ]
+    }
+  ],
+  "maintainerDocs": {
+    "index": "docs/README.md",
+    "documents": [
+      {
+        "path": "docs/README.md",
+        "section": "entry-point"
+      },
+      {
+        "path": "docs/development/README.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/knowledge-architecture.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/ai-tooling.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/task-context-map.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/repo-map.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/quality-gates.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/review-routing.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/analyzer-authoring.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/architecture-invariants.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/backwards-compatibility.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/benchmarking.md",
+        "section": "verification"
+      },
+      {
+        "path": "docs/environment-variables.md",
+        "section": "operations"
+      },
+      {
+        "path": "docs/fallow-compliance.md",
+        "section": "operations"
+      },
+      {
+        "path": "docs/fallow-core-migration.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/plugin-authoring.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/public-config-corpus.md",
+        "section": "verification"
+      },
+      {
+        "path": "docs/reference/cli-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/README.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/detection-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/extract-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/lsp-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/mcp-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/plugin-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/vscode-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/security-agent-verification.md",
+        "section": "verification"
+      },
+      {
+        "path": "docs/styling-corpus-smoke.md",
+        "section": "styling"
+      },
+      {
+        "path": "docs/styling-pr-smoke.md",
+        "section": "styling"
+      },
+      {
+        "path": "docs/styling-release-matrix.md",
+        "section": "styling"
+      },
+      {
+        "path": "docs/telemetry.md",
+        "section": "operations"
+      },
+      {
+        "path": "docs/v3-release-notes.md",
+        "section": "release-context"
+      }
+    ],
+    "ignoredWorktreePrefixes": [
+      {
+        "path": "docs/superpowers/",
+        "reason": "Legacy local workflow artifacts are ignored and are not maintainer documentation."
+      }
+    ]
+  },
+  "skills": {
+    "canonicalRoot": ".agents/skills",
+    "adapterRoots": [
+      {
+        "client": "claude",
+        "path": ".claude/skills",
+        "mode": "generated"
+      }
+    ],
+    "generator": "scripts/generate-agent-adapters.mjs",
+    "checkCommand": "npm run check:agent-adapters"
+  },
+  "externalSources": [
+    {
+      "repository": "fallow-rs/docs",
+      "role": "canonical-public-user-documentation",
+      "direction": "public-to-consumer"
+    },
+    {
+      "repository": "fallow-rs/fallow-skills",
+      "role": "portable-public-end-user-skills",
+      "direction": "public-to-consumer"
+    },
+    {
+      "repository": "fallow-rs/fallow-cov-protocol",
+      "role": "public-cloud-facing-runtime-contract",
+      "direction": "public-to-consumer"
+    }
+  ],
+  "trustBoundary": {
+    "automatedPrivateToPublic": false,
+    "publicPromotion": "sanitized-reviewed-rewrite",
+    "forbiddenRoutePrefixes": [
+      ".internal/",
+      "internal/",
+      "decisions/"
+    ],
+    "forbiddenReferencePrefixes": [
+      ".internal/",
+      "decisions/"
+    ]
+  }
+}

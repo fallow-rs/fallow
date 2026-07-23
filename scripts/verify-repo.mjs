@@ -8,6 +8,16 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const FAST_COMMANDS = [
   {
+    label: "Knowledge architecture",
+    command: "npm",
+    args: ["run", "check:knowledge-architecture"],
+  },
+  {
+    label: "Agent adapter drift",
+    command: "npm",
+    args: ["run", "check:agent-adapters"],
+  },
+  {
     label: "Rust formatting",
     command: "cargo",
     args: ["fmt", "--all", "--", "--check"],
@@ -79,6 +89,10 @@ const FULL_ONLY_COMMANDS = [
 ];
 
 export const CI_ONLY_GATES = [
+  {
+    label: "Trigger Tree documentation discoverability",
+    helpPattern: "documentation discoverability",
+  },
   { label: "Miri", helpPattern: "Miri" },
   { label: "MSRV and cross-platform jobs", helpPattern: "cross-platform" },
   {
@@ -127,7 +141,8 @@ export const parseArgs = (args) => {
 export const helpText = () => `Usage: node scripts/verify-repo.mjs [--fast | --full]
 
 Canonical local repository verification:
-  --fast  Formatting, linting, generated contracts, and crate boundaries (default)
+  --fast  Knowledge routing, adapter drift, formatting, linting, generated
+          contracts, and crate boundaries (default)
   --full  Fast checks plus repository script tests, npm wrapper tests, workspace
           tests, benchmark compilation, rustdoc, and the local NAPI build and tests
 

@@ -283,6 +283,7 @@ In this repository:
 - [docs/plugin-authoring.md](docs/plugin-authoring.md): writing an external framework plugin
 - [BENCHMARKS.md](BENCHMARKS.md): benchmark methodology and reference tables
 - [ROADMAP.md](ROADMAP.md): where fallow is headed
+- [SECURITY.md](SECURITY.md): supported versions and vulnerability reporting
 - [CONTEXT.md](CONTEXT.md): domain vocabulary for contributors and agents
 
 ## Contributing and license

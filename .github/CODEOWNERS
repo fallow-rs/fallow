@@ -10,3 +10,10 @@
 /**/AGENTS.md  @bartwaardenburg
 /.codex/    @bartwaardenburg
 /.agents/   @bartwaardenburg
+/docs/  @bartwaardenburg
+/.trigger-tree/  @bartwaardenburg
+/scripts/knowledge-surfaces.json  @bartwaardenburg
+/scripts/check-knowledge-architecture.mjs  @bartwaardenburg
+/scripts/check-knowledge-architecture.test.mjs  @bartwaardenburg
+/scripts/generate-agent-adapters.mjs  @bartwaardenburg
+/scripts/generate-agent-adapters.test.mjs  @bartwaardenburg

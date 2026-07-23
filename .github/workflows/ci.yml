@@ -414,6 +414,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Documentation discoverability
+        uses: Hedde/trigger_tree@78a801629f0b11f403737e0ae9e5c2bfa827a6bb # v1.23.2
+        with:
+          min-score: "100"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
@@ -426,6 +430,10 @@ jobs:
         run: node scripts/check-comment-quality.mjs --all
       - name: Script tests
         run: node --test scripts/*.test.mjs
+      - name: Knowledge architecture
+        run: npm run check:knowledge-architecture
+      - name: Agent adapter drift
+        run: npm run check:agent-adapters
 
   npm-package:
     name: npm Package

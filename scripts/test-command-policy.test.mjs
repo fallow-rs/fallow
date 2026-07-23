@@ -8,20 +8,20 @@ import test from "node:test";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ciWorkflowRelativePath = ".github/workflows/ci.yml";
 const requiredPolicyPaths = [
-  "CLAUDE.md",
   ".claude/hooks/pre-bash-guard.py",
   ".githooks/pre-push",
   ciWorkflowRelativePath,
   "scripts/scaffold-analyzer-plan.mjs",
 ];
+const requiredTrackedPaths = ["CLAUDE.md", ...requiredPolicyPaths];
 const optionalPolicyPaths = [
   ".codex/references/quality-gates.md",
   ".codex/hooks/pre-bash-guard.py",
 ];
 const fullValidationPaths = [
-  "CLAUDE.md",
   ".githooks/pre-push",
   "scripts/scaffold-analyzer-plan.mjs",
+  "docs/development/quality-gates.md",
   ".codex/references/quality-gates.md",
 ];
 
@@ -141,9 +141,16 @@ const assertCiWorkspaceTestCommands = (text) => {
 };
 
 test("tracked command-policy files are present", () => {
-  for (const filePath of requiredPolicyPaths.map((relativePath) => join(repoRoot, relativePath))) {
+  for (const filePath of requiredTrackedPaths.map((relativePath) => join(repoRoot, relativePath))) {
     assert.equal(existsSync(filePath), true, `missing tracked policy file: ${filePath}`);
   }
+});
+
+test("Claude routes command policy through the shared repository contract", () => {
+  const claude = readFileSync(join(repoRoot, "CLAUDE.md"), "utf8");
+
+  assert.match(claude, /@AGENTS\.md/u);
+  assert.match(claude, /@docs\/README\.md/u);
 });
 
 test("pre-commit JavaScript gate covers the root lint and format scopes", () => {
@@ -249,6 +256,6 @@ test("optional Codex policy files may be absent in a clean checkout", (t) => {
   );
   assert.deepEqual(
     validationPaths(root).map((filePath) => relative(root, filePath)),
-    ["CLAUDE.md", ".githooks/pre-push", "scripts/scaffold-analyzer-plan.mjs"],
+    fullValidationPaths.filter((relativePath) => requiredPolicyPaths.includes(relativePath)),
   );
 });
