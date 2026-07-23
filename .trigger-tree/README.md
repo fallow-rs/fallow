@@ -7,26 +7,27 @@ shared project configuration.
 
 ## Pinned source
 
-Both clients use trigger-tree v1.19.1 from tag commit
-`f860090defde3d11a743bf559d304947f1f825af`.
+Both clients use trigger-tree v1.21.0 from tag commit
+`84e478d550de752a9a8eabfa9a6323fa4257543c`.
 
-The locally installed hook manifests on this Mac prefer `python3.13`, the
-newest interpreter supported by v1.19.1. The project status line falls back to
-`python3` and then `python` for other environments.
+Version 1.21.0 supports Python 3.10 through 3.14. The project status line
+prefers `python3.13`, then falls back to `python3` and `python`.
 
 Claude Code declares the tagged marketplace and enabled plugin in
 `.claude/settings.json`.
 
 Codex currently installs plugins for the user rather than one project. Its
 local marketplace lives at
-`~/.codex/local-marketplaces/trigger-tree-v1.19.1-off`. That snapshot differs
-from upstream only to keep installation deterministic, privacy-safe, and
-compatible with this Mac:
+`~/.codex/local-marketplaces/trigger-tree-v1.21.0-off`. That snapshot differs
+from upstream only to keep installation deterministic and privacy-safe:
 
 - Both fallback `TT_LOG_PROMPTS` values are `off`.
 - The marketplace resolves the plugin from the local tagged snapshot instead
   of the floating upstream `main` branch.
-- The hook launcher prefers `python3.13` before the newer system `python3`.
+
+Codex reviews plugin hooks by hash. After installing or updating trigger-tree,
+start Codex interactively and choose `Trust all and continue` for its four
+hooks. Non-interactive sessions skip untrusted hooks without recording events.
 
 Repositories without a project configuration therefore store prompt markers
 only. Fallow overrides that fallback with `TT_LOG_PROMPTS='hash'`. A hash still
@@ -39,11 +40,9 @@ Runtime files such as `history.jsonl`, rotated histories, session state,
 reports, and badges are ignored. They are never required for a clean checkout
 or CI.
 
-The long-lived maintainer checkout contains large ignored scratch trees.
-trigger-tree v1.19.1 caps its filesystem inventory before applying watch
-patterns, so doctor can report an optional low-coverage warning here even when
-the configured tracked paths match. The integration verifies the watch, scan,
-and always-loaded expressions with explicit positive and negative path cases.
+Version 1.21.0 scans the Git-visible documentation set, includes `.agents/`
+and `.codex/`, and records the originating client on new events. Existing
+v1.19.1 events remain valid and appear with client `unknown`.
 
 ## Updating
 
@@ -53,8 +52,7 @@ Before upgrading:
 2. Review the upstream prompt default and privacy policy.
 3. Review both hook manifests for new events or tool access.
 4. Reapply the Codex `off` fallback to a fresh tagged local marketplace.
-5. If the system `python3` remains unsupported, reapply the `python3.13`
-   preference to both locally installed hook manifests.
+5. Review and trust the four updated Codex hooks interactively.
 6. Run one real Codex session and one real Claude Code session in this
    checkout.
 7. Confirm prompt probes remain absent from current and rotated histories.

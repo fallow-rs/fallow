@@ -16,6 +16,9 @@ TT_ALWAYS_LOADED_REGEX='(^|/)(?:CLAUDE|AGENTS|GEMINI)\.md$|(^|/)CLAUDE\.local\.m
 # Example project override additions for other instruction systems:
 # TT_ALWAYS_LOADED_REGEX='...|^\.github/copilot-instructions\.md$|^\.cursor/rules/'
 
+# Markdown that is intentionally human-facing or generated per platform.
+TT_SCOPE_IGNORE='.github/*,CHANGELOG.md,CODE_OF_CONDUCT.md,npm/darwin-*/README.md,npm/linux-*/README.md,npm/win32-*/README.md'
+
 # Comma-separated globs for rare-but-critical documentation that must be reviewed,
 # never treated as an archive candidate. Safety paths are protected regardless.
 TT_CRITICAL_GLOB='AGENTS.md,CLAUDE.md,.claude/rules/workflow.md,.claude/rules/release-workflow.md,.claude/rules/detection.md,.codex/references/quality-gates.md,.codex/references/review-routing.md'
