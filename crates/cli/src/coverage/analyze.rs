@@ -12,8 +12,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
 use crate::coverage::cloud_client::{
-    CloudError, CloudRequest, CloudRuntimeContext, CloudRuntimeFunction, CloudRuntimeProvenance,
-    CloudRuntimeWarning, CloudTrackingState, fetch_runtime_context,
+    CloudError, CloudNeverCalledSource, CloudRequest, CloudRuntimeContext, CloudRuntimeFunction,
+    CloudRuntimeProvenance, CloudRuntimeWarning, CloudTrackingState, fetch_runtime_context,
 };
 use crate::error::emit_error;
 use crate::health::HealthOptions;
@@ -998,15 +998,22 @@ fn cloud_finding_decision(
     Option<u64>,
 ) {
     match function.tracking_state {
-        CloudTrackingState::NeverCalled => (
-            if local.static_used {
-                RuntimeCoverageVerdict::ReviewRequired
-            } else {
-                RuntimeCoverageVerdict::SafeToDelete
-            },
-            RuntimeCoverageConfidence::High,
-            Some(0),
-        ),
+        CloudTrackingState::NeverCalled => match function.never_called_source {
+            CloudNeverCalledSource::RuntimeObserved => (
+                if local.static_used {
+                    RuntimeCoverageVerdict::ReviewRequired
+                } else {
+                    RuntimeCoverageVerdict::SafeToDelete
+                },
+                RuntimeCoverageConfidence::High,
+                Some(0),
+            ),
+            CloudNeverCalledSource::InventoryBackfill | CloudNeverCalledSource::Unknown => (
+                RuntimeCoverageVerdict::ReviewRequired,
+                RuntimeCoverageConfidence::Low,
+                Some(0),
+            ),
+        },
         CloudTrackingState::Untracked => (
             RuntimeCoverageVerdict::CoverageUnavailable,
             RuntimeCoverageConfidence::None,
@@ -1799,7 +1806,9 @@ mod tests {
         let mut unused = used.clone();
         unused.static_used = false;
 
-        let never_called = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(20));
+        let mut never_called =
+            cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(20));
+        never_called.never_called_source = CloudNeverCalledSource::RuntimeObserved;
         assert_eq!(
             cloud_finding_decision(&never_called, &used),
             (
@@ -1813,6 +1822,28 @@ mod tests {
             (
                 RuntimeCoverageVerdict::SafeToDelete,
                 RuntimeCoverageConfidence::High,
+                Some(0)
+            )
+        );
+
+        let mut inventory_backfill = never_called.clone();
+        inventory_backfill.never_called_source = CloudNeverCalledSource::InventoryBackfill;
+        assert_eq!(
+            cloud_finding_decision(&inventory_backfill, &unused),
+            (
+                RuntimeCoverageVerdict::ReviewRequired,
+                RuntimeCoverageConfidence::Low,
+                Some(0)
+            )
+        );
+
+        let mut legacy = never_called.clone();
+        legacy.never_called_source = CloudNeverCalledSource::Unknown;
+        assert_eq!(
+            cloud_finding_decision(&legacy, &unused),
+            (
+                RuntimeCoverageVerdict::ReviewRequired,
+                RuntimeCoverageConfidence::Low,
                 Some(0)
             )
         );
@@ -2225,6 +2256,7 @@ mod tests {
             end_line,
             hit_count: Some(0),
             tracking_state: CloudTrackingState::NeverCalled,
+            never_called_source: CloudNeverCalledSource::Unknown,
             deployments_observed: 1,
             untracked_reason: None,
         }
