@@ -15,8 +15,8 @@ const unique = (values) => [...new Set(values)];
 
 const readJson = (root, path) => JSON.parse(readFileSync(join(root, path), "utf8"));
 
-const gitVisibleFiles = (root) =>
-  execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+const trackedFiles = (root) =>
+  execFileSync("git", ["ls-files", "-z", "--cached"], {
     cwd: root,
     encoding: "utf8",
   })
@@ -73,7 +73,7 @@ const addPathChecks = ({ errors, root, visible, path, kind, rejectSymlink = true
     return;
   }
   if (!visible.has(path)) {
-    errors.push(`${kind} is ignored or not Git-visible: ${path}`);
+    errors.push(`${kind} is not tracked: ${path}`);
   }
   if (rejectSymlink && lstatSync(absolute).isSymbolicLink()) {
     errors.push(`${kind} must not be a symlink: ${path}`);
@@ -97,7 +97,7 @@ const addTrustBoundaryChecks = ({ content, errors, manifest, path }) => {
 
 export const validateKnowledgeArchitecture = ({
   root = ROOT,
-  visibleFiles = gitVisibleFiles(root),
+  visibleFiles = trackedFiles(root),
 } = {}) => {
   const errors = [];
   const visible = new Set(visibleFiles.map(toPosix));
@@ -177,7 +177,7 @@ export const validateKnowledgeArchitecture = ({
     errors.push(`maintainer document is not classified: ${path}`);
   }
   for (const path of phantomDocs) {
-    errors.push(`classified maintainer document is ignored or not Git-visible: ${path}`);
+    errors.push(`classified maintainer document is not tracked: ${path}`);
   }
 
   for (const path of docPaths) {

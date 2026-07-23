@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,6 +78,27 @@ const setup = () => {
 test("accepts indexed durable docs and matching generated adapters", () => {
   const fixture = setup();
   assert.deepEqual(validateKnowledgeArchitecture(fixture), []);
+});
+
+test("does not let an untracked document satisfy the manifest", () => {
+  const fixture = setup();
+  execFileSync("git", ["-C", fixture.root, "init", "--quiet"]);
+  execFileSync("git", ["-C", fixture.root, "add", "."]);
+  const changed = structuredClone(manifest);
+  changed.maintainerDocs.documents.push({
+    path: "docs/untracked.md",
+    section: "development",
+  });
+  write(fixture.root, "scripts/knowledge-surfaces.json", `${JSON.stringify(changed, null, 2)}\n`);
+  write(
+    fixture.root,
+    "docs/README.md",
+    "# Docs\n\n[Guide](development/guide.md)\n\n[Untracked](untracked.md)\n",
+  );
+  write(fixture.root, "docs/untracked.md", "# Untracked\n");
+
+  const errors = validateKnowledgeArchitecture({ root: fixture.root });
+  assert.ok(errors.some((error) => error.includes("not tracked: docs/untracked.md")));
 });
 
 test("reports unclassified docs and missing entry-point routes", () => {
