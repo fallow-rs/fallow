@@ -18,9 +18,9 @@ name = "fallow-multicall"
 path = "src/main.rs"
 
 [dependencies]
-fallow-cli = { version = "3.8.0", path = "../cli" }
-fallow-lsp = { version = "3.8.0", path = "../lsp" }
-fallow-mcp = { version = "3.8.0", path = "../mcp" }
+fallow-cli = { version = "3.8.1", path = "../cli" }
+fallow-lsp = { version = "3.8.1", path = "../lsp" }
+fallow-mcp = { version = "3.8.1", path = "../mcp" }
 
 [lints]
 workspace = true

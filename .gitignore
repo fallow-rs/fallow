@@ -86,6 +86,7 @@ editors/vscode/LICENSE
 !.claude/skills/
 !.claude/rules/
 !.claude/agents/
+!.claude/tt-statusline.py
 
 # Codex
 .codex/
@@ -118,3 +119,8 @@ decisions/
 # Runtime scratch the review app writes (human notes feed, captured framing).
 # App-subtree .gitignore already ignores it; this keeps a root `git add -A` safe.
 .fallow-review/
+
+# trigger-tree keeps telemetry local while sharing its project configuration.
+.trigger-tree/*
+!.trigger-tree/config.sh
+!.trigger-tree/README.md

@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/linux-x64-gnu",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "Fallow CLI binary for Linux x64 (GNU)",
   "license": "MIT",
   "repository": {

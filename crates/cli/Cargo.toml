@@ -56,9 +56,9 @@ fallow-config = { workspace = true }
 fallow-output = { workspace = true }
 fallow-security = { workspace = true }
 fallow-types = { workspace = true }
-fallow-v8-coverage = { version = "3.8.0", path = "../v8-coverage" }
+fallow-v8-coverage = { version = "3.8.1", path = "../v8-coverage" }
 fallow-cov-protocol = "0.8"
-fallow-license = { version = "3.8.0", path = "../license" }
+fallow-license = { version = "3.8.1", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { workspace = true }
 dunce = { workspace = true }

@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/darwin-arm64",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "Fallow CLI binary for macOS ARM64 (Apple Silicon)",
   "license": "MIT",
   "repository": {

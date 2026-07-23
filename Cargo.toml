@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "3.8.0"
+version = "3.8.1"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -14,15 +14,15 @@ keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-api = { version = "3.8.0", path = "crates/api" }
-fallow-core = { version = "3.8.0", path = "crates/core" }
-fallow-config = { version = "3.8.0", path = "crates/config" }
-fallow-extract = { version = "3.8.0", path = "crates/extract" }
-fallow-engine = { version = "3.8.0", path = "crates/engine" }
-fallow-graph = { version = "3.8.0", path = "crates/graph" }
-fallow-output = { version = "3.8.0", path = "crates/output" }
-fallow-security = { version = "3.8.0", path = "crates/security" }
-fallow-types = { version = "3.8.0", path = "crates/types" }
+fallow-api = { version = "3.8.1", path = "crates/api" }
+fallow-core = { version = "3.8.1", path = "crates/core" }
+fallow-config = { version = "3.8.1", path = "crates/config" }
+fallow-extract = { version = "3.8.1", path = "crates/extract" }
+fallow-engine = { version = "3.8.1", path = "crates/engine" }
+fallow-graph = { version = "3.8.1", path = "crates/graph" }
+fallow-output = { version = "3.8.1", path = "crates/output" }
+fallow-security = { version = "3.8.1", path = "crates/security" }
+fallow-types = { version = "3.8.1", path = "crates/types" }
 
 # Parsing & analysis
 oxc_allocator = "0.126"

@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/win32-x64-msvc",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "Fallow CLI binary for Windows x64 (MSVC)",
   "license": "MIT",
   "repository": {
