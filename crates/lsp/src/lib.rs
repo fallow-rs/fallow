@@ -241,10 +241,14 @@ impl LanguageServer for FallowLspServer {
     /// task can settle. NOTE: `tokio::task::spawn_blocking` is not
     /// interruptible; rayon work already running on the blocking thread
     /// pool continues to natural completion and its results are dropped.
+    /// Active type-aware sidecars are terminated before the grace wait so
+    /// semantic analysis does not keep the editor process alive.
     /// The grace is for quiescence, not for cancellation. See issue #477.
     async fn shutdown(&self) -> Result<()> {
         self.cancellation.store(true, Ordering::SeqCst);
+        fallow_api::shutdown_type_aware_sidecars();
         let _ = tokio::time::timeout(Duration::from_millis(250), self.analysis_guard.lock()).await;
+        fallow_api::terminate_active_type_aware_sidecars();
         Ok(())
     }
 
@@ -584,6 +588,7 @@ impl FallowLspServer {
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
         let blocking_root = root.clone();
         let blocking_toplevel = resolved_toplevel.clone();
+        let cancellation = Arc::clone(&self.cancellation);
 
         let join_result = tokio::task::spawn_blocking(move || {
             let input = BlockingAnalysisInput {
@@ -597,6 +602,7 @@ impl FallowLspServer {
                 root: blocking_root,
                 toplevel: blocking_toplevel,
                 changed_since,
+                cancellation,
             };
             run_blocking_analysis(&input)
         })

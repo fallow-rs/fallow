@@ -4,10 +4,10 @@ Optional TypeScript-Go semantic refinement sidecar for Fallow. It accepts one
 versioned JSON request on stdin and writes one JSON response to stdout.
 
 The sidecar is deliberately narrower than a general type-aware linter. Protocol
-v3 accepts a bounded batch of tagged `symbol-use`, `symbol-trace`, `api-surface`,
+v5 accepts a bounded batch of tagged `symbol-use`, `symbol-trace`, `api-surface`,
 `symbol-impact`, and `type-coupling` queries. Each selected TypeScript project
-creates one Program, and every requested capability reuses it. Bulk symbol-use
-queries share one indexed source traversal per Program.
+creates one Program. Symbol use, trace, and impact queries share one indexed
+source traversal per Program.
 
 Symbol identities include the canonical project-relative path, value or type
 namespace, declaration kind, exported and local name, one-based line,
@@ -19,7 +19,10 @@ omissions, reason codes, actions, and truncation reported explicitly.
 Unsafe project state never manufactures certainty. Structural diagnostics,
 unknown identities, missing projects, unsupported syntax, dynamic behavior,
 and capacity limits retain syntactic findings or produce an explicit advisory
-gap. The sidecar does not emit TypeScript compiler diagnostics as Fallow
+gap. Required interfaces, abstract members, and overrides are returned as exact
+contract evidence. Complete negative evidence carries an exact UTF-8 byte span
+and SHA-256 declaration guard, but Fallow owns the final decision and fix
+policy. The sidecar does not emit TypeScript compiler diagnostics as Fallow
 findings and does not implement generic typed lint rules.
 
 Protocol v2 `class-member-uses` requests remain supported for the existing

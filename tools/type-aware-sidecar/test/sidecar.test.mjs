@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { createResponse, createSemanticResponse, parseRequest } from "../src/protocol.mjs";
 import { analyzeSemanticQueries } from "../src/semantic.mjs";
 import { readAll } from "../src/cli.mjs";
-import { canonicalFileIdentity } from "../src/typescript-go.mjs";
+import { canonicalFileIdentity } from "../src/file-identity.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const executable = process.env.FALLOW_TYPE_AWARE_BIN
@@ -31,8 +31,8 @@ test("status reports protocol and backend without a project request", () => {
   const result = spawnSync(executable, ["--status"], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    package_version: "3.8.0",
-    protocol_version: 3,
+    package_version: "3.8.1",
+    protocol_version: 5,
     backend_family: "typescript-go",
     backend_version: "7.0.2",
   });
@@ -53,12 +53,113 @@ const request = (root, candidates) => ({
 });
 
 const semanticRequest = (root, queries, options = {}) => ({
-  protocol_version: 3,
+  protocol_version: 5,
   operation: "semantic-queries",
   root,
   projects: options.projects ?? ["tsconfig.json"],
   evidence_limit: options.evidenceLimit ?? 40,
   queries,
+});
+
+test("unexpected semantic backend failures propagate instead of becoming abstentions", () => {
+  const root = makeProject();
+  const backendError = new Error("injected backend failure");
+  let closed = false;
+  try {
+    const parsed = parseRequest(
+      semanticRequest(root, [
+        {
+          id: 0,
+          operation: "api-surface",
+          entry_points: [],
+          private_leak_candidates: [],
+        },
+      ]),
+    );
+    assert.throws(
+      () =>
+        analyzeSemanticQueries(parsed, {
+          createApi: () => ({
+            updateSnapshot: () => {
+              throw backendError;
+            },
+            close: () => {
+              closed = true;
+            },
+          }),
+        }),
+      backendError,
+    );
+    assert.equal(closed, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 validates request-scoped private leak candidates", () => {
+  const root = makeProject();
+  try {
+    const base = {
+      id: 0,
+      operation: "api-surface",
+      entry_points: [],
+      private_leak_candidates: [
+        {
+          id: 4,
+          path: "src/api.ts",
+          export_name: "run",
+          type_name: "PrivateOptions",
+        },
+      ],
+    };
+    assert.equal(
+      parseRequest(semanticRequest(root, [base])).queries[0].privateLeakCandidates[0].id,
+      4,
+    );
+    assert.throws(
+      () =>
+        parseRequest(
+          semanticRequest(root, [
+            {
+              ...base,
+              private_leak_candidates: [
+                ...base.private_leak_candidates,
+                { ...base.private_leak_candidates[0] },
+              ],
+            },
+          ]),
+        ),
+      /duplicate candidate id 4/,
+    );
+    assert.throws(
+      () =>
+        parseRequest(
+          semanticRequest(root, [
+            {
+              ...base,
+              private_leak_candidates: [
+                { ...base.private_leak_candidates[0], path: path.resolve(root, "src/api.ts") },
+              ],
+            },
+          ]),
+        ),
+      /must be project-relative/,
+    );
+    assert.throws(
+      () =>
+        parseRequest(
+          semanticRequest(root, [
+            {
+              ...base,
+              private_leak_candidates: [{ ...base.private_leak_candidates[0], unexpected: true }],
+            },
+          ]),
+        ),
+      /unknown field unexpected/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const symbolIdentity = ({
@@ -286,7 +387,7 @@ export class StringService extends BaseService<GenericClient<string>> {
     assert.deepEqual(response.selected_tsconfigs, ["tsconfig.json"]);
     assert.equal(response.backend, "typescript-go");
     assert.equal(response.backend_version, "7.0.2");
-    assert.equal(response.sidecar_version, "3.8.0");
+    assert.equal(response.sidecar_version, "3.8.1");
     assert.deepEqual(response.abstentions, []);
     assert.ok(response.projects[0].source_file_count >= 2);
     const { source_file_count: _sourceFileCount, ...projectResult } = response.projects[0];
@@ -931,6 +1032,100 @@ new Service().run();
   }
 });
 
+test("semantic project identity follows the effective extends configuration", () => {
+  const root = makeProject();
+  try {
+    const source = [
+      "export class Service {",
+      "  run(): void {}",
+      "}",
+      "new Service().run();",
+      "",
+    ].join("\n");
+    write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { strict: true } }));
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ extends: "./tsconfig.base.json", include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/service.ts", source);
+    const symbol = symbolIdentity({
+      source,
+      marker: "run",
+      file: "src/service.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "run",
+      owner: "Service",
+    });
+    const body = semanticRequest(root, [{ id: 0, operation: "symbol-use", symbol }]);
+
+    const before = runSidecar(body).projects[0].effective_config_hash;
+    write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { strict: false } }));
+    const after = runSidecar(body).projects[0].effective_config_hash;
+
+    assert.match(before, /^sha256:[0-9a-f]{64}$/u);
+    assert.match(after, /^sha256:[0-9a-f]{64}$/u);
+    assert.notEqual(before, after);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("semantic project identity follows the effective project-reference closure", () => {
+  const root = makeProject();
+  try {
+    const source = "export class Service { run(): void {} }\n";
+    for (const name of ["a", "b"]) {
+      write(
+        root,
+        `packages/${name}/tsconfig.json`,
+        JSON.stringify({ compilerOptions: { composite: true }, include: ["src/**/*.ts"] }),
+      );
+      write(root, `packages/${name}/src/value.ts`, `export const ${name} = "${name}";\n`);
+    }
+    write(
+      root,
+      "packages/app/tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true },
+        include: ["src/**/*.ts"],
+        references: [{ path: "../a" }],
+      }),
+    );
+    write(root, "packages/app/src/service.ts", source);
+    const symbol = symbolIdentity({
+      source,
+      marker: "run",
+      file: "packages/app/src/service.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "run",
+      owner: "Service",
+    });
+    const body = semanticRequest(root, [{ id: 0, operation: "symbol-use", symbol }]);
+    body.projects = ["packages/app/tsconfig.json"];
+
+    const before = runSidecar(body).projects[0].effective_config_hash;
+    write(
+      root,
+      "packages/app/tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true },
+        include: ["src/**/*.ts"],
+        references: [{ path: "../b" }],
+      }),
+    );
+    const after = runSidecar(body).projects[0].effective_config_hash;
+
+    assert.match(before, /^sha256:[0-9a-f]{64}$/u);
+    assert.match(after, /^sha256:[0-9a-f]{64}$/u);
+    assert.notEqual(before, after);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("does not run a full semantic diagnostic pass before exact refinement", () => {
   const root = makeProject();
   try {
@@ -1032,7 +1227,7 @@ new Service().run();
   }
 });
 
-test("protocol v3 batches exact export and type-use queries through one Program", () => {
+test("protocol v5 batches exact export and type-use queries through one Program", () => {
   const root = makeProject();
   try {
     const apiSource = [
@@ -1081,7 +1276,7 @@ test("protocol v3 batches exact export and type-use queries through one Program"
       ]),
     );
 
-    assert.equal(response.protocol_version, 3);
+    assert.equal(response.protocol_version, 5);
     assert.equal(response.operation, "semantic-queries");
     assert.equal(response.projects.length, 1);
     assert.equal(response.projects[0].program_reused, true);
@@ -1115,7 +1310,7 @@ test("protocol v3 batches exact export and type-use queries through one Program"
   }
 });
 
-test("protocol v3 does not treat paired accessors as uses of each other", () => {
+test("protocol v5 does not treat paired accessors as uses of each other", () => {
   const root = makeProject();
   try {
     const source = `export class Accessor {
@@ -1152,12 +1347,13 @@ test("protocol v3 does not treat paired accessors as uses of each other", () => 
       response.results.map(({ assertion }) => assertion),
       ["no-confirmed-use", "no-confirmed-use"],
     );
+    assert.ok(response.results.every(({ reason_code }) => reason_code === "accessor-pair"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("protocol v3 maps public API leaks and project-local public-signature coupling", () => {
+test("protocol v5 maps public API leaks and project-local public-signature coupling", () => {
   const root = makeProject();
   try {
     write(
@@ -1178,17 +1374,30 @@ test("protocol v3 maps public API leaks and project-local public-signature coupl
     );
     write(root, "src/index.ts", 'export type { PublicResult } from "./api";\n');
 
-    const response = runSidecar(
-      semanticRequest(root, [
-        { id: 10, operation: "api-surface", entry_points: ["src/index.ts"] },
-        {
-          id: 11,
-          operation: "type-coupling",
-          entry_points: ["src/index.ts"],
-          include_cycles: true,
-        },
-      ]),
-    );
+    const apiRequest = semanticRequest(root, [
+      {
+        id: 10,
+        operation: "api-surface",
+        entry_points: ["src/index.ts"],
+        private_leak_candidates: [
+          {
+            id: 7,
+            path: "src/api.ts",
+            export_name: "PublicResult",
+            type_name: "Hidden",
+          },
+        ],
+      },
+      {
+        id: 11,
+        operation: "type-coupling",
+        entry_points: ["src/index.ts"],
+        include_cycles: true,
+      },
+    ]);
+    const response = runSidecar(apiRequest);
+    const directAnalysis = analyzeSemanticQueries(parseRequest(apiRequest));
+    assert.equal(directAnalysis.sourceScanCount, 0);
 
     const api = response.results[0];
     assert.equal(api.assertion, "leak-confirmed");
@@ -1200,6 +1409,11 @@ test("protocol v3 maps public API leaks and project-local public-signature coupl
           leak.private_declaration.local_name === "Hidden",
       ),
     );
+    assert.deepEqual(api.data.private_leak_confirmation, {
+      requested_candidate_count: 1,
+      confirmation_complete: true,
+      confirmed_candidate_ids: [7],
+    });
     assert.match(api.data.entries[0].signature_fingerprint, /^sha256:[0-9a-f]{64}$/u);
     assert.ok(
       api.data.entries[0].referenced_types.some(
@@ -1230,7 +1444,439 @@ test("protocol v3 maps public API leaks and project-local public-signature coupl
   }
 });
 
-test("protocol v3 discovers public entry points from a nested package project", () => {
+test("protocol v5 resolves checker-inferred public return types", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/model.ts", "export class Hidden { token = 'secret' }\n");
+    write(
+      root,
+      "src/index.ts",
+      'import { Hidden } from "./model";\nexport const create = () => new Hidden();\n',
+    );
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        {
+          id: 12,
+          operation: "api-surface",
+          entry_points: ["src/index.ts"],
+          private_leak_candidates: [],
+        },
+      ]),
+    );
+    const api = response.results[0];
+    assert.equal(api.status, "complete");
+    assert.ok(
+      api.data.entries
+        .find((entry) => entry.exposed.exported_name === "create")
+        .referenced_types.some((reference) => reference.declaration.local_name === "Hidden"),
+    );
+    assert.ok(
+      api.data.leaks.some(
+        (leak) =>
+          leak.exposed_symbol.exported_name === "create" &&
+          leak.private_declaration.local_name === "Hidden",
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 reports public-signature cycles spanning three files", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/a.ts", 'import type { B } from "./b";\nexport interface A { b: B }\n');
+    write(root, "src/b.ts", 'import type { C } from "./c";\nexport interface B { c: C }\n');
+    write(root, "src/c.ts", 'import type { A } from "./a";\nexport interface C { a: A }\n');
+    write(
+      root,
+      "src/index.ts",
+      [
+        'export type { A } from "./a";',
+        'export type { B } from "./b";',
+        'export type { C } from "./c";',
+        "",
+      ].join("\n"),
+    );
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        {
+          id: 13,
+          operation: "type-coupling",
+          entry_points: ["src/index.ts"],
+          include_cycles: true,
+        },
+      ]),
+    );
+    const coupling = response.results[0];
+    assert.equal(coupling.status, "complete");
+    assert.deepEqual(coupling.data.cycles, [["src/a.ts", "src/b.ts", "src/c.ts", "src/a.ts"]]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 confirms a requested private leak beyond bounded evidence", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    const declarations = Array.from({ length: 45 }, (_, index) => {
+      const suffix = String(index).padStart(2, "0");
+      return [
+        `interface Hidden${suffix} { value: string }`,
+        `export interface Public${suffix} { hidden: Hidden${suffix} }`,
+      ].join("\n");
+    }).join("\n");
+    write(root, "src/index.ts", `${declarations}\n`);
+
+    const response = runSidecar(
+      semanticRequest(
+        root,
+        [
+          {
+            id: 20,
+            operation: "api-surface",
+            entry_points: ["src/index.ts"],
+            private_leak_candidates: [
+              {
+                id: 900,
+                path: "src/index.ts",
+                export_name: "Public44",
+                type_name: "Hidden44",
+              },
+            ],
+          },
+        ],
+        { evidenceLimit: 1 },
+      ),
+    );
+    const api = response.results[0];
+    assert.equal(api.data.total_leak_count, 45);
+    assert.equal(api.data.leaks.length, 1);
+    assert.deepEqual(api.data.private_leak_confirmation, {
+      requested_candidate_count: 1,
+      confirmation_complete: true,
+      confirmed_candidate_ids: [900],
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 reports every missing requested entry point", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/index.ts", "export interface PublicResult { value: string }\n");
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        {
+          id: 12,
+          operation: "api-surface",
+          entry_points: ["src/index.ts", "src/missing.ts"],
+          private_leak_candidates: [
+            {
+              id: 0,
+              path: "src/index.ts",
+              export_name: "PublicResult",
+              type_name: "Missing",
+            },
+          ],
+        },
+        {
+          id: 13,
+          operation: "type-coupling",
+          entry_points: ["src/index.ts", "src/missing.ts"],
+          include_cycles: false,
+        },
+      ]),
+    );
+
+    for (const result of response.results) {
+      assert.equal(result.status, "partial");
+      assert.equal(result.reason_code, "unknown-entry-point");
+      assert.deepEqual(result.omissions, [{ reason_code: "unknown-entry-point", count: 1 }]);
+    }
+    assert.equal(response.results[0].data.private_leak_confirmation.confirmation_complete, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 ignores parameter and generic names in public signatures", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "package.json", JSON.stringify({ exports: { ".": "./src/index.ts" } }));
+    write(
+      root,
+      "src/model.ts",
+      "export interface CustomTester { test(value: unknown): boolean }\n",
+    );
+    write(
+      root,
+      "src/api.ts",
+      [
+        'import type { CustomTester } from "./model";',
+        "export type PublicMatchers = {",
+        "  match<T>(actual: T, expected: T): boolean;",
+        "  customTesters: readonly CustomTester[];",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    write(root, "src/index.ts", 'export type { PublicMatchers } from "./api";\n');
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        {
+          id: 14,
+          operation: "api-surface",
+          entry_points: ["src/index.ts"],
+          private_leak_candidates: [
+            {
+              id: 3,
+              path: "src/api.ts",
+              export_name: "PublicMatchers",
+              type_name: "CustomTester",
+            },
+          ],
+        },
+        {
+          id: 15,
+          operation: "type-coupling",
+          entry_points: ["src/index.ts"],
+          include_cycles: true,
+        },
+      ]),
+    );
+
+    const api = response.results[0];
+    assert.deepEqual(
+      api.data.leaks.map((leak) => leak.private_declaration.local_name),
+      ["CustomTester"],
+    );
+    assert.deepEqual(api.data.private_leak_confirmation, {
+      requested_candidate_count: 1,
+      confirmation_complete: true,
+      confirmed_candidate_ids: [3],
+    });
+    assert.deepEqual(
+      api.data.entries[0].referenced_types.map((reference) => reference.declaration.local_name),
+      ["CustomTester"],
+    );
+    const coupling = response.results[1];
+    assert.equal(coupling.data.edge_count, 1);
+    assert.deepEqual(
+      coupling.data.edges.map((edge) => edge.target.local_name),
+      ["CustomTester"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 deduplicates API data from overlapping projects", () => {
+  const root = makeProject();
+  try {
+    const config = JSON.stringify({
+      compilerOptions: { strict: true },
+      include: ["src/**/*.ts"],
+    });
+    write(root, "tsconfig.build.json", config);
+    write(root, "tsconfig.test.json", config);
+    write(root, "package.json", JSON.stringify({ exports: { ".": "./src/index.ts" } }));
+    write(root, "src/model.ts", "interface Hidden { token: string }\nexport { Hidden };\n");
+    write(
+      root,
+      "src/index.ts",
+      [
+        'import type { Hidden } from "./model";',
+        "export interface PublicResult { hidden: Hidden }",
+        "",
+      ].join("\n"),
+    );
+
+    const response = runSidecar(
+      semanticRequest(
+        root,
+        [{ id: 16, operation: "api-surface", entry_points: ["src/index.ts"] }],
+        { projects: ["tsconfig.build.json", "tsconfig.test.json"] },
+      ),
+    );
+
+    const api = response.results[0];
+    assert.equal(api.data.total_export_count, 1);
+    assert.equal(api.data.total_entry_count, 1);
+    assert.equal(api.data.total_public_signature_edge_count, 1);
+    assert.equal(api.data.total_leak_count, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 reports symbol-use outcomes per selected project", () => {
+  const root = makeProject();
+  try {
+    const usedSource = "export const used = 1;\n";
+    const unusedSource = "export const unused = 2;\n";
+    write(
+      root,
+      "packages/used/tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(
+      root,
+      "packages/unused/tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "packages/used/src/value.ts", usedSource);
+    write(
+      root,
+      "packages/used/src/consumer.ts",
+      'import { used } from "./value";\nexport const result = used;\n',
+    );
+    write(root, "packages/unused/src/value.ts", unusedSource);
+    const response = runSidecar(
+      semanticRequest(
+        root,
+        [
+          {
+            id: 17,
+            operation: "symbol-use",
+            symbol: symbolIdentity({
+              source: usedSource,
+              marker: "used",
+              file: "packages/used/src/value.ts",
+              namespace: "value",
+              declarationKind: "export",
+              exportedName: "used",
+            }),
+          },
+          {
+            id: 18,
+            operation: "symbol-use",
+            symbol: symbolIdentity({
+              source: unusedSource,
+              marker: "unused",
+              file: "packages/unused/src/value.ts",
+              namespace: "value",
+              declarationKind: "export",
+              exportedName: "unused",
+            }),
+          },
+        ],
+        {
+          projects: ["packages/used/tsconfig.json", "packages/unused/tsconfig.json"],
+        },
+      ),
+    );
+
+    assert.deepEqual(
+      response.projects.map(
+        ({
+          config,
+          candidate_count,
+          confirmed_used_count,
+          no_static_references_count,
+          unresolved_count,
+          abstained_count,
+        }) => ({
+          config,
+          candidate_count,
+          confirmed_used_count,
+          no_static_references_count,
+          unresolved_count,
+          abstained_count,
+        }),
+      ),
+      [
+        {
+          config: "packages/unused/tsconfig.json",
+          candidate_count: 1,
+          confirmed_used_count: 0,
+          no_static_references_count: 1,
+          unresolved_count: 0,
+          abstained_count: 0,
+        },
+        {
+          config: "packages/used/tsconfig.json",
+          candidate_count: 1,
+          confirmed_used_count: 1,
+          no_static_references_count: 0,
+          unresolved_count: 0,
+          abstained_count: 0,
+        },
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 marks a project unavailable when an assigned symbol cannot be resolved", () => {
+  const root = makeProject();
+  try {
+    const source = "export const value = 1;\n";
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/value.ts", source);
+    const response = runSidecar(
+      semanticRequest(root, [
+        {
+          id: 19,
+          operation: "symbol-use",
+          symbol: symbolIdentity({
+            source,
+            marker: "value",
+            file: "src/value.ts",
+            namespace: "value",
+            declarationKind: "export",
+            exportedName: "missing",
+          }),
+        },
+      ]),
+    );
+
+    assert.equal(response.results[0].reason_code, "unknown-symbol");
+    assert.equal(response.projects[0].status, "unavailable");
+    assert.equal(response.projects[0].reason_code, "unknown-symbol");
+    assert.equal(response.projects[0].candidate_count, 1);
+    assert.equal(response.projects[0].abstained_count, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 discovers public entry points from a nested package project", () => {
   const root = makeProject();
   try {
     write(
@@ -1283,7 +1929,7 @@ test("protocol v3 discovers public entry points from a nested package project", 
   }
 });
 
-test("protocol v3 finds semantic consumers and tests across selected projects", () => {
+test("protocol v5 finds semantic consumers and tests across selected projects", () => {
   const root = makeProject();
   try {
     const source = "export const execute = (): string => 'ok';\n";
@@ -1317,17 +1963,19 @@ test("protocol v3 finds semantic consumers and tests across selected projects", 
       exportedName: "execute",
       localName: "execute",
     });
-    const response = runSidecar(
-      semanticRequest(
-        root,
-        [
-          { id: 5, operation: "symbol-use", symbol },
-          { id: 6, operation: "symbol-trace", symbol },
-          { id: 7, operation: "symbol-impact", symbol },
-        ],
-        { projects: ["packages/lib/tsconfig.json", "packages/app/tsconfig.json"] },
-      ),
+    const crossProjectRequest = semanticRequest(
+      root,
+      [
+        { id: 5, operation: "symbol-use", symbol },
+        { id: 6, operation: "symbol-trace", symbol },
+        { id: 7, operation: "symbol-impact", symbol },
+      ],
+      { projects: ["packages/lib/tsconfig.json", "packages/app/tsconfig.json"] },
     );
+    const response = runSidecar(crossProjectRequest);
+    const directAnalysis = analyzeSemanticQueries(parseRequest(crossProjectRequest));
+    assert.equal(directAnalysis.referenceScanCount, 0);
+    assert.equal(directAnalysis.sourceScanCount, 3);
     assert.equal(response.results[0].assertion, "confirmed-used");
     assert.ok(
       response.results[1].evidence.some((entry) => entry.path === "packages/app/src/consumer.ts"),
@@ -1346,7 +1994,7 @@ test("protocol v3 finds semantic consumers and tests across selected projects", 
   }
 });
 
-test("protocol v3 reports exact-symbol impact and shortest targeted-test provenance", () => {
+test("protocol v5 reports exact-symbol impact and shortest targeted-test provenance", () => {
   const root = makeProject();
   try {
     const librarySource = "export const run = (value: string): string => value;\n";
@@ -1392,7 +2040,7 @@ test("protocol v3 reports exact-symbol impact and shortest targeted-test provena
   }
 });
 
-test("protocol v3 includes a direct test consumer in targeted tests", () => {
+test("protocol v5 includes a direct test consumer in targeted tests", () => {
   const root = makeProject();
   try {
     const librarySource = "export const run = (value: string): string => value;\n";
@@ -1431,7 +2079,7 @@ test("protocol v3 includes a direct test consumer in targeted tests", () => {
   }
 });
 
-test("protocol v3 bounds evidence and exposes omissions, reasons, and actions", () => {
+test("protocol v5 bounds evidence and exposes omissions, reasons, and actions", () => {
   const root = makeProject();
   try {
     const source = "export const used = 1;\n";
@@ -1474,7 +2122,7 @@ test("protocol v3 bounds evidence and exposes omissions, reasons, and actions", 
   }
 });
 
-test("protocol v3 keeps merged value and type namespaces distinct", () => {
+test("protocol v5 keeps merged value and type namespaces distinct", () => {
   const root = makeProject();
   try {
     const source = [
@@ -1544,7 +2192,247 @@ test("protocol v3 keeps merged value and type namespaces distinct", () => {
   }
 });
 
-test("protocol v3 fails closed for an unknown exact symbol identity", () => {
+test("protocol v5 confirms complete closed-world absence of static class-member references", () => {
+  const root = makeProject();
+  try {
+    const source = [
+      "class Worker {",
+      "  execute(): void {}",
+      "}",
+      "export const worker = new Worker();",
+      "",
+    ].join("\n");
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/worker.ts", source);
+    const symbol = symbolIdentity({
+      source,
+      marker: "execute",
+      file: "src/worker.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "execute",
+      owner: "Worker",
+    });
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 42, operation: "symbol-use", symbol }]),
+    );
+    const result = response.results[0];
+    assert.equal(result.assertion, "confirmed-no-static-references");
+    assert.equal(result.status, "complete");
+    assert.equal(result.data.closed_world_eligible, true);
+    assert.deepEqual(result.data.owning_projects, ["tsconfig.json"]);
+    assert.deepEqual(result.data.contract_relations, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 preserves required interface, abstract, and inherited contracts", () => {
+  const cases = [
+    {
+      relation: "interface-implementation",
+      source: [
+        "interface Runnable { execute(): void }",
+        "class Worker implements Runnable {",
+        "  execute(): void {}",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+    },
+    {
+      relation: "abstract-implementation",
+      source: [
+        "abstract class Runnable { abstract execute(): void }",
+        "class Worker extends Runnable {",
+        "  execute(): void {}",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+    },
+    {
+      relation: "override",
+      source: [
+        "class Runnable { execute(): void {} }",
+        "class Worker extends Runnable {",
+        "  override execute(): void {}",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+    },
+    {
+      relation: "override",
+      source: [
+        "abstract class Runnable { execute(): void {} }",
+        "class Worker extends Runnable {",
+        "  override execute(): void {}",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+    },
+  ];
+
+  for (const expected of cases) {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({
+          compilerOptions: { strict: true, noImplicitOverride: true },
+          include: ["src/**/*.ts"],
+        }),
+      );
+      write(root, "src/worker.ts", expected.source);
+      const symbol = symbolIdentity({
+        source: expected.source,
+        marker: "execute",
+        occurrence: 2,
+        file: "src/worker.ts",
+        namespace: "value",
+        declarationKind: "class_method",
+        exportedName: "execute",
+        owner: "Worker",
+      });
+      Object.assign(symbol, utf8Position(expected.source, "execute", 2));
+
+      const response = runSidecar(
+        semanticRequest(root, [{ id: 43, operation: "symbol-use", symbol }]),
+      );
+      const result = response.results[0];
+      assert.equal(result.assertion, "contract-preserved");
+      assert.equal(result.data.closed_world_eligible, false);
+      assert.equal(result.data.contract_relations[0].relation, expected.relation);
+      assert.equal(result.data.contract_relations[0].declaration.local_name, "execute");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("protocol v5 abstains for optional contracts, decorators, and dynamic member access", () => {
+  const cases = [
+    {
+      reason: "optional-contract",
+      source: [
+        "interface Runnable { execute?(): void }",
+        "class Worker implements Runnable {",
+        "  execute(): void {}",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+      markerOccurrence: 2,
+    },
+    {
+      reason: "decorated-declaration",
+      source: [
+        "declare const Register: MethodDecorator;",
+        "class Worker {",
+        "  @Register",
+        "  execute(): void {}",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+      markerOccurrence: 1,
+      experimentalDecorators: true,
+    },
+    {
+      reason: "dynamic-member-access",
+      source: [
+        "class Worker {",
+        "  execute(): void {}",
+        "}",
+        "const worker = new Worker();",
+        'const key: keyof Worker = Math.random() ? "execute" : "execute";',
+        "worker[key]();",
+        "export { worker };",
+        "",
+      ].join("\n"),
+      markerOccurrence: 1,
+    },
+    {
+      reason: "abstract-declaration",
+      source: ["export abstract class Worker {", "  abstract execute(): void;", "}", ""].join("\n"),
+      markerOccurrence: 1,
+    },
+    {
+      reason: "overload-set",
+      source: [
+        "class Worker {",
+        "  execute(value: string): void;",
+        "  execute(value: number): void;",
+        "  execute(value: string | number): void { console.log(value); }",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+      markerOccurrence: 1,
+    },
+    {
+      reason: "attached-comment",
+      source: [
+        "class Worker {",
+        "  /** Registered by the host application. */",
+        "  execute(): void {}",
+        "}",
+        "export const worker = new Worker();",
+        "",
+      ].join("\n"),
+      markerOccurrence: 1,
+    },
+  ];
+
+  for (const expected of cases) {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            experimentalDecorators: expected.experimentalDecorators ?? false,
+          },
+          include: ["src/**/*.ts"],
+        }),
+      );
+      write(root, "src/worker.ts", expected.source);
+      const symbol = symbolIdentity({
+        source: expected.source,
+        marker: "execute",
+        file: "src/worker.ts",
+        namespace: "value",
+        declarationKind: "class_method",
+        exportedName: "execute",
+        owner: "Worker",
+      });
+      Object.assign(symbol, utf8Position(expected.source, "execute", expected.markerOccurrence));
+
+      const response = runSidecar(
+        semanticRequest(root, [{ id: 44, operation: "symbol-use", symbol }]),
+      );
+      const result = response.results[0];
+      assert.equal(result.assertion, "no-confirmed-use");
+      assert.equal(result.status, "partial");
+      assert.equal(result.reason_code, expected.reason);
+      assert.equal(result.data.closed_world_eligible, false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("protocol v5 fails closed for an unknown exact symbol identity", () => {
   const root = makeProject();
   try {
     const source = "export const known = 1;\n";
@@ -1584,7 +2472,7 @@ test("protocol v3 fails closed for an unknown exact symbol identity", () => {
   }
 });
 
-test("protocol v3 resolves a generic export identity through an alias", () => {
+test("protocol v5 resolves a generic export identity through an alias", () => {
   const root = makeProject();
   try {
     const source = "const original = 1;\nexport { original as publicName };\n";
@@ -1613,15 +2501,138 @@ test("protocol v3 resolves a generic export identity through an alias", () => {
     );
     const result = response.results[0];
     assert.equal(result.assertion, "confirmed-used");
-    assert.equal(result.data.symbol.declaration_kind, "variable");
+    assert.equal(result.data.symbol.declaration_kind, "export");
     assert.equal(result.data.symbol.exported_name, "publicName");
-    assert.equal(result.data.symbol.local_name, "original");
+    assert.equal(result.data.symbol.local_name, "publicName");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("protocol v3 resolves a named default export to its actual declaration", () => {
+test("protocol v5 does not count same-module references as export use", () => {
+  const root = makeProject();
+  try {
+    const source = [
+      "export const locallyUsed = 1;",
+      "export const localResult = locallyUsed + 1;",
+      "",
+    ].join("\n");
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/value.ts", source);
+    const identity = symbolIdentity({
+      source,
+      marker: "locallyUsed",
+      file: "src/value.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "locallyUsed",
+      localName: "locallyUsed",
+    });
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 61, operation: "symbol-use", symbol: identity }]),
+    );
+
+    assert.equal(response.results[0].assertion, "confirmed-no-static-references");
+    assert.equal(response.results[0].total_evidence_count, 0);
+    assert.equal(response.projects[0].no_static_references_count, 1);
+    assert.equal(response.projects[0].fix_eligible_count, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 keeps an unused barrel alias distinct from its used source export", () => {
+  const root = makeProject();
+  try {
+    const barrelSource = 'export { shared } from "./source";\n';
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/source.ts", "export const shared = 1;\n");
+    write(root, "src/barrel.ts", barrelSource);
+    write(
+      root,
+      "src/consumer.ts",
+      'import { shared } from "./source";\nexport const result = shared;\n',
+    );
+    const identity = symbolIdentity({
+      source: barrelSource,
+      marker: "shared",
+      file: "src/barrel.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "shared",
+      localName: "shared",
+    });
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 62, operation: "symbol-use", symbol: identity }]),
+    );
+
+    assert.equal(response.results[0].assertion, "confirmed-no-static-references");
+    assert.equal(response.results[0].total_evidence_count, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v5 counts namespace property and element access through the exact source module", () => {
+  for (const access of ["source.shared", 'source["shared"]']) {
+    const root = makeProject();
+    try {
+      const source = "export const shared = 1;\n";
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+      );
+      write(root, "src/source.ts", source);
+      write(
+        root,
+        "src/consumer.ts",
+        `import * as source from "./source";\nexport const result = ${access};\n`,
+      );
+      const identity = symbolIdentity({
+        source,
+        marker: "shared",
+        file: "src/source.ts",
+        namespace: "value",
+        declarationKind: "export",
+        exportedName: "shared",
+        localName: "shared",
+      });
+
+      const response = runSidecar(
+        semanticRequest(root, [
+          { id: 63, operation: "symbol-use", symbol: identity },
+          { id: 64, operation: "symbol-trace", symbol: identity },
+          { id: 65, operation: "symbol-impact", symbol: identity },
+        ]),
+      );
+
+      assert.equal(response.results[0].assertion, "confirmed-used");
+      assert.equal(response.results[0].total_evidence_count, 1);
+      assert.equal(response.results[0].evidence[0].path, "src/consumer.ts");
+      assert.equal(response.results[1].assertion, "references-found");
+      assert.ok(response.results[1].evidence.some((entry) => entry.path === "src/consumer.ts"));
+      assert.equal(response.results[2].assertion, "consumers-found");
+      assert.deepEqual(response.results[2].data.direct_consumers, [
+        { path: "src/consumer.ts", namespace: "value" },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("protocol v5 tracks a named default export by its module export identity", () => {
   const root = makeProject();
   try {
     const source = "export default function execute(): string { return 'ok'; }\n";
@@ -1645,14 +2656,14 @@ test("protocol v3 resolves a named default export to its actual declaration", ()
       semanticRequest(root, [{ id: 70, operation: "symbol-use", symbol: identity }]),
     );
     assert.equal(response.results[0].assertion, "confirmed-used");
-    assert.equal(response.results[0].data.symbol.declaration_kind, "function");
+    assert.equal(response.results[0].data.symbol.declaration_kind, "export");
     assert.equal(response.results[0].data.symbol.exported_name, "default");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("protocol v3 preserves bulk symbol-use capacity and separately bounds graph queries", () => {
+test("protocol v5 preserves bulk symbol-use capacity and separately bounds graph queries", () => {
   const baseSymbol = {
     path: "src/value.ts",
     namespace: "value",
@@ -1812,7 +2823,7 @@ test("returns provenance for an empty candidate request", () => {
   const response = runSidecar(request(sidecarRoot, []));
 
   assert.equal(response.protocol_version, 2);
-  assert.equal(response.sidecar_version, "3.8.0");
+  assert.equal(response.sidecar_version, "3.8.1");
   assert.equal(response.backend, "typescript-go");
   assert.deepEqual(response.selected_tsconfigs, []);
   assert.deepEqual(response.confirmed_used_candidate_ids, []);

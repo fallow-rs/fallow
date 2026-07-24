@@ -26,6 +26,7 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
+        "--explain".to_string(),
     ];
     push_global(
         &mut args,
@@ -104,6 +105,7 @@ mod tests {
 
         let args = build_inspect_args(&params).unwrap();
 
+        assert!(args.contains(&"--explain".to_string()));
         assert!(args.contains(&"--no-production".to_string()));
         assert!(args.windows(2).any(|pair| pair == ["--workspace", "pkg-a"]));
         assert!(!args.contains(&"--production".to_string()));

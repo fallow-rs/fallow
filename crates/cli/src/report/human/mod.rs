@@ -376,20 +376,41 @@ pub(super) fn push_section_footer_with_count(
     title: &str,
     item_count: usize,
 ) {
-    push_section_footer_impl(lines, title, item_count, false);
+    push_section_footer_impl(lines, title, item_count, false, None);
+}
+
+pub(super) fn push_section_footer_with_fixability(
+    lines: &mut Vec<String>,
+    title: &str,
+    item_count: usize,
+    has_auto_fixable_action: bool,
+) {
+    push_section_footer_impl(
+        lines,
+        title,
+        item_count,
+        false,
+        Some(has_auto_fixable_action),
+    );
 }
 
 /// Push section footer for directory-rollup sections (suggests ignorePatterns config).
 pub(super) fn push_section_footer_rollup(lines: &mut Vec<String>, title: &str, item_count: usize) {
-    push_section_footer_impl(lines, title, item_count, true);
+    push_section_footer_impl(lines, title, item_count, true, None);
 }
 
-fn push_section_footer_impl(lines: &mut Vec<String>, title: &str, item_count: usize, rollup: bool) {
+fn push_section_footer_impl(
+    lines: &mut Vec<String>,
+    title: &str,
+    item_count: usize,
+    rollup: bool,
+    auto_fixable_override: Option<bool>,
+) {
     if let Some((desc, url)) = section_footer_text(title) {
         lines.push(format!("  {}", format!("{desc} \u{2014} {url}").dimmed()));
     }
     if item_count >= 3 {
-        if is_auto_fixable(title) {
+        if auto_fixable_override.unwrap_or_else(|| is_auto_fixable(title)) {
             lines.push(format!(
                 "  {}",
                 "To auto-fix: fallow fix --dry-run".dimmed()
@@ -786,6 +807,27 @@ mod tests {
                 "{title:?} hint {hint_line:?}: file-level form does not match is_file_level_only",
             );
         }
+    }
+
+    #[test]
+    fn finding_fixability_overrides_category_level_auto_fix_hint() {
+        let mut disabled = Vec::new();
+        push_section_footer_with_fixability(&mut disabled, "Unused exports", 3, false);
+        let disabled = disabled
+            .iter()
+            .map(|line| strip_ansi(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!disabled.contains("To auto-fix"));
+
+        let mut enabled = Vec::new();
+        push_section_footer_with_fixability(&mut enabled, "Unused class members", 3, true);
+        let enabled = enabled
+            .iter()
+            .map(|line| strip_ansi(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(enabled.contains("To auto-fix: fallow fix --dry-run"));
     }
 
     /// Regression for the eight sections issue #1828 verified broken: the six with

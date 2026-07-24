@@ -839,7 +839,11 @@ use crate::MemberKind;
 /// multi-hop generic substitution, and semantic facts retain exact enclosing
 /// class provenance for `this`-rooted typed member and whole-object access.
 /// Warm 239 caches lack both forms of extraction data; invalidate them.
-pub(super) const CACHE_VERSION: u32 = 240;
+///
+/// Bumped to 241: ECMAScript `#private` methods and properties are no longer
+/// extracted as reportable class members. Warm 240 caches can retain those
+/// members and reproduce the old false positives.
+pub(super) const CACHE_VERSION: u32 = 241;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

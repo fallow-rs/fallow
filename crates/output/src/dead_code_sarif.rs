@@ -1053,7 +1053,7 @@ pub fn build_dead_code_sarif(
     rule_builder: &dyn Fn(&str, &str, &str) -> serde_json::Value,
 ) -> serde_json::Value {
     let mut sarif_results = Vec::new();
-    let mut snippets = SourceSnippetCache::default();
+    let mut snippets = SourceSnippetCache::with_root(root);
     let ctx = SarifCtx {
         results,
         root,

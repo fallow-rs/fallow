@@ -43,6 +43,7 @@ pub(super) fn handle_type_aware_trace_output(
     graph: &RetainedModuleGraph,
     trace_opts: &TraceOptions,
     config: &ResolvedConfig,
+    explain: bool,
     json_style: crate::json_style::JsonStyle,
 ) -> Option<ExitCode> {
     if !config.type_aware.enabled {
@@ -77,17 +78,12 @@ pub(super) fn handle_type_aware_trace_output(
                     config.output,
                 ));
             };
-            match crate::semantic_queries::trace_symbol(
-                &config.root,
-                &projects,
-                symbol,
-                config.type_aware.require,
-            ) {
+            match fallow_api::trace_type_aware_symbol(&config.root, &projects, symbol) {
                 Ok(semantic) => {
                     let exit =
                         semantic_completeness_exit(config.type_aware.require, semantic.status);
                     trace.semantic = Some(semantic);
-                    report::print_export_trace(&trace, config.output, json_style);
+                    report::print_semantic_export_trace(&trace, config.output, explain, json_style);
                     return Some(exit);
                 }
                 Err(error) => {
@@ -114,17 +110,17 @@ pub(super) fn handle_type_aware_trace_output(
                     config.output,
                 ));
             };
-            match crate::semantic_queries::trace_symbol(
-                &config.root,
-                &projects,
-                symbol,
-                config.type_aware.require,
-            ) {
+            match fallow_api::trace_type_aware_symbol(&config.root, &projects, symbol) {
                 Ok(semantic) => {
                     let exit =
                         semantic_completeness_exit(config.type_aware.require, semantic.status);
                     trace.semantic = Some(semantic);
-                    report::print_class_member_trace(&trace, config.output, json_style);
+                    report::print_semantic_class_member_trace(
+                        &trace,
+                        config.output,
+                        explain,
+                        json_style,
+                    );
                     return Some(exit);
                 }
                 Err(error) => {
@@ -162,15 +158,10 @@ pub(super) fn handle_type_aware_trace_output(
             config.output,
         ));
     };
-    match crate::semantic_queries::symbol_impact(
-        &config.root,
-        &projects,
-        symbol,
-        config.type_aware.require,
-    ) {
+    match fallow_api::type_aware_symbol_impact(&config.root, &projects, symbol) {
         Ok(impact) => {
             let exit = semantic_completeness_exit(config.type_aware.require, impact.status);
-            report::print_symbol_impact(&impact, config.output, json_style);
+            report::print_symbol_impact(&impact, config.output, explain, json_style);
             Some(exit)
         }
         Err(error) => Some(emit_error(

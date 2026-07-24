@@ -18,7 +18,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files now fail closed with per-candidate abstention instead of invalid project
   metadata. The release corpus enforces pinned clean sources, repeated
   deterministic output, independent source review, and accuracy, resource, and
-  abstention limits.
+  abstention limits. Corpus evidence is now produced by the exact hashed
+  sidecar artifact recorded during discovery instead of importing workspace
+  implementation modules.
+
+### Fixed
+
+- **Type-aware API and project metadata now reflect checker-backed facts.**
+  Public API analysis no longer treats parameter names or generic type
+  parameters as private types, complete semantic API results remove unmatched
+  syntactic leak guesses, and overlapping TypeScript projects no longer
+  duplicate API entries or coupling edges. Per-project candidate, confirmed,
+  unresolved, and abstained counts are populated instead of remaining zero,
+  including in the programmatic API. Unavailable API queries retain syntactic
+  leak findings, and a missing entry point keeps mixed-entry results partial.
+  Corpus artifacts now record and verify the approved ancestor dependency
+  environment, including its lockfile and installed type-declaration tree,
+  rather than claiming that fixtures resolve with no dependencies. The
+  semantic protocol is now version 4: private leak confirmation is
+  request-scoped and bounded, incomplete entry-point coverage retains
+  syntactic candidates, and unexpected checker failures surface as errors
+  instead of being mislabeled as unsupported syntax. Requests above the
+  private-leak candidate cap retain the unrequested tail and report partial
+  capacity instead of failing or pruning it. The Rust semantic client
+  and reconciliation logic now have one owner in `fallow-api`; CLI, editor,
+  runtime, and programmatic paths share it. Cross-platform child-process
+  lifecycle behavior is shared through `fallow-process`.
 
 ## [3.8.1] - 2026-07-23
 

@@ -27,6 +27,18 @@ pub enum SemanticCapability {
     TypeCoupling,
 }
 
+/// Effective policy applied when semantic evidence is incomplete.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticCompletenessRequirement {
+    /// Keep incomplete semantic evidence advisory.
+    #[default]
+    BestEffort,
+    /// Make incomplete semantic evidence fail the command.
+    Complete,
+}
+
 /// Whether the semantic backend answered every requested query safely.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -71,6 +83,13 @@ pub struct SemanticAnalysisIdentity {
     pub completeness: SemanticCompleteness,
 }
 
+/// Project-config identity used only when no semantic query was needed.
+///
+/// A clean run has no checker evidence whose compatibility depends on a
+/// concrete TypeScript project. Stored comparisons therefore treat this value
+/// as deferred until a later run has an actual semantic candidate.
+pub const DEFERRED_PROJECT_CONFIG_HASH: &str = "deferred:no-semantic-queries";
+
 impl Default for SemanticAnalysisIdentity {
     fn default() -> Self {
         Self {
@@ -107,7 +126,9 @@ impl SemanticAnalysisIdentity {
         if self.capabilities != other.capabilities {
             fields.push("capabilities");
         }
-        if self.project_config_hash != other.project_config_hash {
+        let project_hash_deferred = self.project_config_hash == DEFERRED_PROJECT_CONFIG_HASH
+            || other.project_config_hash == DEFERRED_PROJECT_CONFIG_HASH;
+        if !project_hash_deferred && self.project_config_hash != other.project_config_hash {
             fields.push("project_config_hash");
         }
         if self.backend_family != other.backend_family {
@@ -176,6 +197,8 @@ pub struct SemanticSourceLocation {
 pub enum SemanticGapReason {
     /// No selected TypeScript project owns the target.
     NoProject,
+    /// More than one owning project produced incompatible declaration evidence.
+    AmbiguousProject,
     /// Structural diagnostics make the selected project unsafe to query.
     BlockingDiagnostics,
     /// The exact declaration could not be resolved.
@@ -186,6 +209,22 @@ pub enum SemanticGapReason {
     EvidenceLimit,
     /// Dynamic runtime behavior is outside checker-visible semantics.
     DynamicBehavior,
+    /// A computed or reflective member access can address the declaration.
+    DynamicMemberAccess,
+    /// A decorator can consume the declaration outside normal references.
+    DecoratedDeclaration,
+    /// An optional interface or inherited contract makes deletion unsafe.
+    OptionalContract,
+    /// A getter or setter has a paired accessor that must be changed atomically.
+    AccessorPair,
+    /// The declaration participates in a method overload set.
+    OverloadSet,
+    /// Source comments are attached to the declaration and must be reviewed.
+    AttachedComment,
+    /// The candidate itself declares an abstract contract.
+    AbstractDeclaration,
+    /// Not every project that owns the declaration completed the query.
+    IncompleteProjectCoverage,
     /// A configured request or response capacity was reached.
     Capacity,
     /// The requested syntax or declaration kind is unsupported.
@@ -200,6 +239,104 @@ pub struct SemanticOmission {
     pub reason_code: SemanticGapReason,
     /// Number of omitted items or relations.
     pub count: usize,
+}
+
+/// Conservative outcome for one existing Fallow dead-code candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticCandidateDecisionKind {
+    /// The checker resolved at least one exact static reference.
+    ConfirmedUsed,
+    /// Removing the declaration would change inherited behavior or an implemented contract.
+    ContractPreserved,
+    /// Complete closed-world analysis found no checker-resolved references.
+    ConfirmedNoStaticReferences,
+    /// Analysis deliberately declined a closed-world assertion.
+    RetainedAbstained,
+    /// The exact declaration or owning project could not be resolved.
+    RetainedUnresolved,
+}
+
+/// How a class member participates in an inherited or implemented relation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticContractRelation {
+    /// A required member declared by an implemented interface.
+    InterfaceImplementation,
+    /// An abstract base member implemented by the candidate.
+    AbstractImplementation,
+    /// A concrete inherited member overridden by the candidate.
+    Override,
+    /// An optional inherited or interface member that still blocks auto-fix.
+    OptionalContract,
+}
+
+/// Exact declaration evidence for an inherited or implemented class-member relation.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SemanticContractEvidence {
+    /// Contract relation that makes deletion unsafe.
+    pub relation: SemanticContractRelation,
+    /// Exact interface or base-class declaration.
+    pub declaration: SemanticSymbol,
+    /// Whether the source contract marks this member optional.
+    pub optional: bool,
+}
+
+/// Exact source span and content hash used to guard semantic source edits.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SemanticEditGuard {
+    /// Zero-based UTF-8 byte offset where the declaration starts.
+    pub start: usize,
+    /// Exclusive zero-based UTF-8 byte offset where the declaration ends.
+    pub end: usize,
+    /// Lowercase SHA-256 digest of the exact declaration text.
+    pub declaration_sha256: String,
+}
+
+/// Bounded, inspectable decision record for one semantic dead-code candidate.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SemanticCandidateDecision {
+    /// Query identifier used to correlate low-level query metadata.
+    pub query_id: usize,
+    /// Exact candidate declaration.
+    pub subject: SemanticSymbol,
+    /// Conservative Fallow-owned decision.
+    pub decision: SemanticCandidateDecisionKind,
+    /// Completeness of the supporting semantic evidence.
+    pub status: SemanticCompleteness,
+    /// Every selected TypeScript project that owns the declaration.
+    pub owning_projects: Vec<String>,
+    /// Bounded checker-resolved reference or uncertainty evidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<SemanticReference>,
+    /// Inherited contract evidence, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<SemanticContractEvidence>,
+    /// Whether this exact decision may enable a guarded class-member fix.
+    pub closed_world_eligible: bool,
+    /// Exact declaration guard required before a source edit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_guard: Option<SemanticEditGuard>,
+    /// Primary reason when the candidate remains unresolved or abstained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<SemanticGapReason>,
+    /// Concise explanation suitable for dry-run and agent output.
+    pub explanation: String,
+    /// Plain next actions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<String>,
+    /// Evidence count before bounding.
+    pub total_evidence_count: usize,
+    /// Whether evidence was truncated.
+    pub truncated: bool,
+    /// Counted omissions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub omissions: Vec<SemanticOmission>,
 }
 
 /// Compact per-query status embedded in run metadata.
@@ -546,6 +683,15 @@ mod tests {
                 "backend_family",
                 "completeness",
             ]
+        );
+
+        let mut deferred = type_aware.clone();
+        deferred.project_config_hash = DEFERRED_PROJECT_CONFIG_HASH.to_string();
+        assert!(
+            deferred
+                .incompatible_fields(&type_aware)
+                .iter()
+                .all(|field| *field != "project_config_hash")
         );
     }
 }

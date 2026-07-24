@@ -5,7 +5,7 @@ or TypeScript. `--type-aware` opts into a bounded TypeScript-Go semantic pass
 after Fallow's normal project analysis. It provides five project-wide
 capabilities:
 
-- exact symbol-use confirmation for existing dead-code candidates
+- exact symbol-use and class-contract decisions for existing dead-code candidates
 - symbol traces with namespaces, aliases, and re-export hops
 - package API surfaces and cross-file private type leaks
 - exact-symbol impact paths and targeted-test suggestions
@@ -45,10 +45,11 @@ Keep Oxlint responsible for local lint rules, including unused ECMAScript
 members when the relevant compiler checks are enabled.
 
 Fallow owns the project-wide questions those tools do not answer: why an exact
-symbol is reachable, how a public export crosses package boundaries, which
-tests are affected, and where public signatures create coupling. The companion
-returns only semantic evidence, completeness, omissions, and stable reason
-codes. It never forwards a compiler diagnostic as a Fallow issue.
+symbol is reachable, whether a class member is required by an interface or base
+class, how a public export crosses package boundaries, which tests are
+affected, and where public signatures create coupling. The companion returns
+only semantic evidence, completeness, omissions, and stable reason codes. It
+never forwards a compiler diagnostic as a Fallow issue.
 
 ## Five semantic capabilities
 
@@ -86,17 +87,44 @@ score:
 fallow health --type-aware --type-coupling --format json --quiet
 ```
 
+Preview and apply class-member cleanup only when Fallow has complete
+closed-world evidence and an exact declaration guard:
+
+```bash
+fallow fix --type-aware --dry-run --format json --quiet
+fallow fix --type-aware --yes --format json --quiet
+```
+
 ## Fail-closed behavior
 
-Every candidate has one of three outcomes:
+Every candidate has one of five outcomes:
 
-- `confirmed used`: exact semantic evidence was found, so Fallow removes it
-- `unresolved`: a diagnostic-free project was scanned, but no exact use was found
-- `abstained`: project selection or compiler state was unsafe, so Fallow keeps it
+- `confirmed-used`: exact static references were found, so Fallow removes the
+  syntactic finding
+- `contract-preserved`: an interface or abstract member requires the
+  declaration, or an override changes inherited behavior, so Fallow removes
+  the syntactic finding
+- `confirmed-no-static-references`: every owning project was checked and no
+  static references were found, so Fallow keeps the finding
+- `retained-unresolved`: the exact declaration or owning project could not be
+  resolved, so Fallow keeps the finding
+- `retained-abstained`: dynamic behavior, unsafe syntax, incomplete coverage,
+  or another known gap prevents a closed-world decision, so Fallow keeps the
+  finding
+
+`confirmed-no-static-references` is intentionally not called “proven unused”.
+Reflection, framework registration, external consumers, and runtime behavior
+can still exist beyond the checker-visible world. Only class-member findings
+with complete evidence from every owning project, no contract or dynamic gap,
+and a matching declaration hash become `auto_fixable: true`. `fallow fix`
+reruns the same semantic analysis and verifies the declaration hash immediately
+before editing.
 
 The current safety policy abstains for every candidate in a TypeScript project
-when configuration, program, syntax, or bind diagnostics make its
-structure unsafe. Ordinary semantic diagnostics do not invalidate an exact
+when configuration, program, syntax, or bind diagnostics make its structure
+unsafe. It also abstains per candidate for decorators, dynamic computed member
+access, optional contracts, accessor pairs, overload sets, abstract
+declarations, or attached comments. Ordinary semantic diagnostics do not invalidate an exact
 declaration match, so Fallow does not request a separate full semantic
 diagnostic pass before scanning. It also avoids TypeScript's project-wide
 global diagnostic pass, which eagerly checks the whole program without adding
@@ -123,12 +151,23 @@ complete process group is terminated on timeout.
 
 ## Output and integration contract
 
+The current semantic wire protocol is version 5. Private-type-leak
+reconciliation sends only Fallow's bounded candidate set and receives stable
+candidate IDs. A complete response may remove an unmatched syntactic candidate.
+If project selection or an entry point is incomplete, the response is partial
+and Fallow retains every unconfirmed candidate. The sidecar never turns an
+unexpected backend or programming failure into an `unsupported-syntax`
+abstention.
+
 Protocol version, sidecar version, backend version, selected configs,
-per-project status, outcome counts, abstention reasons, warnings, total elapsed
-time, and project setup, diagnostics, and symbol-scan timings are recorded under
-`_meta.type_aware` in JSON output. The command's top-level `elapsed_ms` includes
-the semantic pass. Human, compact, markdown, JSON, grouped JSON, and SARIF
-preserve the semantic analysis identity or a bounded provenance summary.
+per-project status, per-candidate decisions, contract evidence, outcome counts,
+guarded-fix eligibility, abstention reasons, warnings, total elapsed time, and
+project setup, diagnostics, and symbol-scan timings are recorded under
+`_meta.type_aware` in JSON output. Each selected project constructs one Program.
+Symbol use, trace, and impact queries share one batched source traversal per
+Program. The command's top-level `elapsed_ms` includes the semantic pass. Human,
+compact, markdown, JSON, grouped JSON, and SARIF preserve the semantic analysis
+identity or a bounded provenance summary.
 
 Combined analysis, audit, MCP, LSP, VS Code, the Rust API, and Node bindings use
 the same exact-version protocol. The VS Code package bundles the companion and
@@ -136,9 +175,10 @@ its TypeScript runtime. CI integrations install the matching optional package.
 Baseline and regression comparisons include semantic mode identity so a
 syntactic run is never silently compared with a type-aware run.
 
-When no semantic query is needed, the companion is not started and
-`_meta.type_aware` is omitted because no semantic pass was computed. Explicit
-project paths are still validated. `--type-aware-require complete` turns an
+When no semantic query is needed, the companion is not started.
+`_meta.type_aware.executed` is `false`, companion provenance is omitted, and the
+deferred analysis identity avoids inventing a concrete TypeScript project hash.
+`--type-aware-require complete` turns an
 incomplete semantic result into an analysis error after the conservative result
 has been produced; the default `best-effort` policy keeps it advisory.
 
@@ -149,11 +189,26 @@ copied into `suggested_feature_buckets` only as review prompts. A reviewer must
 record the buckets that genuinely apply to each candidate in
 `adjudicated_feature_buckets`; suggestions never contribute to the GO gate.
 
-The corpus uses clean worktrees at exact public refs and does not reuse fixture
-`node_modules`. Discovery records the manifest, release binary, full sidecar
-runtime, TypeScript installation, platform, and fixture commits. Partial runs
-must use a separate output directory, so they cannot overwrite canonical
-publication artifacts.
+The corpus uses clean worktrees at exact public refs and does not create or
+reuse fixture-local `node_modules`. TypeScript dependency resolution is pinned
+to the Fallow workspace ancestor, recorded with hashes of its `package-lock.json`
+and installed package manifests and type declarations. Any other ancestor
+dependency root is rejected. Published dependency paths explicitly use the
+Fallow workspace root as their base. Discovery records the
+manifest, release binary, full sidecar runtime, TypeScript installation,
+platform, fixture commits, and dependency provenance. Partial runs must use a
+separate output directory, so they cannot overwrite canonical publication
+artifacts.
+
+The evidence phase executes the exact `--sidecar-bin` artifact recorded during
+discovery. It does not import semantic implementation modules from the current
+workspace. The ledger records the sidecar hash, protocol version, and digests of
+the complete request and normalized response sets. Raw bounded stdout and
+stderr are retained under the local corpus artifact directory for auditability.
+Ledger verification recomputes both digests from the pinned requests and stored
+raw responses. A hash mismatch, malformed or oversized response, missing query
+result, duplicate query identity, invalid source location, timeout, or non-zero
+sidecar exit fails the evidence phase.
 
 ```bash
 npm run type-aware:corpus -- prepare
@@ -163,12 +218,15 @@ npm run type-aware:corpus -- discover \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 npm run type-aware:corpus -- measure \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
-npm run type-aware:corpus -- evidence
+npm run type-aware:corpus -- evidence \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 npm run type-aware:corpus -- adjudicate
 npm run type-aware:corpus -- verify-ledger
-npm run type-aware:corpus -- summarize \
-  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 npm run type-aware:corpus -- supplemental \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
+npm run type-aware:corpus -- capabilities \
+  --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
+npm run type-aware:corpus -- summarize \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 npm run type-aware:corpus -- verify-publication \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
@@ -178,12 +236,20 @@ Use `--project` only with a non-canonical `--out-dir` for iteration. The
 publication gate requires the complete manifest, repeated normalized output,
 complete paired measurements, source-current evidence, checked-in review
 decisions, independent signoff, and explicit accuracy, abstention, runtime, and
-memory thresholds. The publication verifier rejects drift in the tracked
-evidence, summary, and supplemental smoke. The supplemental command
-materializes the exact pinned Vitest commit without dependencies, reruns it
-twice, and binds its canonical candidate sets to the independently reviewed
-set. Publication verification repeats that clean supplemental run instead of
-trusting stored hashes.
+memory thresholds. Generate the runtime-bound supplemental and capability
+artifacts before the summary. The publication verifier rejects drift in the
+tracked evidence, summary, supplemental smoke, and capability proof. The
+supplemental command
+materializes the exact pinned Vitest commit without a fixture-local dependency
+install, records the approved workspace dependency root and lockfile hash,
+reruns it twice, and binds its canonical candidate sets to the independently
+reviewed set. Publication verification repeats that clean supplemental run
+instead of trusting stored hashes.
+
+The gate reports safe confirmation yield and independently adjudicated truth
+coverage. It does not claim corpus-wide recall: retained candidates without
+independent truth remain `indeterminate` and are excluded from adjudicated
+accuracy metrics.
 
 Feature-bucket value requires two separate candidates that are both manually
 classified as used and correctly confirmed by semantic refinement. The two

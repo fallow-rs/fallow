@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
-use fallow_config::TypeAwareRequire;
 use fallow_types::envelope::{
     TypeAwareAbstentionCounts, TypeAwareMeta, TypeAwarePhaseTimings, TypeAwareProjectMeta,
     TypeAwareProjectSource, TypeAwareProjectStatus,
@@ -12,22 +11,27 @@ use fallow_types::extract::MemberKind;
 use fallow_types::output_dead_code::PrivateTypeLeakFinding;
 use fallow_types::results::{AnalysisResults, PrivateTypeLeak};
 use fallow_types::semantic::{
-    ApiSurfaceEntry, ApiSurfaceResult, PublicTypeReference, SemanticAliasHop,
-    SemanticAnalysisIdentity, SemanticAnalysisMode, SemanticCapability, SemanticCompleteness,
-    SemanticGapReason, SemanticImpactPath, SemanticNamespace, SemanticOmission,
-    SemanticPrivateTypeLeak, SemanticQuerySummary, SemanticReference, SemanticSourceLocation,
-    SemanticSymbol, SemanticSymbolImpact, SemanticSymbolTrace, TypeCouplingCycle, TypeCouplingEdge,
-    TypeCouplingFile, TypeCouplingReport, TypeCouplingSummary,
+    ApiSurfaceEntry, ApiSurfaceResult, DEFERRED_PROJECT_CONFIG_HASH, PublicTypeReference,
+    SemanticAliasHop, SemanticAnalysisIdentity, SemanticAnalysisMode, SemanticCandidateDecision,
+    SemanticCandidateDecisionKind, SemanticCapability, SemanticCompleteness,
+    SemanticContractEvidence, SemanticEditGuard, SemanticGapReason, SemanticImpactPath,
+    SemanticNamespace, SemanticOmission, SemanticPrivateTypeLeak, SemanticQuerySummary,
+    SemanticReference, SemanticSourceLocation, SemanticSymbol, SemanticSymbolImpact,
+    SemanticSymbolTrace, TypeCouplingCycle, TypeCouplingEdge, TypeCouplingFile, TypeCouplingReport,
+    TypeCouplingSummary,
 };
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::type_aware::{TypeAwareError, TypeAwareOutcome};
+use super::transport::{TYPE_AWARE_PROTOCOL_VERSION, TypeAwareError, TypeAwareOutcome};
 
-const PROTOCOL_VERSION: u32 = 3;
+const PROTOCOL_VERSION: u32 = TYPE_AWARE_PROTOCOL_VERSION;
 const OPERATION: &str = "semantic-queries";
 const EVIDENCE_LIMIT: usize = 40;
-const SEMANTIC_SCHEMA_VERSION: u32 = 1;
+const MAX_SEMANTIC_QUERIES: usize = 25_000;
+const MAX_PRIVATE_LEAK_CANDIDATES: usize = 25_000;
+const SEMANTIC_SCHEMA_VERSION: u32 = 2;
 const BACKEND_FAMILY: &str = "typescript-go";
 const BACKEND_VERSION: &str = "7.0.2";
 
@@ -61,6 +65,7 @@ enum SemanticQuery {
         id: usize,
         entry_points: Vec<String>,
         include_cycles: bool,
+        private_leak_candidates: Vec<PrivateLeakCandidate>,
     },
     TypeCoupling {
         id: usize,
@@ -133,8 +138,16 @@ struct SemanticResponse {
 #[serde(deny_unknown_fields)]
 struct SemanticProjectResponse {
     config: String,
+    effective_config_hash: String,
     source: TypeAwareProjectSource,
     status: TypeAwareProjectStatus,
+    candidate_count: usize,
+    confirmed_used_count: usize,
+    contract_preserved_count: usize,
+    no_static_references_count: usize,
+    fix_eligible_count: usize,
+    unresolved_count: usize,
+    abstained_count: usize,
     reason_code: Option<SemanticGapReason>,
     blocking_diagnostic_count: usize,
     source_file_count: usize,
@@ -173,6 +186,7 @@ struct ApiSurfaceData {
     entries: Vec<ApiSurfaceEntryData>,
     total_entry_count: usize,
     leaks: Vec<ApiLeakData>,
+    private_leak_confirmation: PrivateLeakConfirmation,
     total_leak_count: usize,
     public_signature_edges: Vec<serde_json::Value>,
     total_public_signature_edge_count: usize,
@@ -204,6 +218,22 @@ struct ApiLeakData {
     evidence: EvidenceLocation,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+struct PrivateLeakCandidate {
+    id: usize,
+    path: String,
+    export_name: String,
+    type_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrivateLeakConfirmation {
+    requested_candidate_count: usize,
+    confirmation_complete: bool,
+    confirmed_candidate_ids: Vec<usize>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EvidenceLocation {
@@ -222,6 +252,18 @@ struct SemanticReferenceData {
     namespace: Option<SemanticNamespace>,
     #[serde(default)]
     via: Vec<SemanticAliasHop>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SymbolUseData {
+    symbol: SemanticSymbol,
+    selected_project: String,
+    owning_projects: Vec<String>,
+    total_reference_count: usize,
+    contract_relations: Vec<SemanticContractEvidence>,
+    closed_world_eligible: bool,
+    edit_guard: SemanticEditGuard,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,8 +354,37 @@ enum QueryTarget {
     ClassMember(usize),
     UnusedExport(usize),
     UnusedType(usize),
-    ApiSurface,
+    ApiSurface { unrequested_candidate_count: usize },
     TypeCoupling,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct LocalCapacity {
+    unrequested_symbol_count: usize,
+}
+
+struct DeadCodeQueryBatch {
+    queries: Vec<SemanticQuery>,
+    targets: BTreeMap<usize, QueryTarget>,
+    capacity: LocalCapacity,
+}
+
+#[derive(Clone, Copy)]
+struct DeadCodeReconciliation<'a> {
+    request: &'a SemanticRequest,
+    targets: &'a BTreeMap<usize, QueryTarget>,
+    capacity: LocalCapacity,
+}
+
+#[derive(Debug, Default)]
+struct CandidateDecisionStats {
+    confirmed_used: usize,
+    contract_preserved: usize,
+    no_static_references: usize,
+    fix_eligible: usize,
+    unresolved: usize,
+    abstained: usize,
+    abstention_reasons: TypeAwareAbstentionCounts,
 }
 
 /// Result of applying a semantic batch to dead-code findings.
@@ -334,8 +405,24 @@ pub struct SemanticCouplingOutcome {
 /// This preserves the conservative completeness state and keeps every query
 /// visible to report, audit, SARIF, MCP, and editor consumers.
 pub fn merge_type_aware_meta(base: &mut TypeAwareMeta, overlay: TypeAwareMeta) {
+    if overlay.executed {
+        base.executed = true;
+        base.protocol_version = overlay.protocol_version;
+        base.sidecar_version.clone_from(&overlay.sidecar_version);
+        base.backend.clone_from(&overlay.backend);
+        base.backend_version.clone_from(&overlay.backend_version);
+    }
     base.queries.extend(overlay.queries);
     base.queries.sort_by_key(|query| query.query_id);
+    base.candidate_decisions.extend(overlay.candidate_decisions);
+    base.candidate_decisions.sort_by(|left, right| {
+        left.subject
+            .path
+            .cmp(&right.subject.path)
+            .then(left.subject.line.cmp(&right.subject.line))
+            .then(left.subject.col.cmp(&right.subject.col))
+            .then(left.query_id.cmp(&right.query_id))
+    });
     base.symbol_traces.extend(overlay.symbol_traces);
     base.symbol_impacts.extend(overlay.symbol_impacts);
     if overlay.api_surface.is_some() {
@@ -351,6 +438,13 @@ pub fn merge_type_aware_meta(base: &mut TypeAwareMeta, overlay: TypeAwareMeta) {
     }
     base.selected_tsconfigs.sort();
     base.warning_count += overlay.warning_count;
+    base.candidate_count += overlay.candidate_count;
+    base.confirmed_used_count += overlay.confirmed_used_count;
+    base.contract_preserved_count += overlay.contract_preserved_count;
+    base.no_static_references_count += overlay.no_static_references_count;
+    base.fix_eligible_count += overlay.fix_eligible_count;
+    base.unresolved_count += overlay.unresolved_count;
+    base.abstained_count += overlay.abstained_count;
     base.warnings.extend(overlay.warnings);
     base.elapsed_ms += overlay.elapsed_ms;
     base.phase_timings_ms.project_setup += overlay.phase_timings_ms.project_setup;
@@ -370,6 +464,12 @@ fn merge_semantic_identity(
         *base = Some(overlay);
         return;
     };
+    if base.project_config_hash == DEFERRED_PROJECT_CONFIG_HASH
+        && overlay.project_config_hash != DEFERRED_PROJECT_CONFIG_HASH
+    {
+        base.project_config_hash
+            .clone_from(&overlay.project_config_hash);
+    }
     for capability in overlay.capabilities {
         if !base.capabilities.contains(&capability) {
             base.capabilities.push(capability);
@@ -397,7 +497,7 @@ const fn semantic_completeness_rank(completeness: SemanticCompleteness) -> u8 {
     clippy::too_many_arguments,
     reason = "semantic refinement keeps requested capability families explicit"
 )]
-pub fn refine_dead_code(
+pub fn refine_dead_code_results(
     root: &Path,
     results: &mut AnalysisResults,
     projects: &[PathBuf],
@@ -405,7 +505,6 @@ pub fn refine_dead_code(
     include_symbol_use: bool,
     include_private_type_leaks: bool,
     include_type_coupling: bool,
-    _require: TypeAwareRequire,
 ) -> Result<Option<SemanticDeadCodeOutcome>, TypeAwareError> {
     let canonical_root = root.canonicalize().map_err(|error| {
         TypeAwareError::from(format!(
@@ -413,10 +512,15 @@ pub fn refine_dead_code(
             root.display()
         ))
     })?;
-    let (queries, targets) = build_dead_code_queries(
+    let DeadCodeQueryBatch {
+        queries,
+        targets,
+        capacity,
+    } = build_dead_code_queries(
         &canonical_root,
         results,
         entry_points,
+        include_symbol_use,
         include_private_type_leaks,
         include_type_coupling,
     )?;
@@ -432,11 +536,7 @@ pub fn refine_dead_code(
         return Ok(None);
     }
     if queries.is_empty() {
-        return Ok(Some(empty_semantic_outcome(
-            &canonical_root,
-            projects,
-            requested_capabilities,
-        )));
+        return Ok(Some(empty_semantic_outcome(requested_capabilities)));
     }
     let request = SemanticRequest {
         protocol_version: PROTOCOL_VERSION,
@@ -450,30 +550,30 @@ pub fn refine_dead_code(
         queries,
     };
     let response: SemanticResponse =
-        crate::type_aware::run_semantic_request(&canonical_root, &request)?;
+        super::transport::run_semantic_request(&canonical_root, &request)?;
     validate_response(&request, &response)?;
     apply_dead_code_response(
         &canonical_root,
         results,
-        &request,
-        &targets,
+        DeadCodeReconciliation {
+            request: &request,
+            targets: &targets,
+            capacity,
+        },
         response,
         requested_capabilities,
     )
     .map(Some)
 }
 
-fn empty_semantic_outcome(
-    root: &Path,
-    projects: &[PathBuf],
-    capabilities: Vec<SemanticCapability>,
-) -> SemanticDeadCodeOutcome {
-    let configured_projects = identity_project_configs(root, projects);
+fn empty_semantic_outcome(mut capabilities: Vec<SemanticCapability>) -> SemanticDeadCodeOutcome {
+    capabilities.sort_unstable();
+    capabilities.dedup();
     let identity = SemanticAnalysisIdentity {
         mode: SemanticAnalysisMode::TypeAware,
         semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
         capabilities,
-        project_config_hash: project_config_hash(root, &configured_projects),
+        project_config_hash: DEFERRED_PROJECT_CONFIG_HASH.to_string(),
         backend_family: BACKEND_FAMILY.to_string(),
         completeness: SemanticCompleteness::Complete,
     };
@@ -481,11 +581,11 @@ fn empty_semantic_outcome(
         type_aware: TypeAwareOutcome {
             meta: TypeAwareMeta {
                 identity: Some(identity),
+                executed: false,
                 protocol_version: PROTOCOL_VERSION,
-                sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
+                sidecar_version: None,
                 backend: BACKEND_FAMILY.to_string(),
-                backend_version: BACKEND_VERSION.to_string(),
-                selected_tsconfigs: Vec::new(),
+                backend_version: None,
                 ..TypeAwareMeta::default()
             },
             warnings: Vec::new(),
@@ -499,7 +599,6 @@ pub fn trace_symbol(
     root: &Path,
     projects: &[PathBuf],
     symbol: SemanticSymbol,
-    require: TypeAwareRequire,
 ) -> Result<SemanticSymbolTrace, TypeAwareError> {
     let (request, response) = run_single_query(
         root,
@@ -512,7 +611,6 @@ pub fn trace_symbol(
     let result = response.results.first().ok_or_else(|| {
         TypeAwareError::from("type-aware trace response omitted its query result".to_string())
     })?;
-    enforce_requirement(require, result)?;
     decode_symbol_trace(&response, &request, result, symbol)
 }
 
@@ -592,7 +690,6 @@ pub fn symbol_impact(
     root: &Path,
     projects: &[PathBuf],
     symbol: SemanticSymbol,
-    require: TypeAwareRequire,
 ) -> Result<SemanticSymbolImpact, TypeAwareError> {
     let (request, response) = run_single_query(
         root,
@@ -605,7 +702,6 @@ pub fn symbol_impact(
     let result = response.results.first().ok_or_else(|| {
         TypeAwareError::from("type-aware impact response omitted its query result".to_string())
     })?;
-    enforce_requirement(require, result)?;
     decode_symbol_impact(&response, &request, result, symbol)
 }
 
@@ -725,6 +821,7 @@ pub fn inspect_symbol(
                     .map(|path| path.to_string_lossy().replace('\\', "/"))
                     .collect(),
                 include_cycles: false,
+                private_leak_candidates: Vec::new(),
             },
             SemanticQuery::SymbolImpact {
                 id: 2,
@@ -733,7 +830,7 @@ pub fn inspect_symbol(
         ],
     };
     let response: SemanticResponse =
-        crate::type_aware::run_semantic_request(&canonical_root, &request)?;
+        super::transport::run_semantic_request(&canonical_root, &request)?;
     validate_response(&request, &response)?;
     let trace_result = response
         .results
@@ -753,7 +850,14 @@ pub fn inspect_symbol(
             TypeAwareError::from("semantic inspect omitted symbol impact".to_string())
         })?;
     let trace = decode_symbol_trace(&response, &request, trace_result, symbol.clone())?;
-    let api_surface = decode_api_surface(api_result)?;
+    let api_query = request
+        .queries
+        .iter()
+        .find(|query| query.id() == api_result.query_id)
+        .ok_or_else(|| {
+            TypeAwareError::from("semantic inspect omitted its API surface query".to_string())
+        })?;
+    let api_surface = decode_api_surface(api_query, api_result)?;
     let impact = decode_symbol_impact(&response, &request, impact_result, symbol)?;
     let type_aware = inspect_type_aware_outcome(&response, &request, &trace, &api_surface, &impact);
     Ok(SemanticInspectOutcome {
@@ -782,8 +886,11 @@ fn inspect_type_aware_outcome(
             status: project.status,
             candidate_count: 0,
             confirmed_used_count: 0,
+            contract_preserved_count: 0,
+            no_static_references_count: 0,
+            fix_eligible_count: 0,
             unresolved_count: 0,
-            abstained_count: usize::from(project.reason_code.is_some()),
+            abstained_count: 0,
             blocking_diagnostic_count: project.blocking_diagnostic_count,
             source_file_count: project.source_file_count,
             program_reused: Some(project.program_reused),
@@ -795,20 +902,26 @@ fn inspect_type_aware_outcome(
     TypeAwareOutcome {
         meta: TypeAwareMeta {
             identity: Some(identity),
+            required_completeness: None,
             queries: response.results.iter().map(query_summary).collect(),
+            candidate_decisions: Vec::new(),
             symbol_traces: vec![trace.clone()],
             api_surface: Some(api_surface.clone()),
             symbol_impacts: vec![impact.clone()],
             type_coupling: None,
+            executed: true,
             protocol_version: response.protocol_version,
-            sidecar_version: response.sidecar_version.clone(),
+            sidecar_version: Some(response.sidecar_version.clone()),
             backend: response.backend.clone(),
-            backend_version: response.backend_version.clone(),
+            backend_version: Some(response.backend_version.clone()),
             selected_tsconfigs: response.selected_tsconfigs.clone(),
             candidate_count: 0,
             confirmed_used_count: 0,
+            contract_preserved_count: 0,
+            no_static_references_count: 0,
+            fix_eligible_count: 0,
             unresolved_count: 0,
-            abstained_count: usize::from(completeness != SemanticCompleteness::Complete),
+            abstained_count: 0,
             abstention_reasons: TypeAwareAbstentionCounts::default(),
             projects,
             warning_count: warnings.len(),
@@ -829,7 +942,6 @@ pub fn type_coupling(
     root: &Path,
     projects: &[PathBuf],
     entry_points: &[PathBuf],
-    require: TypeAwareRequire,
 ) -> Result<SemanticCouplingOutcome, TypeAwareError> {
     let canonical_root = root.canonicalize().map_err(|error| {
         TypeAwareError::from(format!(
@@ -856,7 +968,6 @@ pub fn type_coupling(
     let result = response.results.first().ok_or_else(|| {
         TypeAwareError::from("type-aware coupling response omitted its query result".to_string())
     })?;
-    enforce_requirement(require, result)?;
     let report = decode_type_coupling(&response, &request, result)?;
     let summary = query_summary(result);
     Ok(build_coupling_outcome(response, report, summary))
@@ -984,8 +1095,11 @@ fn build_coupling_outcome(
             status: project.status,
             candidate_count: 0,
             confirmed_used_count: 0,
+            contract_preserved_count: 0,
+            no_static_references_count: 0,
+            fix_eligible_count: 0,
             unresolved_count: 0,
-            abstained_count: usize::from(project.reason_code.is_some()),
+            abstained_count: 0,
             blocking_diagnostic_count: project.blocking_diagnostic_count,
             source_file_count: project.source_file_count,
             program_reused: Some(project.program_reused),
@@ -996,20 +1110,26 @@ fn build_coupling_outcome(
     let type_aware = TypeAwareOutcome {
         meta: TypeAwareMeta {
             identity: Some(report.identity.clone()),
+            required_completeness: None,
             queries: vec![query],
+            candidate_decisions: Vec::new(),
             symbol_traces: Vec::new(),
             api_surface: None,
             symbol_impacts: Vec::new(),
             type_coupling: Some(report.clone()),
+            executed: true,
             protocol_version: response.protocol_version,
-            sidecar_version: response.sidecar_version,
+            sidecar_version: Some(response.sidecar_version),
             backend: response.backend,
-            backend_version: response.backend_version,
+            backend_version: Some(response.backend_version),
             selected_tsconfigs: response.selected_tsconfigs,
             candidate_count: 0,
             confirmed_used_count: 0,
+            contract_preserved_count: 0,
+            no_static_references_count: 0,
+            fix_eligible_count: 0,
             unresolved_count: 0,
-            abstained_count: usize::from(report.status != SemanticCompleteness::Complete),
+            abstained_count: 0,
             abstention_reasons: TypeAwareAbstentionCounts::default(),
             projects,
             warning_count,
@@ -1048,22 +1168,9 @@ fn run_single_query(
         evidence_limit: EVIDENCE_LIMIT,
         queries: vec![query],
     };
-    let response = crate::type_aware::run_semantic_request(&canonical_root, &request)?;
+    let response = super::transport::run_semantic_request(&canonical_root, &request)?;
     validate_response(&request, &response)?;
     Ok((request, response))
-}
-
-fn enforce_requirement(
-    require: TypeAwareRequire,
-    result: &SemanticQueryResponse,
-) -> Result<(), TypeAwareError> {
-    if require == TypeAwareRequire::Complete && result.status != SemanticCompleteness::Complete {
-        return Err(TypeAwareError::from(format!(
-            "type-aware completeness is required, but {} was {:?}",
-            result.assertion, result.status
-        )));
-    }
-    Ok(())
 }
 
 fn semantic_identity(
@@ -1071,18 +1178,18 @@ fn semantic_identity(
     request: &SemanticRequest,
     completeness: SemanticCompleteness,
 ) -> SemanticAnalysisIdentity {
+    let mut capabilities = request
+        .queries
+        .iter()
+        .map(|query| query.operation().capability())
+        .collect::<Vec<_>>();
+    capabilities.sort_unstable();
+    capabilities.dedup();
     SemanticAnalysisIdentity {
         mode: SemanticAnalysisMode::TypeAware,
         semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
-        capabilities: request
-            .queries
-            .iter()
-            .map(|query| query.operation().capability())
-            .collect(),
-        project_config_hash: project_config_hash(
-            Path::new(&request.root),
-            &identity_project_config_strings(Path::new(&request.root), &request.projects),
-        ),
+        capabilities,
+        project_config_hash: response_project_config_hash(&response.projects),
         backend_family: response.backend.clone(),
         completeness,
     }
@@ -1111,46 +1218,31 @@ fn build_dead_code_queries(
     root: &Path,
     results: &AnalysisResults,
     entry_points: &[PathBuf],
+    include_symbol_use: bool,
     include_private_type_leaks: bool,
     include_type_coupling: bool,
-) -> Result<(Vec<SemanticQuery>, BTreeMap<usize, QueryTarget>), TypeAwareError> {
+) -> Result<DeadCodeQueryBatch, TypeAwareError> {
     let mut queries = Vec::new();
     let mut targets = BTreeMap::new();
-    for (index, finding) in results.unused_class_members.iter().enumerate() {
-        let id = queries.len();
-        queries.push(SemanticQuery::SymbolUse {
-            id,
-            symbol: SemanticSymbol {
-                path: protocol_path(root, &finding.member.path)?,
-                namespace: SemanticNamespace::Value,
-                declaration_kind: member_kind_name(finding.member.kind).to_string(),
-                exported_name: finding.member.member_name.clone(),
-                local_name: finding.member.member_name.clone(),
-                owner: Some(finding.member.parent_name.clone()),
-                line: finding.member.line,
-                col: finding.member.col,
-            },
-        });
-        targets.insert(id, QueryTarget::ClassMember(index));
-    }
-    for (index, finding) in results.unused_exports.iter().enumerate() {
-        let id = queries.len();
-        queries.push(SemanticQuery::SymbolUse {
-            id,
-            symbol: export_symbol(root, &finding.export, SemanticNamespace::Value)?,
-        });
-        targets.insert(id, QueryTarget::UnusedExport(index));
-    }
-    for (index, finding) in results.unused_types.iter().enumerate() {
-        let id = queries.len();
-        queries.push(SemanticQuery::SymbolUse {
-            id,
-            symbol: export_symbol(root, &finding.export, SemanticNamespace::Type)?,
-        });
-        targets.insert(id, QueryTarget::UnusedType(index));
-    }
+    let graph_query_count = usize::from(include_private_type_leaks && !entry_points.is_empty())
+        + usize::from(include_type_coupling);
+    let unrequested_symbol_count = if include_symbol_use {
+        append_symbol_use_queries(
+            root,
+            results,
+            MAX_SEMANTIC_QUERIES.saturating_sub(graph_query_count),
+            &mut queries,
+            &mut targets,
+        )?
+    } else {
+        0
+    };
     if include_private_type_leaks && !entry_points.is_empty() {
         let id = queries.len();
+        let unrequested_candidate_count = results
+            .private_type_leaks
+            .len()
+            .saturating_sub(MAX_PRIVATE_LEAK_CANDIDATES);
         queries.push(SemanticQuery::ApiSurface {
             id,
             entry_points: entry_points
@@ -1161,8 +1253,29 @@ fn build_dead_code_queries(
                 .map(|path| path.to_string_lossy().replace('\\', "/"))
                 .collect(),
             include_cycles: false,
+            private_leak_candidates: results
+                .private_type_leaks
+                .iter()
+                .enumerate()
+                .take(MAX_PRIVATE_LEAK_CANDIDATES)
+                .map(|(candidate_id, finding)| {
+                    Ok(PrivateLeakCandidate {
+                        id: candidate_id,
+                        path: protocol_path(root, &finding.leak.path)?
+                            .to_string_lossy()
+                            .replace('\\', "/"),
+                        export_name: finding.leak.export_name.clone(),
+                        type_name: finding.leak.type_name.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, TypeAwareError>>()?,
         });
-        targets.insert(id, QueryTarget::ApiSurface);
+        targets.insert(
+            id,
+            QueryTarget::ApiSurface {
+                unrequested_candidate_count,
+            },
+        );
     }
     if include_type_coupling {
         let id = queries.len();
@@ -1179,7 +1292,74 @@ fn build_dead_code_queries(
         });
         targets.insert(id, QueryTarget::TypeCoupling);
     }
-    Ok((queries, targets))
+    Ok(DeadCodeQueryBatch {
+        queries,
+        targets,
+        capacity: LocalCapacity {
+            unrequested_symbol_count,
+        },
+    })
+}
+
+fn append_symbol_use_queries(
+    root: &Path,
+    results: &AnalysisResults,
+    capacity: usize,
+    queries: &mut Vec<SemanticQuery>,
+    targets: &mut BTreeMap<usize, QueryTarget>,
+) -> Result<usize, TypeAwareError> {
+    let class_count = results.unused_class_members.len().min(capacity);
+    for (index, finding) in results
+        .unused_class_members
+        .iter()
+        .take(class_count)
+        .enumerate()
+    {
+        let id = queries.len();
+        queries.push(SemanticQuery::SymbolUse {
+            id,
+            symbol: SemanticSymbol {
+                path: protocol_path(root, &finding.member.path)?,
+                namespace: SemanticNamespace::Value,
+                declaration_kind: member_kind_name(finding.member.kind).to_string(),
+                exported_name: finding.member.member_name.clone(),
+                local_name: finding.member.member_name.clone(),
+                owner: Some(finding.member.parent_name.clone()),
+                line: finding.member.line,
+                col: finding.member.col,
+            },
+        });
+        targets.insert(id, QueryTarget::ClassMember(index));
+    }
+
+    let remaining = capacity - class_count;
+    let export_count = results.unused_exports.len().min(remaining);
+    for (index, finding) in results.unused_exports.iter().take(export_count).enumerate() {
+        let id = queries.len();
+        queries.push(SemanticQuery::SymbolUse {
+            id,
+            symbol: export_symbol(root, &finding.export, SemanticNamespace::Value)?,
+        });
+        targets.insert(id, QueryTarget::UnusedExport(index));
+    }
+
+    let remaining = remaining - export_count;
+    let type_count = results.unused_types.len().min(remaining);
+    for (index, finding) in results.unused_types.iter().take(type_count).enumerate() {
+        let id = queries.len();
+        queries.push(SemanticQuery::SymbolUse {
+            id,
+            symbol: export_symbol(root, &finding.export, SemanticNamespace::Type)?,
+        });
+        targets.insert(id, QueryTarget::UnusedType(index));
+    }
+
+    Ok(
+        results.unused_class_members.len() - class_count + results.unused_exports.len()
+            - export_count
+            + results.unused_types.len()
+            - type_count,
+    )
 }
 
 fn export_symbol(
@@ -1207,6 +1387,13 @@ const fn member_kind_name(kind: MemberKind) -> &'static str {
         MemberKind::NamespaceMember => "namespace_member",
         MemberKind::StoreMember => "store_member",
     }
+}
+
+fn query_supports_guarded_fix(query: &SemanticQuery) -> bool {
+    matches!(
+        query,
+        SemanticQuery::SymbolUse { symbol, .. } if symbol.declaration_kind == "class_method"
+    )
 }
 
 fn protocol_path(root: &Path, path: &Path) -> Result<PathBuf, TypeAwareError> {
@@ -1316,69 +1503,147 @@ fn validate_response(
 fn apply_dead_code_response(
     root: &Path,
     results: &mut AnalysisResults,
-    request: &SemanticRequest,
-    targets: &BTreeMap<usize, QueryTarget>,
+    reconciliation: DeadCodeReconciliation<'_>,
     response: SemanticResponse,
     requested_capabilities: Vec<SemanticCapability>,
 ) -> Result<SemanticDeadCodeOutcome, TypeAwareError> {
+    let DeadCodeReconciliation {
+        request,
+        targets,
+        capacity: local_capacity,
+    } = reconciliation;
     let mut confirmed_class = BTreeSet::new();
     let mut confirmed_exports = BTreeSet::new();
     let mut confirmed_types = BTreeSet::new();
     let mut api_surface = None;
     let mut type_coupling = None;
     let mut query_summaries = Vec::new();
-    let mut confirmed_used_count = 0;
-    let mut unresolved_count = 0;
-    let mut abstained_count = 0;
-    let mut abstention_reasons = TypeAwareAbstentionCounts::default();
+    let mut candidate_decisions = Vec::new();
+    let mut decision_stats = CandidateDecisionStats::default();
+    let mut source_cache = FxHashMap::default();
 
     for result in &response.results {
         let Some(target) = targets.get(&result.query_id) else {
             continue;
         };
-        query_summaries.push(query_summary(result));
+        let query = request
+            .queries
+            .iter()
+            .find(|query| query.id() == result.query_id)
+            .ok_or_else(|| {
+                TypeAwareError::from(format!(
+                    "type-aware response query {} had no matching request",
+                    result.query_id
+                ))
+            })?;
+        let mut summary = query_summary(result);
         match target {
-            QueryTarget::ClassMember(index) => classify_symbol_use(
-                result,
-                *index,
-                &mut confirmed_class,
-                &mut confirmed_used_count,
-                &mut unresolved_count,
-                &mut abstained_count,
-                &mut abstention_reasons,
-            ),
-            QueryTarget::UnusedExport(index) => classify_symbol_use(
-                result,
-                *index,
-                &mut confirmed_exports,
-                &mut confirmed_used_count,
-                &mut unresolved_count,
-                &mut abstained_count,
-                &mut abstention_reasons,
-            ),
-            QueryTarget::UnusedType(index) => classify_symbol_use(
-                result,
-                *index,
-                &mut confirmed_types,
-                &mut confirmed_used_count,
-                &mut unresolved_count,
-                &mut abstained_count,
-                &mut abstention_reasons,
-            ),
-            QueryTarget::ApiSurface => {
-                api_surface = Some(apply_api_surface(root, results, result)?);
+            QueryTarget::ClassMember(index) => {
+                let fix_supported = query_supports_guarded_fix(query);
+                let decision = decode_candidate_decision(
+                    root,
+                    query,
+                    result,
+                    fix_supported,
+                    &mut source_cache,
+                )?;
+                results
+                    .unused_class_members
+                    .get_mut(*index)
+                    .ok_or_else(|| {
+                        TypeAwareError::from(
+                            "type-aware class-member target no longer exists".to_string(),
+                        )
+                    })?
+                    .set_semantic_decision(decision.clone());
+                record_candidate_decision(
+                    &decision,
+                    *index,
+                    &mut confirmed_class,
+                    &mut decision_stats,
+                );
+                candidate_decisions.push(decision);
+            }
+            QueryTarget::UnusedExport(index) => {
+                let decision =
+                    decode_candidate_decision(root, query, result, false, &mut source_cache)?;
+                results
+                    .unused_exports
+                    .get_mut(*index)
+                    .ok_or_else(|| {
+                        TypeAwareError::from(
+                            "type-aware export target no longer exists".to_string(),
+                        )
+                    })?
+                    .set_semantic_decision(decision.clone());
+                record_candidate_decision(
+                    &decision,
+                    *index,
+                    &mut confirmed_exports,
+                    &mut decision_stats,
+                );
+                candidate_decisions.push(decision);
+            }
+            QueryTarget::UnusedType(index) => {
+                let decision =
+                    decode_candidate_decision(root, query, result, false, &mut source_cache)?;
+                results
+                    .unused_types
+                    .get_mut(*index)
+                    .ok_or_else(|| {
+                        TypeAwareError::from("type-aware type target no longer exists".to_string())
+                    })?
+                    .set_semantic_decision(decision.clone());
+                record_candidate_decision(
+                    &decision,
+                    *index,
+                    &mut confirmed_types,
+                    &mut decision_stats,
+                );
+                candidate_decisions.push(decision);
+            }
+            QueryTarget::ApiSurface {
+                unrequested_candidate_count,
+            } => {
+                let mut surface = apply_api_surface(root, results, query, result)?;
+                if *unrequested_candidate_count > 0 {
+                    add_capacity_gap(&mut summary, &mut surface, *unrequested_candidate_count);
+                }
+                api_surface = Some(surface);
             }
             QueryTarget::TypeCoupling => {
                 type_coupling = Some(decode_type_coupling(&response, request, result)?);
             }
         }
+        query_summaries.push(summary);
+    }
+    if local_capacity.unrequested_symbol_count > 0
+        && let Some(summary) = query_summaries
+            .iter_mut()
+            .rev()
+            .find(|summary| summary.capability == SemanticCapability::SymbolUse)
+    {
+        add_summary_capacity_gap(summary, local_capacity.unrequested_symbol_count);
     }
 
     retain_unconfirmed(&mut results.unused_class_members, &confirmed_class);
     retain_unconfirmed(&mut results.unused_exports, &confirmed_exports);
     retain_unconfirmed(&mut results.unused_types, &confirmed_types);
 
-    let completeness = aggregate_completeness(&response.results);
+    let mut completeness = aggregate_completeness(&response.results);
+    if completeness == SemanticCompleteness::Complete
+        && (local_capacity.unrequested_symbol_count > 0
+            || targets.values().any(|target| {
+                matches!(
+                    target,
+                    QueryTarget::ApiSurface {
+                        unrequested_candidate_count: 1..
+                    }
+                )
+            }))
+    {
+        completeness = SemanticCompleteness::Partial;
+    }
     let capabilities = requested_capabilities
         .into_iter()
         .collect::<BTreeSet<_>>()
@@ -1388,17 +1653,17 @@ fn apply_dead_code_response(
         .queries
         .iter()
         .filter(|query| matches!(query, SemanticQuery::SymbolUse { .. }))
-        .count();
+        .count()
+        + local_capacity.unrequested_symbol_count;
+    decision_stats.abstained += local_capacity.unrequested_symbol_count;
+    decision_stats.abstention_reasons.capacity += local_capacity.unrequested_symbol_count;
     let warning_count = response.warnings.len();
     let warnings = response.warnings.clone();
     let identity = SemanticAnalysisIdentity {
         mode: SemanticAnalysisMode::TypeAware,
         semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
         capabilities,
-        project_config_hash: project_config_hash(
-            root,
-            &identity_project_config_strings(root, &request.projects),
-        ),
+        project_config_hash: response_project_config_hash(&response.projects),
         backend_family: response.backend.clone(),
         completeness,
     };
@@ -1409,10 +1674,13 @@ fn apply_dead_code_response(
             config: project.config,
             source: project.source,
             status: project.status,
-            candidate_count: 0,
-            confirmed_used_count: 0,
-            unresolved_count: 0,
-            abstained_count: 0,
+            candidate_count: project.candidate_count,
+            confirmed_used_count: project.confirmed_used_count,
+            contract_preserved_count: project.contract_preserved_count,
+            no_static_references_count: project.no_static_references_count,
+            fix_eligible_count: project.fix_eligible_count,
+            unresolved_count: project.unresolved_count,
+            abstained_count: project.abstained_count,
             blocking_diagnostic_count: project.blocking_diagnostic_count,
             source_file_count: project.source_file_count,
             program_reused: Some(project.program_reused),
@@ -1423,21 +1691,27 @@ fn apply_dead_code_response(
     let type_aware = TypeAwareOutcome {
         meta: TypeAwareMeta {
             identity: Some(identity),
+            required_completeness: None,
             queries: query_summaries,
+            candidate_decisions,
             symbol_traces: Vec::new(),
             api_surface,
             symbol_impacts: Vec::new(),
             type_coupling: type_coupling.clone(),
+            executed: true,
             protocol_version: response.protocol_version,
-            sidecar_version: response.sidecar_version,
+            sidecar_version: Some(response.sidecar_version),
             backend: response.backend,
-            backend_version: response.backend_version,
+            backend_version: Some(response.backend_version),
             selected_tsconfigs: response.selected_tsconfigs,
             candidate_count,
-            confirmed_used_count,
-            unresolved_count,
-            abstained_count,
-            abstention_reasons,
+            confirmed_used_count: decision_stats.confirmed_used,
+            contract_preserved_count: decision_stats.contract_preserved,
+            no_static_references_count: decision_stats.no_static_references,
+            fix_eligible_count: decision_stats.fix_eligible,
+            unresolved_count: decision_stats.unresolved,
+            abstained_count: decision_stats.abstained,
+            abstention_reasons: decision_stats.abstention_reasons,
             projects,
             warning_count,
             warnings: warnings.clone(),
@@ -1456,32 +1730,336 @@ fn apply_dead_code_response(
     })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "keeps per-category refinement accounting explicit"
-)]
-fn classify_symbol_use(
+fn decode_candidate_decision(
+    root: &Path,
+    query: &SemanticQuery,
     result: &SemanticQueryResponse,
+    fix_supported: bool,
+    source_cache: &mut FxHashMap<PathBuf, Vec<u8>>,
+) -> Result<SemanticCandidateDecision, TypeAwareError> {
+    let SemanticQuery::SymbolUse {
+        symbol: requested, ..
+    } = query
+    else {
+        return Err(TypeAwareError::from(
+            "type-aware symbol-use result was paired with a different query operation".to_string(),
+        ));
+    };
+    if result.status == SemanticCompleteness::Unavailable {
+        return Ok(unavailable_candidate_decision(requested.clone(), result));
+    }
+    let data: SymbolUseData = serde_json::from_value(result.data.clone()).map_err(|error| {
+        TypeAwareError::from(format!(
+            "failed to decode type-aware symbol-use decision: {error}"
+        ))
+    })?;
+    validate_symbol_use_data(root, requested, result, &data, fix_supported, source_cache)?;
+    let evidence = decode_symbol_use_evidence(result)?;
+    let required_contract = data
+        .contract_relations
+        .iter()
+        .find(|contract| !contract.optional)
+        .cloned();
+    let expected_assertion = if data.total_reference_count > 0 {
+        "confirmed-used"
+    } else if required_contract.is_some() {
+        "contract-preserved"
+    } else if data.closed_world_eligible {
+        "confirmed-no-static-references"
+    } else {
+        "no-confirmed-use"
+    };
+    if result.assertion != expected_assertion {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {} assertion {} conflicts with its evidence",
+            result.query_id, result.assertion
+        )));
+    }
+    let decision = match expected_assertion {
+        "confirmed-used" => SemanticCandidateDecisionKind::ConfirmedUsed,
+        "contract-preserved" => SemanticCandidateDecisionKind::ContractPreserved,
+        "confirmed-no-static-references" => {
+            SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
+        }
+        _ if unresolved_gap(result.reason_code) => {
+            SemanticCandidateDecisionKind::RetainedUnresolved
+        }
+        _ => SemanticCandidateDecisionKind::RetainedAbstained,
+    };
+    let closed_world_eligible = fix_supported
+        && decision == SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
+        && data.closed_world_eligible;
+    Ok(SemanticCandidateDecision {
+        query_id: result.query_id,
+        subject: if fix_supported {
+            data.symbol
+        } else {
+            requested.clone()
+        },
+        decision,
+        status: result.status,
+        owning_projects: data.owning_projects,
+        evidence,
+        contract: required_contract.or_else(|| data.contract_relations.first().cloned()),
+        closed_world_eligible,
+        edit_guard: closed_world_eligible.then_some(data.edit_guard),
+        reason_code: result.reason_code,
+        explanation: candidate_explanation(decision, closed_world_eligible).to_string(),
+        actions: result.actions.clone(),
+        total_evidence_count: result.total_evidence_count,
+        truncated: result.truncated,
+        omissions: result.omissions.clone(),
+    })
+}
+
+fn unavailable_candidate_decision(
+    subject: SemanticSymbol,
+    result: &SemanticQueryResponse,
+) -> SemanticCandidateDecision {
+    SemanticCandidateDecision {
+        query_id: result.query_id,
+        subject,
+        decision: SemanticCandidateDecisionKind::RetainedUnresolved,
+        status: result.status,
+        owning_projects: Vec::new(),
+        evidence: Vec::new(),
+        contract: None,
+        closed_world_eligible: false,
+        edit_guard: None,
+        reason_code: result.reason_code,
+        explanation: candidate_explanation(
+            SemanticCandidateDecisionKind::RetainedUnresolved,
+            false,
+        )
+        .to_string(),
+        actions: result.actions.clone(),
+        total_evidence_count: result.total_evidence_count,
+        truncated: result.truncated,
+        omissions: result.omissions.clone(),
+    }
+}
+
+fn validate_symbol_use_data(
+    root: &Path,
+    requested: &SemanticSymbol,
+    result: &SemanticQueryResponse,
+    data: &SymbolUseData,
+    fix_supported: bool,
+    source_cache: &mut FxHashMap<PathBuf, Vec<u8>>,
+) -> Result<(), TypeAwareError> {
+    if data.total_reference_count != result.total_evidence_count {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {} returned inconsistent reference totals",
+            result.query_id
+        )));
+    }
+    if data.symbol.namespace != requested.namespace
+        || data.symbol.exported_name != requested.exported_name
+        || data.owning_projects.is_empty()
+        || !data.owning_projects.contains(&data.selected_project)
+        || !data
+            .owning_projects
+            .windows(2)
+            .all(|items| items[0] < items[1])
+    {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {} returned an inconsistent symbol or project identity",
+            result.query_id
+        )));
+    }
+    if fix_supported
+        && (data.symbol.path != requested.path
+            || data.symbol.declaration_kind != requested.declaration_kind
+            || data.symbol.local_name != requested.local_name
+            || data.symbol.owner != requested.owner
+            || data.symbol.line != requested.line
+            || data.symbol.col != requested.col)
+    {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {} moved the exact class-member declaration identity",
+            result.query_id
+        )));
+    }
+    if data.closed_world_eligible
+        && (result.status != SemanticCompleteness::Complete
+            || result.truncated
+            || !result.omissions.is_empty()
+            || data.total_reference_count != 0
+            || !data.contract_relations.is_empty())
+    {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {} claimed unsafe closed-world eligibility",
+            result.query_id
+        )));
+    }
+    if fix_supported {
+        validate_edit_guard(
+            root,
+            &data.symbol,
+            &data.edit_guard,
+            result.query_id,
+            source_cache,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_edit_guard(
+    root: &Path,
+    symbol: &SemanticSymbol,
+    guard: &SemanticEditGuard,
+    query_id: usize,
+    source_cache: &mut FxHashMap<PathBuf, Vec<u8>>,
+) -> Result<(), TypeAwareError> {
+    let relative = protocol_path(root, &symbol.path)?;
+    let path = root.join(relative);
+    let bytes = match source_cache.entry(path.clone()) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            let bytes = std::fs::read(&path).map_err(|error| {
+                TypeAwareError::from(format!(
+                    "failed to read type-aware declaration for query {query_id}: {error}"
+                ))
+            })?;
+            entry.insert(bytes)
+        }
+    };
+    if guard.start >= guard.end || guard.end > bytes.len() {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {query_id} returned an invalid declaration span"
+        )));
+    }
+    let digest = digest_hex(Sha256::digest(&bytes[guard.start..guard.end]));
+    if digest != guard.declaration_sha256 {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {query_id} returned a stale declaration hash"
+        )));
+    }
+    Ok(())
+}
+
+fn decode_symbol_use_evidence(
+    result: &SemanticQueryResponse,
+) -> Result<Vec<SemanticReference>, TypeAwareError> {
+    result
+        .evidence
+        .iter()
+        .map(|value| {
+            let evidence: SemanticReferenceData =
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    TypeAwareError::from(format!(
+                        "failed to decode type-aware evidence for query {}: {error}",
+                        result.query_id
+                    ))
+                })?;
+            let namespace = evidence.namespace.ok_or_else(|| {
+                TypeAwareError::from(format!(
+                    "type-aware reference for query {} omitted its namespace",
+                    result.query_id
+                ))
+            })?;
+            Ok(SemanticReference {
+                path: evidence.path,
+                line: evidence.line,
+                col: evidence.col,
+                role: evidence.role,
+                namespace,
+                via: evidence.via,
+            })
+        })
+        .collect()
+}
+
+const fn unresolved_gap(reason: Option<SemanticGapReason>) -> bool {
+    matches!(
+        reason,
+        Some(
+            SemanticGapReason::NoProject
+                | SemanticGapReason::AmbiguousProject
+                | SemanticGapReason::BlockingDiagnostics
+                | SemanticGapReason::UnknownSymbol
+                | SemanticGapReason::IncompleteProjectCoverage
+                | SemanticGapReason::Capacity
+        )
+    )
+}
+
+const fn candidate_explanation(
+    decision: SemanticCandidateDecisionKind,
+    fix_eligible: bool,
+) -> &'static str {
+    match decision {
+        SemanticCandidateDecisionKind::ConfirmedUsed => {
+            "TypeScript resolved at least one exact static reference, so Fallow removed the syntactic finding."
+        }
+        SemanticCandidateDecisionKind::ContractPreserved => {
+            "This member implements a required contract or overrides inherited behavior, so Fallow kept the declaration and removed the syntactic finding."
+        }
+        SemanticCandidateDecisionKind::ConfirmedNoStaticReferences if fix_eligible => {
+            "Every owning project completed, no exact static reference or contract was found, and a guarded class-member fix is available."
+        }
+        SemanticCandidateDecisionKind::ConfirmedNoStaticReferences => {
+            "Every owning project completed and no exact static reference was found. This remains advisory for this declaration kind."
+        }
+        SemanticCandidateDecisionKind::RetainedAbstained => {
+            "Fallow retained this candidate because dynamic or declaration semantics make deletion unsafe."
+        }
+        SemanticCandidateDecisionKind::RetainedUnresolved => {
+            "Fallow retained this candidate because its declaration or owning project was not resolved completely."
+        }
+    }
+}
+
+fn record_candidate_decision(
+    decision: &SemanticCandidateDecision,
     index: usize,
     confirmed: &mut BTreeSet<usize>,
-    confirmed_used_count: &mut usize,
-    unresolved_count: &mut usize,
-    abstained_count: &mut usize,
-    abstention_reasons: &mut TypeAwareAbstentionCounts,
+    stats: &mut CandidateDecisionStats,
 ) {
-    if result.assertion == "confirmed-used" {
-        confirmed.insert(index);
-        *confirmed_used_count += 1;
-    } else if result.status == SemanticCompleteness::Complete {
-        *unresolved_count += 1;
-    } else {
-        *abstained_count += 1;
-        match result.reason_code {
-            Some(SemanticGapReason::NoProject) => abstention_reasons.no_project += 1,
-            Some(SemanticGapReason::BlockingDiagnostics) => {
-                abstention_reasons.blocking_diagnostics += 1;
+    match decision.decision {
+        SemanticCandidateDecisionKind::ConfirmedUsed => {
+            confirmed.insert(index);
+            stats.confirmed_used += 1;
+        }
+        SemanticCandidateDecisionKind::ContractPreserved => {
+            confirmed.insert(index);
+            stats.contract_preserved += 1;
+        }
+        SemanticCandidateDecisionKind::ConfirmedNoStaticReferences => {
+            stats.no_static_references += 1;
+            stats.fix_eligible += usize::from(decision.closed_world_eligible);
+        }
+        SemanticCandidateDecisionKind::RetainedUnresolved => {
+            stats.unresolved += 1;
+            match decision.reason_code {
+                Some(SemanticGapReason::NoProject) => stats.abstention_reasons.no_project += 1,
+                Some(SemanticGapReason::BlockingDiagnostics) => {
+                    stats.abstention_reasons.blocking_diagnostics += 1;
+                }
+                Some(SemanticGapReason::UnknownSymbol) => {
+                    stats.abstention_reasons.unknown_symbol += 1;
+                }
+                Some(SemanticGapReason::Capacity) => {
+                    stats.abstention_reasons.capacity += 1;
+                }
+                _ => stats.abstention_reasons.unsupported_syntax += 1,
             }
-            _ => abstention_reasons.ambiguous_project += 1,
+        }
+        SemanticCandidateDecisionKind::RetainedAbstained => {
+            stats.abstained += 1;
+            match decision.reason_code {
+                Some(SemanticGapReason::NoProject) => stats.abstention_reasons.no_project += 1,
+                Some(SemanticGapReason::BlockingDiagnostics) => {
+                    stats.abstention_reasons.blocking_diagnostics += 1;
+                }
+                Some(SemanticGapReason::UnknownSymbol) => {
+                    stats.abstention_reasons.unknown_symbol += 1;
+                }
+                Some(SemanticGapReason::Capacity) => {
+                    stats.abstention_reasons.capacity += 1;
+                }
+                _ => stats.abstention_reasons.unsupported_syntax += 1,
+            }
         }
     }
 }
@@ -1509,6 +2087,40 @@ fn query_summary(result: &SemanticQueryResponse) -> SemanticQuerySummary {
     }
 }
 
+fn add_capacity_gap(
+    summary: &mut SemanticQuerySummary,
+    surface: &mut ApiSurfaceResult,
+    count: usize,
+) {
+    const ACTION: &str =
+        "Narrow the analysis scope so every private-type-leak candidate can be confirmed.";
+    let omission = SemanticOmission {
+        reason_code: SemanticGapReason::Capacity,
+        count,
+    };
+    add_summary_capacity_gap(summary, count);
+    if surface.status == SemanticCompleteness::Complete {
+        surface.status = SemanticCompleteness::Partial;
+    }
+    surface.omissions.push(omission);
+    surface.actions.push(ACTION.to_string());
+}
+
+fn add_summary_capacity_gap(summary: &mut SemanticQuerySummary, count: usize) {
+    const ACTION: &str =
+        "Narrow the analysis scope so every type-aware candidate can be confirmed.";
+    if summary.status == SemanticCompleteness::Complete {
+        summary.status = SemanticCompleteness::Partial;
+        summary.reason_code = Some(SemanticGapReason::Capacity);
+    }
+    summary.truncated = true;
+    summary.omissions.push(SemanticOmission {
+        reason_code: SemanticGapReason::Capacity,
+        count,
+    });
+    summary.actions.push(ACTION.to_string());
+}
+
 fn aggregate_completeness(results: &[SemanticQueryResponse]) -> SemanticCompleteness {
     if results
         .iter()
@@ -1528,32 +2140,97 @@ fn aggregate_completeness(results: &[SemanticQueryResponse]) -> SemanticComplete
 fn apply_api_surface(
     root: &Path,
     results: &mut AnalysisResults,
+    query: &SemanticQuery,
     result: &SemanticQueryResponse,
 ) -> Result<ApiSurfaceResult, TypeAwareError> {
+    if result.status == SemanticCompleteness::Unavailable {
+        return Ok(empty_api_surface_result(result));
+    }
     let data: ApiSurfaceData = serde_json::from_value(result.data.clone()).map_err(|error| {
         TypeAwareError::from(format!("failed to decode type-aware API surface: {error}"))
     })?;
-    validate_api_surface_data(&data)?;
+    validate_api_surface_data(query, result, &data)?;
     let api_surface = api_surface_result(result, data.clone());
+    if data.private_leak_confirmation.confirmation_complete {
+        let confirmed = data
+            .private_leak_confirmation
+            .confirmed_candidate_ids
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let mut candidate_id = 0_usize;
+        results.private_type_leaks.retain(|_| {
+            let keep = candidate_id >= data.private_leak_confirmation.requested_candidate_count
+                || confirmed.contains(&candidate_id);
+            candidate_id += 1;
+            keep
+        });
+    }
     for (wire, semantic) in data.leaks.iter().zip(&api_surface.private_type_leaks) {
         attach_or_add_private_type_leak(root, results, wire, semantic.clone());
     }
     Ok(api_surface)
 }
 
-fn decode_api_surface(result: &SemanticQueryResponse) -> Result<ApiSurfaceResult, TypeAwareError> {
+fn decode_api_surface(
+    query: &SemanticQuery,
+    result: &SemanticQueryResponse,
+) -> Result<ApiSurfaceResult, TypeAwareError> {
+    if result.status == SemanticCompleteness::Unavailable {
+        return Ok(empty_api_surface_result(result));
+    }
     let data: ApiSurfaceData = serde_json::from_value(result.data.clone()).map_err(|error| {
         TypeAwareError::from(format!("failed to decode type-aware API surface: {error}"))
     })?;
-    validate_api_surface_data(&data)?;
+    validate_api_surface_data(query, result, &data)?;
     Ok(api_surface_result(result, data))
 }
 
-fn validate_api_surface_data(data: &ApiSurfaceData) -> Result<(), TypeAwareError> {
+fn empty_api_surface_result(result: &SemanticQueryResponse) -> ApiSurfaceResult {
+    ApiSurfaceResult {
+        assertion: result.assertion.clone(),
+        status: result.status,
+        entries: Vec::new(),
+        private_type_leaks: Vec::new(),
+        omissions: result.omissions.clone(),
+        actions: result.actions.clone(),
+    }
+}
+
+fn validate_api_surface_data(
+    query: &SemanticQuery,
+    result: &SemanticQueryResponse,
+    data: &ApiSurfaceData,
+) -> Result<(), TypeAwareError> {
+    let SemanticQuery::ApiSurface {
+        private_leak_candidates,
+        ..
+    } = query
+    else {
+        return Err(TypeAwareError::from(
+            "type-aware API surface data was paired with a different query operation".to_string(),
+        ));
+    };
+    let confirmed_ids = &data.private_leak_confirmation.confirmed_candidate_ids;
+    let ids_are_sorted_unique = confirmed_ids.windows(2).all(|ids| ids[0] < ids[1]);
+    let requested_ids = private_leak_candidates
+        .iter()
+        .map(|candidate| candidate.id)
+        .collect::<BTreeSet<_>>();
+    let unsafe_confirmation = data.private_leak_confirmation.confirmation_complete
+        && (result.status == SemanticCompleteness::Unavailable
+            || result
+                .omissions
+                .iter()
+                .any(|omission| omission.reason_code != SemanticGapReason::EvidenceLimit));
     if data.total_export_count < data.exports.len()
         || data.total_entry_count < data.entries.len()
         || data.total_leak_count < data.leaks.len()
         || data.total_public_signature_edge_count < data.public_signature_edges.len()
+        || data.private_leak_confirmation.requested_candidate_count != private_leak_candidates.len()
+        || !ids_are_sorted_unique
+        || confirmed_ids.iter().any(|id| !requested_ids.contains(id))
+        || unsafe_confirmation
         || data
             .entries
             .iter()
@@ -1633,58 +2310,20 @@ fn attach_or_add_private_type_leak(
         }));
 }
 
-fn project_config_hash(root: &Path, configs: &[String]) -> String {
+fn response_project_config_hash(projects: &[SemanticProjectResponse]) -> String {
     let mut hasher = Sha256::new();
-    let mut configs = configs.to_vec();
-    configs.sort();
-    for config in configs {
+    let mut configs = projects
+        .iter()
+        .map(|project| (&project.config, &project.effective_config_hash))
+        .collect::<Vec<_>>();
+    configs.sort_unstable();
+    for (config, effective_hash) in configs {
         hasher.update(config.as_bytes());
-        let path = Path::new(&config);
-        let path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            root.join(path)
-        };
-        if !config.starts_with('<')
-            && let Ok(bytes) = std::fs::read(path)
-        {
-            hasher.update(bytes);
-        }
+        hasher.update([0]);
+        hasher.update(effective_hash.as_bytes());
+        hasher.update([0]);
     }
     format!("sha256:{}", digest_hex(hasher.finalize()))
-}
-
-fn identity_project_configs(root: &Path, projects: &[PathBuf]) -> Vec<String> {
-    let configured = projects
-        .iter()
-        .map(|project| project.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    identity_project_config_strings(root, &configured)
-}
-
-fn identity_project_config_strings(root: &Path, projects: &[String]) -> Vec<String> {
-    if projects.is_empty() {
-        return vec![if root.join("tsconfig.json").is_file() {
-            "tsconfig.json".to_string()
-        } else {
-            "<auto>".to_string()
-        }];
-    }
-    let mut normalized = projects
-        .iter()
-        .map(|project| {
-            let path = Path::new(project);
-            let path = if path.is_absolute() {
-                path.strip_prefix(root).unwrap_or(path)
-            } else {
-                path
-            };
-            path.to_string_lossy().replace('\\', "/")
-        })
-        .collect::<Vec<_>>();
-    normalized.sort();
-    normalized.dedup();
-    normalized
 }
 
 fn digest_hex(bytes: impl AsRef<[u8]>) -> String {
@@ -1742,6 +2381,7 @@ mod tests {
                     id: 3,
                     entry_points: vec!["src/config.ts".to_string()],
                     include_cycles: true,
+                    private_leak_candidates: Vec::new(),
                 },
                 SemanticQuery::TypeCoupling {
                     id: 4,
@@ -1790,6 +2430,18 @@ mod tests {
             warnings: Vec::new(),
             elapsed_ms: 6,
         }
+    }
+
+    fn private_leak(path: PathBuf, export_name: &str, type_name: &str) -> PrivateTypeLeakFinding {
+        PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+            path,
+            export_name: export_name.to_string(),
+            type_name: type_name.to_string(),
+            line: 2,
+            col: 10,
+            span_start: 0,
+            semantic: None,
+        })
     }
 
     #[test]
@@ -1883,6 +2535,11 @@ mod tests {
             ..TypeAwareMeta::default()
         };
         let overlay = TypeAwareMeta {
+            executed: true,
+            protocol_version: PROTOCOL_VERSION,
+            sidecar_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            backend: BACKEND_FAMILY.to_string(),
+            backend_version: Some(BACKEND_VERSION.to_string()),
             identity: Some(SemanticAnalysisIdentity {
                 mode: SemanticAnalysisMode::TypeAware,
                 semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
@@ -1930,6 +2587,12 @@ mod tests {
         assert_eq!(base.warning_count, 3);
         assert_eq!(base.warnings.len(), 2);
         assert_eq!(base.elapsed_ms, 12);
+        assert!(base.executed);
+        assert_eq!(
+            base.sidecar_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(base.backend_version.as_deref(), Some(BACKEND_VERSION));
         assert_eq!(base.phase_timings_ms.project_setup, 5);
         assert_eq!(base.phase_timings_ms.diagnostics, 7);
         assert_eq!(base.phase_timings_ms.symbol_scan, 9);
@@ -1957,30 +2620,6 @@ mod tests {
         assert_eq!(namespace_name(SemanticNamespace::Type), "type");
         assert_eq!(digest_hex([0, 15, 255]), "000fff");
 
-        let projects = vec![
-            PathBuf::from("tsconfig.json"),
-            root.join("tsconfig.json"),
-            PathBuf::from("tsconfig.json"),
-        ];
-        assert_eq!(
-            identity_project_configs(root, &projects),
-            vec!["tsconfig.json".to_string()]
-        );
-        assert_eq!(
-            identity_project_config_strings(
-                root,
-                &[
-                    "tsconfig.json".to_string(),
-                    root.join("tsconfig.json").to_string_lossy().into_owned(),
-                ],
-            ),
-            vec!["tsconfig.json".to_string()]
-        );
-        assert_eq!(
-            project_config_hash(root, &["tsconfig.json".to_string()]),
-            project_config_hash(root, &["tsconfig.json".to_string()])
-        );
-
         let paths = impact_paths(
             vec![
                 ImpactPathData {
@@ -2001,22 +2640,55 @@ mod tests {
         assert_eq!(paths[1].distance, 2);
         assert_eq!(paths[1].relation, "affected");
 
-        let outcome = empty_semantic_outcome(
-            root,
-            &[],
-            vec![
-                SemanticCapability::SymbolUse,
-                SemanticCapability::ApiSurface,
-            ],
-        );
+        let outcome = empty_semantic_outcome(vec![
+            SemanticCapability::SymbolUse,
+            SemanticCapability::ApiSurface,
+            SemanticCapability::SymbolUse,
+        ]);
+        assert!(!outcome.type_aware.meta.executed);
+        assert!(outcome.type_aware.meta.sidecar_version.is_none());
+        assert!(outcome.type_aware.meta.backend_version.is_none());
         let identity = outcome
             .type_aware
             .meta
             .identity
             .expect("empty semantic identity");
-        assert_eq!(identity.mode, SemanticAnalysisMode::TypeAware);
-        assert_eq!(identity.completeness, SemanticCompleteness::Complete);
+        assert_eq!(
+            identity.capabilities,
+            vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::ApiSurface
+            ]
+        );
+        assert_eq!(identity.project_config_hash, DEFERRED_PROJECT_CONFIG_HASH);
         assert!(outcome.type_coupling.is_none());
+    }
+
+    #[test]
+    fn real_semantic_query_replaces_deferred_project_identity() {
+        let empty = empty_semantic_outcome(vec![SemanticCapability::SymbolUse]);
+        let mut identity = empty.type_aware.meta.identity;
+        merge_semantic_identity(
+            &mut identity,
+            Some(SemanticAnalysisIdentity {
+                mode: SemanticAnalysisMode::TypeAware,
+                semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
+                capabilities: vec![SemanticCapability::TypeCoupling],
+                project_config_hash: "sha256:real-project-config".to_string(),
+                backend_family: BACKEND_FAMILY.to_string(),
+                completeness: SemanticCompleteness::Complete,
+            }),
+        );
+
+        let merged = identity.expect("merged semantic identity");
+        assert_eq!(merged.project_config_hash, "sha256:real-project-config");
+        assert_eq!(
+            merged.capabilities,
+            vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::TypeCoupling
+            ]
+        );
     }
 
     #[test]
@@ -2044,6 +2716,481 @@ mod tests {
         let mut items = vec!["zero", "one", "two", "three"];
         retain_unconfirmed(&mut items, &BTreeSet::from([0, 2]));
         assert_eq!(items, vec!["one", "three"]);
+    }
+
+    #[test]
+    fn complete_api_surface_replaces_syntactic_private_leak_guesses() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let path = root.join("src/api.ts");
+        let mut results = AnalysisResults {
+            private_type_leaks: vec![
+                private_leak(path.clone(), "PublicResult", "Hidden"),
+                private_leak(path, "InternalConfig", "ConfigOptions"),
+            ],
+            ..AnalysisResults::default()
+        };
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::ApiSurface,
+            assertion: "leak-confirmed".to_string(),
+            status: SemanticCompleteness::Complete,
+            reason_code: None,
+            actions: Vec::new(),
+            evidence: Vec::new(),
+            total_evidence_count: 1,
+            truncated: false,
+            omissions: Vec::new(),
+            data: json!({
+                "exports": [],
+                "total_export_count": 1,
+                "entries": [],
+                "total_entry_count": 1,
+                "leaks": [{
+                    "exposed_symbol": {
+                        "path": "src/api.ts",
+                        "namespace": "type",
+                        "declaration_kind": "interface",
+                        "exported_name": "PublicResult",
+                        "local_name": "PublicResult",
+                        "line": 2,
+                        "col": 0,
+                        "owner": null
+                    },
+                    "private_declaration": {
+                        "path": "src/model.ts",
+                        "namespace": "type",
+                        "declaration_kind": "interface",
+                        "exported_name": "Hidden",
+                        "local_name": "Hidden",
+                        "line": 1,
+                        "col": 0,
+                        "owner": null
+                    },
+                    "relation": "public-signature-private-type",
+                    "evidence": {
+                        "path": "src/api.ts",
+                        "line": 2,
+                        "col": 10
+                    }
+                }],
+                "private_leak_confirmation": {
+                    "requested_candidate_count": 2,
+                    "confirmation_complete": true,
+                    "confirmed_candidate_ids": [0]
+                },
+                "total_leak_count": 1,
+                "public_signature_edges": [],
+                "total_public_signature_edge_count": 1
+            }),
+        };
+        let query = SemanticQuery::ApiSurface {
+            id: 0,
+            entry_points: vec!["src/index.ts".to_string()],
+            include_cycles: false,
+            private_leak_candidates: vec![
+                PrivateLeakCandidate {
+                    id: 0,
+                    path: "src/api.ts".to_string(),
+                    export_name: "PublicResult".to_string(),
+                    type_name: "Hidden".to_string(),
+                },
+                PrivateLeakCandidate {
+                    id: 1,
+                    path: "src/api.ts".to_string(),
+                    export_name: "InternalConfig".to_string(),
+                    type_name: "ConfigOptions".to_string(),
+                },
+            ],
+        };
+
+        let api =
+            apply_api_surface(root, &mut results, &query, &result).expect("valid API surface");
+
+        assert_eq!(api.private_type_leaks.len(), 1);
+        assert_eq!(results.private_type_leaks.len(), 1);
+        assert_eq!(
+            results.private_type_leaks[0].leak.export_name,
+            "PublicResult"
+        );
+        assert!(results.private_type_leaks[0].leak.semantic.is_some());
+    }
+
+    #[test]
+    fn evidence_bounded_api_surface_replaces_syntactic_private_leak_guesses() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = AnalysisResults::default();
+        results.private_type_leaks.push(private_leak(
+            root.join("src/api.ts"),
+            "InternalConfig",
+            "ConfigOptions",
+        ));
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::ApiSurface,
+            assertion: "no-leak-confirmed".to_string(),
+            status: SemanticCompleteness::Partial,
+            reason_code: Some(SemanticGapReason::EvidenceLimit),
+            actions: vec!["Narrow the query.".to_string()],
+            evidence: Vec::new(),
+            total_evidence_count: 0,
+            truncated: true,
+            omissions: vec![SemanticOmission {
+                reason_code: SemanticGapReason::EvidenceLimit,
+                count: 1,
+            }],
+            data: json!({
+                "exports": [],
+                "total_export_count": 1,
+                "entries": [],
+                "total_entry_count": 1,
+                "leaks": [],
+                "private_leak_confirmation": {
+                    "requested_candidate_count": 1,
+                    "confirmation_complete": true,
+                    "confirmed_candidate_ids": []
+                },
+                "total_leak_count": 0,
+                "public_signature_edges": [],
+                "total_public_signature_edge_count": 0
+            }),
+        };
+        let query = SemanticQuery::ApiSurface {
+            id: 0,
+            entry_points: vec!["src/index.ts".to_string()],
+            include_cycles: false,
+            private_leak_candidates: vec![PrivateLeakCandidate {
+                id: 0,
+                path: "src/api.ts".to_string(),
+                export_name: "InternalConfig".to_string(),
+                type_name: "ConfigOptions".to_string(),
+            }],
+        };
+
+        apply_api_surface(root, &mut results, &query, &result).expect("valid API surface");
+
+        assert!(results.private_type_leaks.is_empty());
+    }
+
+    #[test]
+    fn candidate_capacity_retains_unrequested_private_leaks_and_marks_partial() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = AnalysisResults::default();
+        results.private_type_leaks.push(private_leak(
+            root.join("src/api.ts"),
+            "First",
+            "FirstPrivate",
+        ));
+        results.private_type_leaks.push(private_leak(
+            root.join("src/api.ts"),
+            "Second",
+            "SecondPrivate",
+        ));
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::ApiSurface,
+            assertion: "no-leak-confirmed".to_string(),
+            status: SemanticCompleteness::Complete,
+            reason_code: None,
+            actions: Vec::new(),
+            evidence: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+            data: json!({
+                "exports": [],
+                "total_export_count": 0,
+                "entries": [],
+                "total_entry_count": 0,
+                "leaks": [],
+                "private_leak_confirmation": {
+                    "requested_candidate_count": 1,
+                    "confirmation_complete": true,
+                    "confirmed_candidate_ids": []
+                },
+                "total_leak_count": 0,
+                "public_signature_edges": [],
+                "total_public_signature_edge_count": 0
+            }),
+        };
+        let query = SemanticQuery::ApiSurface {
+            id: 0,
+            entry_points: vec!["src/index.ts".to_string()],
+            include_cycles: false,
+            private_leak_candidates: vec![PrivateLeakCandidate {
+                id: 0,
+                path: "src/api.ts".to_string(),
+                export_name: "First".to_string(),
+                type_name: "FirstPrivate".to_string(),
+            }],
+        };
+
+        let mut surface =
+            apply_api_surface(root, &mut results, &query, &result).expect("valid API surface");
+        let mut summary = query_summary(&result);
+        add_capacity_gap(&mut summary, &mut surface, 1);
+
+        assert_eq!(results.private_type_leaks.len(), 1);
+        assert_eq!(results.private_type_leaks[0].leak.export_name, "Second");
+        assert_eq!(summary.status, SemanticCompleteness::Partial);
+        assert_eq!(summary.reason_code, Some(SemanticGapReason::Capacity));
+        assert_eq!(surface.status, SemanticCompleteness::Partial);
+        assert_eq!(
+            surface.omissions[0].reason_code,
+            SemanticGapReason::Capacity
+        );
+
+        let mut unavailable_summary = SemanticQuerySummary {
+            status: SemanticCompleteness::Unavailable,
+            reason_code: Some(SemanticGapReason::BlockingDiagnostics),
+            ..query_summary(&result)
+        };
+        let mut unavailable_surface = ApiSurfaceResult {
+            status: SemanticCompleteness::Unavailable,
+            ..surface
+        };
+        add_capacity_gap(&mut unavailable_summary, &mut unavailable_surface, 1);
+        assert_eq!(
+            unavailable_summary.status,
+            SemanticCompleteness::Unavailable
+        );
+        assert_eq!(
+            unavailable_summary.reason_code,
+            Some(SemanticGapReason::BlockingDiagnostics)
+        );
+        assert_eq!(
+            unavailable_surface.status,
+            SemanticCompleteness::Unavailable
+        );
+    }
+
+    #[test]
+    fn semantic_query_capacity_reserves_graph_queries_and_retains_the_tail() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = AnalysisResults::default();
+        results.unused_types = (0..=MAX_SEMANTIC_QUERIES)
+            .map(|index| {
+                fallow_types::output_dead_code::UnusedTypeFinding::with_actions(
+                    fallow_types::results::UnusedExport {
+                        path: root.join("src/types.ts"),
+                        export_name: format!("Type{index}"),
+                        is_type_only: true,
+                        line: 1,
+                        col: 0,
+                        span_start: 0,
+                        is_re_export: false,
+                    },
+                )
+            })
+            .collect();
+
+        let batch = build_dead_code_queries(
+            root,
+            &results,
+            &[root.join("src/index.ts")],
+            true,
+            false,
+            true,
+        )
+        .expect("bounded semantic query batch");
+
+        assert_eq!(batch.queries.len(), MAX_SEMANTIC_QUERIES);
+        assert_eq!(batch.capacity.unrequested_symbol_count, 2);
+        assert!(matches!(
+            batch.queries.last(),
+            Some(SemanticQuery::TypeCoupling { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_private_leak_confirmation_ids_and_counts() {
+        let query = SemanticQuery::ApiSurface {
+            id: 0,
+            entry_points: Vec::new(),
+            include_cycles: false,
+            private_leak_candidates: vec![
+                PrivateLeakCandidate {
+                    id: 2,
+                    path: "src/api.ts".to_string(),
+                    export_name: "first".to_string(),
+                    type_name: "First".to_string(),
+                },
+                PrivateLeakCandidate {
+                    id: 7,
+                    path: "src/api.ts".to_string(),
+                    export_name: "second".to_string(),
+                    type_name: "Second".to_string(),
+                },
+            ],
+        };
+        let decode = |confirmation| {
+            serde_json::from_value::<ApiSurfaceData>(json!({
+                "exports": [],
+                "total_export_count": 0,
+                "entries": [],
+                "total_entry_count": 0,
+                "leaks": [],
+                "private_leak_confirmation": confirmation,
+                "total_leak_count": 0,
+                "public_signature_edges": [],
+                "total_public_signature_edge_count": 0
+            }))
+            .expect("API surface data")
+        };
+        let result = complete_result(0, SemanticOperation::ApiSurface);
+
+        assert!(
+            validate_api_surface_data(
+                &query,
+                &result,
+                &decode(json!({
+                    "requested_candidate_count": 2,
+                    "confirmation_complete": true,
+                    "confirmed_candidate_ids": [2, 7]
+                })),
+            )
+            .is_ok()
+        );
+        for confirmation in [
+            json!({
+                "requested_candidate_count": 1,
+                "confirmation_complete": true,
+                "confirmed_candidate_ids": [2]
+            }),
+            json!({
+                "requested_candidate_count": 2,
+                "confirmation_complete": true,
+                "confirmed_candidate_ids": [7, 2]
+            }),
+            json!({
+                "requested_candidate_count": 2,
+                "confirmation_complete": true,
+                "confirmed_candidate_ids": [2, 2]
+            }),
+            json!({
+                "requested_candidate_count": 2,
+                "confirmation_complete": true,
+                "confirmed_candidate_ids": [99]
+            }),
+        ] {
+            assert!(validate_api_surface_data(&query, &result, &decode(confirmation)).is_err());
+        }
+    }
+
+    #[test]
+    fn diagnostically_partial_api_surface_retains_syntactic_private_leak_guesses() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = AnalysisResults::default();
+        results.private_type_leaks.push(private_leak(
+            root.join("src/api.ts"),
+            "InternalConfig",
+            "ConfigOptions",
+        ));
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::ApiSurface,
+            assertion: "no-leak-confirmed".to_string(),
+            status: SemanticCompleteness::Partial,
+            reason_code: Some(SemanticGapReason::BlockingDiagnostics),
+            actions: vec!["Repair diagnostics.".to_string()],
+            evidence: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: vec![SemanticOmission {
+                reason_code: SemanticGapReason::BlockingDiagnostics,
+                count: 1,
+            }],
+            data: json!({
+                "exports": [],
+                "total_export_count": 0,
+                "entries": [],
+                "total_entry_count": 0,
+                "leaks": [],
+                "private_leak_confirmation": {
+                    "requested_candidate_count": 1,
+                    "confirmation_complete": false,
+                    "confirmed_candidate_ids": []
+                },
+                "total_leak_count": 0,
+                "public_signature_edges": [],
+                "total_public_signature_edge_count": 0
+            }),
+        };
+        let query = SemanticQuery::ApiSurface {
+            id: 0,
+            entry_points: vec!["src/index.ts".to_string()],
+            include_cycles: false,
+            private_leak_candidates: vec![PrivateLeakCandidate {
+                id: 0,
+                path: "src/api.ts".to_string(),
+                export_name: "InternalConfig".to_string(),
+                type_name: "ConfigOptions".to_string(),
+            }],
+        };
+
+        let mut unsafe_result = result.clone();
+        unsafe_result.data["private_leak_confirmation"]["confirmation_complete"] =
+            serde_json::Value::Bool(true);
+        assert!(apply_api_surface(root, &mut results, &query, &unsafe_result).is_err());
+        assert_eq!(results.private_type_leaks.len(), 1);
+
+        apply_api_surface(root, &mut results, &query, &result).expect("valid API surface");
+
+        assert_eq!(results.private_type_leaks.len(), 1);
+        assert!(results.private_type_leaks[0].leak.semantic.is_none());
+    }
+
+    #[test]
+    fn unavailable_api_surface_retains_syntactic_private_leaks_without_decoding_data() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = AnalysisResults::default();
+        results.private_type_leaks.push(private_leak(
+            root.join("src/api.ts"),
+            "InternalConfig",
+            "ConfigOptions",
+        ));
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::ApiSurface,
+            assertion: "no-leak-confirmed".to_string(),
+            status: SemanticCompleteness::Unavailable,
+            reason_code: Some(SemanticGapReason::BlockingDiagnostics),
+            actions: vec!["Repair diagnostics.".to_string()],
+            evidence: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: vec![SemanticOmission {
+                reason_code: SemanticGapReason::BlockingDiagnostics,
+                count: 1,
+            }],
+            data: json!({}),
+        };
+
+        let query = SemanticQuery::ApiSurface {
+            id: 0,
+            entry_points: vec!["src/index.ts".to_string()],
+            include_cycles: false,
+            private_leak_candidates: vec![PrivateLeakCandidate {
+                id: 0,
+                path: "src/api.ts".to_string(),
+                export_name: "InternalConfig".to_string(),
+                type_name: "ConfigOptions".to_string(),
+            }],
+        };
+        let applied = apply_api_surface(root, &mut results, &query, &result)
+            .expect("conservative API surface");
+        let decoded = decode_api_surface(&query, &result).expect("inspect API surface");
+
+        assert_eq!(results.private_type_leaks.len(), 1);
+        assert_eq!(applied.status, SemanticCompleteness::Unavailable);
+        assert!(applied.entries.is_empty());
+        assert_eq!(decoded.status, SemanticCompleteness::Unavailable);
+        assert!(decoded.private_type_leaks.is_empty());
     }
 
     #[test]
@@ -2129,7 +3276,67 @@ mod tests {
             PathBuf::from("test/config.test.ts")
         );
         assert_eq!(impact.confidence, "bounded");
-        assert!(enforce_requirement(TypeAwareRequire::BestEffort, &result).is_ok());
-        assert!(enforce_requirement(TypeAwareRequire::Complete, &result).is_err());
+    }
+
+    #[test]
+    fn candidate_policy_removes_contracts_and_retains_only_fixable_negative_evidence() {
+        let decision = |kind, fixable| SemanticCandidateDecision {
+            query_id: 0,
+            subject: symbol(),
+            decision: kind,
+            status: SemanticCompleteness::Complete,
+            owning_projects: vec!["tsconfig.json".to_string()],
+            evidence: Vec::new(),
+            contract: None,
+            closed_world_eligible: fixable,
+            edit_guard: None,
+            reason_code: None,
+            explanation: "test decision".to_string(),
+            actions: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+        };
+        let mut removed = BTreeSet::new();
+        let mut stats = CandidateDecisionStats::default();
+
+        record_candidate_decision(
+            &decision(SemanticCandidateDecisionKind::ContractPreserved, false),
+            3,
+            &mut removed,
+            &mut stats,
+        );
+        record_candidate_decision(
+            &decision(
+                SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
+                true,
+            ),
+            4,
+            &mut removed,
+            &mut stats,
+        );
+
+        assert!(removed.contains(&3));
+        assert!(!removed.contains(&4));
+        assert_eq!(stats.contract_preserved, 1);
+        assert_eq!(stats.no_static_references, 1);
+        assert_eq!(stats.fix_eligible, 1);
+    }
+
+    #[test]
+    fn guarded_fix_support_excludes_class_properties() {
+        let mut method = symbol();
+        method.declaration_kind = "class_method".to_string();
+        let mut property = method.clone();
+        property.declaration_kind = "class_property".to_string();
+
+        assert!(query_supports_guarded_fix(&SemanticQuery::SymbolUse {
+            id: 0,
+            symbol: method,
+        }));
+        assert!(!query_supports_guarded_fix(&SemanticQuery::SymbolUse {
+            id: 1,
+            symbol: property,
+        }));
     }
 }

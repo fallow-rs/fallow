@@ -227,8 +227,11 @@ fn render_type_coupling(
     lines.push(String::new());
     lines.push("Type coupling".bold().to_string());
     lines.push(format!(
-        "  Proof: {} ({:?})",
-        coupling.assertion, coupling.status
+        "  {}",
+        crate::report::human_status_line(
+            crate::report::semantic_status(coupling.status),
+            format_args!("Proof: {} ({:?})", coupling.assertion, coupling.status)
+        )
     ));
     if let Some(summary) = &coupling.summary {
         lines.push(format!(

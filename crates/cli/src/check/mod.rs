@@ -631,9 +631,13 @@ fn handle_trace_side_effects(
     }
     if let Some(graph) = trace_graph {
         crate::telemetry::note_graph_structure(graph);
-        if let Some(code) =
-            output::handle_type_aware_trace_output(graph, opts.trace_opts, config, opts.json_style)
-        {
+        if let Some(code) = output::handle_type_aware_trace_output(
+            graph,
+            opts.trace_opts,
+            config,
+            opts.explain,
+            opts.json_style,
+        ) {
             return Err(code);
         }
         if let Some(code) = output::handle_trace_output(
@@ -830,7 +834,7 @@ struct CheckCompletionInput<'a> {
     elapsed: Duration,
     regression_outcome: Option<RegressionOutcome>,
     baseline_matched: Option<(usize, usize)>,
-    type_aware: Option<crate::type_aware::TypeAwareOutcome>,
+    type_aware: Option<fallow_api::TypeAwareOutcome>,
     type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
 }
 
@@ -883,9 +887,14 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     );
 
     let config_fixable = crate::fix::is_config_fixable(opts.root, opts.config_path.as_ref());
+    let required_completeness = config.type_aware.require.into();
     let (type_aware_meta, type_aware_warnings) = type_aware.map_or_else(
         || (None, Vec::new()),
-        |outcome| (Some(outcome.meta), outcome.warnings),
+        |outcome| {
+            let mut meta = outcome.meta;
+            meta.required_completeness = Some(required_completeness);
+            (Some(meta), outcome.warnings)
+        },
     );
 
     // Report result volume to telemetry from the real result, independent of
@@ -926,6 +935,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
     let config = prepare_check_config(opts)?;
+    validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
 
     let ws_roots = filtering::resolve_workspace_scope(
         opts.root,
@@ -992,7 +1002,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 &data.workspaces,
             )
         });
-        let outcome = crate::semantic_queries::refine_dead_code(
+        let outcome = fallow_api::refine_type_aware_results(
             &config.root,
             &mut data.results,
             &type_aware_projects,
@@ -1000,7 +1010,6 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             include_symbol_use,
             config.rules.private_type_leaks != Severity::Off,
             opts.retain_modules_for_health,
-            config.type_aware.require,
         )
         .map_err(|error| {
             emit_error(
@@ -1046,6 +1055,30 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     }))
 }
 
+fn validate_effective_type_aware_output(
+    output: fallow_config::OutputFormat,
+    enabled: bool,
+) -> Result<(), ExitCode> {
+    if enabled
+        && !matches!(
+            output,
+            fallow_config::OutputFormat::Human
+                | fallow_config::OutputFormat::Json
+                | fallow_config::OutputFormat::Sarif
+                | fallow_config::OutputFormat::Compact
+                | fallow_config::OutputFormat::Markdown
+                | fallow_config::OutputFormat::CodeClimate
+        )
+    {
+        return Err(emit_error(
+            "type-aware analysis supports human, JSON, SARIF, compact, markdown, and CodeClimate output; pair CodeClimate with the JSON artifact to preserve semantic provenance",
+            2,
+            output,
+        ));
+    }
+    Ok(())
+}
+
 pub struct PrintCheckOptions {
     pub quiet: bool,
     pub explain: bool,
@@ -1055,6 +1088,7 @@ pub struct PrintCheckOptions {
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
+    pub type_aware_scope: Option<&'static str>,
     pub json_style: crate::json_style::JsonStyle,
 }
 
@@ -1075,6 +1109,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             quiet: opts.quiet,
             explain: opts.explain,
             type_aware: result.type_aware_meta.as_ref(),
+            type_aware_scope: opts.type_aware_scope,
             group_by: opts.group_by,
             top: opts.top,
             summary: opts.summary,
@@ -1152,7 +1187,11 @@ fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {
     }
     if !quiet {
         eprintln!(
-            "Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+            "{}",
+            crate::report::human_status_line(
+                crate::report::HumanStatus::Warning,
+                "Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+            )
         );
     }
     true
@@ -1163,21 +1202,44 @@ fn print_type_aware_summary(result: &CheckResult) {
         return;
     }
     if let Some(meta) = &result.type_aware_meta {
-        println!("{}", format_type_aware_summary(meta));
+        println!(
+            "{}",
+            crate::report::human_status_line(
+                crate::report::type_aware_meta_status(meta),
+                format_type_aware_summary(meta)
+            )
+        );
     }
 }
 
 fn format_type_aware_summary(meta: &fallow_types::envelope::TypeAwareMeta) -> String {
     let candidates = count_noun(meta.candidate_count, "candidate", "candidates");
     let confirmed = count_noun(meta.confirmed_used_count, "confirmed use", "confirmed uses");
-    let retained_count = meta.unresolved_count + meta.abstained_count;
-    let retained = count_noun(retained_count, "retained finding", "retained findings");
-    let abstained = count_noun(meta.abstained_count, "abstention", "abstentions");
-    if meta.abstained_count == 0 {
-        format!("Type-aware refinement: {candidates}, {confirmed}, {retained}")
-    } else {
-        format!("Type-aware refinement: {candidates}, {confirmed}, {retained} ({abstained})")
-    }
+    let contracts = count_noun(
+        meta.contract_preserved_count,
+        "preserved contract",
+        "preserved contracts",
+    );
+    let no_static_references = count_noun(
+        meta.no_static_references_count,
+        "candidate without static references",
+        "candidates without static references",
+    );
+    let fixable = count_noun(meta.fix_eligible_count, "guarded fix", "guarded fixes");
+    let unresolved = count_noun(
+        meta.unresolved_count,
+        "unresolved finding",
+        "unresolved findings",
+    );
+    let abstained = count_noun(
+        meta.abstained_count,
+        "abstained finding",
+        "abstained findings",
+    );
+    format!(
+        "Type-aware refinement: {candidates}, {confirmed}, {contracts}, \
+         {no_static_references} ({fixable}), {unresolved}, {abstained}"
+    )
 }
 
 fn count_noun(count: usize, singular: &str, plural: &str) -> String {
@@ -1187,7 +1249,13 @@ fn count_noun(count: usize, singular: &str, plural: &str) -> String {
 
 fn print_type_aware_warnings(result: &CheckResult) {
     for warning in &result.type_aware_warnings {
-        eprintln!("Type-aware warning: {warning}");
+        eprintln!(
+            "{}",
+            crate::report::human_status_line(
+                crate::report::HumanStatus::Warning,
+                format_args!("Type-aware: {warning}")
+            )
+        );
     }
 }
 
@@ -1273,6 +1341,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
+            type_aware_scope: None,
             json_style: opts.json_style,
         },
     );
@@ -1484,29 +1553,37 @@ mod tests {
         };
         assert_eq!(
             format_type_aware_summary(&clean),
-            "Type-aware refinement: 1 candidate, 1 confirmed use, 0 retained findings"
+            "Type-aware refinement: 1 candidate, 1 confirmed use, 0 preserved contracts, \
+             0 candidates without static references (0 guarded fixes), 0 unresolved findings, \
+             0 abstained findings"
         );
 
         let retained = fallow_types::envelope::TypeAwareMeta {
-            candidate_count: 2,
+            candidate_count: 3,
             confirmed_used_count: 1,
+            no_static_references_count: 1,
+            fix_eligible_count: 1,
             unresolved_count: 1,
             ..fallow_types::envelope::TypeAwareMeta::default()
         };
         assert_eq!(
             format_type_aware_summary(&retained),
-            "Type-aware refinement: 2 candidates, 1 confirmed use, 1 retained finding"
+            "Type-aware refinement: 3 candidates, 1 confirmed use, 0 preserved contracts, \
+             1 candidate without static references (1 guarded fix), 1 unresolved finding, \
+             0 abstained findings"
         );
 
         let abstained = fallow_types::envelope::TypeAwareMeta {
             candidate_count: 2,
-            unresolved_count: 1,
+            contract_preserved_count: 1,
             abstained_count: 1,
             ..fallow_types::envelope::TypeAwareMeta::default()
         };
         assert_eq!(
             format_type_aware_summary(&abstained),
-            "Type-aware refinement: 2 candidates, 0 confirmed uses, 2 retained findings (1 abstention)"
+            "Type-aware refinement: 2 candidates, 0 confirmed uses, 1 preserved contract, \
+             0 candidates without static references (0 guarded fixes), 0 unresolved findings, \
+             1 abstained finding"
         );
     }
 

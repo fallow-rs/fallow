@@ -30,6 +30,7 @@ interface ConfigProperty {
   readonly markdownDescription?: string;
   readonly scope?: string;
   readonly enum?: readonly string[];
+  readonly enumDescriptions?: readonly string[];
   readonly default?: unknown;
 }
 
@@ -124,9 +125,7 @@ describe("package.json view title menus", () => {
   });
 
   it("contributes team-shareable muted diagnostic categories as resource settings", () => {
-    const setting = pkg.contributes.configuration.properties[
-      "fallow.diagnostics.mutedCategories"
-    ];
+    const setting = pkg.contributes.configuration.properties["fallow.diagnostics.mutedCategories"];
 
     expect(setting?.default).toEqual([]);
     expect(setting?.scope).toBe("resource");
@@ -149,10 +148,20 @@ describe("package.json binary download settings", () => {
   });
 });
 
+describe("package.json type-aware settings", () => {
+  it("explains both type-aware completeness modes in the settings UI", () => {
+    const setting = pkg.contributes.configuration.properties["fallow.typeAware.require"];
+
+    expect(setting?.enum).toEqual(["best-effort", "complete"]);
+    expect(setting?.enumDescriptions).toHaveLength(setting?.enum?.length ?? 0);
+    expect(setting?.enumDescriptions?.[0]).toContain("advisory");
+    expect(setting?.enumDescriptions?.[1]).toContain("fail");
+  });
+});
+
 describe("package.json remote config trust setting", () => {
   it("keeps remote config trust machine-controlled", () => {
-    const setting =
-      pkg.contributes.configuration.properties["fallow.allowRemoteExtends"];
+    const setting = pkg.contributes.configuration.properties["fallow.allowRemoteExtends"];
 
     expect(setting?.default).toBe(false);
     expect(setting?.scope).toBe("machine");

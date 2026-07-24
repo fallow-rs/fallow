@@ -19,9 +19,6 @@
 //! See `.plans/issue-477-signal-handlers.md` for the design rationale and
 //! `crates/lsp/src/main.rs` for the LSP-side cooperative cancellation.
 
-pub mod registry;
-pub mod scoped_child;
-
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -30,7 +27,13 @@ mod windows;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub use scoped_child::ScopedChild;
+pub use fallow_process::ScopedChild;
+
+/// Compatibility namespace for existing CLI subprocess call sites. The
+/// implementation is owned by the lower `fallow-process` crate.
+pub mod scoped_child {
+    pub use fallow_process::{output, status};
+}
 
 /// True once a termination signal has been observed.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -131,7 +134,7 @@ fn platform_install() -> std::io::Result<()> {
 /// Invoked by the platform-specific handler thread.
 fn handle_signal(exit_code: i32) {
     SHUTDOWN.store(true, Ordering::SeqCst);
-    registry::drain_and_kill();
+    fallow_process::drain_and_kill();
     if GRACEFUL.load(Ordering::SeqCst) {
         return;
     }

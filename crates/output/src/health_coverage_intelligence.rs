@@ -16,7 +16,7 @@ pub enum CoverageIntelligenceSchemaVersion {
 }
 
 /// Headline verdict for the combined coverage-intelligence report.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageIntelligenceVerdict {
@@ -50,7 +50,9 @@ impl fmt::Display for CoverageIntelligenceVerdict {
 }
 
 /// Ordered evidence signals behind a coverage-intelligence finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageIntelligenceSignal {
@@ -91,7 +93,7 @@ impl fmt::Display for CoverageIntelligenceSignal {
 }
 
 /// Recommended action family for a combined finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageIntelligenceRecommendation {
@@ -120,7 +122,9 @@ impl fmt::Display for CoverageIntelligenceRecommendation {
 }
 
 /// Confidence in the joined evidence and resulting recommendation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageIntelligenceConfidence {

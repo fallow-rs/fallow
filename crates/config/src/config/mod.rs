@@ -171,6 +171,15 @@ pub enum TypeAwareRequire {
     Complete,
 }
 
+impl From<TypeAwareRequire> for fallow_types::semantic::SemanticCompletenessRequirement {
+    fn from(value: TypeAwareRequire) -> Self {
+        match value {
+            TypeAwareRequire::BestEffort => Self::BestEffort,
+            TypeAwareRequire::Complete => Self::Complete,
+        }
+    }
+}
+
 /// Shared opt-in configuration for TypeScript semantic analysis.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

@@ -118,7 +118,8 @@ vi.mock("../src/binary-utils.js", () => ({
       ? { command: mockBinaryResolution.localBinary, args: [] }
       : null,
   findBinaryInPath: () => mockBinaryResolution.pathBinary,
-  resolveConfiguredBinaryPath: (configured: string) => mockBinaryResolution.configuredBinary ?? configured,
+  resolveConfiguredBinaryPath: (configured: string) =>
+    mockBinaryResolution.configuredBinary ?? configured,
 }));
 
 vi.mock("../src/download.js", () => ({
@@ -237,6 +238,42 @@ describe("createInitializationOptions", () => {
     };
 
     expect(createInitializationOptions().typeAware).toEqual(mockTypeAwareSettings);
+  });
+
+  it("disables type-aware LSP settings for a known old binary", () => {
+    mockTypeAwareSettings = {
+      enabled: true,
+      projects: ["tsconfig.app.json"],
+      require: "complete",
+    };
+
+    expect(createInitializationOptions("3.8.1").typeAware).toEqual({
+      ...mockTypeAwareSettings,
+      enabled: false,
+    });
+  });
+
+  it("disables type-aware LSP settings when the selected binary cannot be verified", () => {
+    mockTypeAwareSettings = {
+      enabled: true,
+      projects: ["tsconfig.app.json"],
+      require: "complete",
+    };
+
+    expect(createInitializationOptions(null).typeAware).toEqual({
+      ...mockTypeAwareSettings,
+      enabled: false,
+    });
+  });
+
+  it("forwards type-aware LSP settings at the capability floor", () => {
+    mockTypeAwareSettings = {
+      enabled: true,
+      projects: ["tsconfig.app.json"],
+      require: "complete",
+    };
+
+    expect(createInitializationOptions("3.8.2").typeAware).toEqual(mockTypeAwareSettings);
   });
 
   it("forwards the remote config trust opt-in to fallow-lsp", () => {

@@ -137,7 +137,7 @@ const generateAgentDocs = (stagingRoot) => {
 };
 
 const generateNapiTypes = (stagingRoot) => {
-  run("node", ["crates/napi/scripts/write-dts.mjs"], {
+  run("node", ["crates/napi/scripts/write-dts-entry.mjs"], {
     env: { FALLOW_GENERATION_OUTPUT_ROOT: stagingRoot },
     stdio: "inherit",
   });

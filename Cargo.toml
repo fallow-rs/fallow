@@ -21,6 +21,7 @@ fallow-extract = { version = "3.8.1", path = "crates/extract" }
 fallow-engine = { version = "3.8.1", path = "crates/engine" }
 fallow-graph = { version = "3.8.1", path = "crates/graph" }
 fallow-output = { version = "3.8.1", path = "crates/output" }
+fallow-process = { version = "3.8.1", path = "crates/process" }
 fallow-security = { version = "3.8.1", path = "crates/security" }
 fallow-types = { version = "3.8.1", path = "crates/types" }
 

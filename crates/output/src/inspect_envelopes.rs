@@ -155,6 +155,27 @@ impl InspectEvidenceSection {
     }
 
     #[must_use]
+    pub fn semantic(
+        scope: InspectEvidenceScope,
+        status: fallow_types::semantic::SemanticCompleteness,
+        data: serde_json::Value,
+    ) -> Self {
+        let status = match status {
+            fallow_types::semantic::SemanticCompleteness::Complete => InspectSectionStatus::Ok,
+            fallow_types::semantic::SemanticCompleteness::Partial => InspectSectionStatus::Partial,
+            fallow_types::semantic::SemanticCompleteness::Unavailable => {
+                InspectSectionStatus::Unavailable
+            }
+        };
+        Self {
+            status,
+            scope,
+            message: None,
+            data: Some(data),
+        }
+    }
+
+    #[must_use]
     pub fn error(scope: InspectEvidenceScope, message: String) -> Self {
         Self {
             status: InspectSectionStatus::Error,
@@ -195,6 +216,7 @@ pub fn serialize_inspect_json_output(
 #[serde(rename_all = "snake_case")]
 pub enum InspectSectionStatus {
     Ok,
+    Partial,
     Unavailable,
     Error,
 }
@@ -285,7 +307,7 @@ mod tests {
             warnings: Vec::new(),
             meta: Some(fallow_types::envelope::Meta {
                 type_aware: Some(fallow_types::envelope::TypeAwareMeta {
-                    protocol_version: 3,
+                    protocol_version: 5,
                     backend: "typescript-go".to_string(),
                     ..fallow_types::envelope::TypeAwareMeta::default()
                 }),
@@ -302,7 +324,7 @@ mod tests {
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-inspect"
         );
-        assert_eq!(value["_meta"]["type_aware"]["protocol_version"], 3);
+        assert_eq!(value["_meta"]["type_aware"]["protocol_version"], 5);
         assert_eq!(value["_meta"]["type_aware"]["backend"], "typescript-go");
         assert!(value["evidence"].get("churn").is_none());
     }

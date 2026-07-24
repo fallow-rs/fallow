@@ -10,7 +10,7 @@ use crate::tools::run_fallow;
 #[cfg(any(unix, windows))]
 use crate::tools::run_fallow_with_timeout;
 #[cfg(unix)]
-use crate::tools::{run_fallow_with_output_limit, run_fallow_with_top_level_warnings};
+use crate::tools::{run_fallow_with_output_limit, run_fallow_with_top_level_warnings, run_tool};
 
 use super::super::resolve_binary;
 
@@ -239,6 +239,96 @@ async fn run_fallow_exit_code_1_treated_as_success_with_issues() {
     assert_eq!(result.is_error, Some(false));
     let text = extract_text(&result);
     assert!(text.contains("issues"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn semantic_complete_requirement_marks_nested_incomplete_analysis_as_an_error() {
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &[
+            "-c".to_string(),
+            "echo '{\"results\":{\"unused_exports\":[]},\"_meta\":{\"type_aware\":{\"identity\":{\"completeness\":\"partial\"}}}}'; exit 1"
+                .to_string(),
+            "--type-aware-require".to_string(),
+            "complete".to_string(),
+        ],
+    )
+    .await
+    .expect("focused semantic gate should stay a tool result");
+
+    assert_eq!(result.is_error, Some(true));
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("semantic JSON evidence");
+    assert_eq!(
+        body["_meta"]["type_aware"]["identity"]["completeness"],
+        "partial"
+    );
+    assert!(
+        body.get("_meta").is_some(),
+        "semantic metadata was discarded"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn complete_semantic_analysis_with_findings_keeps_exit_code_1_as_success() {
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &[
+            "-c".to_string(),
+            "echo '{\"results\":{\"unused_exports\":[{\"name\":\"unused\"}]},\"_meta\":{\"type_aware\":{\"identity\":{\"completeness\":\"complete\"}}}}'; exit 1"
+                .to_string(),
+            "--type-aware-require".to_string(),
+            "complete".to_string(),
+        ],
+    )
+    .await
+    .expect("ordinary findings should stay a successful tool result");
+
+    assert_eq!(result.is_error, Some(false));
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("analysis JSON evidence");
+    assert_eq!(
+        body["_meta"]["type_aware"]["identity"]["completeness"],
+        "complete"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn complete_requirement_rejects_mixed_semantic_sections_and_query_statuses() {
+    let result = run_tool(
+        "/bin/sh",
+        "inspect_target",
+        &[
+            "-c".to_string(),
+            "echo '{\"evidence\":{\"semantic_trace\":{\"status\":\"ok\",\"data\":{\"identity\":{\"completeness\":\"complete\"},\"status\":\"complete\"}},\"api_surface\":{\"status\":\"ok\",\"data\":{\"identity\":{\"completeness\":\"partial\"},\"status\":\"partial\"}}},\"_meta\":{\"type_aware\":{\"protocol_version\":5,\"queries\":[{\"status\":\"complete\"},{\"status\":\"partial\"}]}}}'; exit 1"
+                .to_string(),
+            "--type-aware-require".to_string(),
+            "complete".to_string(),
+        ],
+    )
+    .await
+    .expect("mixed semantic evidence should stay a tool result");
+
+    assert_eq!(result.is_error, Some(true));
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("semantic JSON evidence");
+    assert_eq!(
+        body["evidence"]["semantic_trace"]["data"]["identity"]["completeness"],
+        "complete"
+    );
+    assert_eq!(
+        body["evidence"]["api_surface"]["data"]["identity"]["completeness"],
+        "partial"
+    );
+    assert_eq!(
+        body["_meta"]["type_aware"]["queries"][1]["status"],
+        "partial"
+    );
 }
 
 #[cfg(unix)]

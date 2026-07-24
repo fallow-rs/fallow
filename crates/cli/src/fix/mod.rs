@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
 
 mod catalog;
+mod class_members;
 mod config;
 mod deps;
 mod enum_helpers;
@@ -21,12 +22,57 @@ use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
+    quiet: bool,
 ) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
-    let output_struct =
-        fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-            .analyze_dead_code_with_artifacts(false, false)
-            .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
-    Ok((output_struct.results, output_struct.file_hashes))
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let output_struct = session
+        .analyze_dead_code_with_artifacts(false, false)
+        .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
+    let mut results = output_struct.results;
+    if config.type_aware.enabled {
+        let projects = config
+            .type_aware
+            .projects
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        let outcome = fallow_api::refine_type_aware_results(
+            &config.root,
+            &mut results,
+            &projects,
+            &[],
+            true,
+            false,
+            false,
+        )
+        .map_err(|error| {
+            crate::error::emit_error(&format!("Type-aware analysis failed: {error}"), 2, output)
+        })?;
+        if let Some(outcome) = outcome {
+            if !quiet {
+                for warning in &outcome.type_aware.warnings {
+                    eprintln!("Type-aware: {warning}");
+                }
+            }
+            let incomplete = outcome
+                .type_aware
+                .meta
+                .identity
+                .as_ref()
+                .is_some_and(|identity| {
+                    identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
+                });
+            if config.type_aware.require == fallow_config::TypeAwareRequire::Complete && incomplete
+            {
+                return Err(crate::error::emit_error(
+                    "Type-aware completeness is required, but at least one fix candidate was retained because semantic evidence was incomplete.",
+                    2,
+                    output,
+                ));
+            }
+        }
+    }
+    Ok((results, output_struct.file_hashes))
 }
 
 pub struct FixOptions<'a> {
@@ -46,6 +92,9 @@ pub struct FixOptions<'a> {
     /// entry; source-file fixes proceed normally. Honored by
     /// `fix::config::apply_config_fixes`.
     pub no_create_config: bool,
+    pub type_aware: bool,
+    pub type_aware_projects: &'a [PathBuf],
+    pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
 }
 
 pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
@@ -55,7 +104,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         return crate::error::emit_error(msg, 2, opts.output);
     }
 
-    let config = match crate::runtime_support::load_config(
+    let mut config = match crate::runtime_support::load_config(
         opts.root,
         opts.config_path,
         crate::runtime_support::LoadConfigArgs {
@@ -70,8 +119,17 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
+    if let Err(code) = crate::check::apply_type_aware_overrides_from(
+        opts.output,
+        opts.type_aware,
+        opts.type_aware_projects,
+        opts.type_aware_require,
+        &mut config,
+    ) {
+        return code;
+    }
 
-    let (results, file_hashes) = match run_analyze(&config, opts.output) {
+    let (results, file_hashes) = match run_analyze(&config, opts.output, opts.quiet) {
         Ok(r) => r,
         Err(code) => return code,
     };
@@ -174,6 +232,16 @@ fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
         plan,
         fixes,
     } = input;
+    class_members::apply_class_member_fixes(class_members::ClassMemberFixInput {
+        root: opts.root,
+        findings: &results.unused_class_members,
+        hashes: file_hashes,
+        plan: &mut *plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut *fixes,
+    });
+
     apply_unused_export_fixes(&mut FixApplicationInput {
         root: opts.root,
         results,

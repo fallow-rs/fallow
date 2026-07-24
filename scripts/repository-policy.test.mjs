@@ -82,7 +82,7 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
 });
 
 test("root Node API overview follows the published declarations", () => {
-  const declarations = readFileSync("crates/napi/index.d.ts", "utf8");
+  const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
   const readme = readFileSync("README.md", "utf8");
   const missing = missingDocumentedNodeFunctions(declarations, readme);
 
@@ -95,6 +95,18 @@ test("root Node API overview follows the published declarations", () => {
   const firstFunction = exportedNodeFunctions(declarations)[0];
   const neuteredReadme = readme.replace(`\`${firstFunction}\``, "`removedFunction`");
   assert.deepEqual(missingDocumentedNodeFunctions(declarations, neuteredReadme), [firstFunction]);
+});
+
+test("NAPI declarations have one canonical public source", () => {
+  const packageJson = readJson("crates/napi/package.json");
+  const entry = readFileSync("crates/napi/index.d.ts", "utf8");
+  const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
+
+  assert.equal(packageJson.types, "index.d.ts");
+  assert.ok(packageJson.files.includes("types"));
+  assert.equal(entry, 'export * from "./types/index";\n');
+  assert.match(declarations, /export interface AnalysisOptions/u);
+  assert.match(declarations, /export function detectDeadCode/u);
 });
 
 test("published Node packages and Action smoke tests use Node 22", () => {
@@ -123,6 +135,24 @@ test("root repository tooling declares its exact Node floor", () => {
   assert.equal(rootPackage.engines.node, ">=22.12.0");
   assert.equal(rootLock.packages[""].engines.node, ">=22.12.0");
   assert.match(contributing, /Repository tooling requires Node\.js 22\.12\.0 or later\./);
+});
+
+test("type-aware sidecar version matches the Rust workspace", () => {
+  const cargo = readFileSync("Cargo.toml", "utf8");
+  const workspaceVersion = cargo.match(/^\[workspace\.package\]\nversion = "([^"]+)"/mu)?.[1];
+  assert.ok(workspaceVersion, "Cargo.toml must declare workspace.package.version");
+
+  const sidecarPackage = readJson("tools/type-aware-sidecar/package.json");
+  const sidecarLock = readJson("tools/type-aware-sidecar/package-lock.json");
+  const protocol = readFileSync("tools/type-aware-sidecar/src/protocol.mjs", "utf8");
+
+  assert.equal(sidecarPackage.version, workspaceVersion);
+  assert.equal(sidecarLock.version, workspaceVersion);
+  assert.equal(sidecarLock.packages[""].version, workspaceVersion);
+  assert.match(
+    protocol,
+    new RegExp(`const SIDECAR_VERSION = "${workspaceVersion.replaceAll(".", "\\.")}";`, "u"),
+  );
 });
 
 test("CONTRIBUTING uses the root contract generation commands", () => {

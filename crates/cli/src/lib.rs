@@ -74,14 +74,12 @@ mod runtime_support;
 mod schema;
 mod security;
 mod security_help;
-mod semantic_queries;
 mod setup_hooks;
 mod signal;
 mod suppressions;
 mod task_matrix;
 mod telemetry;
 mod trace_chain;
-mod type_aware;
 mod update_check;
 use fallow_engine::validate;
 use fallow_engine::vital_signs;
@@ -181,6 +179,7 @@ Use --only/--skip to select specific analyses.
 
 When the agent is about to...
   delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
+  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export>
   delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
   commit or open a PR                      fallow audit --base <ref>
   prioritize refactoring                   fallow health --hotspots --targets
@@ -3001,7 +3000,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             no_open,
             viz_format,
         } => dispatch_viz(dispatch, viz_output.as_deref(), no_open, viz_format),
-        Command::Report { from } => cli_report::run_report(&from, output, root),
+        Command::Report { from } => {
+            cli_report::run_report(&from, output, root, cli.config.as_deref())
+        }
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
         Command::License { subcommand } => {
@@ -3021,31 +3022,62 @@ fn dispatch_type_aware_command(
 ) -> ExitCode {
     match subcommand {
         TypeAwareCli::Status => {
-            let status = type_aware::status(dispatch.root);
+            let status = fallow_api::type_aware_status(dispatch.root);
             match dispatch.output {
-                fallow_config::OutputFormat::Json => match dispatch.json_style.serialize(&status) {
-                    Ok(json) => {
-                        crate::report::sink::outln!("{json}");
-                        ExitCode::SUCCESS
+                fallow_config::OutputFormat::Json => {
+                    let output = type_aware_status_output(dispatch.root, status);
+                    match fallow_output::serialize_type_aware_status_json_output(
+                        output,
+                        crate::output_runtime::current_root_envelope_mode(),
+                    ) {
+                        Ok(value) => match dispatch.json_style.serialize(&value) {
+                            Ok(json) => {
+                                crate::report::sink::outln!("{json}");
+                                ExitCode::SUCCESS
+                            }
+                            Err(error) => emit_error(
+                                &format!("failed to serialize type-aware status: {error}"),
+                                2,
+                                dispatch.output,
+                            ),
+                        },
+                        Err(error) => emit_error(
+                            &format!("failed to build type-aware status: {error}"),
+                            2,
+                            dispatch.output,
+                        ),
                     }
-                    Err(error) => emit_error(
-                        &format!("failed to serialize type-aware status: {error}"),
-                        2,
-                        dispatch.output,
-                    ),
-                },
+                }
                 fallow_config::OutputFormat::Human => {
                     if status.available {
                         crate::report::sink::outln!(
-                            "Type-aware companion: available ({}, protocol {}, TypeScript {})",
-                            status.package_version.as_deref().unwrap_or("unknown"),
-                            status.protocol_version,
-                            status.backend_version.as_deref().unwrap_or("unknown"),
+                            "{}",
+                            report::human_status_line(
+                                report::HumanStatus::Ok,
+                                format_args!(
+                                    "Type-aware companion: available ({}, protocol {}, TypeScript {})",
+                                    status.package_version.as_deref().unwrap_or("unknown"),
+                                    status.protocol_version,
+                                    status.backend_version.as_deref().unwrap_or("unknown"),
+                                )
+                            )
                         );
                     } else {
-                        crate::report::sink::outln!("Type-aware companion: unavailable");
+                        crate::report::sink::outln!(
+                            "{}",
+                            report::human_status_line(
+                                report::HumanStatus::Inactive,
+                                "Type-aware companion: unavailable"
+                            )
+                        );
                         if let Some(remediation) = status.remediation {
-                            crate::report::sink::outln!("Action: {remediation}");
+                            crate::report::sink::outln!(
+                                "{}",
+                                report::human_status_line(
+                                    report::HumanStatus::Warning,
+                                    format_args!("Action: {remediation}")
+                                )
+                            );
                         }
                     }
                     ExitCode::SUCCESS
@@ -3057,6 +3089,48 @@ fn dispatch_type_aware_command(
                 ),
             }
         }
+    }
+}
+
+fn type_aware_status_output(
+    root: &Path,
+    status: fallow_api::TypeAwareStatus,
+) -> fallow_output::TypeAwareStatusOutput {
+    let companion_path = status.companion_path.as_deref().map(|path| {
+        if let Ok(relative) = path.strip_prefix(root)
+            && !relative.as_os_str().is_empty()
+        {
+            relative.to_string_lossy().replace('\\', "/")
+        } else {
+            path.file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned()
+        }
+    });
+    let remediation = status.remediation.map(|message| {
+        let without_root = message.replace(root.to_string_lossy().as_ref(), ".");
+        status.companion_path.as_deref().map_or_else(
+            || without_root.clone(),
+            |path| {
+                without_root.replace(
+                    path.to_string_lossy().as_ref(),
+                    companion_path.as_deref().unwrap_or("fallow-type-aware"),
+                )
+            },
+        )
+    });
+    fallow_output::TypeAwareStatusOutput {
+        schema_version: fallow_types::envelope::SchemaVersion(report::SCHEMA_VERSION),
+        version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        available: status.available,
+        discovery_source: status.discovery_source.map(str::to_string),
+        companion_path,
+        package_version: status.package_version,
+        protocol_version: status.protocol_version,
+        backend_family: status.backend_family,
+        backend_version: status.backend_version,
+        remediation,
     }
 }
 
@@ -4475,6 +4549,9 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
         yes: args.yes,
         production,
         no_create_config: args.no_create_config,
+        type_aware: cli.type_aware,
+        type_aware_projects: &cli.type_aware_project,
+        type_aware_require: cli.type_aware_require.map(Into::into),
     })
 }
 
@@ -4577,6 +4654,23 @@ fn validate_type_aware_check_options(
     if args.trace_opts.symbol_impact.is_some() && !args.type_aware {
         return Some(emit_error(
             "--symbol-impact requires --type-aware",
+            2,
+            output,
+        ));
+    }
+    let focused_output = args.trace_opts.trace_export.is_some()
+        || args.trace_opts.trace_file.is_some()
+        || args.trace_opts.trace_dependency.is_some()
+        || args.trace_opts.impact_closure.is_some()
+        || args.trace_opts.symbol_impact.is_some();
+    if focused_output
+        && !matches!(
+            output,
+            fallow_config::OutputFormat::Human | fallow_config::OutputFormat::Json
+        )
+    {
+        return Some(emit_error(
+            "focused trace and impact queries support human and JSON output",
             2,
             output,
         ));
@@ -5859,6 +5953,32 @@ mod tests {
             panic!("dead-code should parse as the check command");
         };
         assert!(unused_class_members);
+    }
+
+    #[test]
+    fn type_aware_status_output_hides_host_paths() {
+        let root = Path::new("/private/work/project");
+        let output = type_aware_status_output(
+            root,
+            fallow_api::TypeAwareStatus {
+                available: false,
+                discovery_source: Some("environment-override"),
+                companion_path: Some(PathBuf::from("/private/tools/fallow-type-aware")),
+                package_version: None,
+                protocol_version: 5,
+                backend_family: None,
+                backend_version: None,
+                remediation: Some(
+                    "failed to launch /private/tools/fallow-type-aware from /private/work/project"
+                        .to_string(),
+                ),
+            },
+        );
+
+        assert_eq!(output.companion_path.as_deref(), Some("fallow-type-aware"));
+        let remediation = output.remediation.expect("remediation");
+        assert!(!remediation.contains("/private/"));
+        assert!(remediation.contains("fallow-type-aware"));
     }
 
     #[test]

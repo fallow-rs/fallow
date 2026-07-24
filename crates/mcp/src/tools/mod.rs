@@ -15,7 +15,6 @@ mod health;
 mod impact;
 mod inspect_target;
 mod list_boundaries;
-mod process_tree;
 mod project_info;
 mod recommend;
 mod security;
@@ -76,7 +75,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
-use process_tree::{ProcessTree, cleanup_tokio_child, configure_tokio_command};
+use fallow_process::{ProcessTree, cleanup_tokio_child, configure_tokio_command};
 
 /// Default subprocess timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -261,6 +260,7 @@ async fn spawn_fallow(
     max_output_bytes: usize,
     tool: Option<&'static str>,
 ) -> Result<CallToolResult, McpError> {
+    let type_aware_complete_required = type_aware_complete_required(args);
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -314,6 +314,7 @@ async fn spawn_fallow(
         process_tree,
         stdout_task,
         stderr_task,
+        exit_one_is_error: type_aware_complete_required,
     };
     complete_fallow_process(binary, process, timeout, max_output_bytes).await
 }
@@ -323,6 +324,7 @@ struct RunningFallowProcess {
     process_tree: ProcessTree,
     stdout_task: tokio::task::JoinHandle<io::Result<CapturedPipe>>,
     stderr_task: tokio::task::JoinHandle<io::Result<CapturedPipe>>,
+    exit_one_is_error: bool,
 }
 
 async fn complete_fallow_process(
@@ -336,6 +338,7 @@ async fn complete_fallow_process(
         process_tree,
         mut stdout_task,
         mut stderr_task,
+        exit_one_is_error,
     } = process;
     let deadline = tokio::time::Instant::now() + timeout;
 
@@ -414,17 +417,7 @@ async fn complete_fallow_process(
         }
     };
     if !cleanup_errors.is_empty() {
-        let error_json = serde_json::json!({
-            "error": true,
-            "message": "failed to clean completed fallow subprocess tree",
-            "exit_code": 2,
-            "code": "FALLOW_MCP_SUBPROCESS_CLEANUP",
-            "context": "subprocess",
-            "cleanup_errors": cleanup_errors,
-        });
-        return Ok(CallToolResult::error(vec![ContentBlock::text(
-            error_json.to_string(),
-        )]));
+        return Ok(cleanup_failure_result(&cleanup_errors));
     }
 
     let output = CapturedOutput {
@@ -432,10 +425,30 @@ async fn complete_fallow_process(
         stdout,
         stderr,
     };
-    Ok(captured_output_result(&output, max_output_bytes))
+    Ok(captured_output_result(
+        &output,
+        max_output_bytes,
+        exit_one_is_error,
+    ))
 }
 
-fn captured_output_result(output: &CapturedOutput, max_output_bytes: usize) -> CallToolResult {
+fn cleanup_failure_result(cleanup_errors: &[String]) -> CallToolResult {
+    let error_json = serde_json::json!({
+        "error": true,
+        "message": "failed to clean completed fallow subprocess tree",
+        "exit_code": 2,
+        "code": "FALLOW_MCP_SUBPROCESS_CLEANUP",
+        "context": "subprocess",
+        "cleanup_errors": cleanup_errors,
+    });
+    CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
+}
+
+fn captured_output_result(
+    output: &CapturedOutput,
+    max_output_bytes: usize,
+    exit_one_is_error: bool,
+) -> CallToolResult {
     if output.stdout.exceeded || output.stderr.exceeded {
         return output_limit_result(max_output_bytes);
     }
@@ -444,7 +457,12 @@ fn captured_output_result(output: &CapturedOutput, max_output_bytes: usize) -> C
     let stderr = String::from_utf8_lossy(&output.stderr.bytes);
 
     if !output.status.success() {
-        return non_success_result(output.status.code().unwrap_or(-1), &stdout, &stderr);
+        return non_success_result(
+            output.status.code().unwrap_or(-1),
+            &stdout,
+            &stderr,
+            exit_one_is_error,
+        );
     }
 
     if stdout.is_empty() {
@@ -520,11 +538,33 @@ fn subprocess_error_with_cleanup(
     )
 }
 
-/// Translate a non-zero CLI exit into the MCP result envelope. Exit 1 (issues
-/// found) is a success carrying the JSON; structured stdout passes through as an
-/// error; otherwise an error JSON is synthesized from stderr.
-fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolResult {
+/// Translate a non-zero CLI exit into the MCP result envelope. Exit 1 normally
+/// carries issue JSON as a success, but an explicitly incomplete type-aware
+/// result is an error when the caller required complete evidence.
+fn non_success_result(
+    exit_code: i32,
+    stdout: &str,
+    stderr: &str,
+    type_aware_complete_required: bool,
+) -> CallToolResult {
     if exit_code == 1 {
+        let complete_required =
+            type_aware_complete_required || type_aware_output_requires_complete(stdout);
+        if complete_required && type_aware_evidence_is_incomplete(stdout) {
+            let text = if stdout.is_empty() {
+                serde_json::json!({
+                    "error": true,
+                    "message": "type-aware completeness was required, but the semantic query was incomplete",
+                    "exit_code": 1,
+                    "code": "FALLOW_TYPE_AWARE_INCOMPLETE",
+                    "context": "analysis.typeAware",
+                })
+                .to_string()
+            } else {
+                stdout.to_string()
+            };
+            return CallToolResult::error(vec![ContentBlock::text(text)]);
+        }
         let text = if stdout.is_empty() {
             "{}".to_string()
         } else {
@@ -550,6 +590,92 @@ fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolRes
     });
 
     CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
+}
+
+fn type_aware_complete_required(args: &[String]) -> bool {
+    args.windows(2)
+        .any(|pair| pair == ["--type-aware-require", "complete"])
+}
+
+fn type_aware_output_requires_complete(stdout: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return false;
+    };
+    contains_complete_requirement(&value)
+}
+
+fn contains_complete_requirement(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.get("required_completeness")
+                .and_then(serde_json::Value::as_str)
+                == Some("complete")
+                || map.values().any(contains_complete_requirement)
+        }
+        serde_json::Value::Array(values) => values.iter().any(contains_complete_requirement),
+        _ => false,
+    }
+}
+
+fn type_aware_evidence_is_incomplete(stdout: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return true;
+    };
+    semantic_evidence_completeness(&value).is_none_or(|complete| !complete)
+}
+
+fn semantic_evidence_completeness(value: &serde_json::Value) -> Option<bool> {
+    let mut signals = Vec::new();
+    collect_semantic_completeness(value, &mut signals);
+    (!signals.is_empty()).then(|| signals.into_iter().all(std::convert::identity))
+}
+
+fn collect_semantic_completeness(value: &serde_json::Value, signals: &mut Vec<bool>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(completeness) = map
+                .get("identity")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|identity| identity.get("completeness"))
+                .and_then(serde_json::Value::as_str)
+            {
+                signals.push(completeness == "complete");
+            }
+            if map.contains_key("identity")
+                && let Some(status) = map.get("status").and_then(serde_json::Value::as_str)
+            {
+                signals.push(status == "complete");
+            }
+            if map.contains_key("protocol_version")
+                && let Some(queries) = map.get("queries").and_then(serde_json::Value::as_array)
+            {
+                signals.extend(queries.iter().filter_map(|query| {
+                    query
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        .map(|status| status == "complete")
+                }));
+            }
+            for section_name in ["semantic_trace", "api_surface", "symbol_impact"] {
+                let Some(section) = map.get(section_name).and_then(serde_json::Value::as_object)
+                else {
+                    continue;
+                };
+                if let Some(status) = section.get("status").and_then(serde_json::Value::as_str) {
+                    signals.push(status == "ok");
+                }
+            }
+            for child in map.values() {
+                collect_semantic_completeness(child, signals);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                collect_semantic_completeness(child, signals);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn timeout_result(timeout: Duration, cleanup_errors: &[String]) -> CallToolResult {
@@ -633,4 +759,43 @@ fn ensure_top_level_warnings(result: CallToolResult) -> CallToolResult {
 
     let text = serde_json::to_string(&value).unwrap_or_else(|_| text.text.clone());
     CallToolResult::success(vec![ContentBlock::text(text)])
+}
+
+#[cfg(test)]
+mod completeness_tests {
+    use super::*;
+
+    #[test]
+    fn configured_complete_requirement_turns_incomplete_exit_one_into_error() {
+        let output = serde_json::json!({
+            "_meta": {
+                "type_aware": {
+                    "required_completeness": "complete",
+                    "identity": { "completeness": "partial" }
+                }
+            }
+        })
+        .to_string();
+
+        let result = non_success_result(1, &output, "", false);
+
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[test]
+    fn best_effort_incomplete_exit_one_remains_a_successful_finding_result() {
+        let output = serde_json::json!({
+            "_meta": {
+                "type_aware": {
+                    "required_completeness": "best-effort",
+                    "identity": { "completeness": "partial" }
+                }
+            }
+        })
+        .to_string();
+
+        let result = non_success_result(1, &output, "", false);
+
+        assert_eq!(result.is_error, Some(false));
+    }
 }

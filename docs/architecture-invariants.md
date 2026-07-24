@@ -19,6 +19,7 @@ The core crates are:
 | --- | --- |
 | `fallow-types` | Shared typed contracts, issue metadata, suppressions, and envelope data. |
 | `fallow-config` | Config loading and typed configuration. |
+| `fallow-process` | Shared child-process lifecycle and process-tree termination. |
 | `fallow-extract` | Parser-facing facts from source files. |
 | `fallow-graph` | Module graph, dependency traversal, cycles, and impact facts. |
 | `fallow-security` | Security matcher catalogue and candidate helpers. |
@@ -34,6 +35,8 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
 ## Dependency Rules
 
 - Foundation and analysis crates must not depend on protocol adapters.
+- `fallow-process` is an independent infrastructure foundation. It must not
+  depend on another workspace crate.
 - `fallow-core` is a backend implementation crate, not a supported embedder
   surface. `fallow-engine` owns the adapter boundary and is the only product
   crate that may depend on it directly.
@@ -43,6 +46,16 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
   `fallow-engine`, or `fallow-api`.
 - Analyzer logic belongs in the lowest crate that already owns the required
   facts. Do not put detector behavior in CLI, LSP, MCP, NAPI, or VS Code code.
+- `fallow-api` is the sole Rust owner of the optional TypeScript semantic
+  protocol, including request and response types, validation, conservative
+  reconciliation, binary discovery, and subprocess invocation.
+- Protocol adapters must not define semantic wire types, validate semantic
+  responses, reconcile semantic findings, or manage the semantic child
+  process. They may select options, call `fallow-api`, render the typed result,
+  and apply their surface-specific exit policy.
+- Shared child-process lifecycle behavior belongs in `fallow-process`; adapters
+  must not fork their own timeout, process-tree setup, termination, or cleanup
+  implementation.
 - Public contract crates should avoid CLI-only assumptions. A contract should
   still make sense for API, MCP, LSP, and NAPI consumers.
 

@@ -54,6 +54,7 @@ fallow-api = { workspace = true }
 fallow-engine = { workspace = true }
 fallow-config = { workspace = true }
 fallow-output = { workspace = true }
+fallow-process = { workspace = true }
 fallow-security = { workspace = true }
 fallow-types = { workspace = true }
 fallow-v8-coverage = { version = "3.8.1", path = "../v8-coverage" }
@@ -97,7 +98,6 @@ similar = { version = "3", default-features = false, features = ["text"] }
 schemars = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
-libc.workspace = true
 rustix = { workspace = true }
 signal-hook = { workspace = true }
 

@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 6,
   "canonical_candidate_key": {
     "algorithm": "sha256",
     "prefix": "tac_",
@@ -19,48 +19,58 @@
     "repo": "vitest-dev/vitest",
     "commit": "8fbfcb054a07410e03bd37e6682d15ef5b240ad8",
     "tracked_source_clean": true,
-    "dependency_installation": "none"
+    "dependency_environment": {
+      "dependency_installation": "ancestor-workspace",
+      "path_base": "fallow-workspace-root",
+      "dependency_root": ".",
+      "lockfile": "package-lock.json",
+      "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+      "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+    }
   },
   "artifacts": {
-    "fallow_sha256": "06847e8b1396dbd872f859ce9a57154a84176ec1dbe63119e68c42ea97b9bd16",
-    "sidecar_sha256": "dc8c0eb0f75917845de89e915800a8826adc4b7db0918ce0267e6dcfcde7117c",
+    "fallow_sha256": "af70b799276b45d33510312f0b6cbf13d0c01028afdbfe098518f14277b03df9",
+    "sidecar_sha256": "ead1db7705881cd5a51ee11ee9004a2e812608b1017bfa2767d8ad36172a7f3c",
     "source_runs": [
       {
         "mode": "baseline",
         "iteration": 0,
         "path": "target/type-aware-corpus/supplemental/vitest-baseline.json",
-        "normalized_sha256": "a47578e2f087f40ed128893f0454912bfbaadc62855e9a6ecf082ac8079b81f3"
+        "normalized_sha256": "ff63087dbe9b8a32509d2c149fc2fe7c89c1554fa5a77a0a9f538b5c9ed49ffb"
       },
       {
         "mode": "baseline",
         "iteration": 1,
         "path": "target/type-aware-corpus/supplemental/vitest-baseline-2.json",
-        "normalized_sha256": "a47578e2f087f40ed128893f0454912bfbaadc62855e9a6ecf082ac8079b81f3"
+        "normalized_sha256": "ff63087dbe9b8a32509d2c149fc2fe7c89c1554fa5a77a0a9f538b5c9ed49ffb"
       },
       {
         "mode": "refined",
         "iteration": 0,
         "path": "target/type-aware-corpus/supplemental/vitest-refined.json",
-        "normalized_sha256": "b8eab5a888a3afd1254b7d6397bb3b4eb9c0e12098826321435aaad1b29eb51f"
+        "normalized_sha256": "04f398f572bc967954e26c85beb3b39e8345b9e68a3600ec0bd5145f311cdbf8"
       },
       {
         "mode": "refined",
         "iteration": 1,
         "path": "target/type-aware-corpus/supplemental/vitest-refined-2.json",
-        "normalized_sha256": "b8eab5a888a3afd1254b7d6397bb3b4eb9c0e12098826321435aaad1b29eb51f"
+        "normalized_sha256": "04f398f572bc967954e26c85beb3b39e8345b9e68a3600ec0bd5145f311cdbf8"
       }
     ]
   },
   "result": {
     "baseline_candidates": 147,
-    "refined_candidates": 86,
-    "confirmed_used": 61,
-    "unresolved_retained": 65,
-    "abstained_retained": 21,
+    "refined_candidates": 85,
+    "confirmed_used": 62,
+    "contract_preserved": 0,
+    "no_static_references": 0,
+    "fix_eligible": 0,
+    "unresolved_retained": 20,
+    "abstained_retained": 65,
     "added_candidates": 0,
     "normalized_runs": 2,
     "deterministic": true,
-    "confirmed_candidate_set_sha256": "9d7c17711be63fbd91449431a4e78eca17352ea7c81d1e03617e5dbc7f76baf6",
+    "confirmed_candidate_set_sha256": "92615ed01a217cfb1491a6bb8e09a9dbffd75e90170bd771a8fd4e9a198294dc",
     "confirmed_candidate_keys": [
       "tac_03dbaef939f4c7fcb08b",
       "tac_062535fbc6e28ae77ba6",
@@ -98,6 +108,7 @@
       "tac_90da32a1aeb7d0025996",
       "tac_92bdbeb4105c1c147905",
       "tac_958808302a3355b9eadc",
+      "tac_9779f504249fbe9ebced",
       "tac_9e4fd557b497f974a148",
       "tac_a377ba23a0d4f3c356b9",
       "tac_a735b373014960315657",

@@ -372,25 +372,35 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
-        name: "symbol_trace",
+        name: "trace_symbol",
         kind: "trace",
-        description: "Trace exact TypeScript symbol references, namespaces, aliases, and re-export hops without surfacing compiler diagnostics",
+        description: "Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat semantic.references, semantic.status, and semantic.identity as the authoritative exact evidence. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface.",
         cli_command: Some(
             "fallow dead-code --type-aware --trace <file:export> --format json --quiet",
         ),
-        key_params: &["file", "export_name", "type_aware_projects"],
+        key_params: &[
+            "file",
+            "export_name",
+            "type_aware_projects",
+            "type_aware_require",
+        ],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
     },
     McpToolInfo {
         name: "symbol_impact",
-        kind: "trace",
-        description: "Return exact-symbol consumers, affected files, and targeted tests for a TypeScript export",
+        kind: "impact",
+        description: "Return advisory exact-symbol consumers, affected files, and targeted tests for a TypeScript export; not a substitute for tsc or Oxlint",
         cli_command: Some(
             "fallow dead-code --type-aware --symbol-impact <file:export> --format json --quiet",
         ),
-        key_params: &["file", "export_name", "type_aware_projects"],
+        key_params: &[
+            "file",
+            "export_name",
+            "type_aware_projects",
+            "type_aware_require",
+        ],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
@@ -442,8 +452,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
 /// surfaces.
 ///
 /// The three surfaces:
-/// - `api_runner`: the `fallow_api::run_*` entry point (the in-process Rust API
-///   that both the napi addon and the MCP server's in-process path build on).
+/// - `api_runner`: the `fallow_api::run_*` entry point.
 /// - `napi_export`: the `#[napi(js_name = ...)]` function in `crates/napi` (the
 ///   `@fallow/node` addon surface).
 /// - `mcp_tool`: a tool `name` in [`MCP_TOOLS`] (the MCP server surface).
@@ -456,15 +465,15 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
 ///
 /// This table is drift-tested from all three sides: [`MCP_TOOLS`] here (every
 /// tool appears in exactly one row), the `#[napi]` exports in `crates/napi`,
-/// and the public `run_*` re-exports in `crates/api`. It is a hand-authored
+/// and the public `run_*` entry points in `crates/api`. It is a hand-authored
 /// statement of product intent, not a generated artifact: each note is a claim
 /// the maintainer endorses.
 #[derive(Debug, Clone, Copy)]
 pub struct CapabilityParityRow {
     /// Human-readable capability name. Table key for readers; not a wire value.
     pub capability: &'static str,
-    /// `fallow_api::run_*` entry point, when the capability is a programmatic
-    /// runner.
+    /// `fallow_api::run_*` entry point, when the capability is programmatically
+    /// available.
     pub api_runner: Option<&'static str>,
     /// `#[napi(js_name = ...)]` export, when the addon exposes the capability.
     pub napi_export: Option<&'static str>,
@@ -613,20 +622,20 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
     },
     CapabilityParityRow {
         capability: "exact TypeScript symbol trace",
-        api_runner: None,
+        api_runner: Some("run_type_aware_symbol_trace"),
         napi_export: None,
-        mcp_tool: Some("symbol_trace"),
+        mcp_tool: Some("trace_symbol"),
         omission_note: Some(
-            "Dedicated type-aware symbol trace. MCP shells out to the CLI; type-aware dead-code refinement is available through run_dead_code and detectDeadCode, but neither surface exposes this dedicated trace query.",
+            "Dedicated type-aware symbol trace is available through the Rust API and MCP. No napi export exists.",
         ),
     },
     CapabilityParityRow {
         capability: "exact TypeScript symbol impact",
-        api_runner: None,
+        api_runner: Some("run_type_aware_symbol_impact"),
         napi_export: None,
         mcp_tool: Some("symbol_impact"),
         omission_note: Some(
-            "Dedicated type-aware symbol impact query. MCP shells out to the CLI; no dedicated run_* runner or napi export exists.",
+            "Dedicated type-aware symbol impact is available through the Rust API and MCP. No napi export exists.",
         ),
     },
     CapabilityParityRow {
@@ -882,6 +891,7 @@ mod tests {
         let allowed = [
             "analysis",
             "trace",
+            "impact",
             "fix",
             "introspection",
             "runtime-coverage",

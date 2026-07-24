@@ -32,7 +32,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"fix_apply".to_string()));
     assert!(names.contains(&"project_info".to_string()));
     assert!(names.contains(&"trace_export".to_string()));
-    assert!(names.contains(&"symbol_trace".to_string()));
+    assert!(names.contains(&"trace_symbol".to_string()));
     assert!(names.contains(&"symbol_impact".to_string()));
     assert!(names.contains(&"trace_file".to_string()));
     assert!(names.contains(&"impact_closure".to_string()));
@@ -72,7 +72,7 @@ fn read_only_tools_have_annotations() {
         "fix_preview",
         "project_info",
         "trace_export",
-        "symbol_trace",
+        "trace_symbol",
         "symbol_impact",
         "trace_file",
         "impact_closure",
@@ -155,7 +155,7 @@ fn open_world_hint_on_analysis_tools() {
         "fix_preview",
         "project_info",
         "trace_export",
-        "symbol_trace",
+        "trace_symbol",
         "symbol_impact",
         "trace_file",
         "impact_closure",

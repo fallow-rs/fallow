@@ -2,13 +2,15 @@ import path from "node:path";
 
 import { version as typescriptVersion } from "typescript";
 
+import { normalizePhaseTimings, normalizeSemanticResult } from "./response-normalization.mjs";
+
 const LEGACY_PROTOCOL_VERSION = 2;
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 5;
 const LEGACY_OPERATION = "class-member-uses";
 const BATCH_OPERATIONS = new Set(["batch", "semantic-queries"]);
-export const SIDECAR_VERSION = "3.8.0";
-export const BACKEND = "typescript-go";
-export const BACKEND_VERSION = typescriptVersion;
+const SIDECAR_VERSION = "3.8.1";
+const BACKEND = "typescript-go";
+const BACKEND_VERSION = typescriptVersion;
 
 export const createStatusResponse = () => ({
   package_version: SIDECAR_VERSION,
@@ -29,7 +31,15 @@ const BATCH_REQUEST_KEYS = new Set([
   "evidence_limit",
 ]);
 const SYMBOL_QUERY_KEYS = new Set(["id", "operation", "symbol"]);
-const GRAPH_QUERY_KEYS = new Set(["id", "operation", "entry_points", "include_cycles"]);
+const API_SURFACE_QUERY_KEYS = new Set([
+  "id",
+  "operation",
+  "entry_points",
+  "include_cycles",
+  "private_leak_candidates",
+]);
+const TYPE_COUPLING_QUERY_KEYS = new Set(["id", "operation", "entry_points", "include_cycles"]);
+const PRIVATE_LEAK_CANDIDATE_KEYS = new Set(["id", "path", "export_name", "type_name"]);
 const SYMBOL_KEYS = new Set([
   "path",
   "namespace",
@@ -55,7 +65,8 @@ const MAX_PROJECTS = 256;
 const MAX_CANDIDATES = 25_000;
 const MAX_QUERIES = 25_000;
 const MAX_GRAPH_QUERIES = 256;
-export const MAX_EVIDENCE_PER_RESULT = 40;
+const MAX_PRIVATE_LEAK_CANDIDATES = 25_000;
+const MAX_EVIDENCE_PER_RESULT = 40;
 const MAX_STRING_CHARS = 4_096;
 
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -191,6 +202,55 @@ const parseEntryPoints = (value, field, root) =>
     parseCandidatePath(entryPoint, `${field}[${index}]`, root),
   );
 
+const parsePrivateLeakCandidates = (value, field, root) => {
+  const candidates = requireBoundedArray(value ?? [], field, MAX_PRIVATE_LEAK_CANDIDATES).map(
+    (candidate, index) => {
+      const candidateField = `${field}[${index}]`;
+      requireObject(candidate, candidateField);
+      requireExactKeys(candidate, PRIVATE_LEAK_CANDIDATE_KEYS, candidateField);
+      const { candidatePath, absolutePath } = parseCandidatePath(
+        candidate.path,
+        `${candidateField}.path`,
+        root,
+      );
+      return {
+        id: requireInteger(candidate.id, `${candidateField}.id`, 0),
+        path: candidatePath,
+        absolutePath,
+        exportName: requireString(candidate.export_name, `${candidateField}.export_name`),
+        typeName: requireString(candidate.type_name, `${candidateField}.type_name`),
+      };
+    },
+  );
+  requireUniqueCandidateIds(candidates);
+  return candidates;
+};
+
+const queryKeys = (operation) => {
+  if (SYMBOL_OPERATIONS.has(operation)) return SYMBOL_QUERY_KEYS;
+  return operation === "api-surface" ? API_SURFACE_QUERY_KEYS : TYPE_COUPLING_QUERY_KEYS;
+};
+
+const parseIncludeCycles = (value, field) =>
+  value === undefined ? false : requireBoolean(value, field);
+
+const parseGraphQuery = (value, field, root, query) => {
+  const graphQuery = {
+    ...query,
+    entryPoints: parseEntryPoints(value.entry_points, `${field}.entry_points`, root),
+    includeCycles: parseIncludeCycles(value.include_cycles, `${field}.include_cycles`),
+  };
+  if (query.operation !== "api-surface") return graphQuery;
+  return {
+    ...graphQuery,
+    privateLeakCandidates: parsePrivateLeakCandidates(
+      value.private_leak_candidates,
+      `${field}.private_leak_candidates`,
+      root,
+    ),
+  };
+};
+
 const parseQuery = (value, index, root) => {
   const field = `queries[${index}]`;
   requireObject(value, field);
@@ -198,11 +258,7 @@ const parseQuery = (value, index, root) => {
   if (!QUERY_OPERATIONS.has(operation)) {
     throw new Error(`unsupported ${field}.operation ${operation}`);
   }
-  requireExactKeys(
-    value,
-    SYMBOL_OPERATIONS.has(operation) ? SYMBOL_QUERY_KEYS : GRAPH_QUERY_KEYS,
-    field,
-  );
+  requireExactKeys(value, queryKeys(operation), field);
   const query = {
     id: requireInteger(value.id, `${field}.id`, 0),
     operation,
@@ -210,14 +266,7 @@ const parseQuery = (value, index, root) => {
   if (SYMBOL_OPERATIONS.has(operation)) {
     return { ...query, symbol: parseSymbolIdentity(value.symbol, `${field}.symbol`, root) };
   }
-  return {
-    ...query,
-    entryPoints: parseEntryPoints(value.entry_points, `${field}.entry_points`, root),
-    includeCycles:
-      value.include_cycles === undefined
-        ? false
-        : requireBoolean(value.include_cycles, `${field}.include_cycles`),
-  };
+  return parseGraphQuery(value, field, root, query);
 };
 
 const parseRoot = (value) => {
@@ -275,6 +324,24 @@ const parseLegacyRequest = (value) => {
   return { protocolVersion: LEGACY_PROTOCOL_VERSION, root, projects, candidates };
 };
 
+const validateGraphQueryCount = (queries) => {
+  const count = queries.filter(
+    (query) => query.operation === "api-surface" || query.operation === "type-coupling",
+  ).length;
+  if (count > MAX_GRAPH_QUERIES) {
+    throw new Error(`graph queries exceed the ${MAX_GRAPH_QUERIES} item limit`);
+  }
+};
+
+const parseEvidenceLimit = (value) => {
+  const limit =
+    value === undefined ? MAX_EVIDENCE_PER_RESULT : requireInteger(value, "evidence_limit", 1);
+  if (limit > MAX_EVIDENCE_PER_RESULT) {
+    throw new Error(`evidence_limit exceeds the ${MAX_EVIDENCE_PER_RESULT} item limit`);
+  }
+  return limit;
+};
+
 const parseBatchRequest = (value) => {
   requireObject(value, "request");
   requireExactKeys(value, BATCH_REQUEST_KEYS, "request");
@@ -288,18 +355,9 @@ const parseBatchRequest = (value) => {
   const queries = requireBoundedArray(value.queries, "queries", MAX_QUERIES).map((query, index) =>
     parseQuery(query, index, root),
   );
-  const graphQueryCount = queries.filter((query) => query.operation !== "symbol-use").length;
-  if (graphQueryCount > MAX_GRAPH_QUERIES) {
-    throw new Error(`graph queries exceed the ${MAX_GRAPH_QUERIES} item limit`);
-  }
+  validateGraphQueryCount(queries);
   requireUniqueCandidateIds(queries);
-  const evidenceLimit =
-    value.evidence_limit === undefined
-      ? MAX_EVIDENCE_PER_RESULT
-      : requireInteger(value.evidence_limit, "evidence_limit", 1);
-  if (evidenceLimit > MAX_EVIDENCE_PER_RESULT) {
-    throw new Error(`evidence_limit exceeds the ${MAX_EVIDENCE_PER_RESULT} item limit`);
-  }
+  const evidenceLimit = parseEvidenceLimit(value.evidence_limit);
   return { protocolVersion: PROTOCOL_VERSION, root, projects, queries, evidenceLimit };
 };
 
@@ -336,12 +394,7 @@ export const createResponse = ({
     (left, right) =>
       compareText(left.config, right.config) || compareText(left.source, right.source),
   ),
-  phase_timings_ms: Object.fromEntries(
-    Object.entries(phaseTimings).map(([name, duration]) => [
-      name,
-      Math.max(0, Math.round(duration)),
-    ]),
-  ),
+  phase_timings_ms: normalizePhaseTimings(phaseTimings),
   warnings: [
     ...new Set(
       [...warnings]
@@ -354,20 +407,6 @@ export const createResponse = ({
     .toSorted(compareText)
     .slice(0, MAX_WARNINGS),
   elapsed_ms: Math.max(0, Math.round(elapsedMs)),
-});
-
-const normalizeResult = (result) => ({
-  query_id: result.queryId,
-  operation: result.operation,
-  assertion: result.assertion,
-  status: result.status,
-  reason_code: result.reasonCode ?? null,
-  actions: [...(result.actions ?? [])].slice(0, 3),
-  evidence: [...(result.evidence ?? [])],
-  total_evidence_count: result.totalEvidenceCount ?? result.evidence?.length ?? 0,
-  truncated: Boolean(result.truncated),
-  omissions: [...(result.omissions ?? [])],
-  data: result.data ?? {},
 });
 
 export const createSemanticResponse = ({
@@ -386,14 +425,9 @@ export const createSemanticResponse = ({
   selected_tsconfigs: [...selectedTsconfigs].toSorted(compareText),
   projects: [...projectResults].toSorted((left, right) => compareText(left.config, right.config)),
   results: [...results]
-    .map(normalizeResult)
+    .map(normalizeSemanticResult)
     .toSorted((left, right) => left.query_id - right.query_id),
-  phase_timings_ms: Object.fromEntries(
-    Object.entries(phaseTimings).map(([name, duration]) => [
-      name,
-      Math.max(0, Math.round(duration)),
-    ]),
-  ),
+  phase_timings_ms: normalizePhaseTimings(phaseTimings),
   warnings: [...new Set(warnings)]
     .map((warning) => [...warning.replace(/\s+/g, " ").trim()].slice(0, MAX_WARNING_CHARS).join(""))
     .filter(Boolean)

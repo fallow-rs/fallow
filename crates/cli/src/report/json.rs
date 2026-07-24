@@ -131,6 +131,10 @@ fn add_type_aware_explanations(meta: &mut fallow_types::envelope::Meta) {
 fn add_type_aware_field_definitions(meta: &mut fallow_types::envelope::Meta) {
     meta.field_definitions.extend([
         (
+            "type_aware.executed".to_owned(),
+            "Whether the semantic companion executed at least one query.".to_owned(),
+        ),
+        (
             "type_aware.protocol_version".to_owned(),
             "Version of Fallow's backend-neutral type-aware sidecar protocol.".to_owned(),
         ),
@@ -140,11 +144,11 @@ fn add_type_aware_field_definitions(meta: &mut fallow_types::envelope::Meta) {
         ),
         (
             "type_aware.sidecar_version".to_owned(),
-            "Version of the sidecar package, independent of the protocol and TypeScript backend versions.".to_owned(),
+            "Version of the sidecar package that executed the query; omitted when no semantic query was needed.".to_owned(),
         ),
         (
             "type_aware.backend_version".to_owned(),
-            "Compiler or semantic engine version used by the backend.".to_owned(),
+            "Compiler or semantic engine version that executed the query; omitted when no semantic query was needed.".to_owned(),
         ),
         (
             "type_aware.selected_tsconfigs".to_owned(),
@@ -157,6 +161,10 @@ fn add_type_aware_field_definitions(meta: &mut fallow_types::envelope::Meta) {
         (
             "type_aware.projects".to_owned(),
             "Per-project status, selection source, diagnostic count, and candidate outcomes.".to_owned(),
+        ),
+        (
+            "type_aware.candidate_decisions".to_owned(),
+            "Per-candidate Fallow decision with bounded checker evidence, contract relations, owning projects, and guarded-edit eligibility.".to_owned(),
         ),
         (
             "type_aware.phase_timings_ms".to_owned(),
@@ -184,7 +192,7 @@ fn add_type_aware_metric_definitions(meta: &mut fallow_types::envelope::Meta) {
             "type_aware.candidate_count".to_owned(),
             type_aware_metric(
                 "Type-aware Candidate Count",
-                "Class-member findings sent to the semantic sidecar after normal Fallow filtering.",
+                "Dead-code candidates sent to the semantic sidecar after normal Fallow filtering, including class members, exports, and types.",
                 "[0, infinity)",
                 "context only",
             ),
@@ -193,9 +201,36 @@ fn add_type_aware_metric_definitions(meta: &mut fallow_types::envelope::Meta) {
             "type_aware.confirmed_used_count".to_owned(),
             type_aware_metric(
                 "Type-aware Confirmed Used Count",
-                "Candidates whose exact declaration was resolved from a property access and removed from the findings.",
+                "Candidates whose exact declaration has a checker-resolved static reference, including imports, re-exports, type references, and property or element access, and was removed from the findings.",
                 "[0, candidate_count]",
                 "higher means semantic analysis removed more syntactic false positives",
+            ),
+        ),
+        (
+            "type_aware.contract_preserved_count".to_owned(),
+            type_aware_metric(
+                "Type-aware Contract Preserved Count",
+                "Candidates removed from findings because their declarations satisfy an interface, abstract member, or override contract.",
+                "[0, candidate_count]",
+                "higher means semantic contract evidence removed more syntactic false positives",
+            ),
+        ),
+        (
+            "type_aware.no_static_references_count".to_owned(),
+            type_aware_metric(
+                "Type-aware No Static References Count",
+                "Candidates retained after complete analysis found no checker-resolved static references.",
+                "[0, candidate_count]",
+                "these remain findings; only an eligible class method can receive a guarded fix",
+            ),
+        ),
+        (
+            "type_aware.fix_eligible_count".to_owned(),
+            type_aware_metric(
+                "Type-aware Fix Eligible Count",
+                "Class-method candidates whose complete closed-world evidence and declaration guard permit a guarded fix.",
+                "[0, type_aware.no_static_references_count]",
+                "higher means more retained findings can be removed safely by fallow fix",
             ),
         ),
         (
@@ -293,6 +328,33 @@ fn add_type_aware_project_metric_definitions(meta: &mut fallow_types::envelope::
             ),
         ),
         (
+            "type_aware.projects[].contract_preserved_count".to_owned(),
+            type_aware_metric(
+                "Project Contract Preserved Count",
+                "Project candidates removed because they satisfy an inherited or implemented contract.",
+                "[0, project candidate_count]",
+                "higher means this project supplied more exact contract evidence",
+            ),
+        ),
+        (
+            "type_aware.projects[].no_static_references_count".to_owned(),
+            type_aware_metric(
+                "Project No Static References Count",
+                "Project candidates retained after complete analysis found no static references.",
+                "[0, project candidate_count]",
+                "these remain findings unless a guarded class-member fix is eligible",
+            ),
+        ),
+        (
+            "type_aware.projects[].fix_eligible_count".to_owned(),
+            type_aware_metric(
+                "Project Fix Eligible Count",
+                "Project class-method candidates eligible for a guarded semantic fix.",
+                "[0, project no_static_references_count]",
+                "higher means more retained findings have complete deletion evidence",
+            ),
+        ),
+        (
             "type_aware.projects[].unresolved_count".to_owned(),
             type_aware_metric(
                 "Project Unresolved Count",
@@ -358,6 +420,33 @@ fn add_type_aware_abstention_metric_definitions(meta: &mut fallow_types::envelop
                 "Candidates retained because structural TypeScript diagnostics blocked scanning.",
                 "[0, type_aware.abstained_count]",
                 "lower means more candidate projects were structurally safe",
+            ),
+        ),
+        (
+            "type_aware.abstention_reasons.unknown_symbol".to_owned(),
+            type_aware_metric(
+                "Unknown-symbol Abstention Count",
+                "Candidates whose exact declaration identity could not be resolved.",
+                "[0, type_aware.abstained_count]",
+                "lower means syntactic and semantic declaration identities agree more often",
+            ),
+        ),
+        (
+            "type_aware.abstention_reasons.unsupported_syntax".to_owned(),
+            type_aware_metric(
+                "Unsupported-syntax Abstention Count",
+                "Candidates using declaration syntax unsupported by the semantic backend.",
+                "[0, type_aware.abstained_count]",
+                "lower means the semantic backend covers more candidate syntax",
+            ),
+        ),
+        (
+            "type_aware.abstention_reasons.capacity".to_owned(),
+            type_aware_metric(
+                "Capacity Abstention Count",
+                "Candidates retained because the bounded semantic request reached capacity.",
+                "[0, type_aware.abstained_count]",
+                "zero means every requested candidate fit in the semantic batch",
             ),
         ),
     ]);
@@ -800,7 +889,22 @@ pub(super) fn print_trace_json<T: serde::Serialize>(
     value: &T,
     json_style: crate::json_style::JsonStyle,
 ) {
-    match json_style.serialize(value) {
+    let value = match fallow_output::serialize_trace_json_output(
+        value,
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Error: failed to build trace output: {e}");
+            #[expect(
+                clippy::exit,
+                reason = "fatal serialization error requires immediate exit"
+            )]
+            std::process::exit(2);
+        }
+    };
+    match json_style.serialize(&value) {
         Ok(json) => outln!("{json}"),
         Err(e) => {
             eprintln!("Error: failed to serialize trace output: {e}");
@@ -811,6 +915,133 @@ pub(super) fn print_trace_json<T: serde::Serialize>(
             std::process::exit(2);
         }
     }
+}
+
+pub(super) fn print_semantic_trace_json<T: serde::Serialize>(
+    value: &T,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) {
+    let mut value = match fallow_output::serialize_trace_json_output(
+        value,
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Error: failed to build semantic trace output: {e}");
+            #[expect(
+                clippy::exit,
+                reason = "fatal serialization error requires immediate exit"
+            )]
+            std::process::exit(2);
+        }
+    };
+    attach_semantic_explain_meta(&mut value, explain);
+    match json_style.serialize(&value) {
+        Ok(json) => outln!("{json}"),
+        Err(e) => {
+            eprintln!("Error: failed to serialize semantic trace output: {e}");
+            #[expect(
+                clippy::exit,
+                reason = "fatal serialization error requires immediate exit"
+            )]
+            std::process::exit(2);
+        }
+    }
+}
+
+pub(super) fn print_semantic_impact_json<T: serde::Serialize>(
+    value: &T,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) {
+    let mut value = match fallow_output::serialize_named_json_output(
+        value,
+        "impact",
+        crate::output_runtime::current_root_envelope_mode(),
+    ) {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Error: failed to build impact output: {e}");
+            #[expect(
+                clippy::exit,
+                reason = "fatal serialization error requires immediate exit"
+            )]
+            std::process::exit(2);
+        }
+    };
+    attach_semantic_explain_meta(&mut value, explain);
+    match json_style.serialize(&value) {
+        Ok(json) => outln!("{json}"),
+        Err(e) => {
+            eprintln!("Error: failed to serialize impact output: {e}");
+            #[expect(
+                clippy::exit,
+                reason = "fatal serialization error requires immediate exit"
+            )]
+            std::process::exit(2);
+        }
+    }
+}
+
+fn attach_semantic_explain_meta(value: &mut serde_json::Value, explain: bool) {
+    if !explain {
+        return;
+    }
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let meta = root
+        .entry("_meta")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    let Some(meta) = meta.as_object_mut() else {
+        return;
+    };
+    meta.entry("docs").or_insert_with(|| {
+        serde_json::Value::String("https://docs.fallow.tools/features/type-aware".to_string())
+    });
+    meta.entry("field_definitions").or_insert_with(|| {
+        serde_json::json!({
+            "semantic": "Authoritative checker-backed evidence. When present, trust semantic.identity, semantic.status, and semantic.references over the syntactic root trace fields.",
+            "semantic.identity": "Compatibility identity for the selected effective TypeScript projects and semantic capabilities.",
+            "semantic.status": "Whether checker-backed evidence is complete, partial, or unavailable.",
+            "semantic.references": "Bounded exact TypeScript checker references for the requested module export or class member.",
+            "identity": "Compatibility identity for this exact-symbol semantic impact query.",
+            "status": "Whether exact-symbol impact evidence is complete, partial, or unavailable.",
+            "direct_consumers": "Files that import or re-export this exact module export.",
+            "affected_files": "Transitively affected project files derived from the exact consumer graph.",
+            "targeted_tests": "Test entry points with a proven dependency path to the exact symbol."
+        })
+    });
+    meta.entry("metrics").or_insert_with(|| {
+        serde_json::json!({
+            "semantic.total_reference_count": {
+                "name": "Exact reference count",
+                "description": "Checker-resolved references before evidence bounding.",
+                "range": "[0, infinity)",
+                "interpretation": "Zero is meaningful only when semantic.status is complete."
+            },
+            "total_direct_consumer_count": {
+                "name": "Direct consumer count",
+                "description": "Exact module consumers before evidence bounding.",
+                "range": "[0, infinity)",
+                "interpretation": "Higher means a wider immediate change surface."
+            },
+            "total_affected_file_count": {
+                "name": "Affected file count",
+                "description": "Transitive exact-symbol impact files before evidence bounding.",
+                "range": "[0, infinity)",
+                "interpretation": "Higher means a wider downstream change surface."
+            },
+            "total_targeted_test_count": {
+                "name": "Targeted test count",
+                "description": "Tests with a proven dependency path to the exact symbol.",
+                "range": "[0, infinity)",
+                "interpretation": "Use these tests first, then retain the normal project verification gates."
+            }
+        })
+    });
 }
 
 #[cfg(test)]
@@ -1964,19 +2195,25 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let type_aware = fallow_types::envelope::TypeAwareMeta {
+            executed: true,
             identity: None,
+            required_completeness: None,
             queries: Vec::new(),
+            candidate_decisions: Vec::new(),
             symbol_traces: Vec::new(),
             api_surface: None,
             symbol_impacts: Vec::new(),
             type_coupling: None,
             protocol_version: 2,
-            sidecar_version: "0.1.0".to_string(),
+            sidecar_version: Some("0.1.0".to_string()),
             backend: "typescript-go".to_string(),
-            backend_version: "7.0.2".to_string(),
+            backend_version: Some("7.0.2".to_string()),
             selected_tsconfigs: vec!["tsconfig.json".to_string()],
             candidate_count: 2,
             confirmed_used_count: 1,
+            contract_preserved_count: 0,
+            no_static_references_count: 0,
+            fix_eligible_count: 0,
             unresolved_count: 1,
             abstained_count: 0,
             abstention_reasons: fallow_types::envelope::TypeAwareAbstentionCounts::default(),
@@ -2022,6 +2259,9 @@ mod tests {
             "type_aware.phase_timings_ms.symbol_scan",
             "type_aware.projects[].candidate_count",
             "type_aware.projects[].confirmed_used_count",
+            "type_aware.projects[].contract_preserved_count",
+            "type_aware.projects[].no_static_references_count",
+            "type_aware.projects[].fix_eligible_count",
             "type_aware.projects[].unresolved_count",
             "type_aware.projects[].abstained_count",
             "type_aware.projects[].blocking_diagnostic_count",
@@ -2029,9 +2269,51 @@ mod tests {
             "type_aware.abstention_reasons.no_project",
             "type_aware.abstention_reasons.ambiguous_project",
             "type_aware.abstention_reasons.blocking_diagnostics",
+            "type_aware.abstention_reasons.unknown_symbol",
+            "type_aware.abstention_reasons.unsupported_syntax",
+            "type_aware.abstention_reasons.capacity",
         ] {
             assert!(meta.metrics.contains_key(metric), "missing metric {metric}");
         }
+        let candidates = meta.metrics["type_aware.candidate_count"]
+            .description
+            .as_deref()
+            .expect("candidate description");
+        assert!(candidates.contains("class members"));
+        assert!(candidates.contains("exports"));
+        assert!(candidates.contains("types"));
+        let confirmed = meta.metrics["type_aware.confirmed_used_count"]
+            .description
+            .as_deref()
+            .expect("confirmed-used description");
+        assert!(confirmed.contains("imports"));
+        assert!(confirmed.contains("re-exports"));
+        assert!(confirmed.contains("property or element access"));
+    }
+
+    #[test]
+    fn focused_semantic_explain_marks_authoritative_fields() {
+        let mut output = serde_json::json!({
+            "kind": "trace",
+            "semantic": {
+                "identity": {"completeness": "complete"},
+                "status": "complete",
+                "references": []
+            },
+            "_meta": {
+                "telemetry": {"analysis_run_id": "run-1"}
+            }
+        });
+
+        attach_semantic_explain_meta(&mut output, true);
+
+        assert_eq!(output["_meta"]["telemetry"]["analysis_run_id"], "run-1");
+        assert!(
+            output["_meta"]["field_definitions"]["semantic"]
+                .as_str()
+                .is_some_and(|definition| definition.contains("trust semantic.identity"))
+        );
+        assert!(output["_meta"]["metrics"]["semantic.total_reference_count"].is_object());
     }
 
     #[test]

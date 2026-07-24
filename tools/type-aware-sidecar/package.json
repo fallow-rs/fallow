@@ -1,6 +1,6 @@
 {
   "name": "fallow-type-aware",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "Optional TypeScript-Go semantic refinement sidecar for Fallow",
   "license": "MIT",
   "repository": {

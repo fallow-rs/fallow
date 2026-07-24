@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "reviewed_on": "2026-07-22",
+  "reviewed_on": "2026-07-23",
   "reviewer": "primary-source-adjudication",
-  "method": "Every semantic removal requires an exact checker-resolved declaration and concrete source use. Retained candidates are indeterminate unless a repository-wide exact-name search and source review prove that only the declaration exists.",
+  "method": "Confirmed uses require an exact checker-resolved declaration and concrete source use. Contract-preserved records require an exact inherited declaration and independently reviewed contract or override behavior. Retained candidates are indeterminate unless source review proves that only the declaration exists.",
   "default_confirmed_bucket": "exact-cross-file-symbol-use",
   "default_retained_bucket": "conservative-retention",
   "known_unused": {
@@ -20,20 +20,20 @@
   "independent_reviews": [
     {
       "project_id": "astro",
-      "candidate_count": 38,
-      "candidate_set_sha256": "b27ec0b783397217150a326be2be038cf800533cb8ffa9b0a4fb3876ac4a5cfb",
-      "evidence_sha256": "3119d23abef54292f1a32522b243f1ecc0a7bedc87379337eba707cbe81b2f37",
+      "candidate_count": 62,
+      "candidate_set_sha256": "913dd1db987d4049d6647385e6e01b2180ad1f7d7622a3a866c89b8939e9a578",
+      "evidence_sha256": "67e67473bb581562517cfbff7a9778be2602411d7d30b34638050952fa117ade",
       "reviewer": "independent-source-review-astro",
-      "method": "Every declaration and use location was checked against the pinned source, including union getters and DOM type mappings.",
+      "method": "Confirmed uses were checked against pinned source evidence. Contract-preserved records were checked for declaration, heritage edge, signature, TypeScript contract diagnostics, or observably different inherited behavior.",
       "verdict": "approved"
     },
     {
       "project_id": "typescript",
-      "candidate_count": 135,
-      "candidate_set_sha256": "a8b0ab23007f31efeaafcce67cc579e15792f6ba5bc686a98634f2f1834842c1",
-      "evidence_sha256": "419b295389521f6ad30fe44da7bed8dcc4251cb72f010744550d4fb1c699eac3",
+      "candidate_count": 148,
+      "candidate_set_sha256": "9d799fb67b19bf82061f9c6780afb4231a2096b6e5df97c8f3c179aa1e8d94b5",
+      "evidence_sha256": "4c7be987c97d1e5ec1a3515508e1e36c422812976b70a3e5f2c8dbc1d1f35f82",
       "reviewer": "independent-source-review-typescript",
-      "method": "Every declaration was checked against the pinned source and every candidate had an independently resolved exact symbol use.",
+      "method": "Confirmed uses were checked against pinned source evidence. Contract-preserved records were checked for declaration, heritage edge, signature, TypeScript contract diagnostics, or observably different inherited behavior.",
       "verdict": "approved"
     }
   ],

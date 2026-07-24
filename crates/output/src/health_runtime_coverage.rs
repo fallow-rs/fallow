@@ -91,7 +91,7 @@ impl fmt::Display for RuntimeCoverageReportVerdict {
 /// decision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings`
 /// array omits `active` entries even though the underlying enum still includes
 /// it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageVerdict {

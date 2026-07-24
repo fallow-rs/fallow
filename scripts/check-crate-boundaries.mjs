@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 import { runCliMain } from "./cli-main.mjs";
@@ -14,12 +14,18 @@ const FOUNDATION_CRATES = new Set([
   "fallow-core",
   "fallow-engine",
   "fallow-output",
+  "fallow-process",
   "fallow-api",
 ]);
 const ANALYSIS_STARTERS = new Set(["fallow-core", "fallow-engine", "fallow-api"]);
 const PROTOCOL_ADAPTERS = new Set(["fallow-cli", "fallow-lsp", "fallow-mcp", "fallow-node"]);
 
 const boundaryRules = [
+  {
+    rule: "process-must-remain-independent",
+    matches: ({ from }) => from === "fallow-process",
+    message: ({ to }) => `fallow-process must not depend on workspace crate ${to}`,
+  },
   {
     rule: "foundation-must-not-depend-on-protocol",
     matches: ({ from, to }) => FOUNDATION_CRATES.has(from) && PROTOCOL_CRATES.has(to),
@@ -70,6 +76,72 @@ export const findCrateBoundaryViolations = (metadata) => {
   return violations;
 };
 
+const SEMANTIC_OWNER_MARKERS = [
+  "struct SemanticRequest",
+  "struct SemanticResponse",
+  "fn validate_response(",
+  "fn apply_api_surface(",
+  "fn run_semantic_request",
+];
+const PROCESS_TREE_OWNER_MARKERS = [
+  "process_group(0)",
+  "TerminateJobObject",
+  "AssignProcessToJobObject",
+  "CreateJobObjectW",
+  "CREATE_SUSPENDED",
+  "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+  "libc::waitid",
+];
+
+const PROTOCOL_ADAPTER_SOURCE_ROOTS = [
+  ["fallow-cli", "crates/cli/src"],
+  ["fallow-lsp", "crates/lsp/src"],
+  ["fallow-mcp", "crates/mcp/src"],
+  ["fallow-node", "crates/napi/src"],
+];
+const SOURCE_GATE_TEST_PATH = "crates/cli/src/architecture_boundaries.rs";
+
+const rustFilesBelow = (directory) =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) return rustFilesBelow(entryPath);
+    return entry.isFile() && entry.name.endsWith(".rs") ? [entryPath] : [];
+  });
+
+export const findSemanticOwnershipViolations = (files) =>
+  files.flatMap(({ path, source }) =>
+    SEMANTIC_OWNER_MARKERS.filter((marker) => source.includes(marker)).map((marker) => ({
+      rule: "semantic-client-owned-by-api",
+      from:
+        PROTOCOL_ADAPTER_SOURCE_ROOTS.find(([, root]) => path.startsWith(`${root}/`))?.[0] ??
+        "protocol-adapter",
+      to: "fallow-api",
+      message: `${path} contains API-owned semantic client marker ${marker}`,
+    })),
+  );
+
+export const findProcessTreeOwnershipViolations = (files) =>
+  files.flatMap(({ path, source }) =>
+    PROCESS_TREE_OWNER_MARKERS.filter((marker) => source.includes(marker)).map((marker) => ({
+      rule: "process-tree-owned-by-process-crate",
+      from:
+        PROTOCOL_ADAPTER_SOURCE_ROOTS.find(([, root]) => path.startsWith(`${root}/`))?.[0] ??
+        "protocol-adapter",
+      to: "fallow-process",
+      message: `${path} contains process-tree owner marker ${marker}`,
+    })),
+  );
+
+const loadProtocolAdapterRustSources = () =>
+  PROTOCOL_ADAPTER_SOURCE_ROOTS.flatMap(([, root]) =>
+    rustFilesBelow(root)
+      .filter((path) => path !== SOURCE_GATE_TEST_PATH)
+      .map((path) => ({
+        path,
+        source: readFileSync(path, "utf8"),
+      })),
+  );
+
 const metadataPathFromArgs = (args) => {
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex === -1) {
@@ -100,7 +172,12 @@ const loadMetadata = (args) => {
 
 export const main = (args = process.argv.slice(2)) => {
   const metadata = loadMetadata(args);
-  const violations = findCrateBoundaryViolations(metadata);
+  const adapterSources = loadProtocolAdapterRustSources();
+  const violations = [
+    ...findCrateBoundaryViolations(metadata),
+    ...findSemanticOwnershipViolations(adapterSources),
+    ...findProcessTreeOwnershipViolations(adapterSources),
+  ];
   if (violations.length === 0) {
     console.log("crate boundary check passed");
     return 0;

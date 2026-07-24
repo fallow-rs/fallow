@@ -91,7 +91,7 @@ export const contractSurfaces = Object.freeze([
   },
   {
     id: "napi-types",
-    owner: "crates/napi/scripts/write-dts.mjs",
+    owner: "crates/napi/scripts/write-dts-entry.mjs",
     generatedPaths: ["crates/napi/index.d.ts"],
     checkCommand: "npm run generate:contracts:check",
     docs: ["crates/napi/README.md"],

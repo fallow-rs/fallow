@@ -7,6 +7,8 @@ use fallow_types::trace::{
     ReExportChain, TracedCloneGroup,
 };
 
+use crate::report::{human_status_line, semantic_status};
+
 use super::{plural, relative_path};
 
 pub(in crate::report) fn print_export_trace_human(trace: &ExportTrace) {
@@ -138,9 +140,15 @@ fn build_class_member_trace_human_lines(trace: &ClassMemberTrace) -> Vec<String>
 fn push_semantic_trace(lines: &mut Vec<String>, trace: &SemanticSymbolTrace) {
     lines.push(String::new());
     lines.push(format!(
-        "  Type-aware proof: {} ({})",
-        trace.assertion,
-        completeness_name(trace.status)
+        "  {}",
+        human_status_line(
+            semantic_status(trace.status),
+            format!(
+                "Type-aware proof: {} ({})",
+                trace.assertion,
+                completeness_name(trace.status)
+            )
+        )
     ));
     lines.push(format!("  TypeScript project: {}", trace.selected_project));
     for reference in &trace.references {
@@ -175,10 +183,16 @@ pub(in crate::report) fn print_symbol_impact_human(impact: &SemanticSymbolImpact
             impact.target.path.display().to_string().dimmed()
         ),
         format!(
-            "  Proof: {} ({}, confidence: {})",
-            impact.assertion,
-            completeness_name(impact.status),
-            impact.confidence
+            "  {}",
+            human_status_line(
+                semantic_status(impact.status),
+                format!(
+                    "Proof: {} ({}, confidence: {})",
+                    impact.assertion,
+                    completeness_name(impact.status),
+                    impact.confidence
+                )
+            )
         ),
         format!("  TypeScript project: {}", impact.selected_project),
     ];

@@ -9,9 +9,12 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  assertDependencyFreeFixture,
+  assertNoFixtureDependencyDirectories,
   candidateFeatureBucketFields,
   candidateKey,
+  compareCandidateSets,
+  evidenceProducerErrors,
+  fixtureDependencyEnvironment,
   independentReviewDigest,
   independentReviewErrors,
   indexLedgerForRefresh,
@@ -20,19 +23,27 @@ import {
   parseArgs,
   requireCompletePublicationCorpus,
   requirePublicationGo,
+  runExactSidecarRequest,
   runOrderForIteration,
+  runProcess,
+  selectFirstCompletedRun,
   summarizeAdjudicatedFeatureBuckets,
   validateCapabilitiesArtifactData,
+  validateEvidenceProducerHash,
   validateManifest,
   validateMeasurements,
   validatePartialOutput,
   validateSupplementalArtifactData,
   verifyLedgerData,
 } from "./type-aware-corpus.mjs";
+import { renderSummaryMarkdown } from "./type-aware-corpus/summary.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const SIDECAR_PACKAGE = resolve(REPO_ROOT, "tools/type-aware-sidecar/package.json");
+const PROCESS_TREE_RSS_AVAILABLE =
+  process.platform !== "win32" &&
+  spawnSync("ps", ["-axo", "pid=,ppid=,rss="], { encoding: "utf8" }).status === 0;
 const SIDECAR_TYPESCRIPT_AVAILABLE = (() => {
   try {
     createRequire(SIDECAR_PACKAGE).resolve("typescript/unstable/sync");
@@ -57,6 +68,287 @@ const candidate = {
   col: 3,
 };
 
+test("discovery retains the first completed baseline and refined runs", () => {
+  const first = { candidates: [{ key: "first" }] };
+  const repeated = { candidates: [{ key: "repeated" }] };
+
+  assert.equal(selectFirstCompletedRun(null, first), first);
+  assert.equal(selectFirstCompletedRun(undefined, first), first);
+  assert.equal(selectFirstCompletedRun(first, repeated), first);
+});
+
+test("candidate comparison keeps contract evidence separate from confirmed use", () => {
+  const classCandidate = {
+    key: candidateKey("fixture", {
+      path: "src/service.ts",
+      parent_name: "Service",
+      member_name: "execute",
+      kind: "class_method",
+      line: 12,
+      col: 3,
+    }),
+    path: "src/service.ts",
+    parent_name: "Service",
+    member_name: "execute",
+    kind: "class_method",
+    line: 12,
+    col: 3,
+  };
+  const decision = {
+    decision: "contract-preserved",
+    status: "complete",
+    owning_projects: ["tsconfig.json"],
+    contract: {
+      relation: "interface-implementation",
+      optional: false,
+      declaration: {
+        path: "src/contract.ts",
+        line: 2,
+        col: 2,
+      },
+    },
+    subject: {
+      path: "src/service.ts",
+      owner: "Service",
+      local_name: "execute",
+      declaration_kind: "class_method",
+      line: 12,
+      col: 3,
+    },
+  };
+
+  assert.deepEqual(
+    compareCandidateSets("fixture", [classCandidate], [], {
+      candidate_decisions: [decision],
+    }),
+    [
+      {
+        ...classCandidate,
+        semantic_status: "contract-preserved",
+        semantic_decision: "contract-preserved",
+        semantic_completeness: "complete",
+        owning_projects: ["tsconfig.json"],
+        contract: decision.contract,
+      },
+    ],
+  );
+});
+
+const writeExecutable = (root, name, source) => {
+  const path = resolve(root, name);
+  writeFileSync(path, source);
+  chmodSync(path, 0o755);
+  return path;
+};
+
+test(
+  "evidence executes the exact supplied sidecar and validates its wire identity",
+  { skip: process.platform === "win32" },
+  () => {
+    const root = mkdtempSync(resolve(tmpdir(), "fallow-exact-sidecar-"));
+    try {
+      const sidecar = writeExecutable(
+        root,
+        "sentinel-sidecar.mjs",
+        [
+          "#!/usr/bin/env node",
+          'let input = "";',
+          'process.stdin.setEncoding("utf8");',
+          'process.stdin.on("data", (chunk) => { input += chunk; });',
+          'process.stdin.on("end", () => {',
+          "  const request = JSON.parse(input);",
+          "  const results = request.queries.map((query) => ({",
+          "    query_id: query.id,",
+          "    operation: query.operation,",
+          '    assertion: "confirmed-used",',
+          '    status: "complete",',
+          "    evidence: [{ path: query.symbol.path, line: 99, col: 7 }],",
+          "  }));",
+          "  process.stdout.write(JSON.stringify({",
+          "    protocol_version: 5,",
+          '    operation: "semantic-queries",',
+          '    sidecar_version: "sentinel",',
+          '    backend: "typescript-go",',
+          '    backend_version: "sentinel",',
+          "    results,",
+          "  }));",
+          "});",
+          "",
+        ].join("\n"),
+      );
+      const stdoutPath = resolve(root, "raw", "stdout.json");
+      const stderrPath = resolve(root, "raw", "stderr.txt");
+      const request = {
+        protocol_version: 5,
+        operation: "semantic-queries",
+        root,
+        projects: [],
+        evidence_limit: 40,
+        queries: [
+          {
+            id: 42,
+            operation: "symbol-use",
+            symbol: { path: "sentinel.ts" },
+          },
+        ],
+      };
+      const response = runExactSidecarRequest({
+        sidecarBin: sidecar,
+        request,
+        stdoutPath,
+        stderrPath,
+      });
+
+      assert.equal(response.sidecar_version, "sentinel");
+      assert.deepEqual(response.results[0].evidence, [{ path: "sentinel.ts", line: 99, col: 7 }]);
+      assert.equal(JSON.parse(readFileSync(stdoutPath, "utf8")).sidecar_version, "sentinel");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "evidence rejects malformed, mismatched, duplicate, and timed-out sidecars",
+  { skip: process.platform === "win32" },
+  () => {
+    const root = mkdtempSync(resolve(tmpdir(), "fallow-invalid-sidecar-"));
+    const request = {
+      protocol_version: 5,
+      operation: "semantic-queries",
+      root,
+      projects: [],
+      evidence_limit: 40,
+      queries: [{ id: 0, operation: "symbol-use", symbol: { path: "src.ts" } }],
+    };
+    const invoke = (sidecarBin, name, timeoutMs) =>
+      runExactSidecarRequest({
+        sidecarBin,
+        request,
+        stdoutPath: resolve(root, `${name}.stdout`),
+        stderrPath: resolve(root, `${name}.stderr`),
+        timeoutMs,
+      });
+    try {
+      const malformed = writeExecutable(
+        root,
+        "malformed.mjs",
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{"));\n',
+      );
+      assert.throws(() => invoke(malformed, "malformed"), /invalid JSON/);
+
+      const mismatch = writeExecutable(
+        root,
+        "mismatch.mjs",
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write(JSON.stringify({protocol_version:3,operation:"semantic-queries",sidecar_version:"x",backend:"typescript-go",backend_version:"x",results:[]})));\n',
+      );
+      assert.throws(() => invoke(mismatch, "mismatch"), /invalid provenance or envelope/);
+
+      const duplicate = writeExecutable(
+        root,
+        "duplicate.mjs",
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => { const result={query_id:0,operation:"symbol-use",evidence:[]}; process.stdout.write(JSON.stringify({protocol_version:5,operation:"semantic-queries",sidecar_version:"x",backend:"typescript-go",backend_version:"x",results:[result,result]})); });\n',
+      );
+      assert.throws(() => invoke(duplicate, "duplicate"), /invalid query identity/);
+
+      const invalidEvidence = writeExecutable(
+        root,
+        "invalid-evidence.mjs",
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write(JSON.stringify({protocol_version:5,operation:"semantic-queries",sidecar_version:"x",backend:"typescript-go",backend_version:"x",results:[{query_id:0,operation:"symbol-use",status:"complete",evidence:[{path:"../escape.ts",line:0,col:-1}]}]})));\n',
+      );
+      assert.throws(
+        () => invoke(invalidEvidence, "invalid-evidence"),
+        /project-relative path|invalid source evidence/,
+      );
+
+      const nonzero = writeExecutable(
+        root,
+        "nonzero.mjs",
+        '#!/usr/bin/env node\nprocess.stderr.write("backend failed"); process.exit(2);\n',
+      );
+      assert.throws(() => invoke(nonzero, "nonzero"), /exited with 2: backend failed/);
+
+      const timeout = writeExecutable(
+        root,
+        "timeout.mjs",
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => setTimeout(() => {}, 10_000));\n',
+      );
+      assert.throws(() => invoke(timeout, "timeout", 50), /timed out|ETIMEDOUT/);
+
+      const oversized = writeExecutable(
+        root,
+        "oversized.mjs",
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write("x".repeat(1024)));\n',
+      );
+      assert.throws(
+        () =>
+          runExactSidecarRequest({
+            sidecarBin: oversized,
+            request,
+            stdoutPath: resolve(root, "oversized.stdout"),
+            stderrPath: resolve(root, "oversized.stderr"),
+            maxResponseBytes: 64,
+          }),
+        /maxBuffer|ENOBUFS|response bytes/,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("evidence producer must match the sidecar recorded by discovery", () => {
+  const hash = "a".repeat(64);
+  assert.doesNotThrow(() =>
+    validateEvidenceProducerHash({ provenance: { sidecar: { sha256: hash } } }, hash),
+  );
+  assert.throws(
+    () =>
+      validateEvidenceProducerHash({ provenance: { sidecar: { sha256: "b".repeat(64) } } }, hash),
+    /does not match discovery provenance/,
+  );
+});
+
+test("ledger producer binds protocol, sidecar, and request-set provenance", () => {
+  const sidecarHash = "a".repeat(64);
+  const discovery = { provenance: { sidecar: { sha256: sidecarHash } } };
+  const producer = {
+    protocol_version: 5,
+    sidecar_sha256: sidecarHash,
+    request_set_sha256: "b".repeat(64),
+    response_set_sha256: "c".repeat(64),
+  };
+  assert.deepEqual(
+    evidenceProducerErrors(
+      discovery,
+      producer,
+      producer.request_set_sha256,
+      producer.response_set_sha256,
+    ),
+    [],
+  );
+  assert.deepEqual(evidenceProducerErrors(discovery, { ...producer, protocol_version: 3 }), [
+    "ledger evidence producer must use protocol 5",
+  ]);
+  assert.deepEqual(
+    evidenceProducerErrors(discovery, {
+      ...producer,
+      sidecar_sha256: "d".repeat(64),
+      request_set_sha256: "invalid",
+      response_set_sha256: "invalid",
+    }),
+    [
+      "ledger evidence producer does not match discovery sidecar provenance",
+      "ledger evidence producer request-set hash is invalid",
+      "ledger evidence producer response-set hash is invalid",
+    ],
+  );
+  assert.deepEqual(evidenceProducerErrors(discovery, producer, "e".repeat(64), "f".repeat(64)), [
+    "ledger evidence producer request-set hash does not match the corpus requests",
+    "ledger evidence producer response-set hash does not match stored responses",
+  ]);
+});
+
 test("manifest contains the complete pinned accuracy and control corpus", () => {
   assert.deepEqual(validateManifest(structuredClone(manifest)), manifest);
 
@@ -71,7 +363,15 @@ test("tracked supplemental smoke is internally reproducible and review-bound", (
   );
   const sourceRoot = mkdtempSync(resolve(tmpdir(), "fallow-supplemental-validation-"));
   try {
-    artifact.schema_version = 3;
+    artifact.schema_version = 6;
+    artifact.project.dependency_environment = {
+      dependency_installation: "ancestor-workspace",
+      path_base: "fallow-workspace-root",
+      dependency_root: ".",
+      lockfile: "package-lock.json",
+      lockfile_sha256: "c".repeat(64),
+      type_declaration_tree_sha256: "d".repeat(64),
+    };
     for (const run of artifact.artifacts.source_runs) {
       delete run.raw_sha256;
       run.path = `${run.mode}-${run.iteration}.json`;
@@ -94,6 +394,7 @@ test("tracked supplemental smoke is internally reproducible and review-bound", (
       fallowSha256: artifact.artifacts.fallow_sha256,
       sidecarSha256: artifact.artifacts.sidecar_sha256,
       sourceRoot,
+      dependencyEnvironment: artifact.project.dependency_environment,
     };
     assert.deepEqual(validateSupplementalArtifactData(artifact, adjudication, context), artifact);
 
@@ -163,8 +464,9 @@ test("semantic capability proof cannot be neutered or reassigned to tsc and Oxli
       "public-api-surface": {
         assertion: "no-leak-confirmed",
         status: "complete",
-        public_entry_count: 1,
-        private_type_leak_count: 0,
+        public_entry_sample_count: 1,
+        private_type_leak_sample_count: 0,
+        omissions: [],
         source_evidence: evidence(),
       },
       "semantic-impact-targeted-tests": {
@@ -202,7 +504,7 @@ test("semantic capability proof cannot be neutered or reassigned to tsc and Oxli
       program_reused: true,
     };
     const artifact = {
-      schema_version: 1,
+      schema_version: 3,
       excludes: ["compiler-diagnostics", "syntax-and-style-lint-rules"],
       artifacts: {
         fallow_sha256: "a".repeat(64),
@@ -223,7 +525,18 @@ test("semantic capability proof cannot be neutered or reassigned to tsc and Oxli
         id,
         commit: `${id}-commit`,
         tracked_source_clean: true,
-        programs: { inspect: [program], coupling: [program] },
+        dependency_environment: {
+          dependency_installation: "ancestor-workspace",
+          path_base: "fallow-workspace-root",
+          dependency_root: ".",
+          lockfile: "package-lock.json",
+          lockfile_sha256: "c".repeat(64),
+          type_declaration_tree_sha256: "d".repeat(64),
+        },
+        programs: {
+          inspect: [program],
+          coupling: [{ ...program, program_reused: false }],
+        },
         capabilities: capabilities(),
       })),
     };
@@ -232,6 +545,12 @@ test("semantic capability proof cannot be neutered or reassigned to tsc and Oxli
       sidecarSha256: "b".repeat(64),
       roots,
       commits: { astro: "astro-commit", vitest: "vitest-commit" },
+      dependencyEnvironments: Object.fromEntries(
+        artifact.repositories.map(({ id, dependency_environment: environment }) => [
+          id,
+          environment,
+        ]),
+      ),
     };
     assert.deepEqual(validateCapabilitiesArtifactData(artifact, context), artifact);
 
@@ -389,21 +708,41 @@ test("prepared fixtures reject direct and nested dependency directories", () => 
   try {
     mkdirSync(resolve(root, "node_modules"));
     assert.throws(
-      () => assertDependencyFreeFixture(root, "fixture", []),
+      () => assertNoFixtureDependencyDirectories(root, "fixture", []),
       /contains dependency directories: node_modules/,
     );
     rmSync(resolve(root, "node_modules"), { recursive: true });
     assert.throws(
       () =>
-        assertDependencyFreeFixture(root, "fixture", [
+        assertNoFixtureDependencyDirectories(root, "fixture", [
           "packages/app/node_modules/",
           "packages/app/.pnpm-store/",
         ]),
       /\.pnpm-store.*node_modules|node_modules.*\.pnpm-store/,
     );
-    assert.doesNotThrow(() => assertDependencyFreeFixture(root, "fixture", []));
+    assert.doesNotThrow(() => assertNoFixtureDependencyDirectories(root, "fixture", []));
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fixture dependency provenance records approved ancestor node_modules", () => {
+  const workspace = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-workspace-"));
+  try {
+    const fixture = resolve(workspace, "target/corpus/fixture");
+    mkdirSync(resolve(workspace, "node_modules"), { recursive: true });
+    mkdirSync(fixture, { recursive: true });
+
+    assert.deepEqual(fixtureDependencyEnvironment(fixture, "fixture", workspace), {
+      dependency_installation: "ancestor-workspace",
+      dependency_root: workspace,
+    });
+    assert.throws(
+      () => fixtureDependencyEnvironment(fixture, "fixture", resolve(workspace, "other")),
+      /resolves dependencies from an unapproved ancestor/,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
   }
 });
 
@@ -435,6 +774,23 @@ test("measured run order alternates baseline and refined", () => {
   assert.deepEqual(runOrderForIteration(1), ["refined", "baseline"]);
   assert.deepEqual(runOrderForIteration(2), ["baseline", "refined"]);
 });
+
+test(
+  "measurement captures process-tree RSS for a process shorter than the sampling interval",
+  { skip: !PROCESS_TREE_RSS_AVAILABLE },
+  async () => {
+    const result = await runProcess(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 25)"],
+      REPO_ROOT,
+      null,
+    );
+
+    assert.equal(result.status, 0);
+    assert.ok(Number.isSafeInteger(result.peak_process_tree_rss_kb));
+    assert.ok(result.peak_process_tree_rss_kb > 0);
+  },
+);
 
 test("measurement validation requires complete paired runs", () => {
   const discovery = {
@@ -633,6 +989,32 @@ test("feature bucket gate needs separate correct confirmations for distinct buck
   );
 });
 
+test("summary reports bounded evidence without claiming corpus-wide recall", () => {
+  const rendered = renderSummaryMarkdown({
+    gate: { go: true },
+    accuracy: {
+      candidate_count: 10,
+      confirmation_precision: 1,
+      confirmation_yield: 0.3,
+      adjudicated_truth_coverage: 0.4,
+      correct_unused_retention: 1,
+      abstention: 0.2,
+    },
+    performance: {
+      marginal_overhead_ms: { median: 10, p95: 20 },
+    },
+    value: {
+      confirmed_repository_count: 2,
+      confirmed_feature_buckets: ["exact-symbol-use", "generic-inheritance"],
+    },
+  });
+
+  assert.match(rendered, /Safe confirmation yield: 0.3/);
+  assert.match(rendered, /Independently adjudicated truth coverage: 0.4/);
+  assert.match(rendered, /No corpus-wide recall is claimed/);
+  assert.doesNotMatch(rendered, /Used recall/);
+});
+
 test("ledger verifier requires truth and complete source evidence for every candidate", () => {
   const key = candidateKey("svelte", candidate);
   const discovery = {
@@ -672,7 +1054,7 @@ test("ledger verifier requires truth and complete source evidence for every cand
   assert.deepEqual(verifyLedgerData(discovery, incomplete), [
     `${key}: at least one explicitly adjudicated feature bucket is required`,
     `${key}: every confirmed removal must be adjudicated used`,
-    `${key}: truth must be used, unused, or indeterminate`,
+    `${key}: truth must be used, preserved, unused, or indeterminate`,
     `${key}: used or confirmed candidates require concrete use evidence`,
   ]);
 

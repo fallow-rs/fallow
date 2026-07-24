@@ -569,6 +569,7 @@ fn print_check_section(
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,
+            type_aware_scope: Some("dead-code"),
             json_style: crate::json_style::JsonStyle::Compact,
         },
     );
@@ -623,6 +624,7 @@ fn print_health_section(
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,
+            type_aware_scope: Some("health"),
             skip_score_and_trend: true,
             css_requested: false,
             json_style: opts.json_style,

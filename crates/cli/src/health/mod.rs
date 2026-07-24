@@ -337,12 +337,7 @@ pub fn run_health(
         }
         let projects = resolved_type_aware.projects;
         let require = resolved_type_aware.require;
-        let outcome = match crate::semantic_queries::type_coupling(
-            opts.root,
-            &projects,
-            &[],
-            fallow_config::TypeAwareRequire::BestEffort,
-        ) {
+        let outcome = match fallow_api::analyze_type_coupling(opts.root, &projects, &[]) {
             Ok(outcome) => outcome,
             Err(error) => {
                 return emit_error(
@@ -369,7 +364,12 @@ pub fn run_health(
         Ok(result) => result,
         Err(code) => return code,
     };
-    result.type_aware_meta = semantic.map(|outcome| outcome.type_aware.meta);
+    let required_completeness = result.config.type_aware.require.into();
+    result.type_aware_meta = semantic.map(|outcome| {
+        let mut meta = outcome.type_aware.meta;
+        meta.required_completeness = Some(required_completeness);
+        meta
+    });
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }
@@ -382,6 +382,7 @@ pub fn run_health(
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
+            type_aware_scope: None,
             skip_score_and_trend: false,
             css_requested: opts.css,
             json_style,
@@ -483,6 +484,7 @@ pub struct HealthPrintOptions {
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
+    pub type_aware_scope: Option<&'static str>,
     pub skip_score_and_trend: bool,
     /// Whether `--css` was requested. Forwarded to the human renderer so an empty
     /// CSS result (no import-reachable stylesheet) is explained rather than
@@ -530,6 +532,7 @@ fn health_report_context(
         quiet: options.quiet,
         explain: options.explain,
         type_aware: result.type_aware_meta.as_ref(),
+        type_aware_scope: options.type_aware_scope,
         group_by: None,
         top: None,
         summary: options.summary,
@@ -793,6 +796,7 @@ mod tests {
                 summary: false,
                 summary_heading: true,
                 show_explain_tip: true,
+                type_aware_scope: None,
                 skip_score_and_trend: false,
                 css_requested: false,
                 json_style: crate::json_style::JsonStyle::Compact,
@@ -965,6 +969,7 @@ mod tests {
                     summary: false,
                     summary_heading: true,
                     show_explain_tip: true,
+                    type_aware_scope: None,
                     skip_score_and_trend: false,
                     css_requested: false,
                     json_style: crate::json_style::JsonStyle::Compact,

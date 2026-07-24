@@ -120,6 +120,58 @@ fn empty_type_aware_candidate_set_starts_no_companion() {
 }
 
 #[test]
+fn focused_type_aware_trace_rejects_unsupported_output_formats() {
+    let output = run_fallow(
+        "dead-code",
+        "basic-project",
+        &[
+            "--type-aware",
+            "--trace",
+            "src/index.ts:anotherUnused3",
+            "--format",
+            "compact",
+            "--quiet",
+        ],
+    );
+
+    assert_eq!(output.code, 2);
+    assert!(
+        output
+            .stderr
+            .contains("focused trace and impact queries support human and JSON output"),
+        "stderr: {}",
+        output.stderr
+    );
+    assert!(output.stdout.is_empty(), "stdout: {}", output.stdout);
+}
+
+#[test]
+fn environment_enabled_type_aware_rejects_renderer_without_semantic_provenance() {
+    let root = fixture_path("basic-project");
+    let root_arg = root.to_string_lossy();
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--format",
+            "review-github",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE", "1")],
+    );
+
+    assert_eq!(output.code, 2);
+    assert!(
+        format!("{}{}", output.stdout, output.stderr)
+            .contains("type-aware analysis supports human, JSON, SARIF"),
+        "stdout: {}\nstderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}
+
+#[test]
 fn duplicate_export_add_to_config_is_auto_fixable_with_explicit_config() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

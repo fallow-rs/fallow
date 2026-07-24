@@ -25,11 +25,15 @@ const baseArgs = {
   configPath: "",
   changedSince: "",
   production: false,
+  cliVersion: null,
 };
+
+const healthArgs = (options: Parameters<typeof buildHealthArgs>[0] = baseArgs): string[] =>
+  buildHealthArgs(options).args;
 
 describe("buildHealthArgs", () => {
   it("always requests the cheap health sections and never --skip", () => {
-    const args = buildHealthArgs(baseArgs);
+    const args = healthArgs();
     expect(args).toEqual([
       "health",
       "--format",
@@ -46,17 +50,17 @@ describe("buildHealthArgs", () => {
   });
 
   it("adds --hotspots only when enabled", () => {
-    expect(buildHealthArgs({ ...baseArgs, hotspots: true })).toContain("--hotspots");
-    expect(buildHealthArgs({ ...baseArgs, hotspots: false })).not.toContain("--hotspots");
+    expect(healthArgs({ ...baseArgs, hotspots: true })).toContain("--hotspots");
+    expect(healthArgs({ ...baseArgs, hotspots: false })).not.toContain("--hotspots");
   });
 
   it("forwards --config, --changed-since, and --production only when set", () => {
-    const none = buildHealthArgs(baseArgs);
+    const none = healthArgs();
     expect(none).not.toContain("--config");
     expect(none).not.toContain("--changed-since");
     expect(none).not.toContain("--production");
 
-    const all = buildHealthArgs({
+    const all = healthArgs({
       ...baseArgs,
       hotspots: true,
       configPath: "/repo/.fallowrc.json",
@@ -83,17 +87,37 @@ describe("buildHealthArgs", () => {
   });
 
   it("floors and omits a non-positive --top", () => {
-    expect(buildHealthArgs({ ...baseArgs, topFindings: 7.9 })).toContain("7");
-    expect(buildHealthArgs({ ...baseArgs, topFindings: 0 })).not.toContain("--top");
-    expect(buildHealthArgs({ ...baseArgs, topFindings: -5 })).not.toContain("--top");
+    expect(healthArgs({ ...baseArgs, topFindings: 7.9 })).toContain("7");
+    expect(healthArgs({ ...baseArgs, topFindings: 0 })).not.toContain("--top");
+    expect(healthArgs({ ...baseArgs, topFindings: -5 })).not.toContain("--top");
   });
 
   it("forwards --workspace only when a workspace scope is set (#906 C2)", () => {
-    expect(buildHealthArgs(baseArgs)).not.toContain("--workspace");
-    expect(buildHealthArgs({ ...baseArgs, workspace: "" })).not.toContain("--workspace");
-    const scoped = buildHealthArgs({ ...baseArgs, workspace: "pkg-a" });
+    expect(healthArgs()).not.toContain("--workspace");
+    expect(healthArgs({ ...baseArgs, workspace: "" })).not.toContain("--workspace");
+    const scoped = healthArgs({ ...baseArgs, workspace: "pkg-a" });
     expect(scoped).toContain("--workspace");
     expect(scoped[scoped.indexOf("--workspace") + 1]).toBe("pkg-a");
+  });
+
+  it("omits coupling and all type-aware flags before the v3.8.2 floor", () => {
+    const result = buildHealthArgs({
+      ...baseArgs,
+      cliVersion: "3.8.1",
+      typeAware: {
+        enabled: true,
+        projects: ["tsconfig.json"],
+        require: "complete",
+      },
+    });
+
+    expect(result.args).not.toContain("--type-coupling");
+    expect(result.args).not.toContain("--type-aware");
+    expect(result.args).not.toContain("--type-aware-project");
+    expect(result.args).not.toContain("--type-aware-require");
+    expect(result.skipped).toEqual([
+      { flag: "--type-aware", requires: "3.8.2", cliVersion: "3.8.1" },
+    ]);
   });
 });
 
@@ -190,9 +214,9 @@ describe("formatComplexityOffense", () => {
   });
 
   it("rounds the CRAP score to a whole number", () => {
-    expect(
-      formatComplexityOffense({ name: "f", cyclomatic: 5, cognitive: 4, crap: 30.7 }),
-    ).toBe("f · 5 cyc · 4 cog · CRAP 31");
+    expect(formatComplexityOffense({ name: "f", cyclomatic: 5, cognitive: 4, crap: 30.7 })).toBe(
+      "f · 5 cyc · 4 cog · CRAP 31",
+    );
   });
 });
 
@@ -278,9 +302,7 @@ describe("penalty label parity with the HealthScorePenalties wire contract", () 
     resolve(__dirname, "../src/generated/output-contract.d.ts"),
     "utf8",
   );
-  const interfaceMatch = contract.match(
-    /export interface HealthScorePenalties \{([\s\S]*?)\n\}/,
-  );
+  const interfaceMatch = contract.match(/export interface HealthScorePenalties \{([\s\S]*?)\n\}/);
 
   it("locates the generated HealthScorePenalties interface", () => {
     expect(interfaceMatch).not.toBeNull();

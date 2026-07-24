@@ -3,7 +3,7 @@ use crate::params::SemanticSymbolParams;
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_global, push_remote_extends, push_type_aware, run_tool};
+use super::{push_global, push_remote_extends, push_type_aware, run_tool, validation_error_body};
 
 fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
@@ -24,6 +24,7 @@ fn build_semantic_symbol_args(
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
+        "--explain".to_string(),
     ];
     push_global(
         &mut args,
@@ -51,9 +52,9 @@ pub async fn run_symbol_trace(
     params: SemanticSymbolParams,
 ) -> Result<CallToolResult, McpError> {
     match build_semantic_symbol_args(&params, "--trace") {
-        Ok(args) => run_tool(binary, "symbol_trace", &args).await,
+        Ok(args) => run_tool(binary, "trace_symbol", &args).await,
         Err(error) => Ok(CallToolResult::error(vec![
-            rmcp::model::ContentBlock::text(error),
+            rmcp::model::ContentBlock::text(validation_error_body(error)),
         ])),
     }
 }
@@ -65,14 +66,14 @@ pub async fn run_symbol_impact(
     match build_semantic_symbol_args(&params, "--symbol-impact") {
         Ok(args) => run_tool(binary, "symbol_impact", &args).await,
         Err(error) => Ok(CallToolResult::error(vec![
-            rmcp::model::ContentBlock::text(error),
+            rmcp::model::ContentBlock::text(validation_error_body(error)),
         ])),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::build_semantic_symbol_args;
+    use super::{build_semantic_symbol_args, run_symbol_trace};
     use crate::params::SemanticSymbolParams;
 
     #[test]
@@ -94,5 +95,37 @@ mod tests {
         assert!(args.iter().any(|arg| arg == "--type-aware"));
         assert!(args.iter().any(|arg| arg == "--type-aware-project"));
         assert!(args.iter().any(|arg| arg == "--symbol-impact"));
+        assert!(args.iter().any(|arg| arg == "--explain"));
+    }
+
+    #[tokio::test]
+    async fn semantic_symbol_validation_errors_are_structured_json() {
+        let result = run_symbol_trace(
+            "unused-test-binary",
+            SemanticSymbolParams {
+                file: " ".to_string(),
+                export_name: String::new(),
+                root: None,
+                config: None,
+                allow_remote_extends: None,
+                type_aware_projects: None,
+                type_aware_require: None,
+                no_cache: None,
+                threads: None,
+            },
+        )
+        .await
+        .expect("validation stays a tool result");
+
+        assert_eq!(result.is_error, Some(true));
+        let text = match &result.content[0] {
+            rmcp::model::ContentBlock::Text(text) => &text.text,
+            _ => panic!("expected text content"),
+        };
+        let body: serde_json::Value =
+            serde_json::from_str(text).expect("structured validation error");
+        assert_eq!(body["error"], true);
+        assert_eq!(body["exit_code"], 2);
+        assert_eq!(body["message"], "file must not be empty");
     }
 }

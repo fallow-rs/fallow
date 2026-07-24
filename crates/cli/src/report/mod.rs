@@ -13,6 +13,7 @@ mod markdown;
 pub(crate) mod sarif;
 mod shared;
 pub(crate) mod sink;
+mod status;
 pub(crate) mod suggestions;
 #[cfg(test)]
 pub(crate) mod test_helpers;
@@ -39,6 +40,9 @@ use crate::report::sink::outln;
 pub use fallow_output::strip_root_prefix;
 pub use grouping::OwnershipResolver;
 pub(crate) use human::health::{render_health_score, render_health_trend};
+pub(crate) use status::{
+    HumanStatus, line as human_status_line, semantic_status, type_aware_meta_status,
+};
 
 /// The three line-groups of a human `fallow review --walkthrough` render: the
 /// orientation header and final status (stderr), and the staged tour body
@@ -99,6 +103,9 @@ pub(crate) struct ReportContext<'a> {
     pub(crate) explain: bool,
     /// Provenance for the opt-in TypeScript semantic analysis pass.
     pub(crate) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// Optional label for semantic metadata when one command renders multiple
+    /// analysis scopes into the same stream.
+    pub(crate) type_aware_scope: Option<&'static str>,
     /// When set, group all output by this resolver.
     pub(crate) group_by: Option<OwnershipResolver>,
     /// Limit displayed items per section (--top N).
@@ -314,13 +321,13 @@ pub(crate) fn print_results(
         }),
         OutputFormat::Compact => {
             compact::print_compact(results, ctx.root);
-            compact::print_type_aware_compact(ctx.type_aware);
+            compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
         OutputFormat::Sarif => sarif::print_sarif(results, ctx.root, ctx.rules, ctx.type_aware),
         OutputFormat::Markdown => {
             markdown::print_markdown(results, ctx.root);
-            markdown::print_type_aware_markdown(ctx.type_aware);
+            markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
@@ -437,12 +444,12 @@ fn print_grouped_results(
         }),
         OutputFormat::Compact => {
             compact::print_grouped_compact(groups, ctx.root);
-            compact::print_type_aware_compact(ctx.type_aware);
+            compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
             markdown::print_grouped_markdown(groups, ctx.root);
-            markdown::print_type_aware_markdown(ctx.type_aware);
+            markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
         OutputFormat::Sarif => {
@@ -679,13 +686,13 @@ pub(crate) fn print_health_report(
         }
         OutputFormat::Compact => {
             compact::print_health_compact(report, ctx.root);
-            compact::print_type_aware_compact(ctx.type_aware);
+            compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             warn_grouping_unsupported(grouping, "compact");
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
             markdown::print_health_markdown(report, ctx.root);
-            markdown::print_type_aware_markdown(ctx.type_aware);
+            markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
             warn_grouping_unsupported(grouping, "markdown");
             ExitCode::SUCCESS
         }
@@ -835,6 +842,20 @@ pub(crate) fn print_export_trace(
     }
 }
 
+/// Print a syntactic export trace with its authoritative checker-backed
+/// semantic section and optional field definitions.
+pub(crate) fn print_semantic_export_trace(
+    trace: &ExportTrace,
+    format: OutputFormat,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) {
+    match format {
+        OutputFormat::Json => json::print_semantic_trace_json(trace, explain, json_style),
+        _ => human::print_export_trace_human(trace),
+    }
+}
+
 /// Print class-member trace results (the `--trace FILE:MEMBER` fallback).
 pub(crate) fn print_class_member_trace(
     trace: &fallow_engine::trace::ClassMemberTrace,
@@ -843,6 +864,20 @@ pub(crate) fn print_class_member_trace(
 ) {
     match format {
         OutputFormat::Json => json::print_trace_json(trace, json_style),
+        _ => human::print_class_member_trace_human(trace),
+    }
+}
+
+/// Print a class-member trace with authoritative checker-backed evidence and
+/// optional field definitions.
+pub(crate) fn print_semantic_class_member_trace(
+    trace: &fallow_engine::trace::ClassMemberTrace,
+    format: OutputFormat,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) {
+    match format {
+        OutputFormat::Json => json::print_semantic_trace_json(trace, explain, json_style),
         _ => human::print_class_member_trace_human(trace),
     }
 }
@@ -915,10 +950,11 @@ pub(crate) fn print_impact_closure_trace(
 pub(crate) fn print_symbol_impact(
     impact: &SemanticSymbolImpact,
     format: OutputFormat,
+    explain: bool,
     json_style: crate::json_style::JsonStyle,
 ) {
     match format {
-        OutputFormat::Json => json::print_trace_json(impact, json_style),
+        OutputFormat::Json => json::print_semantic_impact_json(impact, explain, json_style),
         _ => human::print_symbol_impact_human(impact),
     }
 }
@@ -1022,6 +1058,7 @@ mod tests {
             quiet: true,
             explain: false,
             type_aware: None,
+            type_aware_scope: None,
             group_by: None,
             top: None,
             summary: false,

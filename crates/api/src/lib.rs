@@ -143,9 +143,9 @@ pub use markdown_output::{
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
-    BoundariesListing, CombinedOutput, FallowOutput, ListBoundariesOutput, ListEntryPointOutput,
-    ListOutput, ListPluginOutput, ReviewBriefWireOutput, SecurityGate, SecurityOutput,
-    SecurityOutputConfig, SecuritySummaryOutput, WorkspacesOutput,
+    BoundariesListing, CombinedOutput, FallowOutput, ImpactOutput, ListBoundariesOutput,
+    ListEntryPointOutput, ListOutput, ListPluginOutput, ReviewBriefWireOutput, SecurityGate,
+    SecurityOutput, SecurityOutputConfig, SecuritySummaryOutput, TraceOutput, WorkspacesOutput,
 };
 pub use runtime::{
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
@@ -177,7 +177,16 @@ pub use sarif_output::{
     build_health_sarif,
 };
 pub use security_output::SecurityGateMode;
-pub use type_aware::refine_dead_code as refine_type_aware_dead_code;
+pub use type_aware::{
+    SemanticCouplingOutcome, SemanticDeadCodeOutcome, SemanticInspectOutcome, TypeAwareError,
+    TypeAwareOutcome, TypeAwareStatus, inspect_symbol as inspect_type_aware_symbol,
+    merge_type_aware_meta, refine_dead_code_results as refine_type_aware_results,
+    refine_programmatic_dead_code as refine_type_aware_dead_code, shutdown_type_aware_sidecars,
+    status as type_aware_status, symbol_impact as run_type_aware_symbol_impact,
+    symbol_impact as type_aware_symbol_impact, terminate_active_type_aware_sidecars,
+    trace_symbol as run_type_aware_symbol_trace, trace_symbol as trace_type_aware_symbol,
+    type_coupling as analyze_type_coupling,
+};
 
 pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "root",

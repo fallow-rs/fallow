@@ -18,6 +18,43 @@ import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  checkerEvidenceRequest as createCheckerEvidenceRequest,
+  digestSet,
+  normalizedEvidenceResponseDigest,
+  requestDigest,
+  runExactSidecarRequest as executeExactSidecarRequest,
+} from "./type-aware-corpus/runner.mjs";
+import {
+  aggregatePhaseTimings,
+  aggregateReasonCounts,
+  percentile,
+  pairedOverheads,
+  renderSummaryMarkdown,
+  requirePublicationGo as assertPublicationGo,
+  safeRatio,
+  summaryChecks,
+  summarizeAdjudicatedFeatureBuckets,
+} from "./type-aware-corpus/summary.mjs";
+import {
+  validateCapabilitiesArtifactData as validateCapabilitiesData,
+  validateMeasurements as validateMeasurementData,
+  validateSupplementalArtifactData as validateSupplementalData,
+} from "./type-aware-corpus/validation.mjs";
+import {
+  candidateFeatureBucketFields as ledgerFeatureBucketFields,
+  evidenceLocationValid as validEvidenceLocation,
+  evidenceProducerErrors as validateEvidenceProducer,
+  independentReviewErrors as validateIndependentReviews,
+  indexLedgerForRefresh as indexRefreshLedger,
+  verifyLedgerData as verifyLedgerArtifact,
+} from "./type-aware-corpus/ledger.mjs";
+import {
+  parseArgs as parseCorpusArgs,
+  validateManifest as validateCorpusManifest,
+} from "./type-aware-corpus/config.mjs";
+
+export { summarizeAdjudicatedFeatureBuckets };
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
@@ -37,7 +74,13 @@ const DEFAULT_RUNS = 4;
 const DEFAULT_WARMUPS = 1;
 const DEFAULT_DISCOVERY_RUNS = 2;
 const MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
-const TRUTH_STATUSES = new Set(["used", "unused", "indeterminate"]);
+const MAX_SEMANTIC_RESPONSE_BYTES = 32 * 1024 * 1024;
+const MAX_SEMANTIC_STDERR_BYTES = 16 * 1024;
+const PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS = 100;
+const SEMANTIC_TIMEOUT_MS = 120_000;
+const SEMANTIC_PROTOCOL_VERSION = 5;
+const SEMANTIC_QUERY_STATUSES = new Set(["complete", "partial", "unavailable"]);
+const TRUTH_STATUSES = new Set(["used", "preserved", "unused", "indeterminate"]);
 const DEPENDENCY_DIRECTORY_NAMES = new Set(["node_modules", ".pnpm-store"]);
 const FOCUSED_TEST_PATH = resolve(REPO_ROOT, "tools/type-aware-sidecar/test/sidecar.test.mjs");
 const REQUIRED_FOCUSED_CASES = [
@@ -48,8 +91,12 @@ const REQUIRED_FOCUSED_CASES = [
   "retains Vue template-only members without claiming a checker use",
   "finds a class member used only from an explicitly opened consumer project",
   "full CLI safely abstains for an explicit solution tsconfig",
-  "protocol v3 discovers public entry points from a nested package project",
-  "protocol v3 includes a direct test consumer in targeted tests",
+  "protocol v5 discovers public entry points from a nested package project",
+  "protocol v5 includes a direct test consumer in targeted tests",
+  "protocol v5 finds semantic consumers and tests across selected projects",
+  "protocol v5 confirms complete closed-world absence of static class-member references",
+  "protocol v5 preserves required interface, abstract, and inherited contracts",
+  "protocol v5 abstains for optional contracts, decorators, and dynamic member access",
   "treats getter and setter declarations as one logical property",
 ];
 const REQUIRED_SEMANTIC_CAPABILITIES = [
@@ -76,6 +123,8 @@ const fail = (message) => {
   throw new Error(message);
 };
 
+const describeError = (error) => (error instanceof Error ? error.message : String(error));
+
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const nonEmptyString = (value, field) => {
@@ -94,74 +143,22 @@ const normalizedRelativePath = (value, field) => {
 };
 
 export const validateManifest = (manifest) => {
-  if (!isObject(manifest) || manifest.schema_version !== 1) {
-    fail("manifest schema_version must be 1");
-  }
-  if (manifest.artifact_directory !== "target/type-aware-corpus") {
-    fail("manifest artifact_directory must be target/type-aware-corpus");
-  }
   const requiredGates = [
     "minimum_confirmation_precision",
-    "minimum_used_recall",
+    "minimum_confirmation_yield",
     "minimum_correct_unused_retention",
     "maximum_abstention",
     "maximum_p95_marginal_overhead_ms",
     "maximum_p95_refined_rss_kb",
   ];
-  if (!isObject(manifest.gates)) fail("manifest gates must be an object");
-  for (const gate of requiredGates) {
-    if (!Number.isFinite(manifest.gates[gate]) || manifest.gates[gate] < 0) {
-      fail(`manifest gates.${gate} must be a non-negative number`);
-    }
-  }
-  if (!Array.isArray(manifest.projects) || manifest.projects.length !== REQUIRED_PROJECTS.size) {
-    fail(`manifest must contain exactly ${REQUIRED_PROJECTS.size} corpus projects`);
-  }
-
-  const seen = new Set();
-  for (const project of manifest.projects) {
-    if (!isObject(project)) fail("every manifest project must be an object");
-    nonEmptyString(project.id, "project.id");
-    if (seen.has(project.id)) fail(`duplicate project id: ${project.id}`);
-    seen.add(project.id);
-    const expectedRole = REQUIRED_PROJECTS.get(project.id);
-    if (!expectedRole) fail(`unexpected corpus project: ${project.id}`);
-    if (project.role !== expectedRole) {
-      fail(`${project.id} role must be ${expectedRole}`);
-    }
-    nonEmptyString(project.label, `${project.id}.label`);
-    nonEmptyString(project.repo, `${project.id}.repo`);
-    nonEmptyString(project.ref, `${project.id}.ref`);
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(project.repo)) {
-      fail(`${project.id}.repo must be a public owner/repository slug`);
-    }
-    const fixture = normalizedRelativePath(project.fixture, `${project.id}.fixture`);
-    const expectedFixture = `benchmarks/fixtures/real-world/${project.id}`;
-    if (fixture !== expectedFixture) {
-      fail(`${project.id}.fixture must be ${expectedFixture}`);
-    }
-    const expectedCandidates = project.role === "zero-control" ? "zero" : "nonzero";
-    if (project.candidate_expectation !== expectedCandidates) {
-      fail(`${project.id}.candidate_expectation must be ${expectedCandidates}`);
-    }
-    if (
-      !Array.isArray(project.feature_buckets) ||
-      project.feature_buckets.some((bucket) => typeof bucket !== "string" || bucket.trim() === "")
-    ) {
-      fail(`${project.id}.feature_buckets must be an array of non-empty strings`);
-    }
-    if (project.role === "accuracy-core" && project.feature_buckets.length === 0) {
-      fail(`${project.id} must declare at least one semantic feature bucket`);
-    }
-    if (new Set(project.feature_buckets).size !== project.feature_buckets.length) {
-      fail(`${project.id}.feature_buckets must be unique`);
-    }
-  }
-
-  for (const id of REQUIRED_PROJECTS.keys()) {
-    if (!seen.has(id)) fail(`manifest is missing required project: ${id}`);
-  }
-  return manifest;
+  return validateCorpusManifest(manifest, {
+    fail,
+    isObject,
+    nonEmptyString,
+    normalizedRelativePath,
+    requiredGates,
+    requiredProjects: REQUIRED_PROJECTS,
+  });
 };
 
 const readJson = (path, description = path) => {
@@ -198,71 +195,36 @@ const readOptionValue = (argv, index, option) => {
 };
 
 export const parseArgs = (argv) => {
-  const command = argv[0];
-  if (!command || command === "--help" || command === "-h") {
-    return { command: "help" };
-  }
-  if (
-    !new Set([
-      "prepare",
-      "discover",
-      "measure",
-      "focused",
-      "evidence",
-      "adjudicate",
-      "verify-ledger",
-      "summarize",
-      "verify-publication",
-      "supplemental",
-      "capabilities",
-    ]).has(command)
-  ) {
-    fail(`unknown command: ${command}`);
-  }
-  const options = {
-    command,
-    manifest: DEFAULT_MANIFEST,
-    outDir: DEFAULT_OUT_DIR,
-    fallowBin: DEFAULT_FALLOW_BIN,
-    sidecarBin: null,
-    runs: DEFAULT_RUNS,
-    warmups: DEFAULT_WARMUPS,
-    discoveryRuns: DEFAULT_DISCOVERY_RUNS,
-    projects: [],
-    outDirExplicit: false,
-  };
-  for (let index = 1; index < argv.length; index += 1) {
-    const option = argv[index];
-    if (option === "--manifest") {
-      options.manifest = resolve(readOptionValue(argv, index, option));
-      index += 1;
-    } else if (option === "--fallow-bin") {
-      options.fallowBin = resolve(readOptionValue(argv, index, option));
-      index += 1;
-    } else if (option === "--sidecar-bin") {
-      options.sidecarBin = resolve(readOptionValue(argv, index, option));
-      index += 1;
-    } else if (option === "--out-dir") {
-      options.outDir = resolve(readOptionValue(argv, index, option));
-      options.outDirExplicit = true;
-      index += 1;
-    } else if (option === "--discovery-runs") {
-      options.discoveryRuns = parsePositiveInteger(readOptionValue(argv, index, option), option);
-      index += 1;
-    } else if (option === "--runs") {
-      options.runs = parsePositiveInteger(readOptionValue(argv, index, option), option);
-      index += 1;
-    } else if (option === "--warmups") {
-      options.warmups = parsePositiveInteger(readOptionValue(argv, index, option), option);
-      index += 1;
-    } else if (option === "--project") {
-      options.projects.push(readOptionValue(argv, index, option));
-      index += 1;
-    } else {
-      fail(`unknown option: ${option}`);
-    }
-  }
-  return options;
+  const commands = new Set([
+    "prepare",
+    "discover",
+    "measure",
+    "focused",
+    "evidence",
+    "adjudicate",
+    "verify-ledger",
+    "summarize",
+    "verify-publication",
+    "supplemental",
+    "capabilities",
+  ]);
+  return parseCorpusArgs(argv, {
+    commands,
+    defaults: () => ({
+      discoveryRuns: DEFAULT_DISCOVERY_RUNS,
+      fallowBin: DEFAULT_FALLOW_BIN,
+      manifest: DEFAULT_MANIFEST,
+      outDir: DEFAULT_OUT_DIR,
+      runs: DEFAULT_RUNS,
+      sidecarBin: null,
+      warmups: DEFAULT_WARMUPS,
+    }),
+    fail,
+    helpCommands: new Set([undefined, "--help", "-h"]),
+    parsePositiveInteger,
+    readOptionValue,
+    resolve,
+  });
 };
 
 const usage = () => `Usage: node scripts/type-aware-corpus.mjs <command> [options]
@@ -284,7 +246,7 @@ Options:
   --manifest PATH     Default: benchmarks/type-aware-corpus.json
   --project ID        Select one project, repeatable
   --fallow-bin PATH   Default: target/release/fallow
-  --sidecar-bin PATH  Required for discover, measure, focused, summarize, verify-publication, and supplemental
+  --sidecar-bin PATH  Required for discover, measure, focused, evidence, summarize, verify-publication, and supplemental
   --out-dir PATH      Isolated artifact directory, required with --project
   --discovery-runs N  Repeated normalized discovery runs, default: ${DEFAULT_DISCOVERY_RUNS}
   --runs N            Measured pairs per project, default: ${DEFAULT_RUNS}
@@ -302,11 +264,12 @@ const selectProjects = (manifest, selectedIds) => {
 };
 
 export const validatePartialOutput = (options) => {
-  if (
-    options.projects.length > 0 &&
-    new Set(["prepare", "discover", "measure"]).has(options.command) &&
-    (!options.outDirExplicit || resolve(options.outDir) === DEFAULT_OUT_DIR)
-  ) {
+  const partialCanonicalRun = [
+    options.projects.length > 0,
+    new Set(["prepare", "discover", "measure"]).has(options.command),
+    [!options.outDirExplicit, resolve(options.outDir) === DEFAULT_OUT_DIR].some(Boolean),
+  ].every(Boolean);
+  if (partialCanonicalRun) {
     fail("partial corpus runs require a non-canonical --out-dir");
   }
 };
@@ -328,7 +291,12 @@ const git = (cwd, args, description) => {
   return result.stdout.trim();
 };
 
-export const assertDependencyFreeFixture = (root, projectId, ignoredPaths = null) => {
+const normalizeDependencyDirectoryPath = (entry) => entry.replaceAll("\\", "/").replace(/\/$/, "");
+
+const containsDependencyDirectory = (entry) =>
+  entry.split("/").some((component) => DEPENDENCY_DIRECTORY_NAMES.has(component));
+
+export const assertNoFixtureDependencyDirectories = (root, projectId, ignoredPaths = null) => {
   const ignored =
     ignoredPaths ??
     git(
@@ -337,26 +305,64 @@ export const assertDependencyFreeFixture = (root, projectId, ignoredPaths = null
       `${projectId} ignored dependency directory scan`,
     ).split("\n");
   const dependencyDirectories = ignored
-    .map((entry) => entry.replaceAll("\\", "/").replace(/\/$/, ""))
-    .filter((entry) =>
-      entry.split("/").some((component) => DEPENDENCY_DIRECTORY_NAMES.has(component)),
-    );
-  for (const name of DEPENDENCY_DIRECTORY_NAMES) {
-    if (existsSync(resolve(root, name))) dependencyDirectories.push(name);
-  }
-  const unique = [...new Set(dependencyDirectories)].toSorted();
+    .map(normalizeDependencyDirectoryPath)
+    .filter(containsDependencyDirectory);
+  const directDependencyDirectories = [...DEPENDENCY_DIRECTORY_NAMES].filter((name) =>
+    existsSync(resolve(root, name)),
+  );
+  const unique = [
+    ...new Set([...dependencyDirectories, ...directDependencyDirectories]),
+  ].toSorted();
   if (unique.length > 0) {
     fail(`${projectId} prepared fixture contains dependency directories: ${unique.join(", ")}`);
   }
 };
 
+const ancestorDirectories = (root) => {
+  const directories = [];
+  let ancestor = dirname(resolve(root));
+  while (true) {
+    directories.push(ancestor);
+    const parent = dirname(ancestor);
+    if (parent === ancestor) return directories;
+    ancestor = parent;
+  }
+};
+
+const containsInstalledDependencies = (root) =>
+  [...DEPENDENCY_DIRECTORY_NAMES].some((name) => existsSync(resolve(root, name)));
+
+const existingDirectory = (path) => (existsSync(path) ? statSync(path).isDirectory() : false);
+const existingFile = (path) => (existsSync(path) ? statSync(path).isFile() : false);
+
+export const fixtureDependencyEnvironment = (
+  root,
+  projectId,
+  approvedDependencyRoot = REPO_ROOT,
+) => {
+  const dependencyRoots = ancestorDirectories(root).filter(containsInstalledDependencies);
+  if (dependencyRoots.length === 0) {
+    return { dependency_installation: "none", dependency_root: null };
+  }
+  const approved = resolve(approvedDependencyRoot);
+  if (dependencyRoots.some((dependencyRoot) => dependencyRoot !== approved)) {
+    fail(
+      `${projectId} resolves dependencies from an unapproved ancestor: ${dependencyRoots.join(", ")}`,
+    );
+  }
+  return {
+    dependency_installation: "ancestor-workspace",
+    dependency_root: approved,
+  };
+};
+
 const sourceFixtureRoot = (project) => {
   const root = resolve(REPO_ROOT, project.fixture);
   const relativeToRepo = relative(REPO_ROOT, root);
-  if (relativeToRepo.startsWith(`..${sep}`) || relativeToRepo === "..") {
+  if ([relativeToRepo.startsWith(`..${sep}`), relativeToRepo === ".."].some(Boolean)) {
     fail(`${project.id} fixture resolves outside the repository`);
   }
-  if (!existsSync(root) || !statSync(root).isDirectory()) {
+  if (!existingDirectory(root)) {
     fail(`${project.id} fixture is missing: ${project.fixture}`);
   }
   return root;
@@ -373,7 +379,7 @@ const fixtureCommit = (project) =>
 
 const validatePreparedFixture = (project, outDir) => {
   const root = preparedFixtureRoot(project, outDir);
-  if (!existsSync(root) || !statSync(root).isDirectory()) {
+  if (!existingDirectory(root)) {
     fail(`${project.id} prepared fixture is missing; run type-aware corpus prepare first`);
   }
   const expectedCommit = fixtureCommit(project);
@@ -387,36 +393,45 @@ const validatePreparedFixture = (project, outDir) => {
     `${project.id} prepared fixture status`,
   );
   if (dirty !== "") fail(`${project.id} prepared fixture has tracked modifications`);
-  assertDependencyFreeFixture(root, project.id);
-  return { root, commit: actualCommit };
+  assertNoFixtureDependencyDirectories(root, project.id);
+  return {
+    root,
+    commit: actualCommit,
+    dependencyEnvironment: fixtureDependencyEnvironment(root, project.id),
+  };
+};
+
+const prepareProject = (project, outDir) => {
+  const sourceRoot = sourceFixtureRoot(project);
+  const root = preparedFixtureRoot(project, outDir);
+  const commit = fixtureCommit(project);
+  if (!existsSync(root)) {
+    mkdirSync(dirname(root), { recursive: true });
+    git(
+      sourceRoot,
+      ["worktree", "add", "--detach", root, commit],
+      `${project.id} clean worktree preparation`,
+    );
+  }
+  const preparedModules = resolve(root, "node_modules");
+  const linkedModules = existsSync(preparedModules)
+    ? lstatSync(preparedModules).isSymbolicLink()
+    : false;
+  if (linkedModules) {
+    unlinkSync(preparedModules);
+  }
+  const validated = validatePreparedFixture(project, outDir);
+  return {
+    id: project.id,
+    repo: project.repo,
+    ref: project.ref,
+    commit: validated.commit,
+    dependency_environment: publishDependencyEnvironment(validated.dependencyEnvironment),
+  };
 };
 
 const prepare = (projects, outDir) => {
-  const prepared = [];
-  for (const project of projects) {
-    const sourceRoot = sourceFixtureRoot(project);
-    const root = preparedFixtureRoot(project, outDir);
-    const commit = fixtureCommit(project);
-    if (!existsSync(root)) {
-      mkdirSync(dirname(root), { recursive: true });
-      git(
-        sourceRoot,
-        ["worktree", "add", "--detach", root, commit],
-        `${project.id} clean worktree preparation`,
-      );
-    }
-    const preparedModules = resolve(root, "node_modules");
-    if (existsSync(preparedModules) && lstatSync(preparedModules).isSymbolicLink()) {
-      unlinkSync(preparedModules);
-    }
-    const validated = validatePreparedFixture(project, outDir);
-    prepared.push({
-      id: project.id,
-      repo: project.repo,
-      ref: project.ref,
-      commit: validated.commit,
-    });
-  }
+  const prepared = projects.map((project) => prepareProject(project, outDir));
   writeJson(resolve(outDir, "fixtures.json"), { schema_version: 1, projects: prepared });
   return prepared;
 };
@@ -434,6 +449,32 @@ const minimalEnvironment = (sidecarBin) => {
   return environment;
 };
 
+const processTreeIndexes = (rows) => {
+  const children = new Map();
+  const rssByPid = new Map();
+  rows.forEach(([pid, ppid, rss]) => {
+    rssByPid.set(pid, rss);
+    const siblings = arrayOrEmpty(children.get(ppid));
+    siblings.push(pid);
+    children.set(ppid, siblings);
+  });
+  return { children, rssByPid };
+};
+
+const processTreeRss = (rootPid, children, rssByPid) => {
+  const pending = [rootPid];
+  const seen = new Set();
+  let total = 0;
+  while (pending.length > 0) {
+    const pid = pending.pop();
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    total += integerOrFallback(rssByPid.get(pid), 0);
+    pending.push(...arrayOrEmpty(children.get(pid)));
+  }
+  return total;
+};
+
 const descendantsRssKb = (rootPid) => {
   if (process.platform === "win32") return null;
   const result = spawnSync("ps", ["-axo", "pid=,ppid=,rss="], {
@@ -448,28 +489,11 @@ const descendantsRssKb = (rootPid) => {
     .filter(
       ([pid, ppid, rss]) => Number.isFinite(pid) && Number.isFinite(ppid) && Number.isFinite(rss),
     );
-  const children = new Map();
-  const rssByPid = new Map();
-  for (const [pid, ppid, rss] of rows) {
-    rssByPid.set(pid, rss);
-    const siblings = children.get(ppid) ?? [];
-    siblings.push(pid);
-    children.set(ppid, siblings);
-  }
-  const pending = [rootPid];
-  const seen = new Set();
-  let total = 0;
-  while (pending.length > 0) {
-    const pid = pending.pop();
-    if (seen.has(pid)) continue;
-    seen.add(pid);
-    total += rssByPid.get(pid) ?? 0;
-    pending.push(...(children.get(pid) ?? []));
-  }
-  return total;
+  const { children, rssByPid } = processTreeIndexes(rows);
+  return processTreeRss(rootPid, children, rssByPid);
 };
 
-const runProcess = (binary, args, cwd, sidecarBin) =>
+export const runProcess = (binary, args, cwd, sidecarBin) =>
   new Promise((accept, reject) => {
     const started = process.hrtime.bigint();
     const child = spawn(binary, args, {
@@ -498,10 +522,12 @@ const runProcess = (binary, args, cwd, sidecarBin) =>
     child.stdout.on("data", (chunk) => collect(stdout, chunk, "stdout"));
     child.stderr.on("data", (chunk) => collect(stderr, chunk, "stderr"));
     child.on("error", reject);
-    const sampler = setInterval(() => {
+    const sampleProcessTreeRss = () => {
       const rss = descendantsRssKb(child.pid);
       if (rss !== null) peakRssKb = Math.max(peakRssKb, rss);
-    }, 20);
+    };
+    sampleProcessTreeRss();
+    const sampler = setInterval(sampleProcessTreeRss, PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS);
     child.on("close", (status, signal) => {
       clearInterval(sampler);
       const finalRss = descendantsRssKb(child.pid);
@@ -521,10 +547,11 @@ const runProcess = (binary, args, cwd, sidecarBin) =>
   });
 
 const findCandidates = (output) => {
-  const candidates =
-    output.unused_class_members ??
-    output.check?.unused_class_members ??
-    output.results?.unused_class_members;
+  const candidates = [
+    output.unused_class_members,
+    Object(output.check).unused_class_members,
+    Object(output.results).unused_class_members,
+  ].find((value) => value !== undefined);
   if (!Array.isArray(candidates)) fail("machine output has no unused_class_members array");
   return candidates;
 };
@@ -542,11 +569,11 @@ const candidateFields = (candidate) => {
   for (const field of ["parent_name", "member_name", "kind"]) {
     nonEmptyString(fields[field], `candidate.${field}`);
   }
-  for (const field of ["line", "col"]) {
-    if (!Number.isSafeInteger(fields[field]) || fields[field] < 0) {
+  ["line", "col"].forEach((field) => {
+    if (![Number.isSafeInteger(fields[field]), fields[field] >= 0].every(Boolean)) {
       fail(`candidate.${field} must be a non-negative integer`);
     }
-  }
+  });
   return fields;
 };
 
@@ -582,7 +609,10 @@ const indexedCandidates = (projectId, output) => {
   return candidates;
 };
 
-const typeAwareMeta = (output) => output._meta?.type_aware ?? output.meta?.type_aware ?? null;
+const typeAwareMeta = (output) =>
+  [Object(output._meta).type_aware, Object(output.meta).type_aware, null].find(
+    (value) => value !== undefined,
+  );
 
 const parseMachineOutput = (stdout, projectId) => {
   let output;
@@ -593,7 +623,10 @@ const parseMachineOutput = (stdout, projectId) => {
       `${projectId} emitted invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (!isObject(output) || (output.kind !== undefined && output.kind !== "dead-code")) {
+  const validEnvelope = [isObject(output), [undefined, "dead-code"].includes(output.kind)].every(
+    Boolean,
+  );
+  if (!validEnvelope) {
     fail(`${projectId} emitted an unexpected machine-output envelope`);
   }
   return {
@@ -615,48 +648,96 @@ const fallowArgs = (root, refined) => [
   "--no-cache",
 ];
 
-const executeFallow = async ({ project, fallowBin, sidecarBin, refined, rawPath, outDir }) => {
-  const root = projectRoot(project, outDir);
-  const result = await runProcess(fallowBin, fallowArgs(root, refined), REPO_ROOT, sidecarBin);
+const machineErrorDetail = (result) => {
+  let detail = result.stderr.trim();
+  try {
+    const errorOutput = JSON.parse(result.stdout);
+    if (typeof errorOutput.message === "string") detail = errorOutput.message;
+  } catch {
+    return detail;
+  }
+  return detail;
+};
+
+const persistProcessResult = (rawPath, result, failureMessage) => {
   mkdirSync(dirname(rawPath), { recursive: true });
   writeFileSync(rawPath, result.stdout);
   writeFileSync(rawPath.replace(/\.json$/, ".stderr.txt"), result.stderr);
-  if (result.status === null || result.status >= 2) {
-    let detail = result.stderr.trim();
-    try {
-      const errorOutput = JSON.parse(result.stdout);
-      if (typeof errorOutput.message === "string") detail = errorOutput.message;
-    } catch {
-      // The normal parse error below reports malformed stdout after successful exits.
-    }
-    fail(
-      `${project.id} ${refined ? "refined" : "baseline"} run failed (${result.status ?? result.signal}): ${detail.slice(0, 2_000)}`,
-    );
+  if ([result.status === null, result.status >= 2].some(Boolean)) {
+    fail(failureMessage(result));
   }
+};
+
+const executeFallow = async ({ project, fallowBin, sidecarBin, refined, rawPath, outDir }) => {
+  const root = projectRoot(project, outDir);
+  const result = await runProcess(fallowBin, fallowArgs(root, refined), REPO_ROOT, sidecarBin);
+  persistProcessResult(rawPath, result, (failedResult) => {
+    const detail = machineErrorDetail(result);
+    const mode = refined ? "refined" : "baseline";
+    const outcome = firstDefined([failedResult.status, failedResult.signal]);
+    return `${project.id} ${mode} run failed (${outcome}): ${detail.slice(0, 2_000)}`;
+  });
   const parsed = parseMachineOutput(result.stdout, project.id);
   return { ...result, ...parsed };
 };
 
 const validateCandidateExpectation = (project, count) => {
-  if (project.candidate_expectation === "zero" && count !== 0) {
+  if ([project.candidate_expectation === "zero", count !== 0].every(Boolean)) {
     fail(`${project.id} zero-candidate control emitted ${count} candidates`);
   }
-  if (project.candidate_expectation === "nonzero" && count === 0) {
+  if ([project.candidate_expectation === "nonzero", count === 0].every(Boolean)) {
     fail(`${project.id} accuracy-core project emitted no candidates`);
   }
 };
 
-const compareCandidateSets = (projectId, baseline, refined) => {
+const decisionCandidate = (decision) => {
+  const subject = Object(decision.subject);
+  return {
+    path: subject.path,
+    parent_name: subject.owner,
+    member_name: subject.local_name,
+    kind: subject.declaration_kind,
+    line: subject.line,
+    col: subject.col,
+  };
+};
+
+const indexCandidateDecisions = (projectId, metadata) => {
+  const decisions = new Map();
+  for (const decision of arrayOrEmpty(Object(metadata).candidate_decisions)) {
+    const key = candidateKey(projectId, decisionCandidate(decision));
+    if (decisions.has(key)) fail(`${projectId} emitted duplicate semantic decisions for ${key}`);
+    decisions.set(key, decision);
+  }
+  return decisions;
+};
+
+export const compareCandidateSets = (projectId, baseline, refined, metadata) => {
   const refinedKeys = new Set(refined.map((candidate) => candidate.key));
   const baselineKeys = new Set(baseline.map((candidate) => candidate.key));
+  const decisions = indexCandidateDecisions(projectId, metadata);
   const additions = [...refinedKeys].filter((key) => !baselineKeys.has(key));
   if (additions.length > 0) {
     fail(`${projectId} refined output added candidates: ${additions.join(", ")}`);
   }
-  return baseline.map((candidate) => ({
-    ...candidate,
-    semantic_status: refinedKeys.has(candidate.key) ? "retained" : "confirmed-used",
-  }));
+  return baseline.map((candidate) => {
+    const decision = decisions.get(candidate.key);
+    if (!decision) fail(`${projectId} emitted no semantic decision for ${candidate.key}`);
+    const removesFinding = ["confirmed-used", "contract-preserved"].includes(decision.decision);
+    if (removesFinding === refinedKeys.has(candidate.key)) {
+      fail(
+        `${projectId} semantic decision ${decision.decision} disagrees with the refined finding set for ${candidate.key}`,
+      );
+    }
+    return {
+      ...candidate,
+      semantic_status: removesFinding ? decision.decision : "retained",
+      semantic_decision: decision.decision,
+      semantic_completeness: decision.status,
+      owning_projects: arrayOrEmpty(decision.owning_projects),
+      contract: decision.contract ?? null,
+    };
+  });
 };
 
 const ensureRuntimeInputs = (options) => {
@@ -675,6 +756,53 @@ const corpusIdentity = (projects) =>
   }));
 
 const sha256File = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+
+const dependencyTypeTreeHashes = new Map();
+
+const dependencyTypeTreeHash = (root) => {
+  const cached = dependencyTypeTreeHashes.get(root);
+  if (cached) return cached;
+  const dependencyRoot = resolve(root, "node_modules");
+  const paths = filesBelow(dependencyRoot).filter(
+    (path) =>
+      basename(path) === "package.json" ||
+      path.endsWith(".d.ts") ||
+      path.endsWith(".d.mts") ||
+      path.endsWith(".d.cts"),
+  );
+  const digest = createHash("sha256");
+  for (const path of paths) {
+    digest.update(relative(dependencyRoot, path).replaceAll("\\", "/"));
+    digest.update("\0");
+    digest.update(readFileSync(path));
+    digest.update("\0");
+  }
+  const hash = digest.digest("hex");
+  dependencyTypeTreeHashes.set(root, hash);
+  return hash;
+};
+
+const publishDependencyEnvironment = (environment) => {
+  if (environment.dependency_root === null) {
+    return {
+      dependency_installation: environment.dependency_installation,
+      path_base: "fallow-workspace-root",
+      dependency_root: null,
+      lockfile: null,
+      lockfile_sha256: null,
+      type_declaration_tree_sha256: null,
+    };
+  }
+  const lockfile = resolve(environment.dependency_root, "package-lock.json");
+  return {
+    dependency_installation: environment.dependency_installation,
+    path_base: "fallow-workspace-root",
+    dependency_root: relative(REPO_ROOT, environment.dependency_root).replaceAll("\\", "/") || ".",
+    lockfile: relative(REPO_ROOT, lockfile).replaceAll("\\", "/"),
+    lockfile_sha256: sha256File(lockfile),
+    type_declaration_tree_sha256: dependencyTypeTreeHash(environment.dependency_root),
+  };
+};
 
 const filesBelow = (root) => {
   if (!existsSync(root)) return [];
@@ -728,25 +856,39 @@ const binaryVersion = (binary) => {
   return output;
 };
 
+const currentPublicationProvenance = (manifestPath, projects, options) => {
+  const preparedProjects = projects.map((project) => ({
+    project,
+    validated: validatePreparedFixture(project, options.outDir),
+  }));
+  return {
+    manifest_sha256: sha256File(manifestPath),
+    fallow: {
+      version: binaryVersion(options.fallowBin),
+      sha256: sha256File(options.fallowBin),
+    },
+    sidecar: {
+      sha256: sidecarArtifactHash(options.sidecarBin),
+    },
+    runtime: {
+      platform: process.platform,
+      architecture: process.arch,
+      node: process.version,
+    },
+    dependency_environments: Object.fromEntries(
+      preparedProjects.map(({ project, validated }) => {
+        return [project.id, publishDependencyEnvironment(validated.dependencyEnvironment)];
+      }),
+    ),
+    fixtures: preparedProjects.map(({ project, validated }) => {
+      return { id: project.id, repo: project.repo, ref: project.ref, commit: validated.commit };
+    }),
+  };
+};
+
 const buildProvenance = (manifestPath, projects, options) => ({
   generated_at: new Date().toISOString(),
-  manifest_sha256: sha256File(manifestPath),
-  fallow: {
-    version: binaryVersion(options.fallowBin),
-    sha256: sha256File(options.fallowBin),
-  },
-  sidecar: {
-    sha256: sidecarArtifactHash(options.sidecarBin),
-  },
-  runtime: {
-    platform: process.platform,
-    architecture: process.arch,
-    node: process.version,
-  },
-  fixtures: projects.map((project) => {
-    const { commit } = validatePreparedFixture(project, options.outDir);
-    return { id: project.id, repo: project.repo, ref: project.ref, commit };
-  }),
+  ...currentPublicationProvenance(manifestPath, projects, options),
 });
 
 const normalizedRefinement = (run) => {
@@ -774,82 +916,109 @@ export const requireCompletePublicationCorpus = (manifest, discovery) => {
   }
 };
 
+const discoveryRawPath = (options, artifactProject, iteration, mode) =>
+  resolve(options.outDir, "discover", `${artifactProject}-${iteration + 1}-${mode}.json`);
+
+export const selectFirstCompletedRun = (previous, current) => previous ?? current;
+
+const runDiscoveryIterations = async (project, options) => {
+  const artifactProject = safeArtifactName(project.id);
+  let baseline = null;
+  let refined = null;
+  let expectedBaseline = null;
+  let expectedRefined = null;
+  for (let iteration = 0; iteration < options.discoveryRuns; iteration += 1) {
+    const currentBaseline = await executeFallow({
+      project,
+      fallowBin: options.fallowBin,
+      sidecarBin: options.sidecarBin,
+      refined: false,
+      rawPath: discoveryRawPath(options, artifactProject, iteration, "baseline"),
+      outDir: options.outDir,
+    });
+    const currentRefined = await executeFallow({
+      project,
+      fallowBin: options.fallowBin,
+      sidecarBin: options.sidecarBin,
+      refined: true,
+      rawPath: discoveryRawPath(options, artifactProject, iteration, "refined"),
+      outDir: options.outDir,
+    });
+    const normalizedBaseline = normalizedRefinement(currentBaseline);
+    const normalizedRefined = normalizedRefinement(currentRefined);
+    if (expectedBaseline) {
+      requireSameNormalizedRun(project.id, "baseline", expectedBaseline, normalizedBaseline);
+    }
+    if (expectedRefined) {
+      requireSameNormalizedRun(project.id, "refined", expectedRefined, normalizedRefined);
+    }
+    expectedBaseline = normalizedBaseline;
+    expectedRefined = normalizedRefined;
+    baseline = selectFirstCompletedRun(baseline, currentBaseline);
+    refined = selectFirstCompletedRun(refined, currentRefined);
+  }
+  return { baseline, refined };
+};
+
+const compactTypeAwareMetadata = (metadata) => {
+  if (!metadata) return null;
+  return {
+    protocol_version: metadata.protocol_version,
+    sidecar_version: metadata.sidecar_version,
+    backend_version: metadata.backend_version,
+    candidate_count: metadata.candidate_count,
+    confirmed_used_count: metadata.confirmed_used_count,
+    contract_preserved_count: metadata.contract_preserved_count,
+    no_static_references_count: metadata.no_static_references_count,
+    fix_eligible_count: metadata.fix_eligible_count,
+    unresolved_count: metadata.unresolved_count,
+    abstained_count: metadata.abstained_count,
+    abstention_reasons: metadata.abstention_reasons,
+    elapsed_ms: metadata.elapsed_ms,
+    phase_timings_ms: metadata.phase_timings_ms,
+    projects: metadata.projects,
+  };
+};
+
+const discoverProject = async (project, options) => {
+  const { baseline, refined } = await runDiscoveryIterations(project, options);
+  validateCandidateExpectation(project, baseline.candidates.length);
+  const candidates = compareCandidateSets(
+    project.id,
+    baseline.candidates,
+    refined.candidates,
+    refined.typeAware,
+  );
+  const metaCount = Object(refined.typeAware).candidate_count;
+  const mismatchedCount = [
+    Number.isSafeInteger(metaCount),
+    metaCount !== baseline.candidates.length,
+  ].every(Boolean);
+  if (mismatchedCount) {
+    fail(`${project.id} type-aware candidate_count does not match baseline output`);
+  }
+  return {
+    id: project.id,
+    role: project.role,
+    feature_buckets: project.feature_buckets,
+    baseline_candidate_count: baseline.candidates.length,
+    refined_candidate_count: refined.candidates.length,
+    confirmed_used_count: candidates.filter(
+      ({ semantic_status: status }) => status === "confirmed-used",
+    ).length,
+    contract_preserved_count: candidates.filter(
+      ({ semantic_status: status }) => status === "contract-preserved",
+    ).length,
+    type_aware: compactTypeAwareMetadata(refined.typeAware),
+    candidates,
+  };
+};
+
 const discover = async (manifest, projects, options) => {
   ensureRuntimeInputs(options);
   const results = [];
   for (const project of projects) {
-    const artifactProject = safeArtifactName(project.id);
-    let baseline = null;
-    let refined = null;
-    let expectedBaseline = null;
-    let expectedRefined = null;
-    for (let iteration = 0; iteration < options.discoveryRuns; iteration += 1) {
-      const currentBaseline = await executeFallow({
-        project,
-        fallowBin: options.fallowBin,
-        sidecarBin: options.sidecarBin,
-        refined: false,
-        rawPath: resolve(
-          options.outDir,
-          "discover",
-          `${artifactProject}-${iteration + 1}-baseline.json`,
-        ),
-        outDir: options.outDir,
-      });
-      const currentRefined = await executeFallow({
-        project,
-        fallowBin: options.fallowBin,
-        sidecarBin: options.sidecarBin,
-        refined: true,
-        rawPath: resolve(
-          options.outDir,
-          "discover",
-          `${artifactProject}-${iteration + 1}-refined.json`,
-        ),
-        outDir: options.outDir,
-      });
-      const normalizedBaseline = normalizedRefinement(currentBaseline);
-      const normalizedRefined = normalizedRefinement(currentRefined);
-      if (expectedBaseline)
-        requireSameNormalizedRun(project.id, "baseline", expectedBaseline, normalizedBaseline);
-      if (expectedRefined)
-        requireSameNormalizedRun(project.id, "refined", expectedRefined, normalizedRefined);
-      expectedBaseline = normalizedBaseline;
-      expectedRefined = normalizedRefined;
-      baseline ??= currentBaseline;
-      refined ??= currentRefined;
-    }
-    validateCandidateExpectation(project, baseline.candidates.length);
-    const candidates = compareCandidateSets(project.id, baseline.candidates, refined.candidates);
-    const metaCount = refined.typeAware?.candidate_count;
-    if (Number.isSafeInteger(metaCount) && metaCount !== baseline.candidates.length) {
-      fail(`${project.id} type-aware candidate_count does not match baseline output`);
-    }
-    results.push({
-      id: project.id,
-      role: project.role,
-      feature_buckets: project.feature_buckets,
-      baseline_candidate_count: baseline.candidates.length,
-      refined_candidate_count: refined.candidates.length,
-      confirmed_used_count: candidates.filter(
-        ({ semantic_status }) => semantic_status === "confirmed-used",
-      ).length,
-      type_aware: refined.typeAware
-        ? {
-            protocol_version: refined.typeAware.protocol_version,
-            sidecar_version: refined.typeAware.sidecar_version,
-            backend_version: refined.typeAware.backend_version,
-            confirmed_used_count: refined.typeAware.confirmed_used_count,
-            unresolved_count: refined.typeAware.unresolved_count,
-            abstained_count: refined.typeAware.abstained_count,
-            abstention_reasons: refined.typeAware.abstention_reasons,
-            elapsed_ms: refined.typeAware.elapsed_ms,
-            phase_timings_ms: refined.typeAware.phase_timings_ms,
-            projects: refined.typeAware.projects,
-          }
-        : null,
-      candidates,
-    });
+    results.push(await discoverProject(project, options));
   }
   const report = {
     schema_version: 1,
@@ -867,9 +1036,15 @@ export const runOrderForIteration = (iteration) => {
   return iteration % 2 === 0 ? ["baseline", "refined"] : ["refined", "baseline"];
 };
 
+const arrayOrEmpty = (value) => (Array.isArray(value) ? value : []);
+const finiteOrNull = (value) => (Number.isFinite(value) ? value : null);
+const integerOrFallback = (value, fallback) => (Number.isSafeInteger(value) ? value : fallback);
+const firstObject = (values) => values.find(isObject) ?? {};
+
 const compactRun = (run, mode, iteration, warmup) => {
-  const meta = run.typeAware;
-  const projects = Array.isArray(meta?.projects) ? meta.projects : [];
+  const meta = Object(run.typeAware);
+  const projects = arrayOrEmpty(meta.projects);
+  const projectCount = projects.length === 0 ? null : projects.length;
   return {
     iteration,
     warmup,
@@ -877,25 +1052,89 @@ const compactRun = (run, mode, iteration, warmup) => {
     wall_ms: run.wall_ms,
     peak_process_tree_rss_kb: run.peak_process_tree_rss_kb,
     candidate_count: run.candidates.length,
-    refinement_ms: Number.isFinite(meta?.elapsed_ms) ? meta.elapsed_ms : null,
-    program_count: Number.isSafeInteger(meta?.program_count)
-      ? meta.program_count
-      : projects.length || null,
-    source_files_per_program: Array.isArray(meta?.source_files_per_program)
+    refinement_ms: finiteOrNull(meta.elapsed_ms),
+    program_count: integerOrFallback(meta.program_count, projectCount),
+    source_files_per_program: Array.isArray(meta.source_files_per_program)
       ? meta.source_files_per_program
       : projects.map(({ source_file_count }) => source_file_count).filter(Number.isSafeInteger),
-    phase_timings_ms: isObject(meta?.phase_timings_ms)
-      ? meta.phase_timings_ms
-      : isObject(meta?.phase_timings)
-        ? meta.phase_timings
-        : {},
-    reason_counts: isObject(meta?.reason_counts)
-      ? meta.reason_counts
-      : isObject(meta?.abstention_reasons)
-        ? meta.abstention_reasons
-        : isObject(meta?.candidate_status_summary?.reason_counts)
-          ? meta.candidate_status_summary.reason_counts
-          : {},
+    phase_timings_ms: firstObject([meta.phase_timings_ms, meta.phase_timings]),
+    reason_counts: firstObject([
+      meta.reason_counts,
+      meta.abstention_reasons,
+      Object(meta.candidate_status_summary).reason_counts,
+    ]),
+  };
+};
+
+const measurementPhases = (options) => [
+  ...Array.from({ length: options.warmups }, (_, iteration) => ({ warmup: true, iteration })),
+  ...Array.from({ length: options.runs }, (_, iteration) => ({ warmup: false, iteration })),
+];
+
+const measurementRawPath = (options, artifactProject, phase, mode) => {
+  const kind = phase.warmup ? "warmup" : "measured";
+  return resolve(
+    options.outDir,
+    "measure",
+    artifactProject,
+    `${kind}-${phase.iteration + 1}-${mode}.json`,
+  );
+};
+
+const validateBaselineMeasurement = (project, run, state) => {
+  validateCandidateExpectation(project, run.candidates.length);
+  const keys = run.candidates.map(({ key }) => key);
+  const changed = [
+    Array.isArray(state.baselineKeys),
+    JSON.stringify(keys) !== JSON.stringify(state.baselineKeys),
+  ].every(Boolean);
+  if (changed) fail(`${project.id} baseline candidate keys changed between runs`);
+  state.baselineKeys = keys;
+};
+
+const validateRefinedMeasurement = (project, run, state) => {
+  if (!Array.isArray(state.baselineKeys)) return;
+  const unexpected = run.candidates.filter(({ key }) => !state.baselineKeys.includes(key));
+  if (unexpected.length > 0) fail(`${project.id} refined run added unexpected candidates`);
+  const normalized = normalizedRefinement(run);
+  if (state.refined) {
+    requireSameNormalizedRun(project.id, "refined measurement", state.refined, normalized);
+  }
+  state.refined = normalized;
+};
+
+const runMeasurement = async (project, options, artifactProject, phase, mode, state) => {
+  const refined = mode === "refined";
+  const run = await executeFallow({
+    project,
+    fallowBin: options.fallowBin,
+    sidecarBin: options.sidecarBin,
+    refined,
+    rawPath: measurementRawPath(options, artifactProject, phase, mode),
+    outDir: options.outDir,
+  });
+  const validators = {
+    baseline: validateBaselineMeasurement,
+    refined: validateRefinedMeasurement,
+  };
+  validators[mode](project, run, state);
+  return compactRun(run, mode, phase.iteration, phase.warmup);
+};
+
+const measureProject = async (project, options) => {
+  const projectRuns = [];
+  const artifactProject = safeArtifactName(project.id);
+  const state = { baselineKeys: null, refined: null };
+  for (const phase of measurementPhases(options)) {
+    for (const mode of runOrderForIteration(phase.iteration)) {
+      projectRuns.push(await runMeasurement(project, options, artifactProject, phase, mode, state));
+    }
+  }
+  return {
+    id: project.id,
+    role: project.role,
+    run_order: projectRuns.map(({ iteration, warmup, mode }) => ({ iteration, warmup, mode })),
+    runs: projectRuns,
   };
 };
 
@@ -903,66 +1142,7 @@ const measure = async (manifest, projects, options) => {
   ensureRuntimeInputs(options);
   const projectReports = [];
   for (const project of projects) {
-    const projectRuns = [];
-    const artifactProject = safeArtifactName(project.id);
-    const phases = [
-      ...Array.from({ length: options.warmups }, (_, iteration) => ({ warmup: true, iteration })),
-      ...Array.from({ length: options.runs }, (_, iteration) => ({ warmup: false, iteration })),
-    ];
-    let expectedBaselineKeys = null;
-    let expectedRefined = null;
-    for (const phase of phases) {
-      for (const mode of runOrderForIteration(phase.iteration)) {
-        const refined = mode === "refined";
-        const kind = phase.warmup ? "warmup" : "measured";
-        const rawPath = resolve(
-          options.outDir,
-          "measure",
-          artifactProject,
-          `${kind}-${phase.iteration + 1}-${mode}.json`,
-        );
-        const run = await executeFallow({
-          project,
-          fallowBin: options.fallowBin,
-          sidecarBin: options.sidecarBin,
-          refined,
-          rawPath,
-          outDir: options.outDir,
-        });
-        if (!refined) {
-          validateCandidateExpectation(project, run.candidates.length);
-          const keys = run.candidates.map(({ key }) => key);
-          if (
-            expectedBaselineKeys &&
-            JSON.stringify(keys) !== JSON.stringify(expectedBaselineKeys)
-          ) {
-            fail(`${project.id} baseline candidate keys changed between runs`);
-          }
-          expectedBaselineKeys = keys;
-        } else if (expectedBaselineKeys) {
-          const unexpected = run.candidates.filter(
-            ({ key }) => !expectedBaselineKeys.includes(key),
-          );
-          if (unexpected.length > 0) fail(`${project.id} refined run added unexpected candidates`);
-          const normalized = normalizedRefinement(run);
-          if (expectedRefined)
-            requireSameNormalizedRun(
-              project.id,
-              "refined measurement",
-              expectedRefined,
-              normalized,
-            );
-          expectedRefined = normalized;
-        }
-        projectRuns.push(compactRun(run, mode, phase.iteration, phase.warmup));
-      }
-    }
-    projectReports.push({
-      id: project.id,
-      role: project.role,
-      run_order: projectRuns.map(({ iteration, warmup, mode }) => ({ iteration, warmup, mode })),
-      runs: projectRuns,
-    });
+    projectReports.push(await measureProject(project, options));
   }
   const report = {
     schema_version: 1,
@@ -976,32 +1156,60 @@ const measure = async (manifest, projects, options) => {
   return report;
 };
 
+const writeSolutionConfigFixture = (root) => {
+  writeFileSync(
+    resolve(root, "package.json"),
+    `${JSON.stringify({ type: "module", main: "src/index.ts" })}\n`,
+  );
+  writeFileSync(
+    resolve(root, "tsconfig.json"),
+    `${JSON.stringify({ files: [], references: [{ path: "packages/lib" }] })}\n`,
+  );
+  mkdirSync(resolve(root, "packages/lib/src"), { recursive: true });
+  mkdirSync(resolve(root, "src"), { recursive: true });
+  writeFileSync(
+    resolve(root, "packages/lib/tsconfig.json"),
+    `${JSON.stringify({ compilerOptions: { composite: true, strict: true }, include: ["src"] })}\n`,
+  );
+  writeFileSync(
+    resolve(root, "packages/lib/src/client.ts"),
+    "export class Client {\n  used(): void {}\n  execute(): void {}\n}\nnew Client().used();\n",
+  );
+  writeFileSync(
+    resolve(root, "src/index.ts"),
+    'import { Client } from "../packages/lib/src/client.js";\nnew Client().used();\n',
+  );
+};
+
+const validateSolutionConfigOutput = (output) => {
+  const metadata = Object(Object(output)._meta).type_aware;
+  const meta = Object(metadata);
+  const valid = [
+    arrayOrEmpty(output.unused_class_members).length === 1,
+    arrayOrEmpty(meta.selected_tsconfigs).length === 0,
+    arrayOrEmpty(meta.projects).length === 0,
+    meta.unresolved_count === 1,
+    meta.abstained_count === 0,
+    Object(meta.abstention_reasons).no_project === 1,
+    arrayOrEmpty(meta.candidate_decisions).some(
+      ({ decision, reason_code: reasonCode }) =>
+        decision === "retained-unresolved" && reasonCode === "no-project",
+    ),
+  ].every(Boolean);
+  if (!valid) {
+    fail(
+      `solution-tsconfig full CLI smoke did not fail closed with an unresolved no-project decision: ${JSON.stringify(
+        { findings: arrayOrEmpty(output.unused_class_members).length, metadata },
+      )}`,
+    );
+  }
+};
+
 const runSolutionConfigCliSmoke = (options) => {
   ensureFile(options.fallowBin, "fallow binary");
   const root = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-solution-"));
   try {
-    writeFileSync(
-      resolve(root, "package.json"),
-      `${JSON.stringify({ type: "module", main: "src/index.ts" })}\n`,
-    );
-    writeFileSync(
-      resolve(root, "tsconfig.json"),
-      `${JSON.stringify({ files: [], references: [{ path: "packages/lib" }] })}\n`,
-    );
-    mkdirSync(resolve(root, "packages/lib/src"), { recursive: true });
-    mkdirSync(resolve(root, "src"), { recursive: true });
-    writeFileSync(
-      resolve(root, "packages/lib/tsconfig.json"),
-      `${JSON.stringify({ compilerOptions: { composite: true, strict: true }, include: ["src"] })}\n`,
-    );
-    writeFileSync(
-      resolve(root, "packages/lib/src/client.ts"),
-      "export class Client {\n  used(): void {}\n  execute(): void {}\n}\nnew Client().used();\n",
-    );
-    writeFileSync(
-      resolve(root, "src/index.ts"),
-      'import { Client } from "../packages/lib/src/client.js";\nnew Client().used();\n',
-    );
+    writeSolutionConfigFixture(root);
     const result = spawnSync(
       options.fallowBin,
       [
@@ -1024,27 +1232,13 @@ const runSolutionConfigCliSmoke = (options) => {
         maxBuffer: 16 * 1024 * 1024,
       },
     );
-    if (result.status !== 0 && result.status !== 1) {
-      fail(`solution-tsconfig full CLI smoke failed: ${(result.stderr || result.stdout).trim()}`);
-    }
-    const output = JSON.parse(result.stdout);
-    const metadata = output._meta?.type_aware;
-    if (
-      output.unused_class_members?.length !== 1 ||
-      metadata?.selected_tsconfigs?.length !== 0 ||
-      metadata?.projects?.length !== 0 ||
-      metadata?.abstained_count !== 1 ||
-      metadata?.abstention_reasons?.no_project !== 1
-    ) {
+    if (![0, 1].includes(result.status)) {
       fail(
-        `solution-tsconfig full CLI smoke did not fail closed with no-project abstention: ${JSON.stringify(
-          {
-            findings: output.unused_class_members?.length,
-            metadata,
-          },
-        )}`,
+        `solution-tsconfig full CLI smoke failed with exit ${result.status}: stdout=${result.stdout.trim()} stderr=${result.stderr.trim()}`,
       );
     }
+    const output = JSON.parse(result.stdout);
+    validateSolutionConfigOutput(output);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1054,7 +1248,7 @@ const focused = (options) => {
   if (!options.sidecarBin) fail("--sidecar-bin is required for focused verification");
   ensureFile(options.sidecarBin, "type-aware sidecar");
   const sidecarRoot = resolve(REPO_ROOT, "tools/type-aware-sidecar");
-  const result = spawnSync(process.execPath, ["--test", FOCUSED_TEST_PATH], {
+  const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", FOCUSED_TEST_PATH], {
     cwd: sidecarRoot,
     encoding: "utf8",
     env: minimalEnvironment(options.sidecarBin),
@@ -1089,8 +1283,9 @@ const focused = (options) => {
 export const normalizeSupplementalOutput = (value) => {
   const output = structuredClone(value);
   delete output.elapsed_ms;
-  if (isObject(output._meta?.telemetry)) delete output._meta.telemetry.analysis_run_id;
-  if (isObject(output._meta?.type_aware)) {
+  const metadata = Object(output._meta);
+  if (isObject(metadata.telemetry)) delete metadata.telemetry.analysis_run_id;
+  if (isObject(metadata.type_aware)) {
     delete output._meta.type_aware.elapsed_ms;
     delete output._meta.type_aware.phase_timings_ms;
   }
@@ -1098,94 +1293,21 @@ export const normalizeSupplementalOutput = (value) => {
 };
 
 export const validateSupplementalArtifactData = (artifact, decisions, context) => {
-  if (!isObject(artifact) || artifact.schema_version !== 3) {
-    fail("supplemental artifact schema_version must be 3");
-  }
-  if (
-    !isObject(context) ||
-    !/^[0-9a-f]{64}$/.test(context.fallowSha256) ||
-    !/^[0-9a-f]{64}$/.test(context.sidecarSha256) ||
-    typeof context.sourceRoot !== "string"
-  ) {
-    fail("supplemental validation requires runtime hashes and a source root");
-  }
-  if (
-    artifact.artifacts?.fallow_sha256 !== context.fallowSha256 ||
-    artifact.artifacts?.sidecar_sha256 !== context.sidecarSha256
-  ) {
-    fail("supplemental artifact runtime hashes do not match the validated binaries");
-  }
-  const confirmedKeys = artifact.result?.confirmed_candidate_keys;
-  const reviewedKeys = artifact.independent_review?.reviewed_candidate_keys;
-  if (
-    !Array.isArray(confirmedKeys) ||
-    !Array.isArray(reviewedKeys) ||
-    JSON.stringify(confirmedKeys) !== JSON.stringify(confirmedKeys.toSorted()) ||
-    JSON.stringify(reviewedKeys) !== JSON.stringify(reviewedKeys.toSorted()) ||
-    new Set(confirmedKeys).size !== confirmedKeys.length ||
-    new Set(reviewedKeys).size !== reviewedKeys.length
-  ) {
-    fail("supplemental candidate key sets must be sorted and unique");
-  }
-  const review = decisions.supplemental_reviews?.find(
-    ({ project_id: projectId }) => projectId === "vitest",
-  );
-  if (
-    !review ||
-    artifact.project?.commit !== review.commit ||
-    artifact.independent_review.verdict !== "approved" ||
-    artifact.independent_review.reviewed_candidate_count !== reviewedKeys.length ||
-    artifact.independent_review.reviewed_candidate_set_sha256 !==
-      candidateSetDigest(reviewedKeys) ||
-    JSON.stringify(reviewedKeys) !== JSON.stringify(review.candidate_keys) ||
-    artifact.result.confirmed_used !== confirmedKeys.length ||
-    artifact.result.confirmed_candidate_set_sha256 !== candidateSetDigest(confirmedKeys) ||
-    !confirmedKeys.every((key) => reviewedKeys.includes(key)) ||
-    artifact.independent_review.clean_run_is_subset !== true ||
-    artifact.result.baseline_candidates - artifact.result.refined_candidates !==
-      artifact.result.confirmed_used ||
-    artifact.result.refined_candidates !==
-      artifact.result.unresolved_retained + artifact.result.abstained_retained
-  ) {
-    fail("supplemental artifact counts, hashes, or review binding are inconsistent");
-  }
-  const sourceRuns = artifact.artifacts?.source_runs;
-  if (!Array.isArray(sourceRuns) || sourceRuns.length !== 4) {
-    fail("supplemental artifact requires two baseline and two refined source runs");
-  }
-  const seenPaths = new Set();
-  for (const mode of ["baseline", "refined"]) {
-    const matching = sourceRuns.filter((run) => run.mode === mode);
-    if (
-      matching.length !== 2 ||
-      JSON.stringify(matching.map(({ iteration }) => iteration).toSorted()) !==
-        JSON.stringify([0, 1]) ||
-      new Set(matching.map(({ normalized_sha256: digest }) => digest)).size !== 1 ||
-      matching.some(
-        ({ normalized_sha256: normalizedSha256 }) => !/^[0-9a-f]{64}$/.test(normalizedSha256),
-      )
-    ) {
-      fail(`supplemental ${mode} source runs are incomplete or nondeterministic`);
-    }
-    for (const run of matching) {
-      const runPath = normalizedRelativePath(run.path, `supplemental ${mode} source path`);
-      if (seenPaths.has(runPath)) fail(`duplicate supplemental source path: ${runPath}`);
-      seenPaths.add(runPath);
-      const absolutePath = resolve(context.sourceRoot, runPath);
-      const relativeToRoot = relative(context.sourceRoot, absolutePath);
-      if (relativeToRoot.startsWith(`..${sep}`) || relativeToRoot === "..") {
-        fail(`supplemental source path escapes its root: ${runPath}`);
-      }
-      ensureFile(absolutePath, `supplemental ${mode} source run`);
-      const normalizedDigest = createHash("sha256")
-        .update(JSON.stringify(normalizeSupplementalOutput(readJson(absolutePath))))
-        .digest("hex");
-      if (normalizedDigest !== run.normalized_sha256) {
-        fail(`supplemental ${mode} source hash does not match ${runPath}`);
-      }
-    }
-  }
-  return artifact;
+  const normalizedFileDigest = (path) =>
+    createHash("sha256")
+      .update(JSON.stringify(normalizeSupplementalOutput(readJson(path))))
+      .digest("hex");
+  return validateSupplementalData(artifact, decisions, context, {
+    candidateSetDigest,
+    ensureFile,
+    fail,
+    isObject,
+    normalizedFileDigest,
+    normalizedRelativePath,
+    relative,
+    resolve,
+    sep,
+  });
 };
 
 const prepareSupplementalFixture = () => {
@@ -1210,9 +1332,16 @@ const prepareSupplementalFixture = () => {
   }
 };
 
-const supplemental = async (options, publicationMode = "write") => {
-  ensureRuntimeInputs(options);
-  prepareSupplementalFixture();
+const persistTrackedJson = (path, description, artifact, publicationMode, driftMessage) => {
+  if (publicationMode === "write") {
+    writeJson(path, artifact);
+    return;
+  }
+  const tracked = readJson(path, description);
+  if (JSON.stringify(tracked) !== JSON.stringify(artifact)) fail(driftMessage);
+};
+
+const validateSupplementalFixture = () => {
   ensureFile(resolve(SUPPLEMENTAL_VITEST_ROOT, "package.json"), "supplemental Vitest fixture");
   const commit = git(SUPPLEMENTAL_VITEST_ROOT, ["rev-parse", "HEAD"], "Vitest fixture HEAD");
   if (commit !== SUPPLEMENTAL_VITEST_COMMIT) {
@@ -1224,145 +1353,210 @@ const supplemental = async (options, publicationMode = "write") => {
     "Vitest fixture status",
   );
   if (dirty !== "") fail("supplemental Vitest fixture has tracked modifications");
-  assertDependencyFreeFixture(SUPPLEMENTAL_VITEST_ROOT, "vitest");
+  assertNoFixtureDependencyDirectories(SUPPLEMENTAL_VITEST_ROOT, "vitest");
+  return {
+    commit,
+    dependencyEnvironment: publishDependencyEnvironment(
+      fixtureDependencyEnvironment(SUPPLEMENTAL_VITEST_ROOT, "vitest"),
+    ),
+  };
+};
 
+const runSupplementalMode = async (options, rawDir, iteration, mode) => {
+  const refined = mode === "refined";
+  const suffix = iteration === 0 ? "" : "-2";
+  const rawPath = resolve(rawDir, `vitest-${mode}${suffix}.json`);
+  const result = await runProcess(
+    options.fallowBin,
+    fallowArgs(SUPPLEMENTAL_VITEST_ROOT, refined),
+    REPO_ROOT,
+    options.sidecarBin,
+  );
+  writeFileSync(rawPath, result.stdout);
+  writeFileSync(rawPath.replace(/\.json$/, ".err"), result.stderr);
+  if ([result.status === null, result.status >= 2].some(Boolean)) {
+    fail(
+      `supplemental Vitest ${mode} run failed with ${firstDefined([result.status, result.signal])}`,
+    );
+  }
+  return {
+    mode,
+    iteration,
+    rawPath,
+    raw_sha256: sha256File(rawPath),
+    ...parseMachineOutput(result.stdout, "vitest"),
+  };
+};
+
+const collectSupplementalRuns = async (options) => {
   const rawDir = resolve(DEFAULT_OUT_DIR, "supplemental");
   const runs = [];
   for (let iteration = 0; iteration < 2; iteration += 1) {
     for (const mode of runOrderForIteration(iteration)) {
-      const refined = mode === "refined";
-      const suffix = iteration === 0 ? "" : "-2";
-      const rawPath = resolve(rawDir, `vitest-${mode}${suffix}.json`);
-      const result = await runProcess(
-        options.fallowBin,
-        fallowArgs(SUPPLEMENTAL_VITEST_ROOT, refined),
-        REPO_ROOT,
-        options.sidecarBin,
-      );
-      writeFileSync(rawPath, result.stdout);
-      writeFileSync(rawPath.replace(/\.json$/, ".err"), result.stderr);
-      if (result.status === null || result.status >= 2) {
-        fail(`supplemental Vitest ${mode} run failed with ${result.status ?? result.signal}`);
-      }
-      runs.push({
-        mode,
-        iteration,
-        rawPath,
-        raw_sha256: sha256File(rawPath),
-        ...parseMachineOutput(result.stdout, "vitest"),
-      });
+      runs.push(await runSupplementalMode(options, rawDir, iteration, mode));
     }
   }
+  return runs;
+};
 
-  for (const mode of ["baseline", "refined"]) {
-    const matching = runs.filter((run) => run.mode === mode);
-    const normalized = matching.map(({ output }) => normalizeSupplementalOutput(output));
+const validateSupplementalDeterminism = (runs) => {
+  ["baseline", "refined"].forEach((mode) => {
+    const normalized = runs
+      .filter((run) => run.mode === mode)
+      .map(({ output }) => normalizeSupplementalOutput(output));
     if (JSON.stringify(normalized[0]) !== JSON.stringify(normalized[1])) {
       fail(`supplemental Vitest ${mode} output is not deterministic`);
     }
-  }
-  const baseline = runs.find(({ mode, iteration }) => mode === "baseline" && iteration === 0);
-  const refined = runs.find(({ mode, iteration }) => mode === "refined" && iteration === 0);
-  const compared = compareCandidateSets("vitest", baseline.candidates, refined.candidates);
-  const confirmedKeys = compared
-    .filter(({ semantic_status: semanticStatus }) => semanticStatus === "confirmed-used")
+  });
+};
+
+const initialSupplementalRun = (runs, expectedMode) =>
+  runs.find(({ mode, iteration }) => [mode === expectedMode, iteration === 0].every(Boolean));
+
+const supplementalConfirmedKeys = (baseline, refined) =>
+  compareCandidateSets("vitest", baseline.candidates, refined.candidates, refined.typeAware)
+    .filter(({ semantic_status: status }) => status === "confirmed-used")
     .map(({ key }) => key)
     .toSorted();
-  const decisions = readJson(DEFAULT_ADJUDICATION, "adjudication decisions");
-  const review = decisions.supplemental_reviews?.find(
+
+const validateSupplementalReview = (decisions, commit, confirmedKeys) => {
+  const review = decisions.supplemental_reviews.find(
     ({ project_id: projectId }) => projectId === "vitest",
   );
-  if (!review || review.commit !== commit || review.verdict !== "approved") {
+  if (
+    ![
+      Boolean(review),
+      Object(review).commit === commit,
+      Object(review).verdict === "approved",
+    ].every(Boolean)
+  ) {
     fail("supplemental Vitest review decision is missing or stale");
   }
-  const reviewedKeys = review.candidate_keys?.toSorted() ?? [];
-  if (
-    JSON.stringify(review.candidate_keys) !== JSON.stringify(reviewedKeys) ||
-    new Set(reviewedKeys).size !== reviewedKeys.length ||
-    review.candidate_count !== reviewedKeys.length ||
-    review.candidate_set_sha256 !== candidateSetDigest(reviewedKeys)
-  ) {
-    fail("supplemental Vitest review candidate set is invalid");
-  }
+  const reviewedKeys = arrayOrEmpty(review.candidate_keys).toSorted();
+  const validCandidateSet = [
+    JSON.stringify(review.candidate_keys) === JSON.stringify(reviewedKeys),
+    new Set(reviewedKeys).size === reviewedKeys.length,
+    review.candidate_count === reviewedKeys.length,
+    review.candidate_set_sha256 === candidateSetDigest(reviewedKeys),
+  ].every(Boolean);
+  if (!validCandidateSet) fail("supplemental Vitest review candidate set is invalid");
   const reviewedSet = new Set(reviewedKeys);
   const cleanRunIsSubset = confirmedKeys.every((key) => reviewedSet.has(key));
   if (!cleanRunIsSubset) fail("clean supplemental Vitest confirmations exceed the reviewed set");
-  const meta = refined.typeAware;
-  if (
-    meta?.confirmed_used_count !== confirmedKeys.length ||
-    meta?.candidate_count !== baseline.candidates.length ||
-    meta?.unresolved_count + meta?.abstained_count + meta?.confirmed_used_count !==
-      meta?.candidate_count
-  ) {
-    fail("supplemental Vitest type-aware metadata is inconsistent");
-  }
+  return { cleanRunIsSubset, review, reviewedKeys };
+};
 
-  const artifact = {
-    schema_version: 3,
-    canonical_candidate_key: {
-      algorithm: "sha256",
-      prefix: "tac_",
-      digest_hex_characters: 20,
-      fields: ["project_id", "path", "parent_name", "member_name", "kind", "line", "col"],
-      separator: "NUL",
-    },
-    project: {
-      repo: "vitest-dev/vitest",
-      commit,
-      tracked_source_clean: true,
-      dependency_installation: "none",
-    },
-    artifacts: {
-      fallow_sha256: sha256File(options.fallowBin),
-      sidecar_sha256: sidecarArtifactHash(options.sidecarBin),
-      source_runs: runs
-        .map(({ mode, iteration, rawPath, output }) => ({
-          mode,
-          iteration,
-          path: relative(REPO_ROOT, rawPath).replaceAll("\\", "/"),
-          normalized_sha256: createHash("sha256")
-            .update(JSON.stringify(normalizeSupplementalOutput(output)))
-            .digest("hex"),
-        }))
-        .toSorted((left, right) =>
-          `${left.mode}:${left.iteration}`.localeCompare(`${right.mode}:${right.iteration}`),
-        ),
-    },
-    result: {
-      baseline_candidates: baseline.candidates.length,
-      refined_candidates: refined.candidates.length,
-      confirmed_used: confirmedKeys.length,
-      unresolved_retained: meta.unresolved_count,
-      abstained_retained: meta.abstained_count,
-      added_candidates: 0,
-      normalized_runs: 2,
-      deterministic: true,
-      confirmed_candidate_set_sha256: candidateSetDigest(confirmedKeys),
-      confirmed_candidate_keys: confirmedKeys,
-    },
-    independent_review: {
-      verdict: review.verdict,
-      reviewed_candidate_count: review.candidate_count,
-      reviewed_candidate_set_sha256: review.candidate_set_sha256,
-      reviewed_candidate_keys: reviewedKeys,
-      clean_run_is_subset: cleanRunIsSubset,
-      known_incorrect_removals: review.known_incorrect_removals,
-      method: review.method,
-    },
-  };
+const validateSupplementalMetadata = (meta, baseline, confirmedKeys) => {
+  const valid = [
+    meta.confirmed_used_count === confirmedKeys.length,
+    meta.candidate_count === baseline.candidates.length,
+    meta.unresolved_count +
+      meta.abstained_count +
+      meta.confirmed_used_count +
+      meta.contract_preserved_count +
+      meta.no_static_references_count ===
+      meta.candidate_count,
+  ].every(Boolean);
+  if (!valid) fail("supplemental Vitest type-aware metadata is inconsistent");
+};
+
+const supplementalSourceRuns = (runs) =>
+  runs
+    .map(({ mode, iteration, rawPath, output }) => ({
+      mode,
+      iteration,
+      path: relative(REPO_ROOT, rawPath).replaceAll("\\", "/"),
+      normalized_sha256: createHash("sha256")
+        .update(JSON.stringify(normalizeSupplementalOutput(output)))
+        .digest("hex"),
+    }))
+    .toSorted((left, right) =>
+      `${left.mode}:${left.iteration}`.localeCompare(`${right.mode}:${right.iteration}`),
+    );
+
+const buildSupplementalArtifact = (context) => ({
+  schema_version: 6,
+  canonical_candidate_key: {
+    algorithm: "sha256",
+    prefix: "tac_",
+    digest_hex_characters: 20,
+    fields: ["project_id", "path", "parent_name", "member_name", "kind", "line", "col"],
+    separator: "NUL",
+  },
+  project: {
+    repo: "vitest-dev/vitest",
+    commit: context.commit,
+    tracked_source_clean: true,
+    dependency_environment: context.dependencyEnvironment,
+  },
+  artifacts: {
+    fallow_sha256: sha256File(context.options.fallowBin),
+    sidecar_sha256: sidecarArtifactHash(context.options.sidecarBin),
+    source_runs: supplementalSourceRuns(context.runs),
+  },
+  result: {
+    baseline_candidates: context.baseline.candidates.length,
+    refined_candidates: context.refined.candidates.length,
+    confirmed_used: context.confirmedKeys.length,
+    contract_preserved: context.meta.contract_preserved_count,
+    no_static_references: context.meta.no_static_references_count,
+    fix_eligible: context.meta.fix_eligible_count,
+    unresolved_retained: context.meta.unresolved_count,
+    abstained_retained: context.meta.abstained_count,
+    added_candidates: 0,
+    normalized_runs: 2,
+    deterministic: true,
+    confirmed_candidate_set_sha256: candidateSetDigest(context.confirmedKeys),
+    confirmed_candidate_keys: context.confirmedKeys,
+  },
+  independent_review: {
+    verdict: context.review.verdict,
+    reviewed_candidate_count: context.review.candidate_count,
+    reviewed_candidate_set_sha256: context.review.candidate_set_sha256,
+    reviewed_candidate_keys: context.reviewedKeys,
+    clean_run_is_subset: context.cleanRunIsSubset,
+    known_incorrect_removals: context.review.known_incorrect_removals,
+    method: context.review.method,
+  },
+});
+
+const supplemental = async (options, publicationMode = "write") => {
+  ensureRuntimeInputs(options);
+  prepareSupplementalFixture();
+  const { commit, dependencyEnvironment } = validateSupplementalFixture();
+  const runs = await collectSupplementalRuns(options);
+  validateSupplementalDeterminism(runs);
+  const baseline = initialSupplementalRun(runs, "baseline");
+  const refined = initialSupplementalRun(runs, "refined");
+  const confirmedKeys = supplementalConfirmedKeys(baseline, refined);
+  const decisions = readJson(DEFAULT_ADJUDICATION, "adjudication decisions");
+  const reviewContext = validateSupplementalReview(decisions, commit, confirmedKeys);
+  const meta = refined.typeAware;
+  validateSupplementalMetadata(meta, baseline, confirmedKeys);
+  const artifact = buildSupplementalArtifact({
+    baseline,
+    commit,
+    confirmedKeys,
+    dependencyEnvironment,
+    meta,
+    options,
+    refined,
+    runs,
+    ...reviewContext,
+  });
   validateSupplementalArtifactData(artifact, decisions, {
     fallowSha256: sha256File(options.fallowBin),
     sidecarSha256: sidecarArtifactHash(options.sidecarBin),
     sourceRoot: REPO_ROOT,
+    dependencyEnvironment,
   });
-  if (publicationMode === "write") {
-    writeJson(SUPPLEMENTAL_ARTIFACT, artifact);
-  } else if (
-    JSON.stringify(readJson(SUPPLEMENTAL_ARTIFACT, "tracked supplemental artifact")) !==
-    JSON.stringify(artifact)
-  ) {
-    fail("tracked supplemental artifact has generator drift; rerun supplemental");
-  }
+  persistTrackedJson(
+    SUPPLEMENTAL_ARTIFACT,
+    "tracked supplemental artifact",
+    artifact,
+    publicationMode,
+    "tracked supplemental artifact has generator drift; rerun supplemental",
+  );
   return artifact;
 };
 
@@ -1371,11 +1565,11 @@ const readDiscovery = (outDir) => readJson(resolve(outDir, "discovery.json"), "d
 const sourceLineEvidence = (root, candidate) => {
   const sourcePath = resolve(root, candidate.path);
   const relativeToRoot = relative(root, sourcePath);
-  if (relativeToRoot.startsWith(`..${sep}`) || relativeToRoot === "..") {
+  if ([relativeToRoot.startsWith(`..${sep}`), relativeToRoot === ".."].some(Boolean)) {
     fail(`${candidate.key} source path escapes its fixture`);
   }
   let excerpt = "";
-  if (existsSync(sourcePath) && statSync(sourcePath).isFile()) {
+  if (existingFile(sourcePath)) {
     const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
     excerpt = (lines[Math.max(0, candidate.line - 1)] ?? "").trim();
   }
@@ -1385,7 +1579,7 @@ const sourceLineEvidence = (root, candidate) => {
 const sourceLocationEvidence = (root, location) => {
   const sourcePath = resolve(root, location.path);
   const relativeToRoot = relative(root, sourcePath);
-  if (relativeToRoot.startsWith(`..${sep}`) || relativeToRoot === "..") {
+  if ([relativeToRoot.startsWith(`..${sep}`), relativeToRoot === ".."].some(Boolean)) {
     fail(`use evidence path escapes its prepared fixture: ${location.path}`);
   }
   const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
@@ -1394,42 +1588,62 @@ const sourceLocationEvidence = (root, location) => {
   return { path: location.path, line: location.line, col: location.col, excerpt };
 };
 
-const collectCheckerEvidence = async (project, candidates, outDir) => {
-  const [{ parseRequest: parseTypeAwareRequest }, { analyzeSemanticQueries }] = await Promise.all([
-    import("../tools/type-aware-sidecar/src/protocol.mjs"),
-    import("../tools/type-aware-sidecar/src/semantic.mjs"),
-  ]);
-  const root = projectRoot(project, outDir);
-  const request = parseTypeAwareRequest({
-    protocol_version: 3,
-    operation: "semantic-queries",
-    root,
-    projects: [],
-    evidence_limit: 40,
-    queries: candidates.map((candidate, id) => ({
-      id,
-      operation: "symbol-use",
-      symbol: {
-        path: candidate.path,
-        namespace: "value",
-        declaration_kind: candidate.kind,
-        exported_name: candidate.member_name,
-        local_name: candidate.member_name,
-        line: candidate.line,
-        col: candidate.col,
-        owner: candidate.parent_name,
-      },
-    })),
+export const runExactSidecarRequest = ({
+  sidecarBin,
+  request,
+  stdoutPath,
+  stderrPath,
+  timeoutMs = SEMANTIC_TIMEOUT_MS,
+  maxResponseBytes = MAX_SEMANTIC_RESPONSE_BYTES,
+}) =>
+  executeExactSidecarRequest({
+    sidecarBin,
+    request,
+    stdoutPath,
+    stderrPath,
+    timeoutMs,
+    maxResponseBytes,
+    dependencies: {
+      fail,
+      isObject,
+      minimalEnvironment,
+      normalizedRelativePath,
+      protocolVersion: SEMANTIC_PROTOCOL_VERSION,
+      queryStatuses: SEMANTIC_QUERY_STATUSES,
+      maximumStderrBytes: MAX_SEMANTIC_STDERR_BYTES,
+    },
   });
-  const analysis = analyzeSemanticQueries(request);
-  return new Map(
-    analysis.results
-      .filter(({ assertion }) => assertion === "confirmed-used")
-      .map(({ queryId, evidence: locations }) => [
-        candidates[queryId].key,
-        locations.map((location) => sourceLocationEvidence(root, location)),
-      ]),
-  );
+
+const checkerEvidenceRequest = (project, candidates, outDir) =>
+  createCheckerEvidenceRequest({
+    project,
+    candidates,
+    outDir,
+    projectRoot,
+    protocolVersion: SEMANTIC_PROTOCOL_VERSION,
+  });
+
+const collectCheckerEvidence = async (project, candidates, outDir, sidecarBin) => {
+  const { root, request } = checkerEvidenceRequest(project, candidates, outDir);
+  const artifactProject = safeArtifactName(project.id);
+  const response = runExactSidecarRequest({
+    sidecarBin,
+    request,
+    stdoutPath: resolve(outDir, "evidence", `${artifactProject}.sidecar.json`),
+    stderrPath: resolve(outDir, "evidence", `${artifactProject}.sidecar.stderr.txt`),
+  });
+  return {
+    requestDigest: requestDigest(request),
+    responseDigest: normalizedEvidenceResponseDigest(response),
+    evidence: new Map(
+      response.results
+        .filter(({ assertion }) => assertion === "confirmed-used")
+        .map(({ query_id: queryId, evidence: locations }) => [
+          candidates[queryId].key,
+          locations.map((location) => sourceLocationEvidence(root, location)),
+        ]),
+    ),
+  };
 };
 
 const firstNonEmptyLineEvidence = (root, path) => {
@@ -1444,6 +1658,17 @@ const firstNonEmptyLineEvidence = (root, path) => {
   return sourceLocationEvidence(root, { path, line: lineIndex + 1, col: 0 });
 };
 
+const parseCapabilityOutput = (stdout, id) => {
+  let output;
+  try {
+    output = JSON.parse(stdout);
+  } catch (error) {
+    fail(`${id} capability run emitted invalid JSON: ${describeError(error)}`);
+  }
+  if (!isObject(output)) fail(`${id} capability run emitted an invalid output envelope`);
+  return output;
+};
+
 const capabilityProcess = async (options, id, root, args) => {
   const rawPath = resolve(DEFAULT_OUT_DIR, "capabilities", `${id}.json`);
   const result = await runProcess(
@@ -1452,28 +1677,21 @@ const capabilityProcess = async (options, id, root, args) => {
     REPO_ROOT,
     options.sidecarBin,
   );
-  mkdirSync(dirname(rawPath), { recursive: true });
-  writeFileSync(rawPath, result.stdout);
-  writeFileSync(rawPath.replace(/\.json$/, ".stderr.txt"), result.stderr);
-  if (result.status === null || result.status >= 2) {
-    fail(`${id} capability run failed with ${result.status ?? result.signal}`);
-  }
-  let output;
-  try {
-    output = JSON.parse(result.stdout);
-  } catch (error) {
-    fail(
-      `${id} capability run emitted invalid JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-  if (!isObject(output)) fail(`${id} capability run emitted an invalid output envelope`);
+  persistProcessResult(
+    rawPath,
+    result,
+    (failedResult) =>
+      `${id} capability run failed with ${firstDefined([
+        failedResult.status,
+        failedResult.signal,
+      ])}`,
+  );
+  const output = parseCapabilityOutput(result.stdout, id);
   return { output, root };
 };
 
 const compactPrograms = (output) =>
-  (output._meta?.type_aware?.projects ?? []).map(
+  arrayOrEmpty(Object(Object(output._meta).type_aware).projects).map(
     ({ config, source, status, source_file_count: sourceFileCount, program_reused: reused }) => ({
       config,
       source,
@@ -1500,12 +1718,13 @@ const compactRefinement = (candidate, confirmedCount, evidence, reviewed) => ({
 });
 
 const semanticCapabilityProof = (root, inspectOutput, couplingOutput) => {
-  const trace = inspectOutput.evidence?.semantic_trace?.data;
-  const api = inspectOutput.evidence?.api_surface?.data;
-  const impact = inspectOutput.evidence?.symbol_impact?.data;
-  const targetedTests = inspectOutput.evidence?.targeted_tests?.data;
-  const coupling = couplingOutput._meta?.type_aware?.type_coupling;
-  if (!isObject(trace) || !isObject(api) || !isObject(impact) || !isObject(coupling)) {
+  const evidence = Object(inspectOutput.evidence);
+  const trace = Object(evidence.semantic_trace).data;
+  const api = Object(evidence.api_surface).data;
+  const impact = Object(evidence.symbol_impact).data;
+  const targetedTests = Object(evidence.targeted_tests).data;
+  const coupling = Object(Object(couplingOutput._meta).type_aware).type_coupling;
+  if (![trace, api, impact, coupling].every(isObject)) {
     fail("semantic capability run omitted a required result section");
   }
   const traceEvidence = trace.references
@@ -1518,10 +1737,10 @@ const semanticCapabilityProof = (root, inspectOutput, couplingOutput) => {
     ...impact.direct_consumers.slice(0, 2).map(({ path }) => firstNonEmptyLineEvidence(root, path)),
     ...impact.targeted_tests.slice(0, 2).map(({ path }) => firstNonEmptyLineEvidence(root, path)),
   ];
-  const couplingEdges = coupling.files.flatMap(({ edges = [] }) => edges);
+  const couplingEdges = coupling.files.flatMap((file) => arrayOrEmpty(file.edges));
   const couplingEvidence = couplingEdges
     .slice(0, 3)
-    .map(({ evidence }) => sourceLocationEvidence(root, evidence));
+    .map(({ evidence: location }) => sourceLocationEvidence(root, location));
   return {
     programs: {
       inspect: compactPrograms(inspectOutput),
@@ -1540,8 +1759,9 @@ const semanticCapabilityProof = (root, inspectOutput, couplingOutput) => {
       "public-api-surface": {
         assertion: api.assertion,
         status: api.status,
-        public_entry_count: api.entries.length,
-        private_type_leak_count: api.private_type_leaks.length,
+        public_entry_sample_count: api.entries.length,
+        private_type_leak_sample_count: api.private_type_leaks.length,
+        omissions: arrayOrEmpty(api.omissions),
         source_evidence: apiEvidence,
       },
       "semantic-impact-targeted-tests": {
@@ -1550,7 +1770,7 @@ const semanticCapabilityProof = (root, inspectOutput, couplingOutput) => {
         direct_consumer_count: impact.total_direct_consumer_count,
         affected_file_count: impact.total_affected_file_count,
         targeted_test_count: impact.total_targeted_test_count,
-        targeted_tests: targetedTests?.tests ?? impact.targeted_tests,
+        targeted_tests: firstDefined([Object(targetedTests).tests, impact.targeted_tests]),
         confidence: impact.confidence,
         source_evidence: impactEvidence,
       },
@@ -1575,14 +1795,14 @@ const refinementProofs = (manifest, options) => {
   );
   if (!astroCandidate) fail("Astro discovery has no confirmed semantic refinement");
   const ledger = readJson(resolve(options.outDir, "ledger.json"), "corpus evidence ledger");
-  const astroLedger = ledger.candidates?.find(({ key }) => key === astroCandidate.key);
+  const astroLedger = ledger.candidates.find(({ key }) => key === astroCandidate.key);
   const astroRoot = projectRoot(
     manifest.projects.find(({ id }) => id === "astro"),
     options.outDir,
   );
   const astroEvidence = [
     sourceLineEvidence(astroRoot, astroCandidate),
-    ...(astroLedger?.source_evidence?.uses ?? []).slice(0, 2),
+    ...arrayOrEmpty(Object(Object(astroLedger).source_evidence).uses).slice(0, 2),
   ];
 
   const supplementalArtifact = validateSupplementalArtifactData(
@@ -1592,6 +1812,9 @@ const refinementProofs = (manifest, options) => {
       fallowSha256: sha256File(options.fallowBin),
       sidecarSha256: sidecarArtifactHash(options.sidecarBin),
       sourceRoot: REPO_ROOT,
+      dependencyEnvironment: publishDependencyEnvironment(
+        fixtureDependencyEnvironment(SUPPLEMENTAL_VITEST_ROOT, "vitest"),
+      ),
     },
   );
   const baseline = parseMachineOutput(
@@ -1602,10 +1825,15 @@ const refinementProofs = (manifest, options) => {
     readFileSync(resolve(DEFAULT_OUT_DIR, "supplemental/vitest-refined.json"), "utf8"),
     "vitest",
   );
-  const refinedKeys = new Set(refined.candidates.map(({ key }) => key));
   const reviewedKeys = new Set(supplementalArtifact.independent_review.reviewed_candidate_keys);
-  const vitestCandidate = baseline.candidates.find(
-    ({ key }) => !refinedKeys.has(key) && reviewedKeys.has(key),
+  const vitestCandidate = compareCandidateSets(
+    "vitest",
+    baseline.candidates,
+    refined.candidates,
+    refined.typeAware,
+  ).find(
+    ({ key, semantic_status: semanticStatus }) =>
+      semanticStatus === "confirmed-used" && reviewedKeys.has(key),
   );
   if (!vitestCandidate) fail("Vitest supplemental proof has no reviewed semantic refinement");
 
@@ -1614,7 +1842,7 @@ const refinementProofs = (manifest, options) => {
       astroCandidate,
       astro.confirmed_used_count,
       astroEvidence,
-      astroLedger?.truth === "used",
+      Object(astroLedger).truth === "used",
     ),
     vitest: compactRefinement(
       vitestCandidate,
@@ -1626,7 +1854,7 @@ const refinementProofs = (manifest, options) => {
 };
 
 const validateCapabilityEvidence = (root, evidence, capability) => {
-  if (!Array.isArray(evidence) || evidence.length === 0) {
+  if (![Array.isArray(evidence), evidence.length > 0].every(Boolean)) {
     fail(`${capability} requires concrete source evidence`);
   }
   for (const location of evidence) {
@@ -1639,133 +1867,23 @@ const validateCapabilityEvidence = (root, evidence, capability) => {
 
 /** Validates that all five semantic capabilities add non-compiler, non-linter value. */
 export const validateCapabilitiesArtifactData = (artifact, context) => {
-  if (!isObject(artifact) || artifact.schema_version !== 1) {
-    fail("semantic capabilities artifact schema_version must be 1");
-  }
-  if (
-    artifact.artifacts?.fallow_sha256 !== context.fallowSha256 ||
-    artifact.artifacts?.sidecar_sha256 !== context.sidecarSha256
-  ) {
-    fail("semantic capabilities artifact runtime hashes do not match");
-  }
-  if (
-    JSON.stringify(artifact.excludes) !==
-    JSON.stringify(["compiler-diagnostics", "syntax-and-style-lint-rules"])
-  ) {
-    fail("semantic capabilities artifact must exclude tsc and Oxlint responsibilities");
-  }
-  if (
-    JSON.stringify(artifact.coverage?.capability_ids) !==
-      JSON.stringify(REQUIRED_SEMANTIC_CAPABILITIES) ||
-    artifact.coverage.repository_count !== 2 ||
-    artifact.coverage.all_capabilities_proven_on_each_repository !== true
-  ) {
-    fail("semantic capabilities artifact does not cover all five capabilities on both projects");
-  }
-  const repositories = artifact.repositories;
-  if (
-    !Array.isArray(repositories) ||
-    JSON.stringify(repositories.map(({ id }) => id)) !== JSON.stringify(["astro", "vitest"])
-  ) {
-    fail("semantic capabilities artifact requires Astro and Vitest in stable order");
-  }
-  for (const repository of repositories) {
-    const root = context.roots[repository.id];
-    if (
-      typeof root !== "string" ||
-      repository.commit !== context.commits[repository.id] ||
-      repository.tracked_source_clean !== true
-    ) {
-      fail(`${repository.id} capability provenance does not match its pinned clean source`);
-    }
-    if (
-      JSON.stringify(Object.keys(repository.capabilities)) !==
-      JSON.stringify(REQUIRED_SEMANTIC_CAPABILITIES)
-    ) {
-      fail(`${repository.id} does not contain all five semantic capabilities`);
-    }
-    const programs = [...repository.programs.inspect, ...repository.programs.coupling];
-    if (
-      programs.length === 0 ||
-      programs.some(
-        (program) =>
-          typeof program.config !== "string" ||
-          program.status !== "complete" ||
-          !Number.isSafeInteger(program.source_file_count) ||
-          program.source_file_count <= 0 ||
-          program.program_reused !== true,
-      )
-    ) {
-      fail(`${repository.id} did not reuse one semantic Program per selected config`);
-    }
-    const refinement = repository.capabilities["dead-code-refinement"];
-    if (
-      refinement.assertion !== "confirmed-used" ||
-      refinement.confirmed_used_count <= 0 ||
-      refinement.reviewed !== true
-    ) {
-      fail(`${repository.id} has no reviewed dead-code refinement proof`);
-    }
-    validateCapabilityEvidence(
-      root,
-      refinement.source_evidence,
-      `${repository.id} dead-code refinement`,
-    );
-    const trace = repository.capabilities["semantic-symbol-trace"];
-    if (
-      trace.assertion !== "references-found" ||
-      !new Set(["complete", "partial"]).has(trace.status) ||
-      trace.total_reference_count <= 0 ||
-      trace.checker_evidence_count <= 0
-    ) {
-      fail(`${repository.id} has no semantic symbol trace proof`);
-    }
-    validateCapabilityEvidence(root, trace.source_evidence, `${repository.id} symbol trace`);
-    const api = repository.capabilities["public-api-surface"];
-    if (
-      !new Set(["leak-confirmed", "no-leak-confirmed"]).has(api.assertion) ||
-      !new Set(["complete", "partial"]).has(api.status) ||
-      api.public_entry_count <= 0
-    ) {
-      fail(`${repository.id} has no public API surface proof`);
-    }
-    validateCapabilityEvidence(root, api.source_evidence, `${repository.id} API surface`);
-    const impact = repository.capabilities["semantic-impact-targeted-tests"];
-    if (
-      impact.assertion !== "consumers-found" ||
-      !new Set(["complete", "partial"]).has(impact.status) ||
-      impact.direct_consumer_count <= 0 ||
-      impact.targeted_test_count <= 0 ||
-      !Array.isArray(impact.targeted_tests) ||
-      impact.targeted_tests.length === 0
-    ) {
-      fail(`${repository.id} has no impact or targeted-test proof`);
-    }
-    validateCapabilityEvidence(root, impact.source_evidence, `${repository.id} impact`);
-    const coupling = repository.capabilities["public-type-coupling"];
-    const summary = coupling.summary;
-    if (
-      coupling.assertion !== "coupling-found" ||
-      !new Set(["complete", "partial"]).has(coupling.status) ||
-      summary?.scope !== "project-local-public-signatures" ||
-      summary?.direction !== "directed" ||
-      summary?.project_size <= 0 ||
-      summary?.distinct_coupled_files <= 0 ||
-      summary?.edge_count <= 0 ||
-      !Number.isFinite(summary?.coupled_file_pct) ||
-      !Number.isFinite(summary?.p50_distinct_connections) ||
-      !Number.isFinite(summary?.p90_distinct_connections) ||
-      !Number.isFinite(summary?.concentration) ||
-      !Array.isArray(coupling.top_contributors) ||
-      coupling.top_contributors.length === 0 ||
-      !Array.isArray(coupling.cycles) ||
-      coupling.cycles.length === 0
-    ) {
-      fail(`${repository.id} has no rich public type-coupling proof`);
-    }
-    validateCapabilityEvidence(root, coupling.source_evidence, `${repository.id} type coupling`);
-  }
-  return artifact;
+  return validateCapabilitiesData(artifact, context, {
+    fail,
+    isObject,
+    requiredCapabilities: REQUIRED_SEMANTIC_CAPABILITIES,
+    validateEvidence: validateCapabilityEvidence,
+  });
+};
+
+const capabilityDependencyEnvironments = (roots) => {
+  const environments = {};
+  roots.forEach(([id, root]) => {
+    const dirty = git(root, ["status", "--porcelain", "--untracked-files=all"], `${id} status`);
+    if (dirty !== "") fail(`${id} capability fixture has tracked modifications`);
+    assertNoFixtureDependencyDirectories(root, id);
+    environments[id] = publishDependencyEnvironment(fixtureDependencyEnvironment(root, id));
+  });
+  return environments;
 };
 
 const capabilities = async (manifest, options, publicationMode = "write") => {
@@ -1783,14 +1901,10 @@ const capabilities = async (manifest, options, publicationMode = "write") => {
   if (vitestCommit !== SUPPLEMENTAL_VITEST_COMMIT) {
     fail(`Vitest capability fixture is at ${vitestCommit}, expected ${SUPPLEMENTAL_VITEST_COMMIT}`);
   }
-  for (const [id, root] of [
+  const dependencyEnvironments = capabilityDependencyEnvironments([
     ["astro", astroRoot],
     ["vitest", SUPPLEMENTAL_VITEST_ROOT],
-  ]) {
-    const dirty = git(root, ["status", "--porcelain", "--untracked-files=all"], `${id} status`);
-    if (dirty !== "") fail(`${id} capability fixture has tracked modifications`);
-    assertDependencyFreeFixture(root, id);
-  }
+  ]);
 
   const astroInspect = await capabilityProcess(options, "astro-inspect", astroRoot, [
     "inspect",
@@ -1856,7 +1970,7 @@ const capabilities = async (manifest, options, publicationMode = "write") => {
     vitestCoupling.output,
   );
   const artifact = {
-    schema_version: 1,
+    schema_version: 3,
     purpose:
       "Prove semantic codebase-intelligence capabilities that are not compiler diagnostics or syntax/style lint rules.",
     excludes: ["compiler-diagnostics", "syntax-and-style-lint-rules"],
@@ -1875,6 +1989,7 @@ const capabilities = async (manifest, options, publicationMode = "write") => {
         repo: astroProject.repo,
         commit: git(astroRoot, ["rev-parse", "HEAD"], "Astro capability fixture HEAD"),
         tracked_source_clean: true,
+        dependency_environment: dependencyEnvironments.astro,
         programs: astroSemantic.programs,
         capabilities: {
           "dead-code-refinement": refinements.astro,
@@ -1886,6 +2001,7 @@ const capabilities = async (manifest, options, publicationMode = "write") => {
         repo: "vitest-dev/vitest",
         commit: vitestCommit,
         tracked_source_clean: true,
+        dependency_environment: dependencyEnvironments.vitest,
         programs: vitestSemantic.programs,
         capabilities: {
           "dead-code-refinement": refinements.vitest,
@@ -1902,15 +2018,15 @@ const capabilities = async (manifest, options, publicationMode = "write") => {
       astro: artifact.repositories[0].commit,
       vitest: SUPPLEMENTAL_VITEST_COMMIT,
     },
+    dependencyEnvironments,
   });
-  if (publicationMode === "write") {
-    writeJson(CAPABILITIES_ARTIFACT, artifact);
-  } else if (
-    JSON.stringify(readJson(CAPABILITIES_ARTIFACT, "tracked capabilities artifact")) !==
-    JSON.stringify(artifact)
-  ) {
-    fail("tracked semantic capabilities artifact has generator drift; rerun capabilities");
-  }
+  persistTrackedJson(
+    CAPABILITIES_ARTIFACT,
+    "tracked capabilities artifact",
+    artifact,
+    publicationMode,
+    "tracked semantic capabilities artifact has generator drift; rerun capabilities",
+  );
   return artifact;
 };
 
@@ -1919,15 +2035,7 @@ export const candidateFeatureBucketFields = (
   previousEntry,
   previousSchemaVersion,
 ) => {
-  const legacySuggestions =
-    previousSchemaVersion === 1 ? previousEntry?.feature_buckets : undefined;
-  return {
-    suggested_feature_buckets: [
-      ...(previousEntry?.suggested_feature_buckets ?? legacySuggestions ?? projectFeatureBuckets),
-    ],
-    adjudicated_feature_buckets:
-      previousSchemaVersion === 2 ? [...(previousEntry?.adjudicated_feature_buckets ?? [])] : [],
-  };
+  return ledgerFeatureBucketFields(projectFeatureBuckets, previousEntry, previousSchemaVersion);
 };
 
 const LEDGER_REFRESH_RECOVERY =
@@ -1935,106 +2043,183 @@ const LEDGER_REFRESH_RECOVERY =
 
 /** Validates that a ledger refresh cannot discard prior manual adjudication. */
 export const indexLedgerForRefresh = (previous, discoveredKeys) => {
-  if (previous === null) return new Map();
-  if (
-    !isObject(previous) ||
-    (previous.schema_version !== 1 && previous.schema_version !== 2) ||
-    !Array.isArray(previous.candidates)
-  ) {
-    fail(
-      `existing evidence ledger must use schema_version 1 or 2 and contain a candidates array. ${LEDGER_REFRESH_RECOVERY}`,
-    );
-  }
-
-  const previousByKey = new Map();
-  for (const entry of previous.candidates) {
-    if (!isObject(entry) || typeof entry.key !== "string" || entry.key.trim() === "") {
-      fail(
-        `every existing evidence ledger candidate must have a non-empty key. ${LEDGER_REFRESH_RECOVERY}`,
-      );
-    }
-    if (previousByKey.has(entry.key)) {
-      fail(
-        `existing evidence ledger contains duplicate candidate key ${JSON.stringify(entry.key)}. ${LEDGER_REFRESH_RECOVERY}`,
-      );
-    }
-    previousByKey.set(entry.key, entry);
-  }
-
-  for (const key of previousByKey.keys()) {
-    if (!discoveredKeys.has(key)) {
-      fail(
-        `existing evidence ledger candidate key ${JSON.stringify(key)} is missing from the current discovery. ${LEDGER_REFRESH_RECOVERY}`,
-      );
-    }
-  }
-  return previousByKey;
+  return indexRefreshLedger(previous, discoveredKeys, LEDGER_REFRESH_RECOVERY, {
+    fail,
+    isObject,
+  });
 };
 
+export const validateEvidenceProducerHash = (discovery, sidecarSha256) => {
+  if (discovery.provenance?.sidecar?.sha256 !== sidecarSha256) {
+    fail("evidence sidecar does not match discovery provenance; rerun discover first");
+  }
+};
+
+export const evidenceProducerErrors = (
+  discovery,
+  producer,
+  expectedRequestSetSha256,
+  expectedResponseSetSha256,
+) => {
+  return validateEvidenceProducer(
+    discovery,
+    producer,
+    expectedRequestSetSha256,
+    expectedResponseSetSha256,
+    { isObject, protocolVersion: SEMANTIC_PROTOCOL_VERSION },
+  );
+};
+
+const expectedEvidenceRequestSetDigest = (discovery, projects, outDir) => {
+  const selected = new Map(projects.map((project) => [project.id, project]));
+  const digests = discovery.projects
+    .filter((result) => selected.has(result.id))
+    .map((result) => {
+      const project = selected.get(result.id);
+      const candidates = result.candidates.filter(
+        ({ semantic_status: semanticStatus }) => semanticStatus === "confirmed-used",
+      );
+      const { request } = checkerEvidenceRequest(project, candidates, outDir);
+      return `${project.id}:${requestDigest(request)}`;
+    });
+  return digestSet(digests);
+};
+
+const storedEvidenceResponseSetDigest = (discovery, outDir) =>
+  digestSet(
+    (discovery.projects ?? []).map((project) => {
+      const path = resolve(outDir, "evidence", `${safeArtifactName(project.id)}.sidecar.json`);
+      return `${project.id}:${normalizedEvidenceResponseDigest(
+        readJson(path, `${project.id} raw evidence response`),
+      )}`;
+    }),
+  );
+
+const firstDefined = (values) => values.find((value) => value !== undefined);
+
+const evidenceLedgerEntry = (
+  project,
+  candidate,
+  root,
+  checkerEvidence,
+  previous,
+  schemaVersion,
+) => {
+  const old = Object(previous);
+  const oldEvidence = Object(old.source_evidence);
+  const featureBuckets = candidateFeatureBucketFields(
+    project.feature_buckets,
+    previous,
+    schemaVersion,
+  );
+  return {
+    key: candidate.key,
+    project_id: project.id,
+    candidate: {
+      path: candidate.path,
+      parent_name: candidate.parent_name,
+      member_name: candidate.member_name,
+      kind: candidate.kind,
+      line: candidate.line,
+      col: candidate.col,
+    },
+    semantic_status: candidate.semantic_status,
+    semantic_decision: candidate.semantic_decision,
+    semantic_completeness: candidate.semantic_completeness,
+    owning_projects: candidate.owning_projects,
+    contract:
+      candidate.contract == null
+        ? null
+        : {
+            relation: candidate.contract.relation,
+            optional: candidate.contract.optional,
+            declaration: sourceLineEvidence(root, candidate.contract.declaration),
+          },
+    ...featureBuckets,
+    truth: firstDefined([old.truth, "pending"]),
+    source_evidence: {
+      declaration: sourceLineEvidence(root, candidate),
+      uses: firstDefined([checkerEvidence.get(candidate.key), oldEvidence.uses, []]),
+      notes: firstDefined([oldEvidence.notes, null]),
+    },
+  };
+};
+
+const collectProjectEvidence = async (project, result, options, previousByKey, previousSchema) => {
+  const confirmedCandidates = result.candidates.filter(
+    ({ semantic_status: status }) => status === "confirmed-used",
+  );
+  const root = projectRoot(project, options.outDir);
+  const checkerResult = await collectCheckerEvidence(
+    project,
+    confirmedCandidates,
+    options.outDir,
+    options.sidecarBin,
+  );
+  const evidenceKeys = [...checkerResult.evidence.keys()].toSorted();
+  const expectedKeys = confirmedCandidates.map(({ key }) => key).toSorted();
+  if (JSON.stringify(evidenceKeys) !== JSON.stringify(expectedKeys)) {
+    fail(`${project.id} checker evidence does not match discovery; rerun discover first`);
+  }
+  return {
+    entries: result.candidates.map((candidate) =>
+      evidenceLedgerEntry(
+        project,
+        candidate,
+        root,
+        checkerResult.evidence,
+        previousByKey.get(candidate.key),
+        previousSchema,
+      ),
+    ),
+    requestDigest: `${project.id}:${checkerResult.requestDigest}`,
+    responseDigest: `${project.id}:${checkerResult.responseDigest}`,
+  };
+};
+
+const readPreviousLedger = (ledgerPath) =>
+  existsSync(ledgerPath) ? readJson(ledgerPath, "existing evidence ledger") : null;
+
+const discoveryCandidateKeys = (discovery) =>
+  new Set(discovery.projects.flatMap((result) => result.candidates.map((entry) => entry.key)));
+
 const evidence = async (manifest, projects, options) => {
+  ensureRuntimeInputs(options);
   const discovery = readDiscovery(options.outDir);
+  const sidecarSha256 = sidecarArtifactHash(options.sidecarBin);
+  validateEvidenceProducerHash(discovery, sidecarSha256);
   const selected = new Map(projects.map((project) => [project.id, project]));
   const ledgerPath = resolve(options.outDir, "ledger.json");
-  const previous = existsSync(ledgerPath) ? readJson(ledgerPath, "existing evidence ledger") : null;
-  const discoveredKeys = new Set(
-    (discovery.projects ?? []).flatMap((result) =>
-      (result.candidates ?? []).map((entry) => entry.key),
-    ),
-  );
+  const previous = readPreviousLedger(ledgerPath);
+  const discoveredKeys = discoveryCandidateKeys(discovery);
   const previousByKey = indexLedgerForRefresh(previous, discoveredKeys);
   const entries = [];
-  for (const result of discovery.projects ?? []) {
+  const requestDigests = [];
+  const responseDigests = [];
+  const selectedResults = discovery.projects.filter(({ id }) => selected.has(id));
+  for (const result of selectedResults) {
     const project = selected.get(result.id);
-    if (!project) continue;
-    const confirmedCandidates = (result.candidates ?? []).filter(
-      ({ semantic_status: semanticStatus }) => semanticStatus === "confirmed-used",
-    );
-    const root = projectRoot(project, options.outDir);
-    const checkerEvidence = await collectCheckerEvidence(
+    const collected = await collectProjectEvidence(
       project,
-      confirmedCandidates,
-      options.outDir,
+      result,
+      options,
+      previousByKey,
+      Object(previous).schema_version,
     );
-    const expectedConfirmed = new Set(confirmedCandidates.map(({ key }) => key));
-    if (
-      JSON.stringify([...checkerEvidence.keys()].toSorted()) !==
-      JSON.stringify([...expectedConfirmed].toSorted())
-    ) {
-      fail(`${project.id} checker evidence does not match discovery; rerun discover first`);
-    }
-    for (const candidate of result.candidates ?? []) {
-      const old = previousByKey.get(candidate.key);
-      const featureBuckets = candidateFeatureBucketFields(
-        project.feature_buckets,
-        old,
-        previous?.schema_version,
-      );
-      entries.push({
-        key: candidate.key,
-        project_id: project.id,
-        candidate: {
-          path: candidate.path,
-          parent_name: candidate.parent_name,
-          member_name: candidate.member_name,
-          kind: candidate.kind,
-          line: candidate.line,
-          col: candidate.col,
-        },
-        semantic_status: candidate.semantic_status,
-        ...featureBuckets,
-        truth: old?.truth ?? "pending",
-        source_evidence: {
-          declaration: sourceLineEvidence(root, candidate),
-          uses: checkerEvidence.get(candidate.key) ?? old?.source_evidence?.uses ?? [],
-          notes: old?.source_evidence?.notes ?? null,
-        },
-      });
-    }
+    entries.push(...collected.entries);
+    requestDigests.push(collected.requestDigest);
+    responseDigests.push(collected.responseDigest);
   }
   entries.sort((left, right) => left.key.localeCompare(right.key));
   const ledger = {
     schema_version: 2,
     artifact_policy: "local adjudication only; never copy raw or private source into tracked files",
+    producer: {
+      protocol_version: SEMANTIC_PROTOCOL_VERSION,
+      sidecar_sha256: sidecarSha256,
+      request_set_sha256: digestSet(requestDigests),
+      response_set_sha256: digestSet(responseDigests),
+    },
     adjudication: null,
     corpus: discovery.corpus,
     candidates: entries,
@@ -2061,6 +2246,15 @@ export const independentReviewDigest = (entries) => {
         col: entry.source_evidence.declaration.col,
         excerpt: entry.source_evidence.declaration.excerpt,
       },
+      semantic_status: entry.semantic_status,
+      contract:
+        entry.contract == null
+          ? null
+          : {
+              relation: entry.contract.relation,
+              optional: entry.contract.optional,
+              declaration: entry.contract.declaration,
+            },
       uses: entry.source_evidence.uses
         .map(({ path: usePath, line, col, excerpt }) => ({
           path: usePath,
@@ -2077,48 +2271,67 @@ export const independentReviewDigest = (entries) => {
 };
 
 export const independentReviewErrors = (allEntries, reviews) => {
-  const errors = [];
-  const confirmedByProject = new Map();
-  for (const entry of allEntries.filter(
-    ({ semantic_status: semanticStatus }) => semanticStatus === "confirmed-used",
-  )) {
-    const entries = confirmedByProject.get(entry.project_id) ?? [];
-    entries.push(entry);
-    confirmedByProject.set(entry.project_id, entries);
+  return validateIndependentReviews(allEntries, reviews, {
+    candidateSetDigest,
+    independentReviewDigest,
+  });
+};
+
+const validateDecisionReferences = (decisions, entriesByKey) => {
+  Object.keys(Object(decisions.known_unused)).forEach((key) => {
+    if (!entriesByKey.has(key)) fail(`adjudication references unknown unused candidate ${key}`);
+  });
+  Object.keys(Object(decisions.feature_overrides)).forEach((key) => {
+    if (!entriesByKey.has(key)) fail(`adjudication references unknown feature candidate ${key}`);
+  });
+};
+
+const adjudicateConfirmed = (entry, decisions) => {
+  if (entry.source_evidence.uses.length === 0) {
+    fail(`${entry.key} cannot be adjudicated used without concrete checker evidence`);
   }
-  if (!Array.isArray(reviews)) return ["independent reviews must be an array"];
-  const seenProjects = new Set();
-  for (const review of reviews) {
-    const projectId = review?.project_id;
-    if (typeof projectId !== "string" || !confirmedByProject.has(projectId)) {
-      errors.push(
-        `independent review references an unconfirmed project: ${projectId ?? "missing"}`,
-      );
-      continue;
-    }
-    if (seenProjects.has(projectId)) {
-      errors.push(`independent review is duplicated for ${projectId}`);
-      continue;
-    }
-    seenProjects.add(projectId);
-    const entries = confirmedByProject.get(projectId);
-    const keys = entries.map(({ key }) => key).toSorted();
-    const expectedCandidateSetDigest = candidateSetDigest(keys);
-    if (
-      review.verdict !== "approved" ||
-      review.candidate_count !== keys.length ||
-      review.candidate_set_sha256 !== expectedCandidateSetDigest ||
-      review.evidence_sha256 !== independentReviewDigest(entries)
-    ) {
-      errors.push(`independent review does not match confirmed evidence for ${projectId}`);
-    }
+  entry.truth = "used";
+  entry.source_evidence.notes =
+    "Exact declaration and checker-resolved source use reviewed against the pinned fixture.";
+  entry.adjudicated_feature_buckets = firstDefined([
+    Object(decisions.feature_overrides)[entry.key],
+    [decisions.default_confirmed_bucket],
+  ]);
+};
+
+const adjudicateContract = (entry) => {
+  if (!isObject(entry.contract) || !isObject(entry.contract.declaration)) {
+    fail(`${entry.key} cannot be adjudicated preserved without contract evidence`);
   }
-  for (const projectId of confirmedByProject.keys()) {
-    if (!seenProjects.has(projectId)) {
-      errors.push(`confirmed candidates for ${projectId} have no independent approved review`);
-    }
+  entry.truth = "preserved";
+  entry.source_evidence.notes =
+    "The implementation and inherited declarations were reviewed; deletion would break a required contract or remove overriding behavior.";
+  entry.adjudicated_feature_buckets = [`contract-${entry.contract.relation}`];
+};
+
+const adjudicateRetained = (entry, knownUnused, decisions) => {
+  if (knownUnused) {
+    entry.truth = "unused";
+    entry.source_evidence.notes = knownUnused;
+    entry.adjudicated_feature_buckets = ["known-unused-retention"];
+    return;
   }
-  return errors.toSorted();
+  entry.truth = "indeterminate";
+  entry.source_evidence.notes =
+    "No exact checker confirmation; retained conservatively without claiming that the member is unused.";
+  entry.adjudicated_feature_buckets = [decisions.default_retained_bucket];
+};
+
+const adjudicateEntry = (entry, decisions) => {
+  if (entry.semantic_status === "confirmed-used") {
+    adjudicateConfirmed(entry, decisions);
+    return;
+  }
+  if (entry.semantic_status === "contract-preserved") {
+    adjudicateContract(entry);
+    return;
+  }
+  adjudicateRetained(entry, Object(decisions.known_unused)[entry.key], decisions);
 };
 
 const adjudicate = (outDir) => {
@@ -2129,37 +2342,10 @@ const adjudicate = (outDir) => {
     fail("adjudication decisions schema_version must be 1");
   }
   const entriesByKey = new Map(ledger.candidates.map((entry) => [entry.key, entry]));
-  for (const key of Object.keys(decisions.known_unused ?? {})) {
-    if (!entriesByKey.has(key)) fail(`adjudication references unknown unused candidate ${key}`);
-  }
-  for (const key of Object.keys(decisions.feature_overrides ?? {})) {
-    if (!entriesByKey.has(key)) fail(`adjudication references unknown feature candidate ${key}`);
-  }
+  validateDecisionReferences(decisions, entriesByKey);
   const reviewErrors = independentReviewErrors(ledger.candidates, decisions.independent_reviews);
   if (reviewErrors.length > 0) fail(reviewErrors.join("\n"));
-  for (const entry of ledger.candidates) {
-    const knownUnused = decisions.known_unused?.[entry.key];
-    if (entry.semantic_status === "confirmed-used") {
-      if (entry.source_evidence.uses.length === 0) {
-        fail(`${entry.key} cannot be adjudicated used without concrete checker evidence`);
-      }
-      entry.truth = "used";
-      entry.source_evidence.notes =
-        "Exact declaration and checker-resolved source use reviewed against the pinned fixture.";
-      entry.adjudicated_feature_buckets = decisions.feature_overrides?.[entry.key] ?? [
-        decisions.default_confirmed_bucket,
-      ];
-    } else if (knownUnused) {
-      entry.truth = "unused";
-      entry.source_evidence.notes = knownUnused;
-      entry.adjudicated_feature_buckets = ["known-unused-retention"];
-    } else {
-      entry.truth = "indeterminate";
-      entry.source_evidence.notes =
-        "No exact checker confirmation; retained conservatively without claiming that the member is unused.";
-      entry.adjudicated_feature_buckets = [decisions.default_retained_bucket];
-    }
-  }
+  ledger.candidates.forEach((entry) => adjudicateEntry(entry, decisions));
   ledger.adjudication = {
     decisions_sha256: sha256File(DEFAULT_ADJUDICATION),
     reviewed_on: decisions.reviewed_on,
@@ -2175,130 +2361,65 @@ const adjudicate = (outDir) => {
 };
 
 const evidenceLocationValid = (location) =>
-  isObject(location) &&
-  typeof location.path === "string" &&
-  location.path.trim() !== "" &&
-  !isAbsolute(location.path) &&
-  Number.isSafeInteger(location.line) &&
-  location.line > 0 &&
-  Number.isSafeInteger(location.col) &&
-  location.col >= 0 &&
-  typeof location.excerpt === "string" &&
-  location.excerpt.trim() !== "";
-
-const featureBucketListValid = (buckets) =>
-  Array.isArray(buckets) &&
-  buckets.length > 0 &&
-  buckets.every((bucket) => typeof bucket === "string" && bucket.trim() !== "") &&
-  new Set(buckets).size === buckets.length;
-
-const optionalFeatureBucketListValid = (buckets) =>
-  buckets === undefined || featureBucketListValid(buckets);
+  validEvidenceLocation(location, { isAbsolute, isObject });
 
 export const verifyLedgerData = (discovery, ledger) => {
-  const errors = [];
-  if (
-    !isObject(discovery) ||
-    discovery.schema_version !== 1 ||
-    !Array.isArray(discovery.projects)
-  ) {
-    return ["discovery artifact is invalid"];
+  return verifyLedgerArtifact(discovery, ledger, {
+    candidateFields,
+    candidateKey,
+    isAbsolute,
+    isObject,
+    truthStatuses: TRUTH_STATUSES,
+  });
+};
+
+const evidenceSourcePath = (entry, location, root, errors) => {
+  const sourcePath = resolve(root, location.path);
+  const relativeToRoot = relative(root, sourcePath);
+  if ([relativeToRoot.startsWith(`..${sep}`), relativeToRoot === ".."].some(Boolean)) {
+    errors.push(`${entry.key}: evidence path escapes the prepared fixture`);
+    return null;
   }
-  if (isObject(ledger) && ledger.schema_version === 1 && Array.isArray(ledger.candidates)) {
-    return [
-      "ledger schema_version 1 is outdated; run `npm run type-aware:corpus -- evidence` to migrate it",
-    ];
+  const sourceIsFile = existsSync(sourcePath) ? statSync(sourcePath).isFile() : false;
+  if (!sourceIsFile) {
+    errors.push(`${entry.key}: evidence source file is missing: ${location.path}`);
+    return null;
   }
-  if (!isObject(ledger) || ledger.schema_version !== 2 || !Array.isArray(ledger.candidates)) {
-    return ["ledger artifact is invalid"];
+  return sourcePath;
+};
+
+const verifyEvidenceExcerpt = (entry, location, sourcePath, errors) => {
+  const sourceLine = readFileSync(sourcePath, "utf8").split(/\r?\n/)[location.line - 1] ?? "";
+  if (sourceLine.trim() !== location.excerpt) {
+    errors.push(`${entry.key}: evidence excerpt is stale at ${location.path}:${location.line}`);
   }
-  const expected = new Map();
-  for (const project of discovery.projects) {
-    for (const candidate of project.candidates ?? []) {
-      try {
-        const computedKey = candidateKey(project.id, candidate);
-        if (candidate.key !== computedKey) {
-          errors.push(`${candidate.key}: discovery candidate key is not stable`);
-        }
-      } catch (error) {
-        errors.push(
-          `${candidate.key ?? "unknown"}: invalid discovery candidate: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      expected.set(candidate.key, { ...candidate, project_id: project.id });
-    }
+  if (location.col > Buffer.byteLength(sourceLine, "utf8")) {
+    errors.push(`${entry.key}: evidence column is outside ${location.path}:${location.line}`);
   }
-  const actual = new Map();
-  for (const entry of ledger.candidates) {
-    if (!isObject(entry) || typeof entry.key !== "string") {
-      errors.push("ledger entry is missing a candidate key");
-      continue;
-    }
-    if (actual.has(entry.key)) errors.push(`${entry.key}: duplicate ledger entry`);
-    actual.set(entry.key, entry);
+};
+
+const verifyEvidenceLocation = (entry, location, root, errors) => {
+  if (!evidenceLocationValid(location)) return;
+  const sourcePath = evidenceSourcePath(entry, location, root, errors);
+  if (sourcePath === null) return;
+  verifyEvidenceExcerpt(entry, location, sourcePath, errors);
+};
+
+const verifyEntrySourceEvidence = (entry, projects, roots, errors) => {
+  const project = projects.get(entry.project_id);
+  if (!project) {
+    errors.push(`${entry.key}: source project is not in the manifest`);
+    return;
   }
-  for (const [key, candidate] of expected) {
-    const entry = actual.get(key);
-    if (!entry) {
-      errors.push(`${key}: missing ledger entry`);
-      continue;
-    }
-    if (entry.project_id !== candidate.project_id) {
-      errors.push(`${key}: project_id does not match discovery`);
-    }
-    try {
-      if (
-        JSON.stringify(candidateFields(entry.candidate)) !==
-        JSON.stringify(candidateFields(candidate))
-      ) {
-        errors.push(`${key}: candidate fields do not match discovery`);
-      }
-    } catch {
-      errors.push(`${key}: ledger candidate fields are incomplete`);
-    }
-    if (!TRUTH_STATUSES.has(entry.truth))
-      errors.push(`${key}: truth must be used, unused, or indeterminate`);
-    if (entry.semantic_status === "confirmed-used" && entry.truth !== "used") {
-      errors.push(`${key}: every confirmed removal must be adjudicated used`);
-    }
-    if (entry.semantic_status !== candidate.semantic_status)
-      errors.push(`${key}: semantic_status does not match discovery`);
-    if (
-      !isObject(entry.source_evidence) ||
-      !evidenceLocationValid(entry.source_evidence.declaration)
-    ) {
-      errors.push(`${key}: complete declaration source evidence is required`);
-    } else if (entry.source_evidence.declaration.path !== candidate.path) {
-      errors.push(`${key}: declaration evidence path must match the candidate path`);
-    } else if (entry.source_evidence.declaration.line !== candidate.line) {
-      errors.push(`${key}: declaration evidence line must match the candidate line`);
-    }
-    const uses = entry.source_evidence?.uses;
-    if (!Array.isArray(uses)) errors.push(`${key}: source_evidence.uses must be an array`);
-    else if (uses.some((use) => !evidenceLocationValid(use)))
-      errors.push(`${key}: every use must have path, line, and excerpt`);
-    if (
-      (entry.truth === "used" || entry.semantic_status === "confirmed-used") &&
-      uses?.length === 0
-    ) {
-      errors.push(`${key}: used or confirmed candidates require concrete use evidence`);
-    }
-    if (
-      (entry.truth === "unused" || entry.truth === "indeterminate") &&
-      (typeof entry.source_evidence?.notes !== "string" ||
-        entry.source_evidence.notes.trim() === "")
-    ) {
-      errors.push(`${key}: unused or indeterminate truth requires adjudication notes`);
-    }
-    if (!optionalFeatureBucketListValid(entry.suggested_feature_buckets))
-      errors.push(`${key}: suggested feature buckets must be non-empty and unique when present`);
-    if (!featureBucketListValid(entry.adjudicated_feature_buckets))
-      errors.push(`${key}: at least one explicitly adjudicated feature bucket is required`);
-  }
-  for (const key of actual.keys()) {
-    if (!expected.has(key)) errors.push(`${key}: stale ledger entry is not present in discovery`);
-  }
-  return errors.toSorted();
+  const sourceEvidence = Object(entry.source_evidence);
+  const locations = [
+    sourceEvidence.declaration,
+    ...arrayOrEmpty(sourceEvidence.uses),
+    ...(entry.contract == null ? [] : [Object(entry.contract).declaration]),
+  ];
+  locations.forEach((location) =>
+    verifyEvidenceLocation(entry, location, roots.get(project.id), errors),
+  );
 };
 
 const verifySourceEvidence = (manifest, ledger, outDir) => {
@@ -2307,37 +2428,24 @@ const verifySourceEvidence = (manifest, ledger, outDir) => {
     manifest.projects.map((project) => [project.id, projectRoot(project, outDir)]),
   );
   const errors = [];
-  for (const entry of ledger.candidates) {
-    const project = projects.get(entry.project_id);
-    if (!project) {
-      errors.push(`${entry.key}: source project is not in the manifest`);
-      continue;
-    }
-    const root = roots.get(project.id);
-    const locations = [entry.source_evidence?.declaration, ...(entry.source_evidence?.uses ?? [])];
-    for (const location of locations) {
-      if (!evidenceLocationValid(location)) continue;
-      const sourcePath = resolve(root, location.path);
-      const relativeToRoot = relative(root, sourcePath);
-      if (relativeToRoot.startsWith(`..${sep}`) || relativeToRoot === "..") {
-        errors.push(`${entry.key}: evidence path escapes the prepared fixture`);
-        continue;
-      }
-      if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
-        errors.push(`${entry.key}: evidence source file is missing: ${location.path}`);
-        continue;
-      }
-      const sourceLine = readFileSync(sourcePath, "utf8").split(/\r?\n/)[location.line - 1] ?? "";
-      const actual = sourceLine.trim();
-      if (actual !== location.excerpt) {
-        errors.push(`${entry.key}: evidence excerpt is stale at ${location.path}:${location.line}`);
-      }
-      if (location.col > Buffer.byteLength(sourceLine, "utf8")) {
-        errors.push(`${entry.key}: evidence column is outside ${location.path}:${location.line}`);
-      }
-    }
-  }
+  ledger.candidates.forEach((entry) => verifyEntrySourceEvidence(entry, projects, roots, errors));
   return errors;
+};
+
+const verifyLedgerAdjudication = (ledger, decisions, errors) => {
+  const adjudication = Object(ledger.adjudication);
+  const signoff = Object(adjudication.independent_signoff);
+  if (adjudication.decisions_sha256 !== sha256File(DEFAULT_ADJUDICATION)) {
+    errors.push("ledger adjudication does not match the checked-in review decisions");
+  }
+  if (signoff.verdict !== "approved") {
+    errors.push("ledger requires an approved independent signoff");
+  }
+  const storedReviews = signoff.reviews;
+  errors.push(...independentReviewErrors(ledger.candidates, storedReviews));
+  if (JSON.stringify(storedReviews) !== JSON.stringify(decisions.independent_reviews)) {
+    errors.push("ledger independent reviews do not match the checked-in review decisions");
+  }
 };
 
 const verifyLedger = (outDir, manifest, discovery = readDiscovery(outDir)) => {
@@ -2348,35 +2456,18 @@ const verifyLedger = (outDir, manifest, discovery = readDiscovery(outDir)) => {
   }
   const errors = [
     ...verifyLedgerData(discovery, ledger),
+    ...evidenceProducerErrors(
+      discovery,
+      ledger.producer,
+      expectedEvidenceRequestSetDigest(discovery, manifest.projects, outDir),
+      storedEvidenceResponseSetDigest(discovery, outDir),
+    ),
     ...verifySourceEvidence(manifest, ledger, outDir),
   ].toSorted();
-  if (ledger.adjudication?.decisions_sha256 !== sha256File(DEFAULT_ADJUDICATION)) {
-    errors.push("ledger adjudication does not match the checked-in review decisions");
-  }
-  if (ledger.adjudication?.independent_signoff?.verdict !== "approved") {
-    errors.push("ledger requires an approved independent signoff");
-  }
-  const storedReviews = ledger.adjudication?.independent_signoff?.reviews;
-  errors.push(...independentReviewErrors(ledger.candidates, storedReviews));
-  if (JSON.stringify(storedReviews) !== JSON.stringify(decisions.independent_reviews)) {
-    errors.push("ledger independent reviews do not match the checked-in review decisions");
-  }
+  verifyLedgerAdjudication(ledger, decisions, errors);
   if (errors.length > 0)
     fail(`ledger verification failed:\n${errors.map((error) => `- ${error}`).join("\n")}`);
   return { discovery, ledger };
-};
-
-const percentile = (values, ratio) => {
-  if (values.length === 0) return null;
-  const sorted = values.toSorted((left, right) => left - right);
-  const index = (sorted.length - 1) * ratio;
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  const value =
-    lower === upper
-      ? sorted[lower]
-      : sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
-  return Math.round(value * 1_000) / 1_000;
 };
 
 const measuredRuns = (measurements, mode) =>
@@ -2384,224 +2475,122 @@ const measuredRuns = (measurements, mode) =>
     project.runs.filter((run) => !run.warmup && run.mode === mode),
   );
 
+const focusedCasesPassed = (focusedReport, discovery) =>
+  [
+    focusedReport.schema_version === 1,
+    focusedReport.passed === true,
+    focusedReport.fallow_sha256 === discovery.provenance.fallow.sha256,
+    focusedReport.sidecar_sha256 === discovery.provenance.sidecar.sha256,
+    focusedReport.test_sha256 === sha256File(FOCUSED_TEST_PATH),
+    JSON.stringify(focusedReport.cases) === JSON.stringify([...REQUIRED_FOCUSED_CASES].toSorted()),
+  ].every(Boolean);
+
+const addSupplementalConfirmation = (confirmedProjects, artifact) => {
+  if (
+    [artifact.result.confirmed_used > 0, artifact.independent_review.verdict === "approved"].every(
+      Boolean,
+    )
+  ) {
+    confirmedProjects.add("vitest");
+  }
+};
+
+const publicationEvidence = (
+  summary,
+  discovery,
+  ledger,
+  correctConfirmed,
+  correctContracts,
+  retainedUnused,
+) => ({
+  schema_version: 1,
+  generated_from: {
+    discovery_provenance: discovery.provenance,
+    evidence_producer: ledger.producer,
+    adjudication: ledger.adjudication,
+  },
+  summary,
+  confirmations: correctConfirmed.map((entry) => ({
+    key: entry.key,
+    project_id: entry.project_id,
+    declaration: {
+      path: entry.source_evidence.declaration.path,
+      line: entry.source_evidence.declaration.line,
+      col: entry.source_evidence.declaration.col,
+    },
+    uses: entry.source_evidence.uses
+      .map(({ path: usePath, line, col }) => ({ path: usePath, line, col }))
+      .toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    feature_buckets: entry.adjudicated_feature_buckets,
+  })),
+  contract_preservations: correctContracts.map((entry) => ({
+    key: entry.key,
+    project_id: entry.project_id,
+    declaration: {
+      path: entry.source_evidence.declaration.path,
+      line: entry.source_evidence.declaration.line,
+      col: entry.source_evidence.declaration.col,
+    },
+    contract: entry.contract,
+  })),
+  known_unused_retained: retainedUnused.map((entry) => ({
+    key: entry.key,
+    project_id: entry.project_id,
+    declaration: {
+      path: entry.source_evidence.declaration.path,
+      line: entry.source_evidence.declaration.line,
+      col: entry.source_evidence.declaration.col,
+    },
+  })),
+});
+
+const persistPublicationEvidence = (summary, publicationArtifact, publicationMode) => {
+  if (!summary.gate.go) return;
+  const evidencePath = resolve(REPO_ROOT, "benchmarks/type-aware-corpus-evidence.json");
+  const summaryPath = resolve(REPO_ROOT, "benchmarks/type-aware-corpus-summary.md");
+  const summaryMarkdown = renderSummaryMarkdown(summary);
+  if (publicationMode === "write") {
+    writeJson(evidencePath, publicationArtifact);
+    writeFileSync(summaryPath, summaryMarkdown);
+    return;
+  }
+  const trackedMatches = [
+    JSON.stringify(readJson(evidencePath, "tracked corpus evidence")) ===
+      JSON.stringify(publicationArtifact),
+    readFileSync(summaryPath, "utf8") === summaryMarkdown,
+  ].every(Boolean);
+  if (!trackedMatches) {
+    fail("tracked corpus evidence or summary has generator drift; rerun summarize");
+  }
+};
+
 export const validateMeasurements = (discovery, measurements) => {
-  if (!isObject(measurements) || measurements.schema_version !== 1) {
-    fail("measurement artifact schema_version must be 1");
-  }
-  if (JSON.stringify(discovery.corpus) !== JSON.stringify(measurements.corpus)) {
-    fail("measurement corpus identity does not match discovery; rerun measure");
-  }
-  if (!Number.isSafeInteger(measurements.warmups) || measurements.warmups < 1) {
-    fail("measurements require at least one warmup pair");
-  }
-  if (!Number.isSafeInteger(measurements.measured_pairs) || measurements.measured_pairs < 4) {
-    fail("measurements require at least four measured pairs");
-  }
-  const expectedProjects = new Map(discovery.projects.map((project) => [project.id, project]));
-  if (
-    !Array.isArray(measurements.projects) ||
-    measurements.projects.length !== expectedProjects.size
-  ) {
-    fail("measurements must contain every discovery project exactly once");
-  }
-  const seen = new Set();
-  for (const project of measurements.projects) {
-    const discovered = expectedProjects.get(project.id);
-    if (!discovered || seen.has(project.id)) fail(`invalid measurement project ${project.id}`);
-    seen.add(project.id);
-    const expectedRunCount = 2 * (measurements.warmups + measurements.measured_pairs);
-    if (!Array.isArray(project.runs) || project.runs.length !== expectedRunCount) {
-      fail(`${project.id} measurements have an incomplete run matrix`);
-    }
-    const pairs = new Map();
-    for (const run of project.runs) {
-      if (!isObject(run) || typeof run.warmup !== "boolean") {
-        fail(`${project.id} measurement warmup must be a boolean`);
-      }
-      if (run.mode !== "baseline" && run.mode !== "refined") {
-        fail(`${project.id} measurement mode must be baseline or refined`);
-      }
-      const iterationLimit = run.warmup ? measurements.warmups : measurements.measured_pairs;
-      if (
-        !Number.isSafeInteger(run.iteration) ||
-        run.iteration < 0 ||
-        run.iteration >= iterationLimit
-      ) {
-        fail(`${project.id} measurement iteration is outside its expected range`);
-      }
-      if (!Number.isFinite(run.wall_ms) || run.wall_ms <= 0) {
-        fail(`${project.id} measurement has an invalid wall time`);
-      }
-      if (
-        process.platform !== "win32" &&
-        (!Number.isFinite(run.peak_process_tree_rss_kb) || run.peak_process_tree_rss_kb <= 0)
-      ) {
-        fail(`${project.id} measurement has no process-tree RSS sample`);
-      }
-      const expectedCount =
-        run.mode === "baseline"
-          ? discovered.baseline_candidate_count
-          : discovered.refined_candidate_count;
-      if (run.candidate_count !== expectedCount) {
-        fail(`${project.id} ${run.mode} candidate count drifted during measurement`);
-      }
-      const key = `${run.warmup ? "warmup" : "measured"}:${run.iteration}`;
-      const modes = pairs.get(key) ?? new Set();
-      if (modes.has(run.mode)) {
-        fail(`${project.id} measurements contain a duplicate ${key}:${run.mode} run`);
-      }
-      modes.add(run.mode);
-      pairs.set(key, modes);
-    }
-    if (
-      pairs.size !== measurements.warmups + measurements.measured_pairs ||
-      [...pairs.values()].some(
-        (modes) => modes.size !== 2 || !modes.has("baseline") || !modes.has("refined"),
-      )
-    ) {
-      fail(`${project.id} measurements are missing a baseline or refined pair`);
-    }
-  }
-  const comparableProvenance = (provenance) => ({
-    manifest_sha256: provenance?.manifest_sha256,
-    fallow: provenance?.fallow,
-    sidecar: provenance?.sidecar,
-    runtime: provenance?.runtime,
-    fixtures: provenance?.fixtures,
+  validateMeasurementData(discovery, measurements, {
+    fail,
+    isObject,
+    platform: process.platform,
   });
-  if (
-    JSON.stringify(comparableProvenance(discovery.provenance)) !==
-    JSON.stringify(comparableProvenance(measurements.provenance))
-  ) {
-    fail("discovery and measurement provenance differ; rerun both with the same artifacts");
-  }
 };
 
 const validatePublicationProvenance = (discovery, manifest, options) => {
   ensureRuntimeInputs(options);
-  const expected = {
-    manifest_sha256: sha256File(options.manifest),
-    fallow: {
-      version: binaryVersion(options.fallowBin),
-      sha256: sha256File(options.fallowBin),
-    },
-    sidecar: { sha256: sidecarArtifactHash(options.sidecarBin) },
-    runtime: {
-      platform: process.platform,
-      architecture: process.arch,
-      node: process.version,
-    },
-    fixtures: manifest.projects.map((project) => {
-      const { commit } = validatePreparedFixture(project, options.outDir);
-      return { id: project.id, repo: project.repo, ref: project.ref, commit };
-    }),
-  };
+  const expected = currentPublicationProvenance(options.manifest, manifest.projects, options);
+  const provenance = Object(discovery.provenance);
   const actual = {
-    manifest_sha256: discovery.provenance?.manifest_sha256,
-    fallow: discovery.provenance?.fallow,
-    sidecar: discovery.provenance?.sidecar,
-    runtime: discovery.provenance?.runtime,
-    fixtures: discovery.provenance?.fixtures,
+    manifest_sha256: provenance.manifest_sha256,
+    fallow: provenance.fallow,
+    sidecar: provenance.sidecar,
+    runtime: provenance.runtime,
+    dependency_environments: provenance.dependency_environments,
+    fixtures: provenance.fixtures,
   };
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     fail("discovery provenance does not match current release artifacts and pinned fixtures");
   }
 };
 
-const aggregateReasonCounts = (runs) => {
-  const counts = {};
-  for (const run of runs) {
-    for (const [reason, count] of Object.entries(run.reason_counts ?? {})) {
-      if (Number.isFinite(count)) counts[reason] = (counts[reason] ?? 0) + count;
-    }
-  }
-  return Object.fromEntries(
-    Object.entries(counts).toSorted(([left], [right]) => left.localeCompare(right)),
-  );
-};
-
-const aggregatePhaseTimings = (runs) => {
-  const byPhase = new Map();
-  for (const run of runs) {
-    for (const [phase, duration] of Object.entries(run.phase_timings_ms ?? {})) {
-      if (!Number.isFinite(duration)) continue;
-      const values = byPhase.get(phase) ?? [];
-      values.push(duration);
-      byPhase.set(phase, values);
-    }
-  }
-  return Object.fromEntries(
-    [...byPhase.entries()]
-      .toSorted(([left], [right]) => left.localeCompare(right))
-      .map(([phase, values]) => [
-        phase,
-        { median: percentile(values, 0.5), p95: percentile(values, 0.95) },
-      ]),
-  );
-};
-
-const safeRatio = (numerator, denominator) =>
-  denominator === 0 ? null : Math.round((numerator / denominator) * 1_000_000) / 1_000_000;
-
-export const summarizeAdjudicatedFeatureBuckets = (entries) => {
-  const candidates = entries
-    .filter(
-      ({ semantic_status: semanticStatus, truth }) =>
-        semanticStatus === "confirmed-used" && truth === "used",
-    )
-    .map((entry) => ({
-      key: entry.key,
-      buckets: new Set(entry.adjudicated_feature_buckets ?? []),
-    }));
-  const confirmedFeatureBuckets = new Set(candidates.flatMap(({ buckets }) => [...buckets]));
-  let multipleFeatureBuckets = false;
-  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
-    const left = candidates[leftIndex];
-    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
-      const right = candidates[rightIndex];
-      if (left.key === right.key) continue;
-      if (
-        [...left.buckets].some((bucket) => [...right.buckets].some((other) => other !== bucket))
-      ) {
-        multipleFeatureBuckets = true;
-        break;
-      }
-    }
-    if (multipleFeatureBuckets) break;
-  }
-  return {
-    confirmed_feature_buckets: [...confirmedFeatureBuckets].toSorted(),
-    multiple_feature_buckets: multipleFeatureBuckets,
-  };
-};
-
-const renderSummaryMarkdown = (summary) =>
-  [
-    "# Type-aware corpus summary",
-    "",
-    `Gate: ${summary.gate.go ? "GO" : "NO-GO"}`,
-    "",
-    `- Candidates: ${summary.accuracy.candidate_count}`,
-    `- Confirmation precision: ${summary.accuracy.confirmation_precision ?? "n/a"}`,
-    `- Used recall: ${summary.accuracy.used_recall ?? "n/a"}`,
-    `- Correct-unused retention: ${summary.accuracy.correct_unused_retention ?? "n/a"}`,
-    `- Abstention: ${summary.accuracy.abstention ?? "n/a"}`,
-    `- Median marginal overhead: ${summary.performance.marginal_overhead_ms.median ?? "n/a"} ms`,
-    `- P95 marginal overhead: ${summary.performance.marginal_overhead_ms.p95 ?? "n/a"} ms`,
-    `- Independent repositories with confirmed value: ${summary.value.confirmed_repository_count}`,
-    `- Semantic buckets with confirmed value: ${summary.value.confirmed_feature_buckets.join(", ") || "none"}`,
-    "",
-    "Raw machine output and source evidence remain under target/type-aware-corpus and are not tracked.",
-    "",
-  ].join("\n");
-
 export const requirePublicationGo = (summary, publicationMode) => {
-  if (publicationMode !== "verify" || summary.gate?.go === true) return;
-  const failedChecks = Object.entries(summary.gate?.checks ?? {})
-    .filter(([, passed]) => passed !== true)
-    .map(([name]) => name)
-    .toSorted();
-  fail(`publication gate is NO-GO; failed checks: ${failedChecks.join(", ") || "unknown"}`);
+  assertPublicationGo(summary, publicationMode, fail);
 };
 
 const summarize = (manifest, options, publicationMode = "write") => {
@@ -2613,20 +2602,20 @@ const summarize = (manifest, options, publicationMode = "write") => {
   const measurements = readJson(resolve(outDir, "measurements.json"), "measurements artifact");
   validateMeasurements(discovery, measurements);
   const focusedReport = readJson(resolve(outDir, "focused.json"), "focused verification artifact");
-  const focusedCasesPassed =
-    focusedReport.schema_version === 1 &&
-    focusedReport.passed === true &&
-    focusedReport.fallow_sha256 === discovery.provenance?.fallow?.sha256 &&
-    focusedReport.sidecar_sha256 === discovery.provenance?.sidecar?.sha256 &&
-    focusedReport.test_sha256 === sha256File(FOCUSED_TEST_PATH) &&
-    JSON.stringify(focusedReport.cases) === JSON.stringify([...REQUIRED_FOCUSED_CASES].toSorted());
+  const focusedVerificationPassed = focusedCasesPassed(focusedReport, discovery);
   const entries = ledger.candidates;
   const confirmed = entries.filter(({ semantic_status }) => semantic_status === "confirmed-used");
+  const contracts = entries.filter(
+    ({ semantic_status }) => semantic_status === "contract-preserved",
+  );
   const retained = entries.filter(({ semantic_status }) => semantic_status === "retained");
   const used = entries.filter(({ truth }) => truth === "used");
+  const preserved = entries.filter(({ truth }) => truth === "preserved");
   const unused = entries.filter(({ truth }) => truth === "unused");
   const correctConfirmed = confirmed.filter(({ truth }) => truth === "used");
   const incorrectConfirmed = confirmed.filter(({ truth }) => truth === "unused");
+  const correctContracts = contracts.filter(({ truth }) => truth === "preserved");
+  const incorrectContracts = contracts.filter(({ truth }) => truth !== "preserved");
   const correctUnusedRetained = retained.filter(({ truth }) => truth === "unused");
   const abstainedCount = discovery.projects.reduce(
     (total, project) => total + (project.type_aware?.abstained_count ?? 0),
@@ -2638,20 +2627,10 @@ const summarize = (manifest, options, publicationMode = "write") => {
   );
   const baselineRuns = measuredRuns(measurements, "baseline");
   const refinedRuns = measuredRuns(measurements, "refined");
-  const overheads = [];
-  for (const project of measurements.projects) {
-    const byPair = new Map();
-    for (const run of project.runs.filter(({ warmup }) => !warmup)) {
-      const pair = byPair.get(run.iteration) ?? {};
-      pair[run.mode] = run.wall_ms;
-      byPair.set(run.iteration, pair);
-    }
-    for (const pair of byPair.values()) {
-      if (Number.isFinite(pair.baseline) && Number.isFinite(pair.refined))
-        overheads.push(pair.refined - pair.baseline);
-    }
-  }
-  const confirmedProjects = new Set(correctConfirmed.map(({ project_id }) => project_id));
+  const overheads = pairedOverheads(measurements.projects);
+  const confirmedProjects = new Set(
+    [...correctConfirmed, ...correctContracts].map(({ project_id }) => project_id),
+  );
   const adjudication = readJson(DEFAULT_ADJUDICATION, "adjudication decisions");
   const supplementalArtifact = validateSupplementalArtifactData(
     readJson(SUPPLEMENTAL_ARTIFACT, "tracked supplemental artifact"),
@@ -2660,20 +2639,20 @@ const summarize = (manifest, options, publicationMode = "write") => {
       fallowSha256: discovery.provenance.fallow.sha256,
       sidecarSha256: discovery.provenance.sidecar.sha256,
       sourceRoot: REPO_ROOT,
+      dependencyEnvironment: publishDependencyEnvironment(
+        fixtureDependencyEnvironment(SUPPLEMENTAL_VITEST_ROOT, "vitest"),
+      ),
     },
   );
-  if (
-    supplementalArtifact.result.confirmed_used > 0 &&
-    supplementalArtifact.independent_review.verdict === "approved"
-  ) {
-    confirmedProjects.add("vitest");
-  }
+  addSupplementalConfirmation(confirmedProjects, supplementalArtifact);
   const featureBucketValue = summarizeAdjudicatedFeatureBuckets(entries);
   const zeroControlsClean = discovery.projects
     .filter(({ role }) => role === "zero-control")
     .every(({ baseline_candidate_count }) => baseline_candidate_count === 0);
   const confirmationPrecision = safeRatio(correctConfirmed.length, confirmed.length);
-  const usedRecall = safeRatio(correctConfirmed.length, used.length);
+  const confirmationYield = safeRatio(correctConfirmed.length, entries.length);
+  const adjudicatedTruthCount = used.length + preserved.length + unused.length;
+  const adjudicatedTruthCoverage = safeRatio(adjudicatedTruthCount, entries.length);
   const correctUnusedRetention = safeRatio(correctUnusedRetained.length, unused.length);
   const abstention = safeRatio(abstainedCount, entries.length);
   const marginalOverheadP95 = percentile(overheads, 0.95);
@@ -2684,37 +2663,32 @@ const summarize = (manifest, options, publicationMode = "write") => {
     0.95,
   );
   const thresholds = manifest.gates;
-  const independentSignoff = ledger.adjudication?.independent_signoff;
-  const checks = {
-    zero_incorrect_removals: incorrectConfirmed.length === 0,
-    zero_controls_clean: zeroControlsClean,
-    multiple_repositories: confirmedProjects.size >= 2,
-    multiple_feature_buckets: featureBucketValue.multiple_feature_buckets,
-    deterministic_output: discovery.determinism_runs >= 2,
-    focused_cases: focusedCasesPassed,
-    confirmation_precision:
-      confirmationPrecision !== null &&
-      confirmationPrecision >= thresholds.minimum_confirmation_precision,
-    used_recall: usedRecall !== null && usedRecall >= thresholds.minimum_used_recall,
-    correct_unused_retention:
-      correctUnusedRetention !== null &&
-      correctUnusedRetention >= thresholds.minimum_correct_unused_retention,
-    abstention: abstention !== null && abstention <= thresholds.maximum_abstention,
-    marginal_overhead:
-      marginalOverheadP95 !== null &&
-      marginalOverheadP95 <= thresholds.maximum_p95_marginal_overhead_ms,
-    refined_rss:
-      process.platform === "win32" ||
-      (refinedRssP95 !== null && refinedRssP95 <= thresholds.maximum_p95_refined_rss_kb),
-    independent_signoff: isObject(independentSignoff) && independentSignoff.verdict === "approved",
-  };
+  const independentSignoff = Object(ledger.adjudication).independent_signoff;
+  const checks = summaryChecks({
+    abstention,
+    confirmationPrecision,
+    confirmationYield,
+    confirmedProjectCount: confirmedProjects.size,
+    correctUnusedRetention,
+    determinismRuns: discovery.determinism_runs,
+    featureBucketValue,
+    focusedCasesPassed: focusedVerificationPassed,
+    incorrectConfirmedCount: incorrectConfirmed.length + incorrectContracts.length,
+    independentSignoff,
+    isObject,
+    marginalOverheadP95,
+    platform: process.platform,
+    refinedRssP95,
+    thresholds,
+    zeroControlsClean,
+  });
   const summary = {
-    schema_version: 2,
+    schema_version: 3,
     gate: {
       go: Object.values(checks).every(Boolean),
       checks,
       thresholds,
-      known_incorrect_removals: incorrectConfirmed.length,
+      known_incorrect_removals: incorrectConfirmed.length + incorrectContracts.length,
       zero_controls_clean: zeroControlsClean,
       multiple_repositories: confirmedProjects.size >= 2,
       multiple_feature_buckets: featureBucketValue.multiple_feature_buckets,
@@ -2722,14 +2696,24 @@ const summarize = (manifest, options, publicationMode = "write") => {
     accuracy: {
       candidate_count: entries.length,
       confirmed_used_count: confirmed.length,
+      contract_preserved_count: contracts.length,
       retained_count: retained.length,
       truth_counts: {
         used: used.length,
+        preserved: preserved.length,
         unused: unused.length,
         indeterminate: entries.filter(({ truth }) => truth === "indeterminate").length,
       },
       confirmation_precision: confirmationPrecision,
-      used_recall: usedRecall,
+      confirmation_yield: confirmationYield,
+      safe_resolution_yield: safeRatio(
+        correctConfirmed.length + correctContracts.length,
+        entries.length,
+      ),
+      adjudicated_truth_count: adjudicatedTruthCount,
+      adjudicated_truth_coverage: adjudicatedTruthCoverage,
+      adjudication_scope:
+        "Confirmed uses, required contracts, and reviewed declaration-only negatives; indeterminate candidates are excluded and corpus-wide recall is not claimed.",
       correct_unused_retention: correctUnusedRetention,
       abstained_count: abstainedCount,
       abstention,
@@ -2788,52 +2772,49 @@ const summarize = (manifest, options, publicationMode = "write") => {
   requirePublicationGo(summary, publicationMode);
   writeJson(resolve(outDir, "summary.json"), summary);
   writeFileSync(resolve(outDir, "summary.md"), renderSummaryMarkdown(summary));
-  if (summary.gate.go) {
-    const publicationEvidence = {
-      schema_version: 1,
-      generated_from: {
-        discovery_provenance: discovery.provenance,
-        adjudication: ledger.adjudication,
-      },
-      summary,
-      confirmations: correctConfirmed.map((entry) => ({
-        key: entry.key,
-        project_id: entry.project_id,
-        declaration: {
-          path: entry.source_evidence.declaration.path,
-          line: entry.source_evidence.declaration.line,
-          col: entry.source_evidence.declaration.col,
-        },
-        uses: entry.source_evidence.uses
-          .map(({ path: usePath, line, col }) => ({ path: usePath, line, col }))
-          .toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
-        feature_buckets: entry.adjudicated_feature_buckets,
-      })),
-      known_unused_retained: correctUnusedRetained.map((entry) => ({
-        key: entry.key,
-        project_id: entry.project_id,
-        declaration: {
-          path: entry.source_evidence.declaration.path,
-          line: entry.source_evidence.declaration.line,
-          col: entry.source_evidence.declaration.col,
-        },
-      })),
-    };
-    const evidencePath = resolve(REPO_ROOT, "benchmarks/type-aware-corpus-evidence.json");
-    const summaryPath = resolve(REPO_ROOT, "benchmarks/type-aware-corpus-summary.md");
-    const summaryMarkdown = renderSummaryMarkdown(summary);
-    if (publicationMode === "write") {
-      writeJson(evidencePath, publicationEvidence);
-      writeFileSync(summaryPath, summaryMarkdown);
-    } else if (
-      JSON.stringify(readJson(evidencePath, "tracked corpus evidence")) !==
-        JSON.stringify(publicationEvidence) ||
-      readFileSync(summaryPath, "utf8") !== summaryMarkdown
-    ) {
-      fail("tracked corpus evidence or summary has generator drift; rerun summarize");
-    }
-  }
+  const publicationArtifact = publicationEvidence(
+    summary,
+    discovery,
+    ledger,
+    correctConfirmed,
+    correctContracts,
+    correctUnusedRetained,
+  );
+  persistPublicationEvidence(summary, publicationArtifact, publicationMode);
   return summary;
+};
+
+const verifyPublication = async (manifest, options) => {
+  summarize(manifest, options, "verify");
+  await supplemental(options, "verify");
+  await capabilities(manifest, options, "verify");
+};
+
+const executeCommand = async (manifest, projects, options) => {
+  const handlers = {
+    prepare: () => prepare(projects, options.outDir),
+    discover: () => discover(manifest, projects, options),
+    measure: () => measure(manifest, projects, options),
+    focused: () => focused(options),
+    evidence: () => evidence(manifest, manifest.projects, options),
+    adjudicate: () => adjudicate(options.outDir),
+    "verify-ledger": () => verifyLedger(options.outDir, manifest),
+    summarize: () => summarize(manifest, options),
+    "verify-publication": () => verifyPublication(manifest, options),
+    supplemental: () => supplemental(options),
+    capabilities: () => capabilities(manifest, options),
+  };
+  await handlers[options.command]();
+};
+
+const successMessage = (options) => {
+  const messages = {
+    "verify-ledger": "verify-ledger: evidence ledger is valid",
+    "verify-publication": "verify-publication: tracked evidence matches the generator",
+    supplemental: `supplemental: artifact written to ${SUPPLEMENTAL_ARTIFACT}`,
+    capabilities: `capabilities: artifact written to ${CAPABILITIES_ARTIFACT}`,
+  };
+  return messages[options.command] ?? `${options.command}: artifacts written to ${options.outDir}`;
 };
 
 export const main = async (argv = process.argv.slice(2)) => {
@@ -2846,28 +2827,8 @@ export const main = async (argv = process.argv.slice(2)) => {
   const projects = selectProjects(manifest, options.projects);
   validatePartialOutput(options);
   mkdirSync(options.outDir, { recursive: true });
-  if (options.command === "prepare") prepare(projects, options.outDir);
-  else if (options.command === "discover") await discover(manifest, projects, options);
-  else if (options.command === "measure") await measure(manifest, projects, options);
-  else if (options.command === "focused") focused(options);
-  else if (options.command === "evidence") await evidence(manifest, manifest.projects, options);
-  else if (options.command === "adjudicate") adjudicate(options.outDir);
-  else if (options.command === "verify-ledger") verifyLedger(options.outDir, manifest);
-  else if (options.command === "summarize") summarize(manifest, options);
-  else if (options.command === "verify-publication") {
-    summarize(manifest, options, "verify");
-    await supplemental(options, "verify");
-    await capabilities(manifest, options, "verify");
-  } else if (options.command === "supplemental") await supplemental(options);
-  else if (options.command === "capabilities") await capabilities(manifest, options);
-  if (options.command === "verify-ledger") console.log("verify-ledger: evidence ledger is valid");
-  else if (options.command === "verify-publication")
-    console.log("verify-publication: tracked evidence matches the generator");
-  else if (options.command === "supplemental")
-    console.log(`supplemental: artifact written to ${SUPPLEMENTAL_ARTIFACT}`);
-  else if (options.command === "capabilities")
-    console.log(`capabilities: artifact written to ${CAPABILITIES_ARTIFACT}`);
-  else console.log(`${options.command}: artifacts written to ${options.outDir}`);
+  await executeCommand(manifest, projects, options);
+  console.log(successMessage(options));
   return 0;
 };
 

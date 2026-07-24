@@ -2822,13 +2822,31 @@ fn sarif_rule_defs(findings: &[SecurityFinding], cwes: &[u32]) -> Vec<serde_json
 /// hops and source-reachability hops become `relatedLocations` of the result.
 #[must_use]
 fn render_sarif(output: &SecurityOutput) -> String {
-    let cwes = collect_cwes(&output.security_findings);
-    let results: Vec<serde_json::Value> = output
-        .security_findings
+    let gate = output
+        .gate
+        .as_ref()
+        .and_then(|gate| serde_json::to_value(gate).ok());
+    let sarif = build_security_sarif(&output.security_findings, gate.as_ref());
+    serde_json::to_string_pretty(&sarif)
+        .unwrap_or_else(|_| "{\"error\":\"failed to serialize sarif\"}".to_owned())
+}
+
+/// Build the native security SARIF document from typed findings.
+///
+/// Both the direct security command and `fallow report --from` use this
+/// function so CWE taxonomy, traces, fingerprints, and gate metadata cannot
+/// drift between analyze-once and direct rendering.
+#[must_use]
+pub fn build_security_sarif(
+    security_findings: &[SecurityFinding],
+    gate: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let cwes = collect_cwes(security_findings);
+    let results: Vec<serde_json::Value> = security_findings
         .iter()
         .map(sarif_result_for_finding)
         .collect();
-    let rules = sarif_rule_defs(&output.security_findings, &cwes);
+    let rules = sarif_rule_defs(security_findings, &cwes);
 
     let mut run = serde_json::json!({
         "tool": { "driver": {
@@ -2848,19 +2866,15 @@ fn render_sarif(output: &SecurityOutput) -> String {
     // Gate verdict rides as a RUN-level property, never on result severity.
     // Result levels come from candidate review-priority severity and deliberately
     // avoid `error`, so GHAS does not frame candidates as confirmed problems.
-    if let Some(gate) = &output.gate
-        && let Ok(gate_value) = serde_json::to_value(gate)
-    {
-        run["properties"] = serde_json::json!({ "fallowGate": gate_value });
+    if let Some(gate) = gate {
+        run["properties"] = serde_json::json!({ "fallowGate": gate });
     }
 
-    let sarif = serde_json::json!({
+    serde_json::json!({
         "version": "2.1.0",
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "runs": [run],
-    });
-    serde_json::to_string_pretty(&sarif)
-        .unwrap_or_else(|_| "{\"error\":\"failed to serialize sarif\"}".to_owned())
+    })
 }
 
 /// Small FNV-1a hex digest for SARIF `partialFingerprints` dedup stability.

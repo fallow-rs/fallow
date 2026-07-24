@@ -3,10 +3,10 @@
 //! on drop or explicit consume (`wait_with_output`, `wait`).
 //!
 //! Storage model: the wrapper owns the `Child` outright. Regular subprocesses
-//! register their PID. Process-tree subprocesses share an owned process-group
-//! or Windows Job Object handle with the signal registry and timeout watchers.
-//! Termination therefore targets the same reserved tree identity without
-//! executable lookup or PID reconstruction.
+//! register their PID. Top-level process-tree subprocesses share an owned
+//! process group or Windows Job Object handle with the signal registry and
+//! timeout watchers. Nested subprocesses inherit that outer tree and retain a
+//! direct-process terminator for their local timeout.
 //!
 //! Why PID-based and not Child-based: the wrapper needs to call
 //! `Child::wait_with_output(self)` which consumes the Child by value.
@@ -44,22 +44,44 @@ pub struct ScopedChild {
     id: Option<u64>,
     /// Shared ownership of the reserved process-tree identity, when requested.
     process_tree: Option<registry::ProcessTreeHandle>,
+    /// PID of a child that inherited an already-managed outer process tree.
+    inherited_tree_pid: Option<u32>,
 }
 
 /// Cloneable process-tree termination capability for timeout and I/O guards.
 #[derive(Clone)]
 pub struct ProcessTreeTerminator {
-    process_tree: registry::ProcessTreeHandle,
+    target: TerminationTarget,
+    direct_pid: u32,
+}
+
+#[derive(Clone)]
+enum TerminationTarget {
+    ProcessTree(registry::ProcessTreeHandle),
+    Process(u32),
 }
 
 impl ProcessTreeTerminator {
     pub fn terminate(&self) -> io::Result<()> {
-        self.process_tree.terminate()
+        let result = match &self.target {
+            TerminationTarget::ProcessTree(process_tree) => process_tree.terminate(),
+            TerminationTarget::Process(pid) => {
+                registry::kill_pid(*pid);
+                Ok(())
+            }
+        };
+        if result.is_err() {
+            registry::kill_pid(self.direct_pid);
+        }
+        result
     }
 
     #[cfg(all(test, windows))]
     fn is_alive(&self) -> bool {
-        self.process_tree.is_alive()
+        match &self.target {
+            TerminationTarget::ProcessTree(process_tree) => process_tree.is_alive(),
+            TerminationTarget::Process(pid) => registry::pid_is_alive(*pid),
+        }
     }
 }
 
@@ -72,15 +94,28 @@ impl ScopedChild {
             inner: Some(child),
             id: Some(id),
             process_tree: None,
+            inherited_tree_pid: None,
         })
     }
 
     /// Spawn a subprocess wrapper in a dedicated process tree and register the
     /// tree for process-wide signal cleanup.
     pub fn spawn_process_tree(command: &mut Command) -> io::Result<Self> {
-        registry::ProcessTree::configure_command(command);
+        if crate::process_tree::inherits_managed_process_tree() {
+            let child = command.spawn()?;
+            let pid = child.id();
+            let id = registry::register(pid);
+            return Ok(Self {
+                inner: Some(child),
+                id: Some(id),
+                process_tree: None,
+                inherited_tree_pid: Some(pid),
+            });
+        }
+
+        crate::process_tree::configure_std_command(command);
         let mut child = command.spawn()?;
-        let process_tree = match registry::ProcessTree::for_child(&child) {
+        let process_tree = match crate::process_tree::ProcessTree::for_std_child(&child) {
             Ok(process_tree) => Arc::new(process_tree),
             Err(error) => {
                 terminate_failed_setup(&mut child);
@@ -88,46 +123,32 @@ impl ScopedChild {
             }
         };
         let id = registry::register_process_tree(Arc::clone(&process_tree));
-        #[cfg(windows)]
-        {
-            if let Err(error) = registry::ProcessTree::start(child.id()) {
-                registry::deregister(id);
-                let _ = process_tree.terminate();
-                terminate_failed_setup(&mut child);
-                return Err(error);
-            }
-        }
         Ok(Self {
             inner: Some(child),
             id: Some(id),
             process_tree: Some(process_tree),
+            inherited_tree_pid: None,
         })
     }
 
-    /// Return a cloneable handle that terminates the exact registered tree.
-    pub(crate) fn process_tree_terminator(&self) -> Option<ProcessTreeTerminator> {
-        self.process_tree
-            .as_ref()
-            .map(|process_tree| ProcessTreeTerminator {
-                process_tree: Arc::clone(process_tree),
-            })
+    /// Return a cloneable handle that terminates the owned tree, or the direct
+    /// child when it inherited a tree from a Fallow parent.
+    pub fn process_tree_terminator(&self) -> Option<ProcessTreeTerminator> {
+        let direct_pid = self.inner.as_ref().map(Child::id)?;
+        if let Some(process_tree) = self.process_tree.as_ref() {
+            return Some(ProcessTreeTerminator {
+                target: TerminationTarget::ProcessTree(Arc::clone(process_tree)),
+                direct_pid,
+            });
+        }
+        self.inherited_tree_pid.map(|pid| ProcessTreeTerminator {
+            target: TerminationTarget::Process(pid),
+            direct_pid,
+        })
     }
 
     /// OS-level process id of the underlying child. Returns `0` if the
-    /// child has been consumed; used by the test-helper subcommand to
-    /// surface the PID so integration tests can probe its liveness.
-    ///
-    /// The only call site is the cfg(unix) `signal_test_helper` in
-    /// `main.rs`; on Windows the helper is excluded so this method has
-    /// no caller. Tag with `dead_code` exempt rather than gating with
-    /// `#[cfg(unix)]` to keep the public surface symmetric for embedders.
-    #[cfg_attr(
-        not(unix),
-        allow(
-            dead_code,
-            reason = "only consumed by the cfg(unix) signal_test_helper in main.rs; the lint does not consistently fire on Windows under -D warnings so allow is safer than expect"
-        )
-    )]
+    /// child has been consumed.
     pub fn id(&self) -> u32 {
         self.inner.as_ref().map_or(0, Child::id)
     }
@@ -190,17 +211,22 @@ impl ScopedChild {
 }
 
 fn terminate_failed_setup(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+    let _ = crate::process_tree::cleanup_std_child(None, child);
 }
 
 impl Drop for ScopedChild {
     fn drop(&mut self) {
+        if let Some(mut child) = self.inner.take() {
+            let running = !matches!(child.try_wait(), Ok(Some(_)));
+            if running {
+                let _ = crate::process_tree::cleanup_std_child(
+                    self.process_tree.as_deref(),
+                    &mut child,
+                );
+            }
+        }
         if let Some(id) = self.id.take() {
             registry::deregister(id);
-        }
-        if let Some(mut child) = self.inner.take() {
-            let _ = child.try_wait();
         }
     }
 }
@@ -227,6 +253,10 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "test setup failures should fail at the exact setup operation"
+)]
 mod tests {
     use super::*;
 
@@ -244,6 +274,22 @@ mod tests {
         assert!(id > 0);
         drop(child);
         assert_deregistered(id);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn scoped_child_drop_terminates_and_reaps_a_running_child() {
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        let child = ScopedChild::spawn(&mut command).expect("spawn sleep");
+        let pid = child.id();
+
+        drop(child);
+
+        assert!(
+            !registry::pid_is_alive(pid),
+            "running child {pid} survived ScopedChild::drop"
+        );
     }
 
     #[test]
@@ -269,12 +315,82 @@ mod tests {
         assert_eq!(output.stdout, b"hello\n");
     }
 
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn nested_managed_process_tree_terminates_inherited_child() {
+        const HELPER_ENV: &str = "FALLOW_NESTED_PROCESS_TREE_TEST";
+        const ROOT_ENV: &str = "FALLOW_NESTED_PROCESS_TREE_ROOT";
+        const TEST_NAME: &str =
+            "scoped_child::tests::nested_managed_process_tree_terminates_inherited_child";
+
+        match std::env::var(HELPER_ENV).ok().as_deref() {
+            Some("nested") => {
+                let root = std::env::var_os(ROOT_ENV).expect("nested helper root");
+                std::fs::write(
+                    std::path::Path::new(&root).join("nested.pid"),
+                    std::process::id().to_string(),
+                )
+                .expect("write nested PID");
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                return;
+            }
+            Some("outer") => {
+                let root = std::env::var_os(ROOT_ENV).expect("outer helper root");
+                let mut command =
+                    Command::new(std::env::current_exe().expect("current test executable"));
+                command
+                    .args(["--exact", TEST_NAME, "--nocapture"])
+                    .env(HELPER_ENV, "nested")
+                    .env(ROOT_ENV, root);
+                let child =
+                    ScopedChild::spawn_process_tree(&mut command).expect("spawn nested helper");
+                let _ = child.wait();
+                return;
+            }
+            _ => {}
+        }
+
+        let root = tempfile::tempdir().expect("temporary nested process-tree root");
+        let mut command = Command::new(std::env::current_exe().expect("current test executable"));
+        command
+            .args(["--exact", TEST_NAME, "--nocapture"])
+            .env(HELPER_ENV, "outer")
+            .env(ROOT_ENV, root.path());
+        let outer = ScopedChild::spawn_process_tree(&mut command).expect("spawn outer helper");
+        let terminator = outer
+            .process_tree_terminator()
+            .expect("outer process-tree terminator");
+        let pid_path = root.path().join("nested.pid");
+        let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !pid_path.exists() && std::time::Instant::now() < ready_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let nested_pid = std::fs::read_to_string(&pid_path)
+            .expect("nested PID")
+            .trim()
+            .parse::<u32>()
+            .expect("numeric nested PID");
+
+        terminator.terminate().expect("terminate outer tree");
+        let status = outer.wait().expect("reap outer helper");
+        assert!(!status.success(), "outer helper was not terminated");
+
+        let exit_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while registry::pid_is_alive(nested_pid) && std::time::Instant::now() < exit_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            !registry::pid_is_alive(nested_pid),
+            "nested managed child {nested_pid} survived outer cleanup"
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_job_object_terminates_descendants_without_taskkill_lookup() {
         const HELPER_ENV: &str = "FALLOW_WINDOWS_JOB_OBJECT_TEST_ROOT";
         const TASKKILL_MARKER_ENV: &str = "FALLOW_FAKE_TASKKILL_MARKER";
-        const TEST_NAME: &str = "signal::scoped_child::tests::windows_job_object_terminates_descendants_without_taskkill_lookup";
+        const TEST_NAME: &str = "scoped_child::tests::windows_job_object_terminates_descendants_without_taskkill_lookup";
 
         if let Some(root) = std::env::var_os(HELPER_ENV) {
             run_windows_job_object_helper(std::path::Path::new(&root));

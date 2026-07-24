@@ -27,7 +27,7 @@
 //! `AuditIntroduced` transparently. The field stays absent at the wire when
 //! `None` (`skip_serializing_if`).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::envelope::AuditIntroduced;
@@ -47,6 +47,9 @@ use crate::results::{
     UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
     UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey,
     UnusedMember, UnusedServerAction, UnusedSvelteEvent,
+};
+use crate::semantic::{
+    SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -96,7 +99,7 @@ fn suppress_line(comment: &str) -> IssueAction {
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
 /// populated at construction time and the audit-pass `introduced` flag
 /// attached as an optional sibling.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedFileFinding {
     /// The underlying dead-code entry.
@@ -148,7 +151,7 @@ impl UnusedFileFinding {
 /// Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors
 /// [`UnusedFileFinding`]: flattens the bare finding and carries a typed
 /// `actions` array (`export-type` primary plus `suppress-line` secondary).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PrivateTypeLeakFinding {
     /// The underlying dead-code entry.
@@ -198,7 +201,7 @@ impl PrivateTypeLeakFinding {
 /// [`UnusedFileFinding`]: flattens the bare finding and carries a typed
 /// `actions` array (`resolve-import` primary plus config and inline
 /// suppression actions).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedImportFinding {
     /// The underlying dead-code entry.
@@ -262,7 +265,7 @@ impl UnresolvedImportFinding {
 /// [`UnusedFileFinding`]: flattens the bare finding and carries a typed
 /// `actions` array (`refactor-cycle` primary plus `suppress-line`
 /// secondary).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CircularDependencyFinding {
     /// The underlying dead-code entry.
@@ -317,7 +320,7 @@ impl CircularDependencyFinding {
 /// file-level suppression on the alphabetically-first member breaks the
 /// cycle, and no `// fallow-ignore-next-line` form makes sense because the
 /// diagnostic is anchored at line 1 col 0 of each member).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReExportCycleFinding {
     /// The underlying dead-code entry.
@@ -394,7 +397,7 @@ impl ReExportCycleFinding {
 /// [`UnusedFileFinding`]: flattens the bare finding and carries a typed
 /// `actions` array (`refactor-boundary` primary plus `suppress-line`
 /// secondary).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryViolationFinding {
     /// The underlying dead-code entry.
@@ -445,7 +448,7 @@ impl BoundaryViolationFinding {
 /// Wire-shape envelope for a [`BoundaryCoverageViolation`] finding. Carries
 /// actions for assigning the file to a zone or explicitly allowing it to stay
 /// unmatched.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryCoverageViolationFinding {
     /// The underlying coverage entry.
@@ -509,7 +512,7 @@ impl BoundaryCoverageViolationFinding {
 /// Wire-shape envelope for a [`BoundaryCallViolation`] finding. Carries
 /// actions for refactoring the forbidden call out of the zone or suppressing
 /// it with the shared `boundary-violation` token.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryCallViolationFinding {
     /// The underlying forbidden-call entry.
@@ -568,7 +571,7 @@ impl BoundaryCallViolationFinding {
 /// Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
 /// replacing the banned call, import, or effect, or suppressing it with a scoped
 /// `policy-violation:<pack>/<rule-id>` token.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PolicyViolationFinding {
     /// The underlying rule-pack policy entry.
@@ -638,7 +641,7 @@ impl PolicyViolationFinding {
 /// `unused_exports` key. Same Rust struct as [`UnusedTypeFinding`], with a
 /// different fix description so consumers can tell value-export from
 /// type-export removal at the action level.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedExportFinding {
     /// The underlying dead-code entry.
@@ -647,6 +650,9 @@ pub struct UnusedExportFinding {
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
+    /// Type-aware evidence for this exact candidate when requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<SemanticCandidateDecision>,
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -687,8 +693,16 @@ impl UnusedExportFinding {
         Self {
             export,
             actions,
+            semantic: None,
             introduced: None,
         }
+    }
+
+    /// Attach type-aware evidence and disable the syntactic fix when semantic
+    /// analysis could not establish complete negative evidence.
+    pub fn set_semantic_decision(&mut self, decision: SemanticCandidateDecision) {
+        set_export_semantic_action(&mut self.actions, &decision);
+        self.semantic = Some(decision);
     }
 }
 
@@ -696,7 +710,7 @@ impl UnusedExportFinding {
 /// `unused_types` key. Wraps the same bare [`UnusedExport`] struct as
 /// [`UnusedExportFinding`] but emits a fix action targeted at type-only
 /// declarations, with the same `is_re_export`-aware note swap.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedTypeFinding {
     /// The underlying dead-code entry.
@@ -705,6 +719,9 @@ pub struct UnusedTypeFinding {
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
+    /// Type-aware evidence for this exact candidate when requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<SemanticCandidateDecision>,
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -746,8 +763,32 @@ impl UnusedTypeFinding {
         Self {
             export,
             actions,
+            semantic: None,
             introduced: None,
         }
+    }
+
+    /// Attach type-aware evidence and disable the syntactic fix when semantic
+    /// analysis could not establish complete negative evidence.
+    pub fn set_semantic_decision(&mut self, decision: SemanticCandidateDecision) {
+        set_export_semantic_action(&mut self.actions, &decision);
+        self.semantic = Some(decision);
+    }
+}
+
+fn set_export_semantic_action(actions: &mut [IssueAction], decision: &SemanticCandidateDecision) {
+    let complete_negative = decision.decision
+        == SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
+        && decision.status == SemanticCompleteness::Complete;
+    let Some(IssueAction::Fix(action)) = actions.first_mut() else {
+        return;
+    };
+    action.auto_fixable = complete_negative;
+    if !complete_negative {
+        action.note = Some(
+            "Type-aware analysis retained this candidate because complete negative evidence was not available"
+                .to_string(),
+        );
     }
 }
 
@@ -756,7 +797,7 @@ impl UnusedTypeFinding {
 /// export that happens to collide with a Next.js server-only name, so removing
 /// it could break the component. Actions are a manual `move-to-server-module`
 /// fix (the real remediation) plus a line-level suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InvalidClientExportFinding {
     /// The underlying dead-code entry.
@@ -812,7 +853,7 @@ impl InvalidClientExportFinding {
 /// a human decision (the barrel may intentionally aggregate both surfaces).
 /// Actions are a manual `split-mixed-barrel` fix (the real remediation) plus a
 /// line-level suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MixedClientServerBarrelFinding {
     /// The underlying dead-code entry.
@@ -868,7 +909,7 @@ impl MixedClientServerBarrelFinding {
 /// judgement-bearing edit (the author may have intended the file to be a
 /// server module after all). Actions are a manual `hoist-directive` fix (the
 /// real remediation) plus a line-level suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisplacedDirectiveFinding {
     /// The underlying dead-code entry.
@@ -923,7 +964,7 @@ impl MisplacedDirectiveFinding {
 /// auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
 /// key, or delete the dead inject). Actions are manual remediation guidance
 /// plus a line-level suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnprovidedInjectFinding {
     /// The underlying finding.
@@ -963,7 +1004,7 @@ impl UnprovidedInjectFinding {
 /// auto-fix: the fix is binary but judgement-bearing (wire the action up to a
 /// consumer, or delete it). Actions are manual remediation guidance plus a
 /// line-level suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedServerActionFinding {
     /// The underlying finding.
@@ -1003,7 +1044,7 @@ impl UnusedServerActionFinding {
 /// auto-fix: a `load()` fetch can have side effects, so deleting the key is a
 /// human call. Actions are manual remediation guidance plus a line-level
 /// suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedLoadDataKeyFinding {
     /// The underlying finding.
@@ -1043,7 +1084,7 @@ impl UnusedLoadDataKeyFinding {
 /// auto-fix: the fix is binary but judgement-bearing (render the component
 /// somewhere, or delete the dead component). Actions are manual remediation
 /// guidance plus a line-level suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnrenderedComponentFinding {
     /// The underlying finding.
@@ -1083,7 +1124,7 @@ impl UnrenderedComponentFinding {
 /// auto-fix: removing a declared prop is judgement-bearing (the prop may be part
 /// of a deliberately-stable public component API). Actions are manual
 /// remediation guidance plus a line-level suppress at the prop declaration.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentPropFinding {
     /// The underlying finding.
@@ -1123,7 +1164,7 @@ impl UnusedComponentPropFinding {
 /// auto-fix: removing a declared emit is judgement-bearing (the event may be
 /// part of a deliberately-stable public component API). Actions are manual
 /// remediation guidance plus a line-level suppress at the emit declaration.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentEmitFinding {
     /// The underlying finding.
@@ -1164,7 +1205,7 @@ impl UnusedComponentEmitFinding {
 /// part of a deliberately-stable public component API, or a listener may be
 /// added later). Actions are manual remediation guidance plus a line-level
 /// suppress at the `dispatch` call.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedSvelteEventFinding {
     /// The underlying finding.
@@ -1205,7 +1246,7 @@ impl UnusedSvelteEventFinding {
 /// context, or compose the component) is a design decision. The only action is a
 /// line-level suppress at the source hop's prop declaration. The rule defaults
 /// to `off` (opt-in health signal), so this finding is dormant by default.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PropDrillingChainFinding {
     /// The underlying located chain.
@@ -1248,7 +1289,7 @@ impl PropDrillingChainFinding {
 /// design decision. The only action is a line-level suppress at the wrapper's
 /// definition. The rule defaults to `off` (opt-in health signal), so this
 /// finding is dormant by default.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ThinWrapperFinding {
     /// The underlying located thin wrapper.
@@ -1292,7 +1333,7 @@ impl ThinWrapperFinding {
 /// definition and a file-level suppress escape hatch (mirroring the
 /// route-collision multi-file model). The rule defaults to `off` (opt-in health
 /// signal), so this finding is dormant by default.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicatePropShapeFinding {
     /// The underlying duplicate-prop-shape entry.
@@ -1351,7 +1392,7 @@ impl DuplicatePropShapeFinding {
 /// auto-fix: removing a declared input is judgement-bearing (the input may be
 /// part of a deliberately-stable public component API). The only action is a
 /// line-level suppress at the input declaration.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentInputFinding {
     /// The underlying finding.
@@ -1391,7 +1432,7 @@ impl UnusedComponentInputFinding {
 /// auto-fix: removing a declared output is judgement-bearing (the event may be
 /// part of a deliberately-stable public component API). The only action is a
 /// line-level suppress at the output declaration.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentOutputFinding {
     /// The underlying finding.
@@ -1432,7 +1473,7 @@ impl UnusedComponentOutputFinding {
 /// (move or merge one of the colliding files), NOT a suppress: suppressing a
 /// build error never makes the build pass. A file-level suppress is offered as
 /// an escape hatch only.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RouteCollisionFinding {
     /// The underlying route-collision entry.
@@ -1491,7 +1532,7 @@ impl RouteCollisionFinding {
 /// conflict is a Next.js dev / runtime error (`next build` does NOT catch it),
 /// so the primary action is manual guidance (rename the dynamic segments to a
 /// single consistent slug name), with a file-level suppress as escape hatch.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DynamicSegmentNameConflictFinding {
     /// The underlying dynamic-segment-name-conflict entry.
@@ -1548,7 +1589,7 @@ impl DynamicSegmentNameConflictFinding {
 
 /// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
 /// `unused_enum_members` key.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedEnumMemberFinding {
     /// The underlying dead-code entry.
@@ -1596,7 +1637,7 @@ impl UnusedEnumMemberFinding {
 /// `unused_class_members` key. Same Rust struct as
 /// [`UnusedEnumMemberFinding`]; the fix action and suppress comment carry
 /// the class-member kebab-case identifier instead.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedClassMemberFinding {
     /// The underlying dead-code entry.
@@ -1605,6 +1646,9 @@ pub struct UnusedClassMemberFinding {
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
+    /// Type-aware evidence for this exact candidate when requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<SemanticCandidateDecision>,
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1640,8 +1684,19 @@ impl UnusedClassMemberFinding {
         Self {
             member,
             actions,
+            semantic: None,
             introduced: None,
         }
+    }
+
+    /// Attach the canonical semantic decision and expose the class-member fix
+    /// only when the API policy granted closed-world eligibility.
+    pub fn set_semantic_decision(&mut self, decision: SemanticCandidateDecision) {
+        if let Some(IssueAction::Fix(action)) = self.actions.first_mut() {
+            action.auto_fixable = decision.closed_world_eligible;
+            action.note = Some(decision.explanation.clone());
+        }
+        self.semantic = Some(decision);
     }
 }
 
@@ -1653,7 +1708,7 @@ impl UnusedClassMemberFinding {
 /// member can be accessed reflectively (a Pinia plugin, `store.$onAction`, or
 /// dynamic dispatch) in ways syntactic analysis cannot see, so removal is a
 /// behavioral change the user must own.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedStoreMemberFinding {
     /// The underlying dead-code entry.
@@ -1765,7 +1820,7 @@ fn build_ignore_dependencies_suppress_action(
 /// finding; the typed `actions` array carries either a `remove-dependency`
 /// or `move-dependency` primary depending on
 /// `inner.used_in_workspaces`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependencyFinding {
     /// The underlying dead-code entry.
@@ -1799,7 +1854,7 @@ impl UnusedDependencyFinding {
 /// [`UnusedDependencyFinding`]; the fix description points at
 /// `devDependencies` and the suppress comment uses
 /// `unused-dev-dependency`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDevDependencyFinding {
     /// The underlying dead-code entry.
@@ -1833,7 +1888,7 @@ impl UnusedDevDependencyFinding {
 /// [`UnusedDependencyFinding`]; the fix description points at
 /// `optionalDependencies`. Reuses the `unused-dependency` suppress
 /// `IssueKind` because there is no dedicated variant for optional deps.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedOptionalDependencyFinding {
     /// The underlying dead-code entry.
@@ -1865,7 +1920,7 @@ impl UnusedOptionalDependencyFinding {
 /// Wire-shape envelope for an [`UnlistedDependency`] finding. Carries an
 /// `install-dependency` primary (non-auto-fixable) plus the standard
 /// `ignoreDependencies` config suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnlistedDependencyFinding {
     /// The underlying dead-code entry.
@@ -1908,7 +1963,7 @@ impl UnlistedDependencyFinding {
 /// Wire-shape envelope for a [`TypeOnlyDependency`] finding. Carries a
 /// `move-to-dev` primary plus the standard `ignoreDependencies` config
 /// suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeOnlyDependencyFinding {
     /// The underlying dead-code entry.
@@ -1952,7 +2007,7 @@ impl TypeOnlyDependencyFinding {
 /// Wire-shape envelope for a [`TestOnlyDependency`] finding. Carries a
 /// `move-to-dev` primary (different prose than [`TypeOnlyDependencyFinding`])
 /// plus the standard `ignoreDependencies` config suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestOnlyDependencyFinding {
     /// The underlying dead-code entry.
@@ -1997,7 +2052,7 @@ impl TestOnlyDependencyFinding {
 /// `move-to-prod` primary (the promote-side mirror of
 /// [`TestOnlyDependencyFinding`]'s `move-to-dev`) plus the standard
 /// `ignoreDependencies` config suppress.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DevDependencyInProductionFinding {
     /// The underlying dead-code entry.
@@ -2062,7 +2117,7 @@ impl DevDependencyInProductionFinding {
 /// the directory's neighbours. The `remove-duplicate` fix stays as the
 /// secondary so consumers that pattern-match on `actions[0].type` for
 /// "primary fix" never propose deletion of an intentional barrel surface.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicateExportFinding {
     /// The underlying finding.
@@ -2174,7 +2229,7 @@ fn build_duplicate_exports_ignore_rules(
 /// Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
 /// `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty or
 /// the source is not `pnpm-workspace.yaml`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntryFinding {
     /// The underlying finding.
@@ -2240,7 +2295,7 @@ impl UnusedCatalogEntryFinding {
 /// Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a
 /// `remove-empty-catalog-group` primary. YAML-sourced findings also include a
 /// YAML-comment suppress action.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EmptyCatalogGroupFinding {
     /// The underlying finding.
@@ -2306,7 +2361,7 @@ fn is_pnpm_catalog_source(path: &Path) -> bool {
 /// alternative exists. When exactly one alternative exists, the action
 /// also carries `suggested_target` so deterministic agents can land the
 /// edit without picking from a list.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedCatalogReferenceFinding {
     /// The underlying finding.
@@ -2423,7 +2478,7 @@ fn suppress_catalog_reference_action(
 /// a `remove-dependency-override` primary plus an `add-to-config`
 /// `ignoreDependencyOverrides` suppress scoped to the target package and
 /// declaration source.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependencyOverrideFinding {
     /// The underlying finding.
@@ -2476,7 +2531,7 @@ impl UnusedDependencyOverrideFinding {
 /// `add-to-config` `ignoreDependencyOverrides` suppress (skipped when both
 /// `target_package` and `raw_key` are empty, since the rule matcher keys on
 /// a non-empty package name).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisconfiguredDependencyOverrideFinding {
     /// The underlying finding.

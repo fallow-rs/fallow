@@ -1104,6 +1104,7 @@ fn collect_health(env: &Value, out: &mut Vec<Annotation>) {
         );
     }
     collect_runtime_coverage(env, out);
+    collect_coverage_intelligence(env, out);
     collect_targets(env, out);
 }
 
@@ -1148,6 +1149,36 @@ fn collect_runtime_coverage(env: &Value, out: &mut Vec<Annotation>) {
                 s(&evidence, "static_status"),
                 s(&evidence, "test_coverage"),
             ),
+        );
+    }
+}
+
+fn collect_coverage_intelligence(env: &Value, out: &mut Vec<Annotation>) {
+    let Some(intelligence) = env.get("coverage_intelligence") else {
+        return;
+    };
+    for finding in arr(intelligence, "findings") {
+        let verdict = s(finding, "verdict");
+        if matches!(verdict, "clean" | "unknown") {
+            continue;
+        }
+        let recommendation = s(finding, "recommendation");
+        let level = if matches!(verdict, "risky-change-detected" | "high-confidence-delete") {
+            AnnotationLevel::Error
+        } else {
+            AnnotationLevel::Warning
+        };
+        let identity = finding
+            .get("identity")
+            .and_then(Value::as_str)
+            .unwrap_or("code");
+        push(
+            out,
+            level,
+            s(finding, "path"),
+            Anchor::line_only(finding),
+            format!("Coverage intelligence ({recommendation})"),
+            format!("'{identity}' coverage intelligence verdict: {verdict} ({recommendation})"),
         );
     }
 }

@@ -246,6 +246,7 @@ fn print_audit_dead_code_section(
             summary: false,
             summary_heading: true,
             show_explain_tip: false,
+            type_aware_scope: None,
             json_style: crate::json_style::JsonStyle::Compact,
         },
     );
@@ -291,6 +292,7 @@ fn print_audit_complexity_section(
             summary: false,
             summary_heading: true,
             show_explain_tip: false,
+            type_aware_scope: None,
             skip_score_and_trend: false,
             css_requested: false,
             json_style: crate::json_style::JsonStyle::Compact,

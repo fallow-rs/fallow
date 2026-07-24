@@ -2,19 +2,101 @@
   "schema_version": 1,
   "generated_from": {
     "discovery_provenance": {
-      "generated_at": "2026-07-23T06:10:24.558Z",
-      "manifest_sha256": "777b47ffc6a5d007de985c86419c1368a0592f853df6093c08678efa62c92b4f",
+      "generated_at": "2026-07-24T11:11:59.131Z",
+      "manifest_sha256": "328ef2ffff457a237713e70ce35cdd6af3a7a608accdc55e13a9579275aa5398",
       "fallow": {
-        "version": "fallow 3.8.0",
-        "sha256": "06847e8b1396dbd872f859ce9a57154a84176ec1dbe63119e68c42ea97b9bd16"
+        "version": "fallow 3.8.1",
+        "sha256": "af70b799276b45d33510312f0b6cbf13d0c01028afdbfe098518f14277b03df9"
       },
       "sidecar": {
-        "sha256": "dc8c0eb0f75917845de89e915800a8826adc4b7db0918ce0267e6dcfcde7117c"
+        "sha256": "ead1db7705881cd5a51ee11ee9004a2e812608b1017bfa2767d8ad36172a7f3c"
       },
       "runtime": {
         "platform": "darwin",
         "architecture": "arm64",
-        "node": "v22.22.1"
+        "node": "v24.13.0"
+      },
+      "dependency_environments": {
+        "svelte": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "vue-core": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "astro": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "typescript": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "next.js": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "preact": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "query": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "vite": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "fastify": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        },
+        "zod": {
+          "dependency_installation": "ancestor-workspace",
+          "path_base": "fallow-workspace-root",
+          "dependency_root": ".",
+          "lockfile": "package-lock.json",
+          "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+          "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+        }
       },
       "fixtures": [
         {
@@ -79,30 +161,36 @@
         }
       ]
     },
+    "evidence_producer": {
+      "protocol_version": 5,
+      "sidecar_sha256": "ead1db7705881cd5a51ee11ee9004a2e812608b1017bfa2767d8ad36172a7f3c",
+      "request_set_sha256": "5818e8ec964ed5df1e6952e4226412acf58ed53be89438bbe700c73c19c0011b",
+      "response_set_sha256": "cbfeff8b6b3057036c722f7ece961eec2a2e7e5c2ac230d665c91f732283a3e0"
+    },
     "adjudication": {
-      "decisions_sha256": "ccac875db3e3a935fcf174059d18ca22b8e10c286ab31388680228f5d1dfbfe2",
-      "reviewed_on": "2026-07-22",
+      "decisions_sha256": "d8617693ecc16ffa6dcd53d64d7a6d0d3feae78f289340582f18ff55718d6f94",
+      "reviewed_on": "2026-07-23",
       "reviewer": "primary-source-adjudication",
-      "method": "Every semantic removal requires an exact checker-resolved declaration and concrete source use. Retained candidates are indeterminate unless a repository-wide exact-name search and source review prove that only the declaration exists.",
+      "method": "Confirmed uses require an exact checker-resolved declaration and concrete source use. Contract-preserved records require an exact inherited declaration and independently reviewed contract or override behavior. Retained candidates are indeterminate unless source review proves that only the declaration exists.",
       "independent_signoff": {
         "verdict": "approved",
         "reviews": [
           {
             "project_id": "astro",
-            "candidate_count": 38,
-            "candidate_set_sha256": "b27ec0b783397217150a326be2be038cf800533cb8ffa9b0a4fb3876ac4a5cfb",
-            "evidence_sha256": "3119d23abef54292f1a32522b243f1ecc0a7bedc87379337eba707cbe81b2f37",
+            "candidate_count": 62,
+            "candidate_set_sha256": "913dd1db987d4049d6647385e6e01b2180ad1f7d7622a3a866c89b8939e9a578",
+            "evidence_sha256": "67e67473bb581562517cfbff7a9778be2602411d7d30b34638050952fa117ade",
             "reviewer": "independent-source-review-astro",
-            "method": "Every declaration and use location was checked against the pinned source, including union getters and DOM type mappings.",
+            "method": "Confirmed uses were checked against pinned source evidence. Contract-preserved records were checked for declaration, heritage edge, signature, TypeScript contract diagnostics, or observably different inherited behavior.",
             "verdict": "approved"
           },
           {
             "project_id": "typescript",
-            "candidate_count": 135,
-            "candidate_set_sha256": "a8b0ab23007f31efeaafcce67cc579e15792f6ba5bc686a98634f2f1834842c1",
-            "evidence_sha256": "419b295389521f6ad30fe44da7bed8dcc4251cb72f010744550d4fb1c699eac3",
+            "candidate_count": 148,
+            "candidate_set_sha256": "9d799fb67b19bf82061f9c6780afb4231a2096b6e5df97c8f3c179aa1e8d94b5",
+            "evidence_sha256": "4c7be987c97d1e5ec1a3515508e1e36c422812976b70a3e5f2c8dbc1d1f35f82",
             "reviewer": "independent-source-review-typescript",
-            "method": "Every declaration was checked against the pinned source and every candidate had an independently resolved exact symbol use.",
+            "method": "Confirmed uses were checked against pinned source evidence. Contract-preserved records were checked for declaration, heritage edge, signature, TypeScript contract diagnostics, or observably different inherited behavior.",
             "verdict": "approved"
           }
         ]
@@ -110,7 +198,7 @@
     }
   },
   "summary": {
-    "schema_version": 2,
+    "schema_version": 3,
     "gate": {
       "go": true,
       "checks": {
@@ -121,7 +209,7 @@
         "deterministic_output": true,
         "focused_cases": true,
         "confirmation_precision": true,
-        "used_recall": true,
+        "confirmation_yield": true,
         "correct_unused_retention": true,
         "abstention": true,
         "marginal_overhead": true,
@@ -130,7 +218,7 @@
       },
       "thresholds": {
         "minimum_confirmation_precision": 1,
-        "minimum_used_recall": 0.5,
+        "minimum_confirmation_yield": 0.25,
         "minimum_correct_unused_retention": 1,
         "maximum_abstention": 0.5,
         "maximum_p95_marginal_overhead_ms": 5000,
@@ -144,19 +232,25 @@
     "accuracy": {
       "candidate_count": 559,
       "confirmed_used_count": 173,
-      "retained_count": 386,
+      "contract_preserved_count": 37,
+      "retained_count": 349,
       "truth_counts": {
         "used": 173,
+        "preserved": 37,
         "unused": 2,
-        "indeterminate": 384
+        "indeterminate": 347
       },
       "confirmation_precision": 1,
-      "used_recall": 1,
+      "confirmation_yield": 0.309481,
+      "safe_resolution_yield": 0.375671,
+      "adjudicated_truth_count": 212,
+      "adjudicated_truth_coverage": 0.379249,
+      "adjudication_scope": "Confirmed uses, required contracts, and reviewed declaration-only negatives; indeterminate candidates are excluded and corpus-wide recall is not claimed.",
       "correct_unused_retention": 1,
-      "abstained_count": 238,
-      "abstention": 0.42576,
-      "unresolved_count": 148,
-      "unresolved": 0.264758
+      "abstained_count": 111,
+      "abstention": 0.198569,
+      "unresolved_count": 238,
+      "unresolved": 0.42576
     },
     "value": {
       "confirmed_repository_count": 3,
@@ -173,20 +267,20 @@
     },
     "performance": {
       "baseline_wall_ms": {
-        "median": 505.136,
-        "p95": 3582.756
+        "median": 766.918,
+        "p95": 4599.459
       },
       "refined_wall_ms": {
-        "median": 558.051,
-        "p95": 5932.895
+        "median": 883.737,
+        "p95": 6267.889
       },
       "marginal_overhead_ms": {
-        "median": 85.393,
-        "p95": 2339.333
+        "median": 116.613,
+        "p95": 1701.926
       },
       "process_tree_peak_rss_kb": {
-        "baseline_p95": 799188,
-        "refined_p95": 1355067.2
+        "baseline_p95": 796778.4,
+        "refined_p95": 1426825.6
       },
       "program_counts": [
         1,
@@ -278,22 +372,25 @@
       ],
       "phase_timings_ms": {
         "diagnostics": {
-          "median": 1,
-          "p95": 3
+          "median": 3.5,
+          "p95": 637.15
         },
         "project_setup": {
-          "median": 40.5,
-          "p95": 426
+          "median": 48.5,
+          "p95": 571.7
         },
         "symbol_scan": {
-          "median": 0,
-          "p95": 672.05
+          "median": 0.5,
+          "p95": 701.2
         }
       },
       "reason_counts": {
-        "ambiguous_project": 4,
+        "ambiguous_project": 0,
         "blocking_diagnostics": 948,
-        "no_project": 0
+        "capacity": 0,
+        "no_project": 0,
+        "unknown_symbol": 4,
+        "unsupported_syntax": 444
       }
     }
   },
@@ -3584,6 +3681,711 @@
       "feature_buckets": [
         "exact-cross-file-symbol-use"
       ]
+    }
+  ],
+  "contract_preservations": [
+    {
+      "key": "tac_0155f008855b12437293",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3178,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 1223,
+          "col": 4,
+          "excerpt": "getExcludedFiles(): readonly NormalizedPath[] {"
+        }
+      }
+    },
+    {
+      "key": "tac_0466d9cd7cee435a883e",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/app/dev/app.ts",
+        "line": 56,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/app/base.ts",
+          "line": 312,
+          "col": 1,
+          "excerpt": "public devMatch(pathname?: string): Promise<DevMatch | undefined> | undefined {"
+        }
+      }
+    },
+    {
+      "key": "tac_0466db24719bbead387f",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 698,
+        "col": 4
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "src/services/types.ts",
+          "line": 323,
+          "col": 4,
+          "excerpt": "getScriptFileNames(): string[];"
+        }
+      }
+    },
+    {
+      "key": "tac_1adbec0c8de2a635204c",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 40,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 20,
+          "col": 1,
+          "excerpt": "readonly enabled: boolean;"
+        }
+      }
+    },
+    {
+      "key": "tac_2b672e664c638d5339d5",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 23,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 29,
+          "col": 1,
+          "excerpt": "readonly options: Readonly<CacheOptions>;"
+        }
+      }
+    },
+    {
+      "key": "tac_2cd95d97c293f69f80de",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/container/pipeline.ts",
+        "line": 22,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/base-pipeline.ts",
+          "line": 247,
+          "col": 1,
+          "excerpt": "abstract getName(): string;"
+        }
+      }
+    },
+    {
+      "key": "tac_319452fb06276ddefd34",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 57,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 25,
+          "col": 1,
+          "excerpt": "set(input: CacheOptions | CacheHint | LiveDataEntry | false): void;"
+        }
+      }
+    },
+    {
+      "key": "tac_31f179f525e6fc4178f7",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 19,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 27,
+          "col": 1,
+          "excerpt": "readonly tags: string[];"
+        }
+      }
+    },
+    {
+      "key": "tac_3bed5417dc6156f27580",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 15,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 20,
+          "col": 1,
+          "excerpt": "readonly enabled: boolean;"
+        }
+      }
+    },
+    {
+      "key": "tac_405ea408e54774e5d596",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2833,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 1378,
+          "col": 4,
+          "excerpt": "onPackageJsonChange(): void {"
+        }
+      }
+    },
+    {
+      "key": "tac_46825b372cd5e23270cd",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 764,
+        "col": 4
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "src/services/types.ts",
+          "line": 331,
+          "col": 4,
+          "excerpt": "getDefaultLibFileName(options: CompilerOptions): string;"
+        }
+      }
+    },
+    {
+      "key": "tac_4ffaf973f34e75bec646",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/cache.ts",
+        "line": 101,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 33,
+          "col": 1,
+          "excerpt": "invalidate(input: InvalidateOptions | LiveDataEntry): Promise<void>;"
+        }
+      }
+    },
+    {
+      "key": "tac_636991a3f34b8ac0b883",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 777,
+        "col": 4
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "src/compiler/types.ts",
+          "line": 7969,
+          "col": 4,
+          "excerpt": "readFile(fileName: string): string | undefined;"
+        }
+      }
+    },
+    {
+      "key": "tac_693248488b8c9ae101f2",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 737,
+        "col": 4
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "src/services/types.ts",
+          "line": 325,
+          "col": 4,
+          "excerpt": "getScriptVersion(fileName: string): string;"
+        }
+      }
+    },
+    {
+      "key": "tac_738b64eea4e5779c2230",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/build/app.ts",
+        "line": 18,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/app/base.ts",
+          "line": 197,
+          "col": 1,
+          "excerpt": "public abstract isDev(): boolean;"
+        }
+      }
+    },
+    {
+      "key": "tac_78f2920d4f01f6fe9121",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 17,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 25,
+          "col": 1,
+          "excerpt": "set(input: CacheOptions | CacheHint | LiveDataEntry | false): void;"
+        }
+      }
+    },
+    {
+      "key": "tac_793231f2dea9d56e3e2c",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 69,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 33,
+          "col": 1,
+          "excerpt": "invalidate(input: InvalidateOptions | LiveDataEntry): Promise<void>;"
+        }
+      }
+    },
+    {
+      "key": "tac_80c071d6b900ab414590",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/vite-plugin-app/app.ts",
+        "line": 64,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/app/base.ts",
+          "line": 197,
+          "col": 1,
+          "excerpt": "public abstract isDev(): boolean;"
+        }
+      }
+    },
+    {
+      "key": "tac_87637dc7482ef3822c00",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/cache.ts",
+        "line": 42,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 20,
+          "col": 1,
+          "excerpt": "readonly enabled: boolean;"
+        }
+      }
+    },
+    {
+      "key": "tac_88cc590ec3b67e8094c2",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/cache.ts",
+        "line": 94,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 29,
+          "col": 1,
+          "excerpt": "readonly options: Readonly<CacheOptions>;"
+        }
+      }
+    },
+    {
+      "key": "tac_8b451833998082bef0d0",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2538,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 868,
+          "col": 4,
+          "excerpt": "scheduleInvalidateResolutionsOfFailedLookupLocations(): void {"
+        }
+      }
+    },
+    {
+      "key": "tac_8c5953d7ac6adaa3348b",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 3048,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 466,
+          "col": 4,
+          "excerpt": "getRedirectFromSourceFile(_fileName: string): ResolvedRefAndOutputDts | undefined {"
+        }
+      }
+    },
+    {
+      "key": "tac_95108b715e3c7ea3dffa",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 65,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 29,
+          "col": 1,
+          "excerpt": "readonly options: Readonly<CacheOptions>;"
+        }
+      }
+    },
+    {
+      "key": "tac_97bd1a0b3eea40a5d2a7",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 27,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 33,
+          "col": 1,
+          "excerpt": "invalidate(input: InvalidateOptions | LiveDataEntry): Promise<void>;"
+        }
+      }
+    },
+    {
+      "key": "tac_9c7457d58c6bc328efc9",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2828,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 1373,
+          "col": 4,
+          "excerpt": "onAutoImportProviderSettingsChanged(): void {"
+        }
+      }
+    },
+    {
+      "key": "tac_9d9a919e69ad253331aa",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2804,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 868,
+          "col": 4,
+          "excerpt": "scheduleInvalidateResolutionsOfFailedLookupLocations(): void {"
+        }
+      }
+    },
+    {
+      "key": "tac_9dd274a8584979a3e3af",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2819,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 698,
+          "col": 4,
+          "excerpt": "getScriptFileNames(): string[] {"
+        }
+      }
+    },
+    {
+      "key": "tac_a0b45e7289bae4ba6c32",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/vite-plugin-app/pipeline.ts",
+        "line": 39,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/base-pipeline.ts",
+          "line": 247,
+          "col": 1,
+          "excerpt": "abstract getName(): string;"
+        }
+      }
+    },
+    {
+      "key": "tac_a6851a938357c5987c3d",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/build/pipeline.ts",
+        "line": 32,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/base-pipeline.ts",
+          "line": 247,
+          "col": 1,
+          "excerpt": "abstract getName(): string;"
+        }
+      }
+    },
+    {
+      "key": "tac_c23911bfacadd9b92735",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 2856,
+        "col": 4
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "src/server/project.ts",
+          "line": 799,
+          "col": 4,
+          "excerpt": "getModuleResolutionCache(): ModuleResolutionCache | undefined {"
+        }
+      }
+    },
+    {
+      "key": "tac_c5893e286d16bb064737",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/app/dev/app.ts",
+        "line": 31,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/app/base.ts",
+          "line": 197,
+          "col": 1,
+          "excerpt": "public abstract isDev(): boolean;"
+        }
+      }
+    },
+    {
+      "key": "tac_c67953485adead26d37c",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/assets/fonts/infra/unstorage-fs-storage.ts",
+        "line": 23,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/assets/fonts/definitions.ts",
+          "line": 81,
+          "col": 1,
+          "excerpt": "setItem: (key: string, value: any) => Promise<void>;"
+        }
+      }
+    },
+    {
+      "key": "tac_c7922cff5fd20426b60d",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/assets/fonts/infra/unstorage-fs-storage.ts",
+        "line": 15,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/assets/fonts/definitions.ts",
+          "line": 79,
+          "col": 1,
+          "excerpt": "getItem: (key: string) => Promise<any | null>;"
+        }
+      }
+    },
+    {
+      "key": "tac_d04022c04a2ad26f0d21",
+      "project_id": "typescript",
+      "declaration": {
+        "path": "src/server/project.ts",
+        "line": 749,
+        "col": 4
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "src/services/types.ts",
+          "line": 326,
+          "col": 4,
+          "excerpt": "getScriptSnapshot(fileName: string): IScriptSnapshot | undefined;"
+        }
+      }
+    },
+    {
+      "key": "tac_d41c067ac84fa8fd81b8",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/app/dev/pipeline.ts",
+        "line": 23,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/base-pipeline.ts",
+          "line": 247,
+          "col": 1,
+          "excerpt": "abstract getName(): string;"
+        }
+      }
+    },
+    {
+      "key": "tac_d552906e3e60750024c3",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/cache/runtime/noop.ts",
+        "line": 61,
+        "col": 1
+      },
+      "contract": {
+        "relation": "interface-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/cache/runtime/cache.ts",
+          "line": 27,
+          "col": 1,
+          "excerpt": "readonly tags: string[];"
+        }
+      }
+    },
+    {
+      "key": "tac_e1d0c42b1152d11428d0",
+      "project_id": "astro",
+      "declaration": {
+        "path": "packages/astro/src/core/app/pipeline.ts",
+        "line": 16,
+        "col": 1
+      },
+      "contract": {
+        "relation": "abstract-implementation",
+        "optional": false,
+        "declaration": {
+          "path": "packages/astro/src/core/base-pipeline.ts",
+          "line": 247,
+          "col": 1,
+          "excerpt": "abstract getName(): string;"
+        }
+      }
     }
   ],
   "known_unused_retained": [

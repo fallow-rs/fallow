@@ -993,10 +993,10 @@ dependencies = [
  "fallow-config",
  "fallow-engine",
  "fallow-output",
+ "fallow-process",
  "fallow-types",
  "globset",
  "jsonschema",
- "libc",
  "rayon",
  "rustc-hash 2.1.3",
  "schemars",
@@ -1040,6 +1040,7 @@ dependencies = [
  "fallow-engine",
  "fallow-license",
  "fallow-output",
+ "fallow-process",
  "fallow-security",
  "fallow-types",
  "fallow-v8-coverage",
@@ -1051,7 +1052,6 @@ dependencies = [
  "insta",
  "jsonc-parser",
  "jsonschema",
- "libc",
  "miette",
  "notify",
  "open",
@@ -1271,8 +1271,8 @@ name = "fallow-mcp"
 version = "3.8.1"
 dependencies = [
  "fallow-api",
+ "fallow-process",
  "fallow-types",
- "libc",
  "regex",
  "rmcp",
  "rquickjs",
@@ -1318,6 +1318,17 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "fallow-process"
+version = "3.8.1"
+dependencies = [
+ "libc",
+ "rustc-hash 2.1.3",
+ "tempfile",
+ "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

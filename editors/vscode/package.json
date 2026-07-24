@@ -248,6 +248,10 @@
             "best-effort",
             "complete"
           ],
+          "enumDescriptions": [
+            "Keep conservative findings and report incomplete semantic evidence as advisory.",
+            "Keep conservative findings, but fail the analysis when semantic evidence is incomplete."
+          ],
           "default": "best-effort",
           "markdownDescription": "Choose whether incomplete semantic evidence stays advisory or fails the analysis after emitting its conservative result."
         },

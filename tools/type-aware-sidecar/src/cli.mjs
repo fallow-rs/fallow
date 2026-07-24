@@ -8,6 +8,10 @@ import {
 } from "./protocol.mjs";
 
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+const STATUS_FIELDS = [
+  ["protocol_version", 5],
+  ["operation", "status"],
+];
 
 export const readAll = async (input, maximumBytes = MAX_REQUEST_BYTES) => {
   const chunks = [];
@@ -23,37 +27,50 @@ export const readAll = async (input, maximumBytes = MAX_REQUEST_BYTES) => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
-export const run = async ({ input, output, args = [] }) => {
+const writeJson = (output, value) => {
+  output.write(`${JSON.stringify(value)}\n`);
+};
+
+const handleArguments = (args, output) => {
   if (args.length === 1 && args[0] === "--status") {
-    output.write(`${JSON.stringify(createStatusResponse())}\n`);
-    return;
+    writeJson(output, createStatusResponse());
+    return true;
   }
   if (args.length > 0) {
     throw new Error(`unknown argument: ${args[0]}`);
   }
-  const startedAt = performance.now();
-  const source = await readAll(input);
-  let rawRequest;
+  return false;
+};
+
+const parseJsonRequest = (source) => {
   try {
-    rawRequest = JSON.parse(source);
+    return JSON.parse(source);
   } catch {
     throw new Error("stdin must contain one valid JSON request");
   }
-  if (
-    rawRequest?.protocol_version === 3 &&
-    rawRequest?.operation === "status" &&
-    Object.keys(rawRequest).length === 2
-  ) {
-    output.write(`${JSON.stringify(createStatusResponse())}\n`);
+};
+
+const isStatusRequest = (request) =>
+  Object.keys(request ?? {}).length === STATUS_FIELDS.length &&
+  STATUS_FIELDS.every(([name, value]) => request[name] === value);
+
+const analyze = (request) =>
+  request.protocolVersion === 2 ? analyzeClassMemberUses(request) : analyzeSemanticQueries(request);
+
+const responseFor = (request, result, elapsedMs) => {
+  const responseFactory = request.protocolVersion === 2 ? createResponse : createSemanticResponse;
+  return responseFactory({ ...result, elapsedMs });
+};
+
+export const run = async ({ input, output, args = [] }) => {
+  if (handleArguments(args, output)) return;
+  const startedAt = performance.now();
+  const rawRequest = parseJsonRequest(await readAll(input));
+  if (isStatusRequest(rawRequest)) {
+    writeJson(output, createStatusResponse());
     return;
   }
-
   const request = parseRequest(rawRequest);
-  const result =
-    request.protocolVersion === 2
-      ? analyzeClassMemberUses(request)
-      : analyzeSemanticQueries(request);
-  const responseFactory = request.protocolVersion === 2 ? createResponse : createSemanticResponse;
-  const response = responseFactory({ ...result, elapsedMs: performance.now() - startedAt });
-  output.write(`${JSON.stringify(response)}\n`);
+  const result = analyze(request);
+  writeJson(output, responseFor(request, result, performance.now() - startedAt));
 };

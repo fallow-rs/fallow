@@ -511,6 +511,13 @@ case "$*" in
   *"--help"*)
     printf '%s\n' 'Usage: fallow dead-code --sarif-file <PATH>'
     ;;
+  *"--type-aware"*)
+    if [ "${MOCK_TYPE_AWARE_INCOMPLETE:-false}" = "true" ]; then
+      printf '%s\n' '{"total_issues":0,"_meta":{"type_aware":{"identity":{"completeness":"partial"},"queries":[]}}}'
+      exit 1
+    fi
+    printf '%s\n' '{"total_issues":0,"_meta":{"type_aware":{"identity":{"completeness":"complete"},"queries":[]}}}'
+    ;;
   *)
     printf '%s\n' '{"total_issues":0}'
     ;;
@@ -676,6 +683,29 @@ assert_contains "$ARGS" "--type-aware" "analyze: forwards type-aware"
 assert_contains "$ARGS" "--type-aware-project tsconfig.app.json" "analyze: forwards first type-aware project"
 assert_contains "$ARGS" "--type-aware-project tsconfig.test.json" "analyze: forwards second type-aware project"
 assert_contains "$ARGS" "--type-aware-require complete" "analyze: forwards type-aware completeness policy"
+
+TYPE_AWARE_INCOMPLETE_WORK="$ANALYZE_TMP/type-aware-incomplete"
+mkdir -p "$TYPE_AWARE_INCOMPLETE_WORK"
+OUT=$(
+  cd "$TYPE_AWARE_INCOMPLETE_WORK" || exit 1
+  PATH="$ANALYZE_TMP/bin:$PATH" \
+    GITHUB_OUTPUT="$ANALYZE_TMP/type-aware-incomplete-output" \
+    INPUT_ROOT="." \
+    INPUT_COMMAND="dead-code" \
+    INPUT_FORMAT="json" \
+    INPUT_AUTO_CHANGED_SINCE="false" \
+    INPUT_TYPE_AWARE="true" \
+    INPUT_TYPE_AWARE_REQUIRE="complete" \
+    MOCK_TYPE_AWARE_INCOMPLETE="true" \
+    bash "$DIR/../scripts/analyze.sh" 2>&1
+)
+cmd_status=$?
+if [ "$cmd_status" -eq 1 ]; then
+  pass "analyze: complete policy fails partial semantic output with zero findings"
+else
+  fail "analyze: complete policy fails partial semantic output with zero findings" "expected exit 1, got $cmd_status"
+fi
+assert_contains "$OUT" "Type-aware completeness gate failed" "analyze: completeness failure is explicit"
 
 run_analyze_scope_case() {
   local case_name=$1
@@ -923,7 +953,7 @@ case "$*" in
     printf '%s\n' 'Usage: fallow dead-code --sarif-file <PATH>'
     ;;
   *"--format sarif"*)
-    printf '%s\n' '{"version":"2.1.0","runs":[]}'
+    printf '%s\n' '{"version":"2.1.0","runs":[{"results":[{"ruleId":"fallow/test"}]}]}'
     ;;
   *)
     printf '%s\n' '{"total_issues":0}'
@@ -979,6 +1009,10 @@ assert_contains "$OUT" "artifacts-dir must be a relative path inside the workspa
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
 [ -n "${MOCK_CALL_LOG:-}" ] && printf '%s\n' "$*" >> "$MOCK_CALL_LOG"
+if [ "${1:-}" = "report" ] && [ "${2:-}" = "--help" ]; then
+  printf '%s\n' 'Usage: fallow report --from <PATH>'
+  exit 0
+fi
 fmt=""
 prev=""
 for arg in "$@"; do
@@ -986,8 +1020,9 @@ for arg in "$@"; do
   prev="$arg"
 done
 if [ "$fmt" = "sarif" ]; then
-  if [ "${MOCK_SARIF_MODE:-valid}" = "valid" ]; then
-    printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"fallow"}},"results":[]}]}'
+  if [ "${MOCK_SARIF_MODE:-valid}" = "valid" ] || \
+     { [ "${MOCK_SARIF_MODE:-valid}" = "report-empty-direct-valid" ] && [ "${1:-}" != "report" ]; }; then
+    printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"fallow"}},"results":[{"ruleId":"fallow/test"}]}]}'
   fi
   # exit 1 = issues found (valid mode) OR genuine failure (empty mode writes nothing)
   exit 1
@@ -1020,6 +1055,22 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
 assert_contains "$OUT" "SARIF generation failed" "analyze: empty/invalid SARIF still warns (issue #813)"
+[ ! -e "$SARIF_BAD_WORK/fallow-results.sarif" ] && pass "analyze: empty SARIF is not published" || fail "analyze: empty SARIF is not published" "empty SARIF file remains"
+
+SARIF_COMPAT_WORK="$ANALYZE_TMP/sarif-report-empty-direct-valid"
+mkdir -p "$SARIF_COMPAT_WORK"
+cd "$SARIF_COMPAT_WORK" && rm -f "$ANALYZE_TMP/output"
+rm -f "$ANALYZE_TMP/sarif-compat-calls"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" \
+  MOCK_SARIF_MODE="report-empty-direct-valid" \
+  MOCK_CALL_LOG="$ANALYZE_TMP/sarif-compat-calls" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_not_contains "$OUT" "SARIF generation failed" "analyze: report-capable older binary falls back to direct SARIF"
+[ -s "$SARIF_COMPAT_WORK/fallow-results.sarif" ] && pass "analyze: compatibility fallback publishes valid SARIF" || fail "analyze: compatibility fallback publishes valid SARIF" "missing sarif file"
+HEALTH_COMPAT_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-compat-calls" || true)
+[ "$HEALTH_COMPAT_CALLS" -eq 2 ] && pass "analyze: compatibility fallback reruns only when saved rendering fails" || fail "analyze: compatibility fallback reruns only when saved rendering fails" "expected two health calls, got $HEALTH_COMPAT_CALLS"
 
 # --- Summary jq tests ---
 

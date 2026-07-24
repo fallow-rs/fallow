@@ -103,7 +103,7 @@ pub(super) fn run_dead_code_with_session(
     apply_dead_code_scope(options, resolved, session, changed_files, &mut results)?;
     apply_dead_code_filters(&options.filters, &mut results);
     post_filter(&mut results);
-    let type_aware_meta = crate::type_aware::refine_dead_code(
+    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
         &options.analysis.type_aware,
         &options.filters,
         session,
@@ -145,7 +145,7 @@ pub(super) fn run_dead_code_with_session_artifacts(
     )?;
     apply_dead_code_filters(&options.filters, &mut artifacts.results);
     post_filter(&mut artifacts.results);
-    let type_aware_meta = crate::type_aware::refine_dead_code(
+    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
         &options.analysis.type_aware,
         &options.filters,
         session,
@@ -178,7 +178,7 @@ pub(super) fn run_dead_code_from_artifacts(
         &mut artifacts.results,
     )?;
     apply_dead_code_filters(&options.filters, &mut artifacts.results);
-    let type_aware_meta = crate::type_aware::refine_dead_code(
+    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
         &options.analysis.type_aware,
         &options.filters,
         session,

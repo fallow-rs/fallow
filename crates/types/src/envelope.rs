@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::semantic::{
-    ApiSurfaceResult, SemanticAnalysisIdentity, SemanticGapReason, SemanticQuerySummary,
-    SemanticSymbolImpact, SemanticSymbolTrace, TypeCouplingReport,
+    ApiSurfaceResult, SemanticAnalysisIdentity, SemanticCandidateDecision, SemanticGapReason,
+    SemanticQuerySummary, SemanticSymbolImpact, SemanticSymbolTrace, TypeCouplingReport,
 };
 
 /// Schema version for this output format (independent of tool version). Bump
@@ -65,7 +65,7 @@ pub struct ElapsedMs(pub u64);
 ///
 /// Outside of audit sub-results the field is omitted, so call sites typically
 /// hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct AuditIntroduced(pub bool);
@@ -330,9 +330,15 @@ pub struct TypeAwareMeta {
     /// Compatibility identity used by audit, baselines, snapshots, and stores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<SemanticAnalysisIdentity>,
+    /// Effective CLI or repository policy for incomplete semantic evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_completeness: Option<crate::semantic::SemanticCompletenessRequirement>,
     /// Compact status for every requested semantic query.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queries: Vec<SemanticQuerySummary>,
+    /// Bounded decision and evidence for each semantic dead-code candidate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_decisions: Vec<SemanticCandidateDecision>,
     /// Checker-backed trace evidence requested by focused symbol queries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub symbol_traces: Vec<SemanticSymbolTrace>,
@@ -345,20 +351,30 @@ pub struct TypeAwareMeta {
     /// Advisory project-local public-signature coupling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_coupling: Option<TypeCouplingReport>,
+    /// Whether the semantic companion executed at least one query.
+    pub executed: bool,
     /// Version of Fallow's backend-neutral sidecar protocol.
     pub protocol_version: u32,
-    /// Version of the sidecar package implementing the protocol.
-    pub sidecar_version: String,
+    /// Version of the sidecar package that executed the query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar_version: Option<String>,
     /// Semantic backend capability identifier.
     pub backend: String,
-    /// Backend compiler or engine version.
-    pub backend_version: String,
+    /// Backend compiler or engine version that executed the query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_version: Option<String>,
     /// TypeScript project configs selected for candidate files.
     pub selected_tsconfigs: Vec<String>,
     /// Number of candidate findings sent to the sidecar.
     pub candidate_count: usize,
     /// Number of candidates confirmed as used and removed.
     pub confirmed_used_count: usize,
+    /// Number of candidates preserved because they implement or override a contract.
+    pub contract_preserved_count: usize,
+    /// Number of candidates with complete, closed-world no-static-reference evidence.
+    pub no_static_references_count: usize,
+    /// Number of retained class members eligible for a guarded type-aware fix.
+    pub fix_eligible_count: usize,
     /// Number of candidates retained because semantic use was unresolved.
     pub unresolved_count: usize,
     /// Number of candidates retained because semantic analysis abstained.
@@ -401,6 +417,12 @@ pub struct TypeAwareAbstentionCounts {
     pub ambiguous_project: usize,
     /// Candidates retained because structural diagnostics block scanning.
     pub blocking_diagnostics: usize,
+    /// Candidates whose exact declaration identity could not be resolved.
+    pub unknown_symbol: usize,
+    /// Candidates using declaration syntax unsupported by the semantic backend.
+    pub unsupported_syntax: usize,
+    /// Candidates retained because the bounded semantic request reached capacity.
+    pub capacity: usize,
 }
 
 /// How a TypeScript project was selected for semantic refinement.
@@ -425,7 +447,7 @@ pub enum TypeAwareProjectStatus {
     Refined,
     /// Structural diagnostics prevented candidate scanning.
     Abstained,
-    /// All v3 semantic queries assigned to this Program completed.
+    /// All semantic queries assigned to this Program completed.
     Complete,
     /// The Program could not answer its assigned semantic queries safely.
     Unavailable,
@@ -451,13 +473,19 @@ pub struct TypeAwareProjectMeta {
     pub config: String,
     /// How the project was selected: `auto` or `explicit`.
     pub source: TypeAwareProjectSource,
-    /// Project result: `refined` or `abstained`.
+    /// Project result: `refined`, `abstained`, `complete`, or `unavailable`.
     pub status: TypeAwareProjectStatus,
     /// Candidates assigned to this project.
     pub candidate_count: usize,
     /// Candidates confirmed as used and removed.
     pub confirmed_used_count: usize,
-    /// Candidates scanned but not confirmed, and therefore retained.
+    /// Candidates retained because they implement or override a contract.
+    pub contract_preserved_count: usize,
+    /// Candidates with complete no-static-reference evidence.
+    pub no_static_references_count: usize,
+    /// Candidates eligible for a guarded class-member fix.
+    pub fix_eligible_count: usize,
+    /// Candidates whose exact semantic outcome remained unresolved.
     pub unresolved_count: usize,
     /// Candidates retained without scanning because the project was unsafe.
     pub abstained_count: usize,
@@ -468,7 +496,7 @@ pub struct TypeAwareProjectMeta {
     /// Whether this Program served more than one semantic query in the batch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_reused: Option<bool>,
-    /// Stable v3 project-level gap reason.
+    /// Stable project-level gap reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<SemanticGapReason>,
     /// Stable reason code when `status` is `abstained`.

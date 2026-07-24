@@ -47,7 +47,7 @@ fn build_duplication_sarif_with_group(
     group_for_clone: impl Fn(&CloneGroup) -> Option<String>,
 ) -> serde_json::Value {
     let mut sarif_results = Vec::new();
-    let mut snippets = SourceSnippetCache::default();
+    let mut snippets = SourceSnippetCache::with_root(root);
 
     for (i, group) in report.clone_groups.iter().enumerate() {
         let group_value = group_for_clone(group);
@@ -90,7 +90,7 @@ pub fn build_health_sarif(
     rule_builder: &SarifRuleBuilder<'_>,
 ) -> serde_json::Value {
     let mut sarif_results = Vec::new();
-    let mut snippets = SourceSnippetCache::default();
+    let mut snippets = SourceSnippetCache::with_root(root);
 
     append_health_sarif_results(report, root, &mut sarif_results, &mut snippets);
     let health_rules = health_sarif_rules(rule_builder, report);

@@ -13,7 +13,9 @@
   "files": [
     "index.js",
     "loader.js",
+    "type-aware-command.js",
     "index.d.ts",
+    "types",
     "README.md"
   ],
   "keywords": [
@@ -53,9 +55,9 @@
     ]
   },
   "scripts": {
-    "build": "napi build --profile napi-release --platform && npm run publish:prepare",
-    "build:debug": "napi build --platform && npm run publish:prepare",
-    "publish:prepare": "node scripts/write-dts.mjs",
+    "build": "napi build --profile napi-release --platform --no-js && npm run publish:prepare",
+    "build:debug": "napi build --platform --no-js && npm run publish:prepare",
+    "publish:prepare": "node scripts/write-dts-entry.mjs",
     "prepublishOnly": "npm run publish:prepare",
     "artifacts": "napi artifacts",
     "create-npm-dirs": "napi create-npm-dirs",

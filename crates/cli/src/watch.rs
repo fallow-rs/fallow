@@ -323,7 +323,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
                 session.workspaces(),
             )
         });
-        match crate::semantic_queries::refine_dead_code(
+        match fallow_api::refine_type_aware_results(
             &config.root,
             &mut analysis.results,
             &projects,
@@ -333,7 +333,6 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
                 || config.rules.unused_class_members != fallow_config::Severity::Off,
             config.rules.private_type_leaks != fallow_config::Severity::Off,
             false,
-            config.type_aware.require,
         ) {
             Ok(outcome) => outcome.map(|outcome| outcome.type_aware.meta),
             Err(error) => {
@@ -357,6 +356,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         quiet: opts.quiet,
         explain: opts.explain,
         type_aware: type_aware.as_ref(),
+        type_aware_scope: None,
         group_by: None,
         top: None,
         summary: false,

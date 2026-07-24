@@ -279,6 +279,28 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /run_fallow_timeout_terminates_and_reaps_windows_job_tree/);
 });
 
+test("NAPI builds preserve the maintained native loader", () => {
+  const packageJson = JSON.parse(readFileSync("crates/napi/package.json", "utf8"));
+  for (const script of [packageJson.scripts.build, packageJson.scripts["build:debug"]]) {
+    assert.match(script, /\bnapi build\b/u);
+    assert.match(script, /--no-js\b/u);
+  }
+
+  for (const path of [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/release-validation.yml",
+  ]) {
+    const commands = [...readWorkflow(path).matchAll(/\bnpx napi build[^\n]*/gu)].map(
+      (match) => match[0],
+    );
+    assert.ok(commands.length > 0, `${path} must build the NAPI addon`);
+    for (const command of commands) {
+      assert.match(command, /--no-js\b/u, `${path}: ${command}`);
+    }
+  }
+});
+
 test("release runs Zed verification on macOS and Windows without credentials", () => {
   const workflow = readWorkflow(".github/workflows/release-validation.yml");
   const job = indentedBlock(workflow, "zed-verify", 2);

@@ -17,6 +17,7 @@ const baseAuditArgsOptions = {
   workspace: "",
   configPath: "",
   gate: "new-only" as const,
+  cliVersion: null,
 };
 
 /**
@@ -117,25 +118,29 @@ const stylingHealth = (
 
 describe("buildAuditArgs", () => {
   it("emits audit as the first positional with the json/quiet flags by default", () => {
-    expect(buildAuditArgs(baseAuditArgsOptions)).toEqual(["audit", "--format", "json", "--quiet"]);
+    expect(buildAuditArgs(baseAuditArgsOptions)).toEqual({
+      args: ["audit", "--format", "json", "--quiet"],
+      skipped: [],
+    });
   });
 
   it("does not append a gate flag for the default new-only gate", () => {
-    expect(buildAuditArgs(baseAuditArgsOptions)).not.toContain("--gate");
+    expect(buildAuditArgs(baseAuditArgsOptions).args).not.toContain("--gate");
   });
 
   it("appends --gate all when the gate is all", () => {
-    const args = buildAuditArgs({ ...baseAuditArgsOptions, gate: "all" });
+    const { args } = buildAuditArgs({ ...baseAuditArgsOptions, gate: "all" });
     expect(args).toEqual(["audit", "--format", "json", "--quiet", "--gate", "all"]);
   });
 
   it("forwards changedSince, workspace, production, and configPath with correct flag spelling", () => {
-    const args = buildAuditArgs({
+    const { args } = buildAuditArgs({
       production: true,
       changedSince: "main",
       workspace: "pkg-a",
       configPath: "/abs/.fallowrc.json",
       gate: "all",
+      cliVersion: null,
     });
     expect(args).toEqual([
       "audit",
@@ -146,32 +151,52 @@ describe("buildAuditArgs", () => {
       "main",
       "--workspace",
       "pkg-a",
-      "--production",
       "--config",
       "/abs/.fallowrc.json",
+      "--production",
       "--gate",
       "all",
     ]);
   });
 
   it("forwards --workspace when a workspace scope is set", () => {
-    const args = buildAuditArgs({ ...baseAuditArgsOptions, workspace: "@scope/pkg" });
+    const { args } = buildAuditArgs({ ...baseAuditArgsOptions, workspace: "@scope/pkg" });
     expect(args).toContain("--workspace");
     expect(args[args.indexOf("--workspace") + 1]).toBe("@scope/pkg");
   });
 
   it("omits optional flags when their values are empty strings", () => {
-    const args = buildAuditArgs({
+    const { args } = buildAuditArgs({
       production: false,
       changedSince: "",
       workspace: "",
       configPath: "",
       gate: "new-only",
+      cliVersion: null,
     });
     expect(args).not.toContain("--changed-since");
     expect(args).not.toContain("--workspace");
     expect(args).not.toContain("--config");
     expect(args).not.toContain("--production");
+  });
+
+  it("omits type-aware flags as one capability before the v3.8.2 floor", () => {
+    const result = buildAuditArgs({
+      ...baseAuditArgsOptions,
+      cliVersion: "3.8.1",
+      typeAware: {
+        enabled: true,
+        projects: ["tsconfig.json"],
+        require: "complete",
+      },
+    });
+
+    expect(result.args).not.toContain("--type-aware");
+    expect(result.args).not.toContain("--type-aware-project");
+    expect(result.args).not.toContain("--type-aware-require");
+    expect(result.skipped).toEqual([
+      { flag: "--type-aware", requires: "3.8.2", cliVersion: "3.8.1" },
+    ]);
   });
 });
 

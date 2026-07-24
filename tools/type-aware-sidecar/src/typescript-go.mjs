@@ -1,4 +1,3 @@
-import { realpathSync } from "node:fs";
 import path from "node:path";
 
 import { API } from "typescript/unstable/sync";
@@ -15,18 +14,11 @@ import {
   isStringLiteralLikeNode,
 } from "typescript/unstable/ast/is";
 
+import { canonicalFileIdentity } from "./file-identity.mjs";
+
 const MAX_WARNINGS = 20;
 const MAX_USE_EVIDENCE_PER_CANDIDATE = 20;
 const INFERRED_PROJECT = "<inferred>";
-
-export const canonicalFileIdentity = (fileName) => {
-  const absolutePath = path.normalize(path.resolve(fileName));
-  try {
-    return path.normalize(realpathSync.native(absolutePath));
-  } catch {
-    return absolutePath;
-  }
-};
 
 const sourceFileIdentities = new WeakMap();
 
@@ -136,22 +128,27 @@ const matchesDeclaration = (candidate, declaration) => {
   return checks.every(Boolean);
 };
 
+const propertyAccessName = (node, candidateNames) => {
+  if (!isPropertyAccessExpression(node)) return undefined;
+  if (isPrivateIdentifier(node.name)) return undefined;
+  return candidateNames.has(node.name.text) ? node.name : undefined;
+};
+
+const elementAccessName = (node, candidateNames) => {
+  if (!isElementAccessExpression(node)) return undefined;
+  const argument = node.argumentExpression;
+  if (!isStringLiteralLikeNode(argument)) return undefined;
+  return candidateNames.has(argument.text) ? argument : undefined;
+};
+
+const candidatePropertyName = (node, candidateNames) =>
+  propertyAccessName(node, candidateNames) ?? elementAccessName(node, candidateNames);
+
 const collectPropertyNames = (sourceFile, candidateNames) => {
   const nodes = [];
   const visit = (node) => {
-    if (
-      isPropertyAccessExpression(node) &&
-      !isPrivateIdentifier(node.name) &&
-      candidateNames.has(node.name.text)
-    ) {
-      nodes.push(node.name);
-    } else if (
-      isElementAccessExpression(node) &&
-      isStringLiteralLikeNode(node.argumentExpression) &&
-      candidateNames.has(node.argumentExpression.text)
-    ) {
-      nodes.push(node.argumentExpression);
-    }
+    const candidate = candidatePropertyName(node, candidateNames);
+    if (candidate) nodes.push(candidate);
     node.forEachChild(visit);
     return undefined;
   };
@@ -201,6 +198,17 @@ const matchingCandidateIds = (declarationHandle, project, possibleCandidates) =>
 
 const symbolDeclarations = (symbol) => (symbol ? symbol.declarations : []);
 
+const sameLocation = (left, right) =>
+  left.path === right.path && left.line === right.line && left.col === right.col;
+
+const recordConfirmedUse = (candidateId, location, confirmedUses) => {
+  const locations = confirmedUses.get(candidateId) ?? [];
+  if (locations.length >= MAX_USE_EVIDENCE_PER_CANDIDATE) return;
+  if (locations.some((existing) => sameLocation(existing, location))) return;
+  locations.push(location);
+  confirmedUses.set(candidateId, locations);
+};
+
 const confirmSymbolUses = ({
   symbol,
   memberName,
@@ -219,20 +227,7 @@ const confirmSymbolUses = ({
       possibleCandidates,
     )) {
       confirmedIds.add(candidateId);
-      const locations = confirmedUses.get(candidateId) ?? [];
-      const location = useLocation(root, useNode);
-      if (
-        locations.length < MAX_USE_EVIDENCE_PER_CANDIDATE &&
-        !locations.some(
-          (existing) =>
-            existing.path === location.path &&
-            existing.line === location.line &&
-            existing.col === location.col,
-        )
-      ) {
-        locations.push(location);
-        confirmedUses.set(candidateId, locations);
-      }
+      recordConfirmedUse(candidateId, useLocation(root, useNode), confirmedUses);
     }
   }
 };
@@ -286,122 +281,151 @@ const scanProject = ({ root, project, candidates, confirmedIds, confirmedUses })
   }
 };
 
+const candidateProject = (snapshot, candidate, explicitProjects) => {
+  if (explicitProjects.length === 0) {
+    return snapshot.getDefaultProjectForFile(candidate.absolutePath);
+  }
+  return explicitProjects.find((project) => project.program.getSourceFile(candidate.absolutePath));
+};
+
+const recordMissingProject = (candidate, abstentions, warnings) => {
+  abstentions.push({ candidate_id: candidate.id, reason: "no-project" });
+  addWarning(warnings, `No TypeScript project selected for ${candidate.path}; finding kept`);
+};
+
+const addProjectCandidate = (candidatesByProject, project, candidate) => {
+  const projectCandidates = candidatesByProject.get(project) ?? [];
+  projectCandidates.push(candidate);
+  candidatesByProject.set(project, projectCandidates);
+};
+
 const selectCandidateProjects = (snapshot, candidates, explicitProjects, warnings) => {
   const candidatesByProject = new Map();
   const abstentions = [];
   for (const candidate of candidates) {
-    const matchingExplicitProject = explicitProjects.find((project) =>
-      project.program.getSourceFile(candidate.absolutePath),
-    );
-    const project =
-      explicitProjects.length === 0
-        ? snapshot.getDefaultProjectForFile(candidate.absolutePath)
-        : matchingExplicitProject;
+    const project = candidateProject(snapshot, candidate, explicitProjects);
     if (!project) {
-      abstentions.push({ candidate_id: candidate.id, reason: "no-project" });
-      addWarning(warnings, `No TypeScript project selected for ${candidate.path}; finding kept`);
+      recordMissingProject(candidate, abstentions, warnings);
       continue;
     }
-    const projectCandidates = candidatesByProject.get(project) ?? [];
-    projectCandidates.push(candidate);
-    candidatesByProject.set(project, projectCandidates);
+    addProjectCandidate(candidatesByProject, project, candidate);
   }
   return { candidatesByProject, abstentions };
 };
 
-const scanSelectedProjects = (root, candidatesByProject, scanProjects, explicit, warnings) => {
-  const selectedTsconfigs = [];
-  const confirmedIds = new Set();
-  const confirmedUses = new Map();
-  const abstentions = [];
-  const projectStates = [];
-  let diagnosticsMs = 0;
-  let symbolScanMs = 0;
-  for (const project of scanProjects) {
-    const projectCandidates = candidatesByProject.get(project) ?? [];
-    const config = relativeConfigPath(root, project.configFileName);
-    const source = explicit ? "explicit" : "auto";
-    const sourceFileCount = project.program.getSourceFileNames().length;
-    selectedTsconfigs.push(config);
-    const diagnosticsStartedAt = performance.now();
-    const blockingDiagnosticCount = countBlockingDiagnostics(project);
-    diagnosticsMs += performance.now() - diagnosticsStartedAt;
-    if (blockingDiagnosticCount > 0) {
-      const diagnosticLabel = blockingDiagnosticCount === 1 ? "diagnostic" : "diagnostics";
-      const recovery =
-        config === "<inferred>"
-          ? "pass an explicit tsconfig with --type-aware-project"
-          : `run \`tsc -p ${config} --noEmit\``;
-      addWarning(
-        warnings,
-        `${config} has ${blockingDiagnosticCount} blocking TypeScript ${diagnosticLabel}; semantic refinement abstained; ${recovery}`,
-      );
-      projectStates.push({
-        project,
-        projectCandidates,
-        config,
-        source,
-        status: "abstained",
-        blocking_diagnostic_count: blockingDiagnosticCount,
-        source_file_count: sourceFileCount,
-        abstain_reason: "blocking-diagnostics",
-      });
-      continue;
-    }
-    projectStates.push({
-      project,
-      projectCandidates,
-      config,
-      source,
-      status: "refined",
-      blocking_diagnostic_count: 0,
-      source_file_count: sourceFileCount,
-    });
-  }
+const diagnosticWarning = (config, count) => {
+  const label = count === 1 ? "diagnostic" : "diagnostics";
+  const recovery =
+    config === INFERRED_PROJECT
+      ? "pass an explicit tsconfig with --type-aware-project"
+      : `run \`tsc -p ${config} --noEmit\``;
+  return `${config} has ${count} blocking TypeScript ${label}; semantic refinement abstained; ${recovery}`;
+};
 
-  const abstainedCandidateIds = new Set();
-  for (const state of projectStates) {
-    if (state.status !== "abstained") continue;
+const inspectProject = (root, project, projectCandidates, explicit, warnings) => {
+  const config = relativeConfigPath(root, project.configFileName);
+  const startedAt = performance.now();
+  const diagnosticCount = countBlockingDiagnostics(project);
+  const diagnosticsMs = performance.now() - startedAt;
+  const state = {
+    project,
+    projectCandidates,
+    config,
+    source: explicit ? "explicit" : "auto",
+    status: diagnosticCount > 0 ? "abstained" : "refined",
+    blocking_diagnostic_count: diagnosticCount,
+    source_file_count: project.program.getSourceFileNames().length,
+  };
+  if (diagnosticCount > 0) {
+    state.abstain_reason = "blocking-diagnostics";
+    addWarning(warnings, diagnosticWarning(config, diagnosticCount));
+  }
+  return { state, diagnosticsMs };
+};
+
+const inspectProjects = (root, candidatesByProject, scanProjects, explicit, warnings) => {
+  const states = [];
+  let diagnosticsMs = 0;
+  for (const project of scanProjects) {
+    const inspection = inspectProject(
+      root,
+      project,
+      candidatesByProject.get(project) ?? [],
+      explicit,
+      warnings,
+    );
+    states.push(inspection.state);
+    diagnosticsMs += inspection.diagnosticsMs;
+  }
+  return { states, diagnosticsMs };
+};
+
+const collectAbstentions = (states) => {
+  const abstentions = [];
+  const ids = new Set();
+  for (const state of states.filter((entry) => entry.status === "abstained")) {
     for (const candidate of state.projectCandidates) {
       abstentions.push({ candidate_id: candidate.id, reason: "blocking-diagnostics" });
-      abstainedCandidateIds.add(candidate.id);
+      ids.add(candidate.id);
     }
   }
-  const activeCandidates = [...candidatesByProject.values()]
-    .flat()
-    .filter((candidate) => !abstainedCandidateIds.has(candidate.id));
-  for (const state of projectStates) {
-    if (state.status !== "refined" || activeCandidates.length === 0) continue;
-    const scanStartedAt = performance.now();
+  return { abstentions, ids };
+};
+
+const scanRefinedProjects = (root, states, candidates, confirmedIds, confirmedUses) => {
+  if (candidates.length === 0) return 0;
+  let elapsedMs = 0;
+  for (const state of states.filter((entry) => entry.status === "refined")) {
+    const startedAt = performance.now();
     scanProject({
       root,
       project: state.project,
-      candidates: activeCandidates,
+      candidates,
       confirmedIds,
       confirmedUses,
     });
-    symbolScanMs += performance.now() - scanStartedAt;
+    elapsedMs += performance.now() - startedAt;
   }
+  return elapsedMs;
+};
 
-  const projectResults = projectStates.map(({ project, projectCandidates, ...state }) => {
-    const confirmedCount = projectCandidates.filter((candidate) =>
-      confirmedIds.has(candidate.id),
-    ).length;
-    return {
-      ...state,
-      candidate_count: projectCandidates.length,
-      confirmed_used_count: confirmedCount,
-      unresolved_count: state.status === "refined" ? projectCandidates.length - confirmedCount : 0,
-      abstained_count: state.status === "abstained" ? projectCandidates.length : 0,
-    };
-  });
+const projectResult = (state, confirmedIds) => {
+  const { project: _project, projectCandidates, ...result } = state;
+  const confirmedCount = projectCandidates.filter((candidate) =>
+    confirmedIds.has(candidate.id),
+  ).length;
+  const refined = result.status === "refined";
   return {
-    selectedTsconfigs: new Set(selectedTsconfigs),
+    ...result,
+    candidate_count: projectCandidates.length,
+    confirmed_used_count: confirmedCount,
+    unresolved_count: refined ? projectCandidates.length - confirmedCount : 0,
+    abstained_count: refined ? 0 : projectCandidates.length,
+  };
+};
+
+const scanSelectedProjects = (root, candidatesByProject, scanProjects, explicit, warnings) => {
+  const confirmedIds = new Set();
+  const confirmedUses = new Map();
+  const inspected = inspectProjects(root, candidatesByProject, scanProjects, explicit, warnings);
+  const abstained = collectAbstentions(inspected.states);
+  const activeCandidates = [...candidatesByProject.values()]
+    .flat()
+    .filter((candidate) => !abstained.ids.has(candidate.id));
+  const symbolScanMs = scanRefinedProjects(
+    root,
+    inspected.states,
+    activeCandidates,
     confirmedIds,
     confirmedUses,
-    abstentions,
-    projectResults,
-    diagnosticsMs,
+  );
+  return {
+    selectedTsconfigs: new Set(inspected.states.map((state) => state.config)),
+    confirmedIds,
+    confirmedUses,
+    abstentions: abstained.abstentions,
+    projectResults: inspected.states.map((state) => projectResult(state, confirmedIds)),
+    diagnosticsMs: inspected.diagnosticsMs,
     symbolScanMs,
   };
 };

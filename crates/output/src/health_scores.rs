@@ -483,7 +483,7 @@ pub struct ComponentRollup {
 }
 
 /// Which complexity threshold was exceeded.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ExceededThreshold {
@@ -557,7 +557,9 @@ impl ExceededThreshold {
 ///
 /// Determined by the highest tier reached across both cognitive and cyclomatic
 /// scores. Default thresholds: cognitive 25/40, cyclomatic 30/50.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FindingSeverity {

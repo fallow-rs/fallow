@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use fallow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
@@ -24,6 +26,7 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
     pub type_aware_options: Option<&'a LspTypeAwareOptions>,
+    pub cancellation: &'a AtomicBool,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
@@ -41,6 +44,7 @@ pub struct BlockingAnalysisInput {
     pub root: PathBuf,
     pub toplevel: Option<PathBuf>,
     pub changed_since: Option<String>,
+    pub cancellation: Arc<AtomicBool>,
 }
 
 pub struct BlockingAnalysisOutput {
@@ -176,7 +180,9 @@ fn run_typed_project_analysis(
             project_root: input.project_root.to_path_buf(),
             message: error.to_string(),
         })?;
-    if let Some(options) = input.type_aware_options.filter(|options| options.enabled) {
+    if !input.cancellation.load(Ordering::SeqCst)
+        && let Some(options) = input.type_aware_options.filter(|options| options.enabled)
+    {
         let type_aware = fallow_api::TypeAwareOptions {
             enabled: true,
             projects: options.projects.iter().map(PathBuf::from).collect(),
@@ -226,6 +232,7 @@ pub fn run_blocking_analysis(
             production_override: input.production_override,
             inline_complexity_enabled: input.inline_complexity_enabled,
             type_aware_options: input.type_aware_options.as_ref(),
+            cancellation: &input.cancellation,
             changed_files: changed_scope.files.as_ref(),
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,

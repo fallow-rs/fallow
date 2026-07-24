@@ -264,6 +264,42 @@ describe("buildAnalysisArgs", () => {
     });
     expect(args).toContain("--no-production");
   });
+
+  it("forwards type-aware arguments at the v3.8.2 compatibility floor", () => {
+    const result = buildAnalysisArgs({
+      ...baseOptions,
+      cliVersion: "3.8.2",
+      typeAware: {
+        enabled: true,
+        projects: ["tsconfig.app.json"],
+        require: "complete",
+      },
+    });
+
+    expect(result.args).toContain("--type-aware");
+    expect(result.args[result.args.indexOf("--type-aware-project") + 1]).toBe("tsconfig.app.json");
+    expect(result.args[result.args.indexOf("--type-aware-require") + 1]).toBe("complete");
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("omits type-aware arguments as one capability for v3.8.1", () => {
+    const result = buildAnalysisArgs({
+      ...baseOptions,
+      cliVersion: "3.8.1",
+      typeAware: {
+        enabled: true,
+        projects: ["tsconfig.app.json"],
+        require: "complete",
+      },
+    });
+
+    expect(result.args).not.toContain("--type-aware");
+    expect(result.args).not.toContain("--type-aware-project");
+    expect(result.args).not.toContain("--type-aware-require");
+    expect(result.skipped).toEqual([
+      { flag: "--type-aware", requires: "3.8.2", cliVersion: "3.8.1" },
+    ]);
+  });
 });
 
 describe("buildCleanAnalysisSummary", () => {
@@ -408,6 +444,25 @@ describe("planDegradation", () => {
       kind: "retry",
       dropped: "--complexity-breakdown",
       args: ["health", "--format", "json", "--quiet"],
+    });
+  });
+
+  it("drops the complete type-aware flag group in one retry", () => {
+    const plan = planDegradation("unexpected argument '--type-aware' found", [
+      "audit",
+      "--format",
+      "json",
+      "--type-coupling",
+      "--type-aware",
+      "--type-aware-project",
+      "tsconfig.json",
+      "--type-aware-require",
+      "complete",
+    ]);
+    expect(plan).toEqual({
+      kind: "retry",
+      dropped: "type-aware flags",
+      args: ["audit", "--format", "json"],
     });
   });
 

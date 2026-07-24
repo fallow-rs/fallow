@@ -1,4 +1,27 @@
 use super::*;
+
+#[test]
+fn completeness_gate_uses_effective_metadata_requirement() {
+    let meta = fallow_types::envelope::TypeAwareMeta {
+        required_completeness: Some(
+            fallow_types::semantic::SemanticCompletenessRequirement::Complete,
+        ),
+        queries: vec![fallow_types::semantic::SemanticQuerySummary {
+            query_id: 0,
+            capability: fallow_types::semantic::SemanticCapability::SymbolUse,
+            assertion: "candidate usage refinement".to_string(),
+            status: fallow_types::semantic::SemanticCompleteness::Partial,
+            reason_code: None,
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+            actions: Vec::new(),
+        }],
+        ..Default::default()
+    };
+
+    assert!(type_aware_meta_completeness_failed(Some(&meta)));
+}
 use crate::base_worktree::{
     canonical_root_hash, legacy_reusable_audit_worktree_path, remove_reusable_audit_caches,
 };

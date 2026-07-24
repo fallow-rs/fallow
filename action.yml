@@ -254,9 +254,9 @@ inputs:
     required: false
     default: ''
   type-aware-require:
-    description: 'Semantic completeness policy: best-effort or complete.'
+    description: 'Semantic completeness policy: best-effort or complete. complete fails the action when semantic analysis is partial or unavailable, including valid zero-finding JSON runs.'
     required: false
-    default: 'best-effort'
+    default: ''
   # Audit-specific inputs
   gate:
     description: 'Audit verdict gate: new-only (default) fails only introduced findings, all fails on every finding in changed files.'

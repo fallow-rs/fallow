@@ -79,6 +79,7 @@ The npm package ships the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers plu
 - [A changed-file PR gate](https://docs.fallow.tools/cli/audit) with a pass, warn, or fail verdict (`fallow audit`)
 - [Auto-fix](https://docs.fallow.tools/analysis/auto-fix) with a dry-run preview
 - Opt-in [security candidates](docs/security-agent-verification.md) ranked by reachability from entry points (`fallow security`)
+- Optional checker-backed TypeScript evidence for exact symbol usage, cross-file private type leaks, targeted tests, and public-signature coupling (`--type-aware`)
 
 Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) detect entry points and framework-consumed exports automatically, so the first run needs no configuration. Fallow Runtime, the optional paid layer, merges production execution evidence into these same reports; see [Runtime intelligence (optional)](#runtime-intelligence-optional) and [static vs runtime](https://docs.fallow.tools/explanations/static-vs-runtime).
 
@@ -107,6 +108,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | [`npx fallow audit`](https://docs.fallow.tools/cli/audit) | Changed-file gate over dead code, complexity, duplication, and styling drift: verdict pass/warn/fail against a base ref. Fails only on findings the change introduced (`--gate all` widens) |
 | [`npx fallow dead-code`](https://docs.fallow.tools/cli/dead-code) | Unused code and circular dependencies (alias: `check`) |
 | `npx fallow dead-code --trace src/file.ts:symbol` | Prove a symbol is unused before deleting it |
+| `npx fallow dead-code --type-aware --symbol-impact src/file.ts:symbol` | Find exact consumers, affected files, and targeted tests |
 | [`npx fallow dupes`](https://docs.fallow.tools/cli/dupes) | Duplication; modes `strict`, `mild` (default), `weak`, `semantic` |
 | [`npx fallow health --score`](https://docs.fallow.tools/cli/health) | Complexity, 0 to 100 health score, hotspots; `--css` adds structural CSS analytics |
 | [`npx fallow fix --dry-run`](https://docs.fallow.tools/cli/fix) | Preview auto-fixes; apply with `npx fallow fix` |
@@ -127,6 +129,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | `fallow review --brief` | Advisory orientation brief over changed files; always exits 0 |
 | `fallow inspect --file src/api.ts` | Evidence bundle for one file, or one symbol via `--symbol src/api.ts:client` |
 | `fallow trace src/utils.ts:formatDate` | Symbol-level call chains: callers up, callees down |
+| `fallow type-aware status` | Check whether the version-matched optional TypeScript companion is available |
 | `fallow watch` | Re-run analysis on file changes (interactive use; agents should not run it) |
 | `fallow flags` | Detect feature-flag patterns |
 | `fallow suppressions` | Inventory of `fallow-ignore` markers |
@@ -147,6 +150,27 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | `fallow coverage setup` | Runtime coverage workflow (`analyze`, `upload-inventory`, `upload-source-maps`, `upload-static-findings`) |
 
 </details>
+
+### Optional TypeScript semantic evidence
+
+Default analysis stays Rust-native, syntactic, and independent of Node.js or
+the TypeScript compiler. Add `--type-aware` when a cleanup or refactor depends
+on exact TypeScript identity across aliases, re-exports, packages, or tests:
+
+```bash
+npx fallow dead-code --unused-class-members --type-aware --format json --quiet
+npx fallow fix --type-aware --dry-run --format json --quiet
+npx fallow dead-code --type-aware --symbol-impact src/api.ts:Client --format json --quiet
+npx fallow health --type-aware --type-coupling --format json --quiet
+```
+
+This does not replace `tsc --noEmit` or Oxlint. Fallow does not emit compiler
+diagnostics or duplicate local typed lint rules. It uses checker evidence only
+for project-wide questions. It removes false positives caused by interfaces,
+base classes, aliases, and re-exports. A class member becomes automatically
+fixable only after every owning project reports complete negative evidence and
+the exact declaration hash still matches. Otherwise Fallow keeps the finding
+and explains the gap. See the [type-aware analysis contract](docs/type-aware-proof-of-concept.md).
 
 Per-command flags come from `fallow schema` (machine-readable) or the [CLI reference](https://docs.fallow.tools/cli/global-flags).
 

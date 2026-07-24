@@ -6790,14 +6790,15 @@
         "read_only": true
       },
       {
-        "name": "symbol_trace",
+        "name": "trace_symbol",
         "kind": "trace",
-        "description": "Trace exact TypeScript symbol references, namespaces, aliases, and re-export hops without surfacing compiler diagnostics",
+        "description": "Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat semantic.references, semantic.status, and semantic.identity as the authoritative exact evidence. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface.",
         "cli_command": "fallow dead-code --type-aware --trace <file:export> --format json --quiet",
         "key_params": [
           "file",
           "export_name",
-          "type_aware_projects"
+          "type_aware_projects",
+          "type_aware_require"
         ],
         "license": "free",
         "license_note": null,
@@ -6805,13 +6806,14 @@
       },
       {
         "name": "symbol_impact",
-        "kind": "trace",
-        "description": "Return exact-symbol consumers, affected files, and targeted tests for a TypeScript export",
+        "kind": "impact",
+        "description": "Return advisory exact-symbol consumers, affected files, and targeted tests for a TypeScript export; not a substitute for tsc or Oxlint",
         "cli_command": "fallow dead-code --type-aware --symbol-impact <file:export> --format json --quiet",
         "key_params": [
           "file",
           "export_name",
-          "type_aware_projects"
+          "type_aware_projects",
+          "type_aware_require"
         ],
         "license": "free",
         "license_note": null,
@@ -7002,6 +7004,11 @@
     {
       "task": "delete an \"unused\" export or file",
       "command": "fallow dead-code --trace <file>:<export>",
+      "note": null
+    },
+    {
+      "task": "prove a TypeScript symbol's exact consumers before refactoring",
+      "command": "fallow dead-code --type-aware --symbol-impact <file>:<export>",
       "note": null
     },
     {

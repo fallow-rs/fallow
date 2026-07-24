@@ -448,7 +448,12 @@ impl EditorAnalysisSession {
         filters: &crate::DeadCodeFilters,
         output: &mut EditorDeadCodeAnalysisOutput,
     ) -> Result<Option<fallow_types::envelope::TypeAwareMeta>, crate::ProgrammaticError> {
-        crate::type_aware::refine_dead_code(options, filters, &self.inner, &mut output.results)
+        crate::type_aware::refine_programmatic_dead_code(
+            options,
+            filters,
+            &self.inner,
+            &mut output.results,
+        )
     }
 
     /// Run dead-code and duplication analysis for this editor session.

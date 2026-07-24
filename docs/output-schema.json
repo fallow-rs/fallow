@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `type-aware-status`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -8146,10 +8146,35 @@
           ]
         },
         {
-          "description": "`fallow trace <symbol> --format json`. Symbol-level caller/callee\ntrace rooted at the requested file and symbol.",
+          "description": "Export, member, file, dependency, clone, impact-closure, or symbol-level\ntrace, including exact TypeScript checker evidence when requested.",
           "allOf": [
             {
-              "$ref": "#/definitions/SymbolChainTrace"
+              "oneOf": [
+                {
+                  "$ref": "#/definitions/ExportTrace"
+                },
+                {
+                  "$ref": "#/definitions/ClassMemberTrace"
+                },
+                {
+                  "$ref": "#/definitions/FileTrace"
+                },
+                {
+                  "$ref": "#/definitions/DependencyTrace"
+                },
+                {
+                  "$ref": "#/definitions/CloneTrace"
+                },
+                {
+                  "$ref": "#/definitions/ImpactClosureTrace"
+                },
+                {
+                  "$ref": "#/definitions/SymbolChainTrace"
+                },
+                {
+                  "$ref": "#/definitions/SemanticSymbolTrace"
+                }
+              ]
             },
             {
               "type": "object",
@@ -8346,10 +8371,17 @@
           ]
         },
         {
-          "description": "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
+          "description": "Project-wide change impact or exact TypeScript symbol impact.",
           "allOf": [
             {
-              "$ref": "#/definitions/ImpactReport"
+              "oneOf": [
+                {
+                  "$ref": "#/definitions/ImpactReport"
+                },
+                {
+                  "$ref": "#/definitions/SemanticSymbolImpact"
+                }
+              ]
             },
             {
               "type": "object",
@@ -8611,6 +8643,26 @@
               ]
             }
           ]
+        },
+        {
+          "description": "`fallow type-aware status --format json`. Companion discovery and\nprotocol compatibility without exposing an absolute host path.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TypeAwareStatusOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "type-aware-status"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
         }
       ],
       "title": "fallow --format json (typed root)",
@@ -8791,6 +8843,17 @@
           },
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticCandidateDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Type-aware evidence for this exact candidate when requested."
+        },
         "introduced": {
           "anyOf": [
             {
@@ -8852,6 +8915,17 @@
             "$ref": "#/definitions/IssueAction"
           },
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticCandidateDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Type-aware evidence for this exact candidate when requested."
         },
         "introduced": {
           "anyOf": [
@@ -9197,6 +9271,17 @@
             "$ref": "#/definitions/IssueAction"
           },
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticCandidateDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Type-aware evidence for this exact candidate when requested."
         },
         "introduced": {
           "anyOf": [
@@ -16231,6 +16316,7 @@
       "type": "string",
       "enum": [
         "ok",
+        "partial",
         "unavailable",
         "error"
       ]
@@ -18848,12 +18934,30 @@
           ],
           "description": "Compatibility identity used by audit, baselines, snapshots, and stores."
         },
+        "required_completeness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticCompletenessRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Effective CLI or repository policy for incomplete semantic evidence."
+        },
         "queries": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/SemanticQuerySummary"
           },
           "description": "Compact status for every requested semantic query."
+        },
+        "candidate_decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticCandidateDecision"
+          },
+          "description": "Bounded decision and evidence for each semantic dead-code candidate."
         },
         "symbol_traces": {
           "type": "array",
@@ -18891,21 +18995,31 @@
           ],
           "description": "Advisory project-local public-signature coupling."
         },
+        "executed": {
+          "type": "boolean",
+          "description": "Whether the semantic companion executed at least one query."
+        },
         "protocol_version": {
           "type": "integer",
           "description": "Version of Fallow's backend-neutral sidecar protocol."
         },
         "sidecar_version": {
-          "type": "string",
-          "description": "Version of the sidecar package implementing the protocol."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version of the sidecar package that executed the query."
         },
         "backend": {
           "type": "string",
           "description": "Semantic backend capability identifier."
         },
         "backend_version": {
-          "type": "string",
-          "description": "Backend compiler or engine version."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Backend compiler or engine version that executed the query."
         },
         "selected_tsconfigs": {
           "type": "array",
@@ -18921,6 +19035,18 @@
         "confirmed_used_count": {
           "type": "integer",
           "description": "Number of candidates confirmed as used and removed."
+        },
+        "contract_preserved_count": {
+          "type": "integer",
+          "description": "Number of candidates preserved because they implement or override a contract."
+        },
+        "no_static_references_count": {
+          "type": "integer",
+          "description": "Number of candidates with complete, closed-world no-static-reference evidence."
+        },
+        "fix_eligible_count": {
+          "type": "integer",
+          "description": "Number of retained class members eligible for a guarded type-aware fix."
         },
         "unresolved_count": {
           "type": "integer",
@@ -18962,13 +19088,15 @@
         }
       },
       "required": [
+        "executed",
         "protocol_version",
-        "sidecar_version",
         "backend",
-        "backend_version",
         "selected_tsconfigs",
         "candidate_count",
         "confirmed_used_count",
+        "contract_preserved_count",
+        "no_static_references_count",
+        "fix_eligible_count",
         "unresolved_count",
         "abstained_count",
         "abstention_reasons",
@@ -18992,7 +19120,7 @@
           "$ref": "#/definitions/TypeAwareProjectSource"
         },
         "status": {
-          "description": "Project result: `refined` or `abstained`.",
+          "description": "Project result: `refined`, `abstained`, `complete`, or `unavailable`.",
           "$ref": "#/definitions/TypeAwareProjectStatus"
         },
         "candidate_count": {
@@ -19003,9 +19131,21 @@
           "type": "integer",
           "description": "Candidates confirmed as used and removed."
         },
+        "contract_preserved_count": {
+          "type": "integer",
+          "description": "Candidates retained because they implement or override a contract."
+        },
+        "no_static_references_count": {
+          "type": "integer",
+          "description": "Candidates with complete no-static-reference evidence."
+        },
+        "fix_eligible_count": {
+          "type": "integer",
+          "description": "Candidates eligible for a guarded class-member fix."
+        },
         "unresolved_count": {
           "type": "integer",
-          "description": "Candidates scanned but not confirmed, and therefore retained."
+          "description": "Candidates whose exact semantic outcome remained unresolved."
         },
         "abstained_count": {
           "type": "integer",
@@ -19035,7 +19175,7 @@
               "type": "null"
             }
           ],
-          "description": "Stable v3 project-level gap reason."
+          "description": "Stable project-level gap reason."
         },
         "abstain_reason": {
           "description": "Stable reason code when `status` is `abstained`.",
@@ -19048,6 +19188,9 @@
         "status",
         "candidate_count",
         "confirmed_used_count",
+        "contract_preserved_count",
+        "no_static_references_count",
+        "fix_eligible_count",
         "unresolved_count",
         "abstained_count",
         "blocking_diagnostic_count",
@@ -19092,12 +19235,27 @@
         "blocking_diagnostics": {
           "type": "integer",
           "description": "Candidates retained because structural diagnostics block scanning."
+        },
+        "unknown_symbol": {
+          "type": "integer",
+          "description": "Candidates whose exact declaration identity could not be resolved."
+        },
+        "unsupported_syntax": {
+          "type": "integer",
+          "description": "Candidates using declaration syntax unsupported by the semantic backend."
+        },
+        "capacity": {
+          "type": "integer",
+          "description": "Candidates retained because the bounded semantic request reached capacity."
         }
       },
       "required": [
         "no_project",
         "ambiguous_project",
-        "blocking_diagnostics"
+        "blocking_diagnostics",
+        "unknown_symbol",
+        "unsupported_syntax",
+        "capacity"
       ],
       "description": "Closed abstention reason counts for stable machine consumption."
     },
@@ -19131,7 +19289,7 @@
         {
           "type": "string",
           "const": "complete",
-          "description": "All v3 semantic queries assigned to this Program completed."
+          "description": "All semantic queries assigned to this Program completed."
         },
         {
           "type": "string",
@@ -19434,6 +19592,11 @@
         },
         {
           "type": "string",
+          "const": "ambiguous-project",
+          "description": "More than one owning project produced incompatible declaration evidence."
+        },
+        {
+          "type": "string",
           "const": "blocking-diagnostics",
           "description": "Structural diagnostics make the selected project unsafe to query."
         },
@@ -19456,6 +19619,46 @@
           "type": "string",
           "const": "dynamic-behavior",
           "description": "Dynamic runtime behavior is outside checker-visible semantics."
+        },
+        {
+          "type": "string",
+          "const": "dynamic-member-access",
+          "description": "A computed or reflective member access can address the declaration."
+        },
+        {
+          "type": "string",
+          "const": "decorated-declaration",
+          "description": "A decorator can consume the declaration outside normal references."
+        },
+        {
+          "type": "string",
+          "const": "optional-contract",
+          "description": "An optional interface or inherited contract makes deletion unsafe."
+        },
+        {
+          "type": "string",
+          "const": "accessor-pair",
+          "description": "A getter or setter has a paired accessor that must be changed atomically."
+        },
+        {
+          "type": "string",
+          "const": "overload-set",
+          "description": "The declaration participates in a method overload set."
+        },
+        {
+          "type": "string",
+          "const": "attached-comment",
+          "description": "Source comments are attached to the declaration and must be reviewed."
+        },
+        {
+          "type": "string",
+          "const": "abstract-declaration",
+          "description": "The candidate itself declares an abstract contract."
+        },
+        {
+          "type": "string",
+          "const": "incomplete-project-coverage",
+          "description": "Not every project that owns the declaration completed the query."
         },
         {
           "type": "string",
@@ -20113,6 +20316,801 @@
         "col"
       ],
       "description": "One project-root-relative source location used as semantic evidence."
+    },
+    "TraceOutput": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ExportTrace"
+        },
+        {
+          "$ref": "#/definitions/ClassMemberTrace"
+        },
+        {
+          "$ref": "#/definitions/FileTrace"
+        },
+        {
+          "$ref": "#/definitions/DependencyTrace"
+        },
+        {
+          "$ref": "#/definitions/CloneTrace"
+        },
+        {
+          "$ref": "#/definitions/ImpactClosureTrace"
+        },
+        {
+          "$ref": "#/definitions/SymbolChainTrace"
+        },
+        {
+          "$ref": "#/definitions/SemanticSymbolTrace"
+        }
+      ]
+    },
+    "ImpactOutput": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ImpactReport"
+        },
+        {
+          "$ref": "#/definitions/SemanticSymbolImpact"
+        }
+      ]
+    },
+    "TypeAwareStatusOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "$ref": "#/definitions/SchemaVersion"
+        },
+        "version": {
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "discovery_source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "companion_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Root-relative companion path, or only the executable name when the\ncompanion lives outside the analyzed project."
+        },
+        "package_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "backend_family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backend_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remediation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "available",
+        "protocol_version"
+      ],
+      "title": "fallow type-aware status --format json",
+      "description": "Envelope emitted by `fallow type-aware status --format json`."
+    },
+    "SemanticCompletenessRequirement": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "best-effort",
+          "description": "Keep incomplete semantic evidence advisory."
+        },
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "Make incomplete semantic evidence fail the command."
+        }
+      ],
+      "description": "Effective policy applied when semantic evidence is incomplete."
+    },
+    "ExportTrace": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The file containing the export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "The export name being traced."
+        },
+        "file_reachable": {
+          "type": "boolean",
+          "description": "Whether the file is reachable from an entry point."
+        },
+        "is_entry_point": {
+          "type": "boolean",
+          "description": "Whether the file is an entry point."
+        },
+        "is_used": {
+          "type": "boolean",
+          "description": "Whether the export is considered used."
+        },
+        "direct_references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExportReference"
+          },
+          "description": "Files that reference this export directly."
+        },
+        "re_export_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReExportChain"
+          },
+          "description": "Re-export chains that pass through this export."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable reason summary."
+        },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticSymbolTrace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact checker-backed references when type-aware tracing is enabled."
+        }
+      },
+      "required": [
+        "file",
+        "export_name",
+        "file_reachable",
+        "is_entry_point",
+        "is_used",
+        "direct_references",
+        "re_export_chains",
+        "reason"
+      ],
+      "description": "Result of tracing an export: why it is considered used or unused."
+    },
+    "ExportReference": {
+      "type": "object",
+      "properties": {
+        "from_file": {
+          "type": "string",
+          "description": "File that contains the reference."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Reference kind, such as named import, default import, or re-export."
+        }
+      },
+      "required": [
+        "from_file",
+        "kind"
+      ],
+      "description": "A direct reference to an export."
+    },
+    "ReExportChain": {
+      "type": "object",
+      "properties": {
+        "barrel_file": {
+          "type": "string",
+          "description": "The barrel file that re-exports this symbol."
+        },
+        "exported_as": {
+          "type": "string",
+          "description": "The name it is re-exported as."
+        },
+        "reference_count": {
+          "type": "integer",
+          "description": "Number of references on the barrel's re-exported symbol."
+        }
+      },
+      "required": [
+        "barrel_file",
+        "exported_as",
+        "reference_count"
+      ],
+      "description": "A re-export chain showing how an export is propagated."
+    },
+    "ClassMemberTrace": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The file containing the member."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "The member name being traced."
+        },
+        "member_kind": {
+          "type": "string",
+          "description": "The member kind: `class-method`, `class-property`, `enum-member`,\n`store-member`, or `namespace-member`."
+        },
+        "owner_export": {
+          "type": "string",
+          "description": "The export that declares this member (the class / enum / store name)."
+        },
+        "owner_is_used": {
+          "type": "boolean",
+          "description": "Whether the owning export is considered used."
+        },
+        "owner_file_reachable": {
+          "type": "boolean",
+          "description": "Whether the file is reachable from an entry point."
+        },
+        "owner_is_entry_point": {
+          "type": "boolean",
+          "description": "Whether the file is an entry point."
+        },
+        "owner_direct_references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExportReference"
+          },
+          "description": "Files that reference the owning export directly."
+        },
+        "owner_re_export_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReExportChain"
+          },
+          "description": "Re-export chains through which the owning export is reachable. Populated\nso a machine consumer can tell \"used via a barrel\" (empty direct refs but\nnon-empty chains) from \"genuinely unreferenced\"."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable reason summary plus the follow-up command to inspect the\nmember finding."
+        },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticSymbolTrace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact checker-backed member references when type-aware tracing is enabled."
+        }
+      },
+      "required": [
+        "file",
+        "member_name",
+        "member_kind",
+        "owner_export",
+        "owner_is_used",
+        "owner_file_reachable",
+        "owner_is_entry_point",
+        "owner_direct_references",
+        "owner_re_export_chains",
+        "reason"
+      ],
+      "description": "Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`\nfallback when `NAME` is not a top-level export but a member declared on one\n(issue #1744). The trace runs on the module graph only, so it reports the\nOWNING export's reachability and usage (the gating precondition for\nmember-level crediting) plus a pointer to the right `--unused-*-members`\ncommand, rather than per-member crediting provenance."
+    },
+    "FileTrace": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The traced file."
+        },
+        "is_reachable": {
+          "type": "boolean",
+          "description": "Whether this file is reachable from entry points."
+        },
+        "is_entry_point": {
+          "type": "boolean",
+          "description": "Whether this file is an entry point."
+        },
+        "exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TracedExport"
+          },
+          "description": "Exports declared by this file."
+        },
+        "imports_from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files that this file imports from."
+        },
+        "imported_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files that import from this file."
+        },
+        "re_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TracedReExport"
+          },
+          "description": "Re-exports declared by this file."
+        }
+      },
+      "required": [
+        "file",
+        "is_reachable",
+        "is_entry_point",
+        "exports",
+        "imports_from",
+        "imported_by",
+        "re_exports"
+      ],
+      "description": "Result of tracing all edges for a file."
+    },
+    "TracedExport": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Export name."
+        },
+        "is_type_only": {
+          "type": "boolean",
+          "description": "Whether the export is type-only."
+        },
+        "reference_count": {
+          "type": "integer",
+          "description": "Number of references to this export."
+        },
+        "referenced_by": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExportReference"
+          },
+          "description": "Files that reference this export."
+        }
+      },
+      "required": [
+        "name",
+        "is_type_only",
+        "reference_count",
+        "referenced_by"
+      ],
+      "description": "An export with usage information."
+    },
+    "TracedReExport": {
+      "type": "object",
+      "properties": {
+        "source_file": {
+          "type": "string",
+          "description": "Source file being re-exported from."
+        },
+        "imported_name": {
+          "type": "string",
+          "description": "Imported symbol name."
+        },
+        "exported_name": {
+          "type": "string",
+          "description": "Exported symbol name."
+        }
+      },
+      "required": [
+        "source_file",
+        "imported_name",
+        "exported_name"
+      ],
+      "description": "A re-export with source information."
+    },
+    "DependencyTrace": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "The dependency name being traced."
+        },
+        "imported_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files that import this dependency."
+        },
+        "type_only_imported_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files that import this dependency with type-only imports."
+        },
+        "used_in_scripts": {
+          "type": "boolean",
+          "description": "Whether the dependency is invoked from package.json scripts or CI configs."
+        },
+        "is_used": {
+          "type": "boolean",
+          "description": "Whether the dependency is used at all."
+        },
+        "import_count": {
+          "type": "integer",
+          "description": "Total import count."
+        }
+      },
+      "required": [
+        "package_name",
+        "imported_by",
+        "type_only_imported_by",
+        "used_in_scripts",
+        "is_used",
+        "import_count"
+      ],
+      "description": "Result of tracing a dependency: where it is used."
+    },
+    "CloneTrace": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "File passed to the trace request, root-relative when a group matches."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line passed to the trace request or representative group line."
+        },
+        "matched_instance": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CloneInstance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The matched clone instance, if one exists."
+        },
+        "clone_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TracedCloneGroup"
+          },
+          "description": "Clone groups matched by the trace request."
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "clone_groups"
+      ],
+      "description": "Result of tracing a clone: all groups containing the code at a source\nlocation or addressed by a stable clone fingerprint."
+    },
+    "TracedCloneGroup": {
+      "type": "object",
+      "properties": {
+        "fingerprint": {
+          "type": "string",
+          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions."
+        },
+        "token_count": {
+          "type": "integer",
+          "description": "Number of tokens in the duplicated block."
+        },
+        "line_count": {
+          "type": "integer",
+          "description": "Number of lines in the duplicated block."
+        },
+        "instances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneInstance"
+          },
+          "description": "Root-relative clone instances in this group."
+        },
+        "suggestion": {
+          "description": "Group-level refactoring suggestion.",
+          "$ref": "#/definitions/RefactoringSuggestion"
+        },
+        "suggested_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Best-effort name for the extracted function. Advisory only."
+        }
+      },
+      "required": [
+        "fingerprint",
+        "token_count",
+        "line_count",
+        "instances",
+        "suggestion"
+      ],
+      "description": "One clone group returned from a clone trace request."
+    },
+    "ImpactClosureTrace": {
+      "type": "object",
+      "properties": {
+        "seed": {
+          "type": "string",
+          "description": "The seed file, root-relative."
+        },
+        "affected_not_shown": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Root-relative paths transitively affected by the seed."
+        },
+        "coordination_gap": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImpactClosureGap"
+          },
+          "description": "Coordination gaps between the seed and consumers."
+        }
+      },
+      "required": [
+        "seed",
+        "affected_not_shown",
+        "coordination_gap"
+      ],
+      "description": "Result of computing the impact closure for a single file as the seed."
+    },
+    "ImpactClosureGap": {
+      "type": "object",
+      "properties": {
+        "consumer_file": {
+          "type": "string",
+          "description": "Root-relative path of the consumer module."
+        },
+        "consumed_symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Exported symbol names the consumer references."
+        },
+        "note": {
+          "type": "string",
+          "description": "Scope note for the syntactic trace."
+        }
+      },
+      "required": [
+        "consumer_file",
+        "consumed_symbols",
+        "note"
+      ],
+      "description": "One coordination-gap entry in an [`ImpactClosureTrace`]."
+    },
+    "SemanticCandidateDecision": {
+      "type": "object",
+      "properties": {
+        "query_id": {
+          "type": "integer",
+          "description": "Query identifier used to correlate low-level query metadata."
+        },
+        "subject": {
+          "description": "Exact candidate declaration.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "decision": {
+          "description": "Conservative Fallow-owned decision.",
+          "$ref": "#/definitions/SemanticCandidateDecisionKind"
+        },
+        "status": {
+          "description": "Completeness of the supporting semantic evidence.",
+          "$ref": "#/definitions/SemanticCompleteness"
+        },
+        "owning_projects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Every selected TypeScript project that owns the declaration."
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticReference"
+          },
+          "description": "Bounded checker-resolved reference or uncertainty evidence."
+        },
+        "contract": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticContractEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inherited contract evidence, when present."
+        },
+        "closed_world_eligible": {
+          "type": "boolean",
+          "description": "Whether this exact decision may enable a guarded class-member fix."
+        },
+        "edit_guard": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticEditGuard"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact declaration guard required before a source edit."
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Primary reason when the candidate remains unresolved or abstained."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Concise explanation suitable for dry-run and agent output."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Plain next actions."
+        },
+        "total_evidence_count": {
+          "type": "integer",
+          "description": "Evidence count before bounding."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "Whether evidence was truncated."
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticOmission"
+          },
+          "description": "Counted omissions."
+        }
+      },
+      "required": [
+        "query_id",
+        "subject",
+        "decision",
+        "status",
+        "owning_projects",
+        "closed_world_eligible",
+        "explanation",
+        "total_evidence_count",
+        "truncated"
+      ],
+      "description": "Bounded, inspectable decision record for one semantic dead-code candidate."
+    },
+    "SemanticCandidateDecisionKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "confirmed-used",
+          "description": "The checker resolved at least one exact static reference."
+        },
+        {
+          "type": "string",
+          "const": "contract-preserved",
+          "description": "Removing the declaration would change inherited behavior or an implemented contract."
+        },
+        {
+          "type": "string",
+          "const": "confirmed-no-static-references",
+          "description": "Complete closed-world analysis found no checker-resolved references."
+        },
+        {
+          "type": "string",
+          "const": "retained-abstained",
+          "description": "Analysis deliberately declined a closed-world assertion."
+        },
+        {
+          "type": "string",
+          "const": "retained-unresolved",
+          "description": "The exact declaration or owning project could not be resolved."
+        }
+      ],
+      "description": "Conservative outcome for one existing Fallow dead-code candidate."
+    },
+    "SemanticContractEvidence": {
+      "type": "object",
+      "properties": {
+        "relation": {
+          "description": "Contract relation that makes deletion unsafe.",
+          "$ref": "#/definitions/SemanticContractRelation"
+        },
+        "declaration": {
+          "description": "Exact interface or base-class declaration.",
+          "$ref": "#/definitions/SemanticSymbol"
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "Whether the source contract marks this member optional."
+        }
+      },
+      "required": [
+        "relation",
+        "declaration",
+        "optional"
+      ],
+      "description": "Exact declaration evidence for an inherited or implemented class-member relation."
+    },
+    "SemanticContractRelation": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "interface-implementation",
+          "description": "A required member declared by an implemented interface."
+        },
+        {
+          "type": "string",
+          "const": "abstract-implementation",
+          "description": "An abstract base member implemented by the candidate."
+        },
+        {
+          "type": "string",
+          "const": "override",
+          "description": "A concrete inherited member overridden by the candidate."
+        },
+        {
+          "type": "string",
+          "const": "optional-contract",
+          "description": "An optional inherited or interface member that still blocks auto-fix."
+        }
+      ],
+      "description": "How a class member participates in an inherited or implemented relation."
+    },
+    "SemanticEditGuard": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "integer",
+          "description": "Zero-based UTF-8 byte offset where the declaration starts."
+        },
+        "end": {
+          "type": "integer",
+          "description": "Exclusive zero-based UTF-8 byte offset where the declaration ends."
+        },
+        "declaration_sha256": {
+          "type": "string",
+          "description": "Lowercase SHA-256 digest of the exact declaration text."
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "declaration_sha256"
+      ],
+      "description": "Exact source span and content hash used to guard semantic source edits."
     }
   }
 }

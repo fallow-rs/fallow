@@ -23,6 +23,7 @@ pub(super) fn print_health_markdown(report: &fallow_output::HealthReport, root: 
 
 pub(super) fn print_type_aware_markdown(
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    scope: Option<&str>,
 ) {
     let Some(meta) = type_aware else {
         return;
@@ -45,14 +46,44 @@ pub(super) fn print_type_aware_markdown(
                 .join(", ")
         },
     );
+    let heading = type_aware_heading(scope);
     outln!(
-        "\n## Type-aware evidence\n\n- Backend: `{}@{}`\n- Completeness: `{}`\n- Capabilities: {}\n- Confirmed used: {}\n- Abstained: {}\n- Warnings: {}",
+        "\n## {heading}\n\n- Executed: `{}`\n- Backend: `{}@{}`\n- Completeness: `{}`\n- Capabilities: {}\n- Confirmed used: {}\n- Contract preserved: {}\n- No static references: {}\n- Guarded fixes available: {}\n- Unresolved: {}\n- Abstained: {}\n- Warnings: {}",
+        meta.executed,
         meta.backend,
-        meta.backend_version,
+        meta.backend_version.as_deref().unwrap_or("not-run"),
         completeness,
         capabilities,
         meta.confirmed_used_count,
+        meta.contract_preserved_count,
+        meta.no_static_references_count,
+        meta.fix_eligible_count,
+        meta.unresolved_count,
         meta.abstained_count,
         meta.warning_count
     );
+}
+
+fn type_aware_heading(scope: Option<&str>) -> String {
+    scope.map_or_else(
+        || "Type-aware evidence".to_string(),
+        |scope| format!("Type-aware {scope} evidence"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::type_aware_heading;
+
+    #[test]
+    fn type_aware_heading_labels_combined_scope() {
+        assert_eq!(
+            type_aware_heading(Some("dead-code")),
+            "Type-aware dead-code evidence"
+        );
+        assert_eq!(
+            type_aware_heading(Some("health")),
+            "Type-aware health evidence"
+        );
+    }
 }

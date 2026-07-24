@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use super::super::process_tree::{ProcessTree, cleanup_std_child, configure_std_command};
+use fallow_process::{ProcessTree, cleanup_std_child, configure_std_command};
 
 const STDERR_LIMIT_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);

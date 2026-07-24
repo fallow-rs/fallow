@@ -33,6 +33,7 @@ fn analyze_project_root_for_test(
         std::mem::take(merged_results),
         std::mem::take(merged_duplication),
     );
+    let cancellation = AtomicBool::new(false);
     analyze_project_root(&mut ProjectRootAnalysisInput {
         project_root,
         config_path,
@@ -41,6 +42,7 @@ fn analyze_project_root_for_test(
         production_override,
         inline_complexity_enabled,
         type_aware_options: None,
+        cancellation: &cancellation,
         changed_files: None,
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
@@ -288,6 +290,7 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         root: root.clone(),
         toplevel: Some(root.clone()),
         changed_since: None,
+        cancellation: Arc::new(AtomicBool::new(false)),
     });
 
     let Err(error) = result else {
@@ -2149,6 +2152,7 @@ fn changed_since_input(
         root: root.to_path_buf(),
         toplevel: Some(root.to_path_buf()),
         changed_since: Some(changed_since.to_string()),
+        cancellation: Arc::new(AtomicBool::new(false)),
     }
 }
 

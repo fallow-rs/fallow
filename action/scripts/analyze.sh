@@ -635,18 +635,82 @@ if jq -e '.error == true' "$RESULTS_FILE" > /dev/null 2>&1; then
   exit "$EXIT_CODE"
 fi
 
+# A findings exit code can still carry a valid JSON envelope, so the analysis
+# command above cannot rely on its exit status alone. Record the effective
+# semantic completeness gate now, then fail only after artifacts and outputs
+# have been published for downstream action steps.
+TYPE_AWARE_COMPLETENESS_FAILED=false
+if ! jq -e --arg requested "${INPUT_TYPE_AWARE_REQUIRE:-}" '
+    (
+      ._meta.type_aware
+      // ._meta.check.type_aware
+      // .check._meta.type_aware
+      // .dead_code._meta.type_aware
+      // null
+    ) as $type_aware
+    | (($type_aware.required_completeness // $requested) != "complete")
+      or (
+        ($type_aware != null)
+        and
+        ($type_aware.identity.completeness == "complete")
+        and ([ $type_aware.queries[]? | select(.status != "complete") ] | length == 0)
+      )
+  ' "$RESULTS_FILE" > /dev/null 2>&1; then
+  TYPE_AWARE_COMPLETENESS_FAILED=true
+fi
+
 # --- Analyze-once SARIF generation ---
+
+valid_sarif() {
+  [ -s "$1" ] && jq -e '
+    .version == "2.1.0"
+    and (.runs | type == "array")
+    and all(.runs[]?; ((.results // []) | type == "array"))
+  ' "$1" > /dev/null 2>&1
+}
 
 if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && \
    [ "$INPUT_COMMAND" != "fix" ] && \
-   { [ ! -f "$SARIF_FILE" ] || ! jq -e '.' "$SARIF_FILE" > /dev/null 2>&1; }; then
+   ! valid_sarif "$SARIF_FILE"; then
   # Render the saved JSON envelope instead of running semantic analysis again.
-  # Only an empty or invalid SARIF file is a real generation failure.
-  fallow report --from "$RESULTS_FILE" --root "$INPUT_ROOT" --quiet --format sarif \
-    > "$SARIF_FILE" 2>/dev/null || true
-  if [ ! -s "$SARIF_FILE" ] || ! jq -e '.' "$SARIF_FILE" > /dev/null 2>&1; then
-    echo "::warning::SARIF generation failed"
+  # A valid SARIF run with zero results is required to clear stale alerts.
+  if [ "$HAS_NATIVE_REPORT" = "true" ]; then
+    REPORT_ARGS=(report --from "$RESULTS_FILE" --root "$INPUT_ROOT" --quiet --format sarif)
+    [ -n "${INPUT_CONFIG:-}" ] && REPORT_ARGS+=(--config "$INPUT_CONFIG")
+    fallow "${REPORT_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
   fi
+  if ! valid_sarif "$SARIF_FILE"; then
+    # Compatibility path for pinned binaries that either lack `report` or
+    # support `report` without saved-envelope SARIF rendering.
+    SARIF_ARGS=()
+    skip_next=false
+    for ((index = 0; index < ${#ARGS[@]}; index++)); do
+      arg=${ARGS[$index]}
+      if [ "$skip_next" = "true" ]; then
+        skip_next=false
+        continue
+      fi
+      if [ "$arg" = "--sarif-file" ]; then
+        skip_next=true
+        continue
+      fi
+      SARIF_ARGS+=("$arg")
+      if [ "$arg" = "--format" ]; then
+        index=$((index + 1))
+        SARIF_ARGS+=("sarif")
+      fi
+    done
+    fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+  fi
+  if ! valid_sarif "$SARIF_FILE"; then
+    echo "::warning::SARIF generation failed"
+    rm -f "$SARIF_FILE"
+  fi
+fi
+
+# Never expose a malformed renderer artifact to the upload step.
+if [ -f "$SARIF_FILE" ] && ! valid_sarif "$SARIF_FILE"; then
+  rm -f "$SARIF_FILE"
 fi
 
 # --- Surface warnings from stderr ---
@@ -708,4 +772,9 @@ if [ "$ISSUES" -gt 0 ]; then
     fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
     "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
   esac
+fi
+
+if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ]; then
+  echo "::error::Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+  exit 1
 fi

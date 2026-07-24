@@ -293,19 +293,15 @@ fn run_combined_health(
         .map_err(|message| crate::error::emit_error(&message, 2, opts.output))?;
         let semantic = if resolved.enabled {
             Some(
-                crate::semantic_queries::type_coupling(
-                    opts.root,
-                    &resolved.projects,
-                    &[],
-                    fallow_config::TypeAwareRequire::BestEffort,
-                )
-                .map_err(|error| {
-                    crate::error::emit_error(
-                        &format!("Type-aware coupling failed: {error}"),
-                        2,
-                        opts.output,
-                    )
-                })?,
+                fallow_api::analyze_type_coupling(opts.root, &resolved.projects, &[]).map_err(
+                    |error| {
+                        crate::error::emit_error(
+                            &format!("Type-aware coupling failed: {error}"),
+                            2,
+                            opts.output,
+                        )
+                    },
+                )?,
             )
         } else {
             None
@@ -364,14 +360,31 @@ fn attach_combined_type_coupling(
         meta.queries.retain(|query| {
             query.capability == fallow_types::semantic::SemanticCapability::TypeCoupling
         });
+        meta.candidate_decisions.clear();
         meta.symbol_traces.clear();
         meta.api_surface = None;
         meta.symbol_impacts.clear();
         meta.type_coupling = Some(report);
         meta.candidate_count = 0;
         meta.confirmed_used_count = 0;
+        meta.contract_preserved_count = 0;
+        meta.no_static_references_count = 0;
+        meta.fix_eligible_count = 0;
         meta.unresolved_count = 0;
         meta.abstained_count = 0;
+        meta.abstention_reasons = fallow_types::envelope::TypeAwareAbstentionCounts::default();
+        for project in &mut meta.projects {
+            project.candidate_count = 0;
+            project.confirmed_used_count = 0;
+            project.contract_preserved_count = 0;
+            project.no_static_references_count = 0;
+            project.fix_eligible_count = 0;
+            project.unresolved_count = 0;
+            project.abstained_count = 0;
+            project.abstain_reason = None;
+        }
+        meta.warning_count = 0;
+        meta.warnings.clear();
         health_result.type_aware_meta = Some(meta);
         return Ok(());
     }
@@ -382,23 +395,18 @@ fn attach_combined_type_coupling(
         .iter()
         .map(std::path::PathBuf::from)
         .collect::<Vec<_>>();
-    let outcome = crate::semantic_queries::type_coupling(
-        opts.root,
-        &projects,
-        &[],
-        fallow_config::TypeAwareRequire::BestEffort,
-    )
-    .map_err(|error| {
-        crate::error::emit_error(
-            &format!("Type-aware coupling failed: {error}"),
-            2,
-            opts.output,
-        )
-    })?;
+    let outcome =
+        fallow_api::analyze_type_coupling(opts.root, &projects, &[]).map_err(|error| {
+            crate::error::emit_error(
+                &format!("Type-aware coupling failed: {error}"),
+                2,
+                opts.output,
+            )
+        })?;
     let coupling_meta = outcome.type_aware.meta;
     health_result.type_aware_meta = Some(coupling_meta.clone());
     match check.type_aware_meta.as_mut() {
-        Some(meta) => crate::semantic_queries::merge_type_aware_meta(meta, coupling_meta),
+        Some(meta) => fallow_api::merge_type_aware_meta(meta, coupling_meta),
         None => check.type_aware_meta = Some(coupling_meta),
     }
     Ok(())

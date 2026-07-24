@@ -10,13 +10,13 @@ const hasVscodeCodegenDependencies = existsSync(
   join("editors", "vscode", "node_modules", "json-schema-to-typescript"),
 );
 
-test("NAPI type generation writes only under the requested output root", () => {
+test("NAPI declaration entry generation writes only under the requested output root", () => {
   const outputRoot = temporaryRoot("fallow-napi-stage");
   const committedPath = "crates/napi/index.d.ts";
   const before = readFileSync(committedPath);
 
   try {
-    execFileSync("node", ["crates/napi/scripts/write-dts.mjs"], {
+    execFileSync("node", ["crates/napi/scripts/write-dts-entry.mjs"], {
       env: { ...process.env, FALLOW_GENERATION_OUTPUT_ROOT: outputRoot },
       stdio: "pipe",
     });

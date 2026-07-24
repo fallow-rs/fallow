@@ -37,6 +37,7 @@ import {
   resolveConfiguredBinaryPath,
   type ResolvedLspBinary,
 } from "./binary-utils.js";
+import { compareVersions } from "./cli-args-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
 // fallow-ignore-next-line unresolved-import
 import type { LspInitializationOptions } from "./generated/lsp-initialization-options.js";
@@ -47,6 +48,7 @@ import {
   setDiagnosticCategories,
 } from "./diagnosticFilter.js";
 import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./download.js";
+import { TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
 
 let client: LanguageClient | null = null;
 
@@ -56,29 +58,40 @@ let client: LanguageClient | null = null;
 // Chaining every restart onto this queue makes them strictly sequential.
 let restartQueue: Promise<LanguageClient | null> = Promise.resolve(null);
 
-export const createInitializationOptions = (): LspInitializationOptions => ({
-  issueTypes: getIssueTypes(),
-  changedSince: getChangedSince(),
-  configPath: getResolvedConfigPath(),
-  allowRemoteExtends: getAllowRemoteExtends(),
-  production: getProductionOverride(),
-  typeAware: getTypeAwareSettings(),
-  // `fallow.health.inlineComplexity` is rendered by the extension's own
-  // ComplexityLensProvider (so the lens can toggle the per-line breakdown), so
-  // it is NOT forwarded to the LSP. The LSP complexity lens stays opt-in for
-  // other editors (Neovim/Zed/Helix) via their own initializationOptions; this
-  // avoids a double lens in VS Code without removing the editor-agnostic path.
-  duplication: {
-    mode: getDuplicationModeOverride(),
-    threshold: getDuplicationThresholdOverride(),
-    minTokens: getDuplicationMinTokensOverride(),
-    minLines: getDuplicationMinLinesOverride(),
-    minOccurrences: getDuplicationMinOccurrencesOverride(),
-    skipLocal: getDuplicationSkipLocalOverride(),
-    crossLanguage: getDuplicationCrossLanguageOverride(),
-    ignoreImports: getDuplicationIgnoreImportsOverride(),
-  },
-});
+export const createInitializationOptions = (
+  lspVersion?: string | null,
+): LspInitializationOptions => {
+  const configuredTypeAware = getTypeAwareSettings();
+  const typeAwareSupported =
+    !configuredTypeAware.enabled ||
+    lspVersion === undefined ||
+    (lspVersion !== null && compareVersions(lspVersion, TYPE_AWARE_MIN_CLI_VERSION) >= 0);
+  return {
+    issueTypes: getIssueTypes(),
+    changedSince: getChangedSince(),
+    configPath: getResolvedConfigPath(),
+    allowRemoteExtends: getAllowRemoteExtends(),
+    production: getProductionOverride(),
+    typeAware: typeAwareSupported
+      ? configuredTypeAware
+      : { ...configuredTypeAware, enabled: false },
+    // `fallow.health.inlineComplexity` is rendered by the extension's own
+    // ComplexityLensProvider (so the lens can toggle the per-line breakdown), so
+    // it is NOT forwarded to the LSP. The LSP complexity lens stays opt-in for
+    // other editors (Neovim/Zed/Helix) via their own initializationOptions; this
+    // avoids a double lens in VS Code without removing the editor-agnostic path.
+    duplication: {
+      mode: getDuplicationModeOverride(),
+      threshold: getDuplicationThresholdOverride(),
+      minTokens: getDuplicationMinTokensOverride(),
+      minLines: getDuplicationMinLinesOverride(),
+      minOccurrences: getDuplicationMinOccurrencesOverride(),
+      skipLocal: getDuplicationSkipLocalOverride(),
+      crossLanguage: getDuplicationCrossLanguageOverride(),
+      ignoreImports: getDuplicationIgnoreImportsOverride(),
+    },
+  };
+};
 
 const warnIfVersionMismatch = async (
   binaryPath: string,
@@ -276,6 +289,21 @@ export const startClient = async (
   const invocation =
     resolved.args.length > 0 ? `${resolved.command} ${resolved.args.join(" ")}` : resolved.command;
   outputChannel.appendLine(`Using fallow-lsp binary: ${invocation}`);
+  const typeAware = getTypeAwareSettings();
+  const lspVersion = typeAware.enabled ? await getBinaryVersion(resolved.command) : undefined;
+  if (
+    typeAware.enabled &&
+    lspVersion !== undefined &&
+    (lspVersion === null || compareVersions(lspVersion, TYPE_AWARE_MIN_CLI_VERSION) < 0)
+  ) {
+    const detail =
+      lspVersion === null
+        ? "its version could not be verified"
+        : `v${lspVersion} predates v${TYPE_AWARE_MIN_CLI_VERSION}`;
+    const message = `Fallow: type-aware editor diagnostics are disabled because the resolved LSP ${detail}. Update the binary or enable fallow.autoDownload.`;
+    outputChannel.appendLine(message);
+    showBinarySkewToastOnce(message);
+  }
 
   const serverOptions: ServerOptions = {
     command: resolved.command,
@@ -299,7 +327,7 @@ export const startClient = async (
     ],
     outputChannel,
     traceOutputChannel: outputChannel,
-    initializationOptions: createInitializationOptions(),
+    initializationOptions: createInitializationOptions(lspVersion),
     // VS Code may receive fallow diagnostics via push and LSP 3.17 pull. The
     // middleware keeps diagnostic muting applied before VS Code stores either.
     middleware: diagnosticFilter

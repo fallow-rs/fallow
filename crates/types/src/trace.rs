@@ -9,6 +9,7 @@ use crate::serde_path;
 
 /// Result of tracing an export: why it is considered used or unused.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExportTrace {
     /// The file containing the export.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -39,6 +40,7 @@ pub struct ExportTrace {
 /// member-level crediting) plus a pointer to the right `--unused-*-members`
 /// command, rather than per-member crediting provenance.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClassMemberTrace {
     /// The file containing the member.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -72,6 +74,7 @@ pub struct ClassMemberTrace {
 
 /// A direct reference to an export.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExportReference {
     /// File that contains the reference.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -82,6 +85,7 @@ pub struct ExportReference {
 
 /// A re-export chain showing how an export is propagated.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReExportChain {
     /// The barrel file that re-exports this symbol.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -94,6 +98,7 @@ pub struct ReExportChain {
 
 /// Result of tracing all edges for a file.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileTrace {
     /// The traced file.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -116,6 +121,7 @@ pub struct FileTrace {
 
 /// An export with usage information.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TracedExport {
     /// Export name.
     pub name: String,
@@ -129,6 +135,7 @@ pub struct TracedExport {
 
 /// A re-export with source information.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TracedReExport {
     /// Source file being re-exported from.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -141,6 +148,7 @@ pub struct TracedReExport {
 
 /// Result of tracing a dependency: where it is used.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DependencyTrace {
     /// The dependency name being traced.
     pub package_name: String,
@@ -160,6 +168,7 @@ pub struct DependencyTrace {
 
 /// Pipeline performance timings.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PipelineTimings {
     /// Time spent discovering files.
     pub discover_files_ms: f64,
@@ -196,7 +205,7 @@ pub struct PipelineTimings {
     /// Time spent running analysis.
     pub analyze_ms: f64,
     /// Time spent running duplicate-code analysis, when included.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplication_ms: Option<f64>,
     /// Total pipeline time.
     pub total_ms: f64,
@@ -204,6 +213,7 @@ pub struct PipelineTimings {
 
 /// Result of computing the impact closure for a single file as the seed.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImpactClosureTrace {
     /// The seed file, root-relative.
     pub seed: String,
@@ -215,6 +225,7 @@ pub struct ImpactClosureTrace {
 
 /// One coordination-gap entry in an [`ImpactClosureTrace`].
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImpactClosureGap {
     /// Root-relative path of the consumer module.
     pub consumer_file: String,
@@ -227,6 +238,7 @@ pub struct ImpactClosureGap {
 /// Result of tracing a clone: all groups containing the code at a source
 /// location or addressed by a stable clone fingerprint.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneTrace {
     /// File passed to the trace request, root-relative when a group matches.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -241,6 +253,7 @@ pub struct CloneTrace {
 
 /// One clone group returned from a clone trace request.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TracedCloneGroup {
     /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
     /// report collisions.
@@ -254,6 +267,6 @@ pub struct TracedCloneGroup {
     /// Group-level refactoring suggestion.
     pub suggestion: RefactoringSuggestion,
     /// Best-effort name for the extracted function. Advisory only.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_name: Option<String>,
 }
