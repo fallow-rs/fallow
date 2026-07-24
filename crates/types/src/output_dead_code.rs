@@ -1649,6 +1649,12 @@ pub struct UnusedClassMemberFinding {
     /// Type-aware evidence for this exact candidate when requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub semantic: Option<SemanticCandidateDecision>,
+    /// Internal marker for a framework member that the syntactic analysis
+    /// suppresses, but the semantic pass may promote after proving complete
+    /// closed-world absence. Never serialized as part of the public finding.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub semantic_only_candidate: bool,
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1685,8 +1691,17 @@ impl UnusedClassMemberFinding {
             member,
             actions,
             semantic: None,
+            semantic_only_candidate: false,
             introduced: None,
         }
+    }
+
+    /// Mark this finding as latent until semantic analysis proves that the
+    /// framework contract does not apply and no static references exist.
+    #[must_use]
+    pub const fn semantic_only_candidate(mut self) -> Self {
+        self.semantic_only_candidate = true;
+        self
     }
 
     /// Attach the canonical semantic decision and expose the class-member fix

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use fallow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
@@ -9,7 +9,7 @@ use fallow_api::{
 };
 use fallow_config::DuplicatesConfig;
 use ls_types::MessageType;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
@@ -26,7 +26,9 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
     pub type_aware_options: Option<&'a LspTypeAwareOptions>,
-    pub cancellation: &'a AtomicBool,
+    pub type_aware_sessions: &'a Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
+    pub type_aware_changes: &'a fallow_api::TypeAwareFileChanges,
+    pub cancellation: &'a Arc<AtomicBool>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
@@ -41,6 +43,8 @@ pub struct BlockingAnalysisInput {
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
     pub type_aware_options: Option<LspTypeAwareOptions>,
+    pub type_aware_sessions: Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
+    pub type_aware_changes: fallow_api::TypeAwareFileChanges,
     pub root: PathBuf,
     pub toplevel: Option<PathBuf>,
     pub changed_since: Option<String>,
@@ -188,16 +192,36 @@ fn run_typed_project_analysis(
             projects: options.projects.iter().map(PathBuf::from).collect(),
             require: options.require.unwrap_or_default(),
         };
-        session
-            .refine_type_aware_dead_code(
-                &type_aware,
-                &fallow_api::DeadCodeFilters::default(),
-                &mut output.dead_code,
-            )
-            .map_err(|error| ProjectAnalysisError {
-                project_root: input.project_root.to_path_buf(),
-                message: error.message,
-            })?;
+        let changes = changes_for_project(input.type_aware_changes, input.project_root);
+        let canonical_root = input
+            .project_root
+            .canonicalize()
+            .unwrap_or_else(|_| input.project_root.to_path_buf());
+        if let Err(message) = refine_type_aware_project(
+            input.type_aware_sessions,
+            TypeAwareProjectRefinement {
+                canonical_root: &canonical_root,
+                cancellation: input.cancellation,
+                session,
+                changes: changes.as_ref(),
+                options: &type_aware,
+                output: &mut output.dead_code,
+            },
+        ) {
+            if type_aware.require == fallow_config::TypeAwareRequire::Complete {
+                return Err(ProjectAnalysisError {
+                    project_root: input.project_root.to_path_buf(),
+                    message,
+                });
+            }
+            input.config_messages.push((
+                MessageType::WARNING,
+                format!(
+                    "type-aware refinement unavailable for {}: {message}; showing conservative syntactic findings",
+                    input.project_root.display()
+                ),
+            ));
+        }
     }
     if input.inline_complexity_enabled {
         input
@@ -209,6 +233,90 @@ fn run_typed_project_analysis(
     }
     input.merged_analysis.merge_project_output(output);
     Ok(())
+}
+
+struct TypeAwareProjectRefinement<'a> {
+    canonical_root: &'a Path,
+    cancellation: &'a Arc<AtomicBool>,
+    session: &'a AnalysisSession,
+    changes: Option<&'a fallow_api::TypeAwareFileChanges>,
+    options: &'a fallow_api::TypeAwareOptions,
+    output: &'a mut fallow_api::EditorDeadCodeAnalysisOutput,
+}
+
+fn refine_type_aware_project(
+    sessions: &Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
+    refinement: TypeAwareProjectRefinement<'_>,
+) -> Result<(), String> {
+    let TypeAwareProjectRefinement {
+        canonical_root,
+        cancellation,
+        session,
+        changes,
+        options,
+        output,
+    } = refinement;
+    if cancellation.load(Ordering::SeqCst) {
+        return Err("editor analysis is closing".to_string());
+    }
+    let mut sessions = sessions.lock().unwrap_or_else(|error| error.into_inner());
+    if !sessions.contains_key(canonical_root) {
+        let semantic_session = match fallow_api::TypeAwareSession::new_cancellable(
+            canonical_root,
+            Arc::clone(cancellation),
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                fallow_api::discard_unverified_semantic_candidates(&mut output.results);
+                return Err(error.to_string());
+            }
+        };
+        sessions.insert(canonical_root.to_path_buf(), semantic_session);
+    }
+    let semantic_session = sessions
+        .get_mut(canonical_root)
+        .ok_or_else(|| "semantic session registry lost its root entry".to_string())?;
+    let result = session.refine_type_aware_dead_code_in_session(
+        semantic_session,
+        changes,
+        options,
+        &fallow_api::DeadCodeFilters::default(),
+        output,
+    );
+    if let Err(error) = result {
+        sessions.remove(canonical_root);
+        return Err(error.message);
+    }
+    drop(sessions);
+    Ok(())
+}
+
+fn changes_for_project(
+    changes: &fallow_api::TypeAwareFileChanges,
+    root: &Path,
+) -> Option<fallow_api::TypeAwareFileChanges> {
+    if changes.invalidate_all {
+        return Some(fallow_api::TypeAwareFileChanges {
+            invalidate_all: true,
+            ..fallow_api::TypeAwareFileChanges::default()
+        });
+    }
+    let relative = |paths: &[PathBuf]| {
+        paths
+            .iter()
+            .filter_map(|path| path.strip_prefix(root).ok().map(Path::to_path_buf))
+            .collect::<Vec<_>>()
+    };
+    let project_changes = fallow_api::TypeAwareFileChanges {
+        changed: relative(&changes.changed),
+        created: relative(&changes.created),
+        deleted: relative(&changes.deleted),
+        invalidate_all: false,
+    };
+    (!project_changes.changed.is_empty()
+        || !project_changes.created.is_empty()
+        || !project_changes.deleted.is_empty())
+    .then_some(project_changes)
 }
 
 pub fn run_blocking_analysis(
@@ -232,6 +340,8 @@ pub fn run_blocking_analysis(
             production_override: input.production_override,
             inline_complexity_enabled: input.inline_complexity_enabled,
             type_aware_options: input.type_aware_options.as_ref(),
+            type_aware_sessions: &input.type_aware_sessions,
+            type_aware_changes: &input.type_aware_changes,
             cancellation: &input.cancellation,
             changed_files: changed_scope.files.as_ref(),
             merged_analysis: &mut analysis,

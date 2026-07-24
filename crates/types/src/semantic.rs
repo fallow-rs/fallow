@@ -209,6 +209,9 @@ pub enum SemanticGapReason {
     EvidenceLimit,
     /// Dynamic runtime behavior is outside checker-visible semantics.
     DynamicBehavior,
+    /// Interface, inherited, or virtual dispatch may reach an implementation
+    /// without referencing that concrete method symbol.
+    VirtualDispatch,
     /// A computed or reflective member access can address the declaration.
     DynamicMemberAccess,
     /// A decorator can consume the declaration outside normal references.
@@ -225,6 +228,9 @@ pub enum SemanticGapReason {
     AbstractDeclaration,
     /// Not every project that owns the declaration completed the query.
     IncompleteProjectCoverage,
+    /// An external framework declaration could not be attributed to an exact
+    /// package.
+    FrameworkContractProvenance,
     /// A configured request or response capacity was reached.
     Capacity,
     /// The requested syntax or declaration kind is unsupported.
@@ -285,6 +291,49 @@ pub struct SemanticContractEvidence {
     pub optional: bool,
 }
 
+/// Heritage relation used by a framework-owned class-member contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticFrameworkRelation {
+    /// The class extends a framework base class.
+    Extends,
+    /// The class implements a framework interface.
+    Implements,
+}
+
+/// Exact framework contract supplied by a detected Fallow plugin.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SemanticFrameworkContract {
+    /// Fallow plugin that supplied the contract.
+    pub framework: String,
+    /// Package that must own the resolved heritage declaration.
+    pub package: String,
+    /// Exported base class or interface name.
+    pub heritage_symbol: String,
+    /// Syntactic spellings accepted only for surfacing a latent candidate.
+    pub heritage_names: Vec<String>,
+    /// Extends or implements relation.
+    pub relation: SemanticFrameworkRelation,
+    /// Framework-dispatched members covered by this contract.
+    pub members: Vec<String>,
+}
+
+/// Checker-validated evidence that a framework contract preserves a member.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SemanticFrameworkContractEvidence {
+    /// Fallow plugin that supplied the contract.
+    pub framework: String,
+    /// Exact package that owns the heritage declaration.
+    pub package: String,
+    /// Extends or implements relation.
+    pub relation: SemanticFrameworkRelation,
+    /// Exact framework base class or interface declaration.
+    pub declaration: SemanticSymbol,
+}
+
 /// Exact source span and content hash used to guard semantic source edits.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -317,6 +366,9 @@ pub struct SemanticCandidateDecision {
     /// Inherited contract evidence, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<SemanticContractEvidence>,
+    /// Framework-owned contract evidence, distinct from TypeScript contracts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framework_contract: Option<SemanticFrameworkContractEvidence>,
     /// Whether this exact decision may enable a guarded class-member fix.
     pub closed_world_eligible: bool,
     /// Exact declaration guard required before a source edit.
@@ -509,6 +561,31 @@ pub struct SemanticImpactPath {
     pub via: Vec<PathBuf>,
 }
 
+/// Confidence of exact-symbol impact analysis after known dynamic gaps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticImpactConfidence {
+    /// All reported static paths are complete within the selected project
+    /// scope.
+    High,
+    /// Static paths are useful, but virtual dispatch or dynamic behavior
+    /// bounds completeness.
+    Bounded,
+    /// Impact analysis could not run.
+    Unavailable,
+}
+
+impl std::fmt::Display for SemanticImpactConfidence {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::High => "high",
+            Self::Bounded => "bounded",
+            Self::Unavailable => "unavailable",
+        })
+    }
+}
+
 /// Exact-symbol impact and targeted-test recommendation.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -536,7 +613,7 @@ pub struct SemanticSymbolImpact {
     /// Targeted-test count before evidence bounding.
     pub total_targeted_test_count: usize,
     /// Confidence after accounting for dynamic behavior.
-    pub confidence: String,
+    pub confidence: SemanticImpactConfidence,
     /// Counted omissions, including dynamic behavior.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub omissions: Vec<SemanticOmission>,

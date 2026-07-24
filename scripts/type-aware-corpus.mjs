@@ -78,7 +78,7 @@ const MAX_SEMANTIC_RESPONSE_BYTES = 32 * 1024 * 1024;
 const MAX_SEMANTIC_STDERR_BYTES = 16 * 1024;
 const PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS = 100;
 const SEMANTIC_TIMEOUT_MS = 120_000;
-const SEMANTIC_PROTOCOL_VERSION = 5;
+const SEMANTIC_PROTOCOL_VERSION = 6;
 const SEMANTIC_QUERY_STATUSES = new Set(["complete", "partial", "unavailable"]);
 const TRUTH_STATUSES = new Set(["used", "preserved", "unused", "indeterminate"]);
 const DEPENDENCY_DIRECTORY_NAMES = new Set(["node_modules", ".pnpm-store"]);
@@ -91,12 +91,12 @@ const REQUIRED_FOCUSED_CASES = [
   "retains Vue template-only members without claiming a checker use",
   "finds a class member used only from an explicitly opened consumer project",
   "full CLI safely abstains for an explicit solution tsconfig",
-  "protocol v5 discovers public entry points from a nested package project",
-  "protocol v5 includes a direct test consumer in targeted tests",
-  "protocol v5 finds semantic consumers and tests across selected projects",
-  "protocol v5 confirms complete closed-world absence of static class-member references",
-  "protocol v5 preserves required interface, abstract, and inherited contracts",
-  "protocol v5 abstains for optional contracts, decorators, and dynamic member access",
+  "protocol v6 discovers public entry points from a nested package project",
+  "protocol v6 includes a direct test consumer in targeted tests",
+  "protocol v6 finds semantic consumers and tests across selected projects",
+  "protocol v6 confirms complete closed-world absence of static class-member references",
+  "protocol v6 preserves required interface, abstract, and inherited contracts",
+  "protocol v6 abstains for optional contracts, decorators, and dynamic member access",
   "treats getter and setter declarations as one logical property",
 ];
 const REQUIRED_SEMANTIC_CAPABILITIES = [
@@ -1446,18 +1446,34 @@ const validateSupplementalReview = (decisions, commit, confirmedKeys) => {
   return { cleanRunIsSubset, review, reviewedKeys };
 };
 
+const supplementalDecisionCounts = (decisions) => ({
+  confirmed_used_count: decisions.filter(({ decision }) => decision === "confirmed-used").length,
+  contract_preserved_count: decisions.filter(({ decision }) => decision === "contract-preserved")
+    .length,
+  no_static_references_count: decisions.filter(
+    ({ decision }) => decision === "confirmed-no-static-references",
+  ).length,
+  fix_eligible_count: decisions.filter(({ closed_world_eligible: eligible }) => eligible).length,
+  unresolved_count: decisions.filter(({ decision }) => decision === "retained-unresolved").length,
+  abstained_count: decisions.filter(({ decision }) => decision === "retained-abstained").length,
+});
+
 const validateSupplementalMetadata = (meta, baseline, confirmedKeys) => {
+  const decisions = arrayOrEmpty(meta.candidate_decisions);
+  const allCounts = supplementalDecisionCounts(decisions);
+  const baselineKeys = new Set(baseline.candidates.map(({ key }) => key));
+  const baselineDecisions = decisions.filter((decision) =>
+    baselineKeys.has(candidateKey("vitest", decisionCandidate(decision))),
+  );
+  const baselineCounts = supplementalDecisionCounts(baselineDecisions);
   const valid = [
-    meta.confirmed_used_count === confirmedKeys.length,
-    meta.candidate_count === baseline.candidates.length,
-    meta.unresolved_count +
-      meta.abstained_count +
-      meta.confirmed_used_count +
-      meta.contract_preserved_count +
-      meta.no_static_references_count ===
-      meta.candidate_count,
+    baselineDecisions.length === baseline.candidates.length,
+    baselineCounts.confirmed_used_count === confirmedKeys.length,
+    meta.candidate_count === decisions.length,
+    Object.entries(allCounts).every(([field, count]) => meta[field] === count),
   ].every(Boolean);
   if (!valid) fail("supplemental Vitest type-aware metadata is inconsistent");
+  return baselineCounts;
 };
 
 const supplementalSourceRuns = (runs) =>
@@ -1498,11 +1514,11 @@ const buildSupplementalArtifact = (context) => ({
     baseline_candidates: context.baseline.candidates.length,
     refined_candidates: context.refined.candidates.length,
     confirmed_used: context.confirmedKeys.length,
-    contract_preserved: context.meta.contract_preserved_count,
-    no_static_references: context.meta.no_static_references_count,
-    fix_eligible: context.meta.fix_eligible_count,
-    unresolved_retained: context.meta.unresolved_count,
-    abstained_retained: context.meta.abstained_count,
+    contract_preserved: context.baselineCounts.contract_preserved_count,
+    no_static_references: context.baselineCounts.no_static_references_count,
+    fix_eligible: context.baselineCounts.fix_eligible_count,
+    unresolved_retained: context.baselineCounts.unresolved_count,
+    abstained_retained: context.baselineCounts.abstained_count,
     added_candidates: 0,
     normalized_runs: 2,
     deterministic: true,
@@ -1532,9 +1548,10 @@ const supplemental = async (options, publicationMode = "write") => {
   const decisions = readJson(DEFAULT_ADJUDICATION, "adjudication decisions");
   const reviewContext = validateSupplementalReview(decisions, commit, confirmedKeys);
   const meta = refined.typeAware;
-  validateSupplementalMetadata(meta, baseline, confirmedKeys);
+  const baselineCounts = validateSupplementalMetadata(meta, baseline, confirmedKeys);
   const artifact = buildSupplementalArtifact({
     baseline,
+    baselineCounts,
     commit,
     confirmedKeys,
     dependencyEnvironment,

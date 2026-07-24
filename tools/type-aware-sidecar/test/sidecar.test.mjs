@@ -14,9 +14,10 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { API } from "typescript/unstable/sync";
 
 import { createResponse, createSemanticResponse, parseRequest } from "../src/protocol.mjs";
-import { analyzeSemanticQueries } from "../src/semantic.mjs";
+import { analyzeSemanticQueries, createSemanticSession } from "../src/semantic.mjs";
 import { readAll } from "../src/cli.mjs";
 import { canonicalFileIdentity } from "../src/file-identity.mjs";
 
@@ -32,7 +33,7 @@ test("status reports protocol and backend without a project request", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     package_version: "3.9.1",
-    protocol_version: 5,
+    protocol_version: 6,
     backend_family: "typescript-go",
     backend_version: "7.0.2",
   });
@@ -53,7 +54,7 @@ const request = (root, candidates) => ({
 });
 
 const semanticRequest = (root, queries, options = {}) => ({
-  protocol_version: 5,
+  protocol_version: 6,
   operation: "semantic-queries",
   root,
   projects: options.projects ?? ["tsconfig.json"],
@@ -96,7 +97,7 @@ test("unexpected semantic backend failures propagate instead of becoming abstent
   }
 });
 
-test("protocol v5 validates request-scoped private leak candidates", () => {
+test("protocol v6 validates request-scoped private leak candidates", () => {
   const root = makeProject();
   try {
     const base = {
@@ -1227,7 +1228,7 @@ new Service().run();
   }
 });
 
-test("protocol v5 batches exact export and type-use queries through one Program", () => {
+test("protocol v6 batches exact export and type-use queries through one Program", () => {
   const root = makeProject();
   try {
     const apiSource = [
@@ -1276,7 +1277,7 @@ test("protocol v5 batches exact export and type-use queries through one Program"
       ]),
     );
 
-    assert.equal(response.protocol_version, 5);
+    assert.equal(response.protocol_version, 6);
     assert.equal(response.operation, "semantic-queries");
     assert.equal(response.projects.length, 1);
     assert.equal(response.projects[0].program_reused, true);
@@ -1310,7 +1311,7 @@ test("protocol v5 batches exact export and type-use queries through one Program"
   }
 });
 
-test("protocol v5 does not treat paired accessors as uses of each other", () => {
+test("protocol v6 does not treat paired accessors as uses of each other", () => {
   const root = makeProject();
   try {
     const source = `export class Accessor {
@@ -1353,7 +1354,7 @@ test("protocol v5 does not treat paired accessors as uses of each other", () => 
   }
 });
 
-test("protocol v5 maps public API leaks and project-local public-signature coupling", () => {
+test("protocol v6 maps public API leaks and project-local public-signature coupling", () => {
   const root = makeProject();
   try {
     write(
@@ -1444,7 +1445,7 @@ test("protocol v5 maps public API leaks and project-local public-signature coupl
   }
 });
 
-test("protocol v5 resolves checker-inferred public return types", () => {
+test("protocol v6 resolves checker-inferred public return types", () => {
   const root = makeProject();
   try {
     write(
@@ -1488,7 +1489,7 @@ test("protocol v5 resolves checker-inferred public return types", () => {
   }
 });
 
-test("protocol v5 reports public-signature cycles spanning three files", () => {
+test("protocol v6 reports public-signature cycles spanning three files", () => {
   const root = makeProject();
   try {
     write(
@@ -1528,7 +1529,7 @@ test("protocol v5 reports public-signature cycles spanning three files", () => {
   }
 });
 
-test("protocol v5 confirms a requested private leak beyond bounded evidence", () => {
+test("protocol v6 confirms a requested private leak beyond bounded evidence", () => {
   const root = makeProject();
   try {
     write(
@@ -1579,7 +1580,7 @@ test("protocol v5 confirms a requested private leak beyond bounded evidence", ()
   }
 });
 
-test("protocol v5 reports every missing requested entry point", () => {
+test("protocol v6 reports every missing requested entry point", () => {
   const root = makeProject();
   try {
     write(
@@ -1624,7 +1625,7 @@ test("protocol v5 reports every missing requested entry point", () => {
   }
 });
 
-test("protocol v5 ignores parameter and generic names in public signatures", () => {
+test("protocol v6 ignores parameter and generic names in public signatures", () => {
   const root = makeProject();
   try {
     write(
@@ -1701,7 +1702,7 @@ test("protocol v5 ignores parameter and generic names in public signatures", () 
   }
 });
 
-test("protocol v5 deduplicates API data from overlapping projects", () => {
+test("protocol v6 deduplicates API data from overlapping projects", () => {
   const root = makeProject();
   try {
     const config = JSON.stringify({
@@ -1740,7 +1741,7 @@ test("protocol v5 deduplicates API data from overlapping projects", () => {
   }
 });
 
-test("protocol v5 reports symbol-use outcomes per selected project", () => {
+test("protocol v6 reports symbol-use outcomes per selected project", () => {
   const root = makeProject();
   try {
     const usedSource = "export const used = 1;\n";
@@ -1839,7 +1840,7 @@ test("protocol v5 reports symbol-use outcomes per selected project", () => {
   }
 });
 
-test("protocol v5 marks a project unavailable when an assigned symbol cannot be resolved", () => {
+test("protocol v6 marks a project unavailable when an assigned symbol cannot be resolved", () => {
   const root = makeProject();
   try {
     const source = "export const value = 1;\n";
@@ -1876,7 +1877,7 @@ test("protocol v5 marks a project unavailable when an assigned symbol cannot be 
   }
 });
 
-test("protocol v5 discovers public entry points from a nested package project", () => {
+test("protocol v6 discovers public entry points from a nested package project", () => {
   const root = makeProject();
   try {
     write(
@@ -1929,7 +1930,7 @@ test("protocol v5 discovers public entry points from a nested package project", 
   }
 });
 
-test("protocol v5 finds semantic consumers and tests across selected projects", () => {
+test("protocol v6 finds semantic consumers and tests across selected projects", () => {
   const root = makeProject();
   try {
     const source = "export const execute = (): string => 'ok';\n";
@@ -1994,7 +1995,7 @@ test("protocol v5 finds semantic consumers and tests across selected projects", 
   }
 });
 
-test("protocol v5 reports exact-symbol impact and shortest targeted-test provenance", () => {
+test("protocol v6 reports exact-symbol impact and shortest targeted-test provenance", () => {
   const root = makeProject();
   try {
     const librarySource = "export const run = (value: string): string => value;\n";
@@ -2040,7 +2041,7 @@ test("protocol v5 reports exact-symbol impact and shortest targeted-test provena
   }
 });
 
-test("protocol v5 includes a direct test consumer in targeted tests", () => {
+test("protocol v6 includes a direct test consumer in targeted tests", () => {
   const root = makeProject();
   try {
     const librarySource = "export const run = (value: string): string => value;\n";
@@ -2079,7 +2080,7 @@ test("protocol v5 includes a direct test consumer in targeted tests", () => {
   }
 });
 
-test("protocol v5 bounds evidence and exposes omissions, reasons, and actions", () => {
+test("protocol v6 bounds evidence and exposes omissions, reasons, and actions", () => {
   const root = makeProject();
   try {
     const source = "export const used = 1;\n";
@@ -2122,7 +2123,7 @@ test("protocol v5 bounds evidence and exposes omissions, reasons, and actions", 
   }
 });
 
-test("protocol v5 keeps merged value and type namespaces distinct", () => {
+test("protocol v6 keeps merged value and type namespaces distinct", () => {
   const root = makeProject();
   try {
     const source = [
@@ -2192,7 +2193,7 @@ test("protocol v5 keeps merged value and type namespaces distinct", () => {
   }
 });
 
-test("protocol v5 confirms complete closed-world absence of static class-member references", () => {
+test("protocol v6 confirms complete closed-world absence of static class-member references", () => {
   const root = makeProject();
   try {
     const source = [
@@ -2232,7 +2233,7 @@ test("protocol v5 confirms complete closed-world absence of static class-member 
   }
 });
 
-test("protocol v5 preserves required interface, abstract, and inherited contracts", () => {
+test("protocol v6 preserves required interface, abstract, and inherited contracts", () => {
   const cases = [
     {
       relation: "interface-implementation",
@@ -2305,20 +2306,26 @@ test("protocol v5 preserves required interface, abstract, and inherited contract
       Object.assign(symbol, utf8Position(expected.source, "execute", 2));
 
       const response = runSidecar(
-        semanticRequest(root, [{ id: 43, operation: "symbol-use", symbol }]),
+        semanticRequest(root, [
+          { id: 43, operation: "symbol-use", symbol, framework_contracts: [] },
+          { id: 44, operation: "symbol-impact", symbol },
+        ]),
       );
       const result = response.results[0];
       assert.equal(result.assertion, "contract-preserved");
       assert.equal(result.data.closed_world_eligible, false);
       assert.equal(result.data.contract_relations[0].relation, expected.relation);
       assert.equal(result.data.contract_relations[0].declaration.local_name, "execute");
+      const impact = response.results[1];
+      assert.equal(impact.data.confidence, "bounded");
+      assert.deepEqual(impact.omissions, [{ reason_code: "virtual-dispatch", count: 1 }]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   }
 });
 
-test("protocol v5 abstains for optional contracts, decorators, and dynamic member access", () => {
+test("protocol v6 abstains for optional contracts, decorators, and dynamic member access", () => {
   const cases = [
     {
       reason: "optional-contract",
@@ -2432,7 +2439,7 @@ test("protocol v5 abstains for optional contracts, decorators, and dynamic membe
   }
 });
 
-test("protocol v5 fails closed for an unknown exact symbol identity", () => {
+test("protocol v6 fails closed for an unknown exact symbol identity", () => {
   const root = makeProject();
   try {
     const source = "export const known = 1;\n";
@@ -2472,7 +2479,7 @@ test("protocol v5 fails closed for an unknown exact symbol identity", () => {
   }
 });
 
-test("protocol v5 resolves a generic export identity through an alias", () => {
+test("protocol v6 resolves a generic export identity through an alias", () => {
   const root = makeProject();
   try {
     const source = "const original = 1;\nexport { original as publicName };\n";
@@ -2509,7 +2516,7 @@ test("protocol v5 resolves a generic export identity through an alias", () => {
   }
 });
 
-test("protocol v5 does not count same-module references as export use", () => {
+test("protocol v6 does not count same-module references as export use", () => {
   const root = makeProject();
   try {
     const source = [
@@ -2546,7 +2553,7 @@ test("protocol v5 does not count same-module references as export use", () => {
   }
 });
 
-test("protocol v5 keeps an unused barrel alias distinct from its used source export", () => {
+test("protocol v6 keeps an unused barrel alias distinct from its used source export", () => {
   const root = makeProject();
   try {
     const barrelSource = 'export { shared } from "./source";\n';
@@ -2583,7 +2590,7 @@ test("protocol v5 keeps an unused barrel alias distinct from its used source exp
   }
 });
 
-test("protocol v5 counts namespace property and element access through the exact source module", () => {
+test("protocol v6 counts namespace property and element access through the exact source module", () => {
   for (const access of ["source.shared", 'source["shared"]']) {
     const root = makeProject();
     try {
@@ -2632,7 +2639,7 @@ test("protocol v5 counts namespace property and element access through the exact
   }
 });
 
-test("protocol v5 tracks a named default export by its module export identity", () => {
+test("protocol v6 tracks a named default export by its module export identity", () => {
   const root = makeProject();
   try {
     const source = "export default function execute(): string { return 'ok'; }\n";
@@ -2663,7 +2670,7 @@ test("protocol v5 tracks a named default export by its module export identity", 
   }
 });
 
-test("protocol v5 preserves bulk symbol-use capacity and separately bounds graph queries", () => {
+test("protocol v6 preserves bulk symbol-use capacity and separately bounds graph queries", () => {
   const baseSymbol = {
     path: "src/value.ts",
     namespace: "value",
@@ -2853,5 +2860,335 @@ test("abstains when TypeScript cannot construct a project", () => {
     assert.match(response.warnings[0], /No TypeScript project/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("persistent semantic session invalidates changed source without stale references", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    const repositorySource = ["export class UserRepository {", "  save(): void {}", "}", ""].join(
+      "\n",
+    );
+    write(root, "src/repository.ts", repositorySource);
+    write(
+      root,
+      "src/consumer.ts",
+      'import { UserRepository } from "./repository"; new UserRepository().save();\n',
+    );
+    const save = symbolIdentity({
+      source: repositorySource,
+      marker: "save",
+      file: "src/repository.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "save",
+      localName: "save",
+      owner: "UserRepository",
+    });
+    const parsed = parseRequest(
+      semanticRequest(root, [
+        { id: 0, operation: "symbol-use", symbol: save, framework_contracts: [] },
+      ]),
+    );
+    const snapshots = [];
+    const session = createSemanticSession(root, {
+      createApi: (cwd) => {
+        const api = new API({ cwd });
+        return {
+          updateSnapshot: (params) => {
+            const snapshot = api.updateSnapshot(params);
+            snapshots.push(snapshot);
+            return snapshot;
+          },
+          close: () => api.close(),
+        };
+      },
+    });
+    try {
+      const first = session.analyze(parsed, { revision: 1 });
+      assert.equal(first.results[0].assertion, "confirmed-used");
+      assert.equal(first.projectResults[0].program_reused_from_previous_snapshot, false);
+      assert.equal(snapshots[0].isDisposed(), false);
+
+      write(root, "src/consumer.ts", "export const unrelated = true;\n");
+      const second = session.analyze(parsed, {
+        revision: 2,
+        fileChanges: { changed: [path.join(root, "src/consumer.ts")] },
+      });
+      assert.equal(second.results[0].assertion, "confirmed-no-static-references");
+      assert.equal(second.projectResults[0].program_reused_from_previous_snapshot, true);
+      assert.equal(second.projectResults[0].snapshot_revision, 2);
+      assert.equal(second.projectResults[0].invalidation_kind, "incremental");
+      assert.equal(snapshots[0].isDisposed(), true);
+      assert.equal(snapshots[1].isDisposed(), false);
+
+      const third = session.analyze(parsed, {
+        revision: 3,
+        fileChanges: { invalidateAll: true },
+      });
+      assert.equal(third.results[0].assertion, "confirmed-no-static-references");
+      assert.equal(third.projectResults[0].program_reused_from_previous_snapshot, false);
+      assert.equal(third.projectResults[0].snapshot_revision, 3);
+      assert.equal(third.projectResults[0].invalidation_kind, "full");
+
+      const addedConsumer = path.join(root, "src/new-consumer.ts");
+      write(
+        root,
+        "src/new-consumer.ts",
+        'import { UserRepository } from "./repository"; new UserRepository().save();\n',
+      );
+      const fourth = session.analyze(parsed, {
+        revision: 4,
+        fileChanges: { created: [addedConsumer] },
+      });
+      assert.equal(fourth.results[0].assertion, "confirmed-used");
+      assert.equal(fourth.projectResults[0].invalidation_kind, "incremental");
+
+      rmSync(addedConsumer);
+      const fifth = session.analyze(parsed, {
+        revision: 5,
+        fileChanges: { deleted: [addedConsumer] },
+      });
+      assert.equal(fifth.results[0].assertion, "confirmed-no-static-references");
+      assert.equal(fifth.projectResults[0].snapshot_revision, 5);
+      session.close();
+      assert.equal(
+        snapshots.every((snapshot) => snapshot.isDisposed()),
+        true,
+      );
+    } finally {
+      session.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("session mode frames revisions and reuses a compatible snapshot", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    const source = "export const value = 1;\n";
+    write(root, "src/value.ts", source);
+    const value = symbolIdentity({
+      source,
+      marker: "value",
+      file: "src/value.ts",
+      namespace: "value",
+      declarationKind: "variable",
+      exportedName: "value",
+    });
+    const body = semanticRequest(root, [
+      { id: 0, operation: "symbol-use", symbol: value, framework_contracts: [] },
+    ]);
+    const input = [
+      JSON.stringify({ type: "analyze", request_id: 11, revision: 1, request: body }),
+      JSON.stringify({ type: "analyze", request_id: 12, revision: 2, request: body }),
+      JSON.stringify({ type: "shutdown" }),
+      "",
+    ].join("\n");
+    const result = spawnSync(executable, ["--session"], {
+      cwd: sidecarRoot,
+      input,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const responses = result.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      responses.map((response) => [response.request_id, response.revision]),
+      [
+        [11, 1],
+        [12, 2],
+      ],
+    );
+    assert.equal(responses[1].response.projects[0].program_reused_from_previous_snapshot, true);
+    assert.equal(responses[1].response.projects[0].invalidation_kind, "none");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("framework contract requires the exact package declaration", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true, module: "nodenext", moduleResolution: "nodenext" },
+        include: ["src/**/*.ts"],
+      }),
+    );
+    write(
+      root,
+      "node_modules/lit/package.json",
+      JSON.stringify({ name: "lit", version: "1.0.0", types: "index.d.ts" }),
+    );
+    write(
+      root,
+      "node_modules/lit/index.d.ts",
+      "export declare class LitElement { protected render(): unknown; }\n",
+    );
+    const source = [
+      'import { LitElement } from "lit";',
+      "export class UserCard extends LitElement {",
+      "  protected render(): unknown { return null; }",
+      "}",
+      "",
+    ].join("\n");
+    write(root, "src/card.ts", source);
+    const render = symbolIdentity({
+      source,
+      marker: "render",
+      file: "src/card.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "render",
+      localName: "render",
+      owner: "UserCard",
+    });
+    const contract = {
+      framework: "lit",
+      package: "lit",
+      heritage_symbol: "LitElement",
+      heritage_names: ["LitElement"],
+      relation: "extends",
+      members: ["render"],
+    };
+    const response = analyzeSemanticQueries(
+      parseRequest(
+        semanticRequest(root, [
+          {
+            id: 0,
+            operation: "symbol-use",
+            symbol: render,
+            framework_contracts: [contract],
+          },
+        ]),
+      ),
+    );
+    assert.equal(
+      response.results[0].assertion,
+      "contract-preserved",
+      JSON.stringify(response.results[0]),
+    );
+    assert.equal(response.results[0].data.framework_contract_relations.length, 1);
+    assert.equal(response.results[0].data.framework_contract_relations[0].package, "lit");
+
+    write(
+      root,
+      "src/local.ts",
+      [
+        "class LitElement { protected render(): unknown { return null; } }",
+        "export class LocalCard extends LitElement {",
+        "  protected render(): unknown { return null; }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const localSource = readFileSync(path.join(root, "src/local.ts"), "utf8");
+    const localRender = symbolIdentity({
+      source: localSource,
+      marker: "render",
+      file: "src/local.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "render",
+      localName: "render",
+      owner: "LocalCard",
+    });
+    Object.assign(localRender, utf8Position(localSource, "render", 2));
+    const localResponse = analyzeSemanticQueries(
+      parseRequest(
+        semanticRequest(root, [
+          {
+            id: 0,
+            operation: "symbol-use",
+            symbol: localRender,
+            framework_contracts: [contract],
+          },
+        ]),
+      ),
+    );
+    assert.deepEqual(localResponse.results[0].data.framework_contract_relations, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("unknown external framework package provenance abstains", () => {
+  const monorepo = makeProject();
+  const root = path.join(monorepo, "packages", "app");
+  try {
+    write(
+      monorepo,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true, module: "nodenext", moduleResolution: "nodenext" },
+        include: ["packages/**/*.ts"],
+      }),
+    );
+    write(monorepo, "packages/framework/lit.d.ts", "export declare class LitElement {}\n");
+    const source = [
+      'import { LitElement } from "../../framework/lit.js";',
+      "export class UserCard extends LitElement {",
+      "  protected render(): unknown { return null; }",
+      "}",
+      "",
+    ].join("\n");
+    write(root, "src/card.ts", source);
+    const render = symbolIdentity({
+      source,
+      marker: "render",
+      file: "src/card.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "render",
+      localName: "render",
+      owner: "UserCard",
+    });
+    const response = analyzeSemanticQueries(
+      parseRequest(
+        semanticRequest(
+          root,
+          [
+            {
+              id: 0,
+              operation: "symbol-use",
+              symbol: render,
+              framework_contracts: [
+                {
+                  framework: "lit",
+                  package: "lit",
+                  heritage_symbol: "LitElement",
+                  heritage_names: ["LitElement"],
+                  relation: "extends",
+                  members: ["render"],
+                },
+              ],
+            },
+          ],
+          { projects: ["../../tsconfig.json"] },
+        ),
+      ),
+    );
+
+    assert.equal(response.results[0].assertion, "no-confirmed-use");
+    assert.equal(response.results[0].reasonCode, "framework-contract-provenance");
+    assert.equal(response.results[0].data.closed_world_eligible, false);
+  } finally {
+    rmSync(monorepo, { recursive: true, force: true });
   }
 });

@@ -8,8 +8,9 @@ use crate::params::{
     DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
     GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactClosureParams,
     ImpactParams, InspectTargetParams, ListBoundariesParams, ListSuppressionsParams,
-    ProjectInfoParams, RecommendParams, SecurityCandidatesParams, SemanticSymbolParams,
-    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    ProjectInfoParams, RecommendParams, SecurityCandidatesParams, SemanticImpactParams,
+    SemanticSymbolParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
+    TraceFileParams,
 };
 use crate::tools::{
     execute_code_mode, inspect_target, run_analyze, run_audit, run_check_changed,
@@ -190,11 +191,11 @@ impl FallowMcp {
         run_symbol_trace(&self.binary, params.0).await
     }
 
-    /// Return exact-symbol consumers, transitive affected files, and targeted tests for a TypeScript export. The result is advisory project-impact evidence and does not duplicate tsc or Oxlint diagnostics.
+    /// Return exact-symbol consumers, transitive affected files, and targeted tests for a TypeScript export or exported class method. Select either export_name, or both class_name and member_name. The result is advisory project-impact evidence and does not duplicate tsc or Oxlint diagnostics.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn symbol_impact(
         &self,
-        params: Parameters<SemanticSymbolParams>,
+        params: Parameters<SemanticImpactParams>,
     ) -> Result<CallToolResult, McpError> {
         run_symbol_impact(&self.binary, params.0).await
     }

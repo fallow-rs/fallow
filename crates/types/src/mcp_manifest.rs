@@ -391,13 +391,15 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "symbol_impact",
         kind: "impact",
-        description: "Return advisory exact-symbol consumers, affected files, and targeted tests for a TypeScript export; not a substitute for tsc or Oxlint",
+        description: "Return advisory exact-symbol consumers, affected files, and targeted tests for a TypeScript export or exported class method; select either export_name, or both class_name and member_name; not a substitute for tsc or Oxlint",
         cli_command: Some(
-            "fallow dead-code --type-aware --symbol-impact <file:export> --format json --quiet",
+            "fallow dead-code --type-aware --symbol-impact <file:export-or-class.member> --format json --quiet",
         ),
         key_params: &[
             "file",
             "export_name",
+            "class_name",
+            "member_name",
             "type_aware_projects",
             "type_aware_require",
         ],

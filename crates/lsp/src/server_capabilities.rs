@@ -37,3 +37,33 @@ pub fn client_supports_workspace_diagnostic_refresh(capabilities: &ClientCapabil
         .and_then(|diagnostics| diagnostics.refresh_support)
         .unwrap_or(false)
 }
+
+pub fn client_supports_watched_file_registration(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.did_change_watched_files.as_ref())
+        .and_then(|watched_files| watched_files.dynamic_registration)
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ls_types::{DidChangeWatchedFilesClientCapabilities, WorkspaceClientCapabilities};
+
+    #[test]
+    fn watched_file_registration_requires_explicit_dynamic_support() {
+        let mut capabilities = ClientCapabilities::default();
+        assert!(!client_supports_watched_file_registration(&capabilities));
+
+        capabilities.workspace = Some(WorkspaceClientCapabilities {
+            did_change_watched_files: Some(DidChangeWatchedFilesClientCapabilities {
+                dynamic_registration: Some(true),
+                relative_pattern_support: None,
+            }),
+            ..Default::default()
+        });
+        assert!(client_supports_watched_file_registration(&capabilities));
+    }
+}

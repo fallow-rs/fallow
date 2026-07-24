@@ -7,6 +7,8 @@
 #[path = "common/mod.rs"]
 mod common;
 
+use std::path::Path;
+
 use common::{
     fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
     run_fallow_raw, run_fallow_raw_with_env,
@@ -169,6 +171,162 @@ fn environment_enabled_type_aware_rejects_renderer_without_semantic_provenance()
         output.stdout,
         output.stderr
     );
+}
+
+#[test]
+fn type_aware_class_method_impact_uses_exact_owner_identity() {
+    let root = fixture_path("type-aware-class-method-impact");
+    let root_arg = root.to_string_lossy();
+    let sidecar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/type-aware-sidecar/fallow-type-aware.mjs");
+    let sidecar_arg = sidecar.to_string_lossy();
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--type-aware",
+            "--symbol-impact",
+            "src/repository.ts:UserRepository.save",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["target"]["owner"], serde_json::json!("UserRepository"));
+    assert_eq!(json["target"]["local_name"], serde_json::json!("save"));
+    let direct_consumers = json["direct_consumers"]
+        .as_array()
+        .expect("direct consumers");
+    assert!(
+        direct_consumers
+            .iter()
+            .any(|consumer| consumer["path"] == "src/service.ts")
+    );
+    assert!(
+        direct_consumers
+            .iter()
+            .all(|consumer| consumer["path"] != "src/repository.ts"),
+        "the same-named AuditRepository.save declaration is not a consumer"
+    );
+
+    let preview = run_fallow_raw_with_env(
+        &[
+            "fix",
+            "--root",
+            &root_arg,
+            "--type-aware",
+            "--dry-run",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    );
+    assert_eq!(preview.code, 0, "stderr: {}", preview.stderr);
+    let preview = parse_json(&preview);
+    let fixes = preview["fixes"].as_array().expect("fix preview");
+    assert!(fixes.iter().any(|fix| {
+        fix["type"] == "remove_class_member"
+            && fix["parent"] == "UserRepository"
+            && fix["name"] == "purge"
+            && fix["closed_world_eligible"] == true
+    }));
+    assert!(
+        fixes
+            .iter()
+            .all(|fix| !(fix["parent"] == "UserRepository" && fix["name"] == "save")),
+        "an exact call must prevent a class-member fix"
+    );
+}
+
+#[test]
+fn type_aware_framework_contract_requires_package_provenance() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create source directory");
+    std::fs::create_dir_all(root.join("node_modules/lit")).expect("create fake lit package");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"framework-contract","private":true,"type":"module","main":"src/index.ts","dependencies":{"lit":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"module":"nodenext","moduleResolution":"nodenext","strict":true},"include":["src/**/*.ts"]}"#,
+    )
+    .expect("write tsconfig");
+    std::fs::write(
+        root.join("node_modules/lit/package.json"),
+        r#"{"name":"lit","version":"1.0.0","types":"index.d.ts"}"#,
+    )
+    .expect("write fake lit manifest");
+    std::fs::write(
+        root.join("node_modules/lit/index.d.ts"),
+        "export declare class LitElement {}\n",
+    )
+    .expect("write fake lit declaration");
+    std::fs::write(
+        root.join("src/real.ts"),
+        "import { LitElement } from \"lit\";\nexport class RealElement extends LitElement {\n  render(): unknown { return null; }\n}\n",
+    )
+    .expect("write package-backed class");
+    std::fs::write(
+        root.join("src/local.ts"),
+        "class LitElement {}\nexport class LocalElement extends LitElement {\n  render(): unknown { return null; }\n}\n",
+    )
+    .expect("write local same-name class");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { RealElement } from \"./real.js\";\nimport { LocalElement } from \"./local.js\";\nnew RealElement();\nnew LocalElement();\n",
+    )
+    .expect("write entry point");
+
+    let root_arg = root.to_string_lossy();
+    let sidecar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/type-aware-sidecar/fallow-type-aware.mjs");
+    let sidecar_arg = sidecar.to_string_lossy();
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--unused-class-members",
+            "--type-aware",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    );
+
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let decisions = json["_meta"]["type_aware"]["candidate_decisions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("semantic decisions missing: {}", output.stdout));
+    let real = decisions
+        .iter()
+        .find(|decision| decision["subject"]["owner"] == "RealElement")
+        .expect("real framework method decision");
+    assert_eq!(real["decision"], "contract-preserved");
+    assert_eq!(real["framework_contract"]["package"], "lit");
+    assert!(
+        real["explanation"]
+            .as_str()
+            .is_some_and(|explanation| explanation.contains("lit contract"))
+    );
+    let local = decisions
+        .iter()
+        .find(|decision| decision["subject"]["owner"] == "LocalElement")
+        .expect("local same-name method decision");
+    assert_eq!(local["decision"], "confirmed-no-static-references");
+    assert!(local.get("framework_contract").is_none());
+    assert_eq!(local["closed_world_eligible"], true);
 }
 
 #[test]

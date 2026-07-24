@@ -8,6 +8,7 @@
 //! relevant Nest interface so unrelated classes are unaffected.
 
 use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use fallow_types::semantic::{SemanticFrameworkContract, SemanticFrameworkRelation};
 
 use super::Plugin;
 
@@ -124,6 +125,32 @@ impl Plugin for NestJsPlugin {
             implements_rule("ExceptionFilter", FILTER_MEMBERS),
             implements_rule("NestMiddleware", MIDDLEWARE_MEMBERS),
         ]
+    }
+
+    fn framework_class_member_contracts(&self) -> Vec<SemanticFrameworkContract> {
+        [
+            ("NestModule", NEST_MODULE_MEMBERS),
+            ("OnModuleInit", MODULE_LIFECYCLE_MEMBERS),
+            ("OnModuleDestroy", MODULE_LIFECYCLE_MEMBERS),
+            ("OnApplicationBootstrap", MODULE_LIFECYCLE_MEMBERS),
+            ("BeforeApplicationShutdown", MODULE_LIFECYCLE_MEMBERS),
+            ("OnApplicationShutdown", MODULE_LIFECYCLE_MEMBERS),
+            ("CanActivate", GUARD_MEMBERS),
+            ("NestInterceptor", INTERCEPTOR_MEMBERS),
+            ("PipeTransform", PIPE_MEMBERS),
+            ("ExceptionFilter", FILTER_MEMBERS),
+            ("NestMiddleware", MIDDLEWARE_MEMBERS),
+        ]
+        .into_iter()
+        .map(|(heritage_symbol, members)| SemanticFrameworkContract {
+            framework: self.name().to_string(),
+            package: "@nestjs/common".to_string(),
+            heritage_symbol: heritage_symbol.to_string(),
+            heritage_names: vec![heritage_symbol.to_string()],
+            relation: SemanticFrameworkRelation::Implements,
+            members: members.iter().map(|member| (*member).to_string()).collect(),
+        })
+        .collect()
     }
 }
 
@@ -273,5 +300,16 @@ mod tests {
                 "every scoped NestJS rule must have an `implements` constraint; found: {s:?}"
             );
         }
+    }
+
+    #[test]
+    fn semantic_contracts_require_nest_common_interfaces() {
+        let contracts = NestJsPlugin.framework_class_member_contracts();
+        assert!(contracts.iter().any(|contract| {
+            contract.package == "@nestjs/common"
+                && contract.heritage_symbol == "CanActivate"
+                && contract.members == ["canActivate".to_string()]
+                && contract.relation == SemanticFrameworkRelation::Implements
+        }));
     }
 }

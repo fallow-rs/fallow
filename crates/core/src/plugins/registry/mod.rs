@@ -241,6 +241,8 @@ pub struct AggregatedPluginResult {
     /// flagged as unused. Extends the built-in Angular/React lifecycle allowlist
     /// with framework-invoked method names, optionally scoped by class heritage.
     pub used_class_members: Vec<UsedClassMemberRule>,
+    /// Exact framework contracts with plugin and package provenance.
+    pub framework_class_member_contracts: Vec<fallow_types::semantic::SemanticFrameworkContract>,
     /// Dependencies referenced in config files (should not be flagged unused).
     pub referenced_dependencies: Vec<String>,
     /// Dependencies referenced by package.json metadata, scoped to that package.json path.
@@ -358,9 +360,10 @@ impl AggregatedPluginResult {
     /// Callers that need the workspace prefix applied must call
     /// [`Self::apply_workspace_prefix`] on `other` first; this method does not
     /// transform any path. Dedup-bearing fields (`active_plugins`, the virtual
-    /// prefix/suffix and generated-pattern lists) deduplicate the incoming
-    /// values against the contents already in `self`, matching the pre-#444
-    /// `seen`-set behavior. `entry_point_roles` is first-writer-wins.
+    /// prefix/suffix, generated-pattern, and semantic framework-contract lists)
+    /// deduplicate the incoming values against the contents already in `self`,
+    /// matching the pre-#444 `seen`-set behavior. `entry_point_roles` is
+    /// first-writer-wins.
     pub(crate) fn merge_into(&mut self, other: Self) {
         let Self {
             entry_patterns,
@@ -369,6 +372,7 @@ impl AggregatedPluginResult {
             always_used,
             used_exports,
             used_class_members,
+            framework_class_member_contracts,
             referenced_dependencies,
             package_referenced_dependencies,
             discovered_always_used,
@@ -396,6 +400,11 @@ impl AggregatedPluginResult {
         self.always_used.extend(always_used);
         self.used_exports.extend(used_exports);
         self.used_class_members.extend(used_class_members);
+        for contract in framework_class_member_contracts {
+            if !self.framework_class_member_contracts.contains(&contract) {
+                self.framework_class_member_contracts.push(contract);
+            }
+        }
         self.referenced_dependencies.extend(referenced_dependencies);
         self.package_referenced_dependencies
             .extend(package_referenced_dependencies);

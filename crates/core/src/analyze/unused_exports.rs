@@ -2311,6 +2311,7 @@ mod tests {
                 })
                 .collect(),
             used_class_members: vec![],
+            framework_class_member_contracts: vec![],
             scss_include_paths: vec![],
             entry_point_roles: FxHashMap::default(),
             referenced_dependencies: vec![],

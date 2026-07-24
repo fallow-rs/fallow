@@ -259,6 +259,96 @@ pub fn semantic_symbol_for_class_member(
     })
 }
 
+/// Stable reason why an exact class-method target cannot be resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticClassMethodResolutionError {
+    /// The requested file is not part of the retained module graph.
+    FileNotFound,
+    /// The requested owner or method does not exist in the file.
+    SymbolNotFound,
+    /// More than one declaration matches the exact owner and method.
+    AmbiguousSymbol,
+    /// The matching declaration is not a supported class method.
+    UnsupportedSyntax,
+}
+
+impl std::fmt::Display for SemanticClassMethodResolutionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reason = match self {
+            Self::FileNotFound => "file-not-found",
+            Self::SymbolNotFound => "unknown-symbol",
+            Self::AmbiguousSymbol => "ambiguous-symbol",
+            Self::UnsupportedSyntax => "unsupported-syntax",
+        };
+        formatter.write_str(reason)
+    }
+}
+
+/// Resolve one exact exported class method without a name-based fallback.
+pub fn semantic_symbol_for_exact_class_method(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    owner_name: &str,
+    member_name: &str,
+) -> Result<fallow_types::semantic::SemanticSymbol, SemanticClassMethodResolutionError> {
+    use fallow_types::extract::MemberKind;
+    use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
+
+    let module = graph
+        .modules
+        .iter()
+        .find(|module| path_matches(&module.path, root, file_path))
+        .ok_or(SemanticClassMethodResolutionError::FileNotFound)?;
+    let owners = module
+        .exports
+        .iter()
+        .filter(|export| export_name_matches(export, owner_name))
+        .collect::<Vec<_>>();
+    if owners.len() != 1 {
+        return Err(if owners.is_empty() {
+            SemanticClassMethodResolutionError::SymbolNotFound
+        } else {
+            SemanticClassMethodResolutionError::AmbiguousSymbol
+        });
+    }
+    let owner = owners[0];
+    let members = owner
+        .members
+        .iter()
+        .filter(|member| member.name == member_name)
+        .collect::<Vec<_>>();
+    if members.len() != 1 {
+        return Err(if members.is_empty() {
+            SemanticClassMethodResolutionError::SymbolNotFound
+        } else {
+            SemanticClassMethodResolutionError::AmbiguousSymbol
+        });
+    }
+    let member = members[0];
+    if member.kind != MemberKind::ClassMethod {
+        return Err(SemanticClassMethodResolutionError::UnsupportedSyntax);
+    }
+    let source = std::fs::read_to_string(&module.path)
+        .map_err(|_| SemanticClassMethodResolutionError::SymbolNotFound)?;
+    let offsets = fallow_types::extract::compute_line_offsets(&source);
+    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
+    Ok(SemanticSymbol {
+        path: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        namespace: SemanticNamespace::Value,
+        declaration_kind: "class_method".to_string(),
+        exported_name: member_name.to_string(),
+        local_name: member_name.to_string(),
+        owner: Some(owner_name.to_string()),
+        line,
+        col,
+    })
+}
+
 /// Trace a class / enum / store MEMBER when `--trace FILE:NAME`'s `NAME` is not
 /// a top-level export but a member declared on one (issue #1744). Runs on the
 /// graph only, so it reports the OWNING export's reachability and usage (the
@@ -953,6 +1043,87 @@ mod tests {
         let graph = build_class_member_graph();
         let root = Path::new("/project");
         assert!(trace_class_member(&graph, root, "src/controller.ts", "nope").is_none());
+    }
+
+    #[test]
+    fn exact_class_method_resolution_rejects_overloads_without_guessing() {
+        use fallow_types::extract::{MemberInfo, MemberKind};
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let path = root.join("repository.ts");
+        let source =
+            "export class Repository {\n  save(): void;\n  save(): void {}\n  run(): void {}\n}\n";
+        std::fs::write(&path, source).unwrap();
+        let first = source.find("save").unwrap() as u32;
+        let second = source.rfind("save").unwrap() as u32;
+        let run = source.find("run").unwrap() as u32;
+        let member = |name: &str, start| MemberInfo {
+            name: name.to_string(),
+            kind: MemberKind::ClassMethod,
+            span: oxc_span::Span::new(start, start + 4),
+            has_decorator: false,
+            decorator_names: vec![],
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        };
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: path.clone(),
+            size_bytes: source.len() as u64,
+        }];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path,
+            exports: vec![ExportInfo {
+                name: ExportName::Named("Repository".to_string()),
+                local_name: Some("Repository".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::new(0, source.len() as u32),
+                members: vec![
+                    member("save", first),
+                    member("save", second),
+                    member("run", run),
+                ],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..Default::default()
+        }];
+        let graph = ModuleGraph::build(&resolved_modules, &[], &files);
+
+        assert_eq!(
+            semantic_symbol_for_exact_class_method(
+                &graph,
+                root,
+                "repository.ts",
+                "Repository",
+                "save",
+            ),
+            Err(SemanticClassMethodResolutionError::AmbiguousSymbol)
+        );
+        assert_eq!(
+            semantic_symbol_for_exact_class_method(
+                &graph,
+                root,
+                "repository.ts",
+                "OtherRepository",
+                "save",
+            ),
+            Err(SemanticClassMethodResolutionError::SymbolNotFound)
+        );
+        let resolved = semantic_symbol_for_exact_class_method(
+            &graph,
+            root,
+            "repository.ts",
+            "Repository",
+            "run",
+        )
+        .unwrap();
+        assert_eq!(resolved.owner.as_deref(), Some("Repository"));
+        assert_eq!(resolved.local_name, "run");
     }
 
     /// Build a graph where the controller declaring `Ctrl` is NOT imported by

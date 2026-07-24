@@ -139,21 +139,42 @@ pub(super) fn handle_type_aware_trace_output(
         ));
     }
     let impact_spec = trace_opts.symbol_impact.as_ref()?;
-    let Some((file_path, export_name)) = parse_trace_spec(impact_spec) else {
+    let Some((file_path, target_name)) = parse_trace_spec(impact_spec) else {
         return Some(emit_error(
-            "--symbol-impact requires FILE:EXPORT_NAME format",
+            "--symbol-impact requires FILE:EXPORT_NAME or FILE:CLASS.METHOD format",
             2,
             config.output,
         ));
     };
-    let Some(symbol) = fallow_engine::trace::semantic_symbol_for_export(
+    let symbol = if let Some(symbol) = fallow_engine::trace::semantic_symbol_for_export(
         graph,
         &config.root,
         file_path,
-        export_name,
-    ) else {
+        target_name,
+    ) {
+        symbol
+    } else if let Some((owner_name, member_name)) = parse_class_method_target(target_name) {
+        match fallow_engine::trace::semantic_symbol_for_exact_class_method(
+            graph,
+            &config.root,
+            file_path,
+            owner_name,
+            member_name,
+        ) {
+            Ok(symbol) => symbol,
+            Err(reason) => {
+                return Some(emit_error(
+                    &format!(
+                        "class method '{target_name}' is unavailable for exact impact analysis: {reason}"
+                    ),
+                    2,
+                    config.output,
+                ));
+            }
+        }
+    } else {
         return Some(emit_error(
-            &format!("export '{export_name}' not found in '{file_path}'"),
+            &format!("export or class method '{target_name}' not found in '{file_path}'"),
             2,
             config.output,
         ));
@@ -344,6 +365,14 @@ fn parse_trace_spec(spec: &str) -> Option<(&str, &str)> {
     spec.rsplit_once(':')
 }
 
+fn parse_class_method_target(target: &str) -> Option<(&str, &str)> {
+    let (owner, member) = target.split_once('.')?;
+    if owner.is_empty() || member.is_empty() || member.contains('.') {
+        return None;
+    }
+    Some((owner, member))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,6 +417,18 @@ mod tests {
     fn parse_trace_spec_nested_path_with_colons() {
         let result = parse_trace_spec("packages/core:src/index.ts:myExport");
         assert_eq!(result, Some(("packages/core:src/index.ts", "myExport")));
+    }
+
+    #[test]
+    fn parse_class_method_target_requires_exact_owner_and_member() {
+        assert_eq!(
+            parse_class_method_target("UserRepository.save"),
+            Some(("UserRepository", "save"))
+        );
+        assert_eq!(parse_class_method_target("save"), None);
+        assert_eq!(parse_class_method_target("A.B.save"), None);
+        assert_eq!(parse_class_method_target(".save"), None);
+        assert_eq!(parse_class_method_target("Repository."), None);
     }
 
     #[test]

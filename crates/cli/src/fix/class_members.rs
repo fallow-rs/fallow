@@ -303,6 +303,7 @@ mod tests {
             owning_projects: vec!["tsconfig.json".to_string()],
             evidence: Vec::new(),
             contract: None,
+            framework_contract: None,
             closed_world_eligible: true,
             edit_guard: Some(SemanticEditGuard {
                 start,

@@ -179,8 +179,10 @@ pub use sarif_output::{
 pub use security_output::SecurityGateMode;
 pub use type_aware::{
     SemanticCouplingOutcome, SemanticDeadCodeOutcome, SemanticInspectOutcome, TypeAwareError,
-    TypeAwareOutcome, TypeAwareStatus, inspect_symbol as inspect_type_aware_symbol,
+    TypeAwareFileChanges, TypeAwareOutcome, TypeAwareSession, TypeAwareStatus,
+    discard_unverified_semantic_candidates, inspect_symbol as inspect_type_aware_symbol,
     merge_type_aware_meta, refine_dead_code_results as refine_type_aware_results,
+    refine_dead_code_results_in_session as refine_type_aware_results_in_session,
     refine_programmatic_dead_code as refine_type_aware_dead_code, shutdown_type_aware_sidecars,
     status as type_aware_status, symbol_impact as run_type_aware_symbol_impact,
     symbol_impact as type_aware_symbol_impact, terminate_active_type_aware_sidecars,

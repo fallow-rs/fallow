@@ -19166,6 +19166,38 @@
           ],
           "description": "Whether this Program served more than one semantic query in the batch."
         },
+        "program_shared_across_queries": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether this Program served more than one query in the current batch."
+        },
+        "program_reused_from_previous_snapshot": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the root-bound semantic session reused the prior snapshot."
+        },
+        "snapshot_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Monotonic revision within the root-bound semantic session."
+        },
+        "invalidation_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeAwareInvalidationKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Full, incremental, or no invalidation before this query."
+        },
         "reason_code": {
           "anyOf": [
             {
@@ -19622,6 +19654,11 @@
         },
         {
           "type": "string",
+          "const": "virtual-dispatch",
+          "description": "Interface, inherited, or virtual dispatch may reach an implementation\nwithout referencing that concrete method symbol."
+        },
+        {
+          "type": "string",
           "const": "dynamic-member-access",
           "description": "A computed or reflective member access can address the declaration."
         },
@@ -19659,6 +19696,11 @@
           "type": "string",
           "const": "incomplete-project-coverage",
           "description": "Not every project that owns the declaration completed the query."
+        },
+        {
+          "type": "string",
+          "const": "framework-contract-provenance",
+          "description": "An external framework declaration could not be attributed to an exact\npackage."
         },
         {
           "type": "string",
@@ -19988,8 +20030,8 @@
           "description": "Targeted-test count before evidence bounding."
         },
         "confidence": {
-          "type": "string",
-          "description": "Confidence after accounting for dynamic behavior."
+          "description": "Confidence after accounting for dynamic behavior.",
+          "$ref": "#/definitions/SemanticImpactConfidence"
         },
         "omissions": {
           "type": "array",
@@ -20945,6 +20987,17 @@
           ],
           "description": "Inherited contract evidence, when present."
         },
+        "framework_contract": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SemanticFrameworkContractEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Framework-owned contract evidence, distinct from TypeScript contracts."
+        },
         "closed_world_eligible": {
           "type": "boolean",
           "description": "Whether this exact decision may enable a guarded class-member fix."
@@ -21111,6 +21164,89 @@
         "declaration_sha256"
       ],
       "description": "Exact source span and content hash used to guard semantic source edits."
+    },
+    "SemanticFrameworkContractEvidence": {
+      "type": "object",
+      "properties": {
+        "framework": {
+          "type": "string",
+          "description": "Fallow plugin that supplied the contract."
+        },
+        "package": {
+          "type": "string",
+          "description": "Exact package that owns the heritage declaration."
+        },
+        "relation": {
+          "description": "Extends or implements relation.",
+          "$ref": "#/definitions/SemanticFrameworkRelation"
+        },
+        "declaration": {
+          "description": "Exact framework base class or interface declaration.",
+          "$ref": "#/definitions/SemanticSymbol"
+        }
+      },
+      "required": [
+        "framework",
+        "package",
+        "relation",
+        "declaration"
+      ],
+      "description": "Checker-validated evidence that a framework contract preserves a member."
+    },
+    "SemanticFrameworkRelation": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "extends",
+          "description": "The class extends a framework base class."
+        },
+        {
+          "type": "string",
+          "const": "implements",
+          "description": "The class implements a framework interface."
+        }
+      ],
+      "description": "Heritage relation used by a framework-owned class-member contract."
+    },
+    "TypeAwareInvalidationKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "full",
+          "description": "The backend rebuilt project state from a clean snapshot."
+        },
+        {
+          "type": "string",
+          "const": "incremental",
+          "description": "The backend applied an explicit source-file change set."
+        },
+        {
+          "type": "string",
+          "const": "none",
+          "description": "No filesystem change was reported between compatible requests."
+        }
+      ],
+      "description": "How a persistent semantic snapshot was refreshed."
+    },
+    "SemanticImpactConfidence": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "high",
+          "description": "All reported static paths are complete within the selected project\nscope."
+        },
+        {
+          "type": "string",
+          "const": "bounded",
+          "description": "Static paths are useful, but virtual dispatch or dynamic behavior\nbounds completeness."
+        },
+        {
+          "type": "string",
+          "const": "unavailable",
+          "description": "Impact analysis could not run."
+        }
+      ],
+      "description": "Confidence of exact-symbol impact analysis after known dynamic gaps."
     }
   }
 }

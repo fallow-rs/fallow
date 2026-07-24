@@ -103,6 +103,9 @@ fn collect_static_plugin_rules(
     for rule in plugin.used_class_member_rules() {
         result.used_class_members.push(rule);
     }
+    result
+        .framework_class_member_contracts
+        .extend(plugin.framework_class_member_contracts());
     for pat in plugin.fixture_glob_patterns() {
         result
             .fixture_patterns

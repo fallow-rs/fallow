@@ -33,7 +33,9 @@ fn analyze_project_root_for_test(
         std::mem::take(merged_results),
         std::mem::take(merged_duplication),
     );
-    let cancellation = AtomicBool::new(false);
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let type_aware_sessions = Arc::new(StdMutex::new(FxHashMap::default()));
+    let type_aware_changes = fallow_api::TypeAwareFileChanges::default();
     analyze_project_root(&mut ProjectRootAnalysisInput {
         project_root,
         config_path,
@@ -42,6 +44,8 @@ fn analyze_project_root_for_test(
         production_override,
         inline_complexity_enabled,
         type_aware_options: None,
+        type_aware_sessions: &type_aware_sessions,
+        type_aware_changes: &type_aware_changes,
         cancellation: &cancellation,
         changed_files: None,
         merged_analysis: &mut merged_analysis,
@@ -287,6 +291,8 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         production_override: None,
         inline_complexity_enabled: false,
         type_aware_options: None,
+        type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
+        type_aware_changes: fallow_api::TypeAwareFileChanges::default(),
         root: root.clone(),
         toplevel: Some(root.clone()),
         changed_since: None,
@@ -541,6 +547,78 @@ async fn did_save_waits_for_in_flight_startup_analysis() {
         backend.analysis.read().await.is_some(),
         "didSave must rerun analysis after the in-flight startup analysis completes",
     );
+    assert_eq!(backend.analysis_epoch.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn type_aware_file_classification_covers_source_and_resolution_inputs() {
+    for path in [
+        "tsconfig.json",
+        "tsconfig.app.json",
+        "jsconfig.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "fallow.toml",
+        "src/framework.d.ts",
+    ] {
+        assert!(
+            type_aware_resolution_file(Path::new(path)),
+            "{path} must force a full semantic invalidation"
+        );
+    }
+    for path in ["src/index.ts", "src/view.tsx", "src/runtime.js"] {
+        assert!(type_aware_source_file(Path::new(path)));
+        assert!(!type_aware_resolution_file(Path::new(path)));
+    }
+    assert!(!type_aware_source_file(Path::new("README.md")));
+}
+
+#[test]
+fn type_aware_change_queue_deduplicates_and_fails_closed_at_capacity() {
+    let mut changes = fallow_api::TypeAwareFileChanges::default();
+    record_type_aware_file_change(
+        &mut changes,
+        PathBuf::from("src/index.ts"),
+        FileChangeType::CHANGED,
+    );
+    record_type_aware_file_change(
+        &mut changes,
+        PathBuf::from("src/index.ts"),
+        FileChangeType::CHANGED,
+    );
+    assert_eq!(changes.changed, [PathBuf::from("src/index.ts")]);
+
+    changes.changed = (0..MAX_PENDING_TYPE_AWARE_CHANGES)
+        .map(|index| PathBuf::from(format!("src/file-{index}.ts")))
+        .collect();
+    record_type_aware_file_change(
+        &mut changes,
+        PathBuf::from("src/overflow.ts"),
+        FileChangeType::CHANGED,
+    );
+    assert!(changes.invalidate_all);
+    assert!(changes.changed.is_empty());
+}
+
+#[test]
+fn failed_analysis_restores_semantic_changes_as_full_invalidation() {
+    let pending = StdMutex::new(fallow_api::TypeAwareFileChanges {
+        created: vec![PathBuf::from("src/newer.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    });
+    let attempted = fallow_api::TypeAwareFileChanges {
+        changed: vec![PathBuf::from("src/changed.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    };
+
+    restore_failed_type_aware_changes(&pending, &attempted);
+
+    let pending = pending.lock().expect("pending changes");
+    assert!(pending.invalidate_all);
+    assert!(pending.changed.is_empty());
+    assert!(pending.created.is_empty());
+    assert!(pending.deleted.is_empty());
+    drop(pending);
 }
 
 #[test]
@@ -1967,6 +2045,7 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             hooks: fallow_api::editor_results::ReactHookSummary::default(),
             props: Vec::new(),
         }],
+        semantic_framework_contracts: vec![],
     }
 }
 
@@ -2149,6 +2228,8 @@ fn changed_since_input(
         production_override: None,
         inline_complexity_enabled: false,
         type_aware_options: None,
+        type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
+        type_aware_changes: fallow_api::TypeAwareFileChanges::default(),
         root: root.to_path_buf(),
         toplevel: Some(root.to_path_buf()),
         changed_since: Some(changed_since.to_string()),

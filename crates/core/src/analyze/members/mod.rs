@@ -159,6 +159,7 @@ struct MemberSkipContext<'a> {
     error_subclass_keys: &'a FxHashSet<ExportKey>,
     ol_interaction_subclass_keys: &'a FxHashSet<ExportKey>,
     allowlist: &'a ClassMemberAllowlist<'a>,
+    semantic_framework_candidates: &'a ClassMemberAllowlist<'a>,
     super_class: Option<&'a str>,
     implemented_interfaces: &'a [String],
     is_public_api_class_export: bool,
@@ -759,9 +760,18 @@ pub struct UnusedMemberResults {
     /// Unused TypeScript enum members.
     pub enum_members: Vec<UnusedMember>,
     /// Unused class methods / properties.
-    pub class_members: Vec<UnusedMember>,
+    pub class_members: Vec<UnusedClassMemberCandidate>,
     /// Unused store members (Pinia stores).
     pub store_members: Vec<UnusedMember>,
+}
+
+/// A class-member candidate plus whether it only exists for semantic
+/// framework-contract validation.
+pub struct UnusedClassMemberCandidate {
+    /// The candidate reported by the member scan.
+    pub member: UnusedMember,
+    /// Whether syntactic analysis would otherwise suppress this member.
+    pub semantic_only: bool,
 }
 
 /// Per-run memoized lookup maps shared across every member-propagation pass.
@@ -817,6 +827,9 @@ pub(super) struct UnusedMemberScanInput<'a> {
     pub(super) suppressions: &'a SuppressionContext<'a>,
     pub(super) line_offsets_by_file: &'a LineOffsetsMap<'a>,
     pub(super) user_class_member_allowlist: &'a [UsedClassMemberRule],
+    /// Plugin rules withheld from syntactic suppression so the semantic pass
+    /// can validate exact framework package provenance.
+    pub(super) semantic_framework_candidates: &'a [UsedClassMemberRule],
     pub(super) ignore_decorators: &'a [String],
     pub(super) public_api_entry_points: &'a FxHashSet<FileId>,
     /// Whether a Lit dependency is declared. When true, a `@state()`-decorated
@@ -837,11 +850,16 @@ struct PreparedMemberScan<'a> {
     ol_interaction_subclass_keys: FxHashSet<ExportKey>,
 }
 
-type MemberScanBuckets = (Vec<UnusedMember>, Vec<UnusedMember>, Vec<UnusedMember>);
+type MemberScanBuckets = (
+    Vec<UnusedMember>,
+    Vec<UnusedClassMemberCandidate>,
+    Vec<UnusedMember>,
+);
 
 struct MemberReportContext<'a, 'scan> {
     input: UnusedMemberScanInput<'a>,
     allowlist: &'scan ClassMemberAllowlist<'a>,
+    semantic_framework_candidates: &'scan ClassMemberAllowlist<'a>,
     ignore_decorators: &'scan IgnoreDecoratorSet,
     prepared: &'scan PreparedMemberScan<'a>,
 }
@@ -853,6 +871,8 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     let mut unused_class_members = Vec::new();
     let mut unused_store_members = Vec::new();
     let allowlist = ClassMemberAllowlist::from_rules(input.user_class_member_allowlist);
+    let semantic_framework_candidates =
+        ClassMemberAllowlist::from_rules(input.semantic_framework_candidates);
     let ignore_decorators = IgnoreDecoratorSet::from_config(input.ignore_decorators);
 
     record_seen_ignore_decorators(input.graph, &ignore_decorators);
@@ -861,6 +881,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     let member_results = MemberReportContext {
         input,
         allowlist: &allowlist,
+        semantic_framework_candidates: &semantic_framework_candidates,
         ignore_decorators: &ignore_decorators,
         prepared: &prepared,
     }
@@ -994,6 +1015,7 @@ impl MemberReportContext<'_, '_> {
                     error_subclass_keys: &self.prepared.error_subclass_keys,
                     ol_interaction_subclass_keys: &self.prepared.ol_interaction_subclass_keys,
                     allowlist: self.allowlist,
+                    semantic_framework_candidates: self.semantic_framework_candidates,
                     super_class,
                     implemented_interfaces,
                     is_public_api_class_export,
@@ -1028,7 +1050,12 @@ impl MemberReportContext<'_, '_> {
         ) else {
             return;
         };
-        push_unused_member(buckets, unused, member.kind);
+        let semantic_only = skip_context.semantic_framework_candidates.matches(
+            member.name.as_str(),
+            skip_context.super_class,
+            skip_context.implemented_interfaces,
+        );
+        push_unused_member(buckets, unused, member.kind, semantic_only);
     }
 }
 
@@ -1040,10 +1067,20 @@ struct MemberScanTarget<'a> {
     store_only_scan: bool,
 }
 
-fn push_unused_member(buckets: &mut MemberScanBuckets, unused: UnusedMember, kind: MemberKind) {
+fn push_unused_member(
+    buckets: &mut MemberScanBuckets,
+    unused: UnusedMember,
+    kind: MemberKind,
+    semantic_only: bool,
+) {
     match kind {
         MemberKind::EnumMember => buckets.0.push(unused),
-        MemberKind::ClassMethod | MemberKind::ClassProperty => buckets.1.push(unused),
+        MemberKind::ClassMethod | MemberKind::ClassProperty => {
+            buckets.1.push(UnusedClassMemberCandidate {
+                member: unused,
+                semantic_only,
+            });
+        }
         MemberKind::StoreMember => buckets.2.push(unused),
         MemberKind::NamespaceMember => unreachable!(),
     }
@@ -1378,9 +1415,15 @@ fn is_class_member_kind(kind: MemberKind) -> bool {
 }
 
 fn class_member_runtime_credit_applies(member: &MemberInfo, ctx: &MemberSkipContext<'_>) -> bool {
+    let semantic_framework_candidate = ctx.semantic_framework_candidates.matches(
+        member.name.as_str(),
+        ctx.super_class,
+        ctx.implemented_interfaces,
+    );
     is_class_member_kind(member.kind)
-        && (is_react_lifecycle_method(&member.name)
-            || is_angular_lifecycle_method(&member.name)
+        && (((is_react_lifecycle_method(&member.name)
+            || is_angular_lifecycle_method(&member.name))
+            && !semantic_framework_candidate)
             || is_native_custom_element_lifecycle_method(&member.name, ctx.super_class)
             || is_error_subclass_runtime_member(
                 &member.name,

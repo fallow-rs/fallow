@@ -873,14 +873,26 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
     };
 
     let mut user_class_members = input.config.used_class_members.clone();
+    let mut semantic_framework_candidates = Vec::new();
     if let Some(plugin_result) = plugin_result {
-        user_class_members.extend(plugin_result.used_class_members.iter().cloned());
+        for rule in &plugin_result.used_class_members {
+            if input.config.type_aware.enabled
+                && plugin_result
+                    .framework_class_member_contracts
+                    .iter()
+                    .any(|contract| framework_contract_covers_rule(contract, rule))
+            {
+                semantic_framework_candidates.push(rule.clone());
+            } else {
+                user_class_members.push(rule.clone());
+            }
+        }
     }
 
     let (virtual_prefixes, generated_patterns, generated_type_prefixes) =
         derive_plugin_string_slices(plugin_result);
 
-    run_parallel_dead_code_detectors(DeadCodeDetectorInput {
+    let mut results = run_parallel_dead_code_detectors(DeadCodeDetectorInput {
         graph: input.graph,
         config: input.config,
         resolved_modules: input.resolved_modules,
@@ -891,13 +903,51 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         plugin_result,
         pkg: input.pkg,
         user_class_members: &user_class_members,
+        semantic_framework_candidates: &semantic_framework_candidates,
         public_api_entry_points: input.public_api_entry_points,
         virtual_prefixes: &virtual_prefixes,
         generated_patterns: &generated_patterns,
         generated_type_prefixes: &generated_type_prefixes,
         declared_deps: input.declared_deps,
         collect_usages: input.collect_usages,
-    })
+    });
+    if input.config.type_aware.enabled {
+        results.semantic_framework_contracts = plugin_result.map_or_else(Vec::new, |plugins| {
+            plugins.framework_class_member_contracts.clone()
+        });
+    }
+    results
+}
+
+fn framework_contract_covers_rule(
+    contract: &fallow_types::semantic::SemanticFrameworkContract,
+    rule: &fallow_config::UsedClassMemberRule,
+) -> bool {
+    use fallow_types::semantic::SemanticFrameworkRelation;
+
+    let fallow_config::UsedClassMemberRule::Scoped(rule) = rule else {
+        return false;
+    };
+    let heritage_matches =
+        match contract.relation {
+            SemanticFrameworkRelation::Extends => {
+                rule.implements.is_none()
+                    && rule.extends.as_ref().is_some_and(|name| {
+                        contract.heritage_names.iter().any(|known| known == name)
+                    })
+            }
+            SemanticFrameworkRelation::Implements => {
+                rule.extends.is_none()
+                    && rule.implements.as_ref().is_some_and(|name| {
+                        contract.heritage_names.iter().any(|known| known == name)
+                    })
+            }
+        };
+    heritage_matches
+        && rule
+            .members
+            .iter()
+            .all(|member| contract.members.contains(member))
 }
 
 /// Derive the borrowed plugin string slices (virtual module prefixes, generated
@@ -1777,6 +1827,7 @@ struct DeadCodeDetectorInput<'a> {
     plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     pkg: Option<&'a PackageJson>,
     user_class_members: &'a [fallow_config::UsedClassMemberRule],
+    semantic_framework_candidates: &'a [fallow_config::UsedClassMemberRule],
     public_api_entry_points: &'a FxHashSet<FileId>,
     virtual_prefixes: &'a [&'a str],
     generated_patterns: &'a [&'a str],
@@ -1921,6 +1972,7 @@ fn run_member_and_dependency_detectors(
                 suppressions: input.suppressions,
                 line_offsets_by_file: input.line_offsets_by_file,
                 user_class_members: input.user_class_members,
+                semantic_framework_candidates: input.semantic_framework_candidates,
                 public_api_entry_points: input.public_api_entry_points,
                 declared_deps: input.declared_deps,
             })
@@ -2460,6 +2512,7 @@ struct MemberDetectorInput<'a> {
     suppressions: &'a crate::suppress::SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     user_class_members: &'a [fallow_config::UsedClassMemberRule],
+    semantic_framework_candidates: &'a [fallow_config::UsedClassMemberRule],
     public_api_entry_points: &'a FxHashSet<FileId>,
     declared_deps: &'a FxHashSet<String>,
 }
@@ -2478,6 +2531,7 @@ fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
         suppressions: input.suppressions,
         line_offsets_by_file: input.line_offsets_by_file,
         user_class_member_allowlist: input.user_class_members,
+        semantic_framework_candidates: input.semantic_framework_candidates,
         ignore_decorators: &input.config.ignore_decorators,
         public_api_entry_points: input.public_api_entry_points,
         lit_active: input.declared_deps.contains("lit")
@@ -2526,14 +2580,21 @@ fn populate_unused_enum_member_findings(
 fn populate_unused_class_member_findings(
     results: &mut AnalysisResults,
     config: &ResolvedConfig,
-    class_members: Vec<UnusedMember>,
+    class_members: Vec<members::UnusedClassMemberCandidate>,
 ) {
     if config.rules.unused_class_members == Severity::Off {
         return;
     }
     results.unused_class_members = class_members
         .into_iter()
-        .map(UnusedClassMemberFinding::with_actions)
+        .map(|candidate| {
+            let finding = UnusedClassMemberFinding::with_actions(candidate.member);
+            if candidate.semantic_only {
+                finding.semantic_only_candidate()
+            } else {
+                finding
+            }
+        })
         .collect();
 }
 
@@ -2758,6 +2819,46 @@ fn run_unresolved_import_detector(
 )]
 mod tests {
     use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
+
+    #[test]
+    fn exact_framework_contract_only_replaces_its_matching_plugin_rule() {
+        use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+        use fallow_types::semantic::{SemanticFrameworkContract, SemanticFrameworkRelation};
+
+        let contract = SemanticFrameworkContract {
+            framework: "lit".to_string(),
+            package: "lit".to_string(),
+            heritage_symbol: "LitElement".to_string(),
+            heritage_names: vec!["LitElement".to_string()],
+            relation: SemanticFrameworkRelation::Extends,
+            members: vec!["render".to_string()],
+        };
+        let matching = UsedClassMemberRule::Scoped(ScopedUsedClassMemberRule {
+            extends: Some("LitElement".to_string()),
+            implements: None,
+            members: vec!["render".to_string()],
+        });
+        let local_name_only = UsedClassMemberRule::Scoped(ScopedUsedClassMemberRule {
+            extends: Some("LocalLitElement".to_string()),
+            implements: None,
+            members: vec!["render".to_string()],
+        });
+        let extra_member = UsedClassMemberRule::Scoped(ScopedUsedClassMemberRule {
+            extends: Some("LitElement".to_string()),
+            implements: None,
+            members: vec!["render".to_string(), "localHook".to_string()],
+        });
+
+        assert!(super::framework_contract_covers_rule(&contract, &matching));
+        assert!(!super::framework_contract_covers_rule(
+            &contract,
+            &local_name_only
+        ));
+        assert!(!super::framework_contract_covers_rule(
+            &contract,
+            &extra_member
+        ));
+    }
 
     fn line_col(source: &str, byte_offset: u32) -> (u32, u32) {
         let offsets = compute_line_offsets(source);

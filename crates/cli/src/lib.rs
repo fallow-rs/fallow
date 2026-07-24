@@ -179,7 +179,7 @@ Use --only/--skip to select specific analyses.
 
 When the agent is about to...
   delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
-  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export>
+  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
   delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
   commit or open a PR                      fallow audit --base <ref>
   prioritize refactoring                   fallow health --hotspots --targets
@@ -6015,7 +6015,7 @@ mod tests {
                 discovery_source: Some("environment-override"),
                 companion_path: Some(PathBuf::from("/private/tools/fallow-type-aware")),
                 package_version: None,
-                protocol_version: 5,
+                protocol_version: 6,
                 backend_family: None,
                 backend_version: None,
                 remediation: Some(

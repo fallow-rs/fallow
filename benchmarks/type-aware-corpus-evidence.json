@@ -2,14 +2,14 @@
   "schema_version": 1,
   "generated_from": {
     "discovery_provenance": {
-      "generated_at": "2026-07-24T11:49:44.992Z",
+      "generated_at": "2026-07-24T20:36:13.763Z",
       "manifest_sha256": "328ef2ffff457a237713e70ce35cdd6af3a7a608accdc55e13a9579275aa5398",
       "fallow": {
         "version": "fallow 3.9.1",
-        "sha256": "80f73690b85f2a6c33ebfa45f77e7d1f0c88d7d8ba992f79a612e6965e76b4e0"
+        "sha256": "55d17c2322f647e461a852f592474b744613a6b6112ba54b2dff3a6e7e86078f"
       },
       "sidecar": {
-        "sha256": "c09d5b0fce8580e47c61ee927307f73c7232d66efba8e7f9f80eb4d36e76b912"
+        "sha256": "e17ab16b32efba45e555e4396b8b3da037cf53b6777ab8221a2ad6cbd8467453"
       },
       "runtime": {
         "platform": "darwin",
@@ -162,10 +162,10 @@
       ]
     },
     "evidence_producer": {
-      "protocol_version": 5,
-      "sidecar_sha256": "c09d5b0fce8580e47c61ee927307f73c7232d66efba8e7f9f80eb4d36e76b912",
-      "request_set_sha256": "5818e8ec964ed5df1e6952e4226412acf58ed53be89438bbe700c73c19c0011b",
-      "response_set_sha256": "99ce0445f0bdbc45669aa995a2ccc356effc5a27eea742792e12021df05d2f85"
+      "protocol_version": 6,
+      "sidecar_sha256": "e17ab16b32efba45e555e4396b8b3da037cf53b6777ab8221a2ad6cbd8467453",
+      "request_set_sha256": "7159a054618ea7b1937725da1cc765824f5c63a7c4cad2c01811d3684140f2ed",
+      "response_set_sha256": "3f9a58e7720a1af2d18b4dd31aae2a4eeae23272faf561f51c9011a06d94aa63"
     },
     "adjudication": {
       "decisions_sha256": "d8617693ecc16ffa6dcd53d64d7a6d0d3feae78f289340582f18ff55718d6f94",
@@ -267,20 +267,20 @@
     },
     "performance": {
       "baseline_wall_ms": {
-        "median": 673.188,
-        "p95": 3713.412
+        "median": 490.877,
+        "p95": 3521.65
       },
       "refined_wall_ms": {
-        "median": 627.064,
-        "p95": 6076.643
+        "median": 535.705,
+        "p95": 5811.704
       },
       "marginal_overhead_ms": {
-        "median": 116.134,
-        "p95": 2348.003
+        "median": 92.059,
+        "p95": 2297.393
       },
       "process_tree_peak_rss_kb": {
-        "baseline_p95": 820022.4,
-        "refined_p95": 1412247.2
+        "baseline_p95": 819913.6,
+        "refined_p95": 1405836.8
       },
       "program_counts": [
         1,
@@ -373,15 +373,15 @@
       "phase_timings_ms": {
         "diagnostics": {
           "median": 2.5,
-          "p95": 644.05
+          "p95": 616.05
         },
         "project_setup": {
-          "median": 42.5,
-          "p95": 462.75
+          "median": 39.5,
+          "p95": 427.05
         },
         "symbol_scan": {
           "median": 0.5,
-          "p95": 708
+          "p95": 651.2
         }
       },
       "reason_counts": {

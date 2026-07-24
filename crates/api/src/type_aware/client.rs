@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use fallow_types::envelope::{
-    TypeAwareAbstentionCounts, TypeAwareMeta, TypeAwarePhaseTimings, TypeAwareProjectMeta,
-    TypeAwareProjectSource, TypeAwareProjectStatus,
+    TypeAwareAbstentionCounts, TypeAwareInvalidationKind, TypeAwareMeta, TypeAwarePhaseTimings,
+    TypeAwareProjectMeta, TypeAwareProjectSource, TypeAwareProjectStatus,
 };
 use fallow_types::extract::MemberKind;
 use fallow_types::output_dead_code::PrivateTypeLeakFinding;
@@ -14,11 +14,12 @@ use fallow_types::semantic::{
     ApiSurfaceEntry, ApiSurfaceResult, DEFERRED_PROJECT_CONFIG_HASH, PublicTypeReference,
     SemanticAliasHop, SemanticAnalysisIdentity, SemanticAnalysisMode, SemanticCandidateDecision,
     SemanticCandidateDecisionKind, SemanticCapability, SemanticCompleteness,
-    SemanticContractEvidence, SemanticEditGuard, SemanticGapReason, SemanticImpactPath,
-    SemanticNamespace, SemanticOmission, SemanticPrivateTypeLeak, SemanticQuerySummary,
-    SemanticReference, SemanticSourceLocation, SemanticSymbol, SemanticSymbolImpact,
-    SemanticSymbolTrace, TypeCouplingCycle, TypeCouplingEdge, TypeCouplingFile, TypeCouplingReport,
-    TypeCouplingSummary,
+    SemanticContractEvidence, SemanticContractRelation, SemanticEditGuard,
+    SemanticFrameworkContract, SemanticFrameworkContractEvidence, SemanticFrameworkRelation,
+    SemanticGapReason, SemanticImpactConfidence, SemanticImpactPath, SemanticNamespace,
+    SemanticOmission, SemanticPrivateTypeLeak, SemanticQuerySummary, SemanticReference,
+    SemanticSourceLocation, SemanticSymbol, SemanticSymbolImpact, SemanticSymbolTrace,
+    TypeCouplingCycle, TypeCouplingEdge, TypeCouplingFile, TypeCouplingReport, TypeCouplingSummary,
 };
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -52,6 +53,7 @@ enum SemanticQuery {
     SymbolUse {
         id: usize,
         symbol: SemanticSymbol,
+        framework_contracts: Vec<SemanticFrameworkContract>,
     },
     SymbolTrace {
         id: usize,
@@ -152,6 +154,12 @@ struct SemanticProjectResponse {
     blocking_diagnostic_count: usize,
     source_file_count: usize,
     program_reused: bool,
+    #[serde(default)]
+    program_reused_from_previous_snapshot: Option<bool>,
+    #[serde(default)]
+    snapshot_revision: Option<u64>,
+    #[serde(default)]
+    invalidation_kind: Option<TypeAwareInvalidationKind>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -243,11 +251,13 @@ struct EvidenceLocation {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SemanticReferenceData {
     path: PathBuf,
     line: u32,
     col: u32,
     role: String,
+    source: String,
     #[serde(default)]
     namespace: Option<SemanticNamespace>,
     #[serde(default)]
@@ -262,6 +272,7 @@ struct SymbolUseData {
     owning_projects: Vec<String>,
     total_reference_count: usize,
     contract_relations: Vec<SemanticContractEvidence>,
+    framework_contract_relations: Vec<SemanticFrameworkContractEvidence>,
     closed_world_eligible: bool,
     edit_guard: SemanticEditGuard,
 }
@@ -288,7 +299,7 @@ struct SymbolImpactData {
     total_transitive_affected_file_count: usize,
     targeted_tests: Vec<ImpactPathData>,
     total_targeted_test_count: usize,
-    confidence: String,
+    confidence: SemanticImpactConfidence,
 }
 
 #[derive(Debug, Deserialize)]
@@ -506,6 +517,85 @@ pub fn refine_dead_code_results(
     include_private_type_leaks: bool,
     include_type_coupling: bool,
 ) -> Result<Option<SemanticDeadCodeOutcome>, TypeAwareError> {
+    let outcome = refine_dead_code_results_with_transport(
+        root,
+        results,
+        projects,
+        entry_points,
+        include_symbol_use,
+        include_private_type_leaks,
+        include_type_coupling,
+        SemanticRequestTransport::OneShot,
+    );
+    if outcome.is_err() {
+        discard_unverified_semantic_candidates(results);
+    }
+    outcome
+}
+
+/// Refine dead-code results through an explicitly owned persistent sidecar.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "semantic refinement keeps requested capability families explicit"
+)]
+pub fn refine_dead_code_results_in_session(
+    session: &mut super::transport::TypeAwareSession,
+    changes: Option<&super::transport::TypeAwareFileChanges>,
+    root: &Path,
+    results: &mut AnalysisResults,
+    projects: &[PathBuf],
+    entry_points: &[PathBuf],
+    include_symbol_use: bool,
+    include_private_type_leaks: bool,
+    include_type_coupling: bool,
+) -> Result<Option<SemanticDeadCodeOutcome>, TypeAwareError> {
+    let outcome = refine_dead_code_results_with_transport(
+        root,
+        results,
+        projects,
+        entry_points,
+        include_symbol_use,
+        include_private_type_leaks,
+        include_type_coupling,
+        SemanticRequestTransport::Session(session, changes),
+    );
+    if outcome.is_err() {
+        discard_unverified_semantic_candidates(results);
+    }
+    outcome
+}
+
+pub fn discard_unverified_semantic_candidates(results: &mut AnalysisResults) {
+    results
+        .unused_class_members
+        .retain(|finding| !finding.semantic_only_candidate);
+}
+
+enum SemanticRequestTransport<'a> {
+    OneShot,
+    Session(
+        &'a mut super::transport::TypeAwareSession,
+        Option<&'a super::transport::TypeAwareFileChanges>,
+    ),
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "semantic refinement keeps requested capability families explicit"
+)]
+fn refine_dead_code_results_with_transport(
+    root: &Path,
+    results: &mut AnalysisResults,
+    projects: &[PathBuf],
+    entry_points: &[PathBuf],
+    include_symbol_use: bool,
+    include_private_type_leaks: bool,
+    include_type_coupling: bool,
+    transport: SemanticRequestTransport<'_>,
+) -> Result<Option<SemanticDeadCodeOutcome>, TypeAwareError> {
+    if !include_symbol_use {
+        discard_unverified_semantic_candidates(results);
+    }
     let canonical_root = root.canonicalize().map_err(|error| {
         TypeAwareError::from(format!(
             "failed to resolve project root {}: {error}",
@@ -533,9 +623,11 @@ pub fn refine_dead_code_results(
     .flatten()
     .collect::<Vec<_>>();
     if requested_capabilities.is_empty() {
+        discard_unverified_semantic_candidates(results);
         return Ok(None);
     }
     if queries.is_empty() {
+        discard_unverified_semantic_candidates(results);
         return Ok(Some(empty_semantic_outcome(requested_capabilities)));
     }
     let request = SemanticRequest {
@@ -549,8 +641,14 @@ pub fn refine_dead_code_results(
         evidence_limit: EVIDENCE_LIMIT,
         queries,
     };
-    let response: SemanticResponse =
-        super::transport::run_semantic_request(&canonical_root, &request)?;
+    let response: SemanticResponse = match transport {
+        SemanticRequestTransport::OneShot => {
+            super::transport::run_semantic_request(&canonical_root, &request)?
+        }
+        SemanticRequestTransport::Session(session, changes) => {
+            session.run_semantic_request(&canonical_root, &request, changes)?
+        }
+    };
     validate_response(&request, &response)?;
     apply_dead_code_response(
         &canonical_root,
@@ -644,6 +742,7 @@ fn decode_symbol_trace(
     let data: SymbolTraceData = serde_json::from_value(result.data.clone()).map_err(|error| {
         TypeAwareError::from(format!("failed to decode type-aware symbol trace: {error}"))
     })?;
+    validate_returned_symbol(&symbol, &data.symbol, result.query_id)?;
     if data.total_alias_hop_count < data.alias_hops.len()
         || result.total_evidence_count < data.checker_evidence_count
         || data.graph_evidence_count < data.alias_hops.len()
@@ -652,23 +751,7 @@ fn decode_symbol_trace(
             "type-aware symbol trace totals are smaller than returned evidence".to_string(),
         ));
     }
-    let references = result
-        .evidence
-        .iter()
-        .filter_map(|evidence| {
-            serde_json::from_value::<SemanticReferenceData>(evidence.clone()).ok()
-        })
-        .filter_map(|evidence| {
-            evidence.namespace.map(|namespace| SemanticReference {
-                path: evidence.path,
-                line: evidence.line,
-                col: evidence.col,
-                role: evidence.role,
-                namespace,
-                via: evidence.via,
-            })
-        })
-        .collect();
+    let references = decode_symbol_trace_evidence(result)?;
     Ok(SemanticSymbolTrace {
         target: data.symbol,
         identity,
@@ -729,7 +812,7 @@ fn decode_symbol_impact(
             total_affected_file_count: 0,
             targeted_tests: Vec::new(),
             total_targeted_test_count: 0,
-            confidence: "unavailable".to_string(),
+            confidence: SemanticImpactConfidence::Unavailable,
             omissions: result.omissions.clone(),
             actions: result.actions.clone(),
         });
@@ -739,6 +822,26 @@ fn decode_symbol_impact(
             "failed to decode type-aware symbol impact: {error}"
         ))
     })?;
+    validate_returned_symbol(&symbol, &data.symbol, result.query_id)?;
+    for consumer in &data.direct_consumers {
+        validate_semantic_response_path(&consumer.path, result.query_id)?;
+    }
+    for path in data
+        .transitive_affected_files
+        .iter()
+        .chain(&data.targeted_tests)
+    {
+        validate_semantic_response_path(&path.path, result.query_id)?;
+        for provenance in &path.provenance {
+            validate_semantic_response_path(provenance, result.query_id)?;
+        }
+    }
+    if data.confidence == SemanticImpactConfidence::Unavailable {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {} returned an unsupported impact confidence",
+            result.query_id
+        )));
+    }
     if data.total_direct_consumer_count < data.direct_consumers.len()
         || data.total_transitive_affected_file_count < data.transitive_affected_files.len()
         || data.total_targeted_test_count < data.targeted_tests.len()
@@ -775,6 +878,19 @@ fn decode_symbol_impact(
         omissions: result.omissions.clone(),
         actions: result.actions.clone(),
     })
+}
+
+fn validate_returned_symbol(
+    requested: &SemanticSymbol,
+    returned: &SemanticSymbol,
+    query_id: usize,
+) -> Result<(), TypeAwareError> {
+    if requested != returned {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {query_id} returned a different exact symbol identity"
+        )));
+    }
+    Ok(())
 }
 
 pub struct SemanticInspectOutcome {
@@ -894,6 +1010,10 @@ fn inspect_type_aware_outcome(
             blocking_diagnostic_count: project.blocking_diagnostic_count,
             source_file_count: project.source_file_count,
             program_reused: Some(project.program_reused),
+            program_shared_across_queries: Some(project.program_reused),
+            program_reused_from_previous_snapshot: project.program_reused_from_previous_snapshot,
+            snapshot_revision: project.snapshot_revision,
+            invalidation_kind: project.invalidation_kind,
             reason_code: project.reason_code,
             abstain_reason: None,
         })
@@ -1103,6 +1223,10 @@ fn build_coupling_outcome(
             blocking_diagnostic_count: project.blocking_diagnostic_count,
             source_file_count: project.source_file_count,
             program_reused: Some(project.program_reused),
+            program_shared_across_queries: Some(project.program_reused),
+            program_reused_from_previous_snapshot: project.program_reused_from_previous_snapshot,
+            snapshot_revision: project.snapshot_revision,
+            invalidation_kind: project.invalidation_kind,
             reason_code: project.reason_code,
             abstain_reason: None,
         })
@@ -1328,6 +1452,12 @@ fn append_symbol_use_queries(
                 line: finding.member.line,
                 col: finding.member.col,
             },
+            framework_contracts: results
+                .semantic_framework_contracts
+                .iter()
+                .filter(|contract| contract.members.contains(&finding.member.member_name))
+                .cloned()
+                .collect(),
         });
         targets.insert(id, QueryTarget::ClassMember(index));
     }
@@ -1339,6 +1469,7 @@ fn append_symbol_use_queries(
         queries.push(SemanticQuery::SymbolUse {
             id,
             symbol: export_symbol(root, &finding.export, SemanticNamespace::Value)?,
+            framework_contracts: Vec::new(),
         });
         targets.insert(id, QueryTarget::UnusedExport(index));
     }
@@ -1350,6 +1481,7 @@ fn append_symbol_use_queries(
         queries.push(SemanticQuery::SymbolUse {
             id,
             symbol: export_symbol(root, &finding.export, SemanticNamespace::Type)?,
+            framework_contracts: Vec::new(),
         });
         targets.insert(id, QueryTarget::UnusedType(index));
     }
@@ -1547,21 +1679,25 @@ fn apply_dead_code_response(
                     fix_supported,
                     &mut source_cache,
                 )?;
-                results
+                let finding = results
                     .unused_class_members
                     .get_mut(*index)
                     .ok_or_else(|| {
                         TypeAwareError::from(
                             "type-aware class-member target no longer exists".to_string(),
                         )
-                    })?
-                    .set_semantic_decision(decision.clone());
+                    })?;
+                let semantic_only = finding.semantic_only_candidate;
+                finding.set_semantic_decision(decision.clone());
                 record_candidate_decision(
                     &decision,
                     *index,
                     &mut confirmed_class,
                     &mut decision_stats,
                 );
+                if semantic_only_candidate_stays_hidden(semantic_only, decision.decision) {
+                    confirmed_class.insert(*index);
+                }
                 candidate_decisions.push(decision);
             }
             QueryTarget::UnusedExport(index) => {
@@ -1626,6 +1762,12 @@ fn apply_dead_code_response(
         add_summary_capacity_gap(summary, local_capacity.unrequested_symbol_count);
     }
 
+    for (index, finding) in results.unused_class_members.iter().enumerate() {
+        if finding.semantic_only_candidate && finding.semantic.is_none() {
+            confirmed_class.insert(index);
+        }
+    }
+
     retain_unconfirmed(&mut results.unused_class_members, &confirmed_class);
     retain_unconfirmed(&mut results.unused_exports, &confirmed_exports);
     retain_unconfirmed(&mut results.unused_types, &confirmed_types);
@@ -1684,6 +1826,10 @@ fn apply_dead_code_response(
             blocking_diagnostic_count: project.blocking_diagnostic_count,
             source_file_count: project.source_file_count,
             program_reused: Some(project.program_reused),
+            program_shared_across_queries: Some(project.program_reused),
+            program_reused_from_previous_snapshot: project.program_reused_from_previous_snapshot,
+            snapshot_revision: project.snapshot_revision,
+            invalidation_kind: project.invalidation_kind,
             reason_code: project.reason_code,
             abstain_reason: None,
         })
@@ -1730,6 +1876,17 @@ fn apply_dead_code_response(
     })
 }
 
+const fn semantic_only_candidate_stays_hidden(
+    semantic_only: bool,
+    decision: SemanticCandidateDecisionKind,
+) -> bool {
+    semantic_only
+        && !matches!(
+            decision,
+            SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
+        )
+}
+
 fn decode_candidate_decision(
     root: &Path,
     query: &SemanticQuery,
@@ -1738,7 +1895,9 @@ fn decode_candidate_decision(
     source_cache: &mut FxHashMap<PathBuf, Vec<u8>>,
 ) -> Result<SemanticCandidateDecision, TypeAwareError> {
     let SemanticQuery::SymbolUse {
-        symbol: requested, ..
+        symbol: requested,
+        framework_contracts,
+        ..
     } = query
     else {
         return Err(TypeAwareError::from(
@@ -1753,58 +1912,69 @@ fn decode_candidate_decision(
             "failed to decode type-aware symbol-use decision: {error}"
         ))
     })?;
-    validate_symbol_use_data(root, requested, result, &data, fix_supported, source_cache)?;
+    validate_symbol_use_data(
+        SymbolUseValidation {
+            root,
+            requested,
+            requested_framework_contracts: framework_contracts,
+            result,
+            fix_supported,
+        },
+        &data,
+        source_cache,
+    )?;
     let evidence = decode_symbol_use_evidence(result)?;
     let required_contract = data
         .contract_relations
         .iter()
         .find(|contract| !contract.optional)
         .cloned();
-    let expected_assertion = if data.total_reference_count > 0 {
-        "confirmed-used"
-    } else if required_contract.is_some() {
-        "contract-preserved"
-    } else if data.closed_world_eligible {
-        "confirmed-no-static-references"
-    } else {
-        "no-confirmed-use"
-    };
+    let framework_contract = data.framework_contract_relations.first().cloned();
+    let (expected_assertion, decision) = expected_candidate_decision(
+        &data,
+        required_contract.is_some() || framework_contract.is_some(),
+        result.reason_code,
+    );
     if result.assertion != expected_assertion {
         return Err(TypeAwareError::from(format!(
             "type-aware query {} assertion {} conflicts with its evidence",
             result.query_id, result.assertion
         )));
     }
-    let decision = match expected_assertion {
-        "confirmed-used" => SemanticCandidateDecisionKind::ConfirmedUsed,
-        "contract-preserved" => SemanticCandidateDecisionKind::ContractPreserved,
-        "confirmed-no-static-references" => {
-            SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
-        }
-        _ if unresolved_gap(result.reason_code) => {
-            SemanticCandidateDecisionKind::RetainedUnresolved
-        }
-        _ => SemanticCandidateDecisionKind::RetainedAbstained,
-    };
     let closed_world_eligible = fix_supported
         && decision == SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
         && data.closed_world_eligible;
+    let subject = if fix_supported {
+        data.symbol
+    } else {
+        requested.clone()
+    };
+    let contract = required_contract.or_else(|| data.contract_relations.first().cloned());
+    let explanation = candidate_explanation(CandidateExplanationInput {
+        subject: &subject,
+        decision,
+        fix_eligible: closed_world_eligible,
+        owning_projects: &data.owning_projects,
+        evidence: &evidence,
+        contract: contract.as_ref(),
+        framework_contract: framework_contract.as_ref(),
+        reason_code: result.reason_code,
+        total_evidence_count: result.total_evidence_count,
+        truncated: result.truncated,
+    });
     Ok(SemanticCandidateDecision {
         query_id: result.query_id,
-        subject: if fix_supported {
-            data.symbol
-        } else {
-            requested.clone()
-        },
+        subject,
         decision,
         status: result.status,
         owning_projects: data.owning_projects,
         evidence,
-        contract: required_contract.or_else(|| data.contract_relations.first().cloned()),
+        contract,
+        framework_contract,
         closed_world_eligible,
         edit_guard: closed_world_eligible.then_some(data.edit_guard),
         reason_code: result.reason_code,
-        explanation: candidate_explanation(decision, closed_world_eligible).to_string(),
+        explanation,
         actions: result.actions.clone(),
         total_evidence_count: result.total_evidence_count,
         truncated: result.truncated,
@@ -1816,6 +1986,18 @@ fn unavailable_candidate_decision(
     subject: SemanticSymbol,
     result: &SemanticQueryResponse,
 ) -> SemanticCandidateDecision {
+    let explanation = candidate_explanation(CandidateExplanationInput {
+        subject: &subject,
+        decision: SemanticCandidateDecisionKind::RetainedUnresolved,
+        fix_eligible: false,
+        owning_projects: &[],
+        evidence: &[],
+        contract: None,
+        framework_contract: None,
+        reason_code: result.reason_code,
+        total_evidence_count: result.total_evidence_count,
+        truncated: result.truncated,
+    });
     SemanticCandidateDecision {
         query_id: result.query_id,
         subject,
@@ -1824,14 +2006,11 @@ fn unavailable_candidate_decision(
         owning_projects: Vec::new(),
         evidence: Vec::new(),
         contract: None,
+        framework_contract: None,
         closed_world_eligible: false,
         edit_guard: None,
         reason_code: result.reason_code,
-        explanation: candidate_explanation(
-            SemanticCandidateDecisionKind::RetainedUnresolved,
-            false,
-        )
-        .to_string(),
+        explanation,
         actions: result.actions.clone(),
         total_evidence_count: result.total_evidence_count,
         truncated: result.truncated,
@@ -1839,14 +2018,27 @@ fn unavailable_candidate_decision(
     }
 }
 
-fn validate_symbol_use_data(
-    root: &Path,
-    requested: &SemanticSymbol,
-    result: &SemanticQueryResponse,
-    data: &SymbolUseData,
+#[derive(Clone, Copy)]
+struct SymbolUseValidation<'a> {
+    root: &'a Path,
+    requested: &'a SemanticSymbol,
+    requested_framework_contracts: &'a [SemanticFrameworkContract],
+    result: &'a SemanticQueryResponse,
     fix_supported: bool,
+}
+
+fn validate_symbol_use_data(
+    validation: SymbolUseValidation<'_>,
+    data: &SymbolUseData,
     source_cache: &mut FxHashMap<PathBuf, Vec<u8>>,
 ) -> Result<(), TypeAwareError> {
+    let SymbolUseValidation {
+        root,
+        requested,
+        requested_framework_contracts,
+        result,
+        fix_supported,
+    } = validation;
     if data.total_reference_count != result.total_evidence_count {
         return Err(TypeAwareError::from(format!(
             "type-aware query {} returned inconsistent reference totals",
@@ -1885,12 +2077,38 @@ fn validate_symbol_use_data(
             || result.truncated
             || !result.omissions.is_empty()
             || data.total_reference_count != 0
-            || !data.contract_relations.is_empty())
+            || !data.contract_relations.is_empty()
+            || !data.framework_contract_relations.is_empty())
     {
         return Err(TypeAwareError::from(format!(
             "type-aware query {} claimed unsafe closed-world eligibility",
             result.query_id
         )));
+    }
+    if data.framework_contract_relations.len() > 1
+        || data.framework_contract_relations.iter().any(|evidence| {
+            !requested_framework_contracts.iter().any(|contract| {
+                contract.framework == evidence.framework
+                    && contract.package == evidence.package
+                    && contract.relation == evidence.relation
+                    && contract.heritage_symbol == evidence.declaration.exported_name
+                    && declaration_path_matches_package(
+                        &evidence.declaration.path,
+                        &contract.package,
+                    )
+            })
+        })
+    {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {} returned unrequested framework contract evidence",
+            result.query_id
+        )));
+    }
+    for contract in &data.contract_relations {
+        validate_semantic_response_path(&contract.declaration.path, result.query_id)?;
+    }
+    for contract in &data.framework_contract_relations {
+        validate_semantic_response_path(&contract.declaration.path, result.query_id)?;
     }
     if fix_supported {
         validate_edit_guard(
@@ -1900,6 +2118,41 @@ fn validate_symbol_use_data(
             result.query_id,
             source_cache,
         )?;
+    }
+    Ok(())
+}
+
+fn declaration_path_matches_package(path: &Path, package: &str) -> bool {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    let marker = format!("/node_modules/{package}/");
+    format!("/{normalized}").contains(&marker)
+}
+
+fn validate_semantic_response_path(path: &Path, query_id: usize) -> Result<(), TypeAwareError> {
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::RootDir | Component::Prefix(_)))
+    {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {query_id} returned a non-project-relative path"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_semantic_reference_paths(
+    evidence: &SemanticReferenceData,
+    query_id: usize,
+) -> Result<(), TypeAwareError> {
+    if evidence.source != "checker" {
+        return Err(TypeAwareError::from(format!(
+            "type-aware query {query_id} returned unsupported reference provenance"
+        )));
+    }
+    validate_semantic_response_path(&evidence.path, query_id)?;
+    for hop in &evidence.via {
+        validate_semantic_response_path(&hop.path, query_id)?;
     }
     Ok(())
 }
@@ -1958,6 +2211,7 @@ fn decode_symbol_use_evidence(
                     result.query_id
                 ))
             })?;
+            validate_semantic_reference_paths(&evidence, result.query_id)?;
             Ok(SemanticReference {
                 path: evidence.path,
                 line: evidence.line,
@@ -1970,6 +2224,40 @@ fn decode_symbol_use_evidence(
         .collect()
 }
 
+fn decode_symbol_trace_evidence(
+    result: &SemanticQueryResponse,
+) -> Result<Vec<SemanticReference>, TypeAwareError> {
+    let mut references = Vec::new();
+    for value in &result.evidence {
+        let evidence: SemanticReferenceData =
+            serde_json::from_value(value.clone()).map_err(|error| {
+                TypeAwareError::from(format!(
+                    "failed to decode type-aware trace evidence for query {}: {error}",
+                    result.query_id
+                ))
+            })?;
+        validate_semantic_reference_paths(&evidence, result.query_id)?;
+        if evidence.role == "declaration" && evidence.namespace.is_none() {
+            continue;
+        }
+        let namespace = evidence.namespace.ok_or_else(|| {
+            TypeAwareError::from(format!(
+                "type-aware trace reference for query {} omitted its namespace",
+                result.query_id
+            ))
+        })?;
+        references.push(SemanticReference {
+            path: evidence.path,
+            line: evidence.line,
+            col: evidence.col,
+            role: evidence.role,
+            namespace,
+            via: evidence.via,
+        });
+    }
+    Ok(references)
+}
+
 const fn unresolved_gap(reason: Option<SemanticGapReason>) -> bool {
     matches!(
         reason,
@@ -1979,34 +2267,220 @@ const fn unresolved_gap(reason: Option<SemanticGapReason>) -> bool {
                 | SemanticGapReason::BlockingDiagnostics
                 | SemanticGapReason::UnknownSymbol
                 | SemanticGapReason::IncompleteProjectCoverage
+                | SemanticGapReason::FrameworkContractProvenance
                 | SemanticGapReason::Capacity
         )
     )
 }
 
-const fn candidate_explanation(
+fn expected_candidate_decision(
+    data: &SymbolUseData,
+    has_required_contract: bool,
+    reason_code: Option<SemanticGapReason>,
+) -> (&'static str, SemanticCandidateDecisionKind) {
+    if data.total_reference_count > 0 {
+        return (
+            "confirmed-used",
+            SemanticCandidateDecisionKind::ConfirmedUsed,
+        );
+    }
+    if has_required_contract {
+        return (
+            "contract-preserved",
+            SemanticCandidateDecisionKind::ContractPreserved,
+        );
+    }
+    if data.closed_world_eligible {
+        return (
+            "confirmed-no-static-references",
+            SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
+        );
+    }
+    if unresolved_gap(reason_code) {
+        return (
+            "no-confirmed-use",
+            SemanticCandidateDecisionKind::RetainedUnresolved,
+        );
+    }
+    (
+        "no-confirmed-use",
+        SemanticCandidateDecisionKind::RetainedAbstained,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct CandidateExplanationInput<'a> {
+    subject: &'a SemanticSymbol,
     decision: SemanticCandidateDecisionKind,
     fix_eligible: bool,
-) -> &'static str {
+    owning_projects: &'a [String],
+    evidence: &'a [SemanticReference],
+    contract: Option<&'a SemanticContractEvidence>,
+    framework_contract: Option<&'a SemanticFrameworkContractEvidence>,
+    reason_code: Option<SemanticGapReason>,
+    total_evidence_count: usize,
+    truncated: bool,
+}
+
+fn candidate_explanation(input: CandidateExplanationInput<'_>) -> String {
+    let CandidateExplanationInput {
+        subject,
+        decision,
+        fix_eligible,
+        owning_projects,
+        evidence,
+        contract,
+        framework_contract,
+        reason_code,
+        total_evidence_count,
+        truncated,
+    } = input;
+    let subject_name = symbol_display_name(subject);
     match decision {
-        SemanticCandidateDecisionKind::ConfirmedUsed => {
-            "TypeScript resolved at least one exact static reference, so Fallow removed the syntactic finding."
-        }
+        SemanticCandidateDecisionKind::ConfirmedUsed => evidence.first().map_or_else(
+            || {
+                format!(
+                    "{subject_name} is retained because TypeScript resolved {total_evidence_count} exact static reference(s)."
+                )
+            },
+            |reference| {
+                let suffix = evidence_count_suffix(total_evidence_count, truncated);
+                format!(
+                    "{subject_name} is retained because it is used by a {} reference at {}:{}:{}{suffix}.",
+                    reference.role,
+                    reference.path.display(),
+                    reference.line,
+                    reference.col
+                )
+            },
+        ),
         SemanticCandidateDecisionKind::ContractPreserved => {
-            "This member implements a required contract or overrides inherited behavior, so Fallow kept the declaration and removed the syntactic finding."
+            framework_contract.map_or_else(
+                || contract.map_or_else(
+                || {
+                    format!(
+                        "{subject_name} is retained because validated contract evidence makes deletion unsafe."
+                    )
+                },
+                |contract| {
+                    let declaration = symbol_display_name(&contract.declaration);
+                    let relation = contract_relation_phrase(contract.relation);
+                    format!(
+                        "{subject_name} is retained because it {relation} {declaration}, declared at {}:{}:{}.",
+                        contract.declaration.path.display(),
+                        contract.declaration.line,
+                        contract.declaration.col
+                    )
+                },
+            ),
+                |contract| {
+                    let declaration = symbol_display_name(&contract.declaration);
+                    let relation = framework_relation_phrase(contract.relation);
+                    format!(
+                        "{subject_name} is retained because the {} contract requires it through {relation} {declaration} from {}, declared at {}:{}:{}.",
+                        contract.framework,
+                        contract.package,
+                        contract.declaration.path.display(),
+                        contract.declaration.line,
+                        contract.declaration.col
+                    )
+                },
+            )
         }
         SemanticCandidateDecisionKind::ConfirmedNoStaticReferences if fix_eligible => {
-            "Every owning project completed, no exact static reference or contract was found, and a guarded class-member fix is available."
+            format!(
+                "{subject_name} has no exact static references or required contracts in {}. A declaration-hash guarded fix is available.",
+                project_scope(owning_projects)
+            )
         }
         SemanticCandidateDecisionKind::ConfirmedNoStaticReferences => {
-            "Every owning project completed and no exact static reference was found. This remains advisory for this declaration kind."
+            format!(
+                "{subject_name} has no exact static references in {}. This declaration kind remains advisory.",
+                project_scope(owning_projects)
+            )
         }
         SemanticCandidateDecisionKind::RetainedAbstained => {
-            "Fallow retained this candidate because dynamic or declaration semantics make deletion unsafe."
+            format!(
+                "{subject_name} is retained because {} makes deletion unsafe in {}.",
+                gap_reason_phrase(reason_code),
+                project_scope(owning_projects)
+            )
         }
         SemanticCandidateDecisionKind::RetainedUnresolved => {
-            "Fallow retained this candidate because its declaration or owning project was not resolved completely."
+            format!(
+                "{subject_name} is retained because {} prevented complete resolution in {}.",
+                gap_reason_phrase(reason_code),
+                project_scope(owning_projects)
+            )
         }
+    }
+}
+
+fn symbol_display_name(symbol: &SemanticSymbol) -> String {
+    symbol.owner.as_ref().map_or_else(
+        || symbol.exported_name.clone(),
+        |owner| format!("{owner}.{}", symbol.local_name),
+    )
+}
+
+fn project_scope(projects: &[String]) -> String {
+    match projects {
+        [] => "the selected TypeScript project scope".to_string(),
+        [project] => project.clone(),
+        projects => format!("{} owning TypeScript projects", projects.len()),
+    }
+}
+
+fn evidence_count_suffix(total: usize, truncated: bool) -> String {
+    if total <= 1 {
+        String::new()
+    } else if truncated {
+        format!(" (first of {total}, evidence truncated)")
+    } else {
+        format!(" (first of {total})")
+    }
+}
+
+const fn contract_relation_phrase(relation: SemanticContractRelation) -> &'static str {
+    match relation {
+        SemanticContractRelation::InterfaceImplementation => "implements",
+        SemanticContractRelation::AbstractImplementation => "implements the abstract member",
+        SemanticContractRelation::Override => "overrides",
+        SemanticContractRelation::OptionalContract => "matches the optional contract",
+    }
+}
+
+const fn framework_relation_phrase(relation: SemanticFrameworkRelation) -> &'static str {
+    match relation {
+        SemanticFrameworkRelation::Extends => "base class",
+        SemanticFrameworkRelation::Implements => "interface",
+    }
+}
+
+const fn gap_reason_phrase(reason: Option<SemanticGapReason>) -> &'static str {
+    match reason {
+        Some(SemanticGapReason::NoProject) => "no owning TypeScript project",
+        Some(SemanticGapReason::AmbiguousProject) => "ambiguous owning projects",
+        Some(SemanticGapReason::BlockingDiagnostics) => "blocking structural diagnostics",
+        Some(SemanticGapReason::UnknownSymbol) => "an unresolved exact declaration",
+        Some(SemanticGapReason::UnknownEntryPoint) => "an unresolved public entry point",
+        Some(SemanticGapReason::EvidenceLimit) => "the configured evidence limit",
+        Some(SemanticGapReason::DynamicBehavior) => "dynamic runtime behavior",
+        Some(SemanticGapReason::VirtualDispatch) => "interface or virtual dispatch",
+        Some(SemanticGapReason::DynamicMemberAccess) => "computed or reflective member access",
+        Some(SemanticGapReason::DecoratedDeclaration) => "a decorated declaration",
+        Some(SemanticGapReason::OptionalContract) => "an optional inherited contract",
+        Some(SemanticGapReason::AccessorPair) => "a paired accessor",
+        Some(SemanticGapReason::OverloadSet) => "a method overload set",
+        Some(SemanticGapReason::AttachedComment) => "an attached source comment",
+        Some(SemanticGapReason::AbstractDeclaration) => "an abstract declaration",
+        Some(SemanticGapReason::IncompleteProjectCoverage) => "incomplete owning-project coverage",
+        Some(SemanticGapReason::FrameworkContractProvenance) => {
+            "unverified framework package provenance"
+        }
+        Some(SemanticGapReason::Capacity) => "the configured semantic capacity",
+        Some(SemanticGapReason::UnsupportedSyntax) => "unsupported declaration syntax",
+        None => "incomplete semantic evidence",
     }
 }
 
@@ -2371,6 +2845,7 @@ mod tests {
                 SemanticQuery::SymbolUse {
                     id: 0,
                     symbol: symbol.clone(),
+                    framework_contracts: Vec::new(),
                 },
                 SemanticQuery::SymbolTrace {
                     id: 1,
@@ -2616,6 +3091,24 @@ mod tests {
         );
         assert!(protocol_path(root, Path::new("../outside.ts")).is_err());
         assert!(protocol_path(root, &root.join("../outside.ts")).is_err());
+        assert!(validate_semantic_response_path(Path::new("src/config.ts"), 0).is_ok());
+        assert!(validate_semantic_response_path(Path::new("../shared/consumer.ts"), 0).is_ok());
+        assert!(validate_semantic_response_path(&root.join("outside.ts"), 0).is_err());
+        let unsafe_alias = SemanticReferenceData {
+            path: PathBuf::from("src/config.ts"),
+            line: 1,
+            col: 0,
+            role: "alias".to_string(),
+            source: "checker".to_string(),
+            namespace: Some(SemanticNamespace::Value),
+            via: vec![SemanticAliasHop {
+                path: root.join("outside.ts"),
+                from_name: "config".to_string(),
+                to_name: "renamedConfig".to_string(),
+                relation: "import-alias".to_string(),
+            }],
+        };
+        assert!(validate_semantic_reference_paths(&unsafe_alias, 0).is_err());
         assert_eq!(namespace_name(SemanticNamespace::Value), "value");
         assert_eq!(namespace_name(SemanticNamespace::Type), "type");
         assert_eq!(digest_hex([0, 15, 255]), "000fff");
@@ -3275,7 +3768,15 @@ mod tests {
             impact.targeted_tests[0].path,
             PathBuf::from("test/config.test.ts")
         );
-        assert_eq!(impact.confidence, "bounded");
+        assert_eq!(impact.confidence, SemanticImpactConfidence::Bounded);
+
+        let mut invalid_confidence = result.clone();
+        invalid_confidence.data["confidence"] = json!("certain");
+        assert!(decode_symbol_impact(&response, &request, &invalid_confidence, symbol()).is_err());
+
+        let mut invalid_path = result;
+        invalid_path.data["direct_consumers"][0]["path"] = json!("/outside.ts");
+        assert!(decode_symbol_impact(&response, &request, &invalid_path, symbol()).is_err());
     }
 
     #[test]
@@ -3288,6 +3789,7 @@ mod tests {
             owning_projects: vec!["tsconfig.json".to_string()],
             evidence: Vec::new(),
             contract: None,
+            framework_contract: None,
             closed_world_eligible: fixable,
             edit_guard: None,
             reason_code: None,
@@ -3324,6 +3826,26 @@ mod tests {
     }
 
     #[test]
+    fn semantic_only_framework_candidates_require_complete_negative_evidence() {
+        for decision in [
+            SemanticCandidateDecisionKind::ConfirmedUsed,
+            SemanticCandidateDecisionKind::ContractPreserved,
+            SemanticCandidateDecisionKind::RetainedAbstained,
+            SemanticCandidateDecisionKind::RetainedUnresolved,
+        ] {
+            assert!(semantic_only_candidate_stays_hidden(true, decision));
+        }
+        assert!(!semantic_only_candidate_stays_hidden(
+            true,
+            SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
+        ));
+        assert!(!semantic_only_candidate_stays_hidden(
+            false,
+            SemanticCandidateDecisionKind::RetainedUnresolved,
+        ));
+    }
+
+    #[test]
     fn guarded_fix_support_excludes_class_properties() {
         let mut method = symbol();
         method.declaration_kind = "class_method".to_string();
@@ -3333,10 +3855,157 @@ mod tests {
         assert!(query_supports_guarded_fix(&SemanticQuery::SymbolUse {
             id: 0,
             symbol: method,
+            framework_contracts: Vec::new(),
         }));
         assert!(!query_supports_guarded_fix(&SemanticQuery::SymbolUse {
             id: 1,
             symbol: property,
+            framework_contracts: Vec::new(),
         }));
+    }
+
+    #[test]
+    fn candidate_explanations_name_exact_use_contract_and_safe_fix_evidence() {
+        let mut method = symbol();
+        method.owner = Some("UserRepository".to_string());
+        method.exported_name = "save".to_string();
+        method.local_name = "save".to_string();
+        method.declaration_kind = "class_method".to_string();
+
+        let owning_projects = ["tsconfig.json".to_string()];
+        let evidence = [SemanticReference {
+            path: PathBuf::from("src/service.ts"),
+            line: 12,
+            col: 4,
+            role: "call".to_string(),
+            namespace: SemanticNamespace::Value,
+            via: Vec::new(),
+        }];
+        let used = candidate_explanation(CandidateExplanationInput {
+            subject: &method,
+            decision: SemanticCandidateDecisionKind::ConfirmedUsed,
+            fix_eligible: false,
+            owning_projects: &owning_projects,
+            evidence: &evidence,
+            contract: None,
+            framework_contract: None,
+            reason_code: None,
+            total_evidence_count: 1,
+            truncated: false,
+        });
+        assert_eq!(
+            used,
+            "UserRepository.save is retained because it is used by a call reference at src/service.ts:12:4."
+        );
+
+        let mut interface_member = method.clone();
+        interface_member.owner = Some("Repository".to_string());
+        let contract = SemanticContractEvidence {
+            relation: SemanticContractRelation::InterfaceImplementation,
+            declaration: interface_member,
+            optional: false,
+        };
+        let required = candidate_explanation(CandidateExplanationInput {
+            subject: &method,
+            decision: SemanticCandidateDecisionKind::ContractPreserved,
+            fix_eligible: false,
+            owning_projects: &owning_projects,
+            evidence: &[],
+            contract: Some(&contract),
+            framework_contract: None,
+            reason_code: None,
+            total_evidence_count: 0,
+            truncated: false,
+        });
+        assert_eq!(
+            required,
+            "UserRepository.save is retained because it implements Repository.save, declared at src/config.ts:4:0."
+        );
+
+        let fixable = candidate_explanation(CandidateExplanationInput {
+            subject: &method,
+            decision: SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
+            fix_eligible: true,
+            owning_projects: &owning_projects,
+            evidence: &[],
+            contract: None,
+            framework_contract: None,
+            reason_code: None,
+            total_evidence_count: 0,
+            truncated: false,
+        });
+        assert_eq!(
+            fixable,
+            "UserRepository.save has no exact static references or required contracts in tsconfig.json. A declaration-hash guarded fix is available."
+        );
+    }
+
+    #[test]
+    fn framework_evidence_must_match_requested_package_declaration() {
+        let requested = SemanticFrameworkContract {
+            framework: "lit".to_string(),
+            package: "lit".to_string(),
+            heritage_symbol: "LitElement".to_string(),
+            heritage_names: vec!["LitElement".to_string()],
+            relation: SemanticFrameworkRelation::Extends,
+            members: vec!["render".to_string()],
+        };
+        let mut declaration = symbol();
+        declaration.path = PathBuf::from("src/local-lit.ts");
+        declaration.exported_name = "LitElement".to_string();
+        declaration.local_name = "LitElement".to_string();
+        let data = SymbolUseData {
+            symbol: symbol(),
+            selected_project: "tsconfig.json".to_string(),
+            owning_projects: vec!["tsconfig.json".to_string()],
+            total_reference_count: 0,
+            contract_relations: Vec::new(),
+            framework_contract_relations: vec![SemanticFrameworkContractEvidence {
+                framework: "lit".to_string(),
+                package: "lit".to_string(),
+                relation: SemanticFrameworkRelation::Extends,
+                declaration,
+            }],
+            closed_world_eligible: false,
+            edit_guard: SemanticEditGuard {
+                start: 0,
+                end: 1,
+                declaration_sha256: "unused".to_string(),
+            },
+        };
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::SymbolUse,
+            assertion: "contract-preserved".to_string(),
+            status: SemanticCompleteness::Complete,
+            reason_code: None,
+            actions: Vec::new(),
+            evidence: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+            data: json!({}),
+        };
+
+        let requested_symbol = symbol();
+        let requested_contracts = [requested];
+        let error = validate_symbol_use_data(
+            SymbolUseValidation {
+                root: Path::new("."),
+                requested: &requested_symbol,
+                requested_framework_contracts: &requested_contracts,
+                result: &result,
+                fix_supported: false,
+            },
+            &data,
+            &mut FxHashMap::default(),
+        )
+        .expect_err("local same-name declaration must not satisfy a package contract");
+
+        assert!(
+            error
+                .to_string()
+                .contains("unrequested framework contract evidence")
+        );
     }
 }

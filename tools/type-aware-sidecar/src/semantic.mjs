@@ -567,6 +567,10 @@ const unavailable = (query, reasonCode, action) => ({
 const REASON_ACTIONS = new Map([
   ["dynamic-behavior", "Review dynamic imports and registrations before changing this symbol."],
   [
+    "virtual-dispatch",
+    "Inspect interface, inherited, and virtual call sites before changing this implementation.",
+  ],
+  [
     "dynamic-member-access",
     "Replace or review computed, reflective, and string-dispatched member access before retrying.",
   ],
@@ -593,6 +597,10 @@ const REASON_ACTIONS = new Map([
     "Repair every owning TypeScript project or select the complete project set and retry.",
   ],
   [
+    "framework-contract-provenance",
+    "Use a project layout that exposes the framework declaration's exact package provenance.",
+  ],
+  [
     "ambiguous-project",
     "Select projects that resolve this declaration to one consistent symbol identity.",
   ],
@@ -610,18 +618,20 @@ const DEFAULT_REASON_ACTION =
 const REASON_PRIORITY = new Map([
   ["blocking-diagnostics", 0],
   ["incomplete-project-coverage", 1],
-  ["ambiguous-project", 2],
-  ["unknown-symbol", 3],
-  ["unknown-entry-point", 4],
-  ["decorated-declaration", 5],
-  ["optional-contract", 6],
-  ["accessor-pair", 7],
-  ["overload-set", 8],
-  ["attached-comment", 9],
-  ["abstract-declaration", 10],
-  ["dynamic-member-access", 11],
-  ["dynamic-behavior", 12],
-  ["evidence-limit", 13],
+  ["framework-contract-provenance", 2],
+  ["ambiguous-project", 3],
+  ["unknown-symbol", 4],
+  ["unknown-entry-point", 5],
+  ["decorated-declaration", 6],
+  ["optional-contract", 7],
+  ["accessor-pair", 8],
+  ["overload-set", 9],
+  ["attached-comment", 10],
+  ["abstract-declaration", 11],
+  ["dynamic-member-access", 12],
+  ["virtual-dispatch", 13],
+  ["dynamic-behavior", 14],
+  ["evidence-limit", 15],
 ]);
 
 const actionForReason = (reasonCode) => REASON_ACTIONS.get(reasonCode) ?? DEFAULT_REASON_ACTION;
@@ -1198,6 +1208,73 @@ const contractRelationsFor = (root, project, declaration, memberName) => {
   return uniqueSorted(relations);
 };
 
+const packageNameForDeclaration = (declaration) => {
+  const normalized = declaration.getSourceFile().fileName.replaceAll("\\", "/");
+  const marker = "/node_modules/";
+  const index = normalized.lastIndexOf(marker);
+  if (index < 0) return undefined;
+  const segments = normalized.slice(index + marker.length).split("/");
+  if (segments[0]?.startsWith("@")) {
+    return segments.length >= 2 ? `${segments[0]}/${segments[1]}` : undefined;
+  }
+  return segments[0] || undefined;
+};
+
+const declarationIsProjectLocal = (root, declaration) => {
+  const relative = path.relative(root, declaration.getSourceFile().fileName);
+  return relative === "" || (!path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`));
+};
+
+const frameworkContractRelationsFor = (root, project, declaration, contracts, memberName) => {
+  const owner = ownerDeclaration(declaration);
+  if (!owner || (!isClassDeclaration(owner) && !isClassExpression(owner))) {
+    return { relations: [], provenanceUnknown: false };
+  }
+  const matchingContracts = contracts.filter((contract) => contract.members.includes(memberName));
+  const relations = [];
+  let provenanceUnknown = false;
+  for (const clause of owner.heritageClauses ?? []) {
+    const clauseRelation = clause.getText(clause.getSourceFile()).startsWith("implements")
+      ? "implements"
+      : "extends";
+    for (const heritageType of clause.types ?? []) {
+      const rawSymbol =
+        project.checker.getSymbolAtLocation(heritageType.expression) ??
+        project.checker.getTypeAtLocation(heritageType).aliasSymbol ??
+        project.checker.getTypeAtLocation(heritageType).symbol;
+      const symbol = resolveAlias(project.checker, rawSymbol);
+      for (const heritageDeclaration of declarationsForSymbol(project, symbol)) {
+        const declarationPackage = packageNameForDeclaration(heritageDeclaration);
+        for (const contract of matchingContracts) {
+          if (
+            contract.relation !== clauseRelation ||
+            contract.heritageSymbol !== declarationName(heritageDeclaration)
+          ) {
+            continue;
+          }
+          if (!declarationPackage) {
+            provenanceUnknown ||= !declarationIsProjectLocal(root, heritageDeclaration);
+            continue;
+          }
+          if (contract.package !== declarationPackage) continue;
+          relations.push({
+            framework: contract.framework,
+            package: contract.package,
+            relation: contract.relation,
+            declaration: stableSymbolIdentity(
+              root,
+              heritageDeclaration,
+              "value",
+              contract.heritageSymbol,
+            ),
+          });
+        }
+      }
+    }
+  }
+  return { relations: uniqueSorted(relations), provenanceUnknown };
+};
+
 const declarationEditGuard = (declaration) => {
   const sourceFile = declaration.getSourceFile();
   const start = declaration.getStart(sourceFile);
@@ -1274,8 +1351,23 @@ const resolveSymbolQuery = (
       contractRelationsFor(root, project, declaration, query.symbol.localName),
     ),
   );
+  const frameworkContractEvidence = ownerContexts.map(({ project, declaration }) =>
+    frameworkContractRelationsFor(
+      root,
+      project,
+      declaration,
+      query.frameworkContracts ?? [],
+      query.symbol.localName,
+    ),
+  );
+  const frameworkContractRelations = uniqueSorted(
+    frameworkContractEvidence.flatMap(({ relations }) => relations),
+  );
   const declarationOwnerNode = ownerDeclaration(primary.declaration);
   const declarationUncertainties = new Set();
+  if (frameworkContractEvidence.some(({ provenanceUnknown }) => provenanceUnknown)) {
+    declarationUncertainties.add("framework-contract-provenance");
+  }
   if (hasDecorator(primary.declaration) || hasDecorator(declarationOwnerNode)) {
     declarationUncertainties.add("decorated-declaration");
   }
@@ -1302,6 +1394,7 @@ const resolveSymbolQuery = (
     ownerContexts,
     owningProjects: context.owners.map(({ state }) => state.config).toSorted(compareText),
     contractRelations,
+    frameworkContractRelations,
     declarationUncertainties,
     editGuard: declarationEditGuard(primary.declaration),
     omissions: resolutionOmissions(
@@ -1324,6 +1417,7 @@ const analyzeSymbolUse = (
 ) => {
   const uncertainties = new Set([...resolved.declarationUncertainties, ...batchUncertainties]);
   const requiredContracts = resolved.contractRelations.filter((relation) => !relation.optional);
+  const frameworkContracts = resolved.frameworkContractRelations;
   const omissions = [
     ...resolved.omissions,
     ...[...uncertainties].map((reason_code) => ({ reason_code, count: 1 })),
@@ -1331,11 +1425,12 @@ const analyzeSymbolUse = (
   const closedWorldEligible =
     totalEvidenceCount === 0 &&
     requiredContracts.length === 0 &&
+    frameworkContracts.length === 0 &&
     omissions.every((omission) => omission.count === 0);
   const assertion =
     totalEvidenceCount > 0
       ? "confirmed-used"
-      : requiredContracts.length > 0
+      : requiredContracts.length > 0 || frameworkContracts.length > 0
         ? "contract-preserved"
         : closedWorldEligible
           ? "confirmed-no-static-references"
@@ -1353,6 +1448,7 @@ const analyzeSymbolUse = (
       owning_projects: resolved.owningProjects,
       total_reference_count: totalEvidenceCount,
       contract_relations: resolved.contractRelations,
+      framework_contract_relations: frameworkContracts,
       closed_world_eligible: closedWorldEligible,
       edit_guard: resolved.editGuard,
     },
@@ -2092,6 +2188,8 @@ const analyzeSymbolImpact = (
   const declarationFile = sourceFileIdentity(resolved.declaration.getSourceFile());
   const directFiles = new Set([...directReferenceFiles].filter((file) => file !== declarationFile));
   const graph = combinedModuleGraph(scanProjects);
+  const virtualDispatchCount = resolved.contractRelations.length;
+  const hasBoundedDispatch = virtualDispatchCount > 0;
   const closure = impactClosure(root, graph, directFiles, evidenceLimit);
   const directTests = [...directFiles]
     .filter(isTestFile)
@@ -2120,6 +2218,9 @@ const analyzeSymbolImpact = (
     evidence,
     evidenceLimit,
     omissions: [
+      ...(hasBoundedDispatch
+        ? [{ reason_code: "virtual-dispatch", count: virtualDispatchCount }]
+        : []),
       ...(graph.hasDynamicBehavior ? [{ reason_code: "dynamic-behavior", count: 1 }] : []),
       {
         reason_code: "evidence-limit",
@@ -2139,7 +2240,7 @@ const analyzeSymbolImpact = (
       total_transitive_affected_file_count: closure.affected.length,
       targeted_tests: targetedTests.slice(0, evidenceLimit),
       total_targeted_test_count: targetedTests.length,
-      confidence: graph.hasDynamicBehavior ? "bounded" : "high",
+      confidence: graph.hasDynamicBehavior || hasBoundedDispatch ? "bounded" : "high",
     },
   });
 };
@@ -2661,13 +2762,37 @@ const semanticProjectSelection = (snapshot, openProjects, openFiles, allowDefaul
   return { explicitProjects, selectedProjects };
 };
 
-const semanticSetup = (root, projects, queries, api) => {
+const semanticSetup = (root, projects, queries, api, sessionState) => {
   const openFiles = semanticOpenFiles(queries);
   const openProjects = semanticOpenProjects(root, projects);
+  const openFileSet = new Set(openFiles);
+  const openProjectSet = new Set(openProjects);
+  const newlyOpenedFiles = sessionState
+    ? openFiles.filter((file) => !sessionState.openFiles.has(file))
+    : openFiles;
+  const newlyOpenedProjects = sessionState
+    ? openProjects.filter((project) => !sessionState.openProjects.has(project))
+    : openProjects;
+  const closeFiles = sessionState
+    ? [...sessionState.openFiles].filter((file) => !openFileSet.has(file))
+    : [];
+  const closeProjects = sessionState
+    ? [...sessionState.openProjects].filter((project) => !openProjectSet.has(project))
+    : [];
   const snapshot = api.updateSnapshot({
-    openFiles: [...new Set(openFiles)],
-    openProjects,
+    openFiles: [...new Set(newlyOpenedFiles)],
+    openProjects: newlyOpenedProjects,
+    closeFiles,
+    closeProjects,
+    ...(sessionState?.fileChanges ? { fileChanges: sessionState.fileChanges } : {}),
   });
+  if (sessionState) {
+    const previousSnapshot = sessionState.snapshot;
+    sessionState.snapshot = snapshot;
+    sessionState.openFiles = openFileSet;
+    sessionState.openProjects = openProjectSet;
+    previousSnapshot?.dispose();
+  }
   const allowDefaultFallback = projects.length === 0;
   return {
     snapshot,
@@ -2748,6 +2873,14 @@ const executeSemanticAnalysis = ({
   };
 };
 
+const executeDisposableSemanticAnalysis = (input) => {
+  try {
+    return executeSemanticAnalysis(input);
+  } finally {
+    input.setup.snapshot.dispose();
+  }
+};
+
 export const analyzeSemanticQueries = (
   { root, projects, queries, evidenceLimit },
   { createApi = (cwd) => new API({ cwd }) } = {},
@@ -2756,7 +2889,7 @@ export const analyzeSemanticQueries = (
   const setupStartedAt = performance.now();
   const api = createApi(root);
   try {
-    return executeSemanticAnalysis({
+    return executeDisposableSemanticAnalysis({
       root,
       projects,
       queries,
@@ -2767,4 +2900,59 @@ export const analyzeSemanticQueries = (
   } finally {
     api.close();
   }
+};
+
+export const createSemanticSession = (root, { createApi = (cwd) => new API({ cwd }) } = {}) => {
+  const api = createApi(root);
+  const state = {
+    openFiles: new Set(),
+    openProjects: new Set(),
+    fileChanges: undefined,
+    revision: 0,
+    analyzed: false,
+    closed: false,
+    snapshot: undefined,
+  };
+  return {
+    analyze(request, { revision, fileChanges } = {}) {
+      if (state.closed) throw new Error("semantic session is closed");
+      if (request.root !== root) throw new Error("semantic session root mismatch");
+      if (!Number.isSafeInteger(revision) || revision <= state.revision) {
+        throw new Error("semantic session revision must increase");
+      }
+      state.fileChanges = fileChanges;
+      const setupStartedAt = performance.now();
+      const result = executeSemanticAnalysis({
+        root,
+        projects: request.projects,
+        queries: request.queries,
+        evidenceLimit: request.evidenceLimit,
+        setupStartedAt,
+        setup: semanticSetup(root, request.projects, request.queries, api, state),
+      });
+      const invalidationKind = fileChanges?.invalidateAll
+        ? "full"
+        : fileChanges
+          ? "incremental"
+          : state.analyzed
+            ? "none"
+            : "full";
+      result.projectResults = result.projectResults.map((project) => ({
+        ...project,
+        program_reused_from_previous_snapshot: state.analyzed && invalidationKind !== "full",
+        snapshot_revision: revision,
+        invalidation_kind: invalidationKind,
+      }));
+      state.revision = revision;
+      state.analyzed = true;
+      state.fileChanges = undefined;
+      return result;
+    },
+    close() {
+      if (state.closed) return;
+      state.closed = true;
+      state.snapshot?.dispose();
+      api.close();
+    },
+  };
 };

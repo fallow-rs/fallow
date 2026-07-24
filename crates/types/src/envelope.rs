@@ -453,6 +453,19 @@ pub enum TypeAwareProjectStatus {
     Unavailable,
 }
 
+/// How a persistent semantic snapshot was refreshed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareInvalidationKind {
+    /// The backend rebuilt project state from a clean snapshot.
+    Full,
+    /// The backend applied an explicit source-file change set.
+    Incremental,
+    /// No filesystem change was reported between compatible requests.
+    None,
+}
+
 /// Semantic sidecar timings, separated from Fallow's syntactic pipeline.
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -496,6 +509,18 @@ pub struct TypeAwareProjectMeta {
     /// Whether this Program served more than one semantic query in the batch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_reused: Option<bool>,
+    /// Whether this Program served more than one query in the current batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_shared_across_queries: Option<bool>,
+    /// Whether the root-bound semantic session reused the prior snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_reused_from_previous_snapshot: Option<bool>,
+    /// Monotonic revision within the root-bound semantic session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_revision: Option<u64>,
+    /// Full, incremental, or no invalidation before this query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invalidation_kind: Option<TypeAwareInvalidationKind>,
     /// Stable project-level gap reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<SemanticGapReason>,

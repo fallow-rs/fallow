@@ -108,7 +108,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | [`npx fallow audit`](https://docs.fallow.tools/cli/audit) | Changed-file gate over dead code, complexity, duplication, and styling drift: verdict pass/warn/fail against a base ref. Fails only on findings the change introduced (`--gate all` widens) |
 | [`npx fallow dead-code`](https://docs.fallow.tools/cli/dead-code) | Unused code and circular dependencies (alias: `check`) |
 | `npx fallow dead-code --trace src/file.ts:symbol` | Prove a symbol is unused before deleting it |
-| `npx fallow dead-code --type-aware --symbol-impact src/file.ts:symbol` | Find exact consumers, affected files, and targeted tests |
+| `npx fallow dead-code --type-aware --symbol-impact src/file.ts:symbol` | Find exact consumers, affected files, and targeted tests for an export or `Class.method` |
 | [`npx fallow dupes`](https://docs.fallow.tools/cli/dupes) | Duplication; modes `strict`, `mild` (default), `weak`, `semantic` |
 | [`npx fallow health --score`](https://docs.fallow.tools/cli/health) | Complexity, 0 to 100 health score, hotspots; `--css` adds structural CSS analytics |
 | [`npx fallow fix --dry-run`](https://docs.fallow.tools/cli/fix) | Preview auto-fixes; apply with `npx fallow fix` |
@@ -161,6 +161,7 @@ on exact TypeScript identity across aliases, re-exports, packages, or tests:
 npx fallow dead-code --unused-class-members --type-aware --format json --quiet
 npx fallow fix --type-aware --dry-run --format json --quiet
 npx fallow dead-code --type-aware --symbol-impact src/api.ts:Client --format json --quiet
+npx fallow dead-code --type-aware --symbol-impact src/repository.ts:UserRepository.save --format json --quiet
 npx fallow health --type-aware --type-coupling --format json --quiet
 ```
 

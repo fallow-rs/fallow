@@ -5,7 +5,7 @@ import { version as typescriptVersion } from "typescript";
 import { normalizePhaseTimings, normalizeSemanticResult } from "./response-normalization.mjs";
 
 const LEGACY_PROTOCOL_VERSION = 2;
-const PROTOCOL_VERSION = 5;
+const PROTOCOL_VERSION = 6;
 const LEGACY_OPERATION = "class-member-uses";
 const BATCH_OPERATIONS = new Set(["batch", "semantic-queries"]);
 const SIDECAR_VERSION = "3.9.1";
@@ -31,6 +31,15 @@ const BATCH_REQUEST_KEYS = new Set([
   "evidence_limit",
 ]);
 const SYMBOL_QUERY_KEYS = new Set(["id", "operation", "symbol"]);
+const SYMBOL_USE_QUERY_KEYS = new Set(["id", "operation", "symbol", "framework_contracts"]);
+const FRAMEWORK_CONTRACT_KEYS = new Set([
+  "framework",
+  "package",
+  "heritage_symbol",
+  "heritage_names",
+  "relation",
+  "members",
+]);
 const API_SURFACE_QUERY_KEYS = new Set([
   "id",
   "operation",
@@ -227,9 +236,37 @@ const parsePrivateLeakCandidates = (value, field, root) => {
 };
 
 const queryKeys = (operation) => {
+  if (operation === "symbol-use") return SYMBOL_USE_QUERY_KEYS;
   if (SYMBOL_OPERATIONS.has(operation)) return SYMBOL_QUERY_KEYS;
   return operation === "api-surface" ? API_SURFACE_QUERY_KEYS : TYPE_COUPLING_QUERY_KEYS;
 };
+
+const parseFrameworkContracts = (value, field) =>
+  requireBoundedArray(value ?? [], field, MAX_PROJECTS).map((contract, index) => {
+    const contractField = `${field}[${index}]`;
+    requireObject(contract, contractField);
+    requireExactKeys(contract, FRAMEWORK_CONTRACT_KEYS, contractField);
+    const relation = requireString(contract.relation, `${contractField}.relation`);
+    if (relation !== "extends" && relation !== "implements") {
+      throw new Error(`${contractField}.relation must be extends or implements`);
+    }
+    return {
+      framework: requireString(contract.framework, `${contractField}.framework`),
+      package: requireString(contract.package, `${contractField}.package`),
+      heritageSymbol: requireString(contract.heritage_symbol, `${contractField}.heritage_symbol`),
+      heritageNames: requireBoundedArray(
+        contract.heritage_names,
+        `${contractField}.heritage_names`,
+        MAX_PROJECTS,
+      ).map((name, nameIndex) =>
+        requireString(name, `${contractField}.heritage_names[${nameIndex}]`),
+      ),
+      relation,
+      members: requireBoundedArray(contract.members, `${contractField}.members`, MAX_PROJECTS).map(
+        (member, memberIndex) => requireString(member, `${contractField}.members[${memberIndex}]`),
+      ),
+    };
+  });
 
 const parseIncludeCycles = (value, field) =>
   value === undefined ? false : requireBoolean(value, field);
@@ -264,7 +301,18 @@ const parseQuery = (value, index, root) => {
     operation,
   };
   if (SYMBOL_OPERATIONS.has(operation)) {
-    return { ...query, symbol: parseSymbolIdentity(value.symbol, `${field}.symbol`, root) };
+    return {
+      ...query,
+      symbol: parseSymbolIdentity(value.symbol, `${field}.symbol`, root),
+      ...(operation === "symbol-use"
+        ? {
+            frameworkContracts: parseFrameworkContracts(
+              value.framework_contracts,
+              `${field}.framework_contracts`,
+            ),
+          }
+        : {}),
+    };
   }
   return parseGraphQuery(value, field, root, query);
 };

@@ -4,6 +4,7 @@
 //! that VS Code invokes through registration APIs.
 
 use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use fallow_types::semantic::{SemanticFrameworkContract, SemanticFrameworkRelation};
 
 use super::Plugin;
 
@@ -87,6 +88,25 @@ impl Plugin for VscodePlugin {
             })
             .collect()
     }
+
+    fn framework_class_member_contracts(&self) -> Vec<SemanticFrameworkContract> {
+        PROVIDER_RULES
+            .iter()
+            .flat_map(|(heritage_symbol, members)| {
+                ["@types/vscode", "vscode"].map(|package| SemanticFrameworkContract {
+                    framework: self.name().to_string(),
+                    package: package.to_string(),
+                    heritage_symbol: (*heritage_symbol).to_string(),
+                    heritage_names: vec![
+                        (*heritage_symbol).to_string(),
+                        format!("vscode.{heritage_symbol}"),
+                    ],
+                    relation: SemanticFrameworkRelation::Implements,
+                    members: members.iter().map(|member| (*member).to_string()).collect(),
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -118,5 +138,18 @@ mod tests {
                 .all(|rule| matches!(rule, UsedClassMemberRule::Scoped(_))),
             "VS Code provider methods must stay heritage-scoped"
         );
+    }
+
+    #[test]
+    fn semantic_contracts_cover_type_package_and_qualified_spelling() {
+        let contracts = VscodePlugin.framework_class_member_contracts();
+        assert!(contracts.iter().any(|contract| {
+            contract.package == "@types/vscode"
+                && contract.heritage_symbol == "TextDocumentContentProvider"
+                && contract
+                    .heritage_names
+                    .contains(&"vscode.TextDocumentContentProvider".to_string())
+                && contract.relation == SemanticFrameworkRelation::Implements
+        }));
     }
 }

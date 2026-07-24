@@ -581,6 +581,11 @@ pub struct AnalysisResults {
     /// See [`ReactComponentIntel`].
     #[serde(skip)]
     pub react_component_intel: Vec<ReactComponentIntel>,
+    /// Plugin-owned framework contracts carried only into the optional
+    /// semantic reconciliation pass.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
 struct AnalysisResultsCoreMergeParts {
@@ -654,6 +659,7 @@ struct AnalysisResultsMetadataMergeParts {
     entry_point_summary: Option<EntryPointSummary>,
     render_fan_in: Option<RenderFanInMetric>,
     react_component_intel: Vec<ReactComponentIntel>,
+    semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
 /// Exhaustively destructure `other` into the five grouped merge-part structs.
@@ -734,6 +740,7 @@ fn split_merge_parts(
         entry_point_summary,
         render_fan_in,
         react_component_intel,
+        semantic_framework_contracts,
     } = other;
 
     (
@@ -804,6 +811,7 @@ fn split_merge_parts(
             entry_point_summary,
             render_fan_in,
             react_component_intel,
+            semantic_framework_contracts,
         },
     )
 }
@@ -1038,6 +1046,11 @@ impl AnalysisResults {
         }
         self.react_component_intel
             .extend(parts.react_component_intel);
+        for contract in parts.semantic_framework_contracts {
+            if !self.semantic_framework_contracts.contains(&contract) {
+                self.semantic_framework_contracts.push(contract);
+            }
+        }
     }
 
     /// Sort all result arrays for deterministic output ordering.
@@ -1047,6 +1060,7 @@ impl AnalysisResults {
     /// across runs. This method canonicalises every result list by sorting on
     /// (path, line, col, name) so that JSON/SARIF/human output is stable.
     pub fn sort(&mut self) {
+        self.semantic_framework_contracts.sort();
         self.sort_core_findings();
         self.sort_dependency_findings();
         self.sort_graph_findings();
@@ -3634,6 +3648,14 @@ mod tests {
 
     #[test]
     fn merge_into_appends_counts_and_preserves_existing_optional_metadata() {
+        let framework_contract = crate::semantic::SemanticFrameworkContract {
+            framework: "lit".to_string(),
+            package: "lit".to_string(),
+            heritage_symbol: "LitElement".to_string(),
+            heritage_names: vec!["LitElement".to_string()],
+            relation: crate::semantic::SemanticFrameworkRelation::Extends,
+            members: vec!["render".to_string()],
+        };
         let mut target = AnalysisResults {
             unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("a.ts"),
@@ -3645,6 +3667,7 @@ mod tests {
                 total: 1,
                 by_source: vec![("existing".to_string(), 1)],
             }),
+            semantic_framework_contracts: vec![framework_contract.clone()],
             ..AnalysisResults::default()
         };
         let source = AnalysisResults {
@@ -3660,6 +3683,7 @@ mod tests {
                 by_source: vec![("incoming".to_string(), 1)],
             }),
             render_fan_in: Some(RenderFanInMetric::default()),
+            semantic_framework_contracts: vec![framework_contract],
             ..AnalysisResults::default()
         };
 
@@ -3686,6 +3710,7 @@ mod tests {
             Some("existing")
         );
         assert!(target.render_fan_in.is_some());
+        assert_eq!(target.semantic_framework_contracts.len(), 1);
     }
 
     fn test_unused_export(path: &str, export_name: &str, is_type_only: bool) -> UnusedExport {

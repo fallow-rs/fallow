@@ -43,7 +43,7 @@ This file gives coding agents project-specific context. Keep it short and update
 | When the agent is about to... | Run |
 |---|---|
 | delete an "unused" export or file | `fallow dead-code --trace <file>:<export>` |
-| prove a TypeScript symbol's exact consumers before refactoring | `fallow dead-code --type-aware --symbol-impact <file>:<export>` |
+| prove a TypeScript symbol's exact consumers before refactoring | `fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>` |
 | delete an "unused" dependency | `fallow dead-code --trace-dependency <name>` |
 | commit or open a PR | `fallow audit --base <ref>` |
 | prioritize refactoring | `fallow health --hotspots --targets` |

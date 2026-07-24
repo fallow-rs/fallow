@@ -159,7 +159,7 @@ export type SemanticCompletenessRequirement = ("best-effort" | "complete")
 /**
  * Stable reason why semantic evidence is partial or unavailable.
  */
-export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "capacity" | "unsupported-syntax")
+export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unsupported-syntax")
 /**
  * Value or type namespace for one exact declaration or reference.
  */
@@ -173,6 +173,14 @@ export type SemanticCandidateDecisionKind = ("confirmed-used" | "contract-preser
  */
 export type SemanticContractRelation = ("interface-implementation" | "abstract-implementation" | "override" | "optional-contract")
 /**
+ * Heritage relation used by a framework-owned class-member contract.
+ */
+export type SemanticFrameworkRelation = ("extends" | "implements")
+/**
+ * Confidence of exact-symbol impact analysis after known dynamic gaps.
+ */
+export type SemanticImpactConfidence = ("high" | "bounded" | "unavailable")
+/**
  * How a TypeScript project was selected for semantic refinement.
  */
 export type TypeAwareProjectSource = ("auto" | "explicit")
@@ -180,6 +188,10 @@ export type TypeAwareProjectSource = ("auto" | "explicit")
  * Outcome of semantic refinement for one TypeScript project.
  */
 export type TypeAwareProjectStatus = ("refined" | "abstained" | "complete" | "unavailable")
+/**
+ * How a persistent semantic snapshot was refreshed.
+ */
+export type TypeAwareInvalidationKind = ("full" | "incremental" | "none")
 /**
  * Closed set of reasons for retaining a candidate without semantic scanning.
  */
@@ -1257,6 +1269,10 @@ evidence?: SemanticReference[]
  */
 contract?: (SemanticContractEvidence | null)
 /**
+ * Framework-owned contract evidence, distinct from TypeScript contracts.
+ */
+framework_contract?: (SemanticFrameworkContractEvidence | null)
+/**
  * Whether this exact decision may enable a guarded class-member fix.
  */
 closed_world_eligible: boolean
@@ -1380,6 +1396,21 @@ declaration: SemanticSymbol
  * Whether the source contract marks this member optional.
  */
 optional: boolean
+}
+/**
+ * Checker-validated evidence that a framework contract preserves a member.
+ */
+export interface SemanticFrameworkContractEvidence {
+/**
+ * Fallow plugin that supplied the contract.
+ */
+framework: string
+/**
+ * Exact package that owns the heritage declaration.
+ */
+package: string
+relation: SemanticFrameworkRelation
+declaration: SemanticSymbol
 }
 /**
  * Exact source span and content hash used to guard semantic source edits.
@@ -1547,10 +1578,7 @@ targeted_tests: SemanticImpactPath[]
  * Targeted-test count before evidence bounding.
  */
 total_targeted_test_count: number
-/**
- * Confidence after accounting for dynamic behavior.
- */
-confidence: string
+confidence: SemanticImpactConfidence
 /**
  * Counted omissions, including dynamic behavior.
  */
@@ -1827,6 +1855,22 @@ source_file_count: number
  * Whether this Program served more than one semantic query in the batch.
  */
 program_reused?: (boolean | null)
+/**
+ * Whether this Program served more than one query in the current batch.
+ */
+program_shared_across_queries?: (boolean | null)
+/**
+ * Whether the root-bound semantic session reused the prior snapshot.
+ */
+program_reused_from_previous_snapshot?: (boolean | null)
+/**
+ * Monotonic revision within the root-bound semantic session.
+ */
+snapshot_revision?: (number | null)
+/**
+ * Full, incremental, or no invalidation before this query.
+ */
+invalidation_kind?: (TypeAwareInvalidationKind | null)
 /**
  * Stable project-level gap reason.
  */

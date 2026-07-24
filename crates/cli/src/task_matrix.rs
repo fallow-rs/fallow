@@ -51,7 +51,7 @@ pub const TASK_MATRIX: &[TaskRow] = &[
     },
     TaskRow {
         task: "prove a TypeScript symbol's exact consumers before refactoring",
-        command: "fallow dead-code --type-aware --symbol-impact <file>:<export>",
+        command: "fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>",
         note: None,
         probe: &[
             "dead-code",

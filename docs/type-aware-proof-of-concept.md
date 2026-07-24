@@ -5,7 +5,7 @@ or TypeScript. `--type-aware` opts into a bounded TypeScript-Go semantic pass
 after Fallow's normal project analysis. It provides five project-wide
 capabilities:
 
-- exact symbol-use and class-contract decisions for existing dead-code candidates
+- exact symbol-use, TypeScript contract, and validated framework-contract decisions for existing dead-code candidates
 - symbol traces with namespaces, aliases, and re-export hops
 - package API surfaces and cross-file private type leaks
 - exact-symbol impact paths and targeted-test suggestions
@@ -78,7 +78,13 @@ Find exact consumers, affected files, and targeted tests:
 ```bash
 fallow dead-code --type-aware --symbol-impact src/api.ts:Client \
   --format json --quiet
+fallow dead-code --type-aware --symbol-impact src/repository.ts:UserRepository.save \
+  --format json --quiet
 ```
+
+The class-method selector resolves the exact exported class and method. It
+never chooses between overloads or same-named classes heuristically. Unsupported
+or ambiguous targets remain advisory with a stable reason.
 
 Inspect advisory public-signature type coupling without changing the health
 score:
@@ -102,8 +108,9 @@ Every candidate has one of five outcomes:
 - `confirmed-used`: exact static references were found, so Fallow removes the
   syntactic finding
 - `contract-preserved`: an interface or abstract member requires the
-  declaration, or an override changes inherited behavior, so Fallow removes
-  the syntactic finding
+  declaration, an override changes inherited behavior, or a detected framework
+  contract resolves to the exact package declaration, so Fallow removes the
+  syntactic finding
 - `confirmed-no-static-references`: every owning project was checked and no
   static references were found, so Fallow keeps the finding
 - `retained-unresolved`: the exact declaration or owning project could not be
@@ -124,12 +131,14 @@ The current safety policy abstains for every candidate in a TypeScript project
 when configuration, program, syntax, or bind diagnostics make its structure
 unsafe. It also abstains per candidate for decorators, dynamic computed member
 access, optional contracts, accessor pairs, overload sets, abstract
-declarations, or attached comments. Ordinary semantic diagnostics do not invalidate an exact
-declaration match, so Fallow does not request a separate full semantic
-diagnostic pass before scanning. It also avoids TypeScript's project-wide
+declarations, or attached comments. Ordinary semantic diagnostics do not
+invalidate an exact declaration match, so Fallow does not request a separate
+full semantic diagnostic pass before scanning. It also avoids TypeScript's project-wide
 global diagnostic pass, which eagerly checks the whole program without adding
 confidence to an exact declaration match. Fallow also abstains when no project
-can be selected. Warnings and stable reason codes explain each abstention class.
+can be selected. If an external framework declaration cannot be attributed to
+an exact package, Fallow records `framework-contract-provenance` and keeps the
+candidate. Warnings and stable reason codes explain each abstention class.
 
 Use repeatable `--type-aware-project PATH` options when automatic project
 selection does not include a consumer project. Every healthy explicit project
@@ -151,7 +160,7 @@ complete process group is terminated on timeout.
 
 ## Output and integration contract
 
-The current semantic wire protocol is version 5. Private-type-leak
+The current semantic wire protocol is version 6. Private-type-leak
 reconciliation sends only Fallow's bounded candidate set and receives stable
 candidate IDs. A complete response may remove an unmatched syntactic candidate.
 If project selection or an entry point is incomplete, the response is partial
@@ -165,7 +174,10 @@ guarded-fix eligibility, abstention reasons, warnings, total elapsed time, and
 project setup, diagnostics, and symbol-scan timings are recorded under
 `_meta.type_aware` in JSON output. Each selected project constructs one Program.
 Symbol use, trace, and impact queries share one batched source traversal per
-Program. The command's top-level `elapsed_ms` includes the semantic pass. Human,
+Program. Editor sessions retain one root-bound Program across saved snapshots,
+apply source changes incrementally, and fully invalidate on TypeScript, Fallow,
+package, lockfile, or declaration-resolution changes. Audit head and base
+remain isolated. The command's top-level `elapsed_ms` includes the semantic pass. Human,
 compact, markdown, JSON, grouped JSON, and SARIF preserve the semantic analysis
 identity or a bounded provenance summary.
 

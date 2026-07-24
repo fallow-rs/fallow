@@ -670,6 +670,27 @@ fn trace_export_schema_contains_expected_properties() {
 }
 
 #[test]
+fn symbol_impact_schema_exposes_exclusive_export_or_class_method_selectors() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "symbol_impact").unwrap();
+    let schema = serde_json::to_value(&tool.input_schema).unwrap();
+    let encoded = serde_json::to_string(&schema).unwrap();
+
+    for field in ["file", "export_name", "class_name", "member_name"] {
+        assert!(
+            encoded.contains(field),
+            "symbol_impact schema should contain selector field '{field}'"
+        );
+    }
+    assert!(
+        encoded.contains("oneOf"),
+        "symbol_impact schema must make the two selector shapes explicit"
+    );
+    assert_required_fields(&schema, &["file"]);
+}
+
+#[test]
 fn trace_file_schema_contains_expected_properties() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();

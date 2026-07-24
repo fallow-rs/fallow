@@ -3433,3 +3433,25 @@ fn check_meta_framework_prerequisites_dedupes_per_framework() {
         "second emit for the same key is suppressed"
     );
 }
+
+#[test]
+fn workspace_plugin_merge_deduplicates_semantic_framework_contracts() {
+    let contract = fallow_types::semantic::SemanticFrameworkContract {
+        framework: "lit".to_string(),
+        package: "lit".to_string(),
+        heritage_symbol: "LitElement".to_string(),
+        heritage_names: vec!["LitElement".to_string()],
+        relation: fallow_types::semantic::SemanticFrameworkRelation::Extends,
+        members: vec!["render".to_string()],
+    };
+    let mut aggregate = AggregatedPluginResult {
+        framework_class_member_contracts: vec![contract.clone()],
+        ..AggregatedPluginResult::default()
+    };
+    aggregate.merge_into(AggregatedPluginResult {
+        framework_class_member_contracts: vec![contract],
+        ..AggregatedPluginResult::default()
+    });
+
+    assert_eq!(aggregate.framework_class_member_contracts.len(), 1);
+}

@@ -508,6 +508,7 @@ mod severity_gate {
             // Project-wide abstain flag for the `unused-load-data-key` detector;
             // an observability bool, not a per-finding diagnostic.
             unused_load_data_keys_global_abstain: _,
+            semantic_framework_contracts: _,
         } = AnalysisResults::default();
     }
 

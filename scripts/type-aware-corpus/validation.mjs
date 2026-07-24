@@ -79,9 +79,11 @@ const supplementalResultCountsValid = (artifact, confirmedKeys, reviewedKeys, ca
     confirmedKeys.every((key) => reviewedKeys.includes(key)),
     artifact.independent_review.clean_run_is_subset === true,
     artifact.result.baseline_candidates - artifact.result.refined_candidates ===
-      artifact.result.confirmed_used,
+      artifact.result.confirmed_used + artifact.result.contract_preserved,
     artifact.result.refined_candidates ===
-      artifact.result.unresolved_retained + artifact.result.abstained_retained,
+      artifact.result.unresolved_retained +
+        artifact.result.abstained_retained +
+        artifact.result.no_static_references,
   ].every(Boolean);
 
 const validateSupplementalReview = (
