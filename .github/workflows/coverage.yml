@@ -81,6 +81,16 @@ jobs:
         if: steps.coverage_policy.outputs.run == 'true'
         uses: ./.github/actions/setup-rust
 
+      - name: Set up Node.js
+        if: steps.coverage_policy.outputs.run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Install type-aware sidecar dependencies
+        if: steps.coverage_policy.outputs.run == 'true'
+        run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
+
       - name: Install cargo-llvm-cov
         if: steps.coverage_policy.outputs.run == 'true'
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2

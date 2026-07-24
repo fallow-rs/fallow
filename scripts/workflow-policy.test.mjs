@@ -473,6 +473,8 @@ test("coverage required check succeeds as a no-op while trusted events still run
 
   for (const name of [
     "Set up Rust",
+    "Set up Node.js",
+    "Install type-aware sidecar dependencies",
     "Install cargo-llvm-cov",
     "Build CLI binary for e2e tests",
     "Run tests with coverage",

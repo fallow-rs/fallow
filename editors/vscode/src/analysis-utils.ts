@@ -77,8 +77,6 @@ interface AnalysisArgsOptions {
   readonly cliVersion: string | null;
 }
 
-/** A flag omitted up front because the resolved CLI is too old to accept it. */
-export type SkippedFlag = SkippedCliCapability;
 export type BuiltAnalysisArgs = BuiltCliArgs;
 
 const pushVersionGatedFlag = (
