@@ -154,10 +154,12 @@ LSP, MCP, and NAPI adapters translate their protocol options and call
 
 The most common contribution is adding support for a new framework. Each plugin lives in `crates/core/src/plugins/` as a single Rust file.
 
-1. Create `crates/core/src/plugins/my_framework.rs`
-2. Implement the `Plugin` trait (see existing plugins for examples)
-3. Register it in `crates/core/src/plugins/mod.rs`
-4. Add tests
+1. Create `crates/core/src/plugins/my_framework.rs`.
+2. Implement the `Plugin` trait using an existing built-in as a reference.
+3. Declare the module in `crates/core/src/plugins/mod.rs`.
+4. Import and instantiate it in the correct category in
+   `crates/core/src/plugins/registry/builtin.rs`.
+5. Add focused plugin tests and an end-to-end fixture.
 
 A minimal plugin needs:
 - `name()` — framework name
@@ -165,7 +167,8 @@ A minimal plugin needs:
 - `entry_patterns()` — glob patterns for entry point files
 - Optionally: `resolve_config()` for AST-based config parsing
 
-See the [Plugin Authoring Guide](docs/plugin-authoring.md) for the full trait API and external plugin format.
+See the [Plugin Authoring Guide](docs/plugin-authoring.md) for external plugin
+files and the built-in extension points.
 
 ## Adding an analyzer or finding
 
@@ -281,4 +284,11 @@ npm run generate:contracts:check
 
 ## Documentation
 
-Documentation lives at [docs.fallow.tools](https://docs.fallow.tools). For documentation improvements, open a PR or issue.
+Public user documentation lives at
+[docs.fallow.tools](https://docs.fallow.tools) and is authored in the public
+[`fallow-rs/docs`](https://github.com/fallow-rs/docs) repository.
+
+Maintainer documentation for this codebase starts at
+[`docs/README.md`](docs/README.md). Use the
+[task context map](docs/development/task-context-map.md) before changing
+architecture, implementation references, skills, or verification workflows.

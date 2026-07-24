@@ -247,7 +247,7 @@ describe("createInitializationOptions", () => {
       require: "complete",
     };
 
-    expect(createInitializationOptions("3.8.1").typeAware).toEqual({
+    expect(createInitializationOptions("3.9.1").typeAware).toEqual({
       ...mockTypeAwareSettings,
       enabled: false,
     });
@@ -273,7 +273,7 @@ describe("createInitializationOptions", () => {
       require: "complete",
     };
 
-    expect(createInitializationOptions("3.8.2").typeAware).toEqual(mockTypeAwareSettings);
+    expect(createInitializationOptions("3.9.2").typeAware).toEqual(mockTypeAwareSettings);
   });
 
   it("forwards the remote config trust opt-in to fallow-lsp", () => {

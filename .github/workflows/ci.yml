@@ -157,8 +157,9 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'editors/vscode/**'
               - 'npm/fallow/**'
-            # `skills` gates the vendored-skill drift gate: the tree under
-            # npm/fallow/skills must mirror the canonical fallow-skills repo.
+            # `skills` gates the public skill contract: the public plugin must
+            # match the source under npm/fallow/skills after its one declared
+            # frontmatter transform.
             skills:
               - 'npm/fallow/skills/**'
               - 'scripts/vendor-skills.mjs'
@@ -353,7 +354,7 @@ jobs:
         run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
 
   skills-vendor:
-    name: Skills vendor drift
+    name: Public skills contract
     needs: changes
     if: needs.changes.outputs.skills == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
@@ -364,10 +365,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      # Canonical skill source is the separate public fallow-rs/fallow-skills
-      # repo. npm/fallow/skills ships verbatim in the npm package, so it must
-      # mirror the canonical tree. This gate fails on drift; re-vendor with
-      # `node scripts/vendor-skills.mjs`.
+      # The released product contract lives in this repository. The companion
+      # skills repo packages it for agent hosts and may add host interface
+      # files plus the declared plugin frontmatter transform.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: fallow-rs/fallow-skills
@@ -376,7 +376,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-      - name: Check vendored skills match canonical fallow-skills
+      - name: Check public skill matches the Fallow source contract
         env:
           FALLOW_SKILLS_DIR: ${{ github.workspace }}/.fallow-skills-src
         run: node scripts/vendor-skills.mjs --check
@@ -419,6 +419,22 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Check out public documentation contract
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: fallow-rs/docs
+          path: .companion/fallow-docs
+          persist-credentials: false
+      - name: Check out public skill contract
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: fallow-rs/fallow-skills
+          path: .companion/fallow-skills
+          persist-credentials: false
+      - name: Documentation discoverability
+        uses: Hedde/trigger_tree@78a801629f0b11f403737e0ae9e5c2bfa827a6bb # v1.23.2
+        with:
+          min-score: "100"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
@@ -438,6 +454,15 @@ jobs:
       - name: Type-aware sidecar package check
         working-directory: tools/type-aware-sidecar
         run: npm pack --dry-run --json
+      - name: Knowledge architecture
+        run: npm run check:knowledge-architecture
+      - name: Cross-repository telemetry documentation parity
+        env:
+          FALLOW_DOCS_DIR: ${{ github.workspace }}/.companion/fallow-docs
+          FALLOW_SKILLS_DIR: ${{ github.workspace }}/.companion/fallow-skills
+        run: python3 scripts/check_telemetry_doc_sync.py
+      - name: Agent adapter drift
+        run: npm run check:agent-adapters
 
   npm-package:
     name: npm Package

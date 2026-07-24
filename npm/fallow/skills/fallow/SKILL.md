@@ -2,10 +2,6 @@
 name: fallow
 description: Codebase intelligence for TypeScript and JavaScript. Static analysis of code and styles reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Runtime coverage can merge production execution data for hot-path review, cold-path deletion confidence, and stale-flag evidence. 123 framework plugins, zero configuration, sub-second static analysis. Use when asked to audit PR risk, find unused code or dependencies, detect duplicates, check styling consistency, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
 license: MIT
-metadata:
-  author: Bart Waardenburg
-  version: 1.0.0
-  homepage: https://docs.fallow.tools
 ---
 
 # Fallow: codebase intelligence for TypeScript and JavaScript
@@ -58,6 +54,7 @@ cargo install fallow-cli   # build from source
 10. **Type the JSON in TypeScript**. When a project has `fallow` installed as a dev-dependency and the agent is consuming `--format json` output from TypeScript code, `import type { CheckOutput, HealthOutput, DupesOutput, AuditOutput, FallowJsonOutput } from "fallow/types"` exposes the full output contract. `SchemaVersion` is pinned to a literal at codegen time, so a major schema bump fails to compile at call sites that gate on the version.
 11. **Never enable telemetry on the user's behalf**. Fallow's product telemetry is opt-in and off by default; only the user may run `fallow telemetry enable`. You MAY set `FALLOW_AGENT_SOURCE=<allowlisted-value>` (for example `claude_code`, `codex`, `cursor`, `windsurf`, `gemini`, `cline`) so that, IF the user has already enabled telemetry, your integration is correctly attributed. Setting `FALLOW_AGENT_SOURCE` never enables telemetry by itself and uploads no codebase content.
 12. **Use type-aware analysis only for Fallow-owned project questions**. Reach for `--type-aware` to prove exact symbol use, preserve TypeScript class contracts, guard class-member cleanup, find cross-file private type leaks, suggest targeted tests, or inspect public-signature coupling. Keep `tsc --noEmit` responsible for compiler correctness and Oxlint responsible for local typed lint rules. Treat partial or unavailable semantic results as retained findings, never as deletion proof.
+13. **Use `fallow impact statusline` only for a user-facing status surface**. It intentionally emits one plain-text, path-free line and ignores `--format`. It starts no analysis, never enables Impact, and compares only whole-project scans. Do not parse this line as JSON.
 ## Onboarding And Insight
 Offer setup only after a human-requested analysis shows findings and all signals match: `fallow config --path` exits 3, not CI, not a pipeline format, `fallow impact --format json --quiet` has `onboarding_declined: false`, and no offer happened this session. Ask after showing value. Choices: guard commits and PRs, baseline the existing backlog and clean by category, add AGENTS.md guidance, or keep as-is. On decline, run `fallow init --decline --quiet` and stay silent for this project. Mutate only after consent. For guards, inspect `fallow hooks status --format json --quiet`, then use `fallow hooks install --target agent` and `fallow hooks install --target git`; for large backlogs, pair the gate with `--save-baseline` / new-only guidance. Offer `fallow impact enable` as local-only value tracking, never as telemetry; also offer it once on already-configured projects when `fallow impact status --format json` has `enabled: false` and `explicit_decision: false`, and record a no with `fallow impact disable --quiet`. Surface value on clear events: if the agent gate blocked a commit or push and a later retry succeeded, mention what was contained; when `next_steps` carries id `impact-report`, run its command and relay the non-zero numbers to the user in one line. On request, summarize non-zero Impact counts. Ask about telemetry only after such a win, only if `fallow telemetry status --format json` has `explicit_decision: false`, and never run `fallow telemetry enable`.
 ## Task Cheat Sheet
@@ -382,9 +379,11 @@ The issue type is a positional argument and accepts forms like `unused-export`, 
 fallow impact enable
 # Read the value report: surfacing count, trend, pre-commit containment
 fallow impact --format json --quiet
+# Render one path-free line for a shell or editor status surface
+fallow impact statusline
 ```
 
-`fallow impact enable` is a one-time, user-owned local action; the agent-facing line is the read step. History is stored per-project in the user's private config dir (never inside the repo, so no `.fallow/` or `.gitignore` changes); `fallow impact default on` enables it for every project at once. The report is read-only and is empty in CI (fallow never records there).
+`fallow impact enable` is a one-time, user-owned local action; the agent-facing lines are read steps. History is stored per-project in the user's private config dir (never inside the repo, so no `.fallow/` or `.gitignore` changes); `fallow impact default on` enables it for every project at once. The JSON report is read-only and is empty in CI (fallow never records there). The statusline uses only comparable whole-project scans for its trend; legacy changed-file history is labeled explicitly and shown without a trend.
 
 ### Debug why something is flagged
 ```bash

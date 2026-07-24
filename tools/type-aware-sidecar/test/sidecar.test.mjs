@@ -31,7 +31,7 @@ test("status reports protocol and backend without a project request", () => {
   const result = spawnSync(executable, ["--status"], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    package_version: "3.8.1",
+    package_version: "3.9.1",
     protocol_version: 5,
     backend_family: "typescript-go",
     backend_version: "7.0.2",
@@ -387,7 +387,7 @@ export class StringService extends BaseService<GenericClient<string>> {
     assert.deepEqual(response.selected_tsconfigs, ["tsconfig.json"]);
     assert.equal(response.backend, "typescript-go");
     assert.equal(response.backend_version, "7.0.2");
-    assert.equal(response.sidecar_version, "3.8.1");
+    assert.equal(response.sidecar_version, "3.9.1");
     assert.deepEqual(response.abstentions, []);
     assert.ok(response.projects[0].source_file_count >= 2);
     const { source_file_count: _sourceFileCount, ...projectResult } = response.projects[0];
@@ -2823,7 +2823,7 @@ test("returns provenance for an empty candidate request", () => {
   const response = runSidecar(request(sidecarRoot, []));
 
   assert.equal(response.protocol_version, 2);
-  assert.equal(response.sidecar_version, "3.8.1");
+  assert.equal(response.sidecar_version, "3.9.1");
   assert.equal(response.backend, "typescript-go");
   assert.deepEqual(response.selected_tsconfigs, []);
   assert.deepEqual(response.confirmed_used_candidate_ids, []);

@@ -103,6 +103,15 @@ npm run bench:circular     # fallow vs madge + dpdm (all fixtures)
 npm run bench -- --runs=10 --warmup=3
 ```
 
+From the repository root, the equivalent setup command is:
+
+```bash
+npm --prefix benchmarks run download-fixtures
+```
+
+It populates the intentionally untracked
+`benchmarks/fixtures/real-world` corpus used by reviewer and panel workflows.
+
 ### Output
 
 Benchmark scripts print:

@@ -1,58 +1,49 @@
-# Agent Skills
+# Maintainer agent resources
 
-This directory contains repo-scoped resources for agents that support the open Agent Skills format.
+`.agents/` is the client-neutral source of truth for Fallow's repository
+workflows and reviewer guidance.
 
-The contents here are additive. They do not replace Fallow's existing tool-specific agent configuration.
+## Skills
 
-## Existing agent configuration
-
-Fallow also keeps agent-specific configuration in these locations:
-
-- `CLAUDE.md`: general repository guidance and working conventions. Some agents, including Pi, can load this as startup context.
-- `.claude/agents/`: Claude-specific subagent definitions.
-- `.codex/agents/`: Codex-specific custom agent definitions.
-
-Do not remove or rename those files when adding portable skills.
-
-## Portable skills
-
-Repo-scoped Agent Skills live under:
+Canonical maintainer workflows live at:
 
 ```text
 .agents/skills/<skill-name>/SKILL.md
 ```
 
-Each skill follows the Agent Skills specification:
+Codex and other Agent Skills clients discover this tree directly. Claude
+adapters under `.claude/skills/` are generated from it:
 
-- the skill is a directory containing `SKILL.md`
-- `SKILL.md` starts with YAML frontmatter
-- `name` and `description` are required
-- `name` matches the parent directory and uses lowercase letters, numbers, and hyphens
-- `description` explains what the skill does and when an agent should use it
-
-Use `.agents/skills/` for focused, repeatable workflows that can be reused by multiple agent harnesses.
-
-## Provenance and references
-
-The initial skills in this directory are adapted from existing reviewer definitions under `.claude/agents/`. The initial skill bodies are content-preserving adaptations of those source files; only the frontmatter is changed to match the Agent Skills format.
-
-Reference:
-
-- Agent Skills specification: https://agentskills.io/specification
-- Agent Skills clients: https://agentskills.io/clients
-
-## Pi usage
-
-Pi already loads `CLAUDE.md` for general project context. Skills are separate: after the project is trusted, Pi can discover directories under `.agents/skills/` that contain `SKILL.md`.
-
-In Pi, a contributor can force-load a skill with:
-
-```text
-/skill:ci-formats-reviewer
+```bash
+npm run generate:agent-adapters
+npm run check:agent-adapters
 ```
 
-## Compatibility
+Never edit generated Claude skill copies. Do not require `.codex/skills`,
+sibling checkouts, or machine-local symlinks for repository workflows.
 
-This directory is intentionally tool-agnostic. Tool-specific agent definitions remain in their native locations.
-Claude-specific subagents remain under `.claude/agents/`, and Codex-specific custom agents remain under `.codex/agents/`.
-Compatible clients and harnesses that support Agent Skills can additionally discover `.agents/skills/`.
+Every skill must:
+
+- use matching lowercase kebab-case directory and frontmatter names
+- include a trigger-oriented description
+- keep procedural instructions concise
+- route stable architecture and reference knowledge into indexed `docs/`
+- avoid private cloud knowledge and local absolute paths
+
+## Runtime-specific configuration
+
+- `AGENTS.md` is the universal repository router.
+- `CLAUDE.md` is the thin Claude adapter.
+- `.claude/rules/` contains Claude-specific path-scoped constraints.
+- `.claude/agents/` and `.codex/agents/` contain runtime-specific reviewer
+  definitions where their formats genuinely differ.
+
+Runtime adapters may differ in format, but their observable review contract
+must remain equivalent and pass the knowledge architecture gate.
+
+## Public end-user skills
+
+This tree is for developing Fallow itself. The released product skill contract
+under `npm/fallow/skills/fallow/` is consumed by the separate public
+`fallow-skills` repository, which owns portable plugin packaging and additional
+end-user workflows.

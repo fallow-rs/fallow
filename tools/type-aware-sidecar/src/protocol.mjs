@@ -8,7 +8,7 @@ const LEGACY_PROTOCOL_VERSION = 2;
 const PROTOCOL_VERSION = 5;
 const LEGACY_OPERATION = "class-member-uses";
 const BATCH_OPERATIONS = new Set(["batch", "semantic-queries"]);
-const SIDECAR_VERSION = "3.8.1";
+const SIDECAR_VERSION = "3.9.1";
 const BACKEND = "typescript-go";
 const BACKEND_VERSION = typescriptVersion;
 

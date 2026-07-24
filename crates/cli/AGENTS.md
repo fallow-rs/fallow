@@ -11,10 +11,14 @@ Use this file when editing `crates/cli/**`.
 - `report/`: user-visible and machine-readable output formats.
 - `fix/`: mutation logic for auto-fixes.
 - `health/`, `dupes.rs`, `coverage/`, `license/`: CLI-specific command orchestration over engine and API services.
+- `crates/engine/`: reusable analysis orchestration consumed by CLI commands.
+- `crates/api/`: programmatic facade used by the CLI and host integrations.
+- `crates/output/`: shared report and serialization contracts.
 
 ## Rules
 
-- Keep analysis logic out of the CLI when it belongs in `crates/core`, `crates/graph`, or `crates/extract`.
+- Keep analysis logic out of the CLI when it belongs in `crates/engine`,
+  `crates/api`, `crates/core`, `crates/graph`, or `crates/extract`.
 - JSON output is an integration contract. Preserve existing fields unless the schema version and downstream consumers move together.
 - Every issue emitted to users should keep a useful `actions` array where that issue family supports actions.
 - Error output must stay structured when `--format json` is active.

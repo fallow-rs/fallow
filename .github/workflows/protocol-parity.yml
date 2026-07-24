@@ -14,10 +14,8 @@ name: Protocol parity
 # the sidecar MUST be re-released with a matching minor before a fallow CLI
 # release can emit them safely.
 #
-# Scaffold mode: if the published sidecar's package.json does not yet carry
-# the `fallowProtocol` field, the check logs a warning and passes. Once the
-# fallow-cloud release workflow starts injecting the field, this workflow
-# begins enforcing parity automatically.
+# The published sidecar must advertise its `fallowProtocol` version. Missing
+# metadata is a contract failure because parity cannot be proven.
 #
 # This workflow reads only pinned, trusted sources (Cargo.lock in this repo
 # and the public npm registry JSON for @fallow-cli/fallow-cov) and does not
@@ -111,14 +109,12 @@ jobs:
           print(f"  fallowProtocol field              = {protocol_label}")
 
           if sidecar_protocol is None:
-              print(
-                  "WARNING: published sidecar does not advertise a "
-                  "`fallowProtocol` field yet. Scaffold-mode pass; "
-                  "enforcement activates once fallow-cloud's release "
-                  "workflow injects the field into the published "
-                  "package.json."
+              sys.exit(
+                  "PROTOCOL METADATA MISSING: the latest published sidecar "
+                  "does not advertise `fallowProtocol`. Publish a sidecar "
+                  "with protocol provenance before changing or releasing "
+                  "the Fallow protocol dependency."
               )
-              sys.exit(0)
 
           cli_mm = minor_tuple(cli_protocol)
           sc_mm = minor_tuple(sidecar_protocol)

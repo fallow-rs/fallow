@@ -180,10 +180,10 @@ describe("buildAuditArgs", () => {
     expect(args).not.toContain("--production");
   });
 
-  it("omits type-aware flags as one capability before the v3.8.2 floor", () => {
+  it("omits type-aware flags as one capability before the v3.9.2 floor", () => {
     const result = buildAuditArgs({
       ...baseAuditArgsOptions,
-      cliVersion: "3.8.1",
+      cliVersion: "3.9.1",
       typeAware: {
         enabled: true,
         projects: ["tsconfig.json"],
@@ -195,7 +195,7 @@ describe("buildAuditArgs", () => {
     expect(result.args).not.toContain("--type-aware-project");
     expect(result.args).not.toContain("--type-aware-require");
     expect(result.skipped).toEqual([
-      { flag: "--type-aware", requires: "3.8.2", cliVersion: "3.8.1" },
+      { flag: "--type-aware", requires: "3.9.2", cliVersion: "3.9.1" },
     ]);
   });
 });

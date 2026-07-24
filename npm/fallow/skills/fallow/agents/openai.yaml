@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fallow"
+  short_description: "Analyze TypeScript and JavaScript codebases"
+  default_prompt: "Use $fallow to audit this codebase for changed-code risk, cleanup opportunities, duplication, complexity, and architecture issues."

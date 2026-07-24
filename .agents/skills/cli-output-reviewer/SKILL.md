@@ -23,6 +23,10 @@ For each human-format diff, walk this list in addition to the generic checks abo
 
 ### Human format audit (Phase 3b)
 
+The real-world corpus is intentionally untracked. Before its first use, follow
+the [benchmark setup](../../../BENCHMARKS.md#comparative-benchmarks) and run
+`npm --prefix benchmarks run download-fixtures`.
+
 ```bash
 FALLOW_QUIET=1 fallow <command> --root benchmarks/fixtures/real-world/zod 2>/dev/null
 ```

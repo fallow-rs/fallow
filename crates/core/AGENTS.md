@@ -4,14 +4,16 @@ Use this file when editing `crates/core/**`.
 
 ## Ownership
 
-- `discover.rs` and `discover/`: source walking, default ignores, entry point detection, workspace-aware file discovery.
+- `discover/`: core discovery backend. Public orchestration lives in
+  `crates/engine/src/discover.rs`.
 - `analyze/`: dead-code and structural issue detection.
 - `plugins/`: built-in framework and tool integrations.
 - `scripts/`: package scripts and dependency-usage parsing.
 
 ## Rules
 
-- Follow pipeline order: config, extract, graph, core, CLI, LSP, MCP.
+- Follow pipeline order: config, discovery, extract, graph, core, engine, API,
+  output, then host adapters.
 - Keep detector behavior conservative. Prefer one missed advisory finding over a noisy false positive unless the rule is explicitly strict.
 - Do not hide diagnostics by broad ignores when a narrower fixture or parser fix is possible.
 - Use `FxHashMap` and `FxHashSet` for hot analysis data structures.

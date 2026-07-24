@@ -6,8 +6,8 @@
     "syntax-and-style-lint-rules"
   ],
   "artifacts": {
-    "fallow_sha256": "af70b799276b45d33510312f0b6cbf13d0c01028afdbfe098518f14277b03df9",
-    "sidecar_sha256": "ead1db7705881cd5a51ee11ee9004a2e812608b1017bfa2767d8ad36172a7f3c"
+    "fallow_sha256": "80f73690b85f2a6c33ebfa45f77e7d1f0c88d7d8ba992f79a612e6965e76b4e0",
+    "sidecar_sha256": "c09d5b0fce8580e47c61ee927307f73c7232d66efba8e7f9f80eb4d36e76b912"
   },
   "coverage": {
     "capability_ids": [

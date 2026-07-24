@@ -385,10 +385,15 @@ External plugins cover the vast majority of use cases. AST-based config parsing 
 
 ## Verifying
 
-Check that your plugin is detected:
+Run the read-only authoring check first:
 
 ```bash
+fallow plugin-check --format json --quiet
 fallow list --plugins
 ```
 
-This shows all active plugins, including external ones.
+`plugin-check` reports whether each external plugin activated and shows
+manifest-entry evidence. Advisory findings return success. Invalid
+configuration or serialization errors return exit code 2.
+
+`list --plugins` then confirms the active plugin inventory.

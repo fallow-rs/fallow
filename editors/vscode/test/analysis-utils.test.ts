@@ -265,10 +265,10 @@ describe("buildAnalysisArgs", () => {
     expect(args).toContain("--no-production");
   });
 
-  it("forwards type-aware arguments at the v3.8.2 compatibility floor", () => {
+  it("forwards type-aware arguments at the v3.9.2 compatibility floor", () => {
     const result = buildAnalysisArgs({
       ...baseOptions,
-      cliVersion: "3.8.2",
+      cliVersion: "3.9.2",
       typeAware: {
         enabled: true,
         projects: ["tsconfig.app.json"],
@@ -282,10 +282,10 @@ describe("buildAnalysisArgs", () => {
     expect(result.skipped).toEqual([]);
   });
 
-  it("omits type-aware arguments as one capability for v3.8.1", () => {
+  it("omits type-aware arguments as one capability for v3.9.1", () => {
     const result = buildAnalysisArgs({
       ...baseOptions,
-      cliVersion: "3.8.1",
+      cliVersion: "3.9.1",
       typeAware: {
         enabled: true,
         projects: ["tsconfig.app.json"],
@@ -297,7 +297,7 @@ describe("buildAnalysisArgs", () => {
     expect(result.args).not.toContain("--type-aware-project");
     expect(result.args).not.toContain("--type-aware-require");
     expect(result.skipped).toEqual([
-      { flag: "--type-aware", requires: "3.8.2", cliVersion: "3.8.1" },
+      { flag: "--type-aware", requires: "3.9.2", cliVersion: "3.9.1" },
     ]);
   });
 });

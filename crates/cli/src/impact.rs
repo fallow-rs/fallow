@@ -384,6 +384,57 @@ pub fn load(root: &Path) -> ImpactStore {
     }
 }
 
+/// A stable failure state for status-bar callers. The statusline loader never
+/// logs the store path or substitutes corrupt/newer data with an empty report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatuslineLoadError {
+    DataUnavailable,
+}
+
+/// Load Impact state without writes, warnings, or path-bearing diagnostics.
+///
+/// Unlike [`load`], this does not persist a legacy in-repo store when the user
+/// store is missing. A corrupt, unreadable, or newer-schema store is reported
+/// as unavailable so the compact renderer cannot mislabel lost data as "off".
+pub fn load_statusline(root: &Path) -> Result<ImpactStore, StatuslineLoadError> {
+    let Some(path) = store_path(root) else {
+        return Ok(ImpactStore::default());
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(content) => parse_statusline_store(&content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            load_legacy_statusline_store(root)
+        }
+        Err(_) => Err(StatuslineLoadError::DataUnavailable),
+    }
+}
+
+fn parse_statusline_store(content: &str) -> Result<ImpactStore, StatuslineLoadError> {
+    let store = serde_json::from_str::<ImpactStore>(content)
+        .map_err(|_| StatuslineLoadError::DataUnavailable)?;
+    if store.schema_version > STORE_SCHEMA_VERSION {
+        return Err(StatuslineLoadError::DataUnavailable);
+    }
+    Ok(store)
+}
+
+fn load_legacy_statusline_store(root: &Path) -> Result<ImpactStore, StatuslineLoadError> {
+    let legacy_path = legacy_store_path(root);
+    let content = match std::fs::read_to_string(legacy_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ImpactStore::default());
+        }
+        Err(_) => return Err(StatuslineLoadError::DataUnavailable),
+    };
+    let legacy = serde_json::from_str::<LegacyFlatStore>(&content)
+        .map_err(|_| StatuslineLoadError::DataUnavailable)?;
+    let (_, worktree, display) = project_identity(root);
+    let mut store = legacy.into_store(&worktree);
+    store.label = display;
+    Ok(store)
+}
+
 fn parse_store(content: &str, path: &Path) -> ImpactStore {
     match serde_json::from_str::<ImpactStore>(content) {
         Ok(store) => {
@@ -2016,6 +2067,94 @@ pub fn render_human(report: &ImpactReport) -> String {
     out
 }
 
+/// Render one stable, path-free line for editor and shell status bars.
+#[must_use]
+pub fn render_statusline(report: &ImpactReport) -> String {
+    const PREFIX: &str = "fallow impact  ";
+
+    if !report.enabled {
+        return format!("{PREFIX}off");
+    }
+
+    let cleared = statusline_cleared_segment(report);
+    if let Some(surfacing) = &report.project_surfacing {
+        let mut segments = vec![format!(
+            "{} issue{} in last full scan",
+            surfacing.total_issues,
+            plural(surfacing.total_issues)
+        )];
+        segments.push(match &report.project_trend {
+            Some(trend) => statusline_trend_segment(trend),
+            None => "compare after next full scan".to_owned(),
+        });
+        if let Some(cleared) = cleared {
+            segments.push(cleared);
+        }
+        return format!("{PREFIX}{}", segments.join(" · "));
+    }
+
+    if let Some(surfacing) = &report.surfacing {
+        let mut segments = vec![format!(
+            "{} issue{} in last changed-file scan",
+            surfacing.total_issues,
+            plural(surfacing.total_issues)
+        )];
+        if let Some(cleared) = cleared {
+            segments.push(cleared);
+        }
+        return format!("{PREFIX}{}", segments.join(" · "));
+    }
+
+    format!("{PREFIX}tracking · awaiting first scan")
+}
+
+/// Render the exact stable state used when Impact history cannot be read.
+#[must_use]
+pub fn render_statusline_unavailable() -> String {
+    "fallow impact  data unavailable".to_owned()
+}
+
+fn statusline_trend_segment(trend: &TrendSummary) -> String {
+    let magnitude = trend.total_delta.unsigned_abs();
+    match trend.direction {
+        ImpactTrendDirection::Improving => format!("{magnitude} fewer than prior"),
+        ImpactTrendDirection::Declining => format!("{magnitude} more than prior"),
+        ImpactTrendDirection::Stable => "unchanged from prior".to_owned(),
+    }
+}
+
+fn statusline_cleared_segment(report: &ImpactReport) -> Option<String> {
+    if !report.attribution_active {
+        return None;
+    }
+    Some(format!(
+        "{} cleared while tracking",
+        compact_count(report.resolved_total)
+    ))
+}
+
+fn compact_count(count: usize) -> String {
+    const THOUSAND: usize = 1_000;
+    const MILLION: usize = 1_000_000;
+    const BILLION: usize = 1_000_000_000;
+
+    let (unit, suffix) = if count >= BILLION {
+        (BILLION, "b")
+    } else if count >= MILLION {
+        (MILLION, "m")
+    } else if count >= THOUSAND {
+        (THOUSAND, "k")
+    } else {
+        return count.to_string();
+    };
+    let tenths = count.saturating_mul(10).saturating_add(unit / 2) / unit;
+    if tenths.is_multiple_of(10) {
+        format!("{}{suffix}", tenths / 10)
+    } else {
+        format!("{}.{:01}{suffix}", tenths / 10, tenths % 10)
+    }
+}
+
 /// Render the changed-file LATEST RUN and TREND sections of the human report.
 #[expect(
     clippy::format_push_string,
@@ -2870,6 +3009,114 @@ mod tests {
         let human = render_human(&report);
         assert!(human.contains("No history yet"));
         assert!(!human.contains("0 issues"));
+    }
+
+    #[test]
+    fn statusline_renders_stable_non_success_states() {
+        let off = build_report(&ImpactStore::default());
+        assert_eq!(render_statusline(&off), "fallow impact  off");
+
+        let tracking = build_report(&ImpactStore {
+            enabled: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            render_statusline(&tracking),
+            "fallow impact  tracking · awaiting first scan"
+        );
+        assert_eq!(
+            render_statusline_unavailable(),
+            "fallow impact  data unavailable"
+        );
+    }
+
+    #[test]
+    fn statusline_uses_only_comparable_whole_project_trend() {
+        let mut report = rreport(
+            2,
+            Some("2026-06-13T00:00:00Z"),
+            Some(rcounts(62, 62, 0, 0)),
+            Some(rtrend(9, 62)),
+            Some(rcounts(7, 7, 0, 0)),
+            Some(rtrend(2, 7)),
+            true,
+        );
+        report.resolved_total = 4_949;
+
+        assert_eq!(
+            render_statusline(&report),
+            "fallow impact  7 issues in last full scan · 5 more than prior · 4.9k cleared while tracking"
+        );
+    }
+
+    #[test]
+    fn statusline_labels_legacy_changed_file_scope_and_omits_trend() {
+        let report = rreport(
+            2,
+            Some("2026-06-13T00:00:00Z"),
+            Some(rcounts(62, 62, 0, 0)),
+            Some(rtrend(9, 62)),
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(
+            render_statusline(&report),
+            "fallow impact  62 issues in last changed-file scan"
+        );
+    }
+
+    #[test]
+    fn statusline_renders_baseline_improvement_stability_and_zero_cleared() {
+        let baseline = rreport(0, None, None, None, Some(rcounts(1, 1, 0, 0)), None, false);
+        assert_eq!(
+            render_statusline(&baseline),
+            "fallow impact  1 issue in last full scan · compare after next full scan"
+        );
+
+        let improving = rreport(
+            0,
+            None,
+            None,
+            None,
+            Some(rcounts(3, 3, 0, 0)),
+            Some(rtrend(8, 3)),
+            false,
+        );
+        assert_eq!(
+            render_statusline(&improving),
+            "fallow impact  3 issues in last full scan · 5 fewer than prior"
+        );
+
+        let stable = rreport(
+            0,
+            None,
+            None,
+            None,
+            Some(rcounts(3, 3, 0, 0)),
+            Some(rtrend(3, 3)),
+            true,
+        );
+        assert_eq!(
+            render_statusline(&stable),
+            "fallow impact  3 issues in last full scan · unchanged from prior · 0 cleared while tracking"
+        );
+    }
+
+    #[test]
+    fn compact_statusline_counts_are_readable() {
+        for (count, expected) in [
+            (0, "0"),
+            (999, "999"),
+            (1_000, "1k"),
+            (1_050, "1.1k"),
+            (4_949, "4.9k"),
+            (10_000, "10k"),
+            (1_250_000, "1.3m"),
+        ] {
+            assert_eq!(compact_count(count), expected);
+        }
     }
 
     #[test]
@@ -5063,6 +5310,83 @@ mod tests {
         // A corrupt legacy file must return a default store without panicking.
         assert!(!store.enabled);
         assert!(store.records.is_empty());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn statusline_loader_reads_legacy_store_without_migrating_it() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".fallow")).unwrap();
+        std::fs::write(
+            legacy_store_path(root),
+            br#"{
+                "enabled": true,
+                "records": [{
+                    "timestamp": "t0",
+                    "version": "2.0.0",
+                    "verdict": "warn",
+                    "counts": {
+                        "total_issues": 2,
+                        "dead_code": 2,
+                        "complexity": 0,
+                        "duplication": 0
+                    }
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let user_store = store_path(root).unwrap();
+        assert!(!user_store.exists());
+        let store = load_statusline(root).expect("legacy statusline store reads");
+        assert!(store.enabled);
+        assert_eq!(store.records.len(), 1);
+        assert!(
+            !user_store.exists(),
+            "statusline load must not persist a migrated user store"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn statusline_loader_reports_corrupt_and_future_user_stores() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+
+        seed_store_raw(root, b"{ not valid json ][");
+        assert!(matches!(
+            load_statusline(root),
+            Err(StatuslineLoadError::DataUnavailable)
+        ));
+
+        seed_store_raw(
+            root,
+            format!(
+                r#"{{"schema_version":{},"enabled":true}}"#,
+                STORE_SCHEMA_VERSION + 1
+            )
+            .as_bytes(),
+        );
+        assert!(matches!(
+            load_statusline(root),
+            Err(StatuslineLoadError::DataUnavailable)
+        ));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn statusline_loader_reports_corrupt_legacy_store() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".fallow")).unwrap();
+        std::fs::write(legacy_store_path(root), b"{ corrupted json ][").unwrap();
+
+        assert!(matches!(
+            load_statusline(root),
+            Err(StatuslineLoadError::DataUnavailable)
+        ));
+        assert!(!store_path(root).unwrap().exists());
     }
 
     // ----- resolve_enabled: user source propagates to report ----------------

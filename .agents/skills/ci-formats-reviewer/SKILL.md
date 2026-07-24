@@ -54,6 +54,10 @@ Review changes to fallow's CI-oriented output formats. Each format serves a spec
 
 For each CI-format diff, run the format-specific audit alongside the generic checks above.
 
+The real-world corpus is intentionally untracked. Before its first use, follow
+the [benchmark setup](../../../BENCHMARKS.md#comparative-benchmarks) and run
+`npm --prefix benchmarks run download-fixtures`.
+
 ### Compact format audit (Phase 3c)
 
 ```bash

@@ -171,6 +171,16 @@ pub struct CloudRuntimeSummary {
     pub last_received_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CloudNeverCalledSource {
+    RuntimeObserved,
+    InventoryBackfill,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeFunction {
     pub file_path: String,
@@ -192,6 +202,8 @@ pub struct CloudRuntimeFunction {
     pub hit_count: Option<u64>,
     #[serde(default)]
     pub tracking_state: CloudTrackingState,
+    #[serde(default)]
+    pub never_called_source: CloudNeverCalledSource,
     #[serde(default)]
     pub deployments_observed: u32,
     #[serde(default)]
@@ -546,6 +558,39 @@ mod tests {
         .expect("absent importance metrics must deserialize");
         assert_eq!(absent.cyclomatic, None);
         assert_eq!(absent.owner_count, None);
+    }
+
+    #[test]
+    fn runtime_function_preserves_never_called_source_conservatively() {
+        let runtime_observed: CloudRuntimeFunction = serde_json::from_str(
+            r#"{"file_path":"src/a.ts","function_name":"a","tracking_state":"never_called","never_called_source":"runtime_observed"}"#,
+        )
+        .expect("runtime-observed provenance must deserialize");
+        assert_eq!(
+            runtime_observed.never_called_source,
+            CloudNeverCalledSource::RuntimeObserved
+        );
+
+        let inventory_backfill: CloudRuntimeFunction = serde_json::from_str(
+            r#"{"file_path":"src/a.ts","function_name":"a","tracking_state":"never_called","never_called_source":"inventory_backfill"}"#,
+        )
+        .expect("inventory-backfill provenance must deserialize");
+        assert_eq!(
+            inventory_backfill.never_called_source,
+            CloudNeverCalledSource::InventoryBackfill
+        );
+
+        let legacy: CloudRuntimeFunction = serde_json::from_str(
+            r#"{"file_path":"src/a.ts","function_name":"a","tracking_state":"never_called"}"#,
+        )
+        .expect("legacy cloud responses must remain deserializable");
+        assert_eq!(legacy.never_called_source, CloudNeverCalledSource::Unknown);
+
+        let future: CloudRuntimeFunction = serde_json::from_str(
+            r#"{"file_path":"src/a.ts","function_name":"a","tracking_state":"never_called","never_called_source":"future_source"}"#,
+        )
+        .expect("future provenance values must remain deserializable");
+        assert_eq!(future.never_called_source, CloudNeverCalledSource::Unknown);
     }
 
     #[test]

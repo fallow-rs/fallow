@@ -12,6 +12,8 @@ import {
 const commandSignatures = (commands) => commands.map(({ command, args }) => [command, args]);
 
 const FAST_COMMANDS = [
+  ["npm", ["run", "check:knowledge-architecture"]],
+  ["npm", ["run", "check:agent-adapters"]],
   ["cargo", ["fmt", "--all", "--", "--check"]],
   ["cargo", ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]],
   ["npm", ["run", "lint:js"]],

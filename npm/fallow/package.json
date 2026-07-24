@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.8.1",
+  "version": "3.9.1",
   "description": "Codebase intelligence for TypeScript and JavaScript. Free static analysis of code and styles, optional paid runtime intelligence (Fallow Runtime). Quality, risk, architecture, dependencies, duplication, and design-system drift for humans, CI, and the agents writing your code. Zero-config framework support.",
   "license": "MIT",
   "repository": {
@@ -87,14 +87,14 @@
     "@tanstack/intent": "0.3.6"
   },
   "optionalDependencies": {
-    "@fallow-cli/darwin-arm64": "3.8.1",
-    "@fallow-cli/darwin-x64": "3.8.1",
-    "@fallow-cli/linux-x64-gnu": "3.8.1",
-    "@fallow-cli/linux-arm64-gnu": "3.8.1",
-    "@fallow-cli/linux-x64-musl": "3.8.1",
-    "@fallow-cli/linux-arm64-musl": "3.8.1",
-    "@fallow-cli/win32-arm64-msvc": "3.8.1",
-    "@fallow-cli/win32-x64-msvc": "3.8.1",
-    "fallow-type-aware": "3.8.1"
+    "@fallow-cli/darwin-arm64": "3.9.1",
+    "@fallow-cli/darwin-x64": "3.9.1",
+    "@fallow-cli/linux-x64-gnu": "3.9.1",
+    "@fallow-cli/linux-arm64-gnu": "3.9.1",
+    "@fallow-cli/linux-x64-musl": "3.9.1",
+    "@fallow-cli/linux-arm64-musl": "3.9.1",
+    "@fallow-cli/win32-arm64-msvc": "3.9.1",
+    "@fallow-cli/win32-x64-msvc": "3.9.1",
+    "fallow-type-aware": "3.9.1"
   }
 }

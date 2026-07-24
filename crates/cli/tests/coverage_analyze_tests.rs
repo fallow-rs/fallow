@@ -60,6 +60,7 @@ fn cloud_body() -> &'static str {
           "end_line": 3,
           "hit_count": 0,
           "tracking_state": "never_called",
+          "never_called_source": "runtime_observed",
           "deployments_observed": 2
         }],
         "warnings": []
@@ -119,6 +120,11 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
         Some("tracked")
     );
     assert_eq!(
+        json.pointer("/runtime_coverage/findings/0/confidence")
+            .and_then(serde_json::Value::as_str),
+        Some("high")
+    );
+    assert_eq!(
         json.pointer("/runtime_coverage/summary/data_source")
             .and_then(serde_json::Value::as_str),
         Some("cloud")
@@ -146,6 +152,86 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
     assert!(
         !lower.contains("accept-encoding: gzip"),
         "request must not advertise gzip without ureq's gzip feature: {request}"
+    );
+}
+
+#[test]
+fn coverage_analyze_cloud_keeps_inventory_backfill_candidates_conservative() {
+    let body = r#"{
+      "data": {
+        "repo": "acme/web",
+        "window": { "period_days": 30 },
+        "summary": {
+          "trace_count": 100,
+          "deployments_seen": 2,
+          "functions_tracked": 1,
+          "functions_hit": 0,
+          "functions_unhit": 1,
+          "functions_untracked": 0,
+          "coverage_percent": 0
+        },
+        "functions": [{
+          "file_path": "src/covered.ts",
+          "function_name": "indirectlyCovered",
+          "line_number": 5,
+          "start_line": 5,
+          "end_line": 7,
+          "hit_count": 0,
+          "tracking_state": "never_called",
+          "never_called_source": "inventory_backfill",
+          "deployments_observed": 2
+        }],
+        "warnings": []
+      }
+    }"#;
+    let (endpoint, _request, handle) = serve_once(body);
+    let output = std::process::Command::new(fallow_bin())
+        .args([
+            "coverage",
+            "analyze",
+            "--cloud",
+            "--repo",
+            "acme/web",
+            "--api-endpoint",
+            &endpoint,
+            "--format",
+            "json",
+            "--root",
+        ])
+        .arg(fixture_path("coverage-gaps"))
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env("FALLOW_API_KEY", "fallow_live_test")
+        .env_remove("FALLOW_RUNTIME_COVERAGE_SOURCE")
+        .output()
+        .expect("run fallow");
+    handle.join().expect("server joins");
+    let command_output = common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: output.status.code().unwrap_or(-1),
+    };
+    assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
+    let json = parse_json(&command_output);
+    assert_eq!(
+        json.pointer("/runtime_coverage/findings/0/function")
+            .and_then(serde_json::Value::as_str),
+        Some("indirectlyCovered")
+    );
+    assert_eq!(
+        json.pointer("/runtime_coverage/findings/0/verdict")
+            .and_then(serde_json::Value::as_str),
+        Some("review_required")
+    );
+    assert_eq!(
+        json.pointer("/runtime_coverage/findings/0/confidence")
+            .and_then(serde_json::Value::as_str),
+        Some("low")
+    );
+    assert_eq!(
+        json.pointer("/runtime_coverage/findings/0/actions/0/type")
+            .and_then(serde_json::Value::as_str),
+        Some("review-runtime")
     );
 }
 

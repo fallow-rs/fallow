@@ -299,15 +299,24 @@ Measured on fallow 2.100.0 (the most recent full benchmark capture), Apple M5, m
 
 ## Documentation
 
-Everything lives at [docs.fallow.tools](https://docs.fallow.tools): [quickstart](https://docs.fallow.tools/quickstart), [configuration overview](https://docs.fallow.tools/configuration/overview), [CLI reference](https://docs.fallow.tools/cli/global-flags), [MCP](https://docs.fallow.tools/integrations/mcp), [CI](https://docs.fallow.tools/integrations/ci), and [limitations](https://docs.fallow.tools/analysis/limitations). A machine-readable index is at [docs.fallow.tools/llms.txt](https://docs.fallow.tools/llms.txt).
+Public user documentation lives at
+[docs.fallow.tools](https://docs.fallow.tools): [quickstart](https://docs.fallow.tools/quickstart),
+[configuration overview](https://docs.fallow.tools/configuration/overview),
+[CLI reference](https://docs.fallow.tools/cli/global-flags),
+[MCP](https://docs.fallow.tools/integrations/mcp),
+[CI](https://docs.fallow.tools/integrations/ci), and
+[limitations](https://docs.fallow.tools/analysis/limitations). A
+machine-readable index is at
+[docs.fallow.tools/llms.txt](https://docs.fallow.tools/llms.txt).
 
-In this repository:
+Contributor and maintainer documentation starts at
+[docs/README.md](docs/README.md). Use the
+[task context map](docs/development/task-context-map.md) to load the smallest
+relevant architecture, implementation, or verification reference.
 
-- [docs/architecture-invariants.md](docs/architecture-invariants.md): the invariants the analyzer holds itself to
-- [docs/plugin-authoring.md](docs/plugin-authoring.md): writing an external framework plugin
-- [BENCHMARKS.md](BENCHMARKS.md): benchmark methodology and reference tables
-- [ROADMAP.md](ROADMAP.md): where fallow is headed
-- [CONTEXT.md](CONTEXT.md): domain vocabulary for contributors and agents
+Repository-level policies remain in [CONTRIBUTING.md](CONTRIBUTING.md),
+[BENCHMARKS.md](BENCHMARKS.md), [ROADMAP.md](ROADMAP.md), and
+[SECURITY.md](SECURITY.md).
 
 ## Contributing and license
 

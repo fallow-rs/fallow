@@ -49,6 +49,26 @@ v1.19.1 events remain valid and appear with client `unknown`.
 The static gate can also write a deterministic GitLab Code Quality artifact
 with `tt gate --code-quality <path>`.
 
+## Static discoverability gate
+
+The reviewed repository baseline lives in `.trigger-tree/gate.json`. CI runs the
+v1.23.2 action at its pinned commit, requires a score of 100, and fails on any
+regression from the baseline.
+
+The score covers only Git-visible, telemetry-free repository structure.
+`docs/README.md` is the maintainer docs entry point, while
+`scripts/check-knowledge-architecture.mjs` separately checks route semantics,
+index coverage, local links, generated adapter parity, and trust boundaries.
+
+After an intentional routing improvement:
+
+```sh
+tt gate --update-baseline
+```
+
+Review the score and findings before committing the new baseline. Runtime
+history, reports, sessions, and prompt markers remain ignored.
+
 ## Updating
 
 Before upgrading:

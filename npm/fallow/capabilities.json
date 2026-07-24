@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.8.1",
+  "version": "3.9.1",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [

@@ -16,22 +16,19 @@ doc lists the full canonical allowlist, so a value added to the canonical doc
 (for example a new agent) cannot silently go missing from a hosted or skills copy
 the way `windsurf`/`gemini` aliases once drifted out of the explanation page.
 
-It is a release-time / local check, not a hard CI gate: the three docs live in
-three repos, so a single repo's CI cannot see the others without fetching them.
-Run it before `/fallow-release`, or wire it into a job that checks the sibling
-repos out first.
+CI checks out the two public companion repositories and runs this script as a
+hard gate. Local runs use sibling checkouts by default.
 
 Companion repos are located as siblings of the fallow repo root by default
 (`../fallow-docs`, `../fallow-skills`); override with FALLOW_DOCS_DIR /
-FALLOW_SKILLS_DIR. A companion repo that is absent is skipped with a warning
-(exit stays 0 for that repo) so the script is usable in environments that only
-checked out one repo.
+FALLOW_SKILLS_DIR. A missing companion repository or expected document is a
+failure because parity cannot be proven.
 
 `SKILL.md` is intentionally excluded: its agent rule lists a representative
 subset ("for example claude_code, codex, ..."), not the full allowlist.
 
-Exit codes: 0 = in sync (or companions absent), 1 = a companion omits a
-canonical value, 2 = the canonical block could not be parsed.
+Exit codes: 0 = in sync, 1 = a companion or value is missing, 2 = the canonical
+block could not be parsed.
 """
 
 from __future__ import annotations
@@ -59,20 +56,13 @@ def parse_canonical_allowlist(text: str) -> list[str]:
 def companion_files() -> list[Path]:
     docs = Path(os.environ.get("FALLOW_DOCS_DIR", REPO_ROOT.parent / "fallow-docs"))
     skills = Path(os.environ.get("FALLOW_SKILLS_DIR", REPO_ROOT.parent / "fallow-skills"))
-    files: list[Path] = []
-    if docs.is_dir():
-        files += [
-            docs / "cli" / "telemetry.mdx",
-            docs / "explanations" / "telemetry.mdx",
-            docs / "configuration" / "environment.mdx",
-        ]
-    else:
-        print(f"warning: fallow-docs not found at {docs}, skipping", file=sys.stderr)
+    files = [
+        docs / "cli" / "telemetry.mdx",
+        docs / "explanations" / "telemetry.mdx",
+        docs / "configuration" / "environment.mdx",
+    ]
     skills_ref = skills / "fallow" / "skills" / "fallow" / "references" / "cli-reference.md"
-    if skills.is_dir():
-        files.append(skills_ref)
-    else:
-        print(f"warning: fallow-skills not found at {skills}, skipping", file=sys.stderr)
+    files.append(skills_ref)
     return files
 
 
@@ -90,7 +80,8 @@ def main() -> int:
     ok = True
     for path in companion_files():
         if not path.is_file():
-            print(f"warning: expected companion doc not found: {path}", file=sys.stderr)
+            ok = False
+            print(f"DRIFT: expected companion doc not found: {path}", file=sys.stderr)
             continue
         missing = missing_values(path.read_text(encoding="utf-8"), allowlist)
         if missing:
@@ -101,8 +92,8 @@ def main() -> int:
 
     if not ok:
         print(
-            "\nA companion doc omits a canonical agent-source value. Update it to match "
-            f"{CANONICAL.relative_to(REPO_ROOT)}.",
+            "\nA companion doc is missing or omits a canonical agent-source value. "
+            f"Update it to match {CANONICAL.relative_to(REPO_ROOT)}.",
             file=sys.stderr,
         )
         return 1

@@ -16,8 +16,8 @@ node_modules/
 .metadata_never_index_unless_rootfs
 
 # Reference repos (for development only)
-reference
-reference/
+/reference
+/reference/
 
 # Coverage reports
 coverage/
@@ -91,6 +91,7 @@ editors/vscode/LICENSE
 # Codex
 .codex/
 AGENTS.md
+!/AGENTS.md
 !crates/cli/AGENTS.md
 !crates/core/AGENTS.md
 !crates/extract/AGENTS.md
@@ -124,3 +125,4 @@ decisions/
 .trigger-tree/*
 !.trigger-tree/config.sh
 !.trigger-tree/README.md
+!.trigger-tree/gate.json

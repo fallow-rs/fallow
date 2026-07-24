@@ -29,9 +29,13 @@ For each JSON-output diff, walk this list in addition to the generic checks abov
     npm/fallow/package.json \
     npm/fallow/README.md
   ```
-  Each hit must either be the new count or have an explicit reason to lag (e.g., historical tables). The `.claude/rules/*.md` files specifically are easy to forget because they live outside the user-facing docs surface but feed Claude sessions, so a stale count there silently misinforms future implement passes. Treat `npm/fallow/skills/**` as a vendored release artifact rather than a canonical edit target. Principle: the hardcoded-count check covers WHAT to compare against (the registry), not WHERE all the ascending surfaces live. Each surface that ever cites the count must be enumerated explicitly so the next bump catches all of them. Caught 2026-05-04 on the tap+tsd plugin addition: README + detection.md + companion repos got bumped, but `.claude/rules/plugins.md`, `.claude/rules/core-crate.md`, `docs/positioning.md`, `npm/fallow/package.json`, and `npm/fallow/README.md` all silently retained 89/90/91.
+  Each hit must either use the new count or have an explicit reason to lag, such as a historical table. Treat `npm/fallow/skills/**` as a vendored release artifact rather than a canonical edit target. The registry defines what to compare, while this search identifies every current consumer that must move with it.
 
 ### JSON format audit (Phase 3a)
+
+The real-world corpus is intentionally untracked. Before its first use, follow
+the [benchmark setup](../../../BENCHMARKS.md#comparative-benchmarks) and run
+`npm --prefix benchmarks run download-fixtures`.
 
 ```bash
 FALLOW_QUIET=1 fallow <command> --format json --root benchmarks/fixtures/real-world/zod 2>/dev/null | jq . | head -c 2000

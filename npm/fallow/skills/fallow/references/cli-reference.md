@@ -25,6 +25,7 @@ Complete command and flag specifications for all fallow CLI commands.
 - [`plugin-schema`: Plugin JSON Schema](#plugin-schema-plugin-json-schema)
 - [`plugin-check`: Verify external plugins](#plugin-check-verify-external-plugins)
 - [`rule-pack-schema`: Rule Pack JSON Schema](#rule-pack-schema-rule-pack-json-schema)
+- [`impact`: Local Impact History](#impact-local-impact-history)
 - [`config`: Show Resolved Config](#config-show-resolved-config)
 - [Global Flags](#global-flags)
 - [Environment Variables](#environment-variables)
@@ -512,7 +513,7 @@ fallow health --format json --quiet --trend
 {
   "kind": "health",
   "schema_version": 7,
-  "version": "3.8.0",
+  "version": "3.9.1",
   "elapsed_ms": 32,
   "summary": {
     "files_analyzed": 482,
@@ -910,7 +911,7 @@ fallow audit \
 {
   "kind": "audit",
   "schema_version": 7,
-  "version": "3.8.0",
+  "version": "3.9.1",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,
@@ -987,7 +988,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 7,
-  "version": "3.8.0",
+  "version": "3.9.1",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0
@@ -1088,7 +1089,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.8.0",
+  "version": "3.9.1",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -1117,7 +1118,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.8.0",
+  "version": "3.9.1",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -1478,6 +1479,30 @@ The inspected payload prints to stderr; stdout (including `--format json`) is un
 - **Decision status:** `fallow telemetry status --format json` includes `explicit_decision`. `false` means the user may have only seen the notice; `true` means `telemetry enable` or `telemetry disable` was explicitly run.
 - **Transport:** when enabled, one small JSON event is POSTed to `https://api.fallow.cloud/v1/telemetry/events` (override with `FALLOW_API_URL`), no auth token, no cookies, on a background thread so it does not delay your command. Delivery is best-effort; errors never change output or exit code.
 - **Agent source:** wrappers may set `FALLOW_AGENT_SOURCE=<allowlisted-value>` so an enabled run is attributed correctly. Allowlist: `codex`, `claude_code`, `cursor`, `copilot`, `opencode`, `aider`, `roo`, `windsurf`, `gemini` (aliases `gemini_cli`/`antigravity`), `cline`, `continue`, `zed`, `goose`, `other_known`, `unknown`, `none`. Setting it never enables telemetry and uploads no codebase content.
+
+---
+
+## `impact`: Local Impact History
+
+Read the opt-in Impact history stored in the user's private config directory.
+These commands start no analysis and never upload data.
+
+```bash
+fallow impact
+fallow impact status
+fallow impact statusline
+fallow impact --all --sort recent
+```
+
+`fallow impact statusline` is the stable status-surface command. It always
+prints exactly one plain-text, path-free line, ignores the global output format,
+and performs no migration write. Whole-project counts come from the last full
+`fallow` scan and their trend compares only the prior full scan. Older stores
+with changed-file history label that narrower scope explicitly and omit its
+non-comparable trend.
+
+The command does not enable tracking. Only the user may opt in with
+`fallow impact enable` or `fallow impact default on`.
 
 ---
 
@@ -1854,7 +1879,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 {
   "kind": "dead-code",
   "schema_version": 7,
-  "version": "3.8.0",
+  "version": "3.9.1",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -2014,7 +2039,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 {
   "kind": "dupes",
   "schema_version": 7,
-  "version": "3.8.0",
+  "version": "3.9.1",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -2058,11 +2083,11 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "kind": "combined",
   "schema_version": 7,
-  "version": "3.8.0",
+  "version": "3.9.1",
   "elapsed_ms": 159,
   "check": {
     "schema_version": 7,
-    "version": "3.8.0",
+    "version": "3.9.1",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],

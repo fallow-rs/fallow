@@ -10,8 +10,8 @@ Gate: GO
 - Independently adjudicated truth coverage: 0.379249
 - Correct-unused retention: 1
 - Abstention: 0.198569
-- Median marginal overhead: 116.613 ms
-- P95 marginal overhead: 1701.926 ms
+- Median marginal overhead: 116.134 ms
+- P95 marginal overhead: 2348.003 ms
 - Independent repositories with confirmed value: 3
 - Semantic buckets with confirmed value: exact-cross-file-symbol-use, generic-class, generic-inheritance
 

@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 2,
+  "entryPoints": [
+    {
+      "path": "AGENTS.md",
+      "client": "codex",
+      "routes": [
+        "docs/README.md",
+        "docs/development/task-context-map.md",
+        ".agents/skills"
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "client": "claude",
+      "routes": [
+        "docs/README.md",
+        "docs/development/task-context-map.md",
+        ".claude/skills"
+      ]
+    }
+  ],
+  "maintainerDocs": {
+    "index": "docs/README.md",
+    "rootDocuments": [
+      {
+        "path": "README.md",
+        "section": "public-entry"
+      },
+      {
+        "path": "CONTRIBUTING.md",
+        "section": "contributing"
+      },
+      {
+        "path": "BENCHMARKS.md",
+        "section": "verification"
+      },
+      {
+        "path": "CHANGELOG.md",
+        "section": "release-history"
+      },
+      {
+        "path": "CODE_OF_CONDUCT.md",
+        "section": "community"
+      },
+      {
+        "path": "ROADMAP.md",
+        "section": "roadmap"
+      },
+      {
+        "path": "SECURITY.md",
+        "section": "security"
+      }
+    ],
+    "documents": [
+      {
+        "path": "docs/README.md",
+        "section": "entry-point"
+      },
+      {
+        "path": "docs/development/README.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/knowledge-architecture.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/ai-tooling.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/task-context-map.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/repo-map.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/quality-gates.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/review-routing.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/development/release-security.md",
+        "section": "development"
+      },
+      {
+        "path": "docs/analyzer-authoring.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/architecture-invariants.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/backwards-compatibility.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/type-aware-proof-of-concept.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/benchmarking.md",
+        "section": "verification"
+      },
+      {
+        "path": "docs/environment-variables.md",
+        "section": "operations"
+      },
+      {
+        "path": "docs/fallow-compliance.md",
+        "section": "operations"
+      },
+      {
+        "path": "docs/fallow-core-migration.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/plugin-authoring.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/public-config-corpus.md",
+        "section": "verification"
+      },
+      {
+        "path": "docs/reference/cli-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/README.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/detection-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/extract-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/lsp-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/mcp-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/plugin-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/reference/vscode-internals.md",
+        "section": "implementation-reference"
+      },
+      {
+        "path": "docs/security-agent-verification.md",
+        "section": "verification"
+      },
+      {
+        "path": "docs/styling-corpus-smoke.md",
+        "section": "styling"
+      },
+      {
+        "path": "docs/styling-pr-smoke.md",
+        "section": "styling"
+      },
+      {
+        "path": "docs/styling-release-matrix.md",
+        "section": "styling"
+      },
+      {
+        "path": "docs/telemetry.md",
+        "section": "operations"
+      }
+    ],
+    "ignoredWorktreePrefixes": [
+      {
+        "path": "docs/superpowers/",
+        "reason": "Legacy local workflow artifacts are ignored and are not maintainer documentation."
+      }
+    ]
+  },
+  "skills": {
+    "canonicalRoot": ".agents/skills",
+    "adapterRoots": [
+      {
+        "client": "claude",
+        "path": ".claude/skills",
+        "mode": "generated"
+      }
+    ],
+    "generator": "scripts/generate-agent-adapters.mjs",
+    "checkCommand": "npm run check:agent-adapters"
+  },
+  "hostRules": [
+    {
+      "client": "claude",
+      "root": ".claude/rules",
+      "mode": "scoped-router"
+    }
+  ],
+  "generatedPathContracts": [
+    {
+      "path": "benchmarks/fixtures/real-world",
+      "setupDocument": "BENCHMARKS.md",
+      "setupCommand": [
+        "npm",
+        "--prefix",
+        "benchmarks",
+        "run",
+        "download-fixtures"
+      ]
+    }
+  ],
+  "externalSources": [
+    {
+      "repository": "fallow-rs/docs",
+      "role": "canonical-public-user-documentation",
+      "direction": "public-to-consumer",
+      "revisionSource": "public-content-manifest.json plus consumer lock",
+      "allowedRoot": ".",
+      "processor": {
+        "kind": "generator",
+        "entrypoint": "scripts/public-content.mjs"
+      },
+      "checkCommand": [
+        "npm",
+        "run",
+        "check"
+      ]
+    },
+    {
+      "repository": "fallow-rs/fallow-skills",
+      "role": "portable-public-skill-packaging",
+      "direction": "canonical-contract-to-public-consumer",
+      "revisionSource": "source-lock.json#commit",
+      "allowedRoot": "npm/fallow/skills/fallow",
+      "processor": {
+        "kind": "validator",
+        "entrypoint": "scripts/check-source-contract.mjs"
+      },
+      "checkCommand": [
+        "node",
+        "scripts/check-source-contract.mjs"
+      ]
+    },
+    {
+      "repository": "fallow-rs/fallow-cov-protocol",
+      "role": "public-cloud-facing-runtime-contract",
+      "direction": "public-to-consumer",
+      "revisionSource": "Cargo.lock",
+      "allowedRoot": "src",
+      "processor": {
+        "kind": "none"
+      },
+      "checkCommand": [
+        "cargo",
+        "test",
+        "--all-targets"
+      ]
+    }
+  ],
+  "trustBoundary": {
+    "automatedPrivateToPublic": false,
+    "publicPromotion": "sanitized-reviewed-rewrite",
+    "forbiddenRoutePrefixes": [
+      ".internal/",
+      "internal/",
+      "decisions/"
+    ],
+    "forbiddenReferencePrefixes": [
+      ".internal/",
+      "internal/",
+      "decisions/"
+    ],
+    "forbiddenReferencePatterns": [
+      {
+        "pattern": "/Users/",
+        "reason": "Machine-local absolute paths are not portable."
+      },
+      {
+        "pattern": "~/.claude/",
+        "reason": "Durable knowledge cannot depend on host-local Claude state."
+      },
+      {
+        "pattern": "~/Sites/",
+        "reason": "Durable knowledge cannot depend on a maintainer checkout layout."
+      }
+    ],
+    "forbiddenRepositories": [
+      "fallow-rs/fallow-cloud"
+    ]
+  }
+}

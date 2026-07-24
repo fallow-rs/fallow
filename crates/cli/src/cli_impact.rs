@@ -26,6 +26,8 @@ pub enum ImpactCli {
     },
     /// Show whether Impact tracking is enabled and how much history exists.
     Status,
+    /// Print one compact, path-free line for shell and editor status bars.
+    Statusline,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -80,7 +82,7 @@ pub fn dispatch_impact(
         if subcommand.is_some() {
             return crate::emit_known_failure(
                 "`fallow impact --all` is a read-only cross-repo view and cannot be combined \
-                 with a subcommand (enable/disable/default/reset)",
+                 with a subcommand",
                 2,
                 output,
                 telemetry::FailureReason::Validation,
@@ -93,8 +95,23 @@ pub fn dispatch_impact(
         Some(ImpactCli::Disable) => impact_disable(root, quiet),
         Some(ImpactCli::Default { state }) => impact_set_default(state, quiet),
         Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
+        Some(ImpactCli::Statusline) => render_impact_statusline(root),
         Some(ImpactCli::Status) | None => render_impact_status(root, quiet, output, json_style),
     }
+}
+
+/// Render the stable status-bar surface. This deliberately ignores the global
+/// output format and quiet flag so callers always receive exactly one
+/// path-free plain-text line.
+pub fn render_impact_statusline(root: &Path) -> ExitCode {
+    let rendered = match impact::load_statusline(root) {
+        Ok(store) => impact::render_statusline(&impact::build_report(&store)),
+        Err(impact::StatuslineLoadError::DataUnavailable) => {
+            impact::render_statusline_unavailable()
+        }
+    };
+    println!("{rendered}");
+    ExitCode::SUCCESS
 }
 
 /// Enable Fallow Impact for this project; print the first-enable guidance.

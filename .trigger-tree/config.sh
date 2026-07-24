@@ -3,7 +3,7 @@
 # Paths are relative to the project root.
 
 # A Read of a file matching this regex counts as a documentation read.
-TT_WATCH_REGEX='^docs/.*\.(?:md|markdown)$|^\.claude/(?:rules|agents|skills)/.*\.md$|^\.codex/(?:references|agents|skills)/.*\.(?:md|toml)$|^\.agents/(?:rules|agents|skills)/.*\.md$|^\.agents/README\.md$|(^|/)(?:CLAUDE|AGENTS|GEMINI)\.md$|^(?:CONTEXT|CONTRIBUTING|README|BENCHMARKS|SECURITY|ROADMAP)\.md$'
+TT_WATCH_REGEX='^(?!docs/superpowers/)docs/.*\.(?:md|markdown)$|^\.claude/(?:rules|agents|skills)/.*\.md$|^\.codex/(?:references|agents|skills)/.*\.(?:md|toml)$|^\.agents/(?:rules|agents|skills)/.*\.md$|^\.agents/README\.md$|(^|/)(?:CLAUDE|AGENTS|GEMINI)\.md$|^(?:CONTEXT|CONTRIBUTING|README|BENCHMARKS|SECURITY|ROADMAP)\.md$'
 
 # A Glob/Grep whose explicit target dir matches this regex counts as search activity.
 # The event records that a search happened, not why it happened or whether routing failed.
@@ -17,11 +17,11 @@ TT_ALWAYS_LOADED_REGEX='(^|/)(?:CLAUDE|AGENTS|GEMINI)\.md$|(^|/)CLAUDE\.local\.m
 # TT_ALWAYS_LOADED_REGEX='...|^\.github/copilot-instructions\.md$|^\.cursor/rules/'
 
 # Markdown that is intentionally human-facing or generated per platform.
-TT_SCOPE_IGNORE='.github/*,CHANGELOG.md,CODE_OF_CONDUCT.md,npm/darwin-*/README.md,npm/linux-*/README.md,npm/win32-*/README.md'
+TT_SCOPE_IGNORE='.github/*,.trigger-tree/*,CHANGELOG.md,CODE_OF_CONDUCT.md,action/README.md,apps/*/README.md,crates/*/README.md,editors/*/README.md,editors/vscode/media/*.md,npm/*/README.md,npm/fallow/skills/*,tests/*/README.md,tests/*/*/README.md,tests/*/BASELINE-REPORT.md'
 
 # Comma-separated globs for rare-but-critical documentation that must be reviewed,
 # never treated as an archive candidate. Safety paths are protected regardless.
-TT_CRITICAL_GLOB='AGENTS.md,CLAUDE.md,.claude/rules/workflow.md,.claude/rules/release-workflow.md,.claude/rules/detection.md,.codex/references/quality-gates.md,.codex/references/review-routing.md'
+TT_CRITICAL_GLOB='AGENTS.md,CLAUDE.md,docs/README.md,docs/development/*.md,docs/reference/*.md,.agents/skills/*/SKILL.md,.claude/rules/*.md,.trigger-tree/config.sh'
 
 # Store only a stable prompt fingerprint. Use `off` for markers without linkability.
 TT_LOG_PROMPTS='hash'

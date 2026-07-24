@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Corpus artifacts now record and verify the approved ancestor dependency
   environment, including its lockfile and installed type-declaration tree,
   rather than claiming that fixtures resolve with no dependencies. The
-  semantic protocol is now version 4: private leak confirmation is
+  semantic protocol is now version 5: private leak confirmation is
   request-scoped and bounded, incomplete entry-point coverage retains
   syntactic candidates, and unexpected checker failures surface as errors
   instead of being mislabeled as unsupported syntax. Requests above the
@@ -44,6 +44,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and reconciliation logic now have one owner in `fallow-api`; CLI, editor,
   runtime, and programmatic paths share it. Cross-platform child-process
   lifecycle behavior is shared through `fallow-process`.
+
+## [3.9.1] - 2026-07-24
+
+### Added
+
+- **`fallow impact statusline` exposes a compact, read-only Impact summary for
+  agent status lines.** It reports the latest whole-project issue count, its
+  trend from the prior full scan, and the number of findings cleared while
+  Impact was tracking. The single-line output is path-free, skips normal CLI
+  notices and telemetry, and stays useful in narrow terminals. Legacy
+  changed-file snapshots remain visible but are explicitly labelled and never
+  produce a misleading project-wide trend. ([#2000](https://github.com/fallow-rs/fallow/pull/2000))
+
+### Fixed
+
+- **Cloud `never_called` evidence now keeps its confidence provenance.**
+  Runtime-observed functions can retain the existing high-confidence deletion
+  recommendation, while inventory-backed, missing, and future provenance stays
+  conservative.
 
 ## [3.8.1] - 2026-07-23
 
@@ -4908,7 +4927,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.8.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.9.1...HEAD
+[3.9.1]: https://github.com/fallow-rs/fallow/compare/v3.8.1...v3.9.1
 [3.8.1]: https://github.com/fallow-rs/fallow/compare/v3.8.0...v3.8.1
 [3.8.0]: https://github.com/fallow-rs/fallow/compare/v3.7.1...v3.8.0
 [3.7.1]: https://github.com/fallow-rs/fallow/compare/v3.7.0...v3.7.1

@@ -195,7 +195,8 @@ fn command_payload_is_json(cli: &Cli, selected: OutputFormat) -> bool {
                     ImpactCli::Enable
                     | ImpactCli::Disable
                     | ImpactCli::Default { .. }
-                    | ImpactCli::Reset { .. },
+                    | ImpactCli::Reset { .. }
+                    | ImpactCli::Statusline,
                 ),
             ..
         })

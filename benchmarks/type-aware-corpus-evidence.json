@@ -2,14 +2,14 @@
   "schema_version": 1,
   "generated_from": {
     "discovery_provenance": {
-      "generated_at": "2026-07-24T11:11:59.131Z",
+      "generated_at": "2026-07-24T11:49:44.992Z",
       "manifest_sha256": "328ef2ffff457a237713e70ce35cdd6af3a7a608accdc55e13a9579275aa5398",
       "fallow": {
-        "version": "fallow 3.8.1",
-        "sha256": "af70b799276b45d33510312f0b6cbf13d0c01028afdbfe098518f14277b03df9"
+        "version": "fallow 3.9.1",
+        "sha256": "80f73690b85f2a6c33ebfa45f77e7d1f0c88d7d8ba992f79a612e6965e76b4e0"
       },
       "sidecar": {
-        "sha256": "ead1db7705881cd5a51ee11ee9004a2e812608b1017bfa2767d8ad36172a7f3c"
+        "sha256": "c09d5b0fce8580e47c61ee927307f73c7232d66efba8e7f9f80eb4d36e76b912"
       },
       "runtime": {
         "platform": "darwin",
@@ -163,9 +163,9 @@
     },
     "evidence_producer": {
       "protocol_version": 5,
-      "sidecar_sha256": "ead1db7705881cd5a51ee11ee9004a2e812608b1017bfa2767d8ad36172a7f3c",
+      "sidecar_sha256": "c09d5b0fce8580e47c61ee927307f73c7232d66efba8e7f9f80eb4d36e76b912",
       "request_set_sha256": "5818e8ec964ed5df1e6952e4226412acf58ed53be89438bbe700c73c19c0011b",
-      "response_set_sha256": "cbfeff8b6b3057036c722f7ece961eec2a2e7e5c2ac230d665c91f732283a3e0"
+      "response_set_sha256": "99ce0445f0bdbc45669aa995a2ccc356effc5a27eea742792e12021df05d2f85"
     },
     "adjudication": {
       "decisions_sha256": "d8617693ecc16ffa6dcd53d64d7a6d0d3feae78f289340582f18ff55718d6f94",
@@ -267,20 +267,20 @@
     },
     "performance": {
       "baseline_wall_ms": {
-        "median": 766.918,
-        "p95": 4599.459
+        "median": 673.188,
+        "p95": 3713.412
       },
       "refined_wall_ms": {
-        "median": 883.737,
-        "p95": 6267.889
+        "median": 627.064,
+        "p95": 6076.643
       },
       "marginal_overhead_ms": {
-        "median": 116.613,
-        "p95": 1701.926
+        "median": 116.134,
+        "p95": 2348.003
       },
       "process_tree_peak_rss_kb": {
-        "baseline_p95": 796778.4,
-        "refined_p95": 1426825.6
+        "baseline_p95": 820022.4,
+        "refined_p95": 1412247.2
       },
       "program_counts": [
         1,
@@ -372,16 +372,16 @@
       ],
       "phase_timings_ms": {
         "diagnostics": {
-          "median": 3.5,
-          "p95": 637.15
+          "median": 2.5,
+          "p95": 644.05
         },
         "project_setup": {
-          "median": 48.5,
-          "p95": 571.7
+          "median": 42.5,
+          "p95": 462.75
         },
         "symbol_scan": {
           "median": 0.5,
-          "p95": 701.2
+          "p95": 708
         }
       },
       "reason_counts": {

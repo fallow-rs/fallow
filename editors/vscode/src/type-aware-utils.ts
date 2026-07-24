@@ -4,10 +4,10 @@ import { compareVersions, type SkippedCliCapability } from "./cli-args-utils.js"
 export type TypeAwareArgsOptions = TypeAwareSettings;
 
 /**
- * Type-aware flags first ship after v3.8.1. The feature branch was reconciled
- * with that release, but was not part of the v3.8.1 tag.
+ * Type-aware flags first ship after v3.9.1. The feature branch was reconciled
+ * with that release, but was not part of the v3.9.1 tag.
  */
-export const TYPE_AWARE_MIN_CLI_VERSION = "3.8.2";
+export const TYPE_AWARE_MIN_CLI_VERSION = "3.9.2";
 
 export const TYPE_AWARE_VERSION_GATED_FLAGS = [
   "--type-aware",

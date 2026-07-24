@@ -798,7 +798,7 @@ describe("runFix type-aware integration", () => {
       await chmod(script, 0o755);
 
       mockPathBinary = script;
-      mockBinaryVersions = { [script]: "3.8.2" };
+      mockBinaryVersions = { [script]: "3.9.2" };
       mockTypeAwareSettings = {
         enabled: true,
         projects: ["tsconfig.app.json"],

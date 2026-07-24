@@ -1,87 +1,103 @@
 #!/usr/bin/env node
 /**
- * Keep the vendored agent skill tree in sync with its canonical source.
+ * Publish the public Fallow skill contract into the companion skills repo.
  *
- * Source of truth: the standalone `fallow-rs/fallow-skills` repo
- * (`<fallow-skills>/fallow/skills/fallow/`). It is also the published Claude
- * plugin. Hand-edit there.
+ * Canonical source: `npm/fallow/skills/fallow/` in this repository.
+ * Public consumer: `<fallow-skills>/fallow/skills/fallow/`.
  *
- * Vendored copy: `npm/fallow/skills/fallow/` in THIS repo. It is committed and
- * shipped verbatim inside the npm package (`npm/fallow/package.json` lists
- * `skills` in `files`), so `npm install fallow` bundles the skill next to the
- * binary. It must be a mechanical mirror of the canonical tree, never
- * hand-edited independently.
+ * The public plugin strips unsupported `metadata` frontmatter from SKILL.md
+ * and may add host interface files outside the source contract. References and
+ * all remaining skill content stay byte-identical.
  *
- * Two modes:
- *   node scripts/vendor-skills.mjs           re-vendor: copy canonical -> vendored
- *   node scripts/vendor-skills.mjs --check    drift gate: exit 1 if they differ
+ * Usage:
+ *   node scripts/vendor-skills.mjs
+ *   node scripts/vendor-skills.mjs --check
  *
- * Canonical location resolves from `FALLOW_SKILLS_DIR` (the fallow-skills repo
- * root), else `../fallow-skills` next to this repo (same convention as
- * scripts/check_telemetry_doc_sync.py). When the default path is absent (a
- * contributor without the sibling repo) `--check` skips with a warning and
- * exits 0; an explicitly-set `FALLOW_SKILLS_DIR` that is missing is a hard
- * error. Zero dependencies; Node >= 18.
+ * `FALLOW_SKILLS_DIR` may point to the companion repository. Otherwise the
+ * script uses `../fallow-skills`. A missing consumer is always an error so
+ * cross-repository checks cannot pass by silently skipping.
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const VENDORED_TREE = join(REPO_ROOT, "npm", "fallow", "skills", "fallow");
-const SKILL_SUBPATH = join("fallow", "skills", "fallow");
+const CANONICAL_TREE = join(REPO_ROOT, "npm", "fallow", "skills", "fallow");
+const TARGET_SUBPATH = join("fallow", "skills", "fallow");
 
-/** Recursively list files under `dir` as base-relative POSIX paths, sorted.
- * Dotfiles (e.g. `.DS_Store`) are ignored so incidental local cruft on one
- * side never trips the gate. */
 export const listFiles = (dir, base = dir) => {
-  const out = [];
+  const files = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".")) {
       continue;
     }
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      out.push(...listFiles(full, base));
-    } else if (entry.isFile()) {
-      out.push(relative(base, full).split("\\").join("/"));
+    const absolutePath = join(dir, entry.name);
+    const metadata = lstatSync(absolutePath);
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`skill contract cannot contain symlinks: ${absolutePath}`);
+    }
+    if (metadata.isDirectory()) {
+      files.push(...listFiles(absolutePath, base));
+    } else if (metadata.isFile()) {
+      files.push(relative(base, absolutePath).split("\\").join("/"));
     }
   }
-  return out.toSorted();
+  return files.toSorted();
 };
 
-const bytes = (root, relPath) => readFileSync(join(root, relPath));
+const contractFiles = (dir) =>
+  listFiles(dir).filter((path) => path === "SKILL.md" || path.startsWith("references/"));
 
-/** `"version": "x.y.z"` strings (in example JSON inside the reference docs) track
- * the fallow release version and are bumped on a staggered cadence at release
- * time: `/fallow-release` step 5c bumps the vendored copy inline while canonical
- * catches up later (step 10a-pre). The drift gate ignores those lines so it does
- * not false-fail on that transient window; content drift (plugin counts,
- * descriptions, commands, flags) is unaffected. The release's own step-10c
- * byte-identical `diff -r` stays the authoritative version-sync check. */
-const VERSION_STRING = /"version":\s*"[^"]*"/g;
-const normalize = (buf) => buf.toString("utf8").replace(VERSION_STRING, '"version": "<v>"');
+export const stripUnsupportedMetadata = (content) => {
+  const lines = content.split("\n");
+  if (lines[0] !== "---") {
+    throw new Error("SKILL.md source is missing YAML frontmatter");
+  }
+  const closing = lines.indexOf("---", 1);
+  if (closing === -1) {
+    throw new Error("SKILL.md source has unterminated YAML frontmatter");
+  }
+  const metadata = lines.findIndex((line, index) => index < closing && line === "metadata:");
+  if (metadata === -1) {
+    return content;
+  }
+  let end = metadata + 1;
+  while (end < closing && (lines[end].startsWith(" ") || lines[end].trim() === "")) {
+    end += 1;
+  }
+  lines.splice(metadata, end - metadata);
+  return lines.join("\n");
+};
 
-/** Compare the two trees. Returns { missing, extra, changed } relative-path
- * lists: `missing` exists in canonical but not vendored, `extra` exists in
- * vendored but not canonical, `changed` exists in both with differing content
- * (byte-for-byte, except `"version"` strings; see `normalize`). */
-export const diffTrees = (canonical, vendored) => {
-  const canonicalFiles = new Set(listFiles(canonical));
-  const vendoredFiles = existsSync(vendored) ? new Set(listFiles(vendored)) : new Set();
-  const missing = [...canonicalFiles].filter((f) => !vendoredFiles.has(f));
-  const extra = [...vendoredFiles].filter((f) => !canonicalFiles.has(f));
+const sourceContent = (root, path) => {
+  const content = readFileSync(join(root, path), "utf8");
+  return path === "SKILL.md" ? stripUnsupportedMetadata(content) : content;
+};
+
+export const diffTrees = (canonical, published) => {
+  const canonicalFiles = new Set(contractFiles(canonical));
+  const publishedFiles = existsSync(published) ? new Set(contractFiles(published)) : new Set();
+  const missing = [...canonicalFiles].filter((path) => !publishedFiles.has(path));
+  const extra = [...publishedFiles].filter((path) => !canonicalFiles.has(path));
   const changed = [...canonicalFiles].filter(
-    (f) => vendoredFiles.has(f) && normalize(bytes(canonical, f)) !== normalize(bytes(vendored, f)),
+    (path) =>
+      publishedFiles.has(path) &&
+      sourceContent(canonical, path) !== readFileSync(join(published, path), "utf8"),
   );
   return { missing, extra, changed };
 };
 
-/** Best-effort unified diff for a changed file; git is present in CI and dev
- * shells, but the gate never depends on it (byte comparison already decided). */
-const showDiff = (canonical, vendored, relPath) => {
+const showDiff = (canonical, published, path) => {
   try {
     execFileSync(
       "git",
@@ -91,99 +107,83 @@ const showDiff = (canonical, vendored, relPath) => {
         "--no-index",
         "--unified=1",
         "--",
-        join(vendored, relPath),
-        join(canonical, relPath),
+        join(published, path),
+        join(canonical, path),
       ],
       { stdio: "inherit" },
     );
   } catch {
-    // git exits 1 when files differ (expected) or is unavailable; ignore.
+    // A content difference makes git exit 1. The comparison above is decisive.
   }
 };
 
-const resolveCanonical = () => {
-  const explicit = process.env.FALLOW_SKILLS_DIR || "";
-  const root = explicit || join(REPO_ROOT, "..", "fallow-skills");
-  const tree = join(root, SKILL_SUBPATH);
-  return { tree, present: existsSync(join(tree, "SKILL.md")), explicit: Boolean(explicit) };
-};
-
-export const runCheck = (canonical, vendored = VENDORED_TREE, { renderDiffs = true } = {}) => {
-  const { missing, extra, changed } = diffTrees(canonical, vendored);
-  if (missing.length === 0 && extra.length === 0 && changed.length === 0) {
-    console.log("vendor-skills: npm/fallow/skills is in sync with canonical fallow-skills");
+export const runCheck = (canonical, published, { renderDiffs = true } = {}) => {
+  const drift = diffTrees(canonical, published);
+  if (Object.values(drift).every((paths) => paths.length === 0)) {
+    console.log("vendor-skills: published public skill matches the Fallow source contract");
     return 0;
   }
-  console.error("vendor-skills: DRIFT between npm/fallow/skills and canonical fallow-skills\n");
-  for (const f of missing) {
-    console.error(`  missing from vendored (present in canonical): ${f}`);
+  console.error("vendor-skills: public skill contract drift\n");
+  for (const path of drift.missing) {
+    console.error(`  missing from published skill: ${path}`);
   }
-  for (const f of extra) {
-    console.error(`  extra in vendored (absent from canonical):    ${f}`);
+  for (const path of drift.extra) {
+    console.error(`  stale published contract file: ${path}`);
   }
-  for (const f of changed) {
-    console.error(`  differs: ${f}`);
+  for (const path of drift.changed) {
+    console.error(`  differs: ${path}`);
   }
-  console.error("\nRe-vendor with: node scripts/vendor-skills.mjs\n");
-  // renderDiffs spawns `git diff` per changed file (helpful for a human running
-  // the gate); tests pass false to keep git output out of the TAP stream.
+  console.error("\nSynchronize with: node scripts/vendor-skills.mjs\n");
   if (renderDiffs) {
-    for (const f of changed) {
-      showDiff(canonical, vendored, f);
+    for (const path of drift.changed) {
+      showDiff(canonical, published, path);
     }
   }
   return 1;
 };
 
-export const runVendor = (canonical, vendored = VENDORED_TREE) => {
-  const { missing, extra, changed } = diffTrees(canonical, vendored);
-  for (const relPath of [...missing, ...changed]) {
-    const dest = join(vendored, relPath);
-    mkdirSync(dirname(dest), { recursive: true });
-    writeFileSync(dest, bytes(canonical, relPath));
+export const runVendor = (canonical, published) => {
+  const drift = diffTrees(canonical, published);
+  for (const path of [...drift.missing, ...drift.changed]) {
+    const destination = join(published, path);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, sourceContent(canonical, path));
   }
-  for (const relPath of extra) {
-    rmSync(join(vendored, relPath));
+  for (const path of drift.extra) {
+    rmSync(join(published, path));
   }
-  const touched = missing.length + changed.length + extra.length;
+  const touched = drift.missing.length + drift.changed.length + drift.extra.length;
   console.log(
     touched === 0
-      ? "vendor-skills: already in sync; nothing to copy"
-      : `vendor-skills: re-vendored ${touched} file(s) (${missing.length} added, ${changed.length} updated, ${extra.length} removed)`,
+      ? "vendor-skills: public skill already matches the source contract"
+      : `vendor-skills: synchronized ${touched.toString()} public contract file(s)`,
   );
   return 0;
 };
 
-/** Pure dispatch for main() given the resolved canonical state. `skip` is the
- * contributor-without-the-sibling-repo case (drift check only); `error` when the
- * canonical tree is missing and skipping is not allowed. */
-export const decide = ({ present, explicit, check }) => {
+const resolvePublished = () => {
+  const root = process.env.FALLOW_SKILLS_DIR || join(REPO_ROOT, "..", "fallow-skills");
+  const tree = join(root, TARGET_SUBPATH);
+  return { tree, present: existsSync(join(tree, "SKILL.md")) };
+};
+
+export const decide = ({ present, check }) => {
   if (!present) {
-    return check && !explicit ? { action: "skip" } : { action: "error" };
+    return { action: "error" };
   }
   return { action: check ? "check" : "vendor" };
 };
 
 export const main = (argv = process.argv.slice(2)) => {
   const check = argv.includes("--check");
-  const { tree, present, explicit } = resolveCanonical();
-  const { action } = decide({ present, explicit, check });
-  if (action === "skip") {
-    console.warn(
-      `vendor-skills: canonical fallow-skills not found at ${tree}; skipping drift check`,
-    );
-    return 0;
-  }
+  const { tree, present } = resolvePublished();
+  const { action } = decide({ present, check });
   if (action === "error") {
-    throw new Error(
-      `canonical fallow-skills not found at ${tree}${explicit ? " (FALLOW_SKILLS_DIR is set)" : ""}`,
-    );
+    throw new Error(`published fallow-skills contract not found at ${tree}`);
   }
-  return action === "check" ? runCheck(tree) : runVendor(tree);
+  return action === "check" ? runCheck(CANONICAL_TREE, tree) : runVendor(CANONICAL_TREE, tree);
 };
 
-// Only run when executed directly (not when imported by the test), so importing
-// never triggers a re-vendor or a "canonical not found" throw.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     process.exitCode = main();

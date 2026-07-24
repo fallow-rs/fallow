@@ -1,127 +1,45 @@
-# Fallow: codebase intelligence for TypeScript and JavaScript
+# Fallow repository adapter for Claude
 
-Fallow is codebase intelligence for TypeScript and JavaScript. The free static layer analyzes code and styles: it finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, boundary violations, code duplication, and complexity hotspots, plus design-system styling drift (CSS and CSS-in-JS) in `fallow audit` and opt-in API hygiene checks such as private type leaks. A paid runtime intelligence layer (Fallow Runtime) adds production execution evidence (hot and cold paths, runtime-backed review, runtime-weighted health, stale-flag evidence, trends, alerts). Rust alternative to [knip](https://github.com/webpro-nl/knip) built on the Oxc parser ecosystem.
+Fallow is a Rust-native codebase analyzer for JavaScript and TypeScript.
 
-For shared domain vocabulary, term definitions, and flagged ambiguities: see @CONTEXT.md. For the feature-workflow chain (when /fallow-implement, /panel-review, /user-panel, /fallow-review are invoked and how the .plans/ artefact threads them together): see @.claude/rules/workflow.md.
+Read `@AGENTS.md` first. It is the universal repository contract for Claude,
+Codex, and contributors. Use `@docs/README.md` as the central documentation
+index, then use
+`@docs/development/task-context-map.md` to load only the references required by
+the current task.
 
-## Project structure
+## Knowledge layers
 
-```
-crates/
-  config/   -- Configuration types, custom framework presets, rule packs, package.json parsing, workspace discovery
-  types/    -- Shared type definitions (discover, extract, results, suppress, serde_path)
-  extract/  -- AST extraction engine (visitor.rs, complexity.rs, sfc.rs, astro.rs, mdx.rs, css.rs, parse.rs, cache.rs, suppress.rs, tests/)
-  graph/    -- Module graph construction (graph/), import resolution (resolve.rs), project state (project.rs)
-  output/   -- Typed output contracts, serializers, schemas, and TS contract generation
-  license/  -- Offline Ed25519 JWT verification for paid features (alg pinned, file+env load precedence, 7/30/hard-fail grace ladder)
-  security/ -- Shared security catalogue contracts for fallow
-  v8-coverage/ -- V8 ScriptCoverage parser + byte-offset-to-line/col mapper + Istanbul normalizer (open-source layer of Phase-2 runtime coverage)
-  benchmarks/ -- CodSpeed benchmark suites for fallow
-  core/     -- Analysis orchestration: discovery, plugins, scripts, caching, progress
-    analyze/    -- Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps.rs, members/)
-    plugins/    -- Plugin system + tooling.rs (general tooling dependency detection)
-  engine/   -- Command-neutral analysis runners and typed engine results; owns health scoring (health/), the duplication detector (duplication_detector/), and input validation (validate.rs)
-  api/      -- Programmatic API boundary for JS/native callers
-  napi/     -- napi-rs native Node addon (cdylib, #[napi] bindings) behind the @fallow/node package
-  cli/      -- CLI binary, split into per-command modules
-    audit.rs, check/, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, regression/, impact.rs, security.rs, viz.rs
-    license/    -- `fallow license {activate, status, refresh, deactivate}` with offline JWT verify plus live trial / refresh flows
-    coverage/   -- `fallow coverage setup` resumable first-run state machine for runtime coverage
-    report/     -- Output formatting (mod.rs dispatch, human/, json.rs, sarif.rs, compact.rs, markdown.rs)
-    migrate/    -- Config migration (mod.rs, knip.rs, jscpd.rs, stylelint.rs)
-  lsp/      -- LSP server, split into modules
-    main.rs, diagnostics/, code_actions/, code_lens.rs, hover.rs
-  mcp/      -- MCP server for AI agent integration (stdio transport, API-backed analysis with CLI fallback)
-  multicall/ -- Packaged `fallow` binary bundling the CLI, LSP, and MCP servers into one engine (renamed to `fallow` at packaging time for npm platform packages and VS Code); publish = false, so `cargo install fallow-cli` stays the pure CLI
-editors/
-  vscode/   -- VS Code extension (LSP client, tree views, status bar, auto-download)
-viz-frontend/ -- TS source (rolldown) for the `fallow viz` interactive HTML; bundles to crates/cli/viz-assets/
-npm/
-  fallow/   -- npm wrapper package with optionalDependencies pattern
-action/       -- GitHub Action (composite)
-  jq/         -- jq scripts for summaries, annotations, review comments, merging
-  scripts/    -- Bash scripts (install, analyze, annotate, comment, review, summary)
-  tests/      -- Unit tests for jq scripts (run: bash action/tests/run.sh)
-ci/           -- GitLab CI template and supporting scripts
-  jq/         -- jq scripts for GitLab MR formatting (comments, reviews, summaries, merging)
-  scripts/    -- Bash scripts (comment.sh, review.sh)
-  tests/      -- Unit tests for jq scripts (92 tests, run: bash ci/tests/run.sh)
-tests/
-  fixtures/ -- Integration test fixtures
-decisions/ -- Architecture Decision Records (ADRs; private, symlinked locally)
-```
+- `.agents/skills/` is the canonical, client-neutral maintainer workflow tree.
+- `.claude/skills/` is generated from `.agents/skills/`. Never edit it by hand.
+- `.claude/rules/` contains only Claude-specific, path-scoped constraints.
+- `docs/` contains durable public maintainer architecture and references.
+- `.plans/` is gitignored task state. Promote durable decisions into indexed
+  public documentation.
 
-## Architecture
+## Workflow
 
-Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + oxc_parser + oxc_semantic, cache-aware) → Script Analysis → Module Resolution (oxc_resolver) → Graph Construction → Re-export Chain Resolution → Dead Code Detection → Reporting
+Use the native lifecycle for non-trivial work:
 
-## Building & Testing
+1. `implement`
+2. `panel-review` when the change has design or user-facing decisions
+3. `review`
+4. `ship`
+5. `sweep`
 
-```bash
-git config core.hooksPath .githooks  # Enable pre-commit hooks (fmt + clippy)
-cargo build --workspace
-cargo test --workspace --lib --bins --tests --examples
-cargo check --workspace --benches
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo run --bin fallow                       # Run all analyses (dead-code + dupes + health)
-cargo run --bin fallow -- watch              # Watch mode
-cargo run --bin fallow -- fix --dry-run      # Auto-fix preview
-```
+The controlling workflow lives in the matching `.agents/skills/<name>/SKILL.md`.
+Do not layer unrelated workflow systems onto this lifecycle.
 
-## Code conventions
+## Trust boundary
 
-- Config files: `.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`
-- No `detect` section in config; use `rules` with `"off"` severity
-- No `output` in config; output format is CLI-only via `--format`
-- Rules severity: `error` (fail CI, default) | `warn` (exit 0) | `off` (skip)
-- Inline suppression: `// fallow-ignore-next-line [issue-type]` and `// fallow-ignore-file [issue-type]`
-- Environment variables: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN` (binary path for MCP), `FALLOW_CACHE_MAX_SIZE` (extraction cache cap in MB; default 256)
-- See `.claude/rules/code-quality.md` for clippy, size assertions, and CI hardening details
+This public repository must contain only public OSS knowledge and contracts.
+Private cloud architecture, operations, customers, commercial context, and
+incidents belong in the private cloud repository. Public behavior may be
+documented here or in the public user documentation repository, but private
+prose must never be copied or automatically exported.
 
-## Key design decisions
+## Generated surfaces
 
-Documented as Architecture Decision Records in `decisions/` (kept in a private repo, symlinked locally). Key decisions:
-
-- **No TypeScript compiler** (ADR-001): Syntactic analysis via Oxc parser + `oxc_semantic`. No type resolution, no tsc.
-- **Flat edge storage** (ADR-002): Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
-- **FxHashMap/FxHashSet required** (ADR-003): Standard `HashMap`/`HashSet` disallowed (enforced via `.clippy.toml`).
-- **Path-sorted FileIds** (ADR-004): Stable cross-run identity, not insertion order.
-- **Re-export chain resolution** (ADR-005): Iterative propagation through barrel files with cycle detection.
-- **Hidden directory allowlist** (ADR-006): `.storybook`, `.vitepress`, `.well-known`, `.changeset`, `.github` traversed; other dotdirs skipped.
-
-## Git conventions
-
-- Conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`
-- Signed commits (`git commit -S`)
-- No AI attribution in commits
-
-## Project communication
-
-- Never reduce fallow to "dead code tool" in taglines or summaries; reference all 5 analysis areas (unused code, circular deps, duplication, complexity hotspots, boundary violations). Category is "codebase analyzer."
-- Comparison pages must be research-backed with source links; never claim a competitor "can't" do something without checking
-- Design specs are definitions, not implementations: tokens, rules, components, ASCII wireframes, table-described behavior; no CSS/JS/HTML code blocks
-
-## Repo layout (for this working tree)
-
-- `~/Sites/fallow-2/` is a working copy of fallow main; primary checkout is the bare-config'd `~/Sites/fallow/`
-- `.internal/`, `quality/`, `reference/`, `benchmarks/fixtures/`, `benchmarks/knip6/` are gitignored symlinks; `.internal/` points at `~/Sites/fallow-cloud/.internal/` (single source of truth, edit only there); the rest point at `~/Sites/fallow/`
-- `npm/fallow/skills/` is a vendored copy of `~/Sites/fallow-skills/`; refresh happens at release time, not manually
-- Edit fallow skills in `~/Sites/fallow-skills/fallow/skills/fallow/`, never in the symlinked `~/.agents/skills/fallow/`
-- GitHub org: `fallow-rs/fallow` (use `gh ... --repo fallow-rs/fallow`); never `bartwaardenburg/fallow`
-- `fallow dead-code` is dead-code only (legacy alias `check` still works); bare `fallow` runs the full pipeline (dead-code + dupes + health)
-
-## Worktree / parallel-agent rules
-
-Multiple agents and background sessions frequently land commits in fallow main concurrently. Treat every working tree as racy:
-
-- **Commit WIP early.** If a feature takes more than ~10 minutes and parallel sessions are active, switch to a feature branch (`git checkout -b feat/<name>`) and commit per chunk. Uncommitted state in main does not survive even one parallel `git stash` cycle, especially for untracked files.
-- **Verify commit authors before every push.** Run `git log --format="%H %ae %s" <base>..HEAD` and abort if any author is not `bart@waardenburg.dev`, a contributor email, or `...@users.noreply.github.com`. Worktrees and pre-push hooks have leaked `test@example.com` and `test@test.com` commits in the past.
-- **Never push fallow commits via fallow-2 (or any worktree) when WIP exists.** Fix the bare-repo push at its root (e.g. unset `GIT_DIR`/`GIT_WORK_TREE` in `.githooks/pre-push`) or create a fresh ephemeral worktree with `git -C <bare> worktree add /tmp/fallow-push <branch>`.
-- **`combined/mod.rs` is the merge-conflict magnet.** `combined.rs` was split into a `combined/` module: `mod.rs` keeps the orchestrator (`run_combined`'s `rayon::join` + shared-parse threading, analysis resolution, health-options wiring), while `output.rs` (format printers + regression/summary), `orientation.rs` (orientation header + entry-point display), and `impact.rs` (impact recording) are independent files editable in parallel. Assign ALL `combined/mod.rs` edits to a single agent that runs after parallel crate-level work finishes; the submodules no longer need serialization.
-- **After cherry-picking from worktree agents, always run `cargo fmt --all`.** Worktree agents do not always produce rustfmt-compliant code.
-- **After every worktree merge, scan for orphan conflict markers.** `grep -r '<<<<<<' crates/` (already auto-enforced by the conflict-marker-scan PostToolUse hook, but run manually before pushing).
-- **After cleaning up worktrees, force-remove all of them and `cargo clean -p <crate>` before testing.** Stale worktree compilation artifacts make new code invisible to `cargo test --list`.
-- **Worktree agents may skip commits.** After each worktree agent completes, verify with `git log <base>..<branch> --oneline`; if empty, check for unstaged changes in the worktree directory and commit manually before cleanup.
-
-See the crate-level `AGENTS.md` guides (`crates/cli/AGENTS.md`, `crates/core/AGENTS.md`, `crates/extract/AGENTS.md`, `crates/graph/AGENTS.md`) and `CONTEXT.md` for AI agent integration guidance.
+Run `npm run generate:contracts:check` and
+`npm run check:agent-adapters` after changing public contracts or skills.
+Generated files identify their source and must not be edited directly.

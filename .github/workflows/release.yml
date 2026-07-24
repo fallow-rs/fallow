@@ -443,9 +443,8 @@ jobs:
     needs: release-verified
     runs-on: ubuntu-latest
     permissions:
-      # Required to create GitHub Releases and to push the rolling v1 action
-      # tag below. The push uses an explicit token URL, not git/config-persisted
-      # credentials, so checkout runs with persist-credentials: false.
+      # Required only to create the GitHub Release. Tag creation and rolling
+      # Action tag updates stay in the maintainer release workflow.
       contents: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -468,19 +467,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # The rolling v1/v3 action tags are pushed by the maintainer's release
-      # flow, not from here: GITHUB_TOKEN can never update a ref whose diff
+      # workflow, not from here: GITHUB_TOKEN can never update a ref whose diff
       # touches .github/workflows/ (GitHub requires the workflows permission,
       # which GITHUB_TOKEN cannot be granted), so the in-workflow push failed
       # on the first release after any workflow edit (v3.4.2).
 
   # The Dockerfile pins ARG FALLOW_VERSION plus two per-arch sha256 digests by
-  # hand. These are refreshed by the maintainer's release flow (fallow-release
-  # skill step 13), NOT from here: like the crates/napi lockfile catch-up
-  # (step 12) and the rolling v1/v3 tags (step 8b), the pin depends on the musl
+  # hand. These are refreshed by the maintainer's release workflow, not from
+  # here. Like the crates/napi lockfile catch-up and the rolling v1/v3 tags,
+  # the pin depends on the musl
   # binaries the `build` matrix compiles and `release` uploads, which only exist
-  # after the publish this workflow performs. Step 13 downloads those assets,
-  # re-hashes them, runs .github/scripts/update-dockerfile-pins.mjs, and pushes
-  # the `chore(docker): pin ...` commit directly to main. The `Docker` job in
+  # after the publish this workflow performs. The maintainer workflow downloads
+  # those assets, re-hashes them, runs
+  # .github/scripts/update-dockerfile-pins.mjs, and pushes the
+  # `chore(docker): pin ...` commit directly to main. The `Docker` job in
   # ci.yml re-verifies the pin end-to-end on that commit. Refs #1817.
 
   # Belt-and-suspenders generated contract drift check before either privileged
