@@ -114,3 +114,49 @@ fn issue_1911_nested_paths_alias_activates_in_production_without_typescript_depe
 
     assert_alias_resolution(&results);
 }
+
+#[test]
+fn issue_1942_ignored_paths_alias_not_reported_as_unlisted_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "fallow-ignored-alias-repro", "private": true }"#,
+    );
+    write(
+        &root.join("tsconfig.json"),
+        r#"{
+            "compilerOptions": {
+                "paths": { "@synthetic/*": ["./sparta/*"] }
+            },
+            "include": ["src/**/*.ts", "sparta/**/*.ts"]
+        }"#,
+    );
+    write(
+        &root.join("src/entry.ts"),
+        r#"import { localValue } from "@synthetic/api/local-module";
+           console.log(localValue);"#,
+    );
+    write(
+        &root.join("sparta/api/local-module.ts"),
+        r#"export const localValue = "resolved inside the workspace";"#,
+    );
+
+    let mut config = create_config(root.to_path_buf());
+    config.ignore_patterns = globset::GlobSetBuilder::new()
+        .add(globset::Glob::new("sparta/api/local-module.ts").expect("valid ignore glob"))
+        .build()
+        .expect("build ignore glob set");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unlisted_dependencies.is_empty(),
+        "ignored local alias target should not be an unlisted dependency: {:?}",
+        results.unlisted_dependencies
+    );
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "ignored local alias target should still resolve: {:?}",
+        results.unresolved_imports
+    );
+}

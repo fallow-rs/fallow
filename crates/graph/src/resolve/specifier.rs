@@ -1282,6 +1282,13 @@ impl ResolvedPathContext<'_, '_> {
             return Some(self.package_result_or_preserved_file(pkg_name, path));
         }
 
+        // A resolved path alias target can be absent from the project file index when
+        // ignorePatterns excluded it. Keep the concrete target instead of reclassifying
+        // the alias's bare-looking specifier as an npm package.
+        if matches_nearest_tsconfig_path_alias(self.ctx, self.from_file, self.specifier) {
+            return Some(ResolveResult::ExternalFile(path.to_path_buf()));
+        }
+
         package_usage_name_for_external_bare_specifier(self.specifier)
             .map(ResolveResult::NpmPackage)
     }
