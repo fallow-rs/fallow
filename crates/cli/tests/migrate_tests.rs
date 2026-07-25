@@ -241,7 +241,35 @@ fn graph_preserving_fixture(suffix: &str) -> std::path::PathBuf {
 #[test]
 fn migrate_knip_ignore_suppresses_findings_without_removing_files() {
     let dir = graph_preserving_fixture("ignore-findings");
-    fs::write(dir.join("knip.json"), r#"{"ignore": ["src/hidden.ts"]}"#).unwrap();
+    fs::write(
+        dir.join("knip.json"),
+        r#"{"ignore": ["vitest.config.ts", "src/hidden.ts"]}"#,
+    )
+    .unwrap();
+
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"ignorePatterns":["vitest.config.ts","src/hidden.ts"]}"#,
+    )
+    .unwrap();
+    let legacy = run_fallow_raw(&[
+        "dead-code",
+        "--format",
+        "json",
+        "--root",
+        dir.to_str().unwrap(),
+        "--quiet",
+    ]);
+    let legacy_findings = parse_json(&legacy);
+    assert!(
+        legacy_findings["unused_files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["path"] == "src/feature.ts"),
+        "fixture must reproduce the old graph-removing migration"
+    );
+    fs::remove_file(dir.join(".fallowrc.json")).unwrap();
 
     let migrate = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
     assert_eq!(
@@ -285,6 +313,10 @@ fn migrate_knip_ignore_suppresses_findings_without_removing_files() {
     assert!(
         normalised.iter().any(|path| path == "src/hidden.ts"),
         "ignored findings must not remove their source file from discovery: {normalised:?}"
+    );
+    assert!(
+        normalised.iter().any(|path| path == "vitest.config.ts"),
+        "an ignored entry must stay discovered so its imports remain reachable: {normalised:?}"
     );
 
     let dead_code = run_fallow_raw(&[

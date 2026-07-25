@@ -66,6 +66,29 @@ fn canonical_root(root: &Path) -> PathBuf {
     dunce::canonicalize(root).expect("canonical root")
 }
 
+fn finding_exclusion_project(ignore_findings: &[&str]) -> tempfile::TempDir {
+    let project = tempfile::tempdir().expect("project");
+    let root = project.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"finding-exclusion-api","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(root.join("src/index.ts"), "console.log('entry');\n").expect("write entry");
+    std::fs::write(root.join("src/hidden.ts"), "export const hidden = 1;\n")
+        .expect("write hidden source");
+    std::fs::write(root.join("src/visible.ts"), "export const visible = 1;\n")
+        .expect("write visible source");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        serde_json::to_vec(&serde_json::json!({"ignoreFindings": ignore_findings}))
+            .expect("serialize config"),
+    )
+    .expect("write config");
+    project
+}
+
 fn health_json_with_runner(
     options: &ComplexityOptions,
     runner: &impl ProgrammaticHealthRunner,
@@ -791,24 +814,8 @@ fn run_dead_code_returns_typed_output_before_json() {
 
 #[test]
 fn run_dead_code_honors_graph_preserving_finding_exclusions() {
-    let project = tempfile::tempdir().expect("project");
+    let project = finding_exclusion_project(&["src/hidden.ts"]);
     let root = project.path();
-    std::fs::write(
-        root.join("package.json"),
-        r#"{"name":"finding-exclusion-api","type":"module","main":"src/index.ts"}"#,
-    )
-    .expect("write package");
-    std::fs::create_dir_all(root.join("src")).expect("create src");
-    std::fs::write(root.join("src/index.ts"), "console.log('entry');\n").expect("write entry");
-    std::fs::write(root.join("src/hidden.ts"), "export const hidden = 1;\n")
-        .expect("write hidden source");
-    std::fs::write(root.join("src/visible.ts"), "export const visible = 1;\n")
-        .expect("write visible source");
-    std::fs::write(
-        root.join(".fallowrc.json"),
-        r#"{"ignoreFindings":["src/hidden.ts"]}"#,
-    )
-    .expect("write config");
 
     let run = run_dead_code(&DeadCodeOptions {
         analysis: analysis_at(root),
@@ -833,6 +840,35 @@ fn run_dead_code_honors_graph_preserving_finding_exclusions() {
             .iter()
             .all(|path| !path.ends_with("src/hidden.ts")),
         "programmatic API leaked an ignored source-owned finding: {unused_paths:?}"
+    );
+}
+
+#[test]
+fn run_dead_code_honors_negated_only_finding_exclusions() {
+    let project = finding_exclusion_project(&["!src/visible.ts"]);
+    let run = run_dead_code(&DeadCodeOptions {
+        analysis: analysis_at(project.path()),
+        ..DeadCodeOptions::default()
+    })
+    .expect("dead-code succeeds");
+    let unused_paths: Vec<&Path> = run
+        .results()
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.as_path())
+        .collect();
+
+    assert!(
+        unused_paths
+            .iter()
+            .any(|path| path.ends_with("src/visible.ts")),
+        "negated exception must remain reportable: {unused_paths:?}"
+    );
+    assert!(
+        unused_paths
+            .iter()
+            .all(|path| !path.ends_with("src/hidden.ts")),
+        "negated-only patterns must hide paths outside the exception: {unused_paths:?}"
     );
 }
 
