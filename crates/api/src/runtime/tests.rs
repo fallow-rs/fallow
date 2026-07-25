@@ -790,6 +790,53 @@ fn run_dead_code_returns_typed_output_before_json() {
 }
 
 #[test]
+fn run_dead_code_honors_graph_preserving_finding_exclusions() {
+    let project = tempfile::tempdir().expect("project");
+    let root = project.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"finding-exclusion-api","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(root.join("src/index.ts"), "console.log('entry');\n").expect("write entry");
+    std::fs::write(root.join("src/hidden.ts"), "export const hidden = 1;\n")
+        .expect("write hidden source");
+    std::fs::write(root.join("src/visible.ts"), "export const visible = 1;\n")
+        .expect("write visible source");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"ignoreFindings":["src/hidden.ts"]}"#,
+    )
+    .expect("write config");
+
+    let run = run_dead_code(&DeadCodeOptions {
+        analysis: analysis_at(root),
+        ..DeadCodeOptions::default()
+    })
+    .expect("dead-code succeeds");
+    let unused_paths: Vec<&Path> = run
+        .results()
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.as_path())
+        .collect();
+
+    assert!(
+        unused_paths
+            .iter()
+            .any(|path| path.ends_with("src/visible.ts")),
+        "control finding must remain visible: {unused_paths:?}"
+    );
+    assert!(
+        unused_paths
+            .iter()
+            .all(|path| !path.ends_with("src/hidden.ts")),
+        "programmatic API leaked an ignored source-owned finding: {unused_paths:?}"
+    );
+}
+
+#[test]
 fn run_dead_code_family_helpers_return_typed_filtered_output() {
     let project = dead_code_project();
     let root = project.path();
