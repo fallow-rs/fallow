@@ -1145,7 +1145,7 @@ impl FallowConfig {
     /// sees ALL offending values in one run rather than fixing them one at a
     /// time.
     ///
-    /// Covered filesystem glob fields: `entry`, `ignorePatterns`,
+    /// Covered filesystem glob fields: `entry`, `ignorePatterns`, `ignoreFindings`,
     /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
     /// `health.thresholdOverrides[].files`, `overrides[].files`, `ignoreExports[].file`,
     /// `ignoreCatalogReferences[].consumer`, `boundaries.zones[].patterns`,
@@ -1196,10 +1196,13 @@ impl FallowConfig {
         &self,
         errors: &mut Vec<super::glob_validation::GlobValidationError>,
     ) {
-        use super::glob_validation::{validate_user_globs, validate_user_specifier_globs};
+        use super::glob_validation::{
+            validate_user_finding_ignore_globs, validate_user_globs, validate_user_specifier_globs,
+        };
 
         validate_user_globs(&self.entry, "entry", errors);
         validate_user_globs(&self.ignore_patterns, "ignorePatterns", errors);
+        validate_user_finding_ignore_globs(&self.ignore_findings, "ignoreFindings", errors);
         validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", errors);
         validate_user_specifier_globs(
             &self.ignore_unresolved_imports,
@@ -1522,6 +1525,7 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
         let config = FallowConfig {
             entry: vec!["src/**/*.ts".to_string()],
             ignore_patterns: vec!["**/*.generated.ts".to_string()],
+            ignore_findings: vec!["**/*.test.ts".to_string(), "!src/public/**".to_string()],
             ..Default::default()
         };
         let resolved = config.resolve(
@@ -1534,6 +1538,16 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
         );
 
         assert!(resolved.ignore_patterns.is_match("src/foo.generated.ts"));
+        assert!(
+            resolved
+                .ignore_findings
+                .is_ignored("src/private/app.test.ts")
+        );
+        assert!(
+            !resolved
+                .ignore_findings
+                .is_ignored("src/public/app.test.ts")
+        );
         assert_eq!(resolved.entry_patterns, vec!["src/**/*.ts"]);
         assert!(matches!(resolved.output, OutputFormat::Json));
         assert!(!resolved.no_cache);
@@ -1934,16 +1948,17 @@ unknown_field = true
 
         std::fs::write(
             dir.path().join("base.json"),
-            r#"{"rules": {"unused-files": "warn", "unused-exports": "off"}}"#,
+            r#"{"ignoreFindings": ["generated/**"], "rules": {"unused-files": "warn", "unused-exports": "off"}}"#,
         )
         .unwrap();
         std::fs::write(
             dir.path().join(".fallowrc.json"),
-            r#"{"extends": ["base.json"], "rules": {"unused-files": "error"}}"#,
+            r#"{"extends": ["base.json"], "ignoreFindings": ["**/*.test.ts"], "rules": {"unused-files": "error"}}"#,
         )
         .unwrap();
 
         let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert_eq!(config.ignore_findings, vec!["**/*.test.ts"]);
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Off);
     }
@@ -5406,6 +5421,22 @@ thresholdOverrides = [
             result.is_err(),
             "invalid glob should surface as an error from find_and_load"
         );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn find_and_load_rejects_bare_finding_ignore_negation() {
+        let dir = test_dir("find-bare-finding-ignore-negation");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"ignoreFindings": ["!"]}"#,
+        )
+        .unwrap();
+
+        let error = FallowConfig::find_and_load(dir.path()).unwrap_err();
+        assert!(error.contains("ignoreFindings"), "error: {error}");
+        assert!(error.contains("requires a pattern"), "error: {error}");
     }
 
     // ------------------------------------------------------------------

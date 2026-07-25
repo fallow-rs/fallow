@@ -9,6 +9,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
+        ignore_findings: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],

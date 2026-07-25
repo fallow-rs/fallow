@@ -29,6 +29,7 @@ fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
+        ignore_findings: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],

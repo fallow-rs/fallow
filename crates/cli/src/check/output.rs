@@ -253,6 +253,7 @@ mod tests {
             root: std::path::PathBuf::from("/project"),
             entry_patterns: vec![],
             ignore_patterns: globset::GlobSet::empty(),
+            ignore_findings: fallow_config::FindingIgnoreMatcher::default(),
             output: OutputFormat::Json,
             cache_dir: std::path::PathBuf::from("/tmp/cache"),
             threads: 1,

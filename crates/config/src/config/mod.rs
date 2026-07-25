@@ -1,5 +1,6 @@
 mod boundaries;
 mod duplicates_config;
+mod finding_ignore;
 mod flags;
 mod format;
 pub mod glob_validation;
@@ -25,6 +26,7 @@ pub use boundaries::{
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
 };
+pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig};
@@ -178,6 +180,10 @@ pub struct FallowConfig {
     /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load.
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
+
+    /// An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. This affects counted dead-code findings only; package/project findings without a source owner remain visible. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_findings: Vec<String>,
 
     /// Declares inline external framework plugins as data (array of plugin objects), each with `name` plus optional `enablers` (package names that activate it) or richer `detection` (dependency/file-existence/`all`/`any` checks, taking priority over `enablers`), `entryPoints` (+ `entryPointRole` runtime/support/test), `configPatterns`, `alwaysUsed`, `toolingDependencies`, `usedExports` (`{ pattern, exports }`), and `usedClassMembers`. Set it to keep a custom or in-house framework's entry points, config files, and conventions reachable without a Rust plugin; these definitions are appended to plugins discovered via `plugins`, `.fallow/plugins/`, and root `fallow-plugin-*` files (first occurrence of a name wins), and cannot do AST-based config parsing.
     #[serde(default)]
@@ -624,6 +630,7 @@ mod tests {
         assert!(config.extends.is_empty());
         assert!(config.entry.is_empty());
         assert!(config.ignore_patterns.is_empty());
+        assert!(config.ignore_findings.is_empty());
         assert!(config.framework.is_empty());
         assert!(config.workspaces.is_none());
         assert!(config.ignore_dependencies.is_empty());
@@ -676,6 +683,7 @@ mod tests {
             "$schema": "./node_modules/fallow/schema.json",
             "entry": ["src/main.ts"],
             "ignorePatterns": ["generated/**"],
+            "ignoreFindings": ["**/*.test.ts", "!src/public/**"],
             "ignoreDependencies": ["postcss"],
             "production": true,
             "plugins": ["custom-plugin.toml"],
@@ -690,6 +698,10 @@ mod tests {
         );
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert_eq!(config.ignore_patterns, vec!["generated/**"]);
+        assert_eq!(
+            config.ignore_findings,
+            vec!["**/*.test.ts", "!src/public/**"]
+        );
         assert_eq!(config.ignore_dependencies, vec!["postcss"]);
         assert!(config.production);
         assert_eq!(config.plugins, vec!["custom-plugin.toml"]);
@@ -703,6 +715,40 @@ mod tests {
         let json = r#"{"unknownField": true}"#;
         let result: Result<FallowConfig, _> = serde_json::from_str(json);
         assert!(result.is_err(), "unknown fields should be rejected");
+    }
+
+    #[test]
+    fn ignore_findings_serialization_is_canonical_and_sparse() {
+        let default_value = serde_json::to_value(FallowConfig::default()).unwrap();
+        assert!(default_value.get("ignoreFindings").is_none());
+
+        let config = FallowConfig {
+            ignore_findings: vec!["**/*.test.ts".to_string(), "!src/public/**".to_string()],
+            ..Default::default()
+        };
+        let value = serde_json::to_value(config).unwrap();
+        assert_eq!(
+            value.get("ignoreFindings"),
+            Some(&serde_json::json!(["**/*.test.ts", "!src/public/**"]))
+        );
+    }
+
+    #[test]
+    fn ignore_findings_deserializes_from_toml() {
+        let config: FallowConfig =
+            toml::from_str(r#"ignoreFindings = ["**/*.test.ts", "!src/public/**"]"#).unwrap();
+
+        assert_eq!(
+            config.ignore_findings,
+            vec!["**/*.test.ts", "!src/public/**"]
+        );
+    }
+
+    #[test]
+    fn generic_ignore_alias_is_rejected() {
+        let result = serde_json::from_str::<FallowConfig>(r#"{"ignore": ["**/*.test.ts"]}"#);
+
+        assert!(result.is_err());
     }
 
     #[test]

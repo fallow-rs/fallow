@@ -1008,6 +1008,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec!["**/dist/**".to_string()],
+        ignore_findings: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
