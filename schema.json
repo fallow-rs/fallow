@@ -35,6 +35,13 @@
       },
       "default": []
     },
+    "ignoreFindings": {
+      "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. This affects counted dead-code findings only; package/project findings without a source owner remain visible. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "framework": {
       "description": "Declares inline external framework plugins as data (array of plugin objects), each with `name` plus optional `enablers` (package names that activate it) or richer `detection` (dependency/file-existence/`all`/`any` checks, taking priority over `enablers`), `entryPoints` (+ `entryPointRole` runtime/support/test), `configPatterns`, `alwaysUsed`, `toolingDependencies`, `usedExports` (`{ pattern, exports }`), and `usedClassMembers`. Set it to keep a custom or in-house framework's entry points, config files, and conventions reachable without a Rust plugin; these definitions are appended to plugins discovered via `plugins`, `.fallow/plugins/`, and root `fallow-plugin-*` files (first occurrence of a name wins), and cannot do AST-based config parsing.",
       "type": "array",

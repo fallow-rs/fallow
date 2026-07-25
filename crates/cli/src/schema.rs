@@ -88,7 +88,7 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         "related_schemas": {
             "note": "This manifest lists RULES, capabilities, presets, and the taste catalog. To author a config FILE you also need its shape, which is a separate schema.",
             "config_schema_command": "fallow config-schema",
-            "config_schema_note": "Full JSON Schema of the config file: every top-level key (rules, entry, ignorePatterns, workspaces, boundaries, duplicates, health, security, rulePacks, production, cache, ...) and its shape. entry and ignorePatterns are how you declare entry points and exclusions; fallow also auto-honors package.json exports/main/module for library public APIs.",
+            "config_schema_note": "Full JSON Schema of the config file: every top-level key (rules, entry, ignorePatterns, ignoreFindings, workspaces, boundaries, duplicates, health, security, rulePacks, production, cache, ...) and its shape. entry declares entry points; ignorePatterns excludes files from analysis; ignoreFindings hides source-owned dead-code findings after analysis while keeping files in the module graph. fallow also auto-honors package.json exports/main/module for library public APIs.",
             "rule_pack_schema_command": "fallow rule-pack-schema",
             "rule_pack_schema_note": "JSON Schema for a declarative rule pack referenced from rulePacks.",
             "plugin_schema_command": "fallow plugin-schema",
