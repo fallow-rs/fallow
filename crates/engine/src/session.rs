@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
-use fallow_types::discover::DiscoveredFile;
+use fallow_types::discover::{DiscoveredFile, StableFileKey};
 use fallow_types::extract::ModuleInfo;
+use fallow_types::results::AnalysisResults;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -902,7 +903,7 @@ fn run_engine_owned_dead_code_pipeline(
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
     let (resolved, graph) = resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
 
-    let detector = core_backend::run_dead_code_detectors(
+    let mut detector = core_backend::run_dead_code_detectors(
         &prelude,
         &graph.graph,
         &resolved.resolved,
@@ -910,6 +911,7 @@ fn run_engine_owned_dead_code_pipeline(
         collect_usages,
         &entry_points,
     );
+    remove_configured_ignored_findings(&mut detector.results, config);
     let profile =
         core_backend::dead_code_pipeline_profile(core_backend::DeadCodePipelineProfileInput {
             retain_timings: retain_graph,
@@ -937,6 +939,24 @@ fn run_engine_owned_dead_code_pipeline(
         script_used_packages,
         file_hashes,
     })
+}
+
+fn remove_configured_ignored_findings(results: &mut AnalysisResults, config: &ResolvedConfig) {
+    if config.ignore_findings.is_empty() {
+        return;
+    }
+
+    results.remove_ignored_source_owned_issues(|path| {
+        let key = if path.is_absolute() {
+            let Ok(relative) = path.strip_prefix(&config.root) else {
+                return false;
+            };
+            StableFileKey::from_relative(relative)
+        } else {
+            StableFileKey::from_relative(path)
+        };
+        config.ignore_findings.is_ignored(key.as_str())
+    });
 }
 
 fn resolve_or_build_dead_code_graph(
@@ -1029,6 +1049,109 @@ mod tests {
                 .any(|workspace| workspace.name == "pkg-a"),
             "session must retain workspace metadata discovered during config load"
         );
+    }
+
+    #[test]
+    fn finding_ignore_filters_results_without_removing_graph_inputs() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"finding-ignore","devDependencies":{"vitest":"latest"}}"#,
+        )
+        .expect("write package manifest");
+        std::fs::write(
+            root.join("vitest.config.ts"),
+            "import './src/feature';\nexport default {};\n",
+        )
+        .expect("write vitest config");
+        std::fs::write(
+            root.join("src/feature.ts"),
+            "export const feature = true;\n",
+        )
+        .expect("write reachable source");
+        std::fs::write(root.join("src/hidden.ts"), "export const hidden = true;\n")
+            .expect("write hidden source");
+
+        let unfiltered = AnalysisSession::load(root, None)
+            .expect("unfiltered session loads")
+            .analyze_dead_code()
+            .expect("unfiltered analysis succeeds");
+        assert!(
+            unfiltered
+                .results
+                .unused_files
+                .iter()
+                .any(|finding| finding.file.path.ends_with("src/hidden.ts"))
+        );
+
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"ignoreFindings":["src/hidden.ts"]}"#,
+        )
+        .expect("write fallow config");
+        let session = AnalysisSession::load(root, None).expect("filtered session loads");
+        let hidden_path = root.join("src/hidden.ts");
+        assert!(session.files().iter().any(|file| file.path == hidden_path));
+
+        let filtered = session
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("filtered analysis succeeds");
+        assert!(
+            filtered
+                .results
+                .unused_files
+                .iter()
+                .all(|finding| finding.file.path != hidden_path)
+        );
+        assert!(
+            filtered
+                .graph
+                .as_ref()
+                .is_some_and(|graph| graph.module_count() == session.files().len())
+        );
+    }
+
+    #[test]
+    fn finding_ignore_normalizes_separators_and_rejects_outside_paths() {
+        use fallow_types::output_dead_code::UnusedFileFinding;
+        use fallow_types::results::UnusedFile;
+
+        let project = tempfile::tempdir().expect("project");
+        let config = serde_json::from_str::<fallow_config::FallowConfig>(
+            r#"{"ignoreFindings":["**/*.ts"]}"#,
+        )
+        .expect("config parses")
+        .resolve(
+            project.path().to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        let outside = project
+            .path()
+            .parent()
+            .expect("project has parent")
+            .join("outside.ts");
+        let mut results = AnalysisResults {
+            unused_files: vec![
+                UnusedFileFinding::with_actions(UnusedFile {
+                    path: PathBuf::from(r"src\hidden.ts"),
+                }),
+                UnusedFileFinding::with_actions(UnusedFile {
+                    path: outside.clone(),
+                }),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        remove_configured_ignored_findings(&mut results, &config);
+
+        assert_eq!(results.unused_files.len(), 1);
+        assert_eq!(results.unused_files[0].file.path, outside);
     }
 
     #[test]
