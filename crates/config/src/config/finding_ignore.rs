@@ -22,6 +22,21 @@ impl FindingIgnoreMatcher {
             return Self::default();
         }
 
+        let (hidden, reported) = Self::build_sets(patterns)
+            .expect("ignoreFindings pattern sets were validated before config resolution");
+
+        Self {
+            hidden,
+            reported,
+            has_patterns: true,
+        }
+    }
+
+    pub(super) fn validate_compilation(patterns: &[String]) -> Result<(), globset::Error> {
+        Self::build_sets(patterns).map(|_| ())
+    }
+
+    fn build_sets(patterns: &[String]) -> Result<(GlobSet, GlobSet), globset::Error> {
         let mut hidden = GlobSetBuilder::new();
         let mut reported = GlobSetBuilder::new();
 
@@ -32,16 +47,10 @@ impl FindingIgnoreMatcher {
                 (&mut hidden, pattern.as_str())
             };
             let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-            builder.add(
-                Glob::new(pattern).expect("ignoreFindings entry was validated at config load time"),
-            );
+            builder.add(Glob::new(pattern)?);
         }
 
-        Self {
-            hidden: hidden.build().unwrap_or_default(),
-            reported: reported.build().unwrap_or_default(),
-            has_patterns: !patterns.is_empty(),
-        }
+        Ok((hidden.build()?, reported.build()?))
     }
 
     /// Whether no finding-ignore patterns were configured.

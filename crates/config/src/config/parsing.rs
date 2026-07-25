@@ -5439,6 +5439,32 @@ thresholdOverrides = [
         assert!(error.contains("requires a pattern"), "error: {error}");
     }
 
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn find_and_load_rejects_finding_ignore_set_that_exceeds_matcher_limits() {
+        let dir = test_dir("find-oversized-finding-ignore-set");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        let alternatives = (0..50_000)
+            .map(|index| format!("name{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let config = serde_json::json!({
+            "ignoreFindings": [format!("**/{{{alternatives}}}.ts")]
+        });
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+
+        let error = FallowConfig::find_and_load(dir.path()).unwrap_err();
+        assert!(error.contains("ignoreFindings"), "error: {error}");
+        assert!(
+            error.contains("cannot be compiled together"),
+            "error: {error}"
+        );
+    }
+
     // ------------------------------------------------------------------
     // resolve_package_exports: Object map with "." key that is not a
     // string or object returns None (the `_ => None` arm)

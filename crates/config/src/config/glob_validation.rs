@@ -22,7 +22,9 @@ use std::path::{Component, Path};
 
 use globset::Glob;
 
-/// Validation failure for a single user-supplied glob pattern.
+use super::finding_ignore::FindingIgnoreMatcher;
+
+/// Validation failure for user-supplied glob configuration.
 #[derive(Debug)]
 pub enum GlobValidationError {
     /// Pattern is an absolute path (`/foo`, `\foo`, `C:\foo`, `\\share`).
@@ -45,6 +47,11 @@ pub enum GlobValidationError {
     EmptyNegation {
         field: &'static str,
         pattern: String,
+    },
+    /// Individually valid patterns cannot be compiled into one matcher.
+    PatternSetCompilation {
+        field: &'static str,
+        source: globset::Error,
     },
 }
 
@@ -85,6 +92,10 @@ impl fmt::Display for GlobValidationError {
                 f,
                 "{field}: invalid glob '{pattern}': a negated pattern requires a pattern after '!'"
             ),
+            Self::PatternSetCompilation { field, source } => write!(
+                f,
+                "{field}: glob patterns cannot be compiled together: {source}; simplify the pattern set"
+            ),
         }
     }
 }
@@ -92,7 +103,9 @@ impl fmt::Display for GlobValidationError {
 impl std::error::Error for GlobValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidSyntax { source, .. } => Some(source),
+            Self::InvalidSyntax { source, .. } | Self::PatternSetCompilation { source, .. } => {
+                Some(source)
+            }
             Self::AbsolutePath { .. }
             | Self::TraversalSegment { .. }
             | Self::EmptyNegation { .. } => None,
@@ -218,12 +231,14 @@ pub fn validate_user_globs(
 }
 
 /// Validate finding-ignore patterns, treating a leading `!` as a report
-/// exception and validating the remaining project-relative glob.
+/// exception, validating each project-relative body, and proving both matcher
+/// sets can be compiled together.
 pub fn validate_user_finding_ignore_globs(
     patterns: &[String],
     field: &'static str,
     errors: &mut Vec<GlobValidationError>,
 ) {
+    let initial_error_count = errors.len();
     for pattern in patterns {
         let body = pattern.strip_prefix('!').unwrap_or(pattern);
         if body.is_empty() {
@@ -234,6 +249,12 @@ pub fn validate_user_finding_ignore_globs(
         } else if let Err(error) = compile_user_glob(body, field) {
             errors.push(error);
         }
+    }
+
+    if errors.len() == initial_error_count
+        && let Err(source) = FindingIgnoreMatcher::validate_compilation(patterns)
+    {
+        errors.push(GlobValidationError::PatternSetCompilation { field, source });
     }
 }
 
