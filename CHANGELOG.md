@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ignoreFindings` hides source-owned dead-code findings without removing
+  matching files from analysis.** Project-root-relative globs support `!`
+  exceptions with Knip-compatible set semantics. Matching files remain in
+  discovery, parsing, resolution, and the module graph, so their imports and
+  exports still contribute to analysis. `fallow migrate` now maps root Knip
+  `ignore` patterns to this field, preserves negation, and warns rather than
+  guessing for workspace-relative ignores. Use `ignorePatterns` only when a
+  file must be excluded from analysis entirely. (Closes
+  [#1991](https://github.com/fallow-rs/fallow/issues/1991).)
+
 ## [3.9.1] - 2026-07-24
 
 ### Added
