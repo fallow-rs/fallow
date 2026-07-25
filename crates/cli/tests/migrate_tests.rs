@@ -210,9 +210,9 @@ fn migrate_existing_fallowrc_jsonc_blocks_run() {
     cleanup(&dir);
 }
 
-/// Build a representative Next.js-shaped fixture project with files that
-/// exercise the most common knip glob patterns. Returns the absolute root.
-fn roundtrip_fixture(suffix: &str) -> std::path::PathBuf {
+/// Build a fixture where a plugin-owned entry imports one source file while a
+/// second source file is unused and ignored only at reporting time.
+fn graph_preserving_fixture(suffix: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "fallow-migrate-roundtrip-{}-{}",
         std::process::id(),
@@ -223,57 +223,25 @@ fn roundtrip_fixture(suffix: &str) -> std::path::PathBuf {
 
     fs::write(
         dir.join("package.json"),
-        r#"{"name": "roundtrip-fixture", "main": "app/page.tsx"}"#,
+        r#"{"name": "graph-preserving-fixture", "devDependencies": {"vitest": "latest"}}"#,
     )
     .unwrap();
-
-    let kept = [
-        "app/layout.tsx",
-        "app/page.tsx",
-        "app/api/route.ts",
-        "components/button.tsx",
-        "components/card.tsx",
-        "lib/utils.ts",
-        "lib/db.ts",
-        "pages/_app.tsx",
-        "pages/api/hello.ts",
-    ];
-    let ignored = [
-        "__tests__/utils.test.ts",
-        "lib/db.test.ts",
-        "dist/bundle.js",
-        "node_modules/foo/index.js",
-        "scripts/build.ts",
-    ];
-
-    for rel in kept.iter().chain(ignored.iter()) {
-        let path = dir.join(rel);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, "export const x = 1;\n").unwrap();
-    }
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("vitest.config.ts"),
+        "import './src/feature';\nexport default {};\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/feature.ts"), "export const feature = true;\n").unwrap();
+    fs::write(dir.join("src/hidden.ts"), "export const hidden = true;\n").unwrap();
 
     dir
 }
 
 #[test]
-fn migrate_roundtrip_globs_match_knip_documented_semantics() {
-    let knip = r#"{
-        "entry": [
-            "app/**/*.{ts,tsx}",
-            "pages/**/*.{ts,tsx}",
-            "components/**/*.{ts,tsx}",
-            "lib/**/*.ts"
-        ],
-        "ignore": [
-            "**/*.test.ts",
-            "dist/**",
-            "node_modules/**",
-            "scripts/**"
-        ]
-    }"#;
-
-    let dir = roundtrip_fixture("globs");
-    fs::write(dir.join("knip.json"), knip).unwrap();
+fn migrate_knip_ignore_suppresses_findings_without_removing_files() {
+    let dir = graph_preserving_fixture("ignore-findings");
+    fs::write(dir.join("knip.json"), r#"{"ignore": ["src/hidden.ts"]}"#).unwrap();
 
     let migrate = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
     assert_eq!(
@@ -285,6 +253,9 @@ fn migrate_roundtrip_globs_match_knip_documented_semantics() {
         dir.join(".fallowrc.json").exists(),
         ".fallowrc.json should be written"
     );
+    let migrated = fs::read_to_string(dir.join(".fallowrc.json")).unwrap();
+    assert!(migrated.contains("\"ignoreFindings\""));
+    assert!(!migrated.contains("\"ignorePatterns\""));
 
     let list = run_fallow_raw(&[
         "list",
@@ -310,24 +281,75 @@ fn migrate_roundtrip_globs_match_knip_documented_semantics() {
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect();
 
-    let expected: Vec<&str> = vec![
-        "app/api/route.ts",
-        "app/layout.tsx",
-        "app/page.tsx",
-        "components/button.tsx",
-        "components/card.tsx",
-        "lib/db.ts",
-        "lib/utils.ts",
-        "pages/_app.tsx",
-        "pages/api/hello.ts",
-    ];
-
     let normalised: Vec<String> = files.iter().map(|f| f.replace('\\', "/")).collect();
-    assert_eq!(
-        normalised, expected,
-        "fallow's scoped file set diverged from knip's documented glob \
-         semantics. If knip recently changed engines this is real drift; \
-         otherwise check fallow's globset or the migrator's pattern copy."
+    assert!(
+        normalised.iter().any(|path| path == "src/hidden.ts"),
+        "ignored findings must not remove their source file from discovery: {normalised:?}"
+    );
+
+    let dead_code = run_fallow_raw(&[
+        "dead-code",
+        "--format",
+        "json",
+        "--root",
+        dir.to_str().unwrap(),
+        "--quiet",
+    ]);
+    let findings = parse_json(&dead_code);
+    let unused_files = findings["unused_files"].as_array().unwrap();
+    assert!(
+        unused_files
+            .iter()
+            .all(|finding| finding["path"] != "src/hidden.ts"),
+        "ignored source finding leaked into dead-code output: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .all(|finding| finding["path"] != "src/feature.ts"),
+        "the imported source should remain reachable through the plugin entry: {unused_files:?}"
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_knip_ignore_warns_for_invalid_entries_without_dropping_valid_patterns() {
+    let dir = migrate_temp_dir(
+        "ignore-warning",
+        "knip.json",
+        r#"{"ignore": ["src/**", 7, null, "!src/keep.ts"]}"#,
+    );
+    let output = run_fallow_raw(&["migrate", "--dry-run", "--root", dir.to_str().unwrap()]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(output.stdout.contains("\"ignoreFindings\""));
+    assert!(output.stdout.contains("\"!src/keep.ts\""));
+    assert!(!output.stdout.contains("\"ignorePatterns\""));
+    assert!(output.stderr.contains("Warnings (2):"));
+    assert!(output.stderr.contains("ignore[1]"));
+    assert!(output.stderr.contains("ignore[2]"));
+
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_knip_workspace_ignore_warns_instead_of_guessing_a_root() {
+    let dir = migrate_temp_dir(
+        "workspace-ignore-warning",
+        "knip.json",
+        r#"{"workspaces":{"packages/*":{"ignore":["src/generated/**"]}}}"#,
+    );
+    let output = run_fallow_raw(&["migrate", "--dry-run", "--root", dir.to_str().unwrap()]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(output.stdout.contains("$schema"));
+    assert!(!output.stdout.contains("ignoreFindings"));
+    assert!(output.stderr.contains("workspaces.packages/*.ignore"));
+    assert!(
+        output
+            .stderr
+            .contains("project-root-relative ignoreFindings")
     );
 
     cleanup(&dir);
