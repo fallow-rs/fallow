@@ -1,6 +1,6 @@
 //! Analysis result types for all issue categories.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -858,6 +858,135 @@ macro_rules! counted_analysis_result_fields {
     };
 }
 
+trait IssueSourceOwners {
+    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool;
+}
+
+macro_rules! impl_single_issue_source_owner {
+    ($($finding:ty => $($field:ident).+),+ $(,)?) => {
+        $(
+            impl IssueSourceOwners for $finding {
+                fn all_source_owners_match(
+                    &self,
+                    predicate: &mut impl FnMut(&Path) -> bool,
+                ) -> bool {
+                    predicate(&self.$($field).+)
+                }
+            }
+        )+
+    };
+}
+
+impl_single_issue_source_owner! {
+    UnusedFileFinding => file.path,
+    UnusedExportFinding => export.path,
+    UnusedTypeFinding => export.path,
+    PrivateTypeLeakFinding => leak.path,
+    UnusedEnumMemberFinding => member.path,
+    UnusedClassMemberFinding => member.path,
+    UnusedStoreMemberFinding => member.path,
+    UnresolvedImportFinding => import.path,
+    BoundaryViolationFinding => violation.from_path,
+    BoundaryCoverageViolationFinding => violation.path,
+    BoundaryCallViolationFinding => violation.path,
+    PolicyViolationFinding => violation.path,
+    StaleSuppression => path,
+    InvalidClientExportFinding => export.path,
+    MixedClientServerBarrelFinding => barrel.path,
+    MisplacedDirectiveFinding => directive_site.path,
+    UnprovidedInjectFinding => inject.path,
+    UnrenderedComponentFinding => component.path,
+    RouteCollisionFinding => collision.path,
+    DynamicSegmentNameConflictFinding => conflict.path,
+    UnusedComponentPropFinding => prop.path,
+    UnusedComponentEmitFinding => emit.path,
+    UnusedComponentInputFinding => input.path,
+    UnusedComponentOutputFinding => output.path,
+    UnusedSvelteEventFinding => event.path,
+    UnusedServerActionFinding => action.path,
+    UnusedLoadDataKeyFinding => key.path,
+}
+
+macro_rules! impl_unowned_issue {
+    ($($finding:ty),+ $(,)?) => {
+        $(
+            impl IssueSourceOwners for $finding {
+                fn all_source_owners_match(
+                    &self,
+                    _predicate: &mut impl FnMut(&Path) -> bool,
+                ) -> bool {
+                    false
+                }
+            }
+        )+
+    };
+}
+
+impl_unowned_issue! {
+    UnusedDependencyFinding,
+    UnusedDevDependencyFinding,
+    UnusedOptionalDependencyFinding,
+    TypeOnlyDependencyFinding,
+    TestOnlyDependencyFinding,
+    DevDependencyInProductionFinding,
+    UnusedCatalogEntryFinding,
+    EmptyCatalogGroupFinding,
+    UnresolvedCatalogReferenceFinding,
+    UnusedDependencyOverrideFinding,
+    MisconfiguredDependencyOverrideFinding,
+}
+
+fn all_nonempty_paths_match<'a>(
+    mut paths: impl Iterator<Item = &'a PathBuf>,
+    predicate: &mut impl FnMut(&Path) -> bool,
+) -> bool {
+    let Some(first) = paths.next() else {
+        return false;
+    };
+    predicate(first) && paths.all(|path| predicate(path))
+}
+
+impl IssueSourceOwners for UnlistedDependencyFinding {
+    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(
+            self.dep.imported_from.iter().map(|site| &site.path),
+            predicate,
+        )
+    }
+}
+
+impl IssueSourceOwners for DuplicateExportFinding {
+    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(
+            self.export.locations.iter().map(|location| &location.path),
+            predicate,
+        )
+    }
+}
+
+impl IssueSourceOwners for CircularDependencyFinding {
+    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(self.cycle.files.iter(), predicate)
+    }
+}
+
+impl IssueSourceOwners for ReExportCycleFinding {
+    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(self.cycle.files.iter(), predicate)
+    }
+}
+
+macro_rules! remove_ignored_source_owned_issues {
+    ($state:expr, $($field:ident => $key:literal,)+) => {{
+        let (results, predicate) = $state;
+        $(
+            results.$field.retain(|issue| {
+                !issue.all_source_owners_match(&mut *predicate)
+            });
+        )+
+    }};
+}
+
 macro_rules! counted_result_key_slice {
     ($($field:ident => $key:literal,)+) => {
         &[$($key),+]
@@ -875,6 +1004,22 @@ pub const TOTAL_ISSUE_RESULT_KEYS: &[&str] =
     counted_analysis_result_fields!(counted_result_key_slice);
 
 impl AnalysisResults {
+    /// Remove counted findings whose complete, non-empty source-owner set
+    /// matches `is_ignored`.
+    ///
+    /// Findings owned by package or project metadata have no source owners and
+    /// are retained. Context paths embedded in a finding are not owners.
+    #[doc(hidden)]
+    pub fn remove_ignored_source_owned_issues(
+        &mut self,
+        mut is_ignored: impl FnMut(&Path) -> bool,
+    ) {
+        counted_analysis_result_fields!(
+            remove_ignored_source_owned_issues,
+            (self, &mut is_ignored)
+        );
+    }
+
     /// Total number of issues found.
     ///
     /// Sums across all issue categories (unused files, exports, types,
@@ -4746,6 +4891,90 @@ mod tests {
             }));
         assert_eq!(r.total_issues(), 1);
         assert_eq!(cloned.total_issues(), 2);
+    }
+
+    #[test]
+    fn finding_ignore_uses_source_owners_not_context_paths() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("ignored/dead.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("src/visible.ts"),
+            }));
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: PathBuf::from("src/visible.ts"),
+                to_path: PathBuf::from("ignored/target.ts"),
+                from_zone: "ui".to_string(),
+                to_zone: "data".to_string(),
+                import_specifier: "../ignored/target".to_string(),
+                line: 1,
+                col: 0,
+            }));
+
+        results.remove_ignored_source_owned_issues(|path| path.starts_with("ignored"));
+
+        assert_eq!(results.unused_files.len(), 1);
+        assert_eq!(
+            results.unused_files[0].file.path,
+            PathBuf::from("src/visible.ts")
+        );
+        assert_eq!(results.boundary_violations.len(), 1);
+    }
+
+    #[test]
+    fn finding_ignore_requires_every_source_owner_to_match() {
+        let duplicate = |paths: &[&str]| {
+            DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "shared".to_string(),
+                locations: paths
+                    .iter()
+                    .map(|path| DuplicateLocation {
+                        path: PathBuf::from(path),
+                        line: 1,
+                        col: 0,
+                    })
+                    .collect(),
+            })
+        };
+        let mut results = AnalysisResults {
+            duplicate_exports: vec![
+                duplicate(&["ignored/a.ts", "ignored/b.ts"]),
+                duplicate(&["ignored/a.ts", "src/b.ts"]),
+                duplicate(&[]),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        results.remove_ignored_source_owned_issues(|path| path.starts_with("ignored"));
+
+        assert_eq!(results.duplicate_exports.len(), 2);
+        assert_eq!(results.duplicate_exports[0].export.locations.len(), 2);
+        assert!(results.duplicate_exports[1].export.locations.is_empty());
+    }
+
+    #[test]
+    fn finding_ignore_retains_unowned_package_issues() {
+        let mut results = AnalysisResults {
+            unused_dependencies: vec![UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "unused-package".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: PathBuf::from("ignored/package.json"),
+                line: 3,
+                used_in_workspaces: vec![],
+            })],
+            ..AnalysisResults::default()
+        };
+
+        results.remove_ignored_source_owned_issues(|path| path.starts_with("ignored"));
+
+        assert_eq!(results.unused_dependencies.len(), 1);
     }
 
     // ── export_usages not counted in total_issues ───────────────
