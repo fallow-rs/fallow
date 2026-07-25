@@ -22,8 +22,10 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ),
     (
         "ignoreFiles",
-        "No separate concept in fallow",
-        Some("use the `ignorePatterns` field instead"),
+        "Fallow has no dedicated ignoreFiles field",
+        Some(
+            "use overrides[].files with rules.unused-files = \"off\"; this keeps matching files in the analysis graph",
+        ),
     ),
     (
         "ignoreBinaries",

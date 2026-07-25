@@ -54,7 +54,12 @@ fn write_string_array_fields(
     output: &mut String,
     obj: &serde_json::Map<String, serde_json::Value>,
 ) {
-    for key in &["entry", "ignorePatterns", "ignoreDependencies"] {
+    for key in &[
+        "entry",
+        "ignorePatterns",
+        "ignoreFindings",
+        "ignoreDependencies",
+    ] {
         if let Some(value) = obj.get(*key)
             && let Some(arr) = value.as_array()
         {

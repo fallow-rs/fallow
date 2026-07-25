@@ -32,6 +32,7 @@ pub(super) fn generate_jsonc(result: &MigrationResult, has_local_schema: bool) -
     let key_order = [
         "entry",
         "ignorePatterns",
+        "ignoreFindings",
         "ignoreDependencies",
         "ignoreExportsUsedInFile",
         "audit",

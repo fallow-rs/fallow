@@ -57,6 +57,51 @@ pub(super) fn migrate_simple_field(
     }
 }
 
+/// Migrate Knip's report-only `ignore` patterns without silently dropping
+/// malformed array entries.
+pub(super) fn migrate_ignore(
+    value: &Value,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let patterns = match value {
+        Value::String(pattern) => vec![pattern.clone()],
+        Value::Array(values) => values
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| {
+                if let Some(pattern) = value.as_str() {
+                    Some(pattern.to_string())
+                } else {
+                    warnings.push(MigrationWarning {
+                        source: "knip",
+                        field: format!("ignore[{index}]"),
+                        message: "expected a string; value not migrated".to_string(),
+                        suggestion: None,
+                    });
+                    None
+                }
+            })
+            .collect(),
+        _ => {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: "ignore".to_string(),
+                message: "expected a string or array of strings; not migrated".to_string(),
+                suggestion: None,
+            });
+            Vec::new()
+        }
+    };
+
+    if !patterns.is_empty() {
+        config.insert(
+            "ignoreFindings".to_string(),
+            Value::Array(patterns.into_iter().map(Value::String).collect()),
+        );
+    }
+}
+
 /// Migrate knip `rules` to fallow `rules`, warning about unmappable rule names.
 pub(super) fn migrate_rules(
     rules_val: &Value,
@@ -283,15 +328,55 @@ mod tests {
 
     #[test]
     fn simple_field_renames_key() {
-        let obj: JsonMap = serde_json::from_str(r#"{"ignore": ["**/*.test.ts"]}"#).unwrap();
+        let obj: JsonMap = serde_json::from_str(r#"{"source": ["value"]}"#).unwrap();
         let mut config = empty_config();
-        migrate_simple_field(&obj, "ignore", "ignorePatterns", &mut config);
+        migrate_simple_field(&obj, "source", "target", &mut config);
 
-        assert!(!config.contains_key("ignore"));
+        assert!(!config.contains_key("source"));
+        assert_eq!(config.get("target").unwrap(), &json!(["value"]));
+    }
+
+    #[test]
+    fn ignore_preserves_patterns_exactly() {
+        let value = json!(["src/**", "!src/keep.ts"]);
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore(&value, &mut config, &mut warnings);
+
         assert_eq!(
-            config.get("ignorePatterns").unwrap(),
-            &json!(["**/*.test.ts"])
+            config.get("ignoreFindings").unwrap(),
+            &json!(["src/**", "!src/keep.ts"])
         );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn ignore_warns_at_invalid_array_indexes() {
+        let value = json!(["src/**", false, null, "!src/keep.ts"]);
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore(&value, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreFindings").unwrap(),
+            &json!(["src/**", "!src/keep.ts"])
+        );
+        let fields: Vec<&str> = warnings
+            .iter()
+            .map(|warning| warning.field.as_str())
+            .collect();
+        assert_eq!(fields, ["ignore[1]", "ignore[2]"]);
+    }
+
+    #[test]
+    fn ignore_invalid_root_warns_without_output() {
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore(&json!(42), &mut config, &mut warnings);
+
+        assert!(!config.contains_key("ignoreFindings"));
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "ignore");
     }
 
     #[test]
@@ -587,7 +672,12 @@ mod tests {
         warn_unmappable_fields(&obj, &mut warnings);
 
         let ignore_files_warning = warnings.iter().find(|w| w.field == "ignoreFiles").unwrap();
-        assert!(ignore_files_warning.suggestion.is_some());
+        let suggestion = ignore_files_warning.suggestion.as_deref().unwrap();
+        assert!(suggestion.contains("overrides[].files"));
+        assert!(suggestion.contains("rules.unused-files"));
+        assert!(suggestion.contains("analysis graph"));
+        assert!(!suggestion.contains("ignorePatterns"));
+        assert!(!suggestion.contains("ignoreFindings"));
 
         let project_warning = warnings.iter().find(|w| w.field == "project").unwrap();
         assert!(project_warning.suggestion.is_none());

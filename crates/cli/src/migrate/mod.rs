@@ -162,7 +162,7 @@ fn reject_existing_fallow_config(root: &Path) -> Option<ExitCode> {
     None
 }
 
-/// Print the migrated-sources list, skipped-field warnings, and the
+/// Print the migrated-sources list, migration warnings, and the
 /// knip glob-engine caveat after a successful migration.
 fn report_migration_outcome(result: &MigrationResult) {
     for source in &result.sources {
@@ -172,9 +172,8 @@ fn report_migration_outcome(result: &MigrationResult) {
     if !result.warnings.is_empty() {
         let count = result.warnings.len();
         let header = if count == 1 { "Warning" } else { "Warnings" };
-        let noun = if count == 1 { "field" } else { "fields" };
         eprintln!();
-        eprintln!("{header} ({count} skipped {noun}):");
+        eprintln!("{header} ({count}):");
         for warning in &result.warnings {
             eprintln!("  {warning}");
         }
@@ -183,7 +182,7 @@ fn report_migration_outcome(result: &MigrationResult) {
     if should_emit_glob_caveat(result) {
         eprintln!();
         eprintln!(
-            "Note: knip and fallow use different glob engines; verify migrated entry / ignorePatterns with `fallow dead-code` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
+            "Note: knip and fallow use different glob engines; verify migrated entry / ignoreFindings with `fallow dead-code` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
         );
     }
 }
@@ -628,7 +627,7 @@ fn source_head(s: &str) -> &str {
 
 /// Decide whether the migrate command should print a glob-semantics caveat
 /// after the warnings block. Emitted only when knip contributed to the
-/// migration AND the resulting config carries `entry` or `ignorePatterns`,
+/// migration AND the resulting config carries `entry` or `ignoreFindings`,
 /// since those are the only fields where knip's glob engine and fallow's
 /// `globset` can diverge. See issue #457.
 fn should_emit_glob_caveat(result: &MigrationResult) -> bool {
@@ -639,7 +638,7 @@ fn should_emit_glob_caveat(result: &MigrationResult) -> bool {
     let Some(obj) = result.config.as_object() else {
         return false;
     };
-    obj.contains_key("entry") || obj.contains_key("ignorePatterns")
+    obj.contains_key("entry") || obj.contains_key("ignoreFindings")
 }
 
 /// Extract a string-or-array field as a `Vec<String>`.

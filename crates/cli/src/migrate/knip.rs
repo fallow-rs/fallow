@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use super::knip_fields::{
-    migrate_exclude, migrate_ignore_deps, migrate_ignore_exports_used_in_file, migrate_include,
-    migrate_rules, migrate_simple_field, warn_plugin_keys, warn_unmappable_fields,
+    migrate_exclude, migrate_ignore, migrate_ignore_deps, migrate_ignore_exports_used_in_file,
+    migrate_include, migrate_rules, migrate_simple_field, warn_plugin_keys, warn_unmappable_fields,
 };
 #[cfg(test)]
 use super::knip_tables::KNIP_RULE_MAP;
@@ -27,7 +27,9 @@ pub(super) fn migrate_knip(
 
     migrate_simple_field(obj, "entry", "entry", config);
 
-    migrate_simple_field(obj, "ignore", "ignorePatterns", config);
+    if let Some(value) = obj.get("ignore") {
+        migrate_ignore(value, config, warnings);
+    }
 
     if let Some(ignore_deps_val) = obj.get("ignoreDependencies") {
         migrate_ignore_deps(ignore_deps_val, config, warnings);
@@ -59,18 +61,57 @@ pub(super) fn migrate_knip(
 
     warn_plugin_keys(obj, warnings);
 
-    if let Some(workspaces_val) = obj.get("workspaces")
-        && workspaces_val.is_object()
-    {
+    if let Some(workspaces) = obj.get("workspaces") {
+        warn_workspace_configs(workspaces, warnings);
+    }
+}
+
+fn warn_workspace_configs(workspaces: &Value, warnings: &mut Vec<MigrationWarning>) {
+    let Some(workspaces) = workspaces.as_object() else {
         warnings.push(MigrationWarning {
             source: "knip",
             field: "workspaces".to_string(),
-            message: "per-workspace plugin overrides have limited support in fallow".to_string(),
-            suggestion: Some(
-                "fallow auto-discovers workspace packages; use --workspace flag to scope output"
-                    .to_string(),
-            ),
+            message: "expected an object; workspace config not migrated".to_string(),
+            suggestion: None,
         });
+        return;
+    };
+
+    for (workspace_pattern, config) in workspaces {
+        let field = format!("workspaces.{workspace_pattern}");
+        let Some(config) = config.as_object() else {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field,
+                message: "expected an object; workspace config not migrated".to_string(),
+                suggestion: None,
+            });
+            continue;
+        };
+
+        if config.contains_key("ignore") {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: format!("{field}.ignore"),
+                message: "workspace-relative ignore patterns are not migrated".to_string(),
+                suggestion: Some(
+                    "translate them to project-root-relative ignoreFindings patterns manually; workspace glob keys may match multiple package roots"
+                        .to_string(),
+                ),
+            });
+        }
+
+        if config.keys().any(|key| key != "ignore") {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field,
+                message: "per-workspace configuration has no direct fallow equivalent".to_string(),
+                suggestion: Some(
+                    "fallow auto-discovers workspace packages; use --workspace to scope output"
+                        .to_string(),
+                ),
+            });
+        }
     }
 }
 
@@ -154,17 +195,20 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_with_ignore_patterns() {
+    fn migrate_knip_ignore_preserves_positive_and_negated_patterns() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"ignore": ["src/generated/**", "**/*.test.ts"]}"#).unwrap();
+            serde_json::from_str(r#"{"ignore": ["src/generated/**", "!src/generated/keep.ts"]}"#)
+                .unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(
-            config.get("ignorePatterns").unwrap(),
-            &serde_json::json!(["src/generated/**", "**/*.test.ts"])
+            config.get("ignoreFindings").unwrap(),
+            &serde_json::json!(["src/generated/**", "!src/generated/keep.ts"])
         );
+        assert!(!config.contains_key("ignorePatterns"));
+        assert!(warnings.is_empty());
     }
 
     #[test]
@@ -314,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_workspaces_object_warns() {
+    fn migrate_knip_workspace_config_warns_at_exact_member() {
         let knip: serde_json::Value =
             serde_json::from_str(r#"{"workspaces": {"packages/*": {"entry": ["src/index.ts"]}}}"#)
                 .unwrap();
@@ -323,24 +367,77 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "workspaces");
-        assert!(
-            warnings[0]
-                .message
-                .contains("per-workspace plugin overrides")
-        );
+        assert_eq!(warnings[0].field, "workspaces.packages/*");
+        assert!(warnings[0].message.contains("no direct fallow equivalent"));
         assert!(warnings[0].suggestion.is_some());
     }
 
     #[test]
-    fn migrate_knip_workspaces_non_object_no_warning() {
+    fn migrate_knip_workspaces_non_object_warns() {
         let knip: serde_json::Value =
             serde_json::from_str(r#"{"workspaces": ["packages/*"]}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(!warnings.iter().any(|w| w.field == "workspaces"));
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "workspaces");
+        assert!(warnings[0].message.contains("expected an object"));
+    }
+
+    #[test]
+    fn migrate_knip_workspace_ignore_has_targeted_warning_only() {
+        let knip = serde_json::json!({
+            "workspaces": {"packages/*": {"ignore": ["src/generated/**"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "workspaces.packages/*.ignore");
+        assert!(warnings[0].message.contains("workspace-relative"));
+        assert!(
+            warnings[0].suggestion.as_deref().is_some_and(
+                |suggestion| suggestion.contains("project-root-relative ignoreFindings")
+            )
+        );
+    }
+
+    #[test]
+    fn migrate_knip_workspace_ignore_and_other_config_warn_separately() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                "packages/*": {
+                    "ignore": ["src/generated/**"],
+                    "entry": ["src/index.ts"]
+                }
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        let fields: Vec<&str> = warnings
+            .iter()
+            .map(|warning| warning.field.as_str())
+            .collect();
+        assert_eq!(
+            fields,
+            ["workspaces.packages/*.ignore", "workspaces.packages/*"]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_workspace_member_non_object_warns_at_member() {
+        let knip = serde_json::json!({"workspaces": {"packages/*": true}});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "workspaces.packages/*");
+        assert!(warnings[0].message.contains("expected an object"));
     }
 
     #[test]
@@ -541,7 +638,7 @@ mod tests {
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(!config.contains_key("ignorePatterns"));
+        assert!(!config.contains_key("ignoreFindings"));
     }
 
     #[test]
@@ -650,7 +747,7 @@ mod tests {
             &serde_json::json!(["src/index.ts", "src/worker.ts"])
         );
         assert_eq!(
-            config.get("ignorePatterns").unwrap(),
+            config.get("ignoreFindings").unwrap(),
             &serde_json::json!(["**/*.generated.*"])
         );
         assert_eq!(
@@ -667,7 +764,7 @@ mod tests {
         assert!(warning_fields.contains(&"ignoreDependencies"));
         assert!(warning_fields.contains(&"project"));
         assert!(warning_fields.contains(&"eslint"));
-        assert!(warning_fields.contains(&"workspaces"));
+        assert!(warning_fields.contains(&"workspaces.packages/*"));
     }
 
     #[test]
@@ -712,9 +809,54 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(
-            config.get("ignorePatterns").unwrap(),
+            config.get("ignoreFindings").unwrap(),
             &serde_json::json!(["dist/**"])
         );
+    }
+
+    #[test]
+    fn migrate_knip_negated_only_ignore_is_preserved() {
+        let knip = serde_json::json!({"ignore": ["!src/keep.ts"]});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config["ignoreFindings"],
+            serde_json::json!(["!src/keep.ts"])
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn migrate_knip_mixed_ignore_warns_for_each_invalid_entry() {
+        let knip = serde_json::json!({"ignore": ["src/**", 7, null, "!src/keep.ts"]});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config["ignoreFindings"],
+            serde_json::json!(["src/**", "!src/keep.ts"])
+        );
+        let fields: Vec<&str> = warnings
+            .iter()
+            .map(|warning| warning.field.as_str())
+            .collect();
+        assert_eq!(fields, ["ignore[1]", "ignore[2]"]);
+    }
+
+    #[test]
+    fn migrate_knip_invalid_ignore_shape_warns_without_output() {
+        let knip = serde_json::json!({"ignore": {"pattern": "src/**"}});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("ignoreFindings"));
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "ignore");
+        assert!(warnings[0].message.contains("string or array of strings"));
     }
 
     #[test]

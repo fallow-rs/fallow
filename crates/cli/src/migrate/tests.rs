@@ -29,7 +29,7 @@ fn migrate_both_knip_and_jscpd() {
         &serde_json::json!(["src/index.ts"])
     );
     assert_eq!(
-        config_map.get("ignorePatterns").unwrap(),
+        config_map.get("ignoreFindings").unwrap(),
         &serde_json::json!(["dist/**"])
     );
     let dupes = config_map.get("duplicates").unwrap().as_object().unwrap();
@@ -244,6 +244,7 @@ fn toml_output_deserializes_as_valid_config() {
         config: serde_json::json!({
             "entry": ["src/index.ts"],
             "ignorePatterns": ["dist/**"],
+            "ignoreFindings": ["src/generated/**", "!src/generated/keep.ts"],
             "ignoreDependencies": ["lodash"],
             "rules": {
                 "unused-files": "error",
@@ -261,6 +262,10 @@ fn toml_output_deserializes_as_valid_config() {
     let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
     assert_eq!(config.entry, vec!["src/index.ts"]);
     assert_eq!(config.ignore_patterns, vec!["dist/**"]);
+    assert_eq!(
+        config.ignore_findings,
+        vec!["src/generated/**", "!src/generated/keep.ts"]
+    );
     assert_eq!(config.ignore_dependencies, vec!["lodash"]);
 }
 
@@ -627,7 +632,8 @@ fn migrate_from_file_package_json_with_both_knip_and_jscpd() {
 
     let config_obj = result.config.as_object().unwrap();
     assert!(config_obj.contains_key("entry"));
-    assert!(config_obj.contains_key("ignorePatterns"));
+    assert!(config_obj.contains_key("ignoreFindings"));
+    assert!(!config_obj.contains_key("ignorePatterns"));
     assert!(config_obj.contains_key("duplicates"));
 
     let _ = std::fs::remove_dir_all(&tmpdir);
@@ -975,7 +981,8 @@ fn jsonc_output_keys_ordered_correctly() {
             "entry": ["src/index.ts"],
             "ignoreDependencies": ["lodash"],
             "ignoreExportsUsedInFile": true,
-            "ignorePatterns": ["dist/**"]
+            "ignorePatterns": ["dist/**"],
+            "ignoreFindings": ["src/generated/**"]
         }),
         warnings: vec![],
         sources: vec!["knip.json".to_string(), ".jscpd.json".to_string()],
@@ -983,12 +990,14 @@ fn jsonc_output_keys_ordered_correctly() {
     let output = generate_jsonc(&result, false);
     let entry_pos = output.find("\"entry\"").unwrap();
     let ignore_pos = output.find("\"ignorePatterns\"").unwrap();
+    let ignore_findings_pos = output.find("\"ignoreFindings\"").unwrap();
     let ignore_deps_pos = output.find("\"ignoreDependencies\"").unwrap();
     let ignore_exports_used_in_file_pos = output.find("\"ignoreExportsUsedInFile\"").unwrap();
     let rules_pos = output.find("\"rules\"").unwrap();
     let dupes_pos = output.find("\"duplicates\"").unwrap();
     assert!(entry_pos < ignore_pos);
-    assert!(ignore_pos < ignore_deps_pos);
+    assert!(ignore_pos < ignore_findings_pos);
+    assert!(ignore_findings_pos < ignore_deps_pos);
     assert!(ignore_deps_pos < ignore_exports_used_in_file_pos);
     assert!(ignore_exports_used_in_file_pos < rules_pos);
     assert!(rules_pos < dupes_pos);
@@ -1081,6 +1090,7 @@ fn toml_full_roundtrip_with_duplicates() {
         config: serde_json::json!({
             "entry": ["src/index.ts"],
             "ignorePatterns": ["dist/**"],
+            "ignoreFindings": ["src/generated/**", "!src/generated/keep.ts"],
             "ignoreDependencies": ["lodash"],
             "rules": {
                 "unused-files": "error",
@@ -1103,6 +1113,10 @@ fn toml_full_roundtrip_with_duplicates() {
     let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
     assert_eq!(config.entry, vec!["src/index.ts"]);
     assert_eq!(config.ignore_patterns, vec!["dist/**"]);
+    assert_eq!(
+        config.ignore_findings,
+        vec!["src/generated/**", "!src/generated/keep.ts"]
+    );
     assert_eq!(config.ignore_dependencies, vec!["lodash"]);
     assert_eq!(config.duplicates.min_tokens, 75);
     assert_eq!(config.duplicates.min_lines, 5);
@@ -1115,6 +1129,7 @@ fn jsonc_full_roundtrip_with_all_fields() {
         config: serde_json::json!({
             "entry": ["src/main.ts", "src/worker.ts"],
             "ignorePatterns": ["build/**"],
+            "ignoreFindings": ["src/generated/**", "!src/generated/keep.ts"],
             "ignoreDependencies": ["react", "lodash"],
             "rules": {
                 "unused-files": "error",
@@ -1135,6 +1150,10 @@ fn jsonc_full_roundtrip_with_all_fields() {
             .unwrap();
     assert_eq!(config.entry, vec!["src/main.ts", "src/worker.ts"]);
     assert_eq!(config.ignore_patterns, vec!["build/**"]);
+    assert_eq!(
+        config.ignore_findings,
+        vec!["src/generated/**", "!src/generated/keep.ts"]
+    );
     assert_eq!(config.ignore_dependencies, vec!["react", "lodash"]);
 }
 
@@ -1244,6 +1263,22 @@ fn toml_output_only_ignore_patterns() {
 }
 
 #[test]
+fn toml_output_only_ignore_findings_preserves_negation() {
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "ignoreFindings": ["src/**", "!src/keep.ts"]
+        }),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    assert!(output.contains("ignoreFindings = [\"src/**\", \"!src/keep.ts\"]"));
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert_eq!(config.ignore_findings, vec!["src/**", "!src/keep.ts"]);
+    assert!(config.ignore_patterns.is_empty());
+}
+
+#[test]
 fn toml_output_only_ignore_dependencies() {
     let result = MigrationResult {
         config: serde_json::json!({
@@ -1327,9 +1362,9 @@ fn glob_caveat_emitted_for_knip_with_entry() {
 }
 
 #[test]
-fn glob_caveat_emitted_for_knip_with_ignore_patterns() {
+fn glob_caveat_emitted_for_knip_with_ignore_findings() {
     let result = MigrationResult {
-        config: serde_json::json!({"ignorePatterns": ["dist/**"]}),
+        config: serde_json::json!({"ignoreFindings": ["dist/**"]}),
         warnings: vec![],
         sources: vec!["package.json (knip key)".to_string()],
     };
