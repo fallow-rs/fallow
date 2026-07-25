@@ -36,7 +36,7 @@
       "default": []
     },
     "ignoreFindings": {
-      "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. This affects counted dead-code findings only; package/project findings without a source owner remain visible. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all.",
+      "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or dependency with any reportable location remains visible. This affects counted dead-code findings only; package/project findings without a source owner remain visible. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all.",
       "type": "array",
       "items": {
         "type": "string"

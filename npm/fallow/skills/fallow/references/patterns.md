@@ -443,7 +443,8 @@ fallow migrate
 Creates `.fallowrc.json` with mapped settings:
 - knip `rules`/`exclude`/`include` → fallow `rules` (error/warn/off)
 - knip `ignore` → fallow `ignoreFindings` (findings are hidden, but matching
-  files remain in the module graph; leading `!` exceptions are preserved)
+  files remain in the module graph; leading `!` exceptions are preserved;
+  multi-source findings stay visible unless every source owner matches)
 - knip `ignoreDependencies` → fallow `ignoreDependencies`
 - knip `ignoreExportsUsedInFile` → fallow `ignoreExportsUsedInFile` (boolean and `{ type, interface }` object form both supported; fallow groups type aliases and interfaces under one issue, so the two type-kind fields behave identically)
 - Unmappable fields generate warnings with suggestions
