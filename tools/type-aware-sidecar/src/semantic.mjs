@@ -8,36 +8,45 @@ import {
   isClassDeclaration,
   isClassExpression,
   isDecorator,
-  isEnumDeclaration,
   isElementAccessExpression,
   isExportDeclaration,
   isExportSpecifier,
   isFunctionBody,
-  isFunctionDeclaration,
+  isGetAccessorDeclaration,
   isIdentifier,
   isImportDeclaration,
   isImportClause,
   isImportSpecifier,
   isImportTypeNode,
-  isInterfaceDeclaration,
-  isMethodDeclaration,
-  isMethodSignatureDeclaration,
-  isModuleDeclaration,
-  isGetAccessorDeclaration,
   isNamespaceImport,
   isPropertyAccessExpression,
-  isPropertyDeclaration,
-  isPropertySignatureDeclaration,
   isPrivateIdentifier,
   isSetAccessorDeclaration,
   isStringLiteralLikeNode,
-  isTypeAliasDeclaration,
   isTypeNode,
   isTypeQueryNode,
-  isVariableDeclaration,
 } from "typescript/unstable/ast/is";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
+import {
+  declarationName,
+  declarationNamespaces,
+  declarationsForSymbol,
+  findDeclaration,
+  isDeclaration,
+  isProjectSource,
+  nodeText,
+  ownerDeclaration,
+  projectExportIndex,
+  projectSourceFiles,
+  relativePath,
+  resolveAlias,
+  semanticQueryIdentity,
+  sourceFileIdentity,
+  stableDeclarationKey,
+  stableSymbolIdentity,
+  symbolForDeclaration,
+} from "./semantic-identity.mjs";
 
 const INFERRED_PROJECT = "<inferred>";
 const TEST_FILE_PATTERN = /(?:^|[/_.-])(?:test|spec)\.[cm]?[jt]sx?$/u;
@@ -55,39 +64,9 @@ const DECLARATION_KINDS = new Set([
   "class_method",
   "class_property",
 ]);
-const DECLARATION_KIND_RULES = [
-  [[isClassDeclaration, isClassExpression], "class"],
-  [[isInterfaceDeclaration], "interface"],
-  [[isTypeAliasDeclaration], "type_alias"],
-  [[isEnumDeclaration], "enum"],
-  [[isFunctionDeclaration], "function"],
-  [[isModuleDeclaration], "namespace"],
-  [[isVariableDeclaration], "variable"],
-  [
-    [
-      isMethodDeclaration,
-      isMethodSignatureDeclaration,
-      isGetAccessorDeclaration,
-      isSetAccessorDeclaration,
-    ],
-    "class_method",
-  ],
-  [[isPropertyDeclaration, isPropertySignatureDeclaration], "class_property"],
-];
-const TYPE_ONLY_DECLARATIONS = [
-  isInterfaceDeclaration,
-  isTypeAliasDeclaration,
-  isPropertySignatureDeclaration,
-];
-const DUAL_NAMESPACE_DECLARATIONS = [isClassDeclaration, isClassExpression, isEnumDeclaration];
-const DECLARATION_OWNER_NODES = [isClassDeclaration, isClassExpression, isInterfaceDeclaration];
 
 const compareText = (left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right));
 const slash = (value) => value.split(path.sep).join("/");
-const relativePath = (root, fileName) =>
-  slash(path.relative(canonicalFileIdentity(root), canonicalFileIdentity(fileName)));
-
-const sourceFileIdentity = (sourceFile) => canonicalFileIdentity(sourceFile.fileName);
 const locationKey = ({ path: filePath, line, col }) => `${filePath}\0${line}\0${col}`;
 
 const location = (root, node) => {
@@ -102,263 +81,12 @@ const location = (root, node) => {
   };
 };
 
-const positions = (node) => {
-  const sourceFile = node.getSourceFile();
-  const nodes = node.name ? [node, node.name] : [node];
-  return nodes.map((candidate) => {
-    const start = candidate.getStart(sourceFile);
-    const { line } = sourceFile.getLineAndCharacterOfPosition(start);
-    const lineStart = sourceFile.getPositionOfLineAndCharacter(line, 0);
-    return {
-      line: line + 1,
-      col: Buffer.byteLength(sourceFile.text.slice(lineStart, start), "utf8"),
-    };
-  });
-};
-
-const matchesAny = (node, checks) => checks.some((check) => check(node));
-const nodeText = (node) => node?.text;
-
-const declarationKind = (node) =>
-  DECLARATION_KIND_RULES.find(([checks]) => matchesAny(node, checks))?.[1];
-
-const declarationNamespaces = (node) =>
-  matchesAny(node, TYPE_ONLY_DECLARATIONS)
-    ? new Set(["type"])
-    : new Set(matchesAny(node, DUAL_NAMESPACE_DECLARATIONS) ? ["type", "value"] : ["value"]);
-
-const declarationName = (node) => node.name?.text;
-
-const ownerName = (node) => {
-  if (!node) return null;
-  if (matchesAny(node, DECLARATION_OWNER_NODES)) return nodeText(node.name) ?? null;
-  return ownerName(node.parent);
-};
-
-const declarationOwner = (node) => ownerName(node.parent);
-
-const ownerDeclaration = (node) => {
-  let current = node?.parent;
-  while (current) {
-    if (matchesAny(current, DECLARATION_OWNER_NODES)) return current;
-    current = current.parent;
-  }
-  return undefined;
-};
-
-const isDeclaration = (node) => declarationKind(node) !== undefined;
-
 const visit = (node, callback) => {
   callback(node);
   node.forEachChild((child) => {
     visit(child, callback);
     return undefined;
   });
-};
-
-const declarationIndexes = new WeakMap();
-
-const anchorKey = ({ declarationKind: kind, localName, exportedName, owner, line, col }) =>
-  [kind, localName, exportedName, owner ?? "", line, col].join("\0");
-
-const setExportAnchor = (index, node, localName, exportedName, owner, position) => {
-  index.set(
-    anchorKey({
-      declarationKind: "export",
-      localName,
-      exportedName,
-      owner,
-      ...position,
-    }),
-    node,
-  );
-};
-
-const exportSpecifierNames = (node) => {
-  const exportedName = nodeText(node.name);
-  return {
-    exportedName,
-    localName: nodeText(node.propertyName) ?? exportedName,
-  };
-};
-
-const exportSpecifierPositions = (node) =>
-  [node, node.name, node.propertyName].filter(Boolean).flatMap((candidate) => positions(candidate));
-
-const indexExportPosition = (index, node, names, position) => {
-  for (const localName of new Set([names.localName, names.exportedName])) {
-    setExportAnchor(index, node, localName, names.exportedName, null, position);
-  }
-};
-
-const indexExportSpecifier = (index, node) => {
-  const names = exportSpecifierNames(node);
-  exportSpecifierPositions(node).forEach((position) =>
-    indexExportPosition(index, node, names, position),
-  );
-};
-
-const defaultModifierFor = (node) =>
-  node.modifiers?.find((modifier) => modifier.getText(node.getSourceFile()) === "default");
-
-const indexNamedDeclaration = (index, node, localName) => {
-  for (const position of positions(node)) {
-    const common = {
-      localName,
-      exportedName: localName,
-      owner: declarationOwner(node),
-      ...position,
-    };
-    index.set(anchorKey({ declarationKind: declarationKind(node), ...common }), node);
-    index.set(anchorKey({ declarationKind: "export", ...common }), node);
-  }
-};
-
-const indexDefaultDeclaration = (index, node, localName, defaultModifier) => {
-  if (!defaultModifier) return;
-  for (const position of [...positions(node), ...positions(defaultModifier)]) {
-    for (const identityLocalName of new Set([localName, "default"])) {
-      setExportAnchor(index, node, identityLocalName, "default", declarationOwner(node), position);
-    }
-  }
-};
-
-const declarationLocalName = (node, defaultModifier) =>
-  declarationName(node) ?? (defaultModifier ? "default" : undefined);
-
-const indexDeclarationNode = (index, node) => {
-  if (!isDeclaration(node)) return;
-  const defaultModifier = defaultModifierFor(node);
-  const localName = declarationLocalName(node, defaultModifier);
-  if (!localName) return;
-  indexNamedDeclaration(index, node, localName);
-  indexDefaultDeclaration(index, node, localName, defaultModifier);
-};
-
-const declarationIndex = (sourceFile) => {
-  const cached = declarationIndexes.get(sourceFile);
-  if (cached) return cached;
-  const index = new Map();
-  visit(sourceFile, (node) => {
-    if (isExportSpecifier(node)) {
-      indexExportSpecifier(index, node);
-      return;
-    }
-    indexDeclarationNode(index, node);
-  });
-  declarationIndexes.set(sourceFile, index);
-  return index;
-};
-
-const findDeclaration = (sourceFile, identity) => {
-  const anchor = declarationIndex(sourceFile).get(anchorKey(identity));
-  if (!anchor || isExportSpecifier(anchor)) return anchor;
-  return declarationNamespaces(anchor).has(identity.namespace) ? anchor : undefined;
-};
-
-const symbolForDeclaration = (project, declaration) =>
-  project.checker.getSymbolAtLocation(declaration.name ?? declaration);
-
-const resolveAlias = (checker, symbol) => {
-  if (!symbol) return undefined;
-  if ((symbol.flags & SymbolFlags.Alias) === 0) return symbol;
-  const aliased = checker.getAliasedSymbol(symbol);
-  return checker.isUnknownSymbol(aliased) ? symbol : aliased;
-};
-
-const declarationsForSymbol = (project, symbol) =>
-  (symbol?.declarations ?? []).map((handle) => handle.resolve(project)).filter(Boolean);
-
-const stableDeclarationKey = (node, namespace = "value") => {
-  const first = positions(node)[0];
-  return [
-    sourceFileIdentity(node.getSourceFile()),
-    namespace,
-    declarationKind(node) ?? "unknown",
-    declarationName(node) ?? "default",
-    first.line,
-    first.col,
-    declarationOwner(node) ?? "",
-  ].join("\0");
-};
-
-const stableSymbolIdentity = (root, declaration, namespace, exportedName) => {
-  const position = positions(declaration)[0];
-  return {
-    path: relativePath(root, declaration.getSourceFile().fileName),
-    namespace,
-    declaration_kind: declarationKind(declaration) ?? "unknown",
-    exported_name: exportedName,
-    local_name: declarationName(declaration) ?? exportedName,
-    line: position.line,
-    col: position.col,
-    owner: declarationOwner(declaration),
-  };
-};
-
-const semanticQueryIdentity = (root, query, resolved) => {
-  if (query.symbol.declarationKind !== "export") {
-    return stableSymbolIdentity(
-      root,
-      resolved.declaration,
-      query.symbol.namespace,
-      query.symbol.exportedName,
-    );
-  }
-  return {
-    path: relativePath(root, query.symbol.absolutePath),
-    namespace: query.symbol.namespace,
-    declaration_kind: query.symbol.declarationKind,
-    exported_name: query.symbol.exportedName,
-    local_name: query.symbol.localName,
-    line: query.symbol.line,
-    col: query.symbol.col,
-    owner: query.symbol.owner,
-  };
-};
-
-const isProjectSource = (project, sourceFile) =>
-  Boolean(sourceFile) &&
-  !sourceFile.isDeclarationFile &&
-  !project.program.isSourceFileDefaultLibrary(sourceFile) &&
-  !project.program.isSourceFileFromExternalLibrary(sourceFile);
-
-const projectSourceFiles = (project) =>
-  project.program
-    .getSourceFileNames()
-    .map((fileName) => project.program.getSourceFile(fileName))
-    .filter((sourceFile) => isProjectSource(project, sourceFile));
-
-const projectExportIndexes = new WeakMap();
-
-const exportedDeclarations = (project, sourceFile) => {
-  const moduleSymbol = project.checker.getSymbolAtLocation(sourceFile);
-  if (!moduleSymbol) return [];
-  return project.checker.getExportsOfModule(moduleSymbol).flatMap((exported) => {
-    const target = resolveAlias(project.checker, exported);
-    return declarationsForSymbol(project, target).flatMap((declaration) =>
-      [...declarationNamespaces(declaration)].map((namespace) => ({
-        exportedName: exported.name,
-        declaration,
-        namespace,
-      })),
-    );
-  });
-};
-
-const exportIndexKey = ({ exportedName, declaration, namespace }) =>
-  `${exportedName}\0${stableDeclarationKey(declaration, namespace)}`;
-
-const projectExportIndex = (project) => {
-  const cached = projectExportIndexes.get(project);
-  if (cached) return cached;
-  const index = new Set(
-    projectSourceFiles(project).flatMap((sourceFile) =>
-      exportedDeclarations(project, sourceFile).map(exportIndexKey),
-    ),
-  );
-  projectExportIndexes.set(project, index);
-  return index;
 };
 
 const blockingDiagnosticCount = (project) =>
@@ -830,6 +558,7 @@ const symbolUseBatchState = (resolvedQueries, evidenceLimit) => {
     declarationLocationsByQuery: new Map(resolvedQueries.map(({ query }) => [query.id, new Set()])),
     targetsByKey: new Map(),
     exportEntriesByModule: new Map(),
+    exportEntriesByProject: new Map(),
     candidateNames: new Set(),
     classMemberEntries,
     classMemberEntriesByName: entriesByName(classMemberEntries),
@@ -858,6 +587,11 @@ const registerSymbolTargets = (root, state, entry) => {
     const entries = state.exportEntriesByModule.get(moduleIdentity) ?? new Set();
     entries.add(entry);
     state.exportEntriesByModule.set(moduleIdentity, entries);
+    entry.resolved.ownerContexts.forEach(({ project }) => {
+      const projectEntries = state.exportEntriesByProject.get(project) ?? new Set();
+      projectEntries.add(entry);
+      state.exportEntriesByProject.set(project, projectEntries);
+    });
   }
   entry.resolved.ownerContexts.forEach(({ project, declaration }) => {
     const symbol = resolveAlias(project.checker, symbolForDeclaration(project, declaration));
@@ -915,12 +649,6 @@ const importTypeSpecifier = (node) => {
 
 const isDynamicImportCall = (node) =>
   isCallExpression(node) && node.expression.getText(node.getSourceFile()) === "import";
-
-const dynamicImportSpecifier = (node) => {
-  if (!isDynamicImportCall(node)) return undefined;
-  const specifier = node.arguments[0];
-  return specifier && isStringLiteralLikeNode(specifier) ? specifier : undefined;
-};
 
 const moduleIdentityForSpecifier = (project, specifier) => {
   if (!specifier) return undefined;
@@ -1040,7 +768,15 @@ const recordComputedMemberAccess = (state, project, entries, node) => {
 };
 
 const recordDynamicImportUncertainty = (state, project, node) => {
-  const moduleIdentity = moduleIdentityForSpecifier(project, dynamicImportSpecifier(node));
+  if (!isDynamicImportCall(node)) return;
+  const specifier = node.arguments[0];
+  if (!specifier || !isStringLiteralLikeNode(specifier)) {
+    (state.exportEntriesByProject.get(project) ?? []).forEach((entry) =>
+      recordSymbolUncertainty(state, entry, "dynamic-behavior"),
+    );
+    return;
+  }
+  const moduleIdentity = moduleIdentityForSpecifier(project, specifier);
   if (!moduleIdentity) return;
   (state.exportEntriesByModule.get(moduleIdentity) ?? []).forEach((entry) =>
     recordSymbolUncertainty(state, entry, "dynamic-behavior"),

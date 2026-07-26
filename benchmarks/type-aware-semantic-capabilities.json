@@ -7,7 +7,7 @@
   ],
   "artifacts": {
     "fallow_sha256": "55d17c2322f647e461a852f592474b744613a6b6112ba54b2dff3a6e7e86078f",
-    "sidecar_sha256": "2ff20d9b363b151c010da150d7563dc9867c111cdb5fb302fc0ca1298c5deab4"
+    "sidecar_sha256": "cb0c642c95fd1c0f570360d9aff09865a82eb0935e06b616dc7f049bc5def3f8"
   },
   "coverage": {
     "capability_ids": [

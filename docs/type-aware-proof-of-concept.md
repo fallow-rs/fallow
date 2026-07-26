@@ -143,7 +143,10 @@ not invalidate an exact declaration match, so Fallow does not request a
 separate full semantic diagnostic pass before scanning. It also avoids
 TypeScript's project-wide global diagnostic pass, which eagerly checks the
 whole program without adding confidence to an exact declaration match. Fallow
-also abstains when no project can be selected. If an external framework
+scopes a literal dynamic import to its resolved module. A non-literal
+`import(variable)` can target any local module, so every export candidate in
+that owning TypeScript project remains advisory. Fallow also abstains when no
+project can be selected. If an external framework
 declaration cannot be attributed to an exact package, Fallow records
 `framework-contract-provenance` and keeps the candidate. Warnings and stable
 reason codes explain each abstention class.

@@ -2656,6 +2656,96 @@ test("protocol v6 abstains when a dynamic import can consume an unresolved expor
   }
 });
 
+test("protocol v6 abstains when a non-literal dynamic import may consume an export", () => {
+  const root = makeProject();
+  try {
+    const source = "export const runtimeValue = 1;\n";
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/source.ts", source);
+    write(root, "src/consumer.ts", 'const modulePath = "./source";\nvoid import(modulePath);\n');
+    const identity = symbolIdentity({
+      source,
+      marker: "runtimeValue",
+      file: "src/source.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "runtimeValue",
+      localName: "runtimeValue",
+    });
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 71, operation: "symbol-use", symbol: identity }]),
+    );
+    const result = response.results[0];
+
+    assert.equal(result.assertion, "no-confirmed-use");
+    assert.equal(result.status, "partial");
+    assert.equal(result.reason_code, "dynamic-behavior");
+    assert.equal(result.data.closed_world_eligible, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v6 scopes literal dynamic import uncertainty to its module", () => {
+  const root = makeProject();
+  try {
+    const importedSource = "export const importedValue = 1;\n";
+    const staticSource = "export const staticValue = 2;\n";
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/imported.ts", importedSource);
+    write(root, "src/static.ts", staticSource);
+    write(root, "src/consumer.ts", 'void import("./imported");\n');
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        {
+          id: 72,
+          operation: "symbol-use",
+          symbol: symbolIdentity({
+            source: importedSource,
+            marker: "importedValue",
+            file: "src/imported.ts",
+            namespace: "value",
+            declarationKind: "export",
+            exportedName: "importedValue",
+            localName: "importedValue",
+          }),
+        },
+        {
+          id: 73,
+          operation: "symbol-use",
+          symbol: symbolIdentity({
+            source: staticSource,
+            marker: "staticValue",
+            file: "src/static.ts",
+            namespace: "value",
+            declarationKind: "export",
+            exportedName: "staticValue",
+            localName: "staticValue",
+          }),
+        },
+      ]),
+    );
+
+    assert.equal(response.results[0].status, "partial");
+    assert.equal(response.results[0].reason_code, "dynamic-behavior");
+    assert.equal(response.results[1].status, "complete");
+    assert.equal(response.results[1].assertion, "confirmed-no-static-references");
+    assert.equal(response.results[1].data.closed_world_eligible, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v6 does not count same-module references as export use", () => {
   const root = makeProject();
   try {

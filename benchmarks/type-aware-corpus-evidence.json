@@ -2,14 +2,14 @@
   "schema_version": 1,
   "generated_from": {
     "discovery_provenance": {
-      "generated_at": "2026-07-26T15:01:47.188Z",
+      "generated_at": "2026-07-26T17:32:57.159Z",
       "manifest_sha256": "328ef2ffff457a237713e70ce35cdd6af3a7a608accdc55e13a9579275aa5398",
       "fallow": {
         "version": "fallow 3.9.1",
         "sha256": "55d17c2322f647e461a852f592474b744613a6b6112ba54b2dff3a6e7e86078f"
       },
       "sidecar": {
-        "sha256": "2ff20d9b363b151c010da150d7563dc9867c111cdb5fb302fc0ca1298c5deab4"
+        "sha256": "cb0c642c95fd1c0f570360d9aff09865a82eb0935e06b616dc7f049bc5def3f8"
       },
       "runtime": {
         "platform": "darwin",
@@ -163,7 +163,7 @@
     },
     "evidence_producer": {
       "protocol_version": 6,
-      "sidecar_sha256": "2ff20d9b363b151c010da150d7563dc9867c111cdb5fb302fc0ca1298c5deab4",
+      "sidecar_sha256": "cb0c642c95fd1c0f570360d9aff09865a82eb0935e06b616dc7f049bc5def3f8",
       "request_set_sha256": "7159a054618ea7b1937725da1cc765824f5c63a7c4cad2c01811d3684140f2ed",
       "response_set_sha256": "3f9a58e7720a1af2d18b4dd31aae2a4eeae23272faf561f51c9011a06d94aa63"
     },
@@ -267,20 +267,20 @@
     },
     "performance": {
       "baseline_wall_ms": {
-        "median": 494.295,
-        "p95": 3582.43
+        "median": 501.581,
+        "p95": 3530.825
       },
       "refined_wall_ms": {
-        "median": 550.386,
-        "p95": 5898.944
+        "median": 571.721,
+        "p95": 5864.748
       },
       "marginal_overhead_ms": {
-        "median": 95.446,
-        "p95": 2304.173
+        "median": 100.254,
+        "p95": 2328.01
       },
       "process_tree_peak_rss_kb": {
-        "baseline_p95": 845000.8,
-        "refined_p95": 1409283.2
+        "baseline_p95": 834185.6,
+        "refined_p95": 1409739.2
       },
       "program_counts": [
         1,
@@ -373,15 +373,15 @@
       "phase_timings_ms": {
         "diagnostics": {
           "median": 2.5,
-          "p95": 620.15
+          "p95": 627.2
         },
         "project_setup": {
-          "median": 40,
-          "p95": 411.05
+          "median": 39.5,
+          "p95": 412.2
         },
         "symbol_scan": {
           "median": 0.5,
-          "p95": 674.1
+          "p95": 675.35
         }
       },
       "reason_counts": {

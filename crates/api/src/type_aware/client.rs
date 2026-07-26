@@ -3499,6 +3499,95 @@ mod tests {
     }
 
     #[test]
+    fn semantic_queries_preserve_export_namespaces_and_targets() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(
+            fallow_types::output_dead_code::UnusedExportFinding::with_actions(
+                fallow_types::results::UnusedExport {
+                    path: root.join("src/runtime.ts"),
+                    export_name: "runtimeValue".to_string(),
+                    is_type_only: false,
+                    line: 3,
+                    col: 7,
+                    span_start: 14,
+                    is_re_export: false,
+                },
+            ),
+        );
+        results.unused_types.push(
+            fallow_types::output_dead_code::UnusedTypeFinding::with_actions(
+                fallow_types::results::UnusedExport {
+                    path: root.join("src/contracts.ts"),
+                    export_name: "RuntimeContract".to_string(),
+                    is_type_only: true,
+                    line: 5,
+                    col: 2,
+                    span_start: 28,
+                    is_re_export: false,
+                },
+            ),
+        );
+
+        let batch = build_dead_code_queries(root, &results, &[], true, false, false)
+            .expect("semantic query batch");
+
+        assert_eq!(batch.queries.len(), 2);
+        assert!(matches!(
+            &batch.queries[0],
+            SemanticQuery::SymbolUse {
+                id: 0,
+                symbol: SemanticSymbol {
+                    path,
+                    namespace: SemanticNamespace::Value,
+                    declaration_kind,
+                    exported_name,
+                    local_name,
+                    owner: None,
+                    line: 3,
+                    col: 7,
+                },
+                framework_contracts,
+            } if path == Path::new("src/runtime.ts")
+                && declaration_kind == "export"
+                && exported_name == "runtimeValue"
+                && local_name == "runtimeValue"
+                && framework_contracts.is_empty()
+        ));
+        assert!(matches!(
+            &batch.queries[1],
+            SemanticQuery::SymbolUse {
+                id: 1,
+                symbol: SemanticSymbol {
+                    path,
+                    namespace: SemanticNamespace::Type,
+                    declaration_kind,
+                    exported_name,
+                    local_name,
+                    owner: None,
+                    line: 5,
+                    col: 2,
+                },
+                framework_contracts,
+            } if path == Path::new("src/contracts.ts")
+                && declaration_kind == "export"
+                && exported_name == "RuntimeContract"
+                && local_name == "RuntimeContract"
+                && framework_contracts.is_empty()
+        ));
+        assert!(matches!(
+            batch.targets.get(&0),
+            Some(QueryTarget::UnusedExport(0))
+        ));
+        assert!(matches!(
+            batch.targets.get(&1),
+            Some(QueryTarget::UnusedType(0))
+        ));
+        assert_eq!(batch.capacity.unrequested_symbol_count, 0);
+    }
+
+    #[test]
     fn rejects_invalid_private_leak_confirmation_ids_and_counts() {
         let query = SemanticQuery::ApiSurface {
             id: 0,
