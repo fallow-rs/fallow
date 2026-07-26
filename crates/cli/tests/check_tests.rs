@@ -245,6 +245,101 @@ fn type_aware_class_method_impact_uses_exact_owner_identity() {
 }
 
 #[test]
+fn type_aware_refines_ambiguous_unused_exports_without_unsafe_fixes() {
+    let root = fixture_path("type-aware-unused-export-refinement");
+    let root_arg = root.to_string_lossy();
+    let sidecar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/type-aware-sidecar/fallow-type-aware.mjs");
+    let sidecar_arg = sidecar.to_string_lossy();
+    let args = [
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--unused-exports",
+        "--unused-types",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+
+    let syntactic = parse_json(&run_fallow_raw(&args));
+    let syntactic_exports = syntactic["unused_exports"]
+        .as_array()
+        .expect("unused exports");
+    let syntactic_types = syntactic["unused_types"].as_array().expect("unused types");
+    assert!(syntactic_exports.iter().any(|issue| {
+        matches!(
+            issue["export_name"].as_str(),
+            Some("PublicApi" | "PublicMerged")
+        )
+    }));
+    assert!(
+        syntactic_types
+            .iter()
+            .any(|issue| { issue["export_name"] == "PublicComplex" })
+    );
+
+    let type_aware_args = [
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--type-aware",
+        "--unused-exports",
+        "--unused-types",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    let typed = parse_json(&run_fallow_raw_with_env(
+        &type_aware_args,
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    ));
+    let typed_exports = typed["unused_exports"].as_array().expect("unused exports");
+    let typed_types = typed["unused_types"].as_array().expect("unused types");
+
+    for confirmed_used in ["PublicApi", "PublicComplex", "PublicMerged"] {
+        assert!(
+            typed_exports
+                .iter()
+                .chain(typed_types)
+                .all(|issue| issue["export_name"] != confirmed_used),
+            "{confirmed_used} should be removed after exact semantic use is confirmed"
+        );
+    }
+
+    let runtime_only = typed_exports
+        .iter()
+        .find(|issue| issue["export_name"] == "RuntimeOnly")
+        .expect("dynamic import candidate");
+    assert_eq!(runtime_only["actions"][0]["auto_fixable"], false);
+
+    let actually_unused = typed_exports
+        .iter()
+        .find(|issue| issue["export_name"] == "actuallyUnused")
+        .expect("confirmed unused export");
+    assert_eq!(actually_unused["actions"][0]["auto_fixable"], true);
+
+    let decisions = typed["_meta"]["type_aware"]["candidate_decisions"]
+        .as_array()
+        .expect("candidate decisions");
+    let runtime_decision = decisions
+        .iter()
+        .find(|decision| decision["subject"]["exported_name"] == "RuntimeOnly")
+        .expect("dynamic import decision");
+    assert_eq!(runtime_decision["decision"], "retained-abstained");
+    assert_eq!(runtime_decision["reason_code"], "dynamic-behavior");
+
+    let unused_decision = decisions
+        .iter()
+        .find(|decision| decision["subject"]["exported_name"] == "actuallyUnused")
+        .expect("unused export decision");
+    assert_eq!(
+        unused_decision["decision"],
+        "confirmed-no-static-references"
+    );
+}
+
+#[test]
 fn type_aware_framework_contract_requires_package_provenance() {
     let dir = tempfile::tempdir().expect("temporary project");
     let root = dir.path();

@@ -60,6 +60,11 @@ fallow dead-code --type-aware --unused-exports --unused-types \
   --unused-class-members --format json --quiet
 ```
 
+Export refinement follows the checker identity through renamed barrels,
+generic and conditional types, declaration merging, `import("./module").Type`,
+and `typeof import("./module").Value`. Fallow only asks these semantic
+questions for exports its normal module graph already considers unused.
+
 Trace one exact exported symbol through aliases and re-exports:
 
 ```bash
@@ -121,24 +126,27 @@ Every candidate has one of five outcomes:
 
 `confirmed-no-static-references` is intentionally not called “proven unused”.
 Reflection, framework registration, external consumers, and runtime behavior
-can still exist beyond the checker-visible world. Only class-member findings
-with complete evidence from every owning project, no contract or dynamic gap,
-and a matching declaration hash become `auto_fixable: true`. `fallow fix`
-reruns the same semantic analysis and verifies the declaration hash immediately
-before editing.
+can still exist beyond the checker-visible world. Existing export and type
+removal actions remain automatically applicable only after a complete negative
+semantic decision. Class-member findings additionally require complete evidence
+from every owning project, no contract or dynamic gap, and a matching
+declaration hash. `fallow fix` reruns the same semantic analysis and verifies
+the declaration hash immediately before editing.
 
 The current safety policy abstains for every candidate in a TypeScript project
 when configuration, program, syntax, or bind diagnostics make its structure
 unsafe. It also abstains per candidate for decorators, dynamic computed member
 access, optional contracts, accessor pairs, overload sets, abstract
-declarations, or attached comments. Ordinary semantic diagnostics do not
-invalidate an exact declaration match, so Fallow does not request a separate
-full semantic diagnostic pass before scanning. It also avoids TypeScript's project-wide
-global diagnostic pass, which eagerly checks the whole program without adding
-confidence to an exact declaration match. Fallow also abstains when no project
-can be selected. If an external framework declaration cannot be attributed to
-an exact package, Fallow records `framework-contract-provenance` and keeps the
-candidate. Warnings and stable reason codes explain each abstention class.
+declarations, attached comments, or a dynamic import that can consume an export
+without an exact static property reference. Ordinary semantic diagnostics do
+not invalidate an exact declaration match, so Fallow does not request a
+separate full semantic diagnostic pass before scanning. It also avoids
+TypeScript's project-wide global diagnostic pass, which eagerly checks the
+whole program without adding confidence to an exact declaration match. Fallow
+also abstains when no project can be selected. If an external framework
+declaration cannot be attributed to an exact package, Fallow records
+`framework-contract-provenance` and keeps the candidate. Warnings and stable
+reason codes explain each abstention class.
 
 Use repeatable `--type-aware-project PATH` options when automatic project
 selection does not include a consumer project. Every healthy explicit project

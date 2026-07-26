@@ -2516,6 +2516,146 @@ test("protocol v6 resolves a generic export identity through an alias", () => {
   }
 });
 
+test("protocol v6 resolves an import type through a renamed non-type barrel export", () => {
+  const root = makeProject();
+  try {
+    const barrelSource = 'export { Api as PublicApi } from "./source";\n';
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/source.ts", "export interface Api<T> { value: T }\n");
+    write(root, "src/barrel.ts", barrelSource);
+    write(
+      root,
+      "src/consumer.ts",
+      'type Used = import("./barrel").PublicApi<string>;\nexport const used: Used = { value: "ok" };\n',
+    );
+    const identity = symbolIdentity({
+      source: barrelSource,
+      marker: "PublicApi",
+      file: "src/barrel.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "PublicApi",
+      localName: "PublicApi",
+    });
+
+    const requestValue = semanticRequest(root, [
+      { id: 66, operation: "symbol-use", symbol: identity },
+      { id: 67, operation: "symbol-trace", symbol: identity },
+    ]);
+    const response = runSidecar(requestValue);
+    const directAnalysis = analyzeSemanticQueries(parseRequest(requestValue));
+
+    assert.equal(response.results[0].assertion, "confirmed-used");
+    assert.equal(response.results[0].data.symbol.namespace, "value");
+    assert.equal(response.results[0].evidence[0].namespace, "type");
+    assert.equal(response.results[0].evidence[0].role, "type-reference");
+    assert.ok(response.results[1].evidence.some((entry) => entry.path === "src/consumer.ts"));
+    assert.equal(directAnalysis.sourceScanCount, 3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v6 resolves typeof import for both halves of a declaration merge", () => {
+  const root = makeProject();
+  try {
+    const source = [
+      "export interface Merged { id: string }",
+      "export namespace Merged { export const kind = 'merged' }",
+      "",
+    ].join("\n");
+    const barrelSource = 'export { Merged as PublicMerged } from "./source";\n';
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/source.ts", source);
+    write(root, "src/barrel.ts", barrelSource);
+    write(
+      root,
+      "src/consumer.ts",
+      'type Used = typeof import("./barrel").PublicMerged;\nexport const kind: Used["kind"] = "merged";\n',
+    );
+    const barrelIdentity = symbolIdentity({
+      source: barrelSource,
+      marker: "PublicMerged",
+      file: "src/barrel.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "PublicMerged",
+      localName: "PublicMerged",
+    });
+    const sourceIdentity = symbolIdentity({
+      source,
+      marker: "Merged",
+      file: "src/source.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "Merged",
+      localName: "Merged",
+    });
+    Object.assign(sourceIdentity, utf8Position(source, "Merged", 2));
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        { id: 68, operation: "symbol-use", symbol: barrelIdentity },
+        { id: 69, operation: "symbol-use", symbol: sourceIdentity },
+      ]),
+    );
+
+    assert.equal(response.results[0].assertion, "confirmed-used");
+    assert.equal(response.results[0].evidence[0].namespace, "value");
+    assert.equal(response.results[1].assertion, "confirmed-used");
+    assert.ok(response.results[1].evidence.some((entry) => entry.path === "src/barrel.ts"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v6 abstains when a dynamic import can consume an unresolved export", () => {
+  const root = makeProject();
+  try {
+    const source = "export const runtimeValue = 1;\n";
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/source.ts", source);
+    write(
+      root,
+      "src/consumer.ts",
+      'void import("./source").then(({ runtimeValue }) => runtimeValue);\n',
+    );
+    const identity = symbolIdentity({
+      source,
+      marker: "runtimeValue",
+      file: "src/source.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "runtimeValue",
+      localName: "runtimeValue",
+    });
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 70, operation: "symbol-use", symbol: identity }]),
+    );
+    const result = response.results[0];
+
+    assert.equal(result.assertion, "no-confirmed-use");
+    assert.equal(result.status, "partial");
+    assert.equal(result.reason_code, "dynamic-behavior");
+    assert.equal(result.data.closed_world_eligible, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v6 does not count same-module references as export use", () => {
   const root = makeProject();
   try {
