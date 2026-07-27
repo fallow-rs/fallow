@@ -754,3 +754,93 @@ fn dupes_includes_plugin_scoped_hidden_dirs_for_react_router() {
         "expected stats.total_files >= 5 (root + routes + .client + .server), got {total_files}"
     );
 }
+
+/// Standalone `fallow dupes` must apply the duplication threshold gate.
+///
+/// Regression for #2009: `run_dupes` rendered through
+/// `print_dupes_result_with_grouping`, which returned the renderer's exit code
+/// without ever consulting `exceeds_threshold`. Combined mode kept gating
+/// (it renders via `print_dupes_result`), so the two entry points disagreed
+/// and standalone runs exited 0 at 100% duplication.
+#[test]
+fn dupes_standalone_exits_one_when_duplication_exceeds_threshold() {
+    let output = run_fallow("dupes", "duplicate-code", &["--threshold", "1", "--quiet"]);
+    assert_eq!(
+        output.code, 1,
+        "duplication above the threshold must exit 1. stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("exceeds threshold"),
+        "expected a threshold diagnostic on stderr, got: {}",
+        output.stderr
+    );
+}
+
+/// Non-vacuous control for the gate above: the same fixture under a threshold
+/// it does not reach must stay green and stay silent. Without this, a fix that
+/// made `dupes` unconditionally exit 1 would pass the positive test.
+#[test]
+fn dupes_standalone_exits_zero_when_duplication_below_threshold() {
+    let output = run_fallow("dupes", "duplicate-code", &["--threshold", "99", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "duplication below the threshold must exit 0. stderr: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("exceeds threshold"),
+        "no threshold diagnostic expected below the threshold, got: {}",
+        output.stderr
+    );
+}
+
+/// The gate is a property of the run, not of the renderer, so it must fire
+/// identically for machine formats. #2009 was reported against `--format json`.
+#[test]
+fn dupes_standalone_threshold_gate_applies_to_json_format() {
+    let output = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--threshold", "1", "--format", "json", "--quiet"],
+    );
+    assert_eq!(
+        output.code, 1,
+        "json format must gate on the threshold too. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["stats"]["duplication_percentage"]
+            .as_f64()
+            .expect("stats.duplication_percentage is a number")
+            > 1.0,
+        "fixture should exceed the 1% threshold for this test to mean anything"
+    );
+}
+
+/// Pins the standalone/combined parity that #2009 broke: both entry points
+/// must reach the same verdict for the same threshold.
+#[test]
+fn dupes_threshold_verdict_matches_between_standalone_and_combined() {
+    let standalone = run_fallow("dupes", "duplicate-code", &["--threshold", "1", "--quiet"]);
+    let combined = run_fallow_combined(
+        "duplicate-code",
+        &["--dupes-threshold", "1", "--quiet", "--skip", "health"],
+    );
+    assert_eq!(
+        standalone.code, 1,
+        "standalone dupes should gate. stderr: {}",
+        standalone.stderr
+    );
+    assert_eq!(
+        combined.code, 1,
+        "combined mode should gate. stderr: {}",
+        combined.stderr
+    );
+    assert!(
+        combined.stderr.contains("exceeds threshold"),
+        "combined mode should keep its threshold diagnostic, got: {}",
+        combined.stderr
+    );
+}

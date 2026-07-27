@@ -38,10 +38,10 @@ fn fail_on_issues_dupes_exits_1_with_clones() {
             "--quiet",
         ],
     );
-    assert!(
-        output.code == 0 || output.code == 1,
-        "dupes with --fail-on-issues should not crash, got {}",
-        output.code
+    assert_eq!(
+        output.code, 1,
+        "dupes over its threshold must exit 1. stderr: {}",
+        output.stderr
     );
 }
 

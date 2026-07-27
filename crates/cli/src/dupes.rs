@@ -629,42 +629,16 @@ pub fn print_dupes_result(
     show_explain_tip: bool,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    let ctx = report::ReportContext {
-        root: &result.config.root,
-        rules: &result.config.rules,
-        elapsed: result.elapsed,
+    print_dupes_result_with_grouping(DupesResultGroupingInput {
+        result,
         quiet,
         explain,
-        type_aware: None,
-        type_aware_scope: None,
         group_by: None,
-        top: None,
         summary,
         summary_heading,
         show_explain_tip,
-        baseline_matched: None,
-        config_fixable: false,
-        skip_score_and_trend: false,
-        css_requested: false,
         json_style,
-    };
-    print_default_ignore_note(result, quiet);
-    print_min_occurrences_note(result, quiet);
-    print_ignore_imports_note(result, quiet);
-    let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
-    if report_code != ExitCode::SUCCESS {
-        return report_code;
-    }
-
-    if exceeds_threshold(result.threshold, result.report.stats.duplication_percentage) {
-        eprintln!(
-            "Duplication ({:.1}%) exceeds threshold ({:.1}%)",
-            result.report.stats.duplication_percentage, result.threshold
-        );
-        return ExitCode::from(1);
-    }
-
-    ExitCode::SUCCESS
+    })
 }
 
 pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
@@ -787,7 +761,24 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     print_default_ignore_note(result, input.quiet);
     print_min_occurrences_note(result, input.quiet);
     print_ignore_imports_note(result, input.quiet);
-    report::print_duplication_report(&result.report, &ctx, result.config.output)
+    let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
+    if report_code != ExitCode::SUCCESS {
+        return report_code;
+    }
+
+    // The threshold gate lives here, on the single shared renderer, so every
+    // entry point inherits it. Standalone `dupes` and combined mode previously
+    // rendered through two near-identical functions and only the combined one
+    // gated, so `fallow dupes --threshold 1` exited 0 at 100% duplication (#2009).
+    if exceeds_threshold(result.threshold, result.report.stats.duplication_percentage) {
+        eprintln!(
+            "Duplication ({:.1}%) exceeds threshold ({:.1}%)",
+            result.report.stats.duplication_percentage, result.threshold
+        );
+        return ExitCode::from(1);
+    }
+
+    ExitCode::SUCCESS
 }
 
 pub fn print_default_ignore_note(result: &DupesResult, quiet: bool) {

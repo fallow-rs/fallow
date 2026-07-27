@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be excluded from analysis entirely. (Closes
   [#1991](https://github.com/fallow-rs/fallow/issues/1991).)
 
+### Fixed
+
+- **`fallow dupes` again fails when duplication exceeds the configured
+  threshold.** Standalone runs rendered through a code path that returned the
+  renderer's exit code without ever consulting the threshold, so
+  `fallow dupes --threshold 1` exited 0 at 100% duplication and printed no
+  diagnostic. Both the `--threshold` flag and a `duplicates.threshold` config
+  value were affected, in every output format. Combined mode (bare `fallow`)
+  rendered through a second, near-identical function that did gate, so the two
+  entry points disagreed. Both now share one gated renderer. Projects that set
+  a duplication threshold and were silently passing will start failing as
+  documented; runs that set no threshold are unaffected, since the default
+  (`0`) still means "no limit". (Closes
+  [#2009](https://github.com/fallow-rs/fallow/issues/2009).)
+
 ## [3.10.0] - 2026-07-27
 
 ### Changed
