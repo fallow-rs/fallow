@@ -86,6 +86,7 @@ const LENSES: LensDef[] = [
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MARK_VIEW_BOX = "173.11 97.47 1008.49 1008.49";
+const FAVICON_VIEW_BOX = "5.03 -70.61 1344.65 1344.65";
 
 /**
  * The fallow f-wing mark, inlined so the single-file HTML report stays
@@ -132,7 +133,7 @@ const brandMark = (): SVGSVGElement => {
  */
 const setFavicon = (): void => {
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${MARK_VIEW_BOX}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${FAVICON_VIEW_BOX}">` +
     `<style>path{fill:#21201c}@media(prefers-color-scheme:dark){path{fill:#eeeeec}}</style>` +
     `<g transform="translate(0,1254) scale(0.1,-0.1)"><path d="${MARK_PATH}"/></g></svg>`;
   const link = document.createElement("link");
