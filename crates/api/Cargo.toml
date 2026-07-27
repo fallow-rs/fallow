@@ -38,5 +38,9 @@ schema = ["dep:schemars", "fallow-engine/schema", "fallow-output/schema", "fallo
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
 
+[build-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

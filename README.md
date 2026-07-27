@@ -171,7 +171,7 @@ for project-wide questions. It removes false positives caused by interfaces,
 base classes, aliases, and re-exports. A class member becomes automatically
 fixable only after every owning project reports complete negative evidence and
 the exact declaration hash still matches. Otherwise Fallow keeps the finding
-and explains the gap. See the [type-aware analysis contract](docs/type-aware-proof-of-concept.md).
+and explains the gap. See the [type-aware analysis contract](docs/type-aware-analysis.md).
 
 Per-command flags come from `fallow schema` (machine-readable) or the [CLI reference](https://docs.fallow.tools/cli/global-flags).
 

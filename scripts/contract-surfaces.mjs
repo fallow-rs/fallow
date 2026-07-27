@@ -98,6 +98,15 @@ export const contractSurfaces = Object.freeze([
     publicStability: "stable",
     newIssueKind: false,
   },
+  {
+    id: "type-aware-protocol",
+    owner: "crates/api/type-aware-protocol.json",
+    generatedPaths: ["tools/type-aware-sidecar/src/generated-protocol.mjs"],
+    checkCommand: "npm run generate:contracts:check",
+    docs: ["docs/type-aware-analysis.md", "docs/backwards-compatibility.md"],
+    publicStability: "stable",
+    newIssueKind: false,
+  },
 ]);
 
 export const contractSurfacePaths = () =>

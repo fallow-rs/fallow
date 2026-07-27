@@ -1,5 +1,8 @@
 //! Typed client for the batched type-aware semantic protocol.
 
+mod queries;
+mod reconcile;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -25,16 +28,19 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::transport::{TYPE_AWARE_PROTOCOL_VERSION, TypeAwareError, TypeAwareOutcome};
+use super::manifest::{
+    ANALYSIS_OPERATION as OPERATION, BACKEND_FAMILY, BACKEND_VERSION, QUERY_OPERATIONS,
+    SEMANTIC_SCHEMA_VERSION, WIRE_PROTOCOL_VERSION as PROTOCOL_VERSION,
+};
+use super::transport::{TypeAwareError, TypeAwareOutcome};
+use queries::{build_dead_code_queries, query_supports_guarded_fix};
+use reconcile::apply_dead_code_response;
+#[cfg(test)]
+use reconcile::semantic_only_candidate_stays_hidden;
 
-const PROTOCOL_VERSION: u32 = TYPE_AWARE_PROTOCOL_VERSION;
-const OPERATION: &str = "semantic-queries";
 const EVIDENCE_LIMIT: usize = 40;
 const MAX_SEMANTIC_QUERIES: usize = 25_000;
 const MAX_PRIVATE_LEAK_CANDIDATES: usize = 25_000;
-const SEMANTIC_SCHEMA_VERSION: u32 = 2;
-const BACKEND_FAMILY: &str = "typescript-go";
-const BACKEND_VERSION: &str = "7.0.2";
 
 #[derive(Debug, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -116,6 +122,16 @@ impl SemanticOperation {
             Self::ApiSurface => SemanticCapability::ApiSurface,
             Self::SymbolImpact => SemanticCapability::SymbolImpact,
             Self::TypeCoupling => SemanticCapability::TypeCoupling,
+        }
+    }
+
+    const fn wire_name(self) -> &'static str {
+        match self {
+            Self::SymbolUse => "symbol-use",
+            Self::SymbolTrace => "symbol-trace",
+            Self::ApiSurface => "api-surface",
+            Self::SymbolImpact => "symbol-impact",
+            Self::TypeCoupling => "type-coupling",
         }
     }
 }
@@ -240,6 +256,26 @@ struct PrivateLeakConfirmation {
     requested_candidate_count: usize,
     confirmation_complete: bool,
     confirmed_candidate_ids: Vec<usize>,
+}
+
+#[derive(Default)]
+struct ApiSurfaceMutation {
+    retention: Option<PrivateLeakRetention>,
+    upserts: Vec<PrivateLeakUpsert>,
+}
+
+struct PrivateLeakRetention {
+    requested_candidate_count: usize,
+    confirmed_candidate_ids: BTreeSet<usize>,
+}
+
+struct PrivateLeakUpsert {
+    evidence_path: PathBuf,
+    export_name: String,
+    type_name: String,
+    line: u32,
+    col: u32,
+    semantic: SemanticPrivateTypeLeak,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1338,196 +1374,6 @@ const fn namespace_name(namespace: SemanticNamespace) -> &'static str {
     }
 }
 
-fn build_dead_code_queries(
-    root: &Path,
-    results: &AnalysisResults,
-    entry_points: &[PathBuf],
-    include_symbol_use: bool,
-    include_private_type_leaks: bool,
-    include_type_coupling: bool,
-) -> Result<DeadCodeQueryBatch, TypeAwareError> {
-    let mut queries = Vec::new();
-    let mut targets = BTreeMap::new();
-    let graph_query_count = usize::from(include_private_type_leaks && !entry_points.is_empty())
-        + usize::from(include_type_coupling);
-    let unrequested_symbol_count = if include_symbol_use {
-        append_symbol_use_queries(
-            root,
-            results,
-            MAX_SEMANTIC_QUERIES.saturating_sub(graph_query_count),
-            &mut queries,
-            &mut targets,
-        )?
-    } else {
-        0
-    };
-    if include_private_type_leaks && !entry_points.is_empty() {
-        let id = queries.len();
-        let unrequested_candidate_count = results
-            .private_type_leaks
-            .len()
-            .saturating_sub(MAX_PRIVATE_LEAK_CANDIDATES);
-        queries.push(SemanticQuery::ApiSurface {
-            id,
-            entry_points: entry_points
-                .iter()
-                .map(|path| protocol_path(root, path))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|path| path.to_string_lossy().replace('\\', "/"))
-                .collect(),
-            include_cycles: false,
-            private_leak_candidates: results
-                .private_type_leaks
-                .iter()
-                .enumerate()
-                .take(MAX_PRIVATE_LEAK_CANDIDATES)
-                .map(|(candidate_id, finding)| {
-                    Ok(PrivateLeakCandidate {
-                        id: candidate_id,
-                        path: protocol_path(root, &finding.leak.path)?
-                            .to_string_lossy()
-                            .replace('\\', "/"),
-                        export_name: finding.leak.export_name.clone(),
-                        type_name: finding.leak.type_name.clone(),
-                    })
-                })
-                .collect::<Result<Vec<_>, TypeAwareError>>()?,
-        });
-        targets.insert(
-            id,
-            QueryTarget::ApiSurface {
-                unrequested_candidate_count,
-            },
-        );
-    }
-    if include_type_coupling {
-        let id = queries.len();
-        queries.push(SemanticQuery::TypeCoupling {
-            id,
-            entry_points: entry_points
-                .iter()
-                .map(|path| protocol_path(root, path))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|path| path.to_string_lossy().replace('\\', "/"))
-                .collect(),
-            include_cycles: true,
-        });
-        targets.insert(id, QueryTarget::TypeCoupling);
-    }
-    Ok(DeadCodeQueryBatch {
-        queries,
-        targets,
-        capacity: LocalCapacity {
-            unrequested_symbol_count,
-        },
-    })
-}
-
-fn append_symbol_use_queries(
-    root: &Path,
-    results: &AnalysisResults,
-    capacity: usize,
-    queries: &mut Vec<SemanticQuery>,
-    targets: &mut BTreeMap<usize, QueryTarget>,
-) -> Result<usize, TypeAwareError> {
-    let class_count = results.unused_class_members.len().min(capacity);
-    for (index, finding) in results
-        .unused_class_members
-        .iter()
-        .take(class_count)
-        .enumerate()
-    {
-        let id = queries.len();
-        queries.push(SemanticQuery::SymbolUse {
-            id,
-            symbol: SemanticSymbol {
-                path: protocol_path(root, &finding.member.path)?,
-                namespace: SemanticNamespace::Value,
-                declaration_kind: member_kind_name(finding.member.kind).to_string(),
-                exported_name: finding.member.member_name.clone(),
-                local_name: finding.member.member_name.clone(),
-                owner: Some(finding.member.parent_name.clone()),
-                line: finding.member.line,
-                col: finding.member.col,
-            },
-            framework_contracts: results
-                .semantic_framework_contracts
-                .iter()
-                .filter(|contract| contract.members.contains(&finding.member.member_name))
-                .cloned()
-                .collect(),
-        });
-        targets.insert(id, QueryTarget::ClassMember(index));
-    }
-
-    let remaining = capacity - class_count;
-    let export_count = results.unused_exports.len().min(remaining);
-    for (index, finding) in results.unused_exports.iter().take(export_count).enumerate() {
-        let id = queries.len();
-        queries.push(SemanticQuery::SymbolUse {
-            id,
-            symbol: export_symbol(root, &finding.export, SemanticNamespace::Value)?,
-            framework_contracts: Vec::new(),
-        });
-        targets.insert(id, QueryTarget::UnusedExport(index));
-    }
-
-    let remaining = remaining - export_count;
-    let type_count = results.unused_types.len().min(remaining);
-    for (index, finding) in results.unused_types.iter().take(type_count).enumerate() {
-        let id = queries.len();
-        queries.push(SemanticQuery::SymbolUse {
-            id,
-            symbol: export_symbol(root, &finding.export, SemanticNamespace::Type)?,
-            framework_contracts: Vec::new(),
-        });
-        targets.insert(id, QueryTarget::UnusedType(index));
-    }
-
-    Ok(
-        results.unused_class_members.len() - class_count + results.unused_exports.len()
-            - export_count
-            + results.unused_types.len()
-            - type_count,
-    )
-}
-
-fn export_symbol(
-    root: &Path,
-    export: &fallow_types::results::UnusedExport,
-    namespace: SemanticNamespace,
-) -> Result<SemanticSymbol, TypeAwareError> {
-    Ok(SemanticSymbol {
-        path: protocol_path(root, &export.path)?,
-        namespace,
-        declaration_kind: "export".to_string(),
-        exported_name: export.export_name.clone(),
-        local_name: export.export_name.clone(),
-        owner: None,
-        line: export.line,
-        col: export.col,
-    })
-}
-
-const fn member_kind_name(kind: MemberKind) -> &'static str {
-    match kind {
-        MemberKind::ClassMethod => "class_method",
-        MemberKind::ClassProperty => "class_property",
-        MemberKind::EnumMember => "enum_member",
-        MemberKind::NamespaceMember => "namespace_member",
-        MemberKind::StoreMember => "store_member",
-    }
-}
-
-fn query_supports_guarded_fix(query: &SemanticQuery) -> bool {
-    matches!(
-        query,
-        SemanticQuery::SymbolUse { symbol, .. } if symbol.declaration_kind == "class_method"
-    )
-}
-
 fn protocol_path(root: &Path, path: &Path) -> Result<PathBuf, TypeAwareError> {
     let relative = if path.is_absolute() {
         path.strip_prefix(root).map_err(|_| {
@@ -1603,6 +1449,12 @@ fn validate_response(
                 result.query_id
             )));
         }
+        if !QUERY_OPERATIONS.contains(&result.operation.wire_name()) {
+            return Err(TypeAwareError::from(format!(
+                "type-aware response returned operation {} outside the protocol manifest",
+                result.operation.wire_name()
+            )));
+        }
         if result.total_evidence_count < result.evidence.len() {
             return Err(TypeAwareError::from(format!(
                 "type-aware query {} reported fewer total evidence items than it returned",
@@ -1626,265 +1478,6 @@ fn validate_response(
         ));
     }
     Ok(())
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "semantic response validation and conservative refinement stay in one transaction"
-)]
-fn apply_dead_code_response(
-    root: &Path,
-    results: &mut AnalysisResults,
-    reconciliation: DeadCodeReconciliation<'_>,
-    response: SemanticResponse,
-    requested_capabilities: Vec<SemanticCapability>,
-) -> Result<SemanticDeadCodeOutcome, TypeAwareError> {
-    let DeadCodeReconciliation {
-        request,
-        targets,
-        capacity: local_capacity,
-    } = reconciliation;
-    let mut confirmed_class = BTreeSet::new();
-    let mut confirmed_exports = BTreeSet::new();
-    let mut confirmed_types = BTreeSet::new();
-    let mut api_surface = None;
-    let mut type_coupling = None;
-    let mut query_summaries = Vec::new();
-    let mut candidate_decisions = Vec::new();
-    let mut decision_stats = CandidateDecisionStats::default();
-    let mut source_cache = FxHashMap::default();
-
-    for result in &response.results {
-        let Some(target) = targets.get(&result.query_id) else {
-            continue;
-        };
-        let query = request
-            .queries
-            .iter()
-            .find(|query| query.id() == result.query_id)
-            .ok_or_else(|| {
-                TypeAwareError::from(format!(
-                    "type-aware response query {} had no matching request",
-                    result.query_id
-                ))
-            })?;
-        let mut summary = query_summary(result);
-        match target {
-            QueryTarget::ClassMember(index) => {
-                let fix_supported = query_supports_guarded_fix(query);
-                let decision = decode_candidate_decision(
-                    root,
-                    query,
-                    result,
-                    fix_supported,
-                    &mut source_cache,
-                )?;
-                let finding = results
-                    .unused_class_members
-                    .get_mut(*index)
-                    .ok_or_else(|| {
-                        TypeAwareError::from(
-                            "type-aware class-member target no longer exists".to_string(),
-                        )
-                    })?;
-                let semantic_only = finding.semantic_only_candidate;
-                finding.set_semantic_decision(decision.clone());
-                record_candidate_decision(
-                    &decision,
-                    *index,
-                    &mut confirmed_class,
-                    &mut decision_stats,
-                );
-                if semantic_only_candidate_stays_hidden(semantic_only, decision.decision) {
-                    confirmed_class.insert(*index);
-                }
-                candidate_decisions.push(decision);
-            }
-            QueryTarget::UnusedExport(index) => {
-                let decision =
-                    decode_candidate_decision(root, query, result, false, &mut source_cache)?;
-                results
-                    .unused_exports
-                    .get_mut(*index)
-                    .ok_or_else(|| {
-                        TypeAwareError::from(
-                            "type-aware export target no longer exists".to_string(),
-                        )
-                    })?
-                    .set_semantic_decision(decision.clone());
-                record_candidate_decision(
-                    &decision,
-                    *index,
-                    &mut confirmed_exports,
-                    &mut decision_stats,
-                );
-                candidate_decisions.push(decision);
-            }
-            QueryTarget::UnusedType(index) => {
-                let decision =
-                    decode_candidate_decision(root, query, result, false, &mut source_cache)?;
-                results
-                    .unused_types
-                    .get_mut(*index)
-                    .ok_or_else(|| {
-                        TypeAwareError::from("type-aware type target no longer exists".to_string())
-                    })?
-                    .set_semantic_decision(decision.clone());
-                record_candidate_decision(
-                    &decision,
-                    *index,
-                    &mut confirmed_types,
-                    &mut decision_stats,
-                );
-                candidate_decisions.push(decision);
-            }
-            QueryTarget::ApiSurface {
-                unrequested_candidate_count,
-            } => {
-                let mut surface = apply_api_surface(root, results, query, result)?;
-                if *unrequested_candidate_count > 0 {
-                    add_capacity_gap(&mut summary, &mut surface, *unrequested_candidate_count);
-                }
-                api_surface = Some(surface);
-            }
-            QueryTarget::TypeCoupling => {
-                type_coupling = Some(decode_type_coupling(&response, request, result)?);
-            }
-        }
-        query_summaries.push(summary);
-    }
-    if local_capacity.unrequested_symbol_count > 0
-        && let Some(summary) = query_summaries
-            .iter_mut()
-            .rev()
-            .find(|summary| summary.capability == SemanticCapability::SymbolUse)
-    {
-        add_summary_capacity_gap(summary, local_capacity.unrequested_symbol_count);
-    }
-
-    for (index, finding) in results.unused_class_members.iter().enumerate() {
-        if finding.semantic_only_candidate && finding.semantic.is_none() {
-            confirmed_class.insert(index);
-        }
-    }
-
-    retain_unconfirmed(&mut results.unused_class_members, &confirmed_class);
-    retain_unconfirmed(&mut results.unused_exports, &confirmed_exports);
-    retain_unconfirmed(&mut results.unused_types, &confirmed_types);
-
-    let mut completeness = aggregate_completeness(&response.results);
-    if completeness == SemanticCompleteness::Complete
-        && (local_capacity.unrequested_symbol_count > 0
-            || targets.values().any(|target| {
-                matches!(
-                    target,
-                    QueryTarget::ApiSurface {
-                        unrequested_candidate_count: 1..
-                    }
-                )
-            }))
-    {
-        completeness = SemanticCompleteness::Partial;
-    }
-    let capabilities = requested_capabilities
-        .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let candidate_count = request
-        .queries
-        .iter()
-        .filter(|query| matches!(query, SemanticQuery::SymbolUse { .. }))
-        .count()
-        + local_capacity.unrequested_symbol_count;
-    decision_stats.abstained += local_capacity.unrequested_symbol_count;
-    decision_stats.abstention_reasons.capacity += local_capacity.unrequested_symbol_count;
-    let warning_count = response.warnings.len();
-    let warnings = response.warnings.clone();
-    let identity = SemanticAnalysisIdentity {
-        mode: SemanticAnalysisMode::TypeAware,
-        semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
-        capabilities,
-        project_config_hash: response_project_config_hash(&response.projects),
-        backend_family: response.backend.clone(),
-        completeness,
-    };
-    let projects = response
-        .projects
-        .into_iter()
-        .map(|project| TypeAwareProjectMeta {
-            config: project.config,
-            source: project.source,
-            status: project.status,
-            candidate_count: project.candidate_count,
-            confirmed_used_count: project.confirmed_used_count,
-            contract_preserved_count: project.contract_preserved_count,
-            no_static_references_count: project.no_static_references_count,
-            fix_eligible_count: project.fix_eligible_count,
-            unresolved_count: project.unresolved_count,
-            abstained_count: project.abstained_count,
-            blocking_diagnostic_count: project.blocking_diagnostic_count,
-            source_file_count: project.source_file_count,
-            program_reused: Some(project.program_reused),
-            program_shared_across_queries: Some(project.program_reused),
-            program_reused_from_previous_snapshot: project.program_reused_from_previous_snapshot,
-            snapshot_revision: project.snapshot_revision,
-            invalidation_kind: project.invalidation_kind,
-            reason_code: project.reason_code,
-            abstain_reason: None,
-        })
-        .collect();
-    let type_aware = TypeAwareOutcome {
-        meta: TypeAwareMeta {
-            identity: Some(identity),
-            required_completeness: None,
-            queries: query_summaries,
-            candidate_decisions,
-            symbol_traces: Vec::new(),
-            api_surface,
-            symbol_impacts: Vec::new(),
-            type_coupling: type_coupling.clone(),
-            executed: true,
-            protocol_version: response.protocol_version,
-            sidecar_version: Some(response.sidecar_version),
-            backend: response.backend,
-            backend_version: Some(response.backend_version),
-            selected_tsconfigs: response.selected_tsconfigs,
-            candidate_count,
-            confirmed_used_count: decision_stats.confirmed_used,
-            contract_preserved_count: decision_stats.contract_preserved,
-            no_static_references_count: decision_stats.no_static_references,
-            fix_eligible_count: decision_stats.fix_eligible,
-            unresolved_count: decision_stats.unresolved,
-            abstained_count: decision_stats.abstained,
-            abstention_reasons: decision_stats.abstention_reasons,
-            projects,
-            warning_count,
-            warnings: warnings.clone(),
-            elapsed_ms: response.elapsed_ms,
-            phase_timings_ms: TypeAwarePhaseTimings {
-                project_setup: response.phase_timings_ms.project_setup,
-                diagnostics: response.phase_timings_ms.diagnostics,
-                symbol_scan: response.phase_timings_ms.semantic_queries,
-            },
-        },
-        warnings,
-    };
-    Ok(SemanticDeadCodeOutcome {
-        type_aware,
-        type_coupling,
-    })
-}
-
-const fn semantic_only_candidate_stays_hidden(
-    semantic_only: bool,
-    decision: SemanticCandidateDecisionKind,
-) -> bool {
-    semantic_only
-        && !matches!(
-            decision,
-            SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
-        )
 }
 
 fn decode_candidate_decision(
@@ -2611,53 +2204,95 @@ fn aggregate_completeness(results: &[SemanticQueryResponse]) -> SemanticComplete
     }
 }
 
+#[cfg(test)]
 fn apply_api_surface(
     root: &Path,
     results: &mut AnalysisResults,
     query: &SemanticQuery,
     result: &SemanticQueryResponse,
 ) -> Result<ApiSurfaceResult, TypeAwareError> {
-    if result.status == SemanticCompleteness::Unavailable {
-        return Ok(empty_api_surface_result(result));
-    }
-    let data: ApiSurfaceData = serde_json::from_value(result.data.clone()).map_err(|error| {
-        TypeAwareError::from(format!("failed to decode type-aware API surface: {error}"))
-    })?;
-    validate_api_surface_data(query, result, &data)?;
-    let api_surface = api_surface_result(result, data.clone());
-    if data.private_leak_confirmation.confirmation_complete {
-        let confirmed = data
-            .private_leak_confirmation
-            .confirmed_candidate_ids
-            .iter()
-            .copied()
-            .collect::<BTreeSet<_>>();
+    let (surface, mutation) = plan_api_surface(root, query, result)?;
+    apply_api_surface_mutation(results, mutation);
+    Ok(surface)
+}
+
+fn plan_api_surface(
+    root: &Path,
+    query: &SemanticQuery,
+    result: &SemanticQueryResponse,
+) -> Result<(ApiSurfaceResult, ApiSurfaceMutation), TypeAwareError> {
+    let Some(data) = decode_api_surface_data(query, result)? else {
+        return Ok((
+            empty_api_surface_result(result),
+            ApiSurfaceMutation::default(),
+        ));
+    };
+    let surface = api_surface_result(result, data.clone());
+    let retention = data
+        .private_leak_confirmation
+        .confirmation_complete
+        .then(|| PrivateLeakRetention {
+            requested_candidate_count: data.private_leak_confirmation.requested_candidate_count,
+            confirmed_candidate_ids: data
+                .private_leak_confirmation
+                .confirmed_candidate_ids
+                .iter()
+                .copied()
+                .collect(),
+        });
+    let upserts = data
+        .leaks
+        .iter()
+        .zip(&surface.private_type_leaks)
+        .map(|(wire, semantic)| PrivateLeakUpsert {
+            evidence_path: root.join(&wire.evidence.path),
+            export_name: wire.exposed_symbol.exported_name.clone(),
+            type_name: wire.private_declaration.local_name.clone(),
+            line: wire.evidence.line,
+            col: wire.evidence.col,
+            semantic: semantic.clone(),
+        })
+        .collect();
+    Ok((surface, ApiSurfaceMutation { retention, upserts }))
+}
+
+fn apply_api_surface_mutation(results: &mut AnalysisResults, mutation: ApiSurfaceMutation) {
+    if let Some(retention) = mutation.retention {
         let mut candidate_id = 0_usize;
         results.private_type_leaks.retain(|_| {
-            let keep = candidate_id >= data.private_leak_confirmation.requested_candidate_count
-                || confirmed.contains(&candidate_id);
+            let keep = candidate_id >= retention.requested_candidate_count
+                || retention.confirmed_candidate_ids.contains(&candidate_id);
             candidate_id += 1;
             keep
         });
     }
-    for (wire, semantic) in data.leaks.iter().zip(&api_surface.private_type_leaks) {
-        attach_or_add_private_type_leak(root, results, wire, semantic.clone());
+    for upsert in mutation.upserts {
+        attach_or_add_private_type_leak(results, upsert);
     }
-    Ok(api_surface)
 }
 
 fn decode_api_surface(
     query: &SemanticQuery,
     result: &SemanticQueryResponse,
 ) -> Result<ApiSurfaceResult, TypeAwareError> {
-    if result.status == SemanticCompleteness::Unavailable {
+    let Some(data) = decode_api_surface_data(query, result)? else {
         return Ok(empty_api_surface_result(result));
+    };
+    Ok(api_surface_result(result, data))
+}
+
+fn decode_api_surface_data(
+    query: &SemanticQuery,
+    result: &SemanticQueryResponse,
+) -> Result<Option<ApiSurfaceData>, TypeAwareError> {
+    if result.status == SemanticCompleteness::Unavailable {
+        return Ok(None);
     }
     let data: ApiSurfaceData = serde_json::from_value(result.data.clone()).map_err(|error| {
         TypeAwareError::from(format!("failed to decode type-aware API surface: {error}"))
     })?;
     validate_api_surface_data(query, result, &data)?;
-    Ok(api_surface_result(result, data))
+    Ok(Some(data))
 }
 
 fn empty_api_surface_result(result: &SemanticQueryResponse) -> ApiSurfaceResult {
@@ -2755,32 +2390,25 @@ fn api_surface_result(result: &SemanticQueryResponse, data: ApiSurfaceData) -> A
     }
 }
 
-fn attach_or_add_private_type_leak(
-    root: &Path,
-    results: &mut AnalysisResults,
-    wire: &ApiLeakData,
-    semantic: SemanticPrivateTypeLeak,
-) {
-    let evidence_path = root.join(&wire.evidence.path);
-    let type_name = wire.private_declaration.local_name.clone();
+fn attach_or_add_private_type_leak(results: &mut AnalysisResults, upsert: PrivateLeakUpsert) {
     if let Some(existing) = results.private_type_leaks.iter_mut().find(|finding| {
-        finding.leak.path == evidence_path
-            && finding.leak.export_name == wire.exposed_symbol.exported_name
-            && finding.leak.type_name == type_name
+        finding.leak.path == upsert.evidence_path
+            && finding.leak.export_name == upsert.export_name
+            && finding.leak.type_name == upsert.type_name
     }) {
-        existing.leak.semantic = Some(semantic);
+        existing.leak.semantic = Some(upsert.semantic);
         return;
     }
     results
         .private_type_leaks
         .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
-            path: evidence_path,
-            export_name: wire.exposed_symbol.exported_name.clone(),
-            type_name,
-            line: wire.evidence.line,
-            col: wire.evidence.col,
+            path: upsert.evidence_path,
+            export_name: upsert.export_name,
+            type_name: upsert.type_name,
+            line: upsert.line,
+            col: upsert.col,
             span_start: 0,
-            semantic: Some(semantic),
+            semantic: Some(upsert.semantic),
         }));
 }
 
@@ -2985,6 +2613,230 @@ mod tests {
         invalid = response;
         invalid.results.pop();
         assert!(validate_response(&request, &invalid).is_err());
+    }
+
+    #[test]
+    fn malformed_late_query_does_not_partially_mutate_dead_code_results() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = AnalysisResults::default();
+        for name in ["first", "second"] {
+            results.unused_exports.push(
+                fallow_types::output_dead_code::UnusedExportFinding::with_actions(
+                    fallow_types::results::UnusedExport {
+                        path: root.join("src/exports.ts"),
+                        export_name: name.to_string(),
+                        is_type_only: false,
+                        line: 1,
+                        col: 0,
+                        span_start: 0,
+                        is_re_export: false,
+                    },
+                ),
+            );
+        }
+        let batch = build_dead_code_queries(root, &results, &[], true, false, false)
+            .expect("semantic query batch");
+        let request = SemanticRequest {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION,
+            root: root.to_string_lossy().into_owned(),
+            projects: vec!["tsconfig.json".to_string()],
+            evidence_limit: EVIDENCE_LIMIT,
+            queries: batch.queries,
+        };
+        let mut response = complete_response(&request);
+        let first_symbol = match &request.queries[0] {
+            SemanticQuery::SymbolUse { symbol, .. } => symbol.clone(),
+            _ => panic!("expected symbol-use query"),
+        };
+        response.results[0].assertion = "confirmed-used".to_string();
+        response.results[0].evidence = vec![json!({
+            "path": "src/consumer.ts",
+            "line": 1,
+            "col": 0,
+            "role": "import",
+            "source": "checker",
+            "namespace": "value",
+            "via": []
+        })];
+        response.results[0].data = json!({
+            "symbol": first_symbol,
+            "selected_project": "tsconfig.json",
+            "owning_projects": ["tsconfig.json"],
+            "total_reference_count": 1,
+            "contract_relations": [],
+            "framework_contract_relations": [],
+            "closed_world_eligible": false,
+            "edit_guard": {
+                "start": 0,
+                "end": 1,
+                "declaration_sha256": "unused"
+            }
+        });
+        response.results[1].data = json!({"malformed": true});
+        let before = serde_json::to_value(&results).expect("serialize original results");
+
+        let outcome = apply_dead_code_response(
+            root,
+            &mut results,
+            DeadCodeReconciliation {
+                request: &request,
+                targets: &batch.targets,
+                capacity: batch.capacity,
+            },
+            response,
+            vec![SemanticCapability::SymbolUse],
+        );
+
+        assert!(outcome.is_err());
+        assert_eq!(
+            serde_json::to_value(&results).expect("serialize retained results"),
+            before
+        );
+    }
+
+    fn rollback_family_results(root: &Path) -> AnalysisResults {
+        let member_path = root.join("src/service.ts");
+        let export_path = root.join("src/exports.ts");
+        let mut class_member =
+            fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(
+                fallow_types::results::UnusedMember {
+                    path: member_path,
+                    parent_name: "Service".to_string(),
+                    member_name: "run".to_string(),
+                    kind: MemberKind::ClassMethod,
+                    line: 2,
+                    col: 2,
+                },
+            );
+        class_member.semantic_only_candidate = true;
+        let export = fallow_types::results::UnusedExport {
+            path: export_path.clone(),
+            export_name: "runtimeValue".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        };
+        let type_export = fallow_types::results::UnusedExport {
+            path: export_path,
+            export_name: "RuntimeType".to_string(),
+            is_type_only: true,
+            line: 2,
+            col: 0,
+            span_start: 10,
+            is_re_export: false,
+        };
+        AnalysisResults {
+            unused_class_members: vec![class_member],
+            unused_exports: vec![
+                fallow_types::output_dead_code::UnusedExportFinding::with_actions(export),
+            ],
+            unused_types: vec![
+                fallow_types::output_dead_code::UnusedTypeFinding::with_actions(type_export),
+            ],
+            private_type_leaks: vec![private_leak(
+                root.join("src/api.ts"),
+                "PublicResult",
+                "Hidden",
+            )],
+            ..AnalysisResults::default()
+        }
+    }
+
+    fn malformed_final_capability_response(request: &SemanticRequest) -> SemanticResponse {
+        let mut response = complete_response(request);
+        for result in &mut response.results[..3] {
+            result.assertion = "no-confirmed-use".to_string();
+            result.status = SemanticCompleteness::Unavailable;
+            result.reason_code = Some(SemanticGapReason::BlockingDiagnostics);
+            result.actions = vec!["Repair blocking diagnostics.".to_string()];
+            result.omissions = vec![SemanticOmission {
+                reason_code: SemanticGapReason::BlockingDiagnostics,
+                count: 1,
+            }];
+        }
+        response.results[3].assertion = "no-leak-confirmed".to_string();
+        response.results[3].data = json!({
+            "exports": [],
+            "total_export_count": 0,
+            "entries": [],
+            "total_entry_count": 0,
+            "leaks": [],
+            "private_leak_confirmation": {
+                "requested_candidate_count": 1,
+                "confirmation_complete": true,
+                "confirmed_candidate_ids": []
+            },
+            "total_leak_count": 0,
+            "public_signature_edges": [],
+            "total_public_signature_edge_count": 0
+        });
+        response.results[4].data = json!({"malformed": true});
+        response
+    }
+
+    #[test]
+    fn malformed_final_capability_rolls_back_every_dead_code_mutation_family() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let mut results = rollback_family_results(root);
+        let batch = build_dead_code_queries(
+            root,
+            &results,
+            &[root.join("src/index.ts")],
+            true,
+            true,
+            true,
+        )
+        .expect("mixed semantic query batch");
+        let request = SemanticRequest {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION,
+            root: root.to_string_lossy().into_owned(),
+            projects: vec!["tsconfig.json".to_string()],
+            evidence_limit: EVIDENCE_LIMIT,
+            queries: batch.queries,
+        };
+        let response = malformed_final_capability_response(&request);
+        let before = serde_json::to_value(&results).expect("serialize original results");
+        let semantic_only_before = results
+            .unused_class_members
+            .iter()
+            .map(|finding| finding.semantic_only_candidate)
+            .collect::<Vec<_>>();
+
+        let outcome = apply_dead_code_response(
+            root,
+            &mut results,
+            DeadCodeReconciliation {
+                request: &request,
+                targets: &batch.targets,
+                capacity: batch.capacity,
+            },
+            response,
+            vec![
+                SemanticCapability::SymbolUse,
+                SemanticCapability::ApiSurface,
+                SemanticCapability::TypeCoupling,
+            ],
+        );
+
+        assert!(outcome.is_err());
+        assert_eq!(
+            serde_json::to_value(&results).expect("serialize retained results"),
+            before
+        );
+        assert_eq!(
+            results
+                .unused_class_members
+                .iter()
+                .map(|finding| finding.semantic_only_candidate)
+                .collect::<Vec<_>>(),
+            semantic_only_before
+        );
     }
 
     #[test]
@@ -3932,6 +3784,41 @@ mod tests {
             false,
             SemanticCandidateDecisionKind::RetainedUnresolved,
         ));
+    }
+
+    #[test]
+    fn failed_refinement_cleanup_removes_only_unverified_semantic_candidates() {
+        let member = |name: &str, semantic_only_candidate| {
+            let mut finding =
+                fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(
+                    fallow_types::results::UnusedMember {
+                        path: PathBuf::from("src/service.ts"),
+                        parent_name: "Service".to_string(),
+                        member_name: name.to_string(),
+                        kind: MemberKind::ClassMethod,
+                        line: 2,
+                        col: 2,
+                    },
+                );
+            finding.semantic_only_candidate = semantic_only_candidate;
+            finding
+        };
+        let ordinary = member("ordinary", false);
+        let ordinary_before = serde_json::to_value(&ordinary).expect("serialize ordinary finding");
+        let mut results = AnalysisResults {
+            unused_class_members: vec![ordinary, member("semantic", true)],
+            ..AnalysisResults::default()
+        };
+
+        discard_unverified_semantic_candidates(&mut results);
+
+        assert_eq!(results.unused_class_members.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&results.unused_class_members[0])
+                .expect("serialize retained ordinary finding"),
+            ordinary_before
+        );
+        assert!(!results.unused_class_members[0].semantic_only_candidate);
     }
 
     #[test]

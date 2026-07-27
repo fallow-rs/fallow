@@ -9,7 +9,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -27,6 +27,8 @@ const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
 const ISSUE_REGISTRY_PATH = "npm/fallow/issue-registry.json";
 const OUTPUT_SCHEMA_PATH = "docs/output-schema.json";
 const AGENT_DOCS_TARGET = "npm/fallow/skills/fallow";
+const TYPE_AWARE_MANIFEST_PATH = "crates/api/type-aware-protocol.json";
+const TYPE_AWARE_MODULE_PATH = "tools/type-aware-sidecar/src/generated-protocol.mjs";
 
 const run = (cmd, args, options = {}) =>
   execFileSync(cmd, args, {
@@ -143,11 +145,73 @@ const generateNapiTypes = (stagingRoot) => {
   });
 };
 
+const generateTypeAwareProtocol = (stagingRoot) => {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, TYPE_AWARE_MANIFEST_PATH), "utf8"));
+  const requiredKeys = [
+    "schema_version",
+    "wire_protocol_version",
+    "semantic_schema_version",
+    "analysis_operation",
+    "status_operation",
+    "query_operations",
+    "session_envelope_types",
+    "backend",
+    "sidecar",
+  ];
+  if (
+    manifest.schema_version !== 1 ||
+    requiredKeys.some((key) => !(key in manifest)) ||
+    !Number.isSafeInteger(manifest.wire_protocol_version) ||
+    !Number.isSafeInteger(manifest.semantic_schema_version) ||
+    !Array.isArray(manifest.query_operations) ||
+    manifest.query_operations.length === 0 ||
+    !Array.isArray(manifest.session_envelope_types) ||
+    manifest.session_envelope_types.length === 0 ||
+    manifest.sidecar?.version_source !== "workspace-package"
+  ) {
+    throw new Error("invalid type-aware protocol manifest");
+  }
+  const string = (value) => JSON.stringify(value);
+  const stringArray = (values) => values.map(string).join(", ");
+  writeStaged(
+    stagingRoot,
+    TYPE_AWARE_MODULE_PATH,
+    `// Generated from crates/api/type-aware-protocol.json. Do not edit.\n\
+export const TYPE_AWARE_PROTOCOL = Object.freeze({\n\
+  schema_version: ${manifest.schema_version},\n\
+  wire_protocol_version: ${manifest.wire_protocol_version},\n\
+  semantic_schema_version: ${manifest.semantic_schema_version},\n\
+  analysis_operation: ${string(manifest.analysis_operation)},\n\
+  status_operation: ${string(manifest.status_operation)},\n\
+  query_operations: [${stringArray(manifest.query_operations)}],\n\
+  session_envelope_types: [${stringArray(manifest.session_envelope_types)}],\n\
+  backend: {\n\
+    family: ${string(manifest.backend.family)},\n\
+    version: ${string(manifest.backend.version)},\n\
+  },\n\
+  sidecar: {\n\
+    package: ${string(manifest.sidecar.package)},\n\
+    version_source: ${string(manifest.sidecar.version_source)},\n\
+  },\n\
+});\n\
+export const WIRE_PROTOCOL_VERSION = TYPE_AWARE_PROTOCOL.wire_protocol_version;\n\
+export const SEMANTIC_SCHEMA_VERSION = TYPE_AWARE_PROTOCOL.semantic_schema_version;\n\
+export const ANALYSIS_OPERATION = TYPE_AWARE_PROTOCOL.analysis_operation;\n\
+export const STATUS_OPERATION = TYPE_AWARE_PROTOCOL.status_operation;\n\
+export const QUERY_OPERATIONS = Object.freeze(TYPE_AWARE_PROTOCOL.query_operations);\n\
+export const SESSION_ENVELOPE_TYPES = Object.freeze(TYPE_AWARE_PROTOCOL.session_envelope_types);\n\
+export const BACKEND_FAMILY = TYPE_AWARE_PROTOCOL.backend.family;\n\
+export const BACKEND_VERSION = TYPE_AWARE_PROTOCOL.backend.version;\n\
+export const SIDECAR_PACKAGE = TYPE_AWARE_PROTOCOL.sidecar.package;\n`,
+  );
+};
+
 const generateAllPhases = (stagingRoot) => {
   generateSchemaFiles(stagingRoot);
   generateExtensionContracts(stagingRoot);
   generateAgentDocs(stagingRoot);
   generateNapiTypes(stagingRoot);
+  generateTypeAwareProtocol(stagingRoot);
 };
 
 const checkContractSurfaceCoverage = () => {

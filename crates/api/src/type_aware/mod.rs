@@ -6,6 +6,7 @@
 //! these responsibilities.
 
 mod client;
+mod manifest;
 mod transport;
 
 use fallow_engine::session::AnalysisSession;

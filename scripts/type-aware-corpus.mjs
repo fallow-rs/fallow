@@ -53,6 +53,7 @@ import {
   parseArgs as parseCorpusArgs,
   validateManifest as validateCorpusManifest,
 } from "./type-aware-corpus/config.mjs";
+import { WIRE_PROTOCOL_VERSION } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
 
 export { summarizeAdjudicatedFeatureBuckets };
 
@@ -78,7 +79,7 @@ const MAX_SEMANTIC_RESPONSE_BYTES = 32 * 1024 * 1024;
 const MAX_SEMANTIC_STDERR_BYTES = 16 * 1024;
 const PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS = 100;
 const SEMANTIC_TIMEOUT_MS = 120_000;
-const SEMANTIC_PROTOCOL_VERSION = 6;
+const SEMANTIC_PROTOCOL_VERSION = WIRE_PROTOCOL_VERSION;
 const SEMANTIC_QUERY_STATUSES = new Set(["complete", "partial", "unavailable"]);
 const TRUTH_STATUSES = new Set(["used", "preserved", "unused", "indeterminate"]);
 const DEPENDENCY_DIRECTORY_NAMES = new Set(["node_modules", ".pnpm-store"]);
@@ -97,7 +98,7 @@ const REQUIRED_FOCUSED_CASES = [
   "protocol v6 confirms complete closed-world absence of static class-member references",
   "protocol v6 preserves required interface, abstract, and inherited contracts",
   "protocol v6 abstains for optional contracts, decorators, and dynamic member access",
-  "treats getter and setter declarations as one logical property",
+  "protocol v6 does not treat paired accessors as uses of each other",
 ];
 const REQUIRED_SEMANTIC_CAPABILITIES = [
   "dead-code-refinement",

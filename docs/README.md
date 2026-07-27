@@ -37,7 +37,7 @@ for contributors and maintainers of the open-source codebase.
   layers.
 - [Backwards compatibility](backwards-compatibility.md): stable CLI, config, and
   output contracts.
-- [Type-aware analysis](type-aware-proof-of-concept.md): semantic sidecar
+- [Type-aware analysis](type-aware-analysis.md): semantic sidecar
   boundaries, evidence policy, packaging, and corpus validation.
 
 ## Internal implementation references

@@ -1,5 +1,9 @@
 //! Backend-neutral protocol for the opt-in type-aware analysis pass.
 
+mod discovery;
+mod process;
+mod session;
+
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -13,12 +17,26 @@ use fallow_types::envelope::TypeAwareMeta;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-const SIDECAR_BINARY: &str = "fallow-type-aware";
+use super::manifest::{
+    BACKEND_FAMILY, BACKEND_VERSION, SESSION_ENVELOPE_TYPES, SIDECAR_PACKAGE as SIDECAR_BINARY,
+    STATUS_OPERATION, WIRE_PROTOCOL_VERSION as TYPE_AWARE_PROTOCOL_VERSION,
+};
+#[cfg(windows)]
+use discovery::canonical_sidecar_path;
+use discovery::{canonicalize_root, discover_type_aware_sidecar, non_empty_env};
+#[cfg(test)]
+use discovery::{discover_type_aware_sidecar_from, find_installed_sidecar};
+use process::{
+    SidecarTimeout, join_sidecar_worker, read_bounded_stream, run_sidecar_json, sidecar_command,
+};
+#[cfg(test)]
+use process::{bounded_text, sanitize_search_path};
+#[cfg(test)]
+use session::TypeAwareSessionProcess;
+pub use session::{TypeAwareFileChanges, TypeAwareSession};
+
 #[cfg(windows)]
 const SIDECAR_SCRIPT_ENV: &str = "FALLOW_TYPE_AWARE_SCRIPT";
-const BACKEND_FAMILY: &str = "typescript-go";
-const BACKEND_VERSION: &str = "7.0.2";
-pub(super) const TYPE_AWARE_PROTOCOL_VERSION: u32 = 6;
 const SIDECAR_TIMEOUT: Duration = Duration::from_mins(2);
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -147,7 +165,7 @@ pub fn status(root: &Path) -> TypeAwareStatus {
     };
     let request = StatusRequest {
         protocol_version: TYPE_AWARE_PROTOCOL_VERSION,
-        operation: "status",
+        operation: STATUS_OPERATION,
     };
     match run_sidecar_json::<_, StatusResponse>(
         &sidecar,
@@ -221,93 +239,6 @@ impl From<String> for TypeAwareError {
     }
 }
 
-fn canonicalize_root(root: &Path) -> Result<PathBuf, TypeAwareError> {
-    root.canonicalize().map_err(|err| {
-        TypeAwareError(format!(
-            "failed to resolve project root {}: {err}",
-            root.display()
-        ))
-    })
-}
-
-fn discover_type_aware_sidecar(_root: &Path) -> Result<PathBuf, String> {
-    let current_exe = std::env::current_exe().ok();
-    discover_type_aware_sidecar_from(
-        non_empty_env("FALLOW_TYPE_AWARE_BIN").as_deref(),
-        current_exe.as_deref(),
-    )
-}
-
-fn discover_type_aware_sidecar_from(
-    override_value: Option<&str>,
-    current_exe: Option<&Path>,
-) -> Result<PathBuf, String> {
-    if let Some(value) = override_value {
-        let path = PathBuf::from(value);
-        if path.is_file() {
-            return canonical_sidecar_path(&path);
-        }
-        return Err(format!(
-            "FALLOW_TYPE_AWARE_BIN is set to {value}, but no file exists there. Point it at a trusted {SIDECAR_BINARY} executable."
-        ));
-    }
-
-    if let Some(path) = current_exe.and_then(find_installed_sidecar) {
-        return Ok(path);
-    }
-
-    Err(format!(
-        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. Install it in the same directory as Fallow or set FALLOW_TYPE_AWARE_BIN to a trusted executable path. Project-local node_modules and PATH are intentionally not searched. The normal command still works without --type-aware."
-    ))
-}
-
-fn canonical_sidecar_path(path: &Path) -> Result<PathBuf, String> {
-    path.canonicalize().map_err(|err| {
-        format!(
-            "failed to resolve type-aware sidecar {}: {err}",
-            path.display()
-        )
-    })
-}
-
-fn non_empty_env(key: &str) -> Option<String> {
-    std::env::var(key).ok().and_then(|value| {
-        let value = value.trim();
-        (!value.is_empty()).then(|| value.to_owned())
-    })
-}
-
-#[expect(
-    clippy::filetype_is_file,
-    reason = "security-sensitive sidecar discovery accepts regular files only"
-)]
-fn find_installed_sidecar(current_exe: &Path) -> Option<PathBuf> {
-    let current_exe = current_exe.canonicalize().ok()?;
-    let install_dir = current_exe.parent()?;
-    binary_names(SIDECAR_BINARY).into_iter().find_map(|name| {
-        let candidate = install_dir.join(name);
-        let metadata = candidate.symlink_metadata().ok()?;
-        if !metadata.file_type().is_file() {
-            return None;
-        }
-        let canonical = candidate.canonicalize().ok()?;
-        (canonical.parent() == Some(install_dir)).then_some(canonical)
-    })
-}
-
-fn binary_names(binary: &str) -> Vec<String> {
-    if cfg!(windows) {
-        vec![
-            binary.to_owned(),
-            format!("{binary}.exe"),
-            format!("{binary}.cmd"),
-            format!("{binary}.bat"),
-        ]
-    } else {
-        vec![binary.to_owned()]
-    }
-}
-
 pub fn run_semantic_request<Request, Response>(
     root: &Path,
     request: &Request,
@@ -326,575 +257,6 @@ where
         MAX_SEMANTIC_RESPONSE_BYTES,
     )
     .map_err(TypeAwareError)
-}
-
-/// Project-relative changes applied before the next persistent semantic query.
-#[derive(Debug, Default, Clone, Serialize)]
-pub struct TypeAwareFileChanges {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub changed: Vec<PathBuf>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub created: Vec<PathBuf>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub deleted: Vec<PathBuf>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub invalidate_all: bool,
-}
-
-#[derive(Serialize)]
-struct SessionRequest<'a, Request: ?Sized> {
-    r#type: &'static str,
-    request_id: u64,
-    revision: u64,
-    request: &'a Request,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    file_changes: Option<&'a TypeAwareFileChanges>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SessionResponse<Response> {
-    request_id: u64,
-    revision: u64,
-    response: Response,
-}
-
-struct TypeAwareSessionProcess {
-    _child: fallow_process::ScopedChild,
-    stdin: std::process::ChildStdin,
-    stdout: BufReader<std::process::ChildStdout>,
-    terminator: fallow_process::ProcessTreeTerminator,
-    _active: ActiveSidecarGuard,
-    stderr_reader: Option<std::thread::JoinHandle<Result<Vec<u8>, String>>>,
-}
-
-impl TypeAwareSessionProcess {
-    fn spawn(sidecar: &Path, root: &Path) -> Result<Self, TypeAwareError> {
-        if SIDECAR_SHUTDOWN.load(Ordering::SeqCst) {
-            return Err(TypeAwareError::from(
-                "type-aware sidecar spawning is closed during shutdown".to_string(),
-            ));
-        }
-        let termination_epoch = SIDECAR_TERMINATION_EPOCH.load(Ordering::SeqCst);
-        let mut command = sidecar_command(sidecar, root).map_err(TypeAwareError)?;
-        command.arg("--session");
-        let mut child =
-            fallow_process::ScopedChild::spawn_process_tree(&mut command).map_err(|error| {
-                TypeAwareError::from(format!(
-                    "failed to spawn persistent {}: {error}",
-                    sidecar.display()
-                ))
-            })?;
-        let terminator = child.process_tree_terminator().ok_or_else(|| {
-            TypeAwareError::from(
-                "persistent type-aware sidecar process tree was not available".to_string(),
-            )
-        })?;
-        let active = ActiveSidecarGuard::register(terminator.clone());
-        if SIDECAR_SHUTDOWN.load(Ordering::SeqCst)
-            || SIDECAR_TERMINATION_EPOCH.load(Ordering::SeqCst) != termination_epoch
-        {
-            let _ = terminator.terminate();
-            return Err(TypeAwareError::from(
-                "persistent type-aware sidecar start was cancelled".to_string(),
-            ));
-        }
-        let stdin = child.take_stdin().ok_or_else(|| {
-            TypeAwareError::from("persistent type-aware stdin was unavailable".to_string())
-        })?;
-        let stdout = child.take_stdout().ok_or_else(|| {
-            TypeAwareError::from("persistent type-aware stdout was unavailable".to_string())
-        })?;
-        let stderr = child.take_stderr().ok_or_else(|| {
-            TypeAwareError::from("persistent type-aware stderr was unavailable".to_string())
-        })?;
-        let stderr_terminator = terminator.clone();
-        let stderr_reader = std::thread::spawn(move || {
-            read_bounded_stream(stderr, MAX_STDERR_BYTES, "stderr", Some(stderr_terminator))
-        });
-        Ok(Self {
-            _child: child,
-            stdin,
-            stdout: BufReader::new(stdout),
-            terminator,
-            _active: active,
-            stderr_reader: Some(stderr_reader),
-        })
-    }
-
-    fn terminate(&mut self) {
-        let _ = self.terminator.terminate();
-        if let Some(reader) = self.stderr_reader.take() {
-            let _ = join_sidecar_worker("stderr reader", reader);
-        }
-    }
-}
-
-/// Explicitly owned semantic sidecar session for one canonical project root.
-pub struct TypeAwareSession {
-    root: PathBuf,
-    sidecar: PathBuf,
-    process: Option<TypeAwareSessionProcess>,
-    request_id: u64,
-    revision: u64,
-    cancellation: Option<Arc<AtomicBool>>,
-}
-
-impl TypeAwareSession {
-    /// Start a root-bound persistent semantic session.
-    pub fn new(root: &Path) -> Result<Self, TypeAwareError> {
-        Self::new_inner(root, None)
-    }
-
-    /// Start a root-bound session that cannot restart after its owner cancels.
-    pub fn new_cancellable(
-        root: &Path,
-        cancellation: Arc<AtomicBool>,
-    ) -> Result<Self, TypeAwareError> {
-        Self::new_inner(root, Some(cancellation))
-    }
-
-    fn new_inner(
-        root: &Path,
-        cancellation: Option<Arc<AtomicBool>>,
-    ) -> Result<Self, TypeAwareError> {
-        if cancellation
-            .as_ref()
-            .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
-        {
-            return Err(TypeAwareError::from(
-                "type-aware session owner is closing".to_string(),
-            ));
-        }
-        let root = canonicalize_root(root)?;
-        let sidecar = discover_type_aware_sidecar(&root)?;
-        let process = TypeAwareSessionProcess::spawn(&sidecar, &root)?;
-        if cancellation
-            .as_ref()
-            .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
-        {
-            drop(process);
-            return Err(TypeAwareError::from(
-                "type-aware session owner closed during startup".to_string(),
-            ));
-        }
-        Ok(Self {
-            root,
-            sidecar,
-            process: Some(process),
-            request_id: 0,
-            revision: 0,
-            cancellation,
-        })
-    }
-
-    pub(super) fn run_semantic_request<Request, Response>(
-        &mut self,
-        root: &Path,
-        request: &Request,
-        changes: Option<&TypeAwareFileChanges>,
-    ) -> Result<Response, TypeAwareError>
-    where
-        Request: Serialize + ?Sized,
-        Response: DeserializeOwned,
-    {
-        self.ensure_owner_open()?;
-        let root = canonicalize_root(root)?;
-        if root != self.root {
-            return Err(TypeAwareError::from(format!(
-                "type-aware session root mismatch: expected {}, received {}",
-                self.root.display(),
-                root.display()
-            )));
-        }
-        match self.request_once(request, changes) {
-            Ok(response) => Ok(response),
-            Err(first_error) => {
-                self.restart()?;
-                let invalidate_all = TypeAwareFileChanges {
-                    invalidate_all: true,
-                    ..TypeAwareFileChanges::default()
-                };
-                self.request_once(request, Some(&invalidate_all)).map_err(|error| {
-                    TypeAwareError::from(format!(
-                        "persistent type-aware request failed after one restart: {first_error}; {error}"
-                    ))
-                })
-            }
-        }
-    }
-
-    fn request_once<Request, Response>(
-        &mut self,
-        request: &Request,
-        changes: Option<&TypeAwareFileChanges>,
-    ) -> Result<Response, TypeAwareError>
-    where
-        Request: Serialize + ?Sized,
-        Response: DeserializeOwned,
-    {
-        self.request_id += 1;
-        self.revision += 1;
-        let envelope = SessionRequest {
-            r#type: "analyze",
-            request_id: self.request_id,
-            revision: self.revision,
-            request,
-            file_changes: changes,
-        };
-        let mut bytes = serde_json::to_vec(&envelope).map_err(|error| {
-            TypeAwareError::from(format!(
-                "failed to serialize persistent type-aware request: {error}"
-            ))
-        })?;
-        if bytes.len() > MAX_REQUEST_BYTES {
-            return Err(TypeAwareError::from(format!(
-                "persistent type-aware request exceeded the {MAX_REQUEST_BYTES} byte limit"
-            )));
-        }
-        bytes.push(b'\n');
-        let process = self.process.as_mut().ok_or_else(|| {
-            TypeAwareError::from("persistent type-aware process is closed".to_string())
-        })?;
-        process
-            .stdin
-            .write_all(&bytes)
-            .and_then(|()| process.stdin.flush())
-            .map_err(|error| {
-                TypeAwareError::from(format!(
-                    "failed to write persistent type-aware request: {error}"
-                ))
-            })?;
-        let timeout = SidecarTimeout::start(process.terminator.clone(), SIDECAR_TIMEOUT);
-        let mut response_bytes = Vec::new();
-        process
-            .stdout
-            .by_ref()
-            .take((MAX_SEMANTIC_RESPONSE_BYTES + 1) as u64)
-            .read_until(b'\n', &mut response_bytes)
-            .map_err(|error| {
-                TypeAwareError::from(format!(
-                    "failed to read persistent type-aware response: {error}"
-                ))
-            })?;
-        timeout.finish().map_err(TypeAwareError)?;
-        if response_bytes.is_empty() {
-            return Err(TypeAwareError::from(
-                "persistent type-aware sidecar closed without a response".to_string(),
-            ));
-        }
-        if response_bytes.len() > MAX_SEMANTIC_RESPONSE_BYTES {
-            return Err(TypeAwareError::from(format!(
-                "persistent type-aware response exceeded the {MAX_SEMANTIC_RESPONSE_BYTES} byte limit"
-            )));
-        }
-        let response: SessionResponse<Response> =
-            serde_json::from_slice(&response_bytes).map_err(|error| {
-                TypeAwareError::from(format!(
-                    "failed to parse persistent type-aware response: {error}"
-                ))
-            })?;
-        if response.request_id != self.request_id || response.revision != self.revision {
-            return Err(TypeAwareError::from(
-                "persistent type-aware response identity mismatch".to_string(),
-            ));
-        }
-        Ok(response.response)
-    }
-
-    fn restart(&mut self) -> Result<(), TypeAwareError> {
-        self.ensure_owner_open()?;
-        if let Some(mut process) = self.process.take() {
-            process.terminate();
-        }
-        self.process = Some(TypeAwareSessionProcess::spawn(&self.sidecar, &self.root)?);
-        self.ensure_owner_open()?;
-        Ok(())
-    }
-
-    fn ensure_owner_open(&self) -> Result<(), TypeAwareError> {
-        if self
-            .cancellation
-            .as_ref()
-            .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
-        {
-            return Err(TypeAwareError::from(
-                "type-aware session owner is closing".to_string(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl Drop for TypeAwareSession {
-    fn drop(&mut self) {
-        if let Some(process) = self.process.as_mut() {
-            let _ = process.stdin.write_all(b"{\"type\":\"shutdown\"}\n");
-            let _ = process.stdin.flush();
-            process.terminate();
-        }
-    }
-}
-
-fn run_sidecar_json<Request, Response>(
-    sidecar: &Path,
-    root: &Path,
-    request: &Request,
-    timeout: Duration,
-    max_response_bytes: usize,
-) -> Result<Response, String>
-where
-    Request: Serialize + ?Sized,
-    Response: DeserializeOwned,
-{
-    if SIDECAR_SHUTDOWN.load(Ordering::SeqCst) {
-        return Err("type-aware sidecar spawning is closed during shutdown".to_owned());
-    }
-    let mut request_bytes = serde_json::to_vec(request)
-        .map_err(|err| format!("failed to serialize type-aware request: {err}"))?;
-    if request_bytes.len() > MAX_REQUEST_BYTES {
-        return Err(format!(
-            "type-aware request exceeded the {MAX_REQUEST_BYTES} byte limit"
-        ));
-    }
-    request_bytes.push(b'\n');
-
-    let termination_epoch = SIDECAR_TERMINATION_EPOCH.load(Ordering::SeqCst);
-    let mut command = sidecar_command(sidecar, root)?;
-    let mut child = fallow_process::ScopedChild::spawn_process_tree(&mut command)
-        .map_err(|err| format!("failed to spawn {}: {err}", sidecar.display()))?;
-    let Some(terminator) = child.process_tree_terminator() else {
-        return Err("type-aware sidecar process tree was not available".to_owned());
-    };
-    let _active_sidecar = ActiveSidecarGuard::register(terminator.clone());
-    if SIDECAR_SHUTDOWN.load(Ordering::SeqCst)
-        || SIDECAR_TERMINATION_EPOCH.load(Ordering::SeqCst) != termination_epoch
-    {
-        let _ = terminator.terminate();
-        return Err("type-aware sidecar start was cancelled during shutdown".to_owned());
-    }
-    let (Some(stdin), Some(stdout), Some(stderr)) =
-        (child.take_stdin(), child.take_stdout(), child.take_stderr())
-    else {
-        let _ = terminator.terminate();
-        let _ = child.wait();
-        return Err("type-aware sidecar pipes were not available".to_owned());
-    };
-    let timeout_guard = SidecarTimeout::start(terminator.clone(), timeout);
-
-    let writer = std::thread::spawn(move || write_request(stdin, &request_bytes));
-    let stdout_terminator = terminator.clone();
-    let stdout_reader = std::thread::spawn(move || {
-        read_bounded_stream(
-            stdout,
-            max_response_bytes,
-            "response",
-            Some(stdout_terminator),
-        )
-    });
-    let stderr_reader = std::thread::spawn(move || {
-        read_bounded_stream(stderr, MAX_STDERR_BYTES, "stderr", Some(terminator))
-    });
-
-    let status = child
-        .wait()
-        .map_err(|err| format!("failed to wait for type-aware sidecar: {err}"));
-    let write_result = join_sidecar_worker("stdin writer", writer);
-    let stdout_result = join_sidecar_worker("stdout reader", stdout_reader);
-    let stderr_result = join_sidecar_worker("stderr reader", stderr_reader);
-    let timeout_result = timeout_guard.finish();
-
-    timeout_result?;
-    let stdout = stdout_result?;
-    let stderr = stderr_result?;
-    let status = status?;
-    write_result?;
-    let output = Output {
-        status,
-        stdout,
-        stderr,
-    };
-    validate_process_output(&output)?;
-    serde_json::from_slice(&output.stdout)
-        .map_err(|err| format!("failed to parse type-aware sidecar response: {err}"))
-}
-
-fn sidecar_command(sidecar: &Path, root: &Path) -> Result<Command, String> {
-    let install_dir = sidecar.parent().ok_or_else(|| {
-        format!(
-            "type-aware sidecar {} has no trusted parent directory",
-            sidecar.display()
-        )
-    })?;
-    let mut command = Command::new(sidecar);
-    #[cfg(windows)]
-    let launch_via_script = if let Some(script) = non_empty_env(SIDECAR_SCRIPT_ENV) {
-        let script = canonical_sidecar_path(Path::new(&script))?;
-        command.arg(script);
-        true
-    } else {
-        false
-    };
-    command
-        .current_dir(install_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    restrict_sidecar_environment(&mut command, root);
-    #[cfg(windows)]
-    if launch_via_script {
-        // VS Code supplies its Electron executable as `process.execPath`.
-        // Node ignores this variable, while Electron needs it to run the
-        // bundled module as a plain Node process.
-        command.env("ELECTRON_RUN_AS_NODE", "1");
-    }
-    Ok(command)
-}
-
-fn restrict_sidecar_environment(command: &mut Command, root: &Path) {
-    const ALLOWED_ENV: &[&str] = &[
-        "HOME",
-        "PATHEXT",
-        "COMSPEC",
-        "SYSTEMROOT",
-        "TEMP",
-        "TMP",
-        "TMPDIR",
-        "USERPROFILE",
-        "WINDIR",
-    ];
-    let values = ALLOWED_ENV
-        .iter()
-        .filter_map(|key| std::env::var_os(key).map(|value| (*key, value)))
-        .collect::<Vec<_>>();
-    let path = std::env::var_os("PATH").and_then(|value| sanitize_search_path(root, &value));
-    command.env_clear();
-    command.envs(values);
-    if let Some(path) = path {
-        command.env("PATH", path);
-    }
-    #[cfg(windows)]
-    command.env("NoDefaultCurrentDirectoryInExePath", "1");
-}
-
-fn sanitize_search_path(root: &Path, value: &OsStr) -> Option<OsString> {
-    let mut safe = Vec::new();
-    for entry in std::env::split_paths(value) {
-        if !entry.is_absolute() {
-            continue;
-        }
-        let Ok(canonical) = entry.canonicalize() else {
-            continue;
-        };
-        if canonical.starts_with(root) || safe.contains(&canonical) {
-            continue;
-        }
-        safe.push(canonical);
-    }
-    std::env::join_paths(safe).ok()
-}
-
-fn write_request(mut stdin: std::process::ChildStdin, request: &[u8]) -> Result<(), String> {
-    stdin
-        .write_all(request)
-        .and_then(|()| stdin.flush())
-        .map_err(|err| format!("failed to write type-aware request: {err}"))
-}
-
-fn read_bounded_stream(
-    reader: impl Read,
-    limit: usize,
-    stream: &str,
-    terminator: Option<fallow_process::ProcessTreeTerminator>,
-) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::with_capacity(limit.min(16 * 1024));
-    reader
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read type-aware sidecar {stream}: {err}"))?;
-    if bytes.len() > limit {
-        if let Some(terminator) = terminator {
-            let _ = terminator.terminate();
-        }
-        return Err(format!(
-            "type-aware sidecar {stream} exceeded the {limit}-byte limit"
-        ));
-    }
-    Ok(bytes)
-}
-
-fn join_sidecar_worker<T>(
-    name: &str,
-    worker: std::thread::JoinHandle<Result<T, String>>,
-) -> Result<T, String> {
-    worker
-        .join()
-        .map_err(|_| format!("type-aware sidecar {name} panicked"))?
-}
-
-struct SidecarTimeout {
-    done: mpsc::Sender<()>,
-    timed_out: Arc<AtomicBool>,
-    watcher: std::thread::JoinHandle<()>,
-    duration: Duration,
-}
-
-impl SidecarTimeout {
-    fn start(terminator: fallow_process::ProcessTreeTerminator, duration: Duration) -> Self {
-        let timed_out = Arc::new(AtomicBool::new(false));
-        let watcher_timed_out = Arc::clone(&timed_out);
-        let (done, done_rx) = mpsc::channel();
-        let watcher = std::thread::spawn(move || match done_rx.recv_timeout(duration) {
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                watcher_timed_out.store(true, Ordering::Release);
-                let _ = terminator.terminate();
-            }
-            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
-        });
-        Self {
-            done,
-            timed_out,
-            watcher,
-            duration,
-        }
-    }
-
-    fn finish(self) -> Result<(), String> {
-        let _ = self.done.send(());
-        let _ = self.watcher.join();
-        if self.timed_out.load(Ordering::Acquire) {
-            return Err(format!(
-                "type-aware sidecar timed out after {} seconds",
-                self.duration.as_secs_f64()
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn validate_process_output(output: &Output) -> Result<(), String> {
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = bounded_text(&output.stderr, MAX_STDERR_CHARS);
-    let suffix = if stderr.is_empty() {
-        String::new()
-    } else {
-        format!(": {stderr}")
-    };
-    Err(format!(
-        "type-aware sidecar exited with status {}{suffix}",
-        output.status
-    ))
-}
-
-fn bounded_text(bytes: &[u8], max_chars: usize) -> String {
-    String::from_utf8_lossy(bytes)
-        .chars()
-        .take(max_chars)
-        .collect::<String>()
-        .trim()
-        .to_owned()
 }
 
 #[cfg(test)]
@@ -1307,7 +669,208 @@ for await (const line of lines) {
         let error = session
             .run_semantic_request::<_, Response>(&canonical_root, &Request { value: 3 }, None)
             .expect_err("a cancelled owner must reject new requests");
-        assert!(error.to_string().contains("owner is closing"));
+        assert!(
+            error.to_string().contains("owner is closing"),
+            "unexpected error: {error}"
+        );
         assert_eq!(session.request_id, 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persistent_session_restarts_once_with_full_invalidation() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        #[derive(Serialize)]
+        struct Request {
+            value: u32,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct Response {
+            value: u32,
+            request_id: u64,
+            revision: u64,
+            invalidate_all: bool,
+            launches: u32,
+            first_process_id: u32,
+            process_id: u32,
+        }
+
+        let _lifecycle_lock = lock_sidecar_lifecycle_tests();
+        let root = tempfile::tempdir().expect("temporary sidecar root");
+        let install = tempfile::tempdir().expect("temporary sidecar install");
+        let sidecar = install.path().join("restart-sidecar.mjs");
+        fs::write(
+            &sidecar,
+            r#"#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+import readline from "node:readline";
+const statePath = path.join(process.cwd(), ".session-restart-state.json");
+const state = fs.existsSync(statePath)
+  ? JSON.parse(fs.readFileSync(statePath, "utf8"))
+  : { launches: 0, first_process_id: process.pid };
+state.launches += 1;
+fs.writeFileSync(statePath, JSON.stringify(state));
+const lines = readline.createInterface({ input: process.stdin });
+for await (const line of lines) {
+  const envelope = JSON.parse(line);
+  if (envelope.type === "shutdown") process.exit(0);
+  if (state.launches === 1) {
+    process.stdout.write(`${JSON.stringify({
+      request_id: envelope.request_id + 1,
+      revision: envelope.revision,
+      response: {},
+    })}\n`);
+    process.exit(0);
+  }
+  process.stdout.write(`${JSON.stringify({
+    request_id: envelope.request_id,
+    revision: envelope.revision,
+    response: {
+      value: envelope.request.value,
+      request_id: envelope.request_id,
+      revision: envelope.revision,
+      invalidate_all: envelope.file_changes?.invalidate_all === true,
+      launches: state.launches,
+      first_process_id: state.first_process_id,
+      process_id: process.pid,
+    },
+  })}\n`);
+}
+"#,
+        )
+        .expect("write restart sidecar fixture");
+        let mut permissions = fs::metadata(&sidecar)
+            .expect("sidecar metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&sidecar, permissions).expect("make sidecar executable");
+
+        let canonical_root = root.path().canonicalize().expect("canonical root");
+        let canonical_sidecar = sidecar.canonicalize().expect("canonical sidecar");
+        let process = TypeAwareSessionProcess::spawn(&canonical_sidecar, &canonical_root)
+            .expect("spawn persistent sidecar");
+        let mut session = TypeAwareSession {
+            root: canonical_root.clone(),
+            sidecar: canonical_sidecar,
+            process: Some(process),
+            request_id: 0,
+            revision: 0,
+            cancellation: None,
+        };
+
+        let response: Response = session
+            .run_semantic_request(&canonical_root, &Request { value: 7 }, None)
+            .expect("request succeeds after one restart");
+
+        assert_eq!(response.value, 7);
+        assert_eq!(response.request_id, 2);
+        assert_eq!(response.revision, 2);
+        assert!(response.invalidate_all);
+        assert_eq!(response.launches, 2);
+        assert_ne!(response.first_process_id, response.process_id);
+        assert_eq!(session.request_id, 2);
+        assert_eq!(session.revision, 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_session_does_not_restart_after_request_failure() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        #[derive(Serialize)]
+        struct Request {
+            value: u32,
+        }
+
+        let _lifecycle_lock = lock_sidecar_lifecycle_tests();
+        let root = tempfile::tempdir().expect("temporary sidecar root");
+        let install = tempfile::tempdir().expect("temporary sidecar install");
+        let sidecar = install.path().join("cancelled-restart-sidecar.mjs");
+        fs::write(
+            &sidecar,
+            r#"#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+import readline from "node:readline";
+const launchesPath = path.join(process.cwd(), ".session-launches");
+const launches = fs.existsSync(launchesPath)
+  ? Number(fs.readFileSync(launchesPath, "utf8")) + 1
+  : 1;
+fs.writeFileSync(launchesPath, String(launches));
+const lines = readline.createInterface({ input: process.stdin });
+for await (const line of lines) {
+  const envelope = JSON.parse(line);
+  if (envelope.type === "shutdown") process.exit(0);
+  fs.writeFileSync(path.join(process.cwd(), ".session-request-seen"), "1");
+  const cancellationAcknowledgement = path.join(process.cwd(), ".session-cancelled");
+  for (let attempt = 0; attempt < 200 && !fs.existsSync(cancellationAcknowledgement); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  process.exit(1);
+}
+"#,
+        )
+        .expect("write cancelled restart sidecar fixture");
+        let mut permissions = fs::metadata(&sidecar)
+            .expect("sidecar metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&sidecar, permissions).expect("make sidecar executable");
+
+        let canonical_root = root.path().canonicalize().expect("canonical root");
+        let canonical_sidecar = sidecar.canonicalize().expect("canonical sidecar");
+        let sidecar_dir = canonical_sidecar
+            .parent()
+            .expect("sidecar install directory")
+            .to_path_buf();
+        let process = TypeAwareSessionProcess::spawn(&canonical_sidecar, &canonical_root)
+            .expect("spawn persistent sidecar");
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let cancellation_watcher = Arc::clone(&cancellation);
+        let request_marker = sidecar_dir.join(".session-request-seen");
+        let cancellation_marker = sidecar_dir.join(".session-cancelled");
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..100 {
+                if request_marker.exists() {
+                    cancellation_watcher.store(true, Ordering::SeqCst);
+                    fs::write(cancellation_marker, "1").expect("acknowledge cancellation");
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let mut session = TypeAwareSession {
+            root: canonical_root.clone(),
+            sidecar: canonical_sidecar,
+            process: Some(process),
+            request_id: 0,
+            revision: 0,
+            cancellation: Some(cancellation),
+        };
+
+        let error = session
+            .run_semantic_request::<_, serde_json::Value>(
+                &canonical_root,
+                &Request { value: 9 },
+                None,
+            )
+            .expect_err("cancelled owner prevents restart");
+        watcher.join().expect("cancellation watcher");
+
+        assert!(
+            error.to_string().contains("owner is closing"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            fs::read_to_string(sidecar_dir.join(".session-launches")).expect("launch counter"),
+            "1"
+        );
+        assert_eq!(session.request_id, 1);
+        assert_eq!(session.revision, 1);
     }
 }

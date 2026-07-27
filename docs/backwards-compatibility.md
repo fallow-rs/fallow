@@ -112,6 +112,20 @@ The following surfaces are intentional bridges, not architecture boundaries to b
 - **Plugin file structure**: as documented in `docs/plugin-authoring.md`
 - **Detection types**: `dependency`, `fileExists`, `all`, `any`
 
+### Type-aware protocol
+
+- **Stable starting point**: wire protocol version 6 is the first stable
+  contract between Fallow and the optional `fallow-type-aware` companion.
+- **Exact-version pairing**: the native binary and companion package must have
+  the same Fallow version. The backend version and supported operations come
+  from `crates/api/type-aware-protocol.json`.
+- **Evolution**: additive response fields may be introduced when older readers
+  can ignore them. Removing or changing an operation, envelope, or required
+  field requires a new wire protocol version and a documented compatibility
+  path.
+- **Pre-stable protocols**: development-only protocols before version 6 are
+  rejected and are not part of the compatibility guarantee.
+
 ## What may change in minor/patch versions
 
 These are explicitly **not** covered by the stability guarantee:

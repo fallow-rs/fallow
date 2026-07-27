@@ -35,7 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Corpus artifacts now record and verify the approved ancestor dependency
   environment, including its lockfile and installed type-declaration tree,
   rather than claiming that fixtures resolve with no dependencies. The
-  semantic protocol is now version 5: private leak confirmation is
+  semantic protocol is now version 6, the first stable type-aware wire
+  contract. A canonical manifest now keeps Rust, the sidecar, corpus tooling,
+  and editor packaging aligned. Pre-stable protocol variants are rejected.
+  Private leak confirmation is
   request-scoped and bounded, incomplete entry-point coverage retains
   syntactic candidates, and unexpected checker failures surface as errors
   instead of being mislabeled as unsupported syntax. Requests above the
@@ -86,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by TypeScript-Go 7.0.2. Only exact symbol matches are removed, unresolved
   candidates remain visible, and `_meta.type_aware` records bounded execution
   provenance. This proof is explicit opt-in and is not yet production
-  packaged. See [the proof-of-concept guide](docs/type-aware-proof-of-concept.md).
+  packaged. See [the type-aware analysis guide](docs/type-aware-analysis.md).
 
 - **`fallow viz` renders your codebase as an interactive map.** A new command that runs one project analysis and writes a single self-contained HTML file (no server, no external assets) styled like the rest of fallow: a nested treemap of files sized by bytes, plus a force-directed import graph with directory and import-community clustering. Both views share four lenses that recolor the same map: dead code (unused files, unused exports, entry points), duplication (share of duplicated lines per file, with clone previews), boundaries (architecture zones from your `boundaries` config, with violating imports drawn in red), and complexity hotspots (per-function cyclomatic and cognitive scores, including React context such as hook counts and JSX depth). Clicking any file opens a detail panel with the evidence: unused export names, clone groups and their other locations, boundary crossings, cycle membership, importers and imports as click-through navigation, and a runnable `fallow ... --trace` command to verify each finding. Search, breadcrumb drill-down, keyboard shortcuts, shareable URL deep links, and dark/light themes are built in; findings carry a hatch texture and `[E]`/`[W]` prefixes so color is never the only signal, and all motion honors `prefers-reduced-motion`. The HTML opens in your browser by default (`--no-open` to skip, `--out <path>` to choose the file); `--viz-format dot` and `--viz-format mermaid` emit the import graph as text for piping into other tools. Read-only, and respects `--production`, `--config`, and `--no-cache` like the analysis commands.
 

@@ -67,8 +67,9 @@ npm run check:crate-boundaries
 
 The check uses `cargo metadata --no-deps` for crate dependency rules. The
 `architecture_boundaries` Rust tests also guard source-level invariants such as
-backend adapter containment, shared output-helper ownership, and protocol
-manifest/docs drift.
+backend adapter containment and shared output-helper ownership. Repository
+policy tests and contract generation guard type-aware manifest/docs drift plus
+protocol and package parity.
 
 ## IO And Cache Rules
 

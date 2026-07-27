@@ -2,8 +2,12 @@
 
 Fallow's default analysis remains fast, syntactic, and independent of Node.js
 or TypeScript. `--type-aware` opts into a bounded TypeScript-Go semantic pass
-after Fallow's normal project analysis. It provides five project-wide
-capabilities:
+after Fallow's normal project analysis. The capability is a stable, optional
+Fallow contract. Its exact-version TypeScript-Go adapter uses an upstream
+unstable API, but that instability is contained behind Fallow's versioned wire
+protocol and fail-closed evidence boundary.
+
+Type-aware analysis provides five project-wide capabilities:
 
 - exact symbol-use, TypeScript contract, and validated framework-contract decisions for existing dead-code candidates
 - symbol traces with namespaces, aliases, and re-export hops
@@ -32,9 +36,12 @@ dependencies are disabled. The `fallow` launcher discovers an exact version
 match and passes its trusted executable path to the native binary.
 
 The companion pins `typescript@7.0.2` and uses `typescript/unstable/sync`, which
-runs the native TypeScript-Go backend. Fallow only changes a finding when the
-checker resolves an exact declaration identity. Name-only matches are never
-enough.
+runs the native TypeScript-Go backend. The canonical protocol manifest at
+`crates/api/type-aware-protocol.json` owns the wire version, semantic schema,
+operations, backend identity, and session envelope. Generated Rust and
+JavaScript constants keep the native client, sidecar, corpus, and editor bundle
+on that single contract. Fallow only changes a finding when the checker
+resolves an exact declaration identity. Name-only matches are never enough.
 
 ## Ownership boundary with tsc and Oxlint
 
@@ -171,7 +178,14 @@ complete process group is terminated on timeout.
 
 ## Output and integration contract
 
-The current semantic wire protocol is version 6. Private-type-leak
+The first stable semantic wire contract is version 6. Earlier development
+protocols are intentionally rejected rather than maintained as hidden
+compatibility paths. Future breaking wire changes require a new protocol
+version, an explicit compatibility decision, generated contract updates, and
+the normal semver review described in
+[`backwards-compatibility.md`](backwards-compatibility.md).
+
+Private-type-leak
 reconciliation sends only Fallow's bounded candidate set and receives stable
 candidate IDs. A complete response may remove an unmatched syntactic candidate.
 If project selection or an entry point is incomplete, the response is partial
@@ -204,6 +218,28 @@ deferred analysis identity avoids inventing a concrete TypeScript project hash.
 `--type-aware-require complete` turns an
 incomplete semantic result into an analysis error after the conservative result
 has been produced; the default `best-effort` policy keeps it advisory.
+
+## Implementation boundaries
+
+The native integration has four explicit layers:
+
+- `manifest` owns generated protocol constants.
+- `client` builds bounded queries, validates responses, plans a narrow result
+  delta, and commits that delta only after every requested capability validates.
+- `transport` owns trusted discovery, one-shot process IO, and persistent
+  session lifecycle.
+- `session` owns revisions, file invalidation, one bounded restart, and
+  cancellation behavior.
+
+The sidecar keeps protocol parsing separate from semantic work. Project state
+owns TypeScript config closure and diagnostics, graph algorithms own
+deterministic traversal primitives, `symbol-impact` owns reverse module closure
+and targeted-test provenance, and `type-coupling` owns public-signature
+coupling metrics and cycles. The semantic coordinator shares one indexed symbol
+traversal across use, trace, and impact without absorbing capability-specific
+graph algorithms. A failed semantic batch cannot partially mutate Fallow
+results. Cleanup after a failed refinement may remove only candidates that were
+created solely for semantic verification.
 
 ## Corpus adjudication and release gate
 

@@ -4,7 +4,7 @@ Optional TypeScript-Go semantic refinement sidecar for Fallow. It accepts one
 versioned JSON request on stdin and writes one JSON response to stdout.
 
 The sidecar is deliberately narrower than a general type-aware linter. Protocol
-v5 accepts a bounded batch of tagged `symbol-use`, `symbol-trace`, `api-surface`,
+v6 accepts a bounded set of tagged `symbol-use`, `symbol-trace`, `api-surface`,
 `symbol-impact`, and `type-coupling` queries. Each selected TypeScript project
 creates one Program. Symbol use, trace, and impact queries share one indexed
 source traversal per Program.
@@ -25,9 +25,6 @@ and SHA-256 declaration guard, but Fallow owns the final decision and fix
 policy. The sidecar does not emit TypeScript compiler diagnostics as Fallow
 findings and does not implement generic typed lint rules.
 
-Protocol v2 `class-member-uses` requests remain supported for the existing
-unused class-member refinement path.
-
 ## Run locally
 
 ```sh
@@ -36,10 +33,11 @@ npm test
 ./fallow-type-aware.mjs < request.json
 ```
 
-The implementation pins `typescript@7.0.2` because `typescript/unstable/sync` is an
-explicitly unstable API. Package version, protocol version, and TypeScript backend
-version are validated independently. See
-[`docs/type-aware-proof-of-concept.md`](../../docs/type-aware-proof-of-concept.md)
+The implementation pins `typescript@7.0.2` because `typescript/unstable/sync`
+is an explicitly unstable API. That backend detail is contained behind
+Fallow's stable, exact-version protocol. Package version, protocol version, and
+TypeScript backend version are validated independently. See
+[`docs/type-aware-analysis.md`](../../docs/type-aware-analysis.md)
 for the Fallow integration contract, safety policy, and current limitations.
 
 ## Release

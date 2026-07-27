@@ -1,19 +1,20 @@
-import { analyzeClassMemberUses } from "./typescript-go.mjs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
-import { analyzeSemanticQueries, createSemanticSession } from "./semantic.mjs";
 import {
-  createResponse,
-  createSemanticResponse,
-  createStatusResponse,
-  parseRequest,
-} from "./protocol.mjs";
+  ANALYSIS_OPERATION,
+  SESSION_ENVELOPE_TYPES,
+  STATUS_OPERATION,
+  WIRE_PROTOCOL_VERSION,
+} from "./generated-protocol.mjs";
+import { analyzeSemanticQueries, createSemanticSession } from "./semantic.mjs";
+import { createSemanticResponse, createStatusResponse, parseRequest } from "./protocol.mjs";
 
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+const [ANALYZE_ENVELOPE, SHUTDOWN_ENVELOPE] = SESSION_ENVELOPE_TYPES;
 const STATUS_FIELDS = [
-  ["protocol_version", 6],
-  ["operation", "status"],
+  ["protocol_version", WIRE_PROTOCOL_VERSION],
+  ["operation", STATUS_OPERATION],
 ];
 
 export const readAll = async (input, maximumBytes = MAX_REQUEST_BYTES) => {
@@ -94,9 +95,9 @@ const runSession = async (input, output) => {
         throw new Error(`session request exceeded the ${MAX_REQUEST_BYTES} byte limit`);
       }
       const envelope = parseJsonRequest(line);
-      if (envelope?.type === "shutdown") return;
+      if (envelope?.type === SHUTDOWN_ENVELOPE) return;
       if (
-        envelope?.type !== "analyze" ||
+        envelope?.type !== ANALYZE_ENVELOPE ||
         !Number.isSafeInteger(envelope.request_id) ||
         envelope.request_id < 0 ||
         !Number.isSafeInteger(envelope.revision) ||
@@ -105,9 +106,6 @@ const runSession = async (input, output) => {
         throw new Error("invalid semantic session envelope");
       }
       const request = parseRequest(envelope.request);
-      if (request.protocolVersion === 2) {
-        throw new Error("legacy protocol is not supported in semantic session mode");
-      }
       if (!session) {
         root = request.root;
         session = createSemanticSession(root);
@@ -141,12 +139,11 @@ const isStatusRequest = (request) =>
   Object.keys(request ?? {}).length === STATUS_FIELDS.length &&
   STATUS_FIELDS.every(([name, value]) => request[name] === value);
 
-const analyze = (request) =>
-  request.protocolVersion === 2 ? analyzeClassMemberUses(request) : analyzeSemanticQueries(request);
-
 const responseFor = (request, result, elapsedMs) => {
-  const responseFactory = request.protocolVersion === 2 ? createResponse : createSemanticResponse;
-  return responseFactory({ ...result, elapsedMs });
+  if (request.protocolVersion !== WIRE_PROTOCOL_VERSION) {
+    throw new Error(`unsupported protocol_version ${String(request.protocolVersion)}`);
+  }
+  return createSemanticResponse({ ...result, elapsedMs });
 };
 
 export const run = async ({ input, output, args = [] }) => {
@@ -162,6 +159,9 @@ export const run = async ({ input, output, args = [] }) => {
     return;
   }
   const request = parseRequest(rawRequest);
-  const result = analyze(request);
+  if (rawRequest.operation !== ANALYSIS_OPERATION) {
+    throw new Error(`unsupported operation ${String(rawRequest.operation)}`);
+  }
+  const result = analyzeSemanticQueries(request);
   writeJson(output, responseFor(request, result, performance.now() - startedAt));
 };

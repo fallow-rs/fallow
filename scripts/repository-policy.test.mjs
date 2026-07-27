@@ -137,22 +137,57 @@ test("root repository tooling declares its exact Node floor", () => {
   assert.match(contributing, /Repository tooling requires Node\.js 22\.12\.0 or later\./);
 });
 
-test("type-aware sidecar version matches the Rust workspace", () => {
+test("type-aware manifest keeps every runtime and package surface in parity", () => {
   const cargo = readFileSync("Cargo.toml", "utf8");
   const workspaceVersion = cargo.match(/^\[workspace\.package\]\nversion = "([^"]+)"/mu)?.[1];
   assert.ok(workspaceVersion, "Cargo.toml must declare workspace.package.version");
 
+  const manifest = readJson("crates/api/type-aware-protocol.json");
   const sidecarPackage = readJson("tools/type-aware-sidecar/package.json");
   const sidecarLock = readJson("tools/type-aware-sidecar/package-lock.json");
-  const protocol = readFileSync("tools/type-aware-sidecar/src/protocol.mjs", "utf8");
+  const generated = readFileSync("tools/type-aware-sidecar/src/generated-protocol.mjs", "utf8");
+  const vscodePackager = readFileSync("editors/vscode/scripts/package-type-aware.mjs", "utf8");
 
+  assert.equal(manifest.schema_version, 1);
+  assert.equal(manifest.wire_protocol_version, 6);
+  assert.equal(manifest.semantic_schema_version, 2);
+  assert.equal(manifest.analysis_operation, "semantic-queries");
+  assert.equal(manifest.status_operation, "status");
+  assert.deepEqual(manifest.query_operations, [
+    "symbol-use",
+    "symbol-trace",
+    "api-surface",
+    "symbol-impact",
+    "type-coupling",
+  ]);
+  assert.deepEqual(manifest.session_envelope_types, ["analyze", "shutdown"]);
+  assert.equal(manifest.sidecar.package, sidecarPackage.name);
+  assert.equal(manifest.sidecar.version_source, "workspace-package");
   assert.equal(sidecarPackage.version, workspaceVersion);
   assert.equal(sidecarLock.version, workspaceVersion);
   assert.equal(sidecarLock.packages[""].version, workspaceVersion);
-  assert.match(
-    protocol,
-    new RegExp(`const SIDECAR_VERSION = "${workspaceVersion.replaceAll(".", "\\.")}";`, "u"),
-  );
+  assert.equal(sidecarPackage.dependencies.typescript, manifest.backend.version);
+  assert.equal(sidecarLock.packages[""].dependencies.typescript, manifest.backend.version);
+  assert.equal(sidecarLock.packages["node_modules/typescript"].version, manifest.backend.version);
+  assert.ok(sidecarPackage.files.includes("src"));
+  assert.match(generated, /Generated from crates\/api\/type-aware-protocol\.json/u);
+  assert.match(vscodePackager, /cpSync\(join\(sourceRoot, "src"\)/u);
+});
+
+test("type-aware public surfaces expose only the stable protocol", () => {
+  const protocol = readFileSync("tools/type-aware-sidecar/src/protocol.mjs", "utf8");
+  const cli = readFileSync("tools/type-aware-sidecar/src/cli.mjs", "utf8");
+  const guide = readFileSync("docs/type-aware-analysis.md", "utf8");
+  const readme = readFileSync("tools/type-aware-sidecar/README.md", "utf8");
+
+  assert.doesNotMatch(protocol, /class-member-uses|operation === "batch"/u);
+  assert.doesNotMatch(cli, /class-member-uses|operation === "batch"/u);
+  assert.match(guide, /first stable semantic wire contract is version 6/u);
+  assert.match(readme, /Protocol\nv6 accepts/u);
+
+  for (const surface of [guide, readme, readFileSync("README.md", "utf8")]) {
+    assert.doesNotMatch(surface, /proof[- ]of[- ]concept|\bpoc\b/iu);
+  }
 });
 
 test("CONTRIBUTING uses the root contract generation commands", () => {

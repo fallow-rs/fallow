@@ -21,6 +21,7 @@ const EXPECTED_GENERATED_PATHS = [
   "plugin-schema.json",
   "rule-pack-schema.json",
   "schema.json",
+  "tools/type-aware-sidecar/src/generated-protocol.mjs",
 ].toSorted();
 
 test("contract surface ids and generated paths are stable and unique", () => {

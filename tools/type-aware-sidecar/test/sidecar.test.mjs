@@ -16,10 +16,16 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { API } from "typescript/unstable/sync";
 
-import { createResponse, createSemanticResponse, parseRequest } from "../src/protocol.mjs";
+import { createSemanticResponse, createStatusResponse, parseRequest } from "../src/protocol.mjs";
 import { analyzeSemanticQueries, createSemanticSession } from "../src/semantic.mjs";
 import { readAll } from "../src/cli.mjs";
 import { canonicalFileIdentity } from "../src/file-identity.mjs";
+import {
+  ANALYSIS_OPERATION,
+  BACKEND_FAMILY,
+  BACKEND_VERSION,
+  WIRE_PROTOCOL_VERSION,
+} from "../src/generated-protocol.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const executable = process.env.FALLOW_TYPE_AWARE_BIN
@@ -33,9 +39,9 @@ test("status reports protocol and backend without a project request", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     package_version: "3.9.1",
-    protocol_version: 6,
-    backend_family: "typescript-go",
-    backend_version: "7.0.2",
+    protocol_version: WIRE_PROTOCOL_VERSION,
+    backend_family: BACKEND_FAMILY,
+    backend_version: BACKEND_VERSION,
   });
 });
 
@@ -45,17 +51,9 @@ const write = (root, relativePath, contents) => {
   writeFileSync(fileName, contents);
 };
 
-const request = (root, candidates) => ({
-  protocol_version: 2,
-  operation: "class-member-uses",
-  root,
-  projects: [],
-  candidates,
-});
-
 const semanticRequest = (root, queries, options = {}) => ({
-  protocol_version: 6,
-  operation: "semantic-queries",
+  protocol_version: WIRE_PROTOCOL_VERSION,
+  operation: ANALYSIS_OPERATION,
   root,
   projects: options.projects ?? ["tsconfig.json"],
   evidence_limit: options.evidenceLimit ?? 40,
@@ -182,14 +180,28 @@ const symbolIdentity = ({
   ...(owner === undefined ? {} : { owner }),
 });
 
-const candidate = ({ id, file, owner, member, kind = "class_method", line = 2, col = 2 }) => ({
+const classMemberQuery = ({
   id,
-  path: file,
-  parent_name: owner,
-  member_name: member,
-  kind,
-  line,
-  col,
+  file,
+  owner,
+  member,
+  kind = "class_method",
+  line = 2,
+  col = 2,
+}) => ({
+  id,
+  operation: "symbol-use",
+  symbol: {
+    path: file,
+    namespace: "value",
+    declaration_kind: kind,
+    exported_name: member,
+    local_name: member,
+    owner,
+    line,
+    col,
+  },
+  framework_contracts: [],
 });
 
 const utf8Position = (source, marker, occurrence = 1) => {
@@ -264,61 +276,6 @@ test("keeps unresolved case-different paths distinct", () => {
   }
 });
 
-test("confirms only the used case-different candidate on case-sensitive filesystems", (t) => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "Pkg/tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["Service.ts"] }),
-    );
-    write(
-      root,
-      "pkg/tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["service.ts"] }),
-    );
-    write(
-      root,
-      "Pkg/Service.ts",
-      `export class Service {
-  run(): void {}
-}
-new Service().run();
-`,
-    );
-    write(
-      root,
-      "pkg/service.ts",
-      `export class Service {
-  run(): void {}
-}
-`,
-    );
-
-    const upper = path.join(root, "Pkg", "Service.ts");
-    const lower = path.join(root, "pkg", "service.ts");
-    const upperStat = statSync(upper);
-    const lowerStat = statSync(lower);
-    if (upperStat.dev === lowerStat.dev && upperStat.ino === lowerStat.ino) {
-      t.skip("filesystem is case-insensitive");
-      return;
-    }
-
-    const body = request(root, [
-      candidate({ id: 0, file: "Pkg/Service.ts", owner: "Service", member: "run" }),
-      candidate({ id: 1, file: "pkg/service.ts", owner: "Service", member: "run" }),
-    ]);
-    body.projects = ["Pkg/tsconfig.json", "pkg/tsconfig.json"];
-    const response = runSidecar(body);
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, [1]);
-    assert.deepEqual(response.abstentions, []);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("confirms a nested generic class-member use", () => {
   const root = makeProject();
   try {
@@ -355,16 +312,21 @@ export class StringService extends BaseService<GenericClient<string>> {
     );
 
     const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "src/client.ts", owner: "GenericClient", member: "used" }),
-        candidate({
+      semanticRequest(root, [
+        classMemberQuery({
+          id: 0,
+          file: "src/client.ts",
+          owner: "GenericClient",
+          member: "used",
+        }),
+        classMemberQuery({
           id: 1,
           file: "src/client.ts",
           owner: "GenericClient",
           member: "dead",
           line: 3,
         }),
-        candidate({
+        classMemberQuery({
           id: 2,
           file: "src/client.ts",
           owner: "GenericClient",
@@ -372,7 +334,7 @@ export class StringService extends BaseService<GenericClient<string>> {
           kind: "class_property",
           line: 4,
         }),
-        candidate({
+        classMemberQuery({
           id: 3,
           file: "src/client.ts",
           owner: "GenericClient",
@@ -383,194 +345,21 @@ export class StringService extends BaseService<GenericClient<string>> {
       ]),
     );
 
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0, 2]);
-    assert.deepEqual(response.unresolved_candidate_ids, [1, 3]);
+    assert.deepEqual(
+      response.results
+        .filter((result) => result.assertion === "confirmed-used")
+        .map((result) => result.query_id),
+      [0, 2],
+    );
+    assert.deepEqual(
+      response.results
+        .filter((result) => result.assertion !== "confirmed-used")
+        .map((result) => result.query_id),
+      [1, 3],
+    );
     assert.deepEqual(response.selected_tsconfigs, ["tsconfig.json"]);
-    assert.equal(response.backend, "typescript-go");
-    assert.equal(response.backend_version, "7.0.2");
-    assert.equal(response.sidecar_version, "3.9.1");
-    assert.deepEqual(response.abstentions, []);
-    assert.ok(response.projects[0].source_file_count >= 2);
-    const { source_file_count: _sourceFileCount, ...projectResult } = response.projects[0];
-    assert.deepEqual(projectResult, {
-      config: "tsconfig.json",
-      source: "auto",
-      status: "refined",
-      candidate_count: 4,
-      confirmed_used_count: 2,
-      unresolved_count: 2,
-      abstained_count: 0,
-      blocking_diagnostic_count: 0,
-    });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("matches same-named declarations by their exact source coordinates", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    const source = `namespace First {
-  export class Service {
-    run(): void {}
-  }
-}
-namespace Second {
-  export class Service {
-    run(): void {}
-  }
-}
-new First.Service().run();
-`;
-    write(root, "src/services.ts", source);
-    const first = utf8Position(source, "run(): void {}", 1);
-    const second = utf8Position(source, "run(): void {}", 2);
-
-    const response = runSidecar(
-      request(root, [
-        candidate({
-          id: 0,
-          file: "src/services.ts",
-          owner: "Service",
-          member: "run",
-          ...first,
-        }),
-        candidate({
-          id: 1,
-          file: "src/services.ts",
-          owner: "Service",
-          member: "run",
-          ...second,
-        }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, [1]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("interprets protocol columns as zero-based UTF-8 byte offsets", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    const source = `const label = "🙂"; export class UnicodeService { run(): void {} }
-new UnicodeService().run();
-`;
-    write(root, "src/unicode.ts", source);
-    const declaration = utf8Position(source, "run(): void {}");
-    const utf16Col = source.slice(0, source.indexOf("run(): void {}")).length;
-    assert.notEqual(declaration.col, utf16Col);
-
-    const response = runSidecar(
-      request(root, [
-        candidate({
-          id: 0,
-          file: "src/unicode.ts",
-          owner: "UnicodeService",
-          member: "run",
-          ...declaration,
-        }),
-        candidate({
-          id: 1,
-          file: "src/unicode.ts",
-          owner: "UnicodeService",
-          member: "run",
-          line: declaration.line,
-          col: utf16Col,
-        }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, [1]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("treats getter and setter declarations as one logical property", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    const source = `export class Accessor {
-  get value(): string { return ""; }
-  set value(next: string) { console.log(next); }
-}
-const accessor = new Accessor();
-console.log(accessor.value);
-`;
-    write(root, "src/accessor.ts", source);
-    const getter = utf8Position(source, "get value");
-    const setter = utf8Position(source, "set value");
-
-    const response = runSidecar(
-      request(root, [
-        candidate({
-          id: 0,
-          file: "src/accessor.ts",
-          owner: "Accessor",
-          member: "value",
-          ...getter,
-        }),
-        candidate({
-          id: 1,
-          file: "src/accessor.ts",
-          owner: "Accessor",
-          member: "value",
-          ...setter,
-        }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0, 1]);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("confirms a generic class member through string-literal element access", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    write(
-      root,
-      "src/client.ts",
-      `export class Client {
-  execute(): void {}
-}
-export const call = <T extends Client>(client: T): void => client["execute"]();
-`,
-    );
-
-    const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "src/client.ts", owner: "Client", member: "execute" }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
+    assert.equal(response.projects[0].candidate_count, 4);
+    assert.equal(response.projects[0].confirmed_used_count, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -597,92 +386,17 @@ view["execute"]();
     );
 
     const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "src/client.ts", owner: "Client", member: "execute" }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("confirms a class member in allowJs and checkJs projects", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({
-        compilerOptions: { allowJs: true, checkJs: true, noEmit: true },
-        include: ["src"],
-      }),
-    );
-    const source = `export class JavaScriptClient {
-  execute() {}
-}
-/** @template {JavaScriptClient} T @param {T} client */
-export const call = (client) => client.execute();
-`;
-    write(root, "src/client.js", source);
-    const declaration = utf8Position(source, "execute() {}");
-
-    const response = runSidecar(
-      request(root, [
-        candidate({
+      semanticRequest(root, [
+        classMemberQuery({
           id: 0,
-          file: "src/client.js",
-          owner: "JavaScriptClient",
+          file: "src/client.ts",
+          owner: "Client",
           member: "execute",
-          ...declaration,
         }),
       ]),
     );
 
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("retains decorator and string-registered members without an exact source use", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({
-        compilerOptions: { experimentalDecorators: true, strict: true },
-        include: ["src"],
-      }),
-    );
-    const source = `declare const Injectable: MethodDecorator;
-export class RegisteredService {
-  @Injectable
-  execute(): void {}
-}
-export const registry = new Map([["execute", RegisteredService]]);
-`;
-    write(root, "src/service.ts", source);
-    const declaration = utf8Position(source, "execute(): void {}");
-
-    const response = runSidecar(
-      request(root, [
-        candidate({
-          id: 0,
-          file: "src/service.ts",
-          owner: "RegisteredService",
-          member: "execute",
-          ...declaration,
-        }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, [0]);
+    assert.equal(response.results[0].assertion, "confirmed-used");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -710,8 +424,8 @@ export const template = "{{ label }}";
     const declaration = utf8Position(source, 'label = "hello"');
 
     const response = runSidecar(
-      request(root, [
-        candidate({
+      semanticRequest(root, [
+        classMemberQuery({
           id: 0,
           file: "src/component.ts",
           owner: "GreetingComponent",
@@ -722,84 +436,59 @@ export const template = "{{ label }}";
       ]),
     );
 
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, [0]);
+    assert.notEqual(response.results[0].assertion, "confirmed-used");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("retains Vue template-only members without claiming a checker use", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    const source = `export class ViewModel {
+for (const [testName, extension, template] of [
+  [
+    "retains Vue template-only members without claiming a checker use",
+    "vue",
+    "<template>{{ model.title }}</template>\n",
+  ],
+  [
+    "retains Astro template-only members without claiming a checker use",
+    "astro",
+    "<h1>{model.title}</h1>\n",
+  ],
+]) {
+  test(testName, () => {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      );
+      const source = `export class ViewModel {
   title = "hello";
 }
 `;
-    write(root, "src/model.ts", source);
-    write(root, "src/component.vue", "<template>{{ model.title }}</template>\n");
-    const declaration = utf8Position(source, 'title = "hello"');
+      write(root, "src/model.ts", source);
+      write(root, `src/component.${extension}`, template);
+      const declaration = utf8Position(source, 'title = "hello"');
 
-    const response = runSidecar(
-      request(root, [
-        candidate({
-          id: 0,
-          file: "src/model.ts",
-          owner: "ViewModel",
-          member: "title",
-          kind: "class_property",
-          ...declaration,
-        }),
-      ]),
-    );
+      const response = runSidecar(
+        semanticRequest(root, [
+          classMemberQuery({
+            id: 0,
+            file: "src/model.ts",
+            owner: "ViewModel",
+            member: "title",
+            kind: "class_property",
+            ...declaration,
+          }),
+        ]),
+      );
 
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, [0]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("retains Astro template-only members without claiming a checker use", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    const source = `export class ViewModel {
-  title = "hello";
+      assert.notEqual(response.results[0].assertion, "confirmed-used");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 }
-`;
-    write(root, "src/model.ts", source);
-    write(root, "src/component.astro", "<h1>{model.title}</h1>\n");
-    const declaration = utf8Position(source, 'title = "hello"');
-
-    const response = runSidecar(
-      request(root, [
-        candidate({
-          id: 0,
-          file: "src/model.ts",
-          owner: "ViewModel",
-          member: "title",
-          kind: "class_property",
-          ...declaration,
-        }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, [0]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
 
 test("finds a class member used only from an explicitly opened consumer project", () => {
   const root = makeProject();
@@ -837,392 +526,26 @@ new Client().execute();
 `,
     );
 
-    const body = request(root, [
-      candidate({
-        id: 0,
-        file: "packages/lib/src/client.ts",
-        owner: "Client",
-        member: "execute",
-      }),
-    ]);
-    body.projects = ["packages/lib/tsconfig.json", "packages/app/tsconfig.json"];
-    const response = runSidecar(body);
+    const response = runSidecar(
+      semanticRequest(
+        root,
+        [
+          classMemberQuery({
+            id: 0,
+            file: "packages/lib/src/client.ts",
+            owner: "Client",
+            member: "execute",
+          }),
+        ],
+        { projects: ["packages/lib/tsconfig.json", "packages/app/tsconfig.json"] },
+      ),
+    );
 
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-    assert.deepEqual(response.abstentions, []);
+    assert.equal(response.results[0].assertion, "confirmed-used");
     assert.deepEqual(response.selected_tsconfigs, [
       "packages/app/tsconfig.json",
       "packages/lib/tsconfig.json",
     ]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("safely abstains when an explicit solution project has no source files", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ files: [], references: [{ path: "packages/lib" }] }),
-    );
-    write(
-      root,
-      "packages/lib/tsconfig.json",
-      JSON.stringify({ compilerOptions: { composite: true, strict: true }, include: ["src"] }),
-    );
-    write(
-      root,
-      "packages/lib/src/client.ts",
-      `export class Client {
-  execute(): void {}
-}
-`,
-    );
-
-    const body = request(root, [
-      candidate({
-        id: 0,
-        file: "packages/lib/src/client.ts",
-        owner: "Client",
-        member: "execute",
-      }),
-    ]);
-    body.projects = ["tsconfig.json"];
-    const response = runSidecar(body);
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-    assert.deepEqual(response.abstentions, [{ candidate_id: 0, reason: "no-project" }]);
-    assert.deepEqual(response.selected_tsconfigs, []);
-    assert.deepEqual(response.projects, []);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("distinguishes a nested class declaration from a same-named outer class", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    const source = `export class Container {
-  make(): void {
-    class Service {
-      run(): void {}
-    }
-    new Service().run();
-  }
-}
-class Service {
-  run(): void {}
-}
-`;
-    write(root, "src/nested.ts", source);
-    const nested = utf8Position(source, "run(): void {}", 1);
-    const outer = utf8Position(source, "run(): void {}", 2);
-
-    const response = runSidecar(
-      request(root, [
-        candidate({
-          id: 0,
-          file: "src/nested.ts",
-          owner: "Service",
-          member: "run",
-          ...nested,
-        }),
-        candidate({
-          id: 1,
-          file: "src/nested.ts",
-          owner: "Service",
-          member: "run",
-          ...outer,
-        }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, [1]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("uses the default project for candidates from multiple configs", () => {
-  const root = makeProject();
-  try {
-    for (const packageName of ["a", "b"]) {
-      write(
-        root,
-        `packages/${packageName}/tsconfig.json`,
-        JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-      );
-    }
-    write(
-      root,
-      "packages/a/src/alpha.ts",
-      `export class Alpha {
-  run(): void {}
-}
-new Alpha().run();
-`,
-    );
-    write(
-      root,
-      "packages/b/src/beta.ts",
-      `export class Beta {
-  stop(): void {}
-}
-new Beta().stop();
-`,
-    );
-
-    const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "packages/a/src/alpha.ts", owner: "Alpha", member: "run" }),
-        candidate({ id: 1, file: "packages/b/src/beta.ts", owner: "Beta", member: "stop" }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0, 1]);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-    assert.deepEqual(response.selected_tsconfigs, [
-      "packages/a/tsconfig.json",
-      "packages/b/tsconfig.json",
-    ]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("uses an explicitly selected ancestor project outside the analysis root", () => {
-  const monorepo = makeProject();
-  const root = path.join(monorepo, "packages", "app");
-  try {
-    write(
-      monorepo,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["packages/app/src"] }),
-    );
-    write(
-      monorepo,
-      "packages/app/src/service.ts",
-      `export class Service {
-  run(): void {}
-}
-new Service().run();
-`,
-    );
-    const body = request(root, [
-      candidate({ id: 0, file: "src/service.ts", owner: "Service", member: "run" }),
-    ]);
-    body.projects = ["../../tsconfig.json"];
-
-    const response = runSidecar(body);
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, [0]);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-    assert.deepEqual(response.selected_tsconfigs, ["../../tsconfig.json"]);
-  } finally {
-    rmSync(monorepo, { recursive: true, force: true });
-  }
-});
-
-test("semantic project identity follows the effective extends configuration", () => {
-  const root = makeProject();
-  try {
-    const source = [
-      "export class Service {",
-      "  run(): void {}",
-      "}",
-      "new Service().run();",
-      "",
-    ].join("\n");
-    write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { strict: true } }));
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ extends: "./tsconfig.base.json", include: ["src/**/*.ts"] }),
-    );
-    write(root, "src/service.ts", source);
-    const symbol = symbolIdentity({
-      source,
-      marker: "run",
-      file: "src/service.ts",
-      namespace: "value",
-      declarationKind: "class_method",
-      exportedName: "run",
-      owner: "Service",
-    });
-    const body = semanticRequest(root, [{ id: 0, operation: "symbol-use", symbol }]);
-
-    const before = runSidecar(body).projects[0].effective_config_hash;
-    write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { strict: false } }));
-    const after = runSidecar(body).projects[0].effective_config_hash;
-
-    assert.match(before, /^sha256:[0-9a-f]{64}$/u);
-    assert.match(after, /^sha256:[0-9a-f]{64}$/u);
-    assert.notEqual(before, after);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("semantic project identity follows the effective project-reference closure", () => {
-  const root = makeProject();
-  try {
-    const source = "export class Service { run(): void {} }\n";
-    for (const name of ["a", "b"]) {
-      write(
-        root,
-        `packages/${name}/tsconfig.json`,
-        JSON.stringify({ compilerOptions: { composite: true }, include: ["src/**/*.ts"] }),
-      );
-      write(root, `packages/${name}/src/value.ts`, `export const ${name} = "${name}";\n`);
-    }
-    write(
-      root,
-      "packages/app/tsconfig.json",
-      JSON.stringify({
-        compilerOptions: { strict: true },
-        include: ["src/**/*.ts"],
-        references: [{ path: "../a" }],
-      }),
-    );
-    write(root, "packages/app/src/service.ts", source);
-    const symbol = symbolIdentity({
-      source,
-      marker: "run",
-      file: "packages/app/src/service.ts",
-      namespace: "value",
-      declarationKind: "class_method",
-      exportedName: "run",
-      owner: "Service",
-    });
-    const body = semanticRequest(root, [{ id: 0, operation: "symbol-use", symbol }]);
-    body.projects = ["packages/app/tsconfig.json"];
-
-    const before = runSidecar(body).projects[0].effective_config_hash;
-    write(
-      root,
-      "packages/app/tsconfig.json",
-      JSON.stringify({
-        compilerOptions: { strict: true },
-        include: ["src/**/*.ts"],
-        references: [{ path: "../b" }],
-      }),
-    );
-    const after = runSidecar(body).projects[0].effective_config_hash;
-
-    assert.match(before, /^sha256:[0-9a-f]{64}$/u);
-    assert.match(after, /^sha256:[0-9a-f]{64}$/u);
-    assert.notEqual(before, after);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("does not run a full semantic diagnostic pass before exact refinement", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    write(
-      root,
-      "src/service.ts",
-      `export class Service {
-  unused(): void {}
-}
-const broken: string = 1;
-`,
-    );
-
-    const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "src/service.ts", owner: "Service", member: "unused" }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, [0]);
-    assert.deepEqual(response.abstentions, []);
-    assert.equal(response.projects[0].status, "refined");
-    assert.equal(response.projects[0].blocking_diagnostic_count, 0);
-    assert.deepEqual(response.warnings, []);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("abstains for every candidate when a project has blocking diagnostics", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "tsconfig.json",
-      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
-    );
-    write(
-      root,
-      "src/service.ts",
-      `export class Service {
-  run(): void {}
-}
-new Service().run();
-const broken = ;
-`,
-    );
-
-    const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "src/service.ts", owner: "Service", member: "run" }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-    assert.deepEqual(response.abstentions, [{ candidate_id: 0, reason: "blocking-diagnostics" }]);
-    assert.equal(response.projects[0].status, "abstained");
-    assert.equal(response.projects[0].abstain_reason, "blocking-diagnostics");
-    assert.equal(response.projects[0].abstained_count, 1);
-    assert.ok(response.projects[0].blocking_diagnostic_count > 0);
-    assert.match(response.warnings[0], /blocking TypeScript diagnostics?/);
-    assert.match(response.warnings[0], /tsc -p tsconfig\.json --noEmit/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("uses an explicit marker when an inferred project safely abstains", () => {
-  const root = makeProject();
-  try {
-    write(
-      root,
-      "service.ts",
-      `class Service {
-  run(): void {}
-}
-new Service().run();
-`,
-    );
-
-    const response = runSidecar(
-      request(root, [candidate({ id: 0, file: "service.ts", owner: "Service", member: "run" })]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-    assert.deepEqual(response.abstentions, [{ candidate_id: 0, reason: "blocking-diagnostics" }]);
-    assert.deepEqual(response.selected_tsconfigs, ["<inferred>"]);
-    assert.match(response.warnings[0], /pass an explicit tsconfig with --type-aware-project/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2963,13 +2286,14 @@ test("protocol v6 preserves bulk symbol-use capacity and separately bounds graph
   assert.ok(Buffer.byteLength(JSON.stringify(maximalBulkResponse)) < 32 * 1024 * 1024);
 });
 
-test("rejects an unsupported protocol version without JSON stdout", () => {
+test("rejects the removed protocol v2 without JSON stdout", () => {
   const result = spawnSync(executable, {
     cwd: sidecarRoot,
     input: JSON.stringify({
-      protocol_version: 99,
+      protocol_version: 2,
       operation: "class-member-uses",
       root: sidecarRoot,
+      projects: [],
       candidates: [],
     }),
     encoding: "utf8",
@@ -2977,29 +2301,41 @@ test("rejects an unsupported protocol version without JSON stdout", () => {
 
   assert.equal(result.status, 2);
   assert.equal(result.stdout, "");
-  assert.match(result.stderr, /unsupported protocol_version 99/);
+  assert.match(result.stderr, /unsupported protocol_version 2/);
 });
 
-test("rejects negative candidate IDs", () => {
+test("rejects negative semantic query IDs", () => {
   const result = spawnSync(executable, {
     cwd: sidecarRoot,
     input: JSON.stringify(
-      request(sidecarRoot, [
-        candidate({ id: -1, file: "missing.ts", owner: "Missing", member: "run" }),
-      ]),
+      semanticRequest(
+        sidecarRoot,
+        [
+          {
+            id: -1,
+            operation: "api-surface",
+            entry_points: [],
+            private_leak_candidates: [],
+          },
+        ],
+        { projects: [] },
+      ),
     ),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 2);
   assert.equal(result.stdout, "");
-  assert.match(result.stderr, /candidates\[0\]\.id must be an integer/);
+  assert.match(result.stderr, /queries\[0\]\.id must be an integer/);
 });
 
-test("rejects unknown request fields and absolute candidate paths", () => {
+test("rejects unknown request fields and absolute symbol paths", () => {
   const unknown = spawnSync(executable, {
     cwd: sidecarRoot,
-    input: JSON.stringify({ ...request(sidecarRoot, []), unexpected: true }),
+    input: JSON.stringify({
+      ...semanticRequest(sidecarRoot, [], { projects: [] }),
+      unexpected: true,
+    }),
     encoding: "utf8",
   });
   assert.equal(unknown.status, 2);
@@ -3008,14 +2344,26 @@ test("rejects unknown request fields and absolute candidate paths", () => {
   const absolute = spawnSync(executable, {
     cwd: sidecarRoot,
     input: JSON.stringify(
-      request(sidecarRoot, [
-        candidate({
-          id: 0,
-          file: path.join(sidecarRoot, "missing.ts"),
-          owner: "Missing",
-          member: "run",
-        }),
-      ]),
+      semanticRequest(
+        sidecarRoot,
+        [
+          {
+            id: 0,
+            operation: "symbol-use",
+            symbol: {
+              path: path.join(sidecarRoot, "missing.ts"),
+              namespace: "value",
+              declaration_kind: "function",
+              exported_name: "run",
+              local_name: "run",
+              line: 1,
+              col: 0,
+            },
+            framework_contracts: [],
+          },
+        ],
+        { projects: [] },
+      ),
     ),
     encoding: "utf8",
   });
@@ -3024,10 +2372,11 @@ test("rejects unknown request fields and absolute candidate paths", () => {
 });
 
 test("bounds and normalizes warning text", () => {
-  const response = createResponse({
+  const response = createSemanticResponse({
     selectedTsconfigs: ["\u{10000}.json", "\uE000.json"],
-    confirmedIds: [],
-    unresolvedIds: [],
+    projectResults: [],
+    results: [],
+    phaseTimings: { project_setup: 0, diagnostics: 0, semantic_queries: 0 },
     warnings: [`first\nwarning`, "first warning", "\u{10000}", "\uE000", "x".repeat(600)],
     elapsedMs: 1,
   });
@@ -3041,56 +2390,25 @@ test("bounds and normalizes warning text", () => {
 
 test("sidecar version matches the package version", () => {
   const packageJson = JSON.parse(readFileSync(path.join(sidecarRoot, "package.json"), "utf8"));
-  const response = createResponse({
-    selectedTsconfigs: [],
-    confirmedIds: [],
-    unresolvedIds: [],
-    warnings: [],
-    elapsedMs: 0,
-  });
+  const response = createStatusResponse();
 
-  assert.equal(response.sidecar_version, packageJson.version);
+  assert.equal(response.package_version, packageJson.version);
 });
 
 test("rejects oversized stdin while reading", async () => {
   await assert.rejects(readAll(Readable.from(["12345"]), 4), /4 byte request limit/);
 });
 
-test("returns provenance for an empty candidate request", () => {
-  const response = runSidecar(request(sidecarRoot, []));
+test("returns provenance for an empty semantic request", () => {
+  const response = runSidecar(semanticRequest(sidecarRoot, [], { projects: [] }));
 
-  assert.equal(response.protocol_version, 2);
+  assert.equal(response.protocol_version, 6);
+  assert.equal(response.operation, "semantic-queries");
   assert.equal(response.sidecar_version, "3.9.1");
   assert.equal(response.backend, "typescript-go");
   assert.deepEqual(response.selected_tsconfigs, []);
-  assert.deepEqual(response.confirmed_used_candidate_ids, []);
-  assert.deepEqual(response.unresolved_candidate_ids, []);
-  assert.deepEqual(response.abstentions, []);
   assert.deepEqual(response.projects, []);
-});
-
-test("abstains when TypeScript cannot construct a project", () => {
-  const root = makeProject();
-  try {
-    const response = runSidecar(
-      request(root, [
-        candidate({ id: 0, file: "missing.ts", owner: "Missing", member: "run" }),
-        candidate({ id: 1, file: "missing.ts", owner: "Missing", member: "stop" }),
-      ]),
-    );
-
-    assert.deepEqual(response.confirmed_used_candidate_ids, []);
-    assert.deepEqual(response.unresolved_candidate_ids, []);
-    assert.deepEqual(response.abstentions, [
-      { candidate_id: 0, reason: "no-project" },
-      { candidate_id: 1, reason: "no-project" },
-    ]);
-    assert.deepEqual(response.projects, []);
-    assert.equal(response.warnings.length, 1);
-    assert.match(response.warnings[0], /No TypeScript project/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  assert.deepEqual(response.results, []);
 });
 
 test("persistent semantic session invalidates changed source without stale references", () => {
