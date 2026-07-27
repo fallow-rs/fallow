@@ -65,7 +65,7 @@ pub fn filter_configured_ignored_findings(results: &mut AnalysisResults, config:
         return;
     }
 
-    results.remove_ignored_source_owned_issues(|path| {
+    results.remove_ignored_dead_code_findings(|path| {
         let key = if path.is_absolute() {
             let Ok(relative) = path.strip_prefix(&config.root) else {
                 return false;
@@ -253,8 +253,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use fallow_types::output_dead_code::{PrivateTypeLeakFinding, UnusedFileFinding};
-    use fallow_types::results::{PrivateTypeLeak, UnusedFile};
+    use fallow_types::output_dead_code::{
+        BoundaryViolationFinding, PrivateTypeLeakFinding, UnusedFileFinding,
+    };
+    use fallow_types::results::{BoundaryViolation, PrivateTypeLeak, UnusedFile};
 
     #[test]
     fn workspace_filter_keeps_findings_under_workspace_root() {
@@ -307,9 +309,21 @@ mod tests {
                 span_start: 0,
                 semantic: None,
             }));
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: project.path().join("src/hidden.ts"),
+                to_path: project.path().join("src/data.ts"),
+                from_zone: "ui".to_string(),
+                to_zone: "data".to_string(),
+                import_specifier: "./data".to_string(),
+                line: 1,
+                col: 0,
+            }));
 
         filter_configured_ignored_findings(&mut results, &config);
 
         assert!(results.private_type_leaks.is_empty());
+        assert_eq!(results.boundary_violations.len(), 1);
     }
 }

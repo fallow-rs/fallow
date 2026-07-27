@@ -866,15 +866,15 @@ macro_rules! counted_analysis_result_fields {
     };
 }
 
-trait IssueSourceOwners {
-    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool;
+trait FindingIgnorePolicy {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool;
 }
 
-macro_rules! impl_single_issue_source_owner {
+macro_rules! impl_single_source_dead_code {
     ($($finding:ty => $($field:ident).+),+ $(,)?) => {
         $(
-            impl IssueSourceOwners for $finding {
-                fn all_source_owners_match(
+            impl FindingIgnorePolicy for $finding {
+                fn should_ignore(
                     &self,
                     predicate: &mut impl FnMut(&Path) -> bool,
                 ) -> bool {
@@ -885,7 +885,7 @@ macro_rules! impl_single_issue_source_owner {
     };
 }
 
-impl_single_issue_source_owner! {
+impl_single_source_dead_code! {
     UnusedFileFinding => file.path,
     UnusedExportFinding => export.path,
     UnusedTypeFinding => export.path,
@@ -894,18 +894,8 @@ impl_single_issue_source_owner! {
     UnusedClassMemberFinding => member.path,
     UnusedStoreMemberFinding => member.path,
     UnresolvedImportFinding => import.path,
-    BoundaryViolationFinding => violation.from_path,
-    BoundaryCoverageViolationFinding => violation.path,
-    BoundaryCallViolationFinding => violation.path,
-    PolicyViolationFinding => violation.path,
-    StaleSuppression => path,
-    InvalidClientExportFinding => export.path,
-    MixedClientServerBarrelFinding => barrel.path,
-    MisplacedDirectiveFinding => directive_site.path,
     UnprovidedInjectFinding => inject.path,
     UnrenderedComponentFinding => component.path,
-    RouteCollisionFinding => collision.path,
-    DynamicSegmentNameConflictFinding => conflict.path,
     UnusedComponentPropFinding => prop.path,
     UnusedComponentEmitFinding => emit.path,
     UnusedComponentInputFinding => input.path,
@@ -915,11 +905,11 @@ impl_single_issue_source_owner! {
     UnusedLoadDataKeyFinding => key.path,
 }
 
-macro_rules! impl_unowned_issue {
+macro_rules! impl_never_ignored_finding {
     ($($finding:ty),+ $(,)?) => {
         $(
-            impl IssueSourceOwners for $finding {
-                fn all_source_owners_match(
+            impl FindingIgnorePolicy for $finding {
+                fn should_ignore(
                     &self,
                     _predicate: &mut impl FnMut(&Path) -> bool,
                 ) -> bool {
@@ -930,7 +920,7 @@ macro_rules! impl_unowned_issue {
     };
 }
 
-impl_unowned_issue! {
+impl_never_ignored_finding! {
     UnusedDependencyFinding,
     UnusedDevDependencyFinding,
     UnusedOptionalDependencyFinding,
@@ -942,6 +932,16 @@ impl_unowned_issue! {
     UnresolvedCatalogReferenceFinding,
     UnusedDependencyOverrideFinding,
     MisconfiguredDependencyOverrideFinding,
+    BoundaryViolationFinding,
+    BoundaryCoverageViolationFinding,
+    BoundaryCallViolationFinding,
+    PolicyViolationFinding,
+    StaleSuppression,
+    InvalidClientExportFinding,
+    MixedClientServerBarrelFinding,
+    MisplacedDirectiveFinding,
+    RouteCollisionFinding,
+    DynamicSegmentNameConflictFinding,
 }
 
 fn all_nonempty_paths_match<'a>(
@@ -954,8 +954,8 @@ fn all_nonempty_paths_match<'a>(
     predicate(first) && paths.all(|path| predicate(path))
 }
 
-impl IssueSourceOwners for UnlistedDependencyFinding {
-    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+impl FindingIgnorePolicy for UnlistedDependencyFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
         all_nonempty_paths_match(
             self.dep.imported_from.iter().map(|site| &site.path),
             predicate,
@@ -963,8 +963,8 @@ impl IssueSourceOwners for UnlistedDependencyFinding {
     }
 }
 
-impl IssueSourceOwners for DuplicateExportFinding {
-    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+impl FindingIgnorePolicy for DuplicateExportFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
         all_nonempty_paths_match(
             self.export.locations.iter().map(|location| &location.path),
             predicate,
@@ -972,24 +972,24 @@ impl IssueSourceOwners for DuplicateExportFinding {
     }
 }
 
-impl IssueSourceOwners for CircularDependencyFinding {
-    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+impl FindingIgnorePolicy for CircularDependencyFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
         all_nonempty_paths_match(self.cycle.files.iter(), predicate)
     }
 }
 
-impl IssueSourceOwners for ReExportCycleFinding {
-    fn all_source_owners_match(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+impl FindingIgnorePolicy for ReExportCycleFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
         all_nonempty_paths_match(self.cycle.files.iter(), predicate)
     }
 }
 
-macro_rules! remove_ignored_source_owned_issues {
+macro_rules! remove_configured_ignored_findings {
     ($state:expr, $($field:ident => $key:literal,)+) => {{
         let (results, predicate) = $state;
         $(
             results.$field.retain(|issue| {
-                !issue.all_source_owners_match(&mut *predicate)
+                !issue.should_ignore(&mut *predicate)
             });
         )+
     }};
@@ -1012,18 +1012,16 @@ pub const TOTAL_ISSUE_RESULT_KEYS: &[&str] =
     counted_analysis_result_fields!(counted_result_key_slice);
 
 impl AnalysisResults {
-    /// Remove counted findings whose complete, non-empty source-owner set
+    /// Remove dead-code findings whose complete, non-empty source-owner set
     /// matches `is_ignored`.
     ///
-    /// Findings owned by package or project metadata have no source owners and
-    /// are retained. Context paths embedded in a finding are not owners.
+    /// Architecture, policy, suppression-hygiene, framework-correctness, and
+    /// package/project findings are retained. Context paths embedded in a
+    /// dead-code finding are not owners.
     #[doc(hidden)]
-    pub fn remove_ignored_source_owned_issues(
-        &mut self,
-        mut is_ignored: impl FnMut(&Path) -> bool,
-    ) {
+    pub fn remove_ignored_dead_code_findings(&mut self, mut is_ignored: impl FnMut(&Path) -> bool) {
         counted_analysis_result_fields!(
-            remove_ignored_source_owned_issues,
+            remove_configured_ignored_findings,
             (self, &mut is_ignored)
         );
     }
@@ -4910,32 +4908,124 @@ mod tests {
         assert_eq!(cloned.total_issues(), 2);
     }
 
-    #[test]
-    fn finding_ignore_uses_source_owners_not_context_paths() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("ignored/dead.ts"),
-            }));
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("src/visible.ts"),
-            }));
-        results
-            .boundary_violations
-            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
-                from_path: PathBuf::from("src/visible.ts"),
-                to_path: PathBuf::from("ignored/target.ts"),
+    fn protected_architecture_findings(path: &Path) -> AnalysisResults {
+        AnalysisResults {
+            boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: path.to_path_buf(),
+                to_path: PathBuf::from("src/target.ts"),
                 from_zone: "ui".to_string(),
                 to_zone: "data".to_string(),
-                import_specifier: "../ignored/target".to_string(),
+                import_specifier: "../target".to_string(),
                 line: 1,
                 col: 0,
-            }));
+            })],
+            boundary_coverage_violations: vec![BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: path.to_path_buf(),
+                    line: 1,
+                    col: 0,
+                },
+            )],
+            boundary_call_violations: vec![BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: path.to_path_buf(),
+                    line: 1,
+                    col: 0,
+                    zone: "ui".to_string(),
+                    callee: "cp.exec".to_string(),
+                    pattern: "child_process.*".to_string(),
+                },
+            )],
+            policy_violations: vec![PolicyViolationFinding::with_actions(PolicyViolation {
+                path: path.to_path_buf(),
+                line: 1,
+                col: 0,
+                pack: "security".to_string(),
+                rule_id: "no-eval".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                matched: "eval".to_string(),
+                severity: PolicyViolationSeverity::Error,
+                message: None,
+            })],
+            stale_suppressions: vec![StaleSuppression {
+                path: path.to_path_buf(),
+                line: 1,
+                col: 0,
+                origin: SuppressionOrigin::Comment {
+                    issue_kind: Some("unused-file".to_string()),
+                    reason: None,
+                    is_file_level: false,
+                    kind_known: true,
+                },
+                missing_reason: false,
+                actions: StaleSuppression::actions_for(false),
+            }],
+            ..AnalysisResults::default()
+        }
+    }
 
-        results.remove_ignored_source_owned_issues(|path| path.starts_with("ignored"));
+    fn protected_framework_findings() -> AnalysisResults {
+        AnalysisResults {
+            invalid_client_exports: vec![InvalidClientExportFinding::with_actions(
+                InvalidClientExport {
+                    path: PathBuf::from("ignored/client.ts"),
+                    export_name: "metadata".to_string(),
+                    directive: "use client".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            )],
+            mixed_client_server_barrels: vec![MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: PathBuf::from("ignored/barrel.ts"),
+                    client_origin: "./client".to_string(),
+                    server_origin: "./server".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            )],
+            misplaced_directives: vec![MisplacedDirectiveFinding::with_actions(
+                MisplacedDirective {
+                    path: PathBuf::from("ignored/directive.ts"),
+                    directive: "use client".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            )],
+            route_collisions: vec![RouteCollisionFinding::with_actions(RouteCollision {
+                path: PathBuf::from("ignored/app/about/page.tsx"),
+                url: "/about".to_string(),
+                conflicting_paths: vec![PathBuf::from("src/app/about/page.tsx")],
+                line: 1,
+                col: 0,
+            })],
+            dynamic_segment_name_conflicts: vec![DynamicSegmentNameConflictFinding::with_actions(
+                DynamicSegmentNameConflict {
+                    path: PathBuf::from("ignored/app/shop/[id]/page.tsx"),
+                    position: "/shop".to_string(),
+                    conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                    conflicting_paths: vec![PathBuf::from("src/app/shop/[slug]/page.tsx")],
+                    line: 1,
+                    col: 0,
+                },
+            )],
+            ..AnalysisResults::default()
+        }
+    }
+
+    #[test]
+    fn finding_ignore_hides_dead_code_but_retains_protected_findings() {
+        let ignored_path = PathBuf::from("ignored/dead.ts");
+        let mut results = protected_architecture_findings(&ignored_path);
+        results.merge_into(protected_framework_findings());
+        results.unused_files = vec![
+            UnusedFileFinding::with_actions(UnusedFile { path: ignored_path }),
+            UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("src/visible.ts"),
+            }),
+        ];
+
+        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
 
         assert_eq!(results.unused_files.len(), 1);
         assert_eq!(
@@ -4943,6 +5033,15 @@ mod tests {
             PathBuf::from("src/visible.ts")
         );
         assert_eq!(results.boundary_violations.len(), 1);
+        assert_eq!(results.boundary_coverage_violations.len(), 1);
+        assert_eq!(results.boundary_call_violations.len(), 1);
+        assert_eq!(results.policy_violations.len(), 1);
+        assert_eq!(results.stale_suppressions.len(), 1);
+        assert_eq!(results.invalid_client_exports.len(), 1);
+        assert_eq!(results.mixed_client_server_barrels.len(), 1);
+        assert_eq!(results.misplaced_directives.len(), 1);
+        assert_eq!(results.route_collisions.len(), 1);
+        assert_eq!(results.dynamic_segment_name_conflicts.len(), 1);
     }
 
     #[test]
@@ -4969,7 +5068,7 @@ mod tests {
             ..AnalysisResults::default()
         };
 
-        results.remove_ignored_source_owned_issues(|path| path.starts_with("ignored"));
+        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
 
         assert_eq!(results.duplicate_exports.len(), 2);
         assert_eq!(results.duplicate_exports[0].export.locations.len(), 2);
@@ -4989,7 +5088,7 @@ mod tests {
             ..AnalysisResults::default()
         };
 
-        results.remove_ignored_source_owned_issues(|path| path.starts_with("ignored"));
+        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
 
         assert_eq!(results.unused_dependencies.len(), 1);
     }
