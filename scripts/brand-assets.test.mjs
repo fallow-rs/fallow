@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const EXPECTED_VIEW_BOX = "5.03 -70.61 1344.65 1344.65";
+const EXPECTED_VIEW_BOX = "139.5 63.86 1075.72 1075.72";
 const PNG_SIGNATURE = "89504e470d0a1a0a";
 
 const assertRgbaPng = (path) => {
@@ -15,7 +15,7 @@ const assertRgbaPng = (path) => {
   return png;
 };
 
-test("standalone brand icons reserve a twenty percent transparent safe area", () => {
+test("standalone brand icons reserve a twelve-and-a-half percent transparent safe area", () => {
   const svg = readFileSync("assets/icon.svg", "utf8");
   assert.match(svg, new RegExp(`viewBox="${EXPECTED_VIEW_BOX.replaceAll(".", "\\.")}"`, "u"));
 
