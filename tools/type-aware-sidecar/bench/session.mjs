@@ -2,8 +2,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { withCodSpeed } from "@codspeed/benchmark.js-plugin";
-import Benchmark from "benchmark";
+import { withCodSpeed } from "@codspeed/tinybench-plugin";
+import { Bench } from "tinybench";
 
 import { WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
 import { parseRequest } from "../src/protocol.mjs";
@@ -67,7 +67,7 @@ const session = createSemanticSession(root);
 let revision = 1;
 let latestResult = session.analyze(request, { revision });
 
-const suite = withCodSpeed(new Benchmark.Suite());
+const suite = withCodSpeed(new Bench());
 suite
   .add("type-aware cold semantic analysis", () => {
     latestResult = analyzeSemanticQueries(request);
@@ -75,17 +75,11 @@ suite
   .add("type-aware warm semantic session", () => {
     revision += 1;
     latestResult = session.analyze(request, { revision });
-  })
-  .on("cycle", (event) => {
-    console.log(String(event.target));
-  })
-  .on("error", (event) => {
-    console.error(event.target.error);
-    process.exitCode = 1;
   });
 
 try {
   await suite.run();
+  console.table(suite.table());
   if (latestResult.results[0]?.assertion !== "confirmed-used") {
     throw new Error("type-aware benchmark produced an unexpected semantic result");
   }

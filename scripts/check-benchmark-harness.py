@@ -230,8 +230,12 @@ def validate_type_aware_benchmark(text: str) -> list[str]:
     manifest = json.loads(TYPE_AWARE_MANIFEST.read_text(encoding="utf-8"))
     if manifest.get("scripts", {}).get("bench") != "node bench/session.mjs":
         errors.append("type-aware package must expose the stable bench/session.mjs command")
+    if "@codspeed/tinybench-plugin" not in manifest.get("devDependencies", {}):
+        errors.append("type-aware benchmark must use CodSpeed's walltime-compatible Tinybench plugin")
     if "npm run bench --prefix tools/type-aware-sidecar" not in text:
         errors.append("type-aware CodSpeed job does not run the package benchmark")
+    if "runs-on: codspeed-macro" not in text:
+        errors.append("type-aware walltime benchmark must run on a CodSpeed macro runner")
     if "tools/type-aware-sidecar/**" not in text:
         errors.append("type-aware benchmark paths do not trigger the benchmark workflow")
     return errors
