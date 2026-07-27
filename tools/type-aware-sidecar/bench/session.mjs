@@ -82,12 +82,14 @@ suite
   .on("error", (event) => {
     console.error(event.target.error);
     process.exitCode = 1;
-  })
-  .on("complete", () => {
-    session.close();
-    rmSync(root, { recursive: true, force: true });
-    if (latestResult.results[0]?.assertion !== "confirmed-used") {
-      throw new Error("type-aware benchmark produced an unexpected semantic result");
-    }
-  })
-  .run();
+  });
+
+try {
+  await suite.run();
+  if (latestResult.results[0]?.assertion !== "confirmed-used") {
+    throw new Error("type-aware benchmark produced an unexpected semantic result");
+  }
+} finally {
+  session.close();
+  rmSync(root, { recursive: true, force: true });
+}

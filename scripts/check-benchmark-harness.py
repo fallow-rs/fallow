@@ -225,6 +225,8 @@ def validate_type_aware_benchmark(text: str) -> list[str]:
         ):
             if f'.add("{name}"' not in source:
                 errors.append(f"type-aware benchmark is missing {name!r}")
+        if "await suite.run()" not in source:
+            errors.append("type-aware benchmark must await instrumented CodSpeed completion")
     manifest = json.loads(TYPE_AWARE_MANIFEST.read_text(encoding="utf-8"))
     if manifest.get("scripts", {}).get("bench") != "node bench/session.mjs":
         errors.append("type-aware package must expose the stable bench/session.mjs command")
