@@ -85,11 +85,55 @@ fn issue_2006_eslint_formatter_flag_value_credits_the_package() {
     }
 }
 
-/// Built-in formatters ship inside eslint, so they must not synthesize a package
-/// name, and a synthesized name must never become an unlisted dependency.
+/// GitHub's code-scanning starter workflow passes a scoped formatter, which
+/// eslint resolves as a package rather than a path.
 #[test]
 #[cfg_attr(miri, ignore)]
-fn issue_2006_builtin_formatter_credits_nothing_and_invents_no_dependency() {
+fn issue_2006_scoped_formatter_flag_value_credits_the_package() {
+    for command in [
+        "npx eslint --format @microsoft/eslint-formatter-sarif",
+        "npx eslint --format @microsoft/sarif",
+    ] {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write(
+            &dir.path().join("package.json"),
+            r#"{
+                "name": "scoped-formatter-repro",
+                "private": true,
+                "main": "src/index.ts",
+                "devDependencies": {
+                    "eslint": "^9.0.0",
+                    "@microsoft/eslint-formatter-sarif": "^3.1.0",
+                    "left-pad": "^1.3.0"
+                }
+            }"#,
+        );
+        write(&dir.path().join("src/index.ts"), r"export const value = 1;");
+        write(
+            &dir.path().join(".github/workflows/ci.yml"),
+            &format!(
+                "name: CI\non: [push]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: {command}\n"
+            ),
+        );
+        let results = analyze(dir.path());
+
+        let unused = unused_dev_dependencies(&results);
+        assert!(
+            !unused.contains(&"@microsoft/eslint-formatter-sarif"),
+            "`{command}` should credit the scoped formatter, got {unused:?}"
+        );
+        assert!(
+            unused.contains(&"left-pad"),
+            "an unrelated unused devDependency must still be reported for `{command}`, got {unused:?}"
+        );
+    }
+}
+
+/// A formatter that no command names stays unused, and a synthesized name must
+/// never become an unlisted dependency.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn issue_2006_unnamed_formatter_stays_unused_and_invents_no_dependency() {
     let dir = tempfile::tempdir().expect("temp dir");
     create_project(dir.path(), "npx eslint --format stylish");
     let results = analyze(dir.path());

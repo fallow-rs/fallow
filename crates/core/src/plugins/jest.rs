@@ -286,9 +286,11 @@ fn credit_inline_project_runner_fields(
     }
 
     for value in read("testEnvironment") {
-        if matches!(value.as_str(), "node" | "jsdom") {
-            super::credit_environment_optional_peers(&value, result);
-        } else {
+        super::credit_environment_optional_peers(&value, result);
+        // The bare built-in names resolve inside jest and name no package; every
+        // other value, including the fully qualified `jest-environment-jsdom`,
+        // is a package the project has to declare.
+        if !matches!(value.as_str(), "node" | "jsdom") {
             result
                 .referenced_dependencies
                 .push(crate::resolve::extract_package_name(&value));
@@ -581,12 +583,15 @@ fn extract_jest_scalar_dependencies(
     if let Some(env) =
         config_parser::extract_config_string(parse_source, parse_path, &["testEnvironment"])
     {
-        if matches!(env.as_str(), "node" | "jsdom") {
-            super::credit_environment_optional_peers(&env, result);
-        } else {
-            result
-                .referenced_dependencies
-                .push(format!("jest-environment-{env}"));
+        super::credit_environment_optional_peers(&env, result);
+        // The bare built-in names resolve inside jest and name no package. Every
+        // other value is a package the project declares, and the unprefixed form
+        // additionally resolves through jest's `jest-environment-` shorthand.
+        if !matches!(env.as_str(), "node" | "jsdom") {
+            result.referenced_dependencies.push(format!(
+                "jest-environment-{}",
+                super::canonical_test_environment(&env)
+            ));
             result.referenced_dependencies.push(env);
         }
     }
