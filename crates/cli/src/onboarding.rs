@@ -317,6 +317,17 @@ const FRAMEWORK_SIGNALS: &[(&str, &[&str])] = &[
 /// heterogeneous, so framework rules must not be uniformly assumed).
 const UI_FRAMEWORKS: &[&str] = &["react", "vue", "svelte", "angular"];
 
+const TYPE_AWARE_GUIDE_URL: &str = "https://docs.fallow.tools/analysis/type-aware";
+
+const TYPE_AWARE_RECOMMENDATION: &str = "Detected TypeScript. For exact symbol use across \
+aliases, re-exports, class contracts, packages, or tests, run `fallow dead-code --type-aware` \
+or set `typeAware.enabled` to true. This starts a slower semantic pass and does not replace \
+tsc or Oxlint.";
+
+const TYPE_AWARE_HUMAN_NUDGE: &str = "Run `fallow dead-code --type-aware` when cleanup or \
+refactoring depends on exact symbol identity. This optional semantic pass is slower and does \
+not replace tsc or Oxlint.";
+
 /// Which of the three decision tiers a recommendation entry belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionKind {
@@ -519,6 +530,15 @@ fn build_recommendation_from(info: &ProjectInfo, deps: &[String]) -> Recommendat
             question: None,
         });
     }
+    if info.has_typescript {
+        decisions.push(Decision {
+            setting: "typeAware.enabled".to_owned(),
+            value: serde_json::Value::Null,
+            rationale: format!("{TYPE_AWARE_RECOMMENDATION} Guide: {TYPE_AWARE_GUIDE_URL}"),
+            kind: DecisionKind::Default,
+            question: None,
+        });
+    }
 
     // Auto (informational): framework-gated rules that auto-activate.
     if !present.is_empty() {
@@ -665,6 +685,13 @@ fn recommendation_human_report(rec: &Recommendation) -> String {
     let _ = writeln!(out, "Detected frameworks: {frameworks}");
     if let Ok(config) = serde_json::to_string_pretty(&rec.proposed_config) {
         let _ = writeln!(out, "\nProposed config (a safe starting point):\n{config}");
+    }
+    if rec.detected["has_typescript"].as_bool() == Some(true) {
+        let _ = writeln!(
+            out,
+            "\nOptional TypeScript evidence: {TYPE_AWARE_HUMAN_NUDGE}\nGuide: \
+             {TYPE_AWARE_GUIDE_URL}"
+        );
     }
 
     let taste: Vec<&Decision> = rec
@@ -1033,5 +1060,46 @@ mod tests {
         );
         // The concise human view still shows the zero-config stop.
         assert!(report.contains("Zero config is a valid stop"));
+    }
+
+    #[test]
+    fn typescript_recommendation_discloses_type_aware_without_enabling_it() {
+        let rec = build_recommendation_from(&ts_lib_info(), &[]);
+        let json = rec.to_json();
+        let decision = json["decisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|decision| decision["setting"] == "typeAware.enabled")
+            .expect("TypeScript projects should disclose type-aware analysis");
+
+        assert_eq!(decision["kind"], "default");
+        assert!(decision["value"].is_null());
+        assert!(
+            decision["rationale"]
+                .as_str()
+                .unwrap()
+                .contains("--type-aware")
+        );
+        assert!(
+            rec.proposed_config.get("typeAware").is_none(),
+            "recommend must not enable the optional semantic pass"
+        );
+
+        let report = recommendation_human_report(&rec);
+        assert!(report.contains("Optional TypeScript evidence"));
+        assert!(report.contains(TYPE_AWARE_GUIDE_URL));
+
+        let mut javascript = ts_lib_info();
+        javascript.has_typescript = false;
+        let js_rec = build_recommendation_from(&javascript, &[]);
+        assert!(
+            !js_rec.to_json()["decisions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|decision| decision["setting"] == "typeAware.enabled")
+        );
+        assert!(!recommendation_human_report(&js_rec).contains("Optional TypeScript evidence"));
     }
 }
