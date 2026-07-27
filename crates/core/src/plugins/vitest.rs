@@ -22,16 +22,16 @@ const ENTRY_PATTERNS: &[&str] = &[
 ];
 
 const CONFIG_PATTERNS: &[&str] = &[
-    "**/vitest.config.{ts,js,mts,mjs}",
-    "vitest.workspace.{ts,js}",
+    "**/vitest.config.{ts,js,mts,mjs,cts,cjs}",
+    "**/vitest.workspace.{ts,js}",
     // A vite config carrying a `test` block IS the vitest config for that
     // project; vitest reads it directly. Every extraction below is keyed under
     // `test`, so a vite config without one contributes nothing.
-    "**/vite.config.{ts,js,mts,mjs}",
+    "**/vite.config.{ts,js,mts,mjs,cts,cjs}",
 ];
 
 const ALWAYS_USED: &[&str] = &[
-    "vitest.config.{ts,js,mts,mjs}",
+    "vitest.config.{ts,js,mts,mjs,cts,cjs}",
     "vitest.setup.{ts,js}",
     "vitest.workspace.{ts,js}",
     "**/src/setupTests.{ts,tsx,js,jsx}",
@@ -78,10 +78,14 @@ const VITEST_CONFIG_FILES: &[&str] = &[
     "vitest.config.js",
     "vitest.config.mts",
     "vitest.config.mjs",
+    "vitest.config.cts",
+    "vitest.config.cjs",
     "vite.config.ts",
     "vite.config.js",
     "vite.config.mts",
     "vite.config.mjs",
+    "vite.config.cts",
+    "vite.config.cjs",
 ];
 
 impl Plugin for VitestPlugin {
@@ -122,7 +126,7 @@ impl Plugin for VitestPlugin {
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
         vec![
-            ("vitest.config.{ts,js,mts,mjs}", CONFIG_EXPORTS),
+            ("vitest.config.{ts,js,mts,mjs,cts,cjs}", CONFIG_EXPORTS),
             ("vitest.workspace.{ts,js}", CONFIG_EXPORTS),
         ]
     }
@@ -243,6 +247,15 @@ fn add_vitest_environment_dependency(result: &mut PluginResult, source: &str, co
         "jsdom" | "happy-dom" => {
             result.referenced_dependencies.push(env.clone());
             super::credit_environment_optional_peers(&env, result);
+        }
+        // A built-in vitest environment backed by an optional peer. There is no
+        // `vitest-environment-edge-runtime` package, and `edge-runtime` is an
+        // unrelated CLI package, so crediting either name exempted the wrong
+        // dependency while leaving the one vitest actually loads unreported.
+        "edge-runtime" => {
+            result
+                .referenced_dependencies
+                .push("@edge-runtime/vm".to_string());
         }
         _ => {
             result
@@ -484,6 +497,31 @@ mod tests {
         let source = r#"
             export default {
                 test: {
+                    environment: "custom-env"
+                }
+            };
+        "#;
+        let result = resolve(source);
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"vitest-environment-custom-env".to_string())
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"custom-env".to_string())
+        );
+    }
+
+    /// `edge-runtime` is a built-in vitest environment backed by the optional
+    /// peer `@edge-runtime/vm`. Crediting the shorthand names instead exempted an
+    /// unrelated CLI package and left the real dependency reported as unused.
+    #[test]
+    fn builtin_edge_runtime_environment_credits_vm_package() {
+        let source = r#"
+            export default {
+                test: {
                     environment: "edge-runtime"
                 }
             };
@@ -492,12 +530,21 @@ mod tests {
         assert!(
             result
                 .referenced_dependencies
-                .contains(&"vitest-environment-edge-runtime".to_string())
+                .contains(&"@edge-runtime/vm".to_string()),
+            "expected @edge-runtime/vm, got {:?}",
+            result.referenced_dependencies
         );
         assert!(
-            result
+            !result
                 .referenced_dependencies
-                .contains(&"edge-runtime".to_string())
+                .contains(&"vitest-environment-edge-runtime".to_string()),
+            "no such package exists"
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"edge-runtime".to_string()),
+            "the bare name is an unrelated package and must not be exempted"
         );
     }
 

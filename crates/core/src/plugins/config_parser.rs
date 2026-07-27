@@ -1091,6 +1091,11 @@ fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'
                     _ => decl.declaration.as_expression(),
                 };
                 if let Some(expr) = expr {
+                    if let Some(obj) =
+                        resolve_call_config_object(program, expr, MAX_CONFIG_WRAPPER_DEPTH)
+                    {
+                        return Some(obj);
+                    }
                     if let Some(obj) = extract_object_from_expression(expr) {
                         return Some(obj);
                     }
@@ -1106,6 +1111,11 @@ fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'
                 if let Expression::AssignmentExpression(assign) = &expr_stmt.expression
                     && is_module_exports_target(&assign.left)
                 {
+                    if let Some(obj) =
+                        resolve_call_config_object(program, &assign.right, MAX_CONFIG_WRAPPER_DEPTH)
+                    {
+                        return Some(obj);
+                    }
                     if let Some(obj) = extract_object_from_expression(&assign.right) {
                         return Some(obj);
                     }
@@ -1205,15 +1215,81 @@ fn extract_object_from_function<'a>(func: &'a Function<'a>) -> Option<&'a Object
 fn extract_object_from_function_body<'a>(
     body: &'a FunctionBody<'a>,
 ) -> Option<&'a ObjectExpression<'a>> {
-    for stmt in &body.statements {
-        if let Statement::ReturnStatement(ret) = stmt
-            && let Some(argument) = &ret.argument
-            && let Some(obj) = extract_object_from_expression(argument)
-        {
-            return Some(obj);
+    find_returned_object(&body.statements, MAX_CONFIG_BRANCH_DEPTH)
+}
+
+/// Maximum control-flow nesting searched for a config `return`.
+const MAX_CONFIG_BRANCH_DEPTH: u8 = 4;
+
+/// Find the first returned object literal in `statements`, descending into
+/// control flow.
+///
+/// A config callback routinely branches on the build mode
+/// (`if (command === "serve") { return { ... } } return { ... }`), so looking at
+/// top-level statements only means the whole config extracts nothing. Nested
+/// function and arrow bodies are deliberately not searched: their returns belong
+/// to the inner function, not to the config callback.
+///
+/// The first return in source order wins. A config whose branches declare
+/// different values therefore contributes only the first branch's.
+fn find_returned_object<'a>(
+    statements: &'a [Statement<'a>],
+    depth: u8,
+) -> Option<&'a ObjectExpression<'a>> {
+    if depth == 0 {
+        return None;
+    }
+    for stmt in statements {
+        let found = match stmt {
+            Statement::ReturnStatement(ret) => ret
+                .argument
+                .as_ref()
+                .and_then(|argument| extract_object_from_expression(argument)),
+            Statement::BlockStatement(block) => find_returned_object(&block.body, depth - 1),
+            Statement::IfStatement(if_stmt) => {
+                find_returned_object_in_statement(&if_stmt.consequent, depth - 1).or_else(|| {
+                    if_stmt
+                        .alternate
+                        .as_ref()
+                        .and_then(|alt| find_returned_object_in_statement(alt, depth - 1))
+                })
+            }
+            Statement::TryStatement(try_stmt) => {
+                find_returned_object(&try_stmt.block.body, depth - 1)
+                    .or_else(|| {
+                        try_stmt
+                            .handler
+                            .as_ref()
+                            .and_then(|handler| find_returned_object(&handler.body.body, depth - 1))
+                    })
+                    .or_else(|| {
+                        try_stmt
+                            .finalizer
+                            .as_ref()
+                            .and_then(|finalizer| find_returned_object(&finalizer.body, depth - 1))
+                    })
+            }
+            Statement::SwitchStatement(switch) => switch
+                .cases
+                .iter()
+                .find_map(|case| find_returned_object(&case.consequent, depth - 1)),
+            _ => None,
+        };
+        if found.is_some() {
+            return found;
         }
     }
     None
+}
+
+fn find_returned_object_in_statement<'a>(
+    stmt: &'a Statement<'a>,
+    depth: u8,
+) -> Option<&'a ObjectExpression<'a>> {
+    match stmt {
+        Statement::BlockStatement(block) => find_returned_object(&block.body, depth),
+        other => find_returned_object(std::slice::from_ref(other), depth),
+    }
 }
 
 /// Check if an assignment target is `module.exports`.
@@ -1271,8 +1347,8 @@ fn find_variable_init_object<'a>(
 /// `pageExtensions` / plugin config is extracted instead of silently dropped.
 ///
 /// Returns the first argument (scanning nested wrapper calls) that resolves to a
-/// local `const NAME = { ... }`. An inline object argument is already handled by
-/// [`extract_object_from_expression`], which the caller tries first.
+/// local `const NAME = { ... }`. Inline object and callback arguments are handled
+/// by [`resolve_call_config_object`], which the caller tries first.
 fn resolve_wrapped_config_object<'a>(
     program: &'a Program,
     expr: &'a Expression<'a>,
@@ -1304,6 +1380,75 @@ fn resolve_wrapped_config_object<'a>(
         }
     }
     None
+}
+
+/// Maximum wrapper nesting resolved by [`resolve_call_config_object`].
+///
+/// Covers the shapes seen in the wild (`defineConfig(mergeConfig(base, defineConfig({..})))`)
+/// while keeping a hand-written config from driving unbounded recursion.
+const MAX_CONFIG_WRAPPER_DEPTH: u8 = 3;
+
+/// Resolve the config object carried by a wrapper call, giving each argument the
+/// full resolution chain in source order.
+///
+/// Config wrappers take the config first and their own options after it, as in
+/// `withSentryConfig(nextConfig, { org, project })` or
+/// `mergeConfig(viteConfig, defineConfig({ test }))`. Scanning the whole argument
+/// list for the first object literal therefore picks up the wrapper's options
+/// object whenever the config itself arrives as an identifier or a nested call,
+/// silently reading the wrong object. Resolving argument by argument, chain-first,
+/// keeps the config's own position winning.
+fn resolve_call_config_object<'a>(
+    program: &'a Program,
+    expr: &'a Expression<'a>,
+    depth: u8,
+) -> Option<&'a ObjectExpression<'a>> {
+    if depth == 0 {
+        return None;
+    }
+    let call = match expr {
+        Expression::CallExpression(call) => call,
+        Expression::ParenthesizedExpression(paren) => {
+            return resolve_call_config_object(program, &paren.expression, depth);
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            return resolve_call_config_object(program, &ts_sat.expression, depth);
+        }
+        Expression::TSAsExpression(ts_as) => {
+            return resolve_call_config_object(program, &ts_as.expression, depth);
+        }
+        _ => return None,
+    };
+
+    call.arguments
+        .iter()
+        .filter_map(oxc_ast::ast::Argument::as_expression)
+        .find_map(|arg| resolve_config_argument(program, arg, depth))
+}
+
+/// Resolve one wrapper argument to the object it stands for.
+fn resolve_config_argument<'a>(
+    program: &'a Program,
+    expr: &'a Expression<'a>,
+    depth: u8,
+) -> Option<&'a ObjectExpression<'a>> {
+    match expr {
+        Expression::ObjectExpression(obj) => Some(obj),
+        Expression::ArrowFunctionExpression(arrow) => extract_object_from_arrow_function(arrow),
+        Expression::FunctionExpression(func) => extract_object_from_function(func),
+        Expression::ParenthesizedExpression(paren) => {
+            resolve_config_argument(program, &paren.expression, depth)
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            resolve_config_argument(program, &ts_sat.expression, depth)
+        }
+        Expression::TSAsExpression(ts_as) => {
+            resolve_config_argument(program, &ts_as.expression, depth)
+        }
+        Expression::CallExpression(_) => resolve_call_config_object(program, expr, depth - 1),
+        _ => unwrap_to_identifier_name(expr)
+            .and_then(|name| find_variable_init_object(program, name)),
+    }
 }
 
 /// Find a named property in an object expression.
@@ -3234,6 +3379,150 @@ mod tests {
         assert_eq!(
             extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
             Some("happy-dom")
+        );
+    }
+
+    /// A wrapper takes the config first and its own options after it. Scanning
+    /// the argument list for the first object literal read the options object
+    /// instead, which is the exact shape the @sentry/nextjs wizard emits.
+    #[test]
+    fn wrapper_options_object_does_not_shadow_named_config_arg() {
+        let source = r#"
+            const nextConfig = { pageExtensions: ["page.tsx"] };
+            module.exports = withSentryConfig(nextConfig, { org: "o", project: "p", silent: true });
+        "#;
+        assert_eq!(
+            extract_config_string_array(source, &js_path(), &["pageExtensions"]),
+            vec!["page.tsx"]
+        );
+    }
+
+    #[test]
+    fn wrapper_options_object_does_not_shadow_named_config_arg_esm() {
+        let source = r#"
+            const nextConfig = { pageExtensions: ["page.tsx"] };
+            export default withSentryConfig(nextConfig, { org: "o", project: "p" });
+        "#;
+        assert_eq!(
+            extract_config_string_array(source, &ts_path(), &["pageExtensions"]),
+            vec!["page.tsx"]
+        );
+    }
+
+    /// Vitest's documented way to share a Vite config with the test runner.
+    #[test]
+    fn merge_config_extracts_nested_define_config_object() {
+        let source = r#"
+            import { defineConfig, mergeConfig } from 'vitest/config';
+            import viteConfig from './vite.config';
+            export default mergeConfig(viteConfig, defineConfig({
+                test: { environment: "jsdom" }
+            }));
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("jsdom")
+        );
+    }
+
+    #[test]
+    fn define_config_wrapping_merge_config_extracts_object() {
+        let source = r#"
+            import { defineConfig, mergeConfig } from 'vitest/config';
+            import base from './base';
+            export default defineConfig(mergeConfig(base, { test: { environment: "jsdom" } }));
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("jsdom")
+        );
+    }
+
+    /// Guards against "prefer an identifier-resolved const over any object
+    /// literal", which would change which object every plain config reads.
+    #[test]
+    fn inline_object_at_argument_zero_still_wins() {
+        let source = r#"
+            const unrelated = { pageExtensions: ["wrong.tsx"] };
+            module.exports = withSentryConfig({ pageExtensions: ["right.tsx"] }, { org: "o" });
+        "#;
+        assert_eq!(
+            extract_config_string_array(source, &js_path(), &["pageExtensions"]),
+            vec!["right.tsx"]
+        );
+    }
+
+    /// Vite's documented mode-branching config shape.
+    #[test]
+    fn conditional_config_callback_extracts_branch_return() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            export default defineConfig(({ command }) => {
+                if (command === "serve") {
+                    return { test: { environment: "jsdom" } };
+                }
+                return { test: { environment: "node" } };
+            });
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("jsdom")
+        );
+    }
+
+    #[test]
+    fn try_block_return_is_extracted() {
+        let source = r#"
+            export default (() => {
+                try {
+                    return { test: { environment: "jsdom" } };
+                } catch (e) {
+                    return { test: { environment: "node" } };
+                }
+            });
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("jsdom")
+        );
+    }
+
+    #[test]
+    fn switch_case_return_is_extracted() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            export default defineConfig(({ mode }) => {
+                switch (mode) {
+                    case "test":
+                        return { test: { environment: "jsdom" } };
+                    default:
+                        return { test: { environment: "node" } };
+                }
+            });
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("jsdom")
+        );
+    }
+
+    /// A guard clause followed by the real return must still resolve to the
+    /// trailing return, which is what worked before branch descent existed.
+    #[test]
+    fn guard_clause_then_top_level_return_is_unchanged() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            export default defineConfig(({ mode }) => {
+                if (!mode) {
+                    return {};
+                }
+                return { test: { environment: "jsdom" } };
+            });
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            None,
+            "the first return in source order wins, even when it is a guard clause"
         );
     }
 
