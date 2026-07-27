@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*.*.*'
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 permissions: {}
 
 env:
@@ -90,7 +94,7 @@ jobs:
             done
           }
           first=1
-          for crate in fallow-types fallow-config fallow-output fallow-extract fallow-graph fallow-security fallow-core fallow-engine fallow-api fallow-license fallow-v8-coverage fallow-cli fallow-mcp; do
+          for crate in fallow-types fallow-process fallow-config fallow-output fallow-extract fallow-graph fallow-security fallow-core fallow-engine fallow-api fallow-license fallow-v8-coverage fallow-cli fallow-mcp; do
             # Settle delay between crates so a dependent crate usually finds its
             # dependency already indexed; the retry loop is the real guarantee.
             if [ "$first" = 0 ]; then sleep 30; fi
@@ -124,7 +128,7 @@ jobs:
             npm_dir: darwin-arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            container: rust:1.97.1-bullseye
+            container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
             binary: fallow
             multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
@@ -132,7 +136,7 @@ jobs:
             npm_dir: linux-x64-gnu
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            container: rust:1.97.1-bullseye
+            container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
             binary: fallow
             multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
@@ -259,7 +263,7 @@ jobs:
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
       - name: Build NAPI addon
-        run: cd crates/napi && npx napi build --platform --profile napi-release --target ${{ matrix.target }}
+        run: cd crates/napi && npx napi build --platform --profile napi-release --no-js --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
@@ -649,7 +653,7 @@ jobs:
             pkg.version = version;
             if (pkg.optionalDependencies) {
               for (const key of Object.keys(pkg.optionalDependencies)) {
-                if (key.startsWith("@fallow-cli/fallow-node")) {
+                if (key.startsWith("@fallow-cli/fallow-node") || key === "fallow-type-aware") {
                   pkg.optionalDependencies[key] = version;
                 }
               }
@@ -694,7 +698,7 @@ jobs:
           # download/upload artifact round-trip; the publish job iterates them
           # in sequence and publishes whatever .tgz it finds inside.
           rm -rf tarballs
-          mkdir -p tarballs/10-cli-platform tarballs/20-cli-root tarballs/30-napi-platform tarballs/40-napi-root
+          mkdir -p tarballs/10-cli-platform tarballs/15-type-aware tarballs/20-cli-root tarballs/30-napi-platform tarballs/40-napi-root
 
           # Emit a manifest alongside the tarballs so the publish job can look
           # up name/version without executing any code from inside a tarball.
@@ -729,6 +733,7 @@ jobs:
             pack tarballs/10-cli-platform "$dir"
           done
 
+          pack tarballs/15-type-aware ./tools/type-aware-sidecar
           pack tarballs/20-cli-root ./npm/fallow
 
           for dir in \
@@ -829,10 +834,10 @@ jobs:
             exit 1
           fi
           VERSION="${PKG_VERSION_REF#refs/tags/v}"
-          # Fixed expected count: 8 cli platform + 1 cli root + 8 napi platform
-          # + 1 napi root = 18 entries. If this number changes, update the
+          # Fixed expected count: 8 cli platform + 1 type-aware companion +
+          # 1 cli root + 8 napi platform + 1 napi root = 19 entries. If this number changes, update the
           # numbered-stage matrix in npm-prep AND this constant together.
-          EXPECTED=18
+          EXPECTED=19
           ACTUAL=$(wc -l < tarballs/manifest.tsv | tr -d ' ')
           if [ "$ACTUAL" -ne "$EXPECTED" ]; then
             echo "::error::Expected $EXPECTED tarballs in manifest, got $ACTUAL"
@@ -848,6 +853,7 @@ jobs:
             "@fallow-cli/linux-arm64-musl"
             "@fallow-cli/win32-x64-msvc"
             "@fallow-cli/win32-arm64-msvc"
+            "fallow-type-aware"
             "fallow"
             "@fallow-cli/fallow-node-darwin-arm64"
             "@fallow-cli/fallow-node-darwin-x64"

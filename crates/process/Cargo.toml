@@ -1,0 +1,35 @@
+[package]
+name = "fallow-process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Shared child-process lifecycle and process-tree cleanup for fallow"
+readme = "../../README.md"
+
+[lib]
+doctest = false
+
+[features]
+tokio = ["dep:tokio"]
+
+[dependencies]
+rustc-hash = { workspace = true }
+tokio = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

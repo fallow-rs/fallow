@@ -5,11 +5,11 @@ import * as vscode from "vscode";
 /**
  * Whether a binary-version-skew toast has already been shown this session. Both
  * the LSP path (`client.ts`, fallow-lsp older than the extension) and the CLI
- * analysis path (`commands.ts`, fallow CLI rejecting/omitting a flag) detect the
- * same root cause: a resolved binary older than the extension. Stacking two
- * toasts about one cause trains users to dismiss without reading, so the toast
- * is shown at most once per session here; per-event details still go to the
- * output channel on every occurrence. Reset implicitly on reactivation.
+ * analysis path (`commands.ts`, fallow CLI rejecting/omitting a flag) detect an
+ * incompatible resolved binary. Stacking two toasts about one compatibility
+ * problem trains users to dismiss without reading, so the toast is shown at
+ * most once per session here; per-event details still go to the output channel
+ * on every occurrence. Reset implicitly on reactivation.
  */
 let toastShown = false;
 

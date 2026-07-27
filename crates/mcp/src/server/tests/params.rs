@@ -310,6 +310,39 @@ fn trace_export_params_require_file_and_export_name() {
 }
 
 #[test]
+fn semantic_impact_params_accept_exactly_one_selector_shape() {
+    let export: SemanticImpactParams =
+        serde_json::from_str(r#"{"file":"src/repository.ts","export_name":"save"}"#).unwrap();
+    assert!(matches!(
+        export.target,
+        SemanticImpactSelector::Export(SemanticExportSelector { export_name })
+            if export_name == "save"
+    ));
+
+    let method: SemanticImpactParams = serde_json::from_str(
+        r#"{"file":"src/repository.ts","class_name":"UserRepository","member_name":"save"}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        method.target,
+        SemanticImpactSelector::ClassMethod(SemanticClassMethodSelector {
+            class_name,
+            member_name,
+        }) if class_name == "UserRepository" && member_name == "save"
+    ));
+
+    for invalid in [
+        r#"{"file":"src/repository.ts"}"#,
+        r#"{"file":"src/repository.ts","class_name":"UserRepository"}"#,
+        r#"{"file":"src/repository.ts","member_name":"save"}"#,
+        r#"{"file":"src/repository.ts","export_name":"save","class_name":"UserRepository","member_name":"save"}"#,
+        r#"{"file":"src/repository.ts","export_name":"save","unknown":true}"#,
+    ] {
+        assert!(serde_json::from_str::<SemanticImpactParams>(invalid).is_err());
+    }
+}
+
+#[test]
 fn trace_file_params_require_file() {
     let json = "{}";
     let result: Result<TraceFileParams, _> = serde_json::from_str(json);

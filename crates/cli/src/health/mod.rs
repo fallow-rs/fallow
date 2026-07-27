@@ -52,6 +52,15 @@ impl From<SortBy> for HealthSort {
 
 pub type HealthOptions<'a> = HealthExecutionOptions<'a>;
 
+/// CLI-only semantic overlay options for `health --type-coupling`.
+pub struct TypeAwareHealthOptions<'a> {
+    pub enabled: bool,
+    pub requested: bool,
+    pub unfiltered: bool,
+    pub projects: &'a [std::path::PathBuf],
+    pub require: Option<fallow_config::TypeAwareRequire>,
+}
+
 impl HealthGroupResolver for OwnershipResolver {
     fn mode_label(&self) -> &'static str {
         OwnershipResolver::mode_label(self)
@@ -183,7 +192,7 @@ fn health_err_to_exit(error: HealthError, output: OutputFormat) -> ExitCode {
 
 /// Load config for a health run, validating coverage-root and churn-file inputs
 /// up front (loud exit 2 on a malformed input).
-fn load_health_config(
+pub fn load_health_config(
     opts: &HealthOptions<'_>,
 ) -> Result<(fallow_config::ResolvedConfig, f64), ExitCode> {
     fallow_engine::health::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
@@ -249,7 +258,14 @@ pub fn execute_health_with_shared_parse(
 
 pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
     let (config, config_ms) = load_health_config(opts)?;
+    execute_health_with_config(opts, config, config_ms)
+}
 
+pub fn execute_health_with_config(
+    opts: &HealthOptions<'_>,
+    config: fallow_config::ResolvedConfig,
+    config_ms: f64,
+) -> Result<HealthResult, ExitCode> {
     let t = Instant::now();
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -295,15 +311,69 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     Ok(result)
 }
 
-pub fn run_health(opts: &HealthOptions<'_>, json_style: crate::json_style::JsonStyle) -> ExitCode {
-    let result = match execute_health(opts) {
-        Ok(r) => r,
+pub fn run_health(
+    opts: &HealthOptions<'_>,
+    json_style: crate::json_style::JsonStyle,
+    type_aware: &TypeAwareHealthOptions<'_>,
+) -> ExitCode {
+    let mut completeness_failed = false;
+    let (config, config_ms) = match load_health_config(opts) {
+        Ok(config) => config,
         Err(code) => return code,
     };
+    let resolved_type_aware = match resolve_type_aware_health_options(type_aware, &config) {
+        Ok(options) => options,
+        Err(message) => return emit_error(&message, 2, opts.output),
+    };
+    let requested = type_aware.requested || (type_aware.unfiltered && resolved_type_aware.enabled);
+    let semantic = if requested {
+        let enabled = resolved_type_aware.enabled;
+        if !enabled {
+            return emit_error(
+                "--type-coupling requires --type-aware or typeAware.enabled in config",
+                2,
+                opts.output,
+            );
+        }
+        let projects = resolved_type_aware.projects;
+        let require = resolved_type_aware.require;
+        let outcome = match fallow_api::analyze_type_coupling(opts.root, &projects, &[]) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return emit_error(
+                    &format!("Type-aware coupling failed: {error}"),
+                    2,
+                    opts.output,
+                );
+            }
+        };
+        completeness_failed = require == fallow_config::TypeAwareRequire::Complete
+            && outcome.report.status != fallow_types::semantic::SemanticCompleteness::Complete;
+        Some(outcome)
+    } else {
+        None
+    };
+    let mut execution_opts = opts.clone();
+    if let Some(identity) = semantic
+        .as_ref()
+        .and_then(|outcome| outcome.type_aware.meta.identity.clone())
+    {
+        execution_opts.analysis_identity = identity;
+    }
+    let mut result = match execute_health_with_config(&execution_opts, config, config_ms) {
+        Ok(result) => result,
+        Err(code) => return code,
+    };
+    let required_completeness = result.config.type_aware.require.into();
+    result.type_aware_meta = semantic.map(|outcome| {
+        let mut meta = outcome.type_aware.meta;
+        meta.required_completeness = Some(required_completeness);
+        meta
+    });
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }
-    print_health_result(
+    let code = print_health_result(
         &result,
         HealthPrintOptions {
             quiet: opts.quiet,
@@ -312,11 +382,75 @@ pub fn run_health(opts: &HealthOptions<'_>, json_style: crate::json_style::JsonS
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
+            type_aware_scope: None,
             skip_score_and_trend: false,
             css_requested: opts.css,
             json_style,
         },
-    )
+    );
+    if code == ExitCode::SUCCESS && completeness_failed {
+        ExitCode::from(1)
+    } else {
+        code
+    }
+}
+
+pub struct ResolvedTypeAwareHealthOptions {
+    pub enabled: bool,
+    pub projects: Vec<std::path::PathBuf>,
+    pub require: fallow_config::TypeAwareRequire,
+}
+
+pub fn resolve_type_aware_health_options(
+    options: &TypeAwareHealthOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+) -> Result<ResolvedTypeAwareHealthOptions, String> {
+    let env_enabled = std::env::var("FALLOW_TYPE_AWARE")
+        .ok()
+        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(
+                "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off"
+                    .to_string(),
+            ),
+        })
+        .transpose()?;
+    let enabled = if options.enabled {
+        true
+    } else {
+        env_enabled.unwrap_or(config.type_aware.enabled)
+    };
+    let projects = if !options.projects.is_empty() {
+        options.projects.to_vec()
+    } else if let Some(value) = std::env::var_os("FALLOW_TYPE_AWARE_PROJECTS") {
+        std::env::split_paths(&value).collect()
+    } else {
+        config
+            .type_aware
+            .projects
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect()
+    };
+    let require = if let Some(require) = options.require {
+        require
+    } else if let Ok(value) = std::env::var("FALLOW_TYPE_AWARE_REQUIRE") {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "best-effort" => fallow_config::TypeAwareRequire::BestEffort,
+            "complete" => fallow_config::TypeAwareRequire::Complete,
+            _ => {
+                return Err("FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete".to_string());
+            }
+        }
+    } else {
+        config.type_aware.require
+    };
+    Ok(ResolvedTypeAwareHealthOptions {
+        enabled,
+        projects,
+        require,
+    })
 }
 
 /// Result of executing health analysis without printing.
@@ -350,6 +484,7 @@ pub struct HealthPrintOptions {
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
+    pub type_aware_scope: Option<&'static str>,
     pub skip_score_and_trend: bool,
     /// Whether `--css` was requested. Forwarded to the human renderer so an empty
     /// CSS result (no import-reachable stylesheet) is explained rather than
@@ -396,6 +531,8 @@ fn health_report_context(
         elapsed: result.elapsed,
         quiet: options.quiet,
         explain: options.explain,
+        type_aware: result.type_aware_meta.as_ref(),
+        type_aware_scope: options.type_aware_scope,
         group_by: None,
         top: None,
         summary: options.summary,
@@ -623,6 +760,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             elapsed: Duration::default(),
             timings: None,
+            type_aware_meta: None,
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
         }
@@ -658,6 +796,7 @@ mod tests {
                 summary: false,
                 summary_heading: true,
                 show_explain_tip: true,
+                type_aware_scope: None,
                 skip_score_and_trend: false,
                 css_requested: false,
                 json_style: crate::json_style::JsonStyle::Compact,
@@ -810,6 +949,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             elapsed: Duration::default(),
             timings: None,
+            type_aware_meta: None,
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
         }
@@ -829,6 +969,7 @@ mod tests {
                     summary: false,
                     summary_heading: true,
                     show_explain_tip: true,
+                    type_aware_scope: None,
                     skip_score_and_trend: false,
                     css_requested: false,
                     json_style: crate::json_style::JsonStyle::Compact,

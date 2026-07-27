@@ -82,7 +82,7 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
 });
 
 test("root Node API overview follows the published declarations", () => {
-  const declarations = readFileSync("crates/napi/index.d.ts", "utf8");
+  const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
   const readme = readFileSync("README.md", "utf8");
   const missing = missingDocumentedNodeFunctions(declarations, readme);
 
@@ -95,6 +95,18 @@ test("root Node API overview follows the published declarations", () => {
   const firstFunction = exportedNodeFunctions(declarations)[0];
   const neuteredReadme = readme.replace(`\`${firstFunction}\``, "`removedFunction`");
   assert.deepEqual(missingDocumentedNodeFunctions(declarations, neuteredReadme), [firstFunction]);
+});
+
+test("NAPI declarations have one canonical public source", () => {
+  const packageJson = readJson("crates/napi/package.json");
+  const entry = readFileSync("crates/napi/index.d.ts", "utf8");
+  const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
+
+  assert.equal(packageJson.types, "index.d.ts");
+  assert.ok(packageJson.files.includes("types"));
+  assert.equal(entry, 'export * from "./types/index";\n');
+  assert.match(declarations, /export interface AnalysisOptions/u);
+  assert.match(declarations, /export function detectDeadCode/u);
 });
 
 test("published Node packages and Action smoke tests use Node 22", () => {
@@ -123,6 +135,64 @@ test("root repository tooling declares its exact Node floor", () => {
   assert.equal(rootPackage.engines.node, ">=22.12.0");
   assert.equal(rootLock.packages[""].engines.node, ">=22.12.0");
   assert.match(contributing, /Repository tooling requires Node\.js 22\.12\.0 or later\./);
+});
+
+test("type-aware manifest keeps every runtime and package surface in parity", () => {
+  const cargo = readFileSync("Cargo.toml", "utf8");
+  const workspaceVersion = cargo.match(/^\[workspace\.package\]\nversion = "([^"]+)"/mu)?.[1];
+  assert.ok(workspaceVersion, "Cargo.toml must declare workspace.package.version");
+
+  const manifest = readJson("crates/api/type-aware-protocol.json");
+  const sidecarPackage = readJson("tools/type-aware-sidecar/package.json");
+  const sidecarLock = readJson("tools/type-aware-sidecar/package-lock.json");
+  const generated = readFileSync("tools/type-aware-sidecar/src/generated-protocol.mjs", "utf8");
+  const vscodePackager = readFileSync("editors/vscode/scripts/package-type-aware.mjs", "utf8");
+
+  assert.equal(manifest.schema_version, 1);
+  assert.equal(manifest.wire_protocol_version, 6);
+  assert.equal(manifest.semantic_schema_version, 2);
+  assert.equal(manifest.analysis_operation, "semantic-queries");
+  assert.equal(manifest.status_operation, "status");
+  assert.deepEqual(manifest.query_operations, [
+    "symbol-use",
+    "symbol-trace",
+    "api-surface",
+    "symbol-impact",
+    "type-coupling",
+  ]);
+  assert.deepEqual(manifest.session_envelope_types, ["analyze", "shutdown"]);
+  assert.equal(manifest.sidecar.package, sidecarPackage.name);
+  assert.equal(manifest.sidecar.version_source, "workspace-package");
+  assert.equal(sidecarPackage.version, workspaceVersion);
+  assert.equal(sidecarLock.version, workspaceVersion);
+  assert.equal(sidecarLock.packages[""].version, workspaceVersion);
+  assert.equal(sidecarPackage.dependencies.typescript, manifest.backend.version);
+  assert.equal(sidecarLock.packages[""].dependencies.typescript, manifest.backend.version);
+  assert.equal(sidecarLock.packages["node_modules/typescript"].version, manifest.backend.version);
+  assert.deepEqual(sidecarPackage.bin, {
+    "fallow-type-aware": "fallow-type-aware.mjs",
+  });
+  assert.deepEqual(sidecarLock.packages[""].bin, sidecarPackage.bin);
+  assert.ok(sidecarPackage.files.includes("fallow-type-aware.mjs"));
+  assert.ok(sidecarPackage.files.includes("src"));
+  assert.match(generated, /Generated from crates\/api\/type-aware-protocol\.json/u);
+  assert.match(vscodePackager, /cpSync\(join\(sourceRoot, "src"\)/u);
+});
+
+test("type-aware public surfaces expose only the stable protocol", () => {
+  const protocol = readFileSync("tools/type-aware-sidecar/src/protocol.mjs", "utf8");
+  const cli = readFileSync("tools/type-aware-sidecar/src/cli.mjs", "utf8");
+  const guide = readFileSync("docs/type-aware-analysis.md", "utf8");
+  const readme = readFileSync("tools/type-aware-sidecar/README.md", "utf8");
+
+  assert.doesNotMatch(protocol, /class-member-uses|operation === "batch"/u);
+  assert.doesNotMatch(cli, /class-member-uses|operation === "batch"/u);
+  assert.match(guide, /first stable semantic wire contract is version 6/u);
+  assert.match(readme, /Protocol\nv6 accepts/u);
+
+  for (const surface of [guide, readme, readFileSync("README.md", "utf8")]) {
+    assert.doesNotMatch(surface, /proof[- ]of[- ]concept|\bpoc\b/iu);
+  }
 });
 
 test("CONTRIBUTING uses the root contract generation commands", () => {

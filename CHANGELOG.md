@@ -21,6 +21,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be excluded from analysis entirely. (Closes
   [#1991](https://github.com/fallow-rs/fallow/issues/1991).)
 
+## [3.10.0] - 2026-07-27
+
+### Changed
+
+- **Type-aware class-member refinement now covers string-literal element access
+  and cross-project consumers.** Explicit TypeScript projects are scanned
+  together, so a use in an application project can confirm a declaration in a
+  referenced library project. Dynamic computed access, decorators, dependency
+  injection, and runtime registration still retain the finding when exact
+  symbol evidence is unavailable. Explicit solution configs without source
+  files now fail closed with per-candidate abstention instead of invalid project
+  metadata. The release corpus enforces pinned clean sources, repeated
+  deterministic output, independent source review, and accuracy, resource, and
+  abstention limits. Corpus evidence is now produced by the exact hashed
+  sidecar artifact recorded during discovery instead of importing workspace
+  implementation modules.
+
+### Fixed
+
+- **Type-aware API and project metadata now reflect checker-backed facts.**
+  Public API analysis no longer treats parameter names or generic type
+  parameters as private types, complete semantic API results remove unmatched
+  syntactic leak guesses, and overlapping TypeScript projects no longer
+  duplicate API entries or coupling edges. Per-project candidate, confirmed,
+  unresolved, and abstained counts are populated instead of remaining zero,
+  including in the programmatic API. Unavailable API queries retain syntactic
+  leak findings, and a missing entry point keeps mixed-entry results partial.
+  Corpus artifacts now record and verify the approved ancestor dependency
+  environment, including its lockfile and installed type-declaration tree,
+  rather than claiming that fixtures resolve with no dependencies. The
+  semantic protocol is now version 6, the first stable type-aware wire
+  contract. A canonical manifest now keeps Rust, the sidecar, corpus tooling,
+  and editor packaging aligned. Pre-stable protocol variants are rejected.
+  Private leak confirmation is
+  request-scoped and bounded, incomplete entry-point coverage retains
+  syntactic candidates, and unexpected checker failures surface as errors
+  instead of being mislabeled as unsupported syntax. Requests above the
+  private-leak candidate cap retain the unrequested tail and report partial
+  capacity instead of failing or pruning it. The Rust semantic client
+  and reconciliation logic now have one owner in `fallow-api`; CLI, editor,
+  runtime, and programmatic paths share it. Cross-platform child-process
+  lifecycle behavior is shared through `fallow-process`.
+
 ## [3.9.1] - 2026-07-24
 
 ### Added
@@ -55,6 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.8.0] - 2026-07-22
 
 ### Added
+
+- **Experimental TypeScript semantic refinement for unused class members.**
+  `fallow dead-code --type-aware` can pass remaining
+  `unused-class-members` candidates to the repository reference sidecar backed
+  by TypeScript-Go 7.0.2. Only exact symbol matches are removed, unresolved
+  candidates remain visible, and `_meta.type_aware` records bounded execution
+  provenance. This proof is explicit opt-in and is not yet production
+  packaged. See [the type-aware analysis guide](docs/type-aware-analysis.md).
 
 - **`fallow viz` renders your codebase as an interactive map.** A new command that runs one project analysis and writes a single self-contained HTML file (no server, no external assets) styled like the rest of fallow: a nested treemap of files sized by bytes, plus a force-directed import graph with directory and import-community clustering. Both views share four lenses that recolor the same map: dead code (unused files, unused exports, entry points), duplication (share of duplicated lines per file, with clone previews), boundaries (architecture zones from your `boundaries` config, with violating imports drawn in red), and complexity hotspots (per-function cyclomatic and cognitive scores, including React context such as hook counts and JSX depth). Clicking any file opens a detail panel with the evidence: unused export names, clone groups and their other locations, boundary crossings, cycle membership, importers and imports as click-through navigation, and a runnable `fallow ... --trace` command to verify each finding. Search, breadcrumb drill-down, keyboard shortcuts, shareable URL deep links, and dark/light themes are built in; findings carry a hatch texture and `[E]`/`[W]` prefixes so color is never the only signal, and all motion honors `prefers-reduced-motion`. The HTML opens in your browser by default (`--no-open` to skip, `--out <path>` to choose the file); `--viz-format dot` and `--viz-format mermaid` emit the import graph as text for piping into other tools. Read-only, and respects `--production`, `--config`, and `--no-cache` like the analysis commands.
 
@@ -4895,7 +4946,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.9.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.10.0...HEAD
+[3.10.0]: https://github.com/fallow-rs/fallow/compare/v3.9.1...v3.10.0
 [3.9.1]: https://github.com/fallow-rs/fallow/compare/v3.8.1...v3.9.1
 [3.8.1]: https://github.com/fallow-rs/fallow/compare/v3.8.0...v3.8.1
 [3.8.0]: https://github.com/fallow-rs/fallow/compare/v3.7.1...v3.8.0

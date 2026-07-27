@@ -52,6 +52,8 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
         "SARIF builders",
         "Boundary Policy",
         "`fallow-core` is a backend implementation crate",
+        "`fallow-process` is an independent infrastructure foundation",
+        "must not fork their own timeout, process-tree setup",
     ] {
         assert!(
             doc.contains(required),
@@ -76,6 +78,37 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
             !doc.contains(forbidden),
             "architecture invariants doc must describe final boundaries, not known leftovers: {forbidden}"
         );
+    }
+}
+
+#[test]
+fn protocol_adapters_do_not_own_process_tree_primitives() {
+    let process_tree_markers = [
+        "process_group(0)",
+        "TerminateJobObject",
+        "AssignProcessToJobObject",
+        "CreateJobObjectW",
+        "CREATE_SUSPENDED",
+        "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+        "libc::waitid",
+    ];
+    for source_path in rust_sources_under([
+        "crates/cli/src",
+        "crates/lsp/src",
+        "crates/mcp/src",
+        "crates/napi/src",
+    ]) {
+        if source_path == "crates/cli/src/architecture_boundaries.rs" {
+            continue;
+        }
+        let source = read_source_without_line_comments(&source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+        for marker in process_tree_markers {
+            assert!(
+                !source.contains(marker),
+                "{source_path} contains process-tree primitive {marker}; use fallow-process"
+            );
+        }
     }
 }
 

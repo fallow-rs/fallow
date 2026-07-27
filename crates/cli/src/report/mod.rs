@@ -10,9 +10,10 @@ pub mod grouping;
 mod human;
 mod json;
 mod markdown;
-mod sarif;
+pub(crate) mod sarif;
 mod shared;
 pub(crate) mod sink;
+mod status;
 pub(crate) mod suggestions;
 #[cfg(test)]
 pub(crate) mod test_helpers;
@@ -25,6 +26,7 @@ use fallow_api::DuplicationGrouping;
 use fallow_config::{OutputFormat, RulesConfig, Severity};
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
+use fallow_types::semantic::SemanticSymbolImpact;
 use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportTrace, FileTrace, ImpactClosureTrace, PipelineTimings,
 };
@@ -38,6 +40,9 @@ use crate::report::sink::outln;
 pub use fallow_output::strip_root_prefix;
 pub use grouping::OwnershipResolver;
 pub(crate) use human::health::{render_health_score, render_health_trend};
+pub(crate) use status::{
+    HumanStatus, line as human_status_line, semantic_status, type_aware_meta_status,
+};
 
 /// The three line-groups of a human `fallow review --walkthrough` render: the
 /// orientation header and final status (stderr), and the staged tour body
@@ -96,6 +101,11 @@ pub(crate) struct ReportContext<'a> {
     pub(crate) elapsed: Duration,
     pub(crate) quiet: bool,
     pub(crate) explain: bool,
+    /// Provenance for the opt-in TypeScript semantic analysis pass.
+    pub(crate) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// Optional label for semantic metadata when one command renders multiple
+    /// analysis scopes into the same stream.
+    pub(crate) type_aware_scope: Option<&'static str>,
     /// When set, group all output by this resolver.
     pub(crate) group_by: Option<OwnershipResolver>,
     /// Limit displayed items per section (--top N).
@@ -303,6 +313,7 @@ pub(crate) fn print_results(
             root: ctx.root,
             elapsed: ctx.elapsed,
             explain: ctx.explain,
+            type_aware: ctx.type_aware,
             regression,
             baseline_matched: ctx.baseline_matched,
             config_fixable: ctx.config_fixable,
@@ -310,11 +321,13 @@ pub(crate) fn print_results(
         }),
         OutputFormat::Compact => {
             compact::print_compact(results, ctx.root);
+            compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_sarif(results, ctx.root, ctx.rules),
+        OutputFormat::Sarif => sarif::print_sarif(results, ctx.root, ctx.rules, ctx.type_aware),
         OutputFormat::Markdown => {
             markdown::print_markdown(results, ctx.root);
+            markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
@@ -424,19 +437,24 @@ fn print_grouped_results(
             root: ctx.root,
             elapsed: ctx.elapsed,
             explain: ctx.explain,
+            type_aware: ctx.type_aware,
             resolver,
             config_fixable: ctx.config_fixable,
             json_style: ctx.json_style,
         }),
         OutputFormat::Compact => {
             compact::print_grouped_compact(groups, ctx.root);
+            compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
             markdown::print_grouped_markdown(groups, ctx.root);
+            markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_grouped_sarif(original, ctx.root, ctx.rules, resolver),
+        OutputFormat::Sarif => {
+            sarif::print_grouped_sarif(original, ctx.root, ctx.rules, resolver, ctx.type_aware)
+        }
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
         }
@@ -668,17 +686,21 @@ pub(crate) fn print_health_report(
         }
         OutputFormat::Compact => {
             compact::print_health_compact(report, ctx.root);
+            compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             warn_grouping_unsupported(grouping, "compact");
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
             markdown::print_health_markdown(report, ctx.root);
+            markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
             warn_grouping_unsupported(grouping, "markdown");
             ExitCode::SUCCESS
         }
         OutputFormat::Sarif => match group_resolver {
-            Some(resolver) => sarif::print_grouped_health_sarif(report, ctx.root, resolver),
-            None => sarif::print_health_sarif(report, ctx.root),
+            Some(resolver) => {
+                sarif::print_grouped_health_sarif(report, ctx.root, resolver, ctx.type_aware)
+            }
+            None => sarif::print_health_sarif(report, ctx.root, ctx.type_aware),
         },
         OutputFormat::Json => match grouping {
             Some(grouping) => json::print_grouped_health_json(
@@ -687,11 +709,17 @@ pub(crate) fn print_health_report(
                 ctx.root,
                 ctx.elapsed,
                 ctx.explain,
+                ctx.type_aware,
                 ctx.json_style,
             ),
-            None => {
-                json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain, ctx.json_style)
-            }
+            None => json::print_health_json(
+                report,
+                ctx.root,
+                ctx.elapsed,
+                ctx.explain,
+                ctx.type_aware,
+                ctx.json_style,
+            ),
         },
         OutputFormat::CodeClimate => match group_resolver {
             Some(resolver) => {
@@ -725,7 +753,8 @@ fn print_health_github_format(
     ctx: &ReportContext<'_>,
     target: GithubTarget,
 ) -> ExitCode {
-    match json::api_health_json_document(report, ctx.root, ctx.elapsed, ctx.explain) {
+    match json::api_health_json_document(report, ctx.root, ctx.elapsed, ctx.explain, ctx.type_aware)
+    {
         Ok(envelope) => print_github_format(
             github_annotations::EnvelopeKind::Health,
             &envelope,
@@ -758,6 +787,7 @@ fn print_health_human_report(
         explain: ctx.explain,
         skip_score_and_trend: ctx.skip_score_and_trend,
         css_requested: ctx.css_requested,
+        type_aware: ctx.type_aware,
     });
     if let Some(grouping) = grouping {
         human::print_health_grouping(grouping, ctx.root, ctx.quiet);
@@ -812,6 +842,20 @@ pub(crate) fn print_export_trace(
     }
 }
 
+/// Print a syntactic export trace with its authoritative checker-backed
+/// semantic section and optional field definitions.
+pub(crate) fn print_semantic_export_trace(
+    trace: &ExportTrace,
+    format: OutputFormat,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) {
+    match format {
+        OutputFormat::Json => json::print_semantic_trace_json(trace, explain, json_style),
+        _ => human::print_export_trace_human(trace),
+    }
+}
+
 /// Print class-member trace results (the `--trace FILE:MEMBER` fallback).
 pub(crate) fn print_class_member_trace(
     trace: &fallow_engine::trace::ClassMemberTrace,
@@ -820,6 +864,20 @@ pub(crate) fn print_class_member_trace(
 ) {
     match format {
         OutputFormat::Json => json::print_trace_json(trace, json_style),
+        _ => human::print_class_member_trace_human(trace),
+    }
+}
+
+/// Print a class-member trace with authoritative checker-backed evidence and
+/// optional field definitions.
+pub(crate) fn print_semantic_class_member_trace(
+    trace: &fallow_engine::trace::ClassMemberTrace,
+    format: OutputFormat,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) {
+    match format {
+        OutputFormat::Json => json::print_semantic_trace_json(trace, explain, json_style),
         _ => human::print_class_member_trace_human(trace),
     }
 }
@@ -885,6 +943,19 @@ pub(crate) fn print_impact_closure_trace(
                 );
             }
         }
+    }
+}
+
+/// Print exact-symbol impact and targeted-test recommendations.
+pub(crate) fn print_symbol_impact(
+    impact: &SemanticSymbolImpact,
+    format: OutputFormat,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) {
+    match format {
+        OutputFormat::Json => json::print_semantic_impact_json(impact, explain, json_style),
+        _ => human::print_symbol_impact_human(impact),
     }
 }
 
@@ -986,6 +1057,8 @@ mod tests {
             elapsed: Duration::default(),
             quiet: true,
             explain: false,
+            type_aware: None,
+            type_aware_scope: None,
             group_by: None,
             top: None,
             summary: false,

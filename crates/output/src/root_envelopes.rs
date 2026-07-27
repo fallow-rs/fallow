@@ -276,6 +276,7 @@ pub enum FallowOutput<
     WalkthroughGuide,
     WalkthroughValidation,
     SuppressionInventory,
+    TypeAwareStatus,
 > {
     /// `fallow audit --format json`.
     #[serde(rename = "audit")]
@@ -358,6 +359,9 @@ pub enum FallowOutput<
     /// `fallow suppressions --format json`.
     #[serde(rename = "suppression-inventory")]
     SuppressionInventory(SuppressionInventory),
+    /// `fallow type-aware status --format json`.
+    #[serde(rename = "type-aware-status")]
+    TypeAwareStatus(TypeAwareStatus),
 }
 
 #[cfg(test)]

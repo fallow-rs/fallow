@@ -1,3 +1,5 @@
+//! Shared process-tree ownership and bounded child cleanup.
+
 use std::io;
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
@@ -5,14 +7,18 @@ use std::time::{Duration, Instant};
 const CLEANUP_GRACE: Duration = Duration::from_secs(1);
 const REAP_RETRY_GRACE: Duration = Duration::from_millis(100);
 const CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const MANAGED_PROCESS_TREE_ENV: &str = "FALLOW_MANAGED_PROCESS_TREE";
 
 /// Configure a Tokio command so its descendants can be terminated as one tree.
-pub(super) fn configure_tokio_command(command: &mut tokio::process::Command) {
+#[cfg(feature = "tokio")]
+pub fn configure_tokio_command(command: &mut tokio::process::Command) {
     configure_std_command(command.as_std_mut());
 }
 
 /// Configure a standard-library command so its descendants can be terminated as one tree.
-pub(super) fn configure_std_command(command: &mut std::process::Command) {
+pub fn configure_std_command(command: &mut std::process::Command) {
+    command.env(MANAGED_PROCESS_TREE_ENV, "1");
+
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -31,6 +37,16 @@ pub(super) fn configure_std_command(command: &mut std::process::Command) {
 
     #[cfg(not(any(unix, windows)))]
     let _ = command;
+}
+
+/// Whether this process already belongs to a tree owned by a Fallow parent.
+///
+/// Nested subprocesses must inherit that tree. Creating a second process group
+/// on Unix would let the nested group survive termination of the outer group.
+/// On Windows, normal child creation keeps the process in the inherited Job
+/// Object.
+pub fn inherits_managed_process_tree() -> bool {
+    std::env::var_os(MANAGED_PROCESS_TREE_ENV).is_some_and(|value| value == "1")
 }
 
 #[cfg(windows)]
@@ -98,7 +114,7 @@ impl Drop for WindowsJobGuard {
 }
 
 /// Platform-specific ownership needed to terminate a spawned process tree.
-pub(super) struct ProcessTree {
+pub struct ProcessTree {
     #[cfg(unix)]
     process_group_id: i32,
     #[cfg(unix)]
@@ -108,16 +124,18 @@ pub(super) struct ProcessTree {
 }
 
 impl ProcessTree {
-    #[cfg(unix)]
-    pub(super) fn for_tokio_child(child: &tokio::process::Child) -> io::Result<Self> {
+    /// Bind a freshly spawned Tokio child to its preconfigured process tree.
+    #[cfg(all(feature = "tokio", unix))]
+    pub fn for_tokio_child(child: &tokio::process::Child) -> io::Result<Self> {
         let pid = child
             .id()
             .ok_or_else(|| io::Error::other("fallow subprocess exited before setup"))?;
         Self::for_pid(pid)
     }
 
-    #[cfg(windows)]
-    pub(super) fn for_tokio_child(child: &tokio::process::Child) -> io::Result<Self> {
+    /// Bind a freshly spawned Tokio child to its preconfigured process tree.
+    #[cfg(all(feature = "tokio", windows))]
+    pub fn for_tokio_child(child: &tokio::process::Child) -> io::Result<Self> {
         let pid = child
             .id()
             .ok_or_else(|| io::Error::other("fallow subprocess exited before setup"))?;
@@ -127,30 +145,37 @@ impl ProcessTree {
         Self::for_windows_handle(handle, pid)
     }
 
-    #[cfg(not(any(unix, windows)))]
-    pub(super) fn for_tokio_child(_child: &tokio::process::Child) -> io::Result<Self> {
+    /// Bind a freshly spawned Tokio child on platforms without tree support.
+    #[cfg(all(feature = "tokio", not(any(unix, windows))))]
+    pub fn for_tokio_child(_child: &tokio::process::Child) -> io::Result<Self> {
         Ok(Self {})
     }
 
+    /// Bind a freshly spawned standard-library child to its preconfigured
+    /// process tree.
     #[cfg(unix)]
-    pub(super) fn for_std_child(child: &std::process::Child) -> io::Result<Self> {
+    pub fn for_std_child(child: &std::process::Child) -> io::Result<Self> {
         Self::for_pid(child.id())
     }
 
+    /// Bind a freshly spawned standard-library child to its preconfigured
+    /// process tree.
     #[cfg(windows)]
-    pub(super) fn for_std_child(child: &std::process::Child) -> io::Result<Self> {
+    pub fn for_std_child(child: &std::process::Child) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle;
 
         Self::for_windows_handle(child.as_raw_handle(), child.id())
     }
 
+    /// Bind a freshly spawned standard-library child on platforms without
+    /// process-tree support.
     #[cfg(not(any(unix, windows)))]
-    pub(super) fn for_std_child(_child: &std::process::Child) -> io::Result<Self> {
+    pub fn for_std_child(_child: &std::process::Child) -> io::Result<Self> {
         Ok(Self {})
     }
 
     #[cfg(unix)]
-    fn for_pid(pid: u32) -> io::Result<Self> {
+    pub(crate) fn for_pid(pid: u32) -> io::Result<Self> {
         let process_group_id = i32::try_from(pid)
             .map_err(|_| io::Error::other(format!("invalid fallow subprocess PID {pid}")))?;
         Ok(Self {
@@ -162,9 +187,14 @@ impl ProcessTree {
     #[cfg(windows)]
     #[expect(unsafe_code, reason = "Windows Job Objects require Win32 FFI calls")]
     fn for_windows_handle(process: std::os::windows::io::RawHandle, pid: u32) -> io::Result<Self> {
+        use std::mem;
         use std::ptr;
 
-        use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
 
         // SAFETY: Both pointers are null by contract, creating an unnamed job
         // with default security attributes.
@@ -173,6 +203,22 @@ impl ProcessTree {
             return Err(io::Error::last_os_error());
         }
         let job = WindowsJobGuard::new(WindowsHandle(job as isize));
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        // SAFETY: The buffer has the exact information-class layout and remains
+        // alive for the duration of this call.
+        if unsafe {
+            SetInformationJobObject(
+                job.raw()?,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                mem::size_of_val(&limits) as u32,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
 
         // SAFETY: `job` is a live handle from CreateJobObjectW and `process` is
         // borrowed from the freshly spawned child for the duration of this call.
@@ -184,12 +230,13 @@ impl ProcessTree {
         Ok(Self { job: job.disarm()? })
     }
 
+    /// Terminate the complete owned process tree.
     #[cfg(unix)]
     #[expect(
         unsafe_code,
         reason = "POSIX process-group termination requires libc::kill"
     )]
-    fn terminate(&self) -> io::Result<()> {
+    pub fn terminate(&self) -> io::Result<()> {
         // SAFETY: A negative PID targets the dedicated process group created by
         // `process_group(0)`. SIGKILL has no borrowed-memory requirements.
         if unsafe { libc::kill(-self.process_group_id, libc::SIGKILL) } == 0 {
@@ -213,8 +260,9 @@ impl ProcessTree {
         Err(error)
     }
 
-    #[cfg(unix)]
-    pub(super) async fn wait_for_exit_without_reaping(&self) -> io::Result<()> {
+    /// Wait until the child leader exits without reaping its process-group ID.
+    #[cfg(all(feature = "tokio", unix))]
+    pub async fn wait_for_exit_without_reaping(&self) -> io::Result<()> {
         loop {
             if self.has_exited_without_reaping()? {
                 return Ok(());
@@ -223,12 +271,14 @@ impl ProcessTree {
         }
     }
 
+    /// Check whether the child leader exited while preserving its process-group
+    /// identity for safe descendant cleanup.
     #[cfg(unix)]
     #[expect(
         unsafe_code,
         reason = "non-reaping POSIX child observation requires waitid"
     )]
-    pub(super) fn has_exited_without_reaping(&self) -> io::Result<bool> {
+    pub fn has_exited_without_reaping(&self) -> io::Result<bool> {
         let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
         // SAFETY: `info` points to writable storage for a siginfo_t. WNOWAIT
         // observes the dedicated child without releasing its PID or PGID.
@@ -254,12 +304,13 @@ impl ProcessTree {
         Ok(exited)
     }
 
+    /// Terminate the complete owned process tree.
     #[cfg(windows)]
     #[expect(
         unsafe_code,
         reason = "Windows Job Object termination requires a Win32 FFI call"
     )]
-    pub(super) fn terminate(&self) -> io::Result<()> {
+    pub fn terminate(&self) -> io::Result<()> {
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
 
         // SAFETY: The handle remains owned by this ProcessTree until Drop.
@@ -269,21 +320,71 @@ impl ProcessTree {
         Err(io::Error::last_os_error())
     }
 
+    /// Report that process-tree termination is unavailable.
     #[cfg(not(any(unix, windows)))]
-    pub(super) fn terminate(&self) -> io::Result<()> {
+    pub fn terminate(&self) -> io::Result<()> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "process-tree termination is unsupported on this platform",
         ))
     }
+
+    #[cfg(unix)]
+    #[expect(
+        unsafe_code,
+        reason = "POSIX process-group liveness checks require libc::kill"
+    )]
+    pub(crate) fn is_alive(&self) -> bool {
+        // SAFETY: Signal 0 checks existence without delivering a signal.
+        unsafe { libc::kill(-self.process_group_id, 0) == 0 }
+    }
+
+    #[cfg(windows)]
+    #[expect(
+        unsafe_code,
+        reason = "Windows Job Object liveness requires QueryInformationJobObject"
+    )]
+    pub(crate) fn is_alive(&self) -> bool {
+        use std::mem;
+        use std::ptr;
+
+        use windows_sys::Win32::System::JobObjects::{
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,
+            QueryInformationJobObject,
+        };
+
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: The output buffer has the requested information-class layout
+        // and remains writable for the call.
+        unsafe {
+            QueryInformationJobObject(
+                self.job.raw(),
+                JobObjectBasicAccountingInformation,
+                (&raw mut accounting).cast(),
+                mem::size_of_val(&accounting) as u32,
+                ptr::null_mut(),
+            ) != 0
+                && accounting.ActiveProcesses > 0
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    pub(crate) fn is_alive(&self) -> bool {
+        false
+    }
 }
 
-pub(super) struct ChildCleanup {
-    pub(super) status: Option<ExitStatus>,
-    pub(super) errors: Vec<String>,
+/// Outcome of a bounded child cleanup attempt.
+pub struct ChildCleanup {
+    /// Reaped child status, when it became available within the cleanup budget.
+    pub status: Option<ExitStatus>,
+    /// Cleanup diagnostics that should be attached to the caller's error.
+    pub errors: Vec<String>,
 }
 
-pub(super) async fn cleanup_tokio_child(
+#[cfg(feature = "tokio")]
+/// Terminate and reap a Tokio child with bounded retries.
+pub async fn cleanup_tokio_child(
     process_tree: Option<&ProcessTree>,
     child: &mut tokio::process::Child,
 ) -> ChildCleanup {
@@ -339,7 +440,8 @@ pub(super) async fn cleanup_tokio_child(
     ChildCleanup { status, errors }
 }
 
-pub(super) fn cleanup_std_child(
+/// Terminate and reap a standard-library child with bounded retries.
+pub fn cleanup_std_child(
     process_tree: Option<&ProcessTree>,
     child: &mut std::process::Child,
 ) -> ChildCleanup {
@@ -426,7 +528,11 @@ fn poll_std_child(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, feature = "tokio", unix))]
+#[expect(
+    clippy::expect_used,
+    reason = "test setup failures should fail at the exact setup operation"
+)]
 mod tests {
     use super::*;
 

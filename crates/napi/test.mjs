@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strict as assert } from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 import {
   computeComplexity,
@@ -13,6 +14,9 @@ import {
   detectDuplication,
   detectFeatureFlags,
 } from "./index.js";
+
+const require = createRequire(import.meta.url);
+const { typeAwareCommand } = require("./type-aware-command.js");
 
 function makeFixture() {
   const root = mkdtempSync(join(tmpdir(), "fallow-node-"));
@@ -221,6 +225,42 @@ writeFileSync(join(root, "src", "main.ts"), "export const value = 1;\n");
   });
 }
 
+function runLoaderCompanionFixture(companionVersion) {
+  const work = mkdtempSync(join(tmpdir(), "fallow-node-loader-"));
+  const packageRoot = join(work, "node_modules", "fallow-type-aware");
+  mkdirSync(packageRoot, { recursive: true });
+  writeFileSync(
+    join(work, "package.json"),
+    JSON.stringify({ name: "@fallow-cli/fallow-node", version: "3.8.0" }),
+  );
+  writeFileSync(
+    join(work, "index.js"),
+    "module.exports = { binary: process.env.FALLOW_TYPE_AWARE_BIN || null, script: process.env.FALLOW_TYPE_AWARE_SCRIPT || null };\n",
+  );
+  writeFileSync(join(work, "loader.js"), readFileSync(join(process.cwd(), "loader.js"), "utf8"));
+  writeFileSync(
+    join(work, "type-aware-command.js"),
+    readFileSync(join(process.cwd(), "type-aware-command.js"), "utf8"),
+  );
+  writeFileSync(
+    join(packageRoot, "package.json"),
+    JSON.stringify({ name: "fallow-type-aware", version: companionVersion }),
+  );
+  writeFileSync(join(packageRoot, "fallow-type-aware.mjs"), "#!/usr/bin/env node\n");
+  const {
+    FALLOW_TYPE_AWARE_BIN: _ignoredBinary,
+    FALLOW_TYPE_AWARE_SCRIPT: _ignoredScript,
+    ...env
+  } = process.env;
+  const child = spawnSync(
+    process.execPath,
+    ["-e", "process.stdout.write(JSON.stringify(require('./loader.js')))"],
+    { cwd: work, encoding: "utf8", env },
+  );
+  rmSync(work, { recursive: true, force: true });
+  return child;
+}
+
 console.log("Testing @fallow-cli/fallow-node...\n");
 
 const root = makeFixture();
@@ -347,6 +387,38 @@ writeFileSync(
   assert.equal(child.status, 0, child.stderr);
   assert.match(child.stdout, /CAUGHT:FALLOW_PANIC:FallowNodeError/);
   console.log("  [PASS] panic boundary");
+}
+
+{
+  const matching = runLoaderCompanionFixture("3.8.0");
+  assert.equal(matching.status, 0, matching.stderr);
+  const matchingCommand = JSON.parse(matching.stdout);
+  if (process.platform === "win32") {
+    assert.equal(matchingCommand.binary, process.execPath);
+    assert.match(matchingCommand.script, /fallow-type-aware\.mjs$/);
+  } else {
+    assert.match(matchingCommand.binary, /fallow-type-aware\.mjs$/);
+    assert.equal(matchingCommand.script, null);
+  }
+
+  const mismatched = runLoaderCompanionFixture("3.7.0");
+  assert.equal(mismatched.status, 0, mismatched.stderr);
+  assert.deepEqual(JSON.parse(mismatched.stdout), { binary: null, script: null });
+
+  const launchRoot = mkdtempSync(join(tmpdir(), "fallow-node-sidecar-launch-"));
+  const launchScript = join(launchRoot, "sidecar.mjs");
+  writeFileSync(launchScript, "process.stdout.write('launched');\n");
+  const windowsCommand = typeAwareCommand(launchScript, {
+    platform: "win32",
+    execPath: process.execPath,
+  });
+  const launched = spawnSync(windowsCommand.binary, [windowsCommand.script], {
+    encoding: "utf8",
+  });
+  rmSync(launchRoot, { recursive: true, force: true });
+  assert.equal(launched.status, 0, launched.stderr);
+  assert.equal(launched.stdout, "launched");
+  console.log("  [PASS] type-aware companion loader");
 }
 
 {

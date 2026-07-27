@@ -29,6 +29,7 @@ pub(in crate::report) struct PrintHealthHumanInput<'a> {
     /// Whether `--css` was requested. Drives the empty-CSS explanatory note when
     /// no stylesheet was import-reachable; defaults `false` for non-css callers.
     pub(in crate::report) css_requested: bool,
+    pub(in crate::report) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
 }
 
 pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
@@ -40,6 +41,9 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
     let explain = input.explain;
     let skip_score_and_trend = input.skip_score_and_trend;
     let css_requested = input.css_requested;
+    let type_coupling = input
+        .type_aware
+        .and_then(|meta| meta.type_coupling.as_ref());
     if !quiet {
         eprintln!();
     }
@@ -55,6 +59,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         && report.threshold_overrides.is_empty()
         && report.css_analytics.is_none()
         && !css_requested
+        && type_coupling.is_none()
         && !has_score
     {
         print_health_empty_state(report, elapsed, quiet);
@@ -77,13 +82,30 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         explain,
         skip_score_and_trend,
         css_requested,
+        input.type_aware,
     );
     for line in lines {
         outln!("{line}");
     }
 
     if !quiet {
-        print_health_final_status(report, elapsed);
+        if type_coupling.is_some()
+            && report.findings.is_empty()
+            && report.coverage_gaps.is_none()
+            && report.runtime_coverage.is_none()
+        {
+            eprintln!(
+                "{}",
+                format!(
+                    "\u{2713} Type coupling analyzed ({:.2}s)",
+                    elapsed.as_secs_f64()
+                )
+                .green()
+                .bold()
+            );
+        } else {
+            print_health_final_status(report, elapsed);
+        }
     }
 }
 
@@ -158,7 +180,7 @@ fn print_health_final_status(report: &fallow_output::HealthReport, elapsed: Dura
 ///
 #[cfg(test)]
 fn build_health_human_lines(report: &fallow_output::HealthReport, root: &Path) -> Vec<String> {
-    build_health_human_lines_with_explain(report, root, false, false, false)
+    build_health_human_lines_with_explain(report, root, false, false, false, None)
 }
 
 fn build_health_human_lines_with_explain(
@@ -167,6 +189,7 @@ fn build_health_human_lines_with_explain(
     explain: bool,
     skip_score_and_trend: bool,
     css_requested: bool,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     if !skip_score_and_trend {
@@ -177,6 +200,7 @@ fn build_health_human_lines_with_explain(
     render_coverage_intelligence(&mut lines, report, root);
     render_vital_signs(&mut lines, report);
     render_risk_profiles(&mut lines, report);
+    render_type_coupling(&mut lines, type_aware);
     render_render_fan_in(&mut lines, report);
     render_large_functions(&mut lines, report, root);
     render_findings(&mut lines, report, root);
@@ -190,6 +214,70 @@ fn build_health_human_lines_with_explain(
         inject_explain_blocks(lines)
     } else {
         lines
+    }
+}
+
+fn render_type_coupling(
+    lines: &mut Vec<String>,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+) {
+    let Some(coupling) = type_aware.and_then(|meta| meta.type_coupling.as_ref()) else {
+        return;
+    };
+    lines.push(String::new());
+    lines.push("Type coupling".bold().to_string());
+    lines.push(format!(
+        "  {}",
+        crate::report::human_status_line(
+            crate::report::semantic_status(coupling.status),
+            format_args!("Proof: {} ({:?})", coupling.assertion, coupling.status)
+        )
+    ));
+    if let Some(summary) = &coupling.summary {
+        lines.push(format!(
+            "  Scope: {}, {}, {} of {} files coupled ({:.1}%), {} edges",
+            summary.scope,
+            summary.direction,
+            summary.distinct_coupled_files,
+            summary.project_size,
+            summary.coupled_file_pct,
+            summary.edge_count
+        ));
+        lines.push(format!(
+            "  Connections: p50 {:.1}, p90 {:.1}; public API depends on: p95 {:.1}, public types used by: p95 {:.1}",
+            summary.p50_distinct_connections,
+            summary.p90_distinct_connections,
+            summary.p95_public_api_depends_on,
+            summary.p95_public_types_used_by
+        ));
+        lines.push(format!(
+            "  High coupling: {:.1}%, top concentration: {:.1}%, type cycles: {}",
+            summary.high_coupling_pct,
+            summary.concentration * 100.0,
+            summary.cycle_count
+        ));
+    }
+    for file in coupling.top_contributors.iter().take(10) {
+        lines.push(format!(
+            "    {}: depends on {}, used by {}",
+            file.path.display(),
+            file.public_api_depends_on,
+            file.public_types_used_by
+        ));
+    }
+    for cycle in coupling.cycles.iter().take(5) {
+        lines.push(format!(
+            "    Cycle: {}",
+            cycle
+                .files
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        ));
+    }
+    for action in &coupling.actions {
+        lines.push(format!("  Next: {action}"));
     }
 }
 

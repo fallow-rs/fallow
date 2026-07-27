@@ -13,7 +13,12 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+use crate::semantic::{
+    ApiSurfaceResult, SemanticAnalysisIdentity, SemanticCandidateDecision, SemanticGapReason,
+    SemanticQuerySummary, SemanticSymbolImpact, SemanticSymbolTrace, TypeCouplingReport,
+};
 
 /// Schema version for this output format (independent of tool version). Bump
 /// policy: ADDITIVE changes (new optional top-level fields, new optional struct
@@ -60,7 +65,7 @@ pub struct ElapsedMs(pub u64);
 ///
 /// Outside of audit sub-results the field is omitted, so call sites typically
 /// hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct AuditIntroduced(pub bool);
@@ -304,6 +309,9 @@ pub struct Meta {
     /// Local telemetry correlation metadata for agent follow-up runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryMeta>,
+    /// Provenance for the opt-in TypeScript semantic analysis pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_aware: Option<TypeAwareMeta>,
     /// Per-field definitions for envelope fields and action payload fields.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub field_definitions: BTreeMap<String, String>,
@@ -313,6 +321,213 @@ pub struct Meta {
     /// Per-rule definitions for check command output.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rules: BTreeMap<String, MetaRule>,
+}
+
+/// Bounded provenance emitted when the opt-in type-aware pass runs.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwareMeta {
+    /// Compatibility identity used by audit, baselines, snapshots, and stores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<SemanticAnalysisIdentity>,
+    /// Effective CLI or repository policy for incomplete semantic evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_completeness: Option<crate::semantic::SemanticCompletenessRequirement>,
+    /// Compact status for every requested semantic query.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<SemanticQuerySummary>,
+    /// Bounded decision and evidence for each semantic dead-code candidate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_decisions: Vec<SemanticCandidateDecision>,
+    /// Checker-backed trace evidence requested by focused symbol queries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbol_traces: Vec<SemanticSymbolTrace>,
+    /// Package-public surface and confirmed private type leaks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_surface: Option<ApiSurfaceResult>,
+    /// Exact-symbol blast radius and targeted-test recommendations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbol_impacts: Vec<SemanticSymbolImpact>,
+    /// Advisory project-local public-signature coupling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_coupling: Option<TypeCouplingReport>,
+    /// Whether the semantic companion executed at least one query.
+    pub executed: bool,
+    /// Version of Fallow's backend-neutral sidecar protocol.
+    pub protocol_version: u32,
+    /// Version of the sidecar package that executed the query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar_version: Option<String>,
+    /// Semantic backend capability identifier.
+    pub backend: String,
+    /// Backend compiler or engine version that executed the query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_version: Option<String>,
+    /// TypeScript project configs selected for candidate files.
+    pub selected_tsconfigs: Vec<String>,
+    /// Number of candidate findings sent to the sidecar.
+    pub candidate_count: usize,
+    /// Number of candidates confirmed as used and removed.
+    pub confirmed_used_count: usize,
+    /// Number of candidates preserved because they implement or override a contract.
+    pub contract_preserved_count: usize,
+    /// Number of candidates with complete, closed-world no-static-reference evidence.
+    pub no_static_references_count: usize,
+    /// Number of retained class members eligible for a guarded type-aware fix.
+    pub fix_eligible_count: usize,
+    /// Number of candidates retained because semantic use was unresolved.
+    pub unresolved_count: usize,
+    /// Number of candidates retained because semantic analysis abstained.
+    pub abstained_count: usize,
+    /// Stable abstention reason counts for automation and diagnostics.
+    pub abstention_reasons: TypeAwareAbstentionCounts,
+    /// Per-project semantic refinement status and evidence.
+    pub projects: Vec<TypeAwareProjectMeta>,
+    /// Number of bounded warnings returned by the sidecar.
+    pub warning_count: usize,
+    /// Bounded semantic warnings. Findings mentioned here were retained.
+    pub warnings: Vec<String>,
+    /// Semantic pass duration as reported by the sidecar.
+    pub elapsed_ms: u64,
+    /// Bounded semantic phase timings reported by the sidecar.
+    pub phase_timings_ms: TypeAwarePhaseTimings,
+}
+
+/// Closed set of reasons for retaining a candidate without semantic scanning.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareAbstentionReason {
+    /// No selected TypeScript project contains the candidate file.
+    #[default]
+    NoProject,
+    /// Multiple explicit TypeScript projects contain the candidate file.
+    AmbiguousProject,
+    /// Structural TypeScript diagnostics make exact matching unsafe.
+    BlockingDiagnostics,
+}
+
+/// Closed abstention reason counts for stable machine consumption.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwareAbstentionCounts {
+    /// Candidates not contained by a selected TypeScript project.
+    pub no_project: usize,
+    /// Candidates contained by more than one explicit TypeScript project.
+    pub ambiguous_project: usize,
+    /// Candidates retained because structural diagnostics block scanning.
+    pub blocking_diagnostics: usize,
+    /// Candidates whose exact declaration identity could not be resolved.
+    pub unknown_symbol: usize,
+    /// Candidates using declaration syntax unsupported by the semantic backend.
+    pub unsupported_syntax: usize,
+    /// Candidates retained because the bounded semantic request reached capacity.
+    pub capacity: usize,
+}
+
+/// How a TypeScript project was selected for semantic refinement.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareProjectSource {
+    /// Fallow selected the nearest discovered project automatically.
+    #[default]
+    Auto,
+    /// The project was supplied with `--type-aware-project`.
+    Explicit,
+}
+
+/// Outcome of semantic refinement for one TypeScript project.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareProjectStatus {
+    /// The project was structurally safe and its candidates were scanned.
+    #[default]
+    Refined,
+    /// Structural diagnostics prevented candidate scanning.
+    Abstained,
+    /// All semantic queries assigned to this Program completed.
+    Complete,
+    /// The Program could not answer its assigned semantic queries safely.
+    Unavailable,
+}
+
+/// How a persistent semantic snapshot was refreshed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareInvalidationKind {
+    /// The backend rebuilt project state from a clean snapshot.
+    Full,
+    /// The backend applied an explicit source-file change set.
+    Incremental,
+    /// No filesystem change was reported between compatible requests.
+    None,
+}
+
+/// Semantic sidecar timings, separated from Fallow's syntactic pipeline.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwarePhaseTimings {
+    /// TypeScript API construction and project snapshot selection.
+    pub project_setup: u64,
+    /// TypeScript diagnostics collected before any candidate refinement.
+    pub diagnostics: u64,
+    /// Batched symbol lookup and exact declaration matching.
+    pub symbol_scan: u64,
+}
+
+/// Bounded provenance for one TypeScript project handled by the sidecar.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwareProjectMeta {
+    /// Project config relative to the analysis root, or `<inferred>`.
+    pub config: String,
+    /// How the project was selected: `auto` or `explicit`.
+    pub source: TypeAwareProjectSource,
+    /// Project result: `refined`, `abstained`, `complete`, or `unavailable`.
+    pub status: TypeAwareProjectStatus,
+    /// Candidates assigned to this project.
+    pub candidate_count: usize,
+    /// Candidates confirmed as used and removed.
+    pub confirmed_used_count: usize,
+    /// Candidates retained because they implement or override a contract.
+    pub contract_preserved_count: usize,
+    /// Candidates with complete no-static-reference evidence.
+    pub no_static_references_count: usize,
+    /// Candidates eligible for a guarded class-member fix.
+    pub fix_eligible_count: usize,
+    /// Candidates whose exact semantic outcome remained unresolved.
+    pub unresolved_count: usize,
+    /// Candidates retained without scanning because the project was unsafe.
+    pub abstained_count: usize,
+    /// Config, program, syntactic, and bind diagnostics that block scanning.
+    pub blocking_diagnostic_count: usize,
+    /// Source files loaded into this TypeScript program.
+    pub source_file_count: usize,
+    /// Whether this Program served more than one semantic query in the batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_reused: Option<bool>,
+    /// Whether this Program served more than one query in the current batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_shared_across_queries: Option<bool>,
+    /// Whether the root-bound semantic session reused the prior snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_reused_from_previous_snapshot: Option<bool>,
+    /// Monotonic revision within the root-bound semantic session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_revision: Option<u64>,
+    /// Full, incremental, or no invalidation before this query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invalidation_kind: Option<TypeAwareInvalidationKind>,
+    /// Stable project-level gap reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<SemanticGapReason>,
+    /// Stable reason code when `status` is `abstained`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "TypeAwareAbstentionReason"))]
+    pub abstain_reason: Option<TypeAwareAbstentionReason>,
 }
 
 /// Privacy-safe local run metadata emitted for JSON consumers.

@@ -512,8 +512,9 @@ const renderCommandFlags = (schema, existing, sectionId) => {
   const config = CLI_REFERENCE_FLAG_SECTIONS[sectionId];
   const command = commandByName(schema, config.command);
   const issueFilters = issueFilterSet(schema, config);
+  const excludedFlags = new Set(config.excludedFlags ?? []);
   const flags = nonArgumentFlags(command.flags ?? []).filter(
-    (flag) => !issueFilters.has(flag.name),
+    (flag) => !issueFilters.has(flag.name) && !excludedFlags.has(flag.name),
   );
   const table = renderTable(["Flag", "Type", "Default", "Description"], flagRows(flags, existing));
   return `${table}${globalFlagNote(schema, config.globalRefs)}`;

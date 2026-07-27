@@ -435,6 +435,46 @@ impl EditorAnalysisSession {
         self.inner.config_path()
     }
 
+    /// Refine this editor session's dead-code findings with exact TypeScript
+    /// symbol evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns a programmatic error when the semantic companion cannot provide
+    /// the requested analysis contract.
+    pub fn refine_type_aware_dead_code(
+        &self,
+        options: &crate::TypeAwareOptions,
+        filters: &crate::DeadCodeFilters,
+        output: &mut EditorDeadCodeAnalysisOutput,
+    ) -> Result<Option<fallow_types::envelope::TypeAwareMeta>, crate::ProgrammaticError> {
+        crate::type_aware::refine_programmatic_dead_code(
+            options,
+            filters,
+            &self.inner,
+            &mut output.results,
+        )
+    }
+
+    /// Refine editor findings through a root-bound persistent semantic session.
+    pub fn refine_type_aware_dead_code_in_session(
+        &self,
+        semantic_session: &mut crate::TypeAwareSession,
+        changes: Option<&crate::TypeAwareFileChanges>,
+        options: &crate::TypeAwareOptions,
+        filters: &crate::DeadCodeFilters,
+        output: &mut EditorDeadCodeAnalysisOutput,
+    ) -> Result<Option<fallow_types::envelope::TypeAwareMeta>, crate::ProgrammaticError> {
+        crate::type_aware::refine_programmatic_dead_code_in_session(
+            semantic_session,
+            changes,
+            options,
+            filters,
+            &self.inner,
+            &mut output.results,
+        )
+    }
+
     /// Run dead-code and duplication analysis for this editor session.
     ///
     /// # Errors

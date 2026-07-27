@@ -8,8 +8,9 @@ use crate::params::{
     DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
     GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactClosureParams,
     ImpactParams, InspectTargetParams, ListBoundariesParams, ListSuppressionsParams,
-    ProjectInfoParams, RecommendParams, SecurityCandidatesParams, TraceCloneParams,
-    TraceDependencyParams, TraceExportParams, TraceFileParams,
+    ProjectInfoParams, RecommendParams, SecurityCandidatesParams, SemanticImpactParams,
+    SemanticSymbolParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
+    TraceFileParams,
 };
 use crate::tools::{
     execute_code_mode, inspect_target, run_analyze, run_audit, run_check_changed,
@@ -18,7 +19,8 @@ use crate::tools::{
     run_get_cleanup_candidates, run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
     run_guard, run_health, run_impact, run_impact_all, run_impact_closure, run_list_boundaries,
     run_list_suppressions, run_project_info, run_recommend, run_security_candidates,
-    run_trace_clone_tool, run_trace_dependency_tool, run_trace_export_tool, run_trace_file_tool,
+    run_symbol_impact, run_symbol_trace, run_trace_clone_tool, run_trace_dependency_tool,
+    run_trace_export_tool, run_trace_file_tool,
 };
 
 #[cfg(test)]
@@ -178,6 +180,24 @@ impl FallowMcp {
         params: Parameters<TraceExportParams>,
     ) -> Result<CallToolResult, McpError> {
         run_trace_export_tool(params.0).await
+    }
+
+    /// Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat `semantic.references`, `semantic.status`, and `semantic.identity` as the authoritative exact evidence. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface.
+    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    async fn trace_symbol(
+        &self,
+        params: Parameters<SemanticSymbolParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_symbol_trace(&self.binary, params.0).await
+    }
+
+    /// Return exact-symbol consumers, transitive affected files, and targeted tests for a TypeScript export or exported class method. Select either export_name, or both class_name and member_name. The result is advisory project-impact evidence and does not duplicate tsc or Oxlint diagnostics.
+    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    async fn symbol_impact(
+        &self,
+        params: Parameters<SemanticImpactParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_symbol_impact(&self.binary, params.0).await
     }
 
     /// Trace a file's graph context. Returns whether the file is reachable or an entry point, what it exports, what it imports, what imports it, and which re-exports it declares. Use this to understand whether a file is isolated, barrel-only, or imported by live entry points.

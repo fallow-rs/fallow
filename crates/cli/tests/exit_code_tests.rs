@@ -1104,7 +1104,7 @@ fn regression_baseline_schema_mismatch_json_format_emits_structured_error_envelo
         .as_str()
         .expect("message should be a string");
     assert!(msg.contains("schema_version 99"), "msg: {msg}");
-    assert!(msg.contains("expects 1"), "msg: {msg}");
+    assert!(msg.contains("expects 2"), "msg: {msg}");
     assert!(msg.contains("fallow 9.9.9"), "msg: {msg}");
     assert!(
         msg.contains("fallow dead-code --save-regression-baseline"),

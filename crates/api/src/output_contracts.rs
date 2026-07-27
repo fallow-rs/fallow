@@ -52,6 +52,28 @@ pub type SecuritySummaryOutput =
 
 pub type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
 
+#[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum TraceOutput {
+    Export(Box<fallow_types::trace::ExportTrace>),
+    ClassMember(Box<fallow_types::trace::ClassMemberTrace>),
+    File(Box<fallow_types::trace::FileTrace>),
+    Dependency(Box<fallow_types::trace::DependencyTrace>),
+    Clone(Box<fallow_types::trace::CloneTrace>),
+    ImpactClosure(Box<fallow_types::trace::ImpactClosureTrace>),
+    SymbolChain(Box<fallow_types::trace_chain::SymbolChainTrace>),
+    SemanticSymbol(Box<fallow_types::semantic::SemanticSymbolTrace>),
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum ImpactOutput {
+    Project(Box<fallow_output::ImpactReport>),
+    SemanticSymbol(Box<fallow_types::semantic::SemanticSymbolImpact>),
+}
+
 #[allow(
     clippy::type_complexity,
     reason = "the concrete review brief contract names every typed wire section"
@@ -77,7 +99,7 @@ pub type FallowOutput = fallow_output::FallowOutput<
     AuditOutput,
     fallow_output::ExplainOutput,
     fallow_output::InspectOutput,
-    fallow_types::trace_chain::SymbolChainTrace,
+    TraceOutput,
     fallow_output::ReviewEnvelopeOutput,
     fallow_output::ReviewReconcileOutput,
     fallow_output::CoverageSetupOutput,
@@ -87,7 +109,7 @@ pub type FallowOutput = fallow_output::FallowOutput<
     fallow_output::HealthOutput<fallow_output::HealthReport, fallow_output::HealthGroup>,
     fallow_output::DupesOutput<crate::DupesReportPayload, crate::DuplicationGroup>,
     fallow_output::CheckGroupedOutput,
-    fallow_output::ImpactReport,
+    ImpactOutput,
     fallow_output::CrossRepoImpactReport,
     SecuritySummaryOutput,
     SecurityOutput,
@@ -101,4 +123,5 @@ pub type FallowOutput = fallow_output::FallowOutput<
     fallow_output::StandardWalkthroughGuide,
     fallow_output::WalkthroughValidation,
     fallow_output::SuppressionInventoryOutput,
+    fallow_output::TypeAwareStatusOutput,
 >;

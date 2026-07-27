@@ -64,6 +64,7 @@ pub struct AuditJsonHeaderInput {
 /// Typed audit JSON assembly input.
 pub struct AuditJsonOutputInput<DeadCode, Duplication, Complexity> {
     pub header: AuditJsonHeaderInput,
+    pub meta: Option<fallow_types::envelope::Meta>,
     pub dead_code: Option<DeadCode>,
     pub duplication: Option<Duplication>,
     pub complexity: Option<Complexity>,
@@ -200,7 +201,7 @@ where
         base_snapshot_skipped: header.base_snapshot_skipped,
         summary: header.summary,
         attribution: header.attribution,
-        meta: None,
+        meta: input.meta,
         dead_code: input.dead_code,
         duplication: input.duplication,
         complexity,
@@ -385,6 +386,7 @@ mod tests {
         let value = serialize_audit_json(
             AuditJsonOutputInput {
                 header: header_input(),
+                meta: None,
                 dead_code: Some(serde_json::json!({"total_issues": 0})),
                 duplication: None::<serde_json::Value>,
                 complexity: None::<serde_json::Value>,

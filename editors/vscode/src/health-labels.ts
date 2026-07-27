@@ -9,13 +9,14 @@
  * findings are measured and framed plainly.
  */
 
-export type HealthSection = "score" | "complexity" | "hotspots" | "targets";
+export type HealthSection = "score" | "complexity" | "hotspots" | "targets" | "typeCoupling";
 
 export const HEALTH_SECTION_LABELS: Record<HealthSection, string> = {
   score: "Score",
   complexity: "Complexity",
   hotspots: "Hotspot Candidates",
   targets: "Refactoring Candidates",
+  typeCoupling: "Type Coupling",
 };
 
 /** Codicon for each health section header. */
@@ -24,4 +25,5 @@ export const HEALTH_SECTION_ICONS: Record<HealthSection, string> = {
   complexity: "flame",
   hotspots: "git-commit",
   targets: "tools",
+  typeCoupling: "references",
 };

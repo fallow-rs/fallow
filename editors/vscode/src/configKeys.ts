@@ -6,6 +6,7 @@ export const RESTART_CONFIG_KEYS = [
   "fallow.issueTypes",
   "fallow.changedSince",
   "fallow.duplication",
+  "fallow.typeAware",
   // `fallow.production` is forwarded to the LSP via initializationOptions, which
   // the server only reads at startup, so a change must restart it (issue #1055).
   "fallow.production",
@@ -26,6 +27,7 @@ export const REANALYSIS_CONFIG_KEYS = [
   "fallow.duplication",
   "fallow.issueTypes",
   "fallow.changedSince",
+  "fallow.typeAware",
   // A pinned workspace-scope change re-runs the dead-code/dupes sidebar + status
   // bar so they reflect the new scope. Deliberately NOT in RESTART_CONFIG_KEYS:
   // the LSP is not workspace-scoped, so a workspace change must not restart it.
@@ -46,6 +48,7 @@ export const HEALTH_CONFIG_KEYS = [
   // re-run is needed. `afterText` is render-only and handled separately.
   "fallow.complexity.breakdownEnabled",
   "fallow.complexity.decorationCap",
+  "fallow.typeAware",
 ] as const;
 
 export const DIAGNOSTIC_RENDER_CONFIG_KEYS = ["fallow.diagnostics.severity"] as const;

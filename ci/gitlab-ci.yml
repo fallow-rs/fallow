@@ -87,6 +87,9 @@ variables:
   FALLOW_FAIL_ON_ISSUES: "true"
   FALLOW_MIN_SEVERITY: ""       # Only fail at or above this complexity severity ('moderate'|'high'|'critical'); empty applies all severities
   FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports
+  FALLOW_TYPE_AWARE: ""                  # true/false overrides repository typeAware.enabled; empty defers to config
+  FALLOW_TYPE_AWARE_PROJECTS: ""         # Comma-separated tsconfig paths; empty uses automatic project discovery
+  FALLOW_TYPE_AWARE_REQUIRE: ""           # best-effort or complete; empty defers to repository typeAware.require
   FALLOW_ARGS: ""               # Extra CLI arguments (space-separated)
   FALLOW_COMMENT: "false"       # Post results as MR summary comment
   FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions
@@ -458,8 +461,8 @@ variables:
       fi
 
       # ── Build CLI arguments ──────────────────────────────────────────
-      # Primary run uses --format json; CodeClimate report is generated via
-      # a second run with --format codeclimate when FALLOW_CODEQUALITY=true.
+      # Analyze once as JSON. Secondary CI formats are rendered from that
+      # artifact so semantic and syntactic findings cannot drift between runs.
       ARGS=()
       [ -n "$FALLOW_COMMAND" ] && ARGS+=("$FALLOW_COMMAND")
       ARGS+=(--root "$FALLOW_ROOT" --quiet --format json)
@@ -478,6 +481,42 @@ variables:
       [ -n "$FALLOW_CHANGED_WORKSPACES" ] && ARGS+=(--changed-workspaces "$FALLOW_CHANGED_WORKSPACES")
       [ "$FALLOW_NO_CACHE" = "true" ]   && ARGS+=(--no-cache)
       [ -n "$FALLOW_THREADS" ]          && ARGS+=(--threads "$FALLOW_THREADS")
+
+      TYPE_AWARE_CLI_ENABLED=false
+      if [ "$FALLOW_TYPE_AWARE" = "false" ] && \
+         { [ -n "$FALLOW_TYPE_AWARE_PROJECTS" ] || [ -n "$FALLOW_TYPE_AWARE_REQUIRE" ]; }; then
+        echo "ERROR: FALLOW_TYPE_AWARE=false conflicts with type-aware projects or completeness policy."
+        exit 2
+      fi
+      if [ "$FALLOW_TYPE_AWARE" = "true" ]; then
+        ARGS+=(--type-aware)
+        TYPE_AWARE_CLI_ENABLED=true
+      fi
+      if [ -n "$FALLOW_TYPE_AWARE_PROJECTS" ]; then
+        if [ "$TYPE_AWARE_CLI_ENABLED" != "true" ]; then
+          ARGS+=(--type-aware)
+          TYPE_AWARE_CLI_ENABLED=true
+        fi
+        IFS=',' read -ra TYPE_AWARE_PROJECTS <<< "$FALLOW_TYPE_AWARE_PROJECTS"
+        for project in "${TYPE_AWARE_PROJECTS[@]}"; do
+          project="$(echo "$project" | xargs)"
+          [ -n "$project" ] && ARGS+=(--type-aware-project "$project")
+        done
+      fi
+      if [ -n "$FALLOW_TYPE_AWARE_REQUIRE" ]; then
+        if [ "$TYPE_AWARE_CLI_ENABLED" != "true" ]; then
+          ARGS+=(--type-aware)
+          TYPE_AWARE_CLI_ENABLED=true
+        fi
+        ARGS+=(--type-aware-require "$FALLOW_TYPE_AWARE_REQUIRE")
+      fi
+
+      # Empty GitLab variables are still exported. Remove them so the CLI can
+      # distinguish "unset, defer to repository config" from an invalid empty
+      # environment override. Explicit false remains exported to disable a
+      # repository-level typeAware.enabled setting.
+      [ -z "$FALLOW_TYPE_AWARE" ] && unset FALLOW_TYPE_AWARE
+      unset FALLOW_TYPE_AWARE_PROJECTS FALLOW_TYPE_AWARE_REQUIRE
 
       if [ -z "$FALLOW_COMMAND" ]; then
         [ -n "$FALLOW_ONLY" ] && ARGS+=(--only "$FALLOW_ONLY")
@@ -589,19 +628,40 @@ variables:
       } > fallow-analysis-args.sh
 
       echo "Running: fallow ${RUN_ARGS[*]}"
-      if ! fallow "${RUN_ARGS[@]}" > fallow-results.json 2> fallow-stderr.log; then
-        if [ ! -s fallow-results.json ] || ! jq -e '.' fallow-results.json > /dev/null 2>&1; then
-          echo "ERROR: Fallow failed to run"
-          [ -s fallow-stderr.log ] && cat fallow-stderr.log
-          [ -s fallow-results.json ] && cat fallow-results.json
-          exit 2
-        fi
+      set +e
+      fallow "${RUN_ARGS[@]}" > fallow-results.json 2> fallow-stderr.log
+      FALLOW_EXIT_CODE=$?
+      set -e
+      if [ "$FALLOW_EXIT_CODE" -ne 0 ] && \
+         { [ ! -s fallow-results.json ] || ! jq -e '.' fallow-results.json > /dev/null 2>&1; }; then
+        echo "ERROR: Fallow failed to run"
+        [ -s fallow-stderr.log ] && cat fallow-stderr.log
+        [ -s fallow-results.json ] && cat fallow-results.json
+        exit 2
       fi
       if jq -e '.error == true' fallow-results.json > /dev/null 2>&1; then
         MESSAGE=$(jq -r '.message // "Fallow failed"' fallow-results.json)
         EXIT_CODE=$(jq -r '.exit_code // 2' fallow-results.json)
         echo "ERROR: ${MESSAGE}"
         exit "$EXIT_CODE"
+      fi
+
+      if [ "$FALLOW_EXIT_CODE" -ne 0 ] && jq -e '
+        (
+          ._meta.type_aware
+          // ._meta.check.type_aware
+          // .check._meta.type_aware
+          // .dead_code._meta.type_aware
+          // empty
+        ) as $type_aware
+        | ($type_aware.required_completeness == "complete")
+          and (
+            ($type_aware.identity.completeness != "complete")
+            or ([ $type_aware.queries[]? | select(.status != "complete") ] | length > 0)
+          )
+      ' fallow-results.json > /dev/null 2>&1; then
+        echo "ERROR: Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+        exit 1
       fi
 
       if [ -s fallow-stderr.log ]; then
@@ -637,28 +697,20 @@ variables:
       echo "Found ${ISSUES} issues"
 
       # ── GitLab Code Quality report (CodeClimate format) ──────────────
-      # Uses fallow's native --format codeclimate for inline MR annotations.
+      # Re-renders the saved JSON envelope for inline MR annotations.
       if [ "$FALLOW_CODEQUALITY" = "true" ] && [ "$FALLOW_COMMAND" != "fix" ] && [ "$FALLOW_COMMAND" != "security" ]; then
         echo "Generating Code Quality report..."
-        # Re-run with --format codeclimate instead of json
-        CQ_ARGS=()
-        for arg in "${ARGS[@]}"; do
-          if [ "$arg" = "json" ] && [ "${prev_arg:-}" = "--format" ]; then
-            CQ_ARGS+=("codeclimate")
-          else
-            CQ_ARGS+=("$arg")
-          fi
-          prev_arg="$arg"
-        done
-        CQ_RUN_ARGS=("${CQ_ARGS[@]}")
-        if [ -n "$FALLOW_ARGS" ]; then
-          CQ_RUN_ARGS+=("${EXTRA_ARGS[@]}")
-        fi
-        # A findings exit code is still a valid CodeClimate report. Fall back
-        # only when the report file is empty, malformed, or not a JSON array.
-        fallow "${CQ_RUN_ARGS[@]}" > gl-code-quality-report.json 2>/dev/null || true
+        REPORT_ARGS=(report --from fallow-results.json --root "$FALLOW_ROOT" --format codeclimate --quiet)
+        [ -n "$FALLOW_CONFIG" ] && REPORT_ARGS+=(--config "$FALLOW_CONFIG")
+        set +e
+        fallow "${REPORT_ARGS[@]}" > gl-code-quality-report.json 2> fallow-codequality-stderr.log
+        CODEQUALITY_EXIT=$?
+        set -e
         if [ ! -s gl-code-quality-report.json ] || ! jq -e 'type == "array"' gl-code-quality-report.json > /dev/null 2>&1; then
-          echo "[]" > gl-code-quality-report.json
+          echo "ERROR: GitLab Code Quality rendering failed."
+          [ -s fallow-codequality-stderr.log ] && cat fallow-codequality-stderr.log
+          [ "$CODEQUALITY_EXIT" -ne 0 ] || CODEQUALITY_EXIT=2
+          exit "$CODEQUALITY_EXIT"
         fi
         CQ_COUNT=$(jq '. | length' gl-code-quality-report.json 2>/dev/null || echo 0)
         echo "Code Quality report: ${CQ_COUNT} findings"

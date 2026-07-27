@@ -24,7 +24,7 @@ update_optional_deps() {
     pkg.version = '$VERSION';
     if (pkg.optionalDependencies) {
       for (const key of Object.keys(pkg.optionalDependencies)) {
-        if (key.startsWith('@fallow-cli/')) {
+        if (key.startsWith('@fallow-cli/') || key === 'fallow-type-aware') {
           pkg.optionalDependencies[key] = '$VERSION';
         }
       }
@@ -33,7 +33,7 @@ update_optional_deps() {
   "
 }
 
-update_napi_lockfile() {
+update_package_lockfile() {
   node -e "
     const fs = require('fs');
     const lockPath = '$1';
@@ -43,7 +43,7 @@ update_napi_lockfile() {
       lock.packages[''].version = '$VERSION';
       if (lock.packages[''].optionalDependencies) {
         for (const key of Object.keys(lock.packages[''].optionalDependencies)) {
-          if (key.startsWith('@fallow-cli/fallow-node')) {
+          if (key.startsWith('@fallow-cli/fallow-node') || key === 'fallow-type-aware') {
             lock.packages[''].optionalDependencies[key] = '$VERSION';
           }
         }
@@ -85,8 +85,16 @@ echo "  Updated fallow/package.json → $VERSION"
 update_optional_deps "$ROOT/crates/napi/package.json"
 echo "  Updated crates/napi/package.json → $VERSION"
 
+update_version "$ROOT/tools/type-aware-sidecar/package.json"
+echo "  Updated tools/type-aware-sidecar/package.json → $VERSION"
+
+if [ -f "$ROOT/tools/type-aware-sidecar/package-lock.json" ]; then
+  update_package_lockfile "$ROOT/tools/type-aware-sidecar/package-lock.json"
+  echo "  Updated tools/type-aware-sidecar/package-lock.json → $VERSION"
+fi
+
 if [ -f "$ROOT/crates/napi/package-lock.json" ]; then
-  update_napi_lockfile "$ROOT/crates/napi/package-lock.json"
+  update_package_lockfile "$ROOT/crates/napi/package-lock.json"
   echo "  Updated crates/napi/package-lock.json → $VERSION"
 fi
 

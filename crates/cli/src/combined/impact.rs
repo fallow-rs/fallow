@@ -66,19 +66,20 @@ fn combined_git_sha(root: &std::path::Path) -> Option<String> {
 /// AND this is a genuine whole-project run. Builds whole-project counts plus a
 /// `Scope::WholeProject` attribution input (sharing the same `active_suppressions`
 /// snapshot audit uses, so a suppressed-but-unchanged finding is credited
-/// suppressed, never resolved). Swallows everything: never touches exit/output.
+/// suppressed, never resolved). Incompatible identities skip the write so local
+/// value tracking can never change analysis output or exit behavior.
 pub(super) fn record_combined_impact(
     opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
-) {
+) -> Result<(), String> {
     if !is_whole_project_run(opts) {
-        return;
+        return Ok(());
     }
     let (Some(check), Some(dupes), Some(health)) = (check_result, dupes_result, health_result)
     else {
-        return;
+        return Ok(());
     };
 
     let dead_code = check.results.total_issues();
@@ -99,6 +100,11 @@ pub(super) fn record_combined_impact(
         suppressions,
     };
 
+    let analysis_identity = check
+        .type_aware_meta
+        .as_ref()
+        .and_then(|meta| meta.identity.clone())
+        .unwrap_or_default();
     crate::impact::record_combined_run(
         opts.root,
         counts,
@@ -106,5 +112,6 @@ pub(super) fn record_combined_impact(
         env!("CARGO_PKG_VERSION"),
         &crate::vital_signs::chrono_timestamp(),
         Some(&attribution),
-    );
+        &analysis_identity,
+    )
 }

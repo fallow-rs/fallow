@@ -24,6 +24,7 @@ path = "src/main.rs"
 rmcp = { version = "2.0", features = ["transport-io"] }
 rquickjs = "0.12"
 fallow-api.workspace = true
+fallow-process = { workspace = true, features = ["tokio"] }
 fallow-types.workspace = true
 tokio.workspace = true
 serde.workspace = true
@@ -32,14 +33,11 @@ schemars.workspace = true
 tempfile.workspace = true
 tracing-subscriber.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
-
 [dev-dependencies]
 regex.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys.workspace = true
 
 [lints]
 workspace = true

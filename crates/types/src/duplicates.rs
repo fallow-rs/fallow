@@ -2,12 +2,12 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::serde_path;
 
 /// A single instance of duplicated code at a specific location.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneInstance {
     /// Path to the file containing this clone instance.
@@ -27,7 +27,7 @@ pub struct CloneInstance {
 
 /// A group of code clones -- the same (or normalized-equivalent) code appearing
 /// in multiple places.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneGroup {
     /// All instances where this duplicated code appears.
@@ -39,7 +39,7 @@ pub struct CloneGroup {
 }
 
 /// The kind of refactoring suggested for a clone family.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum RefactoringKind {
     /// Extract a shared function/utility.
@@ -49,7 +49,7 @@ pub enum RefactoringKind {
 }
 
 /// A refactoring suggestion for a clone family.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringSuggestion {
     /// What kind of refactoring is suggested.
@@ -65,7 +65,7 @@ pub struct RefactoringSuggestion {
 /// When multiple clone groups are all duplicated between the same set of files,
 /// they form a family, indicating a deeper structural relationship that should
 /// be refactored together rather than group-by-group.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneFamily {
     /// The files involved in this family (sorted for stable output).
@@ -83,7 +83,7 @@ pub struct CloneFamily {
 
 /// A detected mirrored directory pattern: two directory prefixes that contain
 /// identical files (e.g., `src/` and `deno/lib/`).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MirroredDirectory {
     /// First directory path (lexically smaller).
@@ -115,7 +115,7 @@ pub struct DefaultIgnoreSkips {
 }
 
 /// Overall duplication analysis report.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationReport {
     /// All detected clone groups. Each group contains 2+ instances of identical
@@ -177,7 +177,7 @@ impl DuplicationReport {
 }
 
 /// Aggregate duplication statistics.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationStats {
     /// Total files analyzed.

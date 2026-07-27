@@ -411,6 +411,8 @@ pub struct HealthExecutionOptions<'a> {
     pub performance: bool,
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
     pub churn_file: Option<&'a Path>,
+    /// Compatibility identity persisted with snapshots and checked by trends.
+    pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
     /// Optional grouping mode for typed health output.
     pub group_by: Option<GroupByMode>,
 }
@@ -711,6 +713,7 @@ mod tests {
             performance: true,
             runtime_coverage: Some(runtime_coverage),
             churn_file: Some(Path::new("churn.json")),
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             group_by: Some(GroupByMode::Directory),
         };
 
@@ -809,6 +812,7 @@ mod tests {
                 performance: false,
                 runtime_coverage: None,
                 churn_file: None,
+                analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
                 group_by: None,
             }
         }

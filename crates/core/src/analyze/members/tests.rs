@@ -36,11 +36,19 @@ fn find_unused_members(
         suppressions,
         line_offsets_by_file,
         user_class_member_allowlist,
+        semantic_framework_candidates: &[],
         ignore_decorators,
         public_api_entry_points: &FxHashSet::default(),
         lit_active: false,
     });
-    (results.enum_members, results.class_members)
+    (
+        results.enum_members,
+        results
+            .class_members
+            .into_iter()
+            .map(|candidate| candidate.member)
+            .collect(),
+    )
 }
 
 #[expect(

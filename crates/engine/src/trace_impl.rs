@@ -162,6 +162,190 @@ pub fn trace_export(
         direct_references,
         re_export_chains,
         reason,
+        semantic: None,
+    })
+}
+
+/// Resolve the exact source identity required by the semantic sidecar for a
+/// graph export. This does not perform semantic analysis itself.
+#[must_use]
+pub fn semantic_symbol_for_export(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    export_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
+
+    let module = graph
+        .modules
+        .iter()
+        .find(|module| path_matches(&module.path, root, file_path))?;
+    let export = module
+        .exports
+        .iter()
+        .filter(|export| export_name_matches(export, export_name))
+        .max_by_key(|export| (!export.references.is_empty(), !export.is_type_only))?;
+    let source = std::fs::read_to_string(&module.path).ok()?;
+    let offsets = fallow_types::extract::compute_line_offsets(&source);
+    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
+    Some(SemanticSymbol {
+        path: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        namespace: if export.is_type_only {
+            SemanticNamespace::Type
+        } else {
+            SemanticNamespace::Value
+        },
+        declaration_kind: "export".to_string(),
+        exported_name: export_name.to_string(),
+        local_name: export_name.to_string(),
+        owner: None,
+        line,
+        col,
+    })
+}
+
+/// Resolve the source identity for a public class member semantic query.
+#[must_use]
+pub fn semantic_symbol_for_class_member(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    member_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    use fallow_types::extract::MemberKind;
+    use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
+
+    let module = graph
+        .modules
+        .iter()
+        .find(|module| path_matches(&module.path, root, file_path))?;
+    let (owner, member) = module
+        .exports
+        .iter()
+        .filter_map(|export| {
+            export
+                .members
+                .iter()
+                .find(|member| member.name == member_name)
+                .map(|member| (export, member))
+        })
+        .max_by_key(|(export, _)| (!export.references.is_empty(), !export.is_type_only))?;
+    let declaration_kind = match member.kind {
+        MemberKind::ClassMethod => "class_method",
+        MemberKind::ClassProperty => "class_property",
+        _ => return None,
+    };
+    let source = std::fs::read_to_string(&module.path).ok()?;
+    let offsets = fallow_types::extract::compute_line_offsets(&source);
+    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
+    Some(SemanticSymbol {
+        path: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        namespace: SemanticNamespace::Value,
+        declaration_kind: declaration_kind.to_string(),
+        exported_name: member_name.to_string(),
+        local_name: member_name.to_string(),
+        owner: Some(owner.name.to_string()),
+        line,
+        col,
+    })
+}
+
+/// Stable reason why an exact class-method target cannot be resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticClassMethodResolutionError {
+    /// The requested file is not part of the retained module graph.
+    FileNotFound,
+    /// The requested owner or method does not exist in the file.
+    SymbolNotFound,
+    /// More than one declaration matches the exact owner and method.
+    AmbiguousSymbol,
+    /// The matching declaration is not a supported class method.
+    UnsupportedSyntax,
+}
+
+impl std::fmt::Display for SemanticClassMethodResolutionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reason = match self {
+            Self::FileNotFound => "file-not-found",
+            Self::SymbolNotFound => "unknown-symbol",
+            Self::AmbiguousSymbol => "ambiguous-symbol",
+            Self::UnsupportedSyntax => "unsupported-syntax",
+        };
+        formatter.write_str(reason)
+    }
+}
+
+/// Resolve one exact exported class method without a name-based fallback.
+pub fn semantic_symbol_for_exact_class_method(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    owner_name: &str,
+    member_name: &str,
+) -> Result<fallow_types::semantic::SemanticSymbol, SemanticClassMethodResolutionError> {
+    use fallow_types::extract::MemberKind;
+    use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
+
+    let module = graph
+        .modules
+        .iter()
+        .find(|module| path_matches(&module.path, root, file_path))
+        .ok_or(SemanticClassMethodResolutionError::FileNotFound)?;
+    let owners = module
+        .exports
+        .iter()
+        .filter(|export| export_name_matches(export, owner_name))
+        .collect::<Vec<_>>();
+    if owners.len() != 1 {
+        return Err(if owners.is_empty() {
+            SemanticClassMethodResolutionError::SymbolNotFound
+        } else {
+            SemanticClassMethodResolutionError::AmbiguousSymbol
+        });
+    }
+    let owner = owners[0];
+    let members = owner
+        .members
+        .iter()
+        .filter(|member| member.name == member_name)
+        .collect::<Vec<_>>();
+    if members.len() != 1 {
+        return Err(if members.is_empty() {
+            SemanticClassMethodResolutionError::SymbolNotFound
+        } else {
+            SemanticClassMethodResolutionError::AmbiguousSymbol
+        });
+    }
+    let member = members[0];
+    if member.kind != MemberKind::ClassMethod {
+        return Err(SemanticClassMethodResolutionError::UnsupportedSyntax);
+    }
+    let source = std::fs::read_to_string(&module.path)
+        .map_err(|_| SemanticClassMethodResolutionError::SymbolNotFound)?;
+    let offsets = fallow_types::extract::compute_line_offsets(&source);
+    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
+    Ok(SemanticSymbol {
+        path: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        namespace: SemanticNamespace::Value,
+        declaration_kind: "class_method".to_string(),
+        exported_name: member_name.to_string(),
+        local_name: member_name.to_string(),
+        owner: Some(owner_name.to_string()),
+        line,
+        col,
     })
 }
 
@@ -236,6 +420,7 @@ pub fn trace_class_member(
         owner_direct_references: owner_trace.direct_references,
         owner_re_export_chains: owner_trace.re_export_chains,
         reason,
+        semantic: None,
     })
 }
 
@@ -860,6 +1045,87 @@ mod tests {
         assert!(trace_class_member(&graph, root, "src/controller.ts", "nope").is_none());
     }
 
+    #[test]
+    fn exact_class_method_resolution_rejects_overloads_without_guessing() {
+        use fallow_types::extract::{MemberInfo, MemberKind};
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let path = root.join("repository.ts");
+        let source =
+            "export class Repository {\n  save(): void;\n  save(): void {}\n  run(): void {}\n}\n";
+        std::fs::write(&path, source).unwrap();
+        let first = source.find("save").unwrap() as u32;
+        let second = source.rfind("save").unwrap() as u32;
+        let run = source.find("run").unwrap() as u32;
+        let member = |name: &str, start| MemberInfo {
+            name: name.to_string(),
+            kind: MemberKind::ClassMethod,
+            span: oxc_span::Span::new(start, start + 4),
+            has_decorator: false,
+            decorator_names: vec![],
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        };
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: path.clone(),
+            size_bytes: source.len() as u64,
+        }];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path,
+            exports: vec![ExportInfo {
+                name: ExportName::Named("Repository".to_string()),
+                local_name: Some("Repository".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::new(0, source.len() as u32),
+                members: vec![
+                    member("save", first),
+                    member("save", second),
+                    member("run", run),
+                ],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..Default::default()
+        }];
+        let graph = ModuleGraph::build(&resolved_modules, &[], &files);
+
+        assert_eq!(
+            semantic_symbol_for_exact_class_method(
+                &graph,
+                root,
+                "repository.ts",
+                "Repository",
+                "save",
+            ),
+            Err(SemanticClassMethodResolutionError::AmbiguousSymbol)
+        );
+        assert_eq!(
+            semantic_symbol_for_exact_class_method(
+                &graph,
+                root,
+                "repository.ts",
+                "OtherRepository",
+                "save",
+            ),
+            Err(SemanticClassMethodResolutionError::SymbolNotFound)
+        );
+        let resolved = semantic_symbol_for_exact_class_method(
+            &graph,
+            root,
+            "repository.ts",
+            "Repository",
+            "run",
+        )
+        .unwrap();
+        assert_eq!(resolved.owner.as_deref(), Some("Repository"));
+        assert_eq!(resolved.local_name, "run");
+    }
+
     /// Build a graph where the controller declaring `Ctrl` is NOT imported by
     /// the entry, so its file is unreachable and every member is dead.
     fn build_unreachable_class_member_graph() -> ModuleGraph {
@@ -1476,6 +1742,7 @@ mod tests {
                 reference_count: 1,
             }],
             reason: "ok".to_string(),
+            semantic: None,
         };
         let json = serde_json::to_string(&trace).expect("serializes");
         assert!(

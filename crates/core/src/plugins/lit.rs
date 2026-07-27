@@ -14,6 +14,7 @@
 //! lifecycle members that the framework calls reflectively.
 
 use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use fallow_types::semantic::{SemanticFrameworkContract, SemanticFrameworkRelation};
 
 use super::Plugin;
 
@@ -92,6 +93,28 @@ impl Plugin for LitPlugin {
             scoped_rule("ReactiveElement", LIT_LIFECYCLE_MEMBERS),
         ]
     }
+
+    fn framework_class_member_contracts(&self) -> Vec<SemanticFrameworkContract> {
+        [
+            ("lit", "LitElement"),
+            ("lit-element", "LitElement"),
+            ("lit", "ReactiveElement"),
+            ("@lit/reactive-element", "ReactiveElement"),
+        ]
+        .into_iter()
+        .map(|(package, heritage_symbol)| SemanticFrameworkContract {
+            framework: self.name().to_string(),
+            package: package.to_string(),
+            heritage_symbol: heritage_symbol.to_string(),
+            heritage_names: vec![heritage_symbol.to_string()],
+            relation: SemanticFrameworkRelation::Extends,
+            members: LIT_LIFECYCLE_MEMBERS
+                .iter()
+                .map(|member| (*member).to_string())
+                .collect(),
+        })
+        .collect()
+    }
 }
 
 #[cfg(test)]
@@ -163,5 +186,20 @@ mod tests {
             .expect("LitElement rule");
         assert!(lit_rule.matches_heritage(Some("LitElement"), &[]));
         assert!(!lit_rule.matches_heritage(Some("HTMLElement"), &[]));
+    }
+
+    #[test]
+    fn semantic_contracts_keep_exact_lit_package_provenance() {
+        let contracts = LitPlugin.framework_class_member_contracts();
+        assert!(contracts.iter().any(|contract| {
+            contract.package == "lit"
+                && contract.heritage_symbol == "LitElement"
+                && contract.relation == SemanticFrameworkRelation::Extends
+                && contract.members.contains(&"render".to_string())
+        }));
+        assert!(contracts.iter().any(|contract| {
+            contract.package == "@lit/reactive-element"
+                && contract.heritage_symbol == "ReactiveElement"
+        }));
     }
 }

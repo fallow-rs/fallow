@@ -19,11 +19,13 @@
     "check:crate-boundaries": "node scripts/check-crate-boundaries.mjs",
     "scaffold:analyzer": "node scripts/scaffold-analyzer-plan.mjs",
     "conformance:public-smoke": "node scripts/public-smoke-conformance.mjs",
+    "type-aware:corpus": "node scripts/type-aware-corpus.mjs",
+    "test:type-aware-corpus": "node --test scripts/type-aware-corpus.test.mjs",
     "smoke:styling-corpus": "node scripts/styling-corpus-smoke.mjs",
     "smoke:styling-prs": "node scripts/styling-pr-smoke.mjs",
-    "lint:js": "oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts commitlint.config.mjs",
-    "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts commitlint.config.mjs",
-    "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts commitlint.config.mjs"
+    "lint:js": "oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
+    "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
+    "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

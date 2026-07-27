@@ -240,7 +240,15 @@ fn append_named_re_export_stubs(exports: &mut Vec<ExportSymbol>, resolved: &Reso
         return;
     }
 
+    let named_re_export_count = resolved
+        .re_exports
+        .iter()
+        .filter(|re_export| re_export.info.exported_name != "*")
+        .count();
+    exports.reserve(named_re_export_count);
+
     let mut named_exports: FxHashSet<&str> = FxHashSet::default();
+    named_exports.reserve(resolved.exports.len().saturating_add(named_re_export_count));
     let mut has_default = false;
     for export in &resolved.exports {
         match &export.name {

@@ -1612,6 +1612,7 @@ mod tests {
         fn make_config_with_ignores(root: PathBuf, ignores: Vec<String>) -> ResolvedConfig {
             FallowConfig {
                 schema: None,
+                type_aware: fallow_config::TypeAwareConfig::default(),
                 extends: vec![],
                 entry: vec![],
                 ignore_patterns: ignores,

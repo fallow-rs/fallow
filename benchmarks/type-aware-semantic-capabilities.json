@@ -1,0 +1,2466 @@
+{
+  "schema_version": 3,
+  "purpose": "Prove semantic codebase-intelligence capabilities that are not compiler diagnostics or syntax/style lint rules.",
+  "excludes": [
+    "compiler-diagnostics",
+    "syntax-and-style-lint-rules"
+  ],
+  "artifacts": {
+    "fallow_sha256": "636c6e3d70c762f5f89af32bbc3bd5ded1f087cc23853353be0bb2f8fe3d2f43",
+    "sidecar_sha256": "1d48d28c9b80ad5a2e301a6cd848615fccfb92a0ed0c18deca32ce08c47a8d6a"
+  },
+  "coverage": {
+    "capability_ids": [
+      "dead-code-refinement",
+      "semantic-symbol-trace",
+      "public-api-surface",
+      "semantic-impact-targeted-tests",
+      "public-type-coupling"
+    ],
+    "repository_count": 2,
+    "all_capabilities_proven_on_each_repository": true
+  },
+  "repositories": [
+    {
+      "id": "astro",
+      "repo": "withastro/astro",
+      "commit": "868892ba788369128a09ba7640f0364678190431",
+      "tracked_source_clean": true,
+      "dependency_environment": {
+        "dependency_installation": "ancestor-workspace",
+        "path_base": "fallow-workspace-root",
+        "dependency_root": ".",
+        "lockfile": "package-lock.json",
+        "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+        "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+      },
+      "programs": {
+        "inspect": [
+          {
+            "config": "packages/telemetry/tsconfig.build.json",
+            "source": "explicit",
+            "status": "complete",
+            "source_file_count": 224,
+            "program_reused": true
+          },
+          {
+            "config": "packages/telemetry/tsconfig.test.json",
+            "source": "explicit",
+            "status": "complete",
+            "source_file_count": 226,
+            "program_reused": true
+          }
+        ],
+        "coupling": [
+          {
+            "config": "packages/astro/tsconfig.build.json",
+            "source": "explicit",
+            "status": "complete",
+            "source_file_count": 839,
+            "program_reused": false
+          }
+        ]
+      },
+      "capabilities": {
+        "dead-code-refinement": {
+          "assertion": "confirmed-used",
+          "confirmed_used_count": 38,
+          "candidate": {
+            "key": "tac_07a28376e3a5fd5d921e",
+            "path": "packages/astro/src/vite-plugin-app/app.ts",
+            "parent_name": "AstroServerApp",
+            "member_name": "handleRequest",
+            "kind": "class_method",
+            "line": 142,
+            "col": 1
+          },
+          "reviewed": true,
+          "source_evidence": [
+            {
+              "path": "packages/astro/src/vite-plugin-app/app.ts",
+              "line": 142,
+              "col": 1,
+              "excerpt": "public async handleRequest({"
+            },
+            {
+              "path": "packages/astro/src/vite-plugin-app/createAstroServerApp.ts",
+              "line": 88,
+              "col": 7,
+              "excerpt": "app.handleRequest({"
+            }
+          ]
+        },
+        "semantic-symbol-trace": {
+          "assertion": "references-found",
+          "status": "complete",
+          "selected_project": "packages/telemetry/tsconfig.build.json",
+          "total_reference_count": 1,
+          "checker_evidence_count": 1,
+          "graph_evidence_count": 1,
+          "source_evidence": [
+            {
+              "path": "packages/telemetry/test/index.test.ts",
+              "line": 3,
+              "col": 9,
+              "excerpt": "import { AstroTelemetry } from '../dist/index.js';"
+            }
+          ]
+        },
+        "public-api-surface": {
+          "assertion": "no-leak-confirmed",
+          "status": "partial",
+          "public_entry_sample_count": 3,
+          "private_type_leak_sample_count": 0,
+          "omissions": [
+            {
+              "reason_code": "unknown-entry-point",
+              "count": 164
+            }
+          ],
+          "source_evidence": [
+            {
+              "path": "packages/telemetry/src/index.ts",
+              "line": 27,
+              "col": 0,
+              "excerpt": "export class AstroTelemetry {"
+            },
+            {
+              "path": "packages/telemetry/src/index.ts",
+              "line": 9,
+              "col": 0,
+              "excerpt": "export type AstroTelemetryOptions = { astroVersion: string; viteVersion: string };"
+            },
+            {
+              "path": "packages/telemetry/src/index.ts",
+              "line": 10,
+              "col": 0,
+              "excerpt": "export type TelemetryEvent = { eventName: string; payload: Record<string, any> };"
+            }
+          ]
+        },
+        "semantic-impact-targeted-tests": {
+          "assertion": "consumers-found",
+          "status": "complete",
+          "direct_consumer_count": 1,
+          "affected_file_count": 0,
+          "targeted_test_count": 1,
+          "targeted_tests": [
+            {
+              "path": "packages/telemetry/test/index.test.ts",
+              "relation": "targeted-test",
+              "distance": 1,
+              "via": [
+                "packages/telemetry/test/index.test.ts"
+              ]
+            }
+          ],
+          "confidence": "high",
+          "source_evidence": [
+            {
+              "path": "packages/telemetry/test/index.test.ts",
+              "line": 1,
+              "col": 0,
+              "excerpt": "import assert from 'node:assert/strict';"
+            },
+            {
+              "path": "packages/telemetry/test/index.test.ts",
+              "line": 1,
+              "col": 0,
+              "excerpt": "import assert from 'node:assert/strict';"
+            }
+          ]
+        },
+        "public-type-coupling": {
+          "assertion": "coupling-found",
+          "status": "partial",
+          "summary": {
+            "scope": "project-local-public-signatures",
+            "direction": "directed",
+            "project_size": 618,
+            "files_analyzed": 618,
+            "distinct_coupled_files": 138,
+            "edge_count": 401,
+            "coupled_file_pct": 22.330097087378643,
+            "p50_distinct_connections": 2,
+            "p90_distinct_connections": 6,
+            "p95_public_types_used_by": 10,
+            "p95_public_api_depends_on": 5,
+            "high_coupling_pct": 2.26537216828479,
+            "concentration": 0.2344139650872818,
+            "cycle_count": 1
+          },
+          "top_contributors": [
+            {
+              "path": "packages/astro/src/types/public/config.ts",
+              "public_api_depends_on": 12,
+              "public_api_depends_on_files": [
+                "packages/astro/src/assets/fonts/types.ts",
+                "packages/astro/src/assets/svg/types.ts",
+                "packages/astro/src/assets/types.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/cache/types.ts",
+                "packages/astro/src/core/config/schemas/base.ts",
+                "packages/astro/src/core/csp/config.ts",
+                "packages/astro/src/core/logger/config.ts",
+                "packages/astro/src/core/logger/core.ts",
+                "packages/astro/src/core/session/types.ts",
+                "packages/astro/src/env/schema.ts",
+                "packages/astro/src/types/public/integrations.ts"
+              ],
+              "public_types_used_by": 24,
+              "public_types_used_by_files": [
+                "packages/astro/src/assets/internal.ts",
+                "packages/astro/src/config/entrypoint.ts",
+                "packages/astro/src/config/index.ts",
+                "packages/astro/src/container/index.ts",
+                "packages/astro/src/content/loaders/types.ts",
+                "packages/astro/src/core/app/common.ts",
+                "packages/astro/src/core/app/manifest.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/build/index.ts",
+                "packages/astro/src/core/config/merge.ts",
+                "packages/astro/src/core/config/validate.ts",
+                "packages/astro/src/core/dev/dev.ts",
+                "packages/astro/src/core/index.ts",
+                "packages/astro/src/core/logger/impls/json.ts",
+                "packages/astro/src/core/logger/impls/node.ts",
+                "packages/astro/src/core/preview/index.ts",
+                "packages/astro/src/core/session/runtime.ts",
+                "packages/astro/src/types/astro.ts",
+                "packages/astro/src/types/public/content.ts",
+                "packages/astro/src/types/public/context.ts",
+                "packages/astro/src/types/public/integrations.ts",
+                "packages/astro/src/types/public/internal.ts",
+                "packages/astro/src/types/public/manifest.ts",
+                "packages/astro/src/virtual-modules/i18n.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "getImage",
+                    "local_name": "getImage",
+                    "line": 47,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/config.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "AstroConfig",
+                    "local_name": "AstroConfig",
+                    "line": 3118,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "line": 49,
+                    "col": 14
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/astro/src/types/public/internal.ts",
+              "public_api_depends_on": 10,
+              "public_api_depends_on_files": [
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/cookies/cookies.ts",
+                "packages/astro/src/runtime/server/html-string-cache.ts",
+                "packages/astro/src/runtime/server/render/astro/instance.ts",
+                "packages/astro/src/runtime/server/render/queue/pool.ts",
+                "packages/astro/src/runtime/server/render/server-islands.ts",
+                "packages/astro/src/types/public/common.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/context.ts",
+                "packages/astro/src/types/public/integrations.ts"
+              ],
+              "public_types_used_by": 16,
+              "public_types_used_by_files": [
+                "packages/astro/src/container/index.ts",
+                "packages/astro/src/core/app/base.ts",
+                "packages/astro/src/core/app/manifest.ts",
+                "packages/astro/src/core/app/pipeline.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/fetch/fetch-state.ts",
+                "packages/astro/src/jsx/rehype.ts",
+                "packages/astro/src/runtime/server/astro-component.ts",
+                "packages/astro/src/runtime/server/render/component.ts",
+                "packages/astro/src/runtime/server/render/script.ts",
+                "packages/astro/src/runtime/server/render/slot.ts",
+                "packages/astro/src/runtime/server/render/template-depth.ts",
+                "packages/astro/src/runtime/server/transition.ts",
+                "packages/astro/src/types/astro.ts",
+                "packages/astro/src/types/public/integrations.ts",
+                "packages/astro/src/virtual-modules/container.ts"
+              ],
+              "edges": []
+            },
+            {
+              "path": "packages/astro/src/core/app/types.ts",
+              "public_api_depends_on": 12,
+              "public_api_depends_on_files": [
+                "packages/astro/src/actions/runtime/types.ts",
+                "packages/astro/src/core/build/types.ts",
+                "packages/astro/src/core/cache/types.ts",
+                "packages/astro/src/core/csp/config.ts",
+                "packages/astro/src/core/logger/config.ts",
+                "packages/astro/src/core/logger/core.ts",
+                "packages/astro/src/core/session/types.ts",
+                "packages/astro/src/types/public/common.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/integrations.ts",
+                "packages/astro/src/types/public/internal.ts",
+                "packages/astro/src/types/public/toolbar.ts"
+              ],
+              "public_types_used_by": 13,
+              "public_types_used_by_files": [
+                "packages/astro/src/container/index.ts",
+                "packages/astro/src/core/app/base.ts",
+                "packages/astro/src/core/app/common.ts",
+                "packages/astro/src/core/app/entrypoints/virtual/dev.ts",
+                "packages/astro/src/core/app/entrypoints/virtual/index.ts",
+                "packages/astro/src/core/app/entrypoints/virtual/prod.ts",
+                "packages/astro/src/core/app/manifest.ts",
+                "packages/astro/src/core/app/node.ts",
+                "packages/astro/src/core/session/runtime.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/integrations.ts",
+                "packages/astro/src/types/public/internal.ts",
+                "packages/astro/src/types/public/manifest.ts"
+              ],
+              "edges": []
+            },
+            {
+              "path": "packages/astro/src/types/public/integrations.ts",
+              "public_api_depends_on": 10,
+              "public_api_depends_on_files": [
+                "packages/astro/src/assets/types.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/build/types.ts",
+                "packages/astro/src/core/logger/core.ts",
+                "packages/astro/src/type-utils.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/content.ts",
+                "packages/astro/src/types/public/extendables.ts",
+                "packages/astro/src/types/public/internal.ts",
+                "packages/astro/src/types/public/toolbar.ts"
+              ],
+              "public_types_used_by": 11,
+              "public_types_used_by_files": [
+                "packages/astro/src/assets/internal.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/config/merge.ts",
+                "packages/astro/src/runtime/client/idle.ts",
+                "packages/astro/src/runtime/client/load.ts",
+                "packages/astro/src/runtime/client/media.ts",
+                "packages/astro/src/runtime/client/only.ts",
+                "packages/astro/src/runtime/client/visible.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/internal.ts",
+                "packages/astro/src/virtual-modules/container.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "getImage",
+                    "local_name": "getImage",
+                    "line": 47,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/integrations.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "AstroAdapterClientConfig",
+                    "local_name": "AstroAdapterClientConfig",
+                    "line": 133,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "line": 49,
+                    "col": 37
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/astro/src/types/public/common.ts",
+              "public_api_depends_on": 2,
+              "public_api_depends_on_files": [
+                "packages/astro/src/type-utils.ts",
+                "packages/astro/src/types/public/context.ts"
+              ],
+              "public_types_used_by": 15,
+              "public_types_used_by_files": [
+                "packages/astro/src/actions/runtime/entrypoints/route.ts",
+                "packages/astro/src/assets/endpoint/dev.ts",
+                "packages/astro/src/assets/endpoint/generic.ts",
+                "packages/astro/src/assets/endpoint/node.ts",
+                "packages/astro/src/container/index.ts",
+                "packages/astro/src/core/app/pipeline.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/cache/types.ts",
+                "packages/astro/src/core/fetch/fetch-state.ts",
+                "packages/astro/src/core/middleware/defineMiddleware.ts",
+                "packages/astro/src/core/middleware/index.ts",
+                "packages/astro/src/core/middleware/sequence.ts",
+                "packages/astro/src/types/public/context.ts",
+                "packages/astro/src/types/public/internal.ts",
+                "packages/astro/src/virtual-modules/i18n.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/astro/src/actions/runtime/entrypoints/route.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "POST",
+                    "local_name": "POST",
+                    "line": 4,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/common.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "APIRoute",
+                    "local_name": "APIRoute",
+                    "line": 102,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/actions/runtime/entrypoints/route.ts",
+                    "line": 4,
+                    "col": 19
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/endpoint/dev.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "GET",
+                    "local_name": "GET",
+                    "line": 69,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/common.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "APIRoute",
+                    "local_name": "APIRoute",
+                    "line": 102,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/endpoint/dev.ts",
+                    "line": 69,
+                    "col": 18
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/endpoint/generic.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "GET",
+                    "local_name": "GET",
+                    "line": 14,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/common.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "APIRoute",
+                    "local_name": "APIRoute",
+                    "line": 102,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/endpoint/generic.ts",
+                    "line": 14,
+                    "col": 18
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/endpoint/node.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "GET",
+                    "local_name": "GET",
+                    "line": 39,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/common.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "APIRoute",
+                    "local_name": "APIRoute",
+                    "line": 102,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/endpoint/node.ts",
+                    "line": 39,
+                    "col": 18
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/astro/src/types/public/context.ts",
+              "public_api_depends_on": 9,
+              "public_api_depends_on_files": [
+                "packages/astro/src/actions/runtime/types.ts",
+                "packages/astro/src/core/cache/runtime/cache.ts",
+                "packages/astro/src/core/cookies/cookies.ts",
+                "packages/astro/src/core/csp/config.ts",
+                "packages/astro/src/core/session/runtime.ts",
+                "packages/astro/src/runtime/server/render/astro/factory.ts",
+                "packages/astro/src/types/public/common.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/extendables.ts"
+              ],
+              "public_types_used_by": 7,
+              "public_types_used_by_files": [
+                "packages/astro/src/actions/runtime/server.ts",
+                "packages/astro/src/actions/runtime/types.ts",
+                "packages/astro/src/core/middleware/index.ts",
+                "packages/astro/src/runtime/server/astro-global.ts",
+                "packages/astro/src/types/public/common.ts",
+                "packages/astro/src/types/public/internal.ts",
+                "packages/astro/src/virtual-modules/i18n.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/astro/src/actions/runtime/server.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "getActionContext",
+                    "local_name": "getActionContext",
+                    "line": 158,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/context.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "APIContext",
+                    "local_name": "APIContext",
+                    "line": 138,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/actions/runtime/server.ts",
+                    "line": 158,
+                    "col": 42
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/actions/runtime/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "ActionAPIContext",
+                    "local_name": "ActionAPIContext",
+                    "line": 89,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/types/public/context.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "APIContext",
+                    "local_name": "APIContext",
+                    "line": 138,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/actions/runtime/types.ts",
+                    "line": 90,
+                    "col": 1
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/astro/src/assets/types.ts",
+              "public_api_depends_on": 2,
+              "public_api_depends_on_files": [
+                "packages/astro/src/type-utils.ts",
+                "packages/astro/src/types/public/extendables.ts"
+              ],
+              "public_types_used_by": 12,
+              "public_types_used_by_files": [
+                "packages/astro/src/assets/internal.ts",
+                "packages/astro/src/assets/runtime.ts",
+                "packages/astro/src/assets/services/service.ts",
+                "packages/astro/src/assets/utils/hash.ts",
+                "packages/astro/src/assets/utils/imageKind.ts",
+                "packages/astro/src/assets/utils/metadata.ts",
+                "packages/astro/src/assets/utils/node.ts",
+                "packages/astro/src/assets/utils/queryParams.ts",
+                "packages/astro/src/assets/utils/remoteProbe.ts",
+                "packages/astro/src/content/runtime.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/integrations.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "getImage",
+                    "local_name": "getImage",
+                    "line": 47,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/assets/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "GetImageResult",
+                    "local_name": "GetImageResult",
+                    "line": 96,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "line": 50,
+                    "col": 11
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "getImage",
+                    "local_name": "getImage",
+                    "line": 47,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/assets/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "ImageMetadata",
+                    "local_name": "ImageMetadata",
+                    "line": 38,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "line": 47,
+                    "col": 0
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "getImage",
+                    "local_name": "getImage",
+                    "line": 47,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/assets/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "UnresolvedImageTransform",
+                    "local_name": "UnresolvedImageTransform",
+                    "line": 70,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/internal.ts",
+                    "line": 48,
+                    "col": 10
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/runtime.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "SvgComponentProps",
+                    "local_name": "SvgComponentProps",
+                    "line": 11,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/assets/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "ImageMetadata",
+                    "local_name": "ImageMetadata",
+                    "line": 38,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/runtime.ts",
+                    "line": 12,
+                    "col": 7
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/astro/src/assets/runtime.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "createSvgComponent",
+                    "local_name": "createSvgComponent",
+                    "line": 18,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/astro/src/assets/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "ImageMetadata",
+                    "local_name": "ImageMetadata",
+                    "line": 38,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/astro/src/assets/runtime.ts",
+                    "line": 18,
+                    "col": 0
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/astro/src/core/app/base.ts",
+              "public_api_depends_on": 9,
+              "public_api_depends_on_files": [
+                "packages/astro/src/core/app/pipeline.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/base-pipeline.ts",
+                "packages/astro/src/core/errors/handler.ts",
+                "packages/astro/src/core/fetch/types.ts",
+                "packages/astro/src/core/logger/core.ts",
+                "packages/astro/src/core/wait-until.ts",
+                "packages/astro/src/types/astro.ts",
+                "packages/astro/src/types/public/internal.ts"
+              ],
+              "public_types_used_by": 3,
+              "public_types_used_by_files": [
+                "packages/astro/src/core/app/app.ts",
+                "packages/astro/src/core/app/node.ts",
+                "packages/astro/src/core/fetch/default-handler.ts"
+              ],
+              "edges": []
+            },
+            {
+              "path": "packages/astro/src/core/logger/core.ts",
+              "public_api_depends_on": 0,
+              "public_types_used_by": 11,
+              "public_types_used_by_files": [
+                "packages/astro/src/content/loaders/types.ts",
+                "packages/astro/src/core/app/base.ts",
+                "packages/astro/src/core/app/types.ts",
+                "packages/astro/src/core/logger/impls/compose.ts",
+                "packages/astro/src/core/logger/impls/console.ts",
+                "packages/astro/src/core/logger/impls/json.ts",
+                "packages/astro/src/core/logger/impls/node.ts",
+                "packages/astro/src/core/logger/public.ts",
+                "packages/astro/src/types/public/config.ts",
+                "packages/astro/src/types/public/integrations.ts",
+                "packages/astro/src/types/public/preview.ts"
+              ],
+              "edges": []
+            },
+            {
+              "path": "packages/astro/src/types/public/extendables.ts",
+              "public_api_depends_on": 0,
+              "public_types_used_by": 10,
+              "public_types_used_by_files": [
+                "packages/astro/src/assets/services/service.ts",
+                "packages/astro/src/assets/types.ts",
+                "packages/astro/src/assets/utils/hash.ts",
+                "packages/astro/src/container/index.ts",
+                "packages/astro/src/core/fetch/fetch-state.ts",
+                "packages/astro/src/core/middleware/index.ts",
+                "packages/astro/src/core/session/runtime.ts",
+                "packages/astro/src/types/public/context.ts",
+                "packages/astro/src/types/public/elements.ts",
+                "packages/astro/src/types/public/integrations.ts"
+              ],
+              "edges": []
+            }
+          ],
+          "cycles": [
+            {
+              "files": [
+                "packages/astro/src/actions/runtime/client.ts",
+                "packages/astro/src/actions/runtime/types.ts",
+                "packages/astro/src/actions/runtime/client.ts"
+              ]
+            }
+          ],
+          "source_evidence": [
+            {
+              "path": "packages/astro/src/actions/runtime/client.ts",
+              "line": 68,
+              "col": 7,
+              "excerpt": "code: ActionErrorCode = 'INTERNAL_SERVER_ERROR';"
+            },
+            {
+              "path": "packages/astro/src/actions/runtime/client.ts",
+              "line": 66,
+              "col": 36,
+              "excerpt": "export class ActionError<_T extends ErrorInferenceObject = ErrorInferenceObject> extends Error {"
+            },
+            {
+              "path": "packages/astro/src/actions/runtime/client.ts",
+              "line": 110,
+              "col": 39,
+              "excerpt": "export function isInputError<T extends ErrorInferenceObject>("
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "vitest",
+      "repo": "vitest-dev/vitest",
+      "commit": "8fbfcb054a07410e03bd37e6682d15ef5b240ad8",
+      "tracked_source_clean": true,
+      "dependency_environment": {
+        "dependency_installation": "ancestor-workspace",
+        "path_base": "fallow-workspace-root",
+        "dependency_root": ".",
+        "lockfile": "package-lock.json",
+        "lockfile_sha256": "cd6fec7410e00ae49cd1ae8dcfc98216622f2a908d68c760709e15e720ace2de",
+        "type_declaration_tree_sha256": "68c33ad327dccfe7a4974b58e944383473742db85f2df368354f0561e4245d57"
+      },
+      "programs": {
+        "inspect": [
+          {
+            "config": "packages/vitest/tsconfig.json",
+            "source": "explicit",
+            "status": "complete",
+            "source_file_count": 435,
+            "program_reused": true
+          },
+          {
+            "config": "test/tsconfig.json",
+            "source": "explicit",
+            "status": "complete",
+            "source_file_count": 1913,
+            "program_reused": true
+          }
+        ],
+        "coupling": [
+          {
+            "config": "packages/vitest/tsconfig.json",
+            "source": "explicit",
+            "status": "complete",
+            "source_file_count": 435,
+            "program_reused": false
+          }
+        ]
+      },
+      "capabilities": {
+        "dead-code-refinement": {
+          "assertion": "confirmed-used",
+          "confirmed_used_count": 62,
+          "candidate": {
+            "key": "tac_03dbaef939f4c7fcb08b",
+            "path": "packages/vitest/src/node/core.ts",
+            "parent_name": "Vitest",
+            "member_name": "getRelevantTestSpecifications",
+            "kind": "class_method",
+            "line": 729,
+            "col": 2
+          },
+          "reviewed": true,
+          "source_evidence": [
+            {
+              "path": "packages/vitest/src/node/core.ts",
+              "line": 729,
+              "col": 2,
+              "excerpt": "getRelevantTestSpecifications(filters?: string[]): Promise<TestSpecification[]> {"
+            }
+          ]
+        },
+        "semantic-symbol-trace": {
+          "assertion": "references-found",
+          "status": "partial",
+          "selected_project": "packages/vitest/tsconfig.json",
+          "total_reference_count": 154,
+          "checker_evidence_count": 154,
+          "graph_evidence_count": 154,
+          "source_evidence": [
+            {
+              "path": "test/browser/fixtures/aria-snapshot/vitest.config.ts",
+              "line": 2,
+              "col": 9,
+              "excerpt": "import { defineConfig } from 'vitest/config'"
+            },
+            {
+              "path": "test/browser/fixtures/assertion-helper/vitest.config.ts",
+              "line": 2,
+              "col": 9,
+              "excerpt": "import { defineConfig } from 'vitest/config'"
+            },
+            {
+              "path": "test/browser/fixtures/benchmark/vitest.config.ts",
+              "line": 2,
+              "col": 9,
+              "excerpt": "import { defineConfig } from 'vitest/config'"
+            }
+          ]
+        },
+        "public-api-surface": {
+          "assertion": "leak-confirmed",
+          "status": "partial",
+          "public_entry_sample_count": 40,
+          "private_type_leak_sample_count": 40,
+          "omissions": [
+            {
+              "reason_code": "unknown-entry-point",
+              "count": 33
+            },
+            {
+              "reason_code": "evidence-limit",
+              "count": 1668
+            }
+          ],
+          "source_evidence": [
+            {
+              "path": "packages/browser-playwright/src/playwright.ts",
+              "line": 105,
+              "col": 0,
+              "excerpt": "export class PlaywrightBrowserProvider implements BrowserProvider {"
+            },
+            {
+              "path": "packages/browser-playwright/src/playwright.ts",
+              "line": 48,
+              "col": 0,
+              "excerpt": "export interface PlaywrightProviderOptions {"
+            },
+            {
+              "path": "packages/browser-playwright/src/playwright.ts",
+              "line": 644,
+              "col": 0,
+              "excerpt": "type PWCDPSession = Pick<PlaywrightCDPSession, 'send' | 'on' | 'off' | 'once'>"
+            }
+          ]
+        },
+        "semantic-impact-targeted-tests": {
+          "assertion": "consumers-found",
+          "status": "partial",
+          "direct_consumer_count": 154,
+          "affected_file_count": 1,
+          "targeted_test_count": 2,
+          "targeted_tests": [
+            {
+              "path": "test/coverage-test/test/threshold-auto-update.unit.test.ts",
+              "relation": "targeted-test",
+              "distance": 1,
+              "via": [
+                "test/coverage-test/test/threshold-auto-update.unit.test.ts"
+              ]
+            },
+            {
+              "path": "test/coverage-test/test/transform-plugin-order.istanbul.test.ts",
+              "relation": "targeted-test",
+              "distance": 2,
+              "via": [
+                "test/coverage-test/test/transform-plugin-order.istanbul.test.ts",
+                "test/coverage-test/fixtures/configs/vitest.config.multi-transforms.ts"
+              ]
+            }
+          ],
+          "confidence": "bounded",
+          "source_evidence": [
+            {
+              "path": "test/browser/fixtures/aria-snapshot/vitest.config.ts",
+              "line": 1,
+              "col": 0,
+              "excerpt": "import { fileURLToPath } from 'node:url'"
+            },
+            {
+              "path": "test/browser/fixtures/assertion-helper/vitest.config.ts",
+              "line": 1,
+              "col": 0,
+              "excerpt": "import { fileURLToPath } from 'node:url'"
+            },
+            {
+              "path": "test/coverage-test/test/threshold-auto-update.unit.test.ts",
+              "line": 1,
+              "col": 0,
+              "excerpt": "import type { CoverageMap } from 'istanbul-lib-coverage'"
+            },
+            {
+              "path": "test/coverage-test/test/transform-plugin-order.istanbul.test.ts",
+              "line": 1,
+              "col": 0,
+              "excerpt": "import { expect } from 'vitest'"
+            }
+          ]
+        },
+        "public-type-coupling": {
+          "assertion": "coupling-found",
+          "status": "partial",
+          "summary": {
+            "scope": "project-local-public-signatures",
+            "direction": "directed",
+            "project_size": 342,
+            "files_analyzed": 342,
+            "distinct_coupled_files": 41,
+            "edge_count": 232,
+            "coupled_file_pct": 11.988304093567251,
+            "p50_distinct_connections": 3,
+            "p90_distinct_connections": 7,
+            "p95_public_types_used_by": 6,
+            "p95_public_api_depends_on": 6,
+            "high_coupling_pct": 1.1695906432748535,
+            "concentration": 0.1788793103448276,
+            "cycle_count": 1
+          },
+          "top_contributors": [
+            {
+              "path": "packages/runner/src/types/tasks.ts",
+              "public_api_depends_on": 3,
+              "public_api_depends_on_files": [
+                "packages/runner/src/fixture.ts",
+                "packages/utils/src/types.ts",
+                "packages/vitest/src/types/global.ts"
+              ],
+              "public_types_used_by": 13,
+              "public_types_used_by_files": [
+                "packages/runner/src/artifact.ts",
+                "packages/runner/src/hooks.ts",
+                "packages/runner/src/suite.ts",
+                "packages/runner/src/types/runner.ts",
+                "packages/vitest/src/api/types.ts",
+                "packages/vitest/src/integrations/chai/index.ts",
+                "packages/vitest/src/runtime/config.ts",
+                "packages/vitest/src/runtime/runners/benchmark.ts",
+                "packages/vitest/src/runtime/runners/test.ts",
+                "packages/vitest/src/runtime/types/benchmark.ts",
+                "packages/vitest/src/types/global.ts",
+                "packages/vitest/src/types/rpc.ts",
+                "packages/vitest/src/types/worker.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "recordArtifact",
+                    "local_name": "recordArtifact",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "FailureScreenshotArtifactAttachment",
+                    "local_name": "FailureScreenshotArtifactAttachment",
+                    "line": 1361,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "recordArtifact",
+                    "local_name": "recordArtifact",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Test",
+                    "local_name": "Test",
+                    "line": 322,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "line": 41,
+                    "col": 74
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "recordArtifact",
+                    "local_name": "recordArtifact",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TestArtifactLocation",
+                    "local_name": "TestArtifactLocation",
+                    "line": 1301,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "recordArtifact",
+                    "local_name": "recordArtifact",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TestAttachment",
+                    "local_name": "TestAttachment",
+                    "line": 1260,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "recordArtifact",
+                    "local_name": "recordArtifact",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "VisualRegressionArtifactAttachment",
+                    "local_name": "VisualRegressionArtifactAttachment",
+                    "line": 1343,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "recordArtifact",
+                    "local_name": "recordArtifact",
+                    "line": 41,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "TestArtifact",
+                    "local_name": "TestArtifact",
+                    "line": 1459,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/artifact.ts",
+                    "line": 41,
+                    "col": 54
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "afterAll",
+                    "local_name": "afterAll",
+                    "line": 118,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "AfterAllListener",
+                    "local_name": "AfterAllListener",
+                    "line": 1084,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 120,
+                    "col": 6
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "afterEach",
+                    "local_name": "afterEach",
+                    "line": 201,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "AfterEachListener",
+                    "local_name": "AfterEachListener",
+                    "line": 1095,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 202,
+                    "col": 6
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "aroundAll",
+                    "local_name": "aroundAll",
+                    "line": 323,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "AroundAllListener",
+                    "local_name": "AroundAllListener",
+                    "line": 1110,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 325,
+                    "col": 6
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "aroundEach",
+                    "local_name": "aroundEach",
+                    "line": 377,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "AroundEachListener",
+                    "local_name": "AroundEachListener",
+                    "line": 1102,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 378,
+                    "col": 6
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "beforeAll",
+                    "local_name": "beforeAll",
+                    "line": 76,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "BeforeAllListener",
+                    "local_name": "BeforeAllListener",
+                    "line": 1080,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 78,
+                    "col": 6
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "function",
+                    "exported_name": "beforeEach",
+                    "local_name": "beforeEach",
+                    "line": 154,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "BeforeEachListener",
+                    "local_name": "BeforeEachListener",
+                    "line": 1088,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 155,
+                    "col": 6
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "onTestFailed",
+                    "local_name": "onTestFailed",
+                    "line": 241,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TaskHook",
+                    "local_name": "TaskHook",
+                    "line": 1241,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 241,
+                    "col": 27
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "onTestFailed",
+                    "local_name": "onTestFailed",
+                    "line": 241,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "OnTestFailedHandler",
+                    "local_name": "OnTestFailedHandler",
+                    "line": 1238,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 241,
+                    "col": 36
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "onTestFinished",
+                    "local_name": "onTestFinished",
+                    "line": 280,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TaskHook",
+                    "local_name": "TaskHook",
+                    "line": 1241,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 280,
+                    "col": 29
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "onTestFinished",
+                    "local_name": "onTestFinished",
+                    "line": 280,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "OnTestFinishedHandler",
+                    "local_name": "OnTestFinishedHandler",
+                    "line": 1239,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/hooks.ts",
+                    "line": 280,
+                    "col": 38
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "ExtendedAPI",
+                    "local_name": "ExtendedAPI",
+                    "line": 596,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "FileScopeFixtureOptions",
+                    "local_name": "FileScopeFixtureOptions",
+                    "line": 847,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "FixtureOptions",
+                    "local_name": "FixtureOptions",
+                    "line": 809,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Hooks",
+                    "local_name": "Hooks",
+                    "line": 601,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "InternalChainableContext",
+                    "local_name": "InternalChainableContext",
+                    "line": 457,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "SuiteCollector",
+                    "local_name": "SuiteCollector",
+                    "line": 1157,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "SuiteCollectorCallable",
+                    "local_name": "SuiteCollectorCallable",
+                    "line": 1051,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "SuiteForFunction",
+                    "local_name": "SuiteForFunction",
+                    "line": 439,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "SuiteOptions",
+                    "local_name": "SuiteOptions",
+                    "line": 589,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TestCollectorCallable",
+                    "local_name": "TestCollectorCallable",
+                    "line": 444,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TestContext",
+                    "local_name": "TestContext",
+                    "line": 1191,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TestEachFunction",
+                    "local_name": "TestEachFunction",
+                    "line": 399,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "TestScopeFixtureOptions",
+                    "local_name": "TestScopeFixtureOptions",
+                    "line": 836,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "WorkerScopeFixtureOptions",
+                    "local_name": "WorkerScopeFixtureOptions",
+                    "line": 858,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "AddBuilderFile",
+                    "local_name": "AddBuilderFile",
+                    "line": 930,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "AddBuilderTest",
+                    "local_name": "AddBuilderTest",
+                    "line": 939,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "AddBuilderWorker",
+                    "local_name": "AddBuilderWorker",
+                    "line": 921,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "BuilderFixtureFn",
+                    "local_name": "BuilderFixtureFn",
+                    "line": 887,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/runner/src/suite.ts",
+                    "namespace": "value",
+                    "declaration_kind": "variable",
+                    "exported_name": "describe",
+                    "local_name": "describe",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "target": {
+                    "path": "packages/runner/src/types/tasks.ts",
+                    "namespace": "type",
+                    "declaration_kind": "type_alias",
+                    "exported_name": "ChainableSuiteAPI",
+                    "local_name": "ChainableSuiteAPI",
+                    "line": 1064,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/runner/src/suite.ts",
+                    "line": 163,
+                    "col": 13
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/vitest/src/types/global.ts",
+              "public_api_depends_on": 6,
+              "public_api_depends_on_files": [
+                "packages/expect/src/types.ts",
+                "packages/pretty-format/src/types.ts",
+                "packages/runner/src/types/tasks.ts",
+                "packages/snapshot/src/port/state.ts",
+                "packages/vitest/src/runtime/types/benchmark.ts",
+                "packages/vitest/src/types/general.ts"
+              ],
+              "public_types_used_by": 8,
+              "public_types_used_by_files": [
+                "packages/expect/src/types.ts",
+                "packages/runner/src/suite.ts",
+                "packages/runner/src/types/tasks.ts",
+                "packages/vitest/src/api/types.ts",
+                "packages/vitest/src/integrations/chai/index.ts",
+                "packages/vitest/src/integrations/snapshot/chai.ts",
+                "packages/vitest/src/runtime/runners/test.ts",
+                "packages/vitest/src/types/rpc.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "ExpectStatic",
+                    "local_name": "ExpectStatic",
+                    "line": 121,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Assertion",
+                    "local_name": "Assertion",
+                    "line": 52,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 125,
+                    "col": 36
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "ExpectStatic",
+                    "local_name": "ExpectStatic",
+                    "line": 121,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "MatcherState",
+                    "local_name": "MatcherState",
+                    "line": 26,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 129,
+                    "col": 18
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Matcher",
+                    "local_name": "RawMatcherFn",
+                    "line": 105,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "MatcherState",
+                    "local_name": "MatcherState",
+                    "line": 26,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 105,
+                    "col": 40
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "MatcherState",
+                    "local_name": "MatcherState",
+                    "line": 44,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Assertion",
+                    "local_name": "Assertion",
+                    "line": 52,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 90,
+                    "col": 22
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/vitest/src/runtime/config.ts",
+              "public_api_depends_on": 7,
+              "public_api_depends_on_files": [
+                "packages/pretty-format/src/types.ts",
+                "packages/runner/src/types/runner.ts",
+                "packages/runner/src/types/tasks.ts",
+                "packages/snapshot/src/types/environment.ts",
+                "packages/snapshot/src/types/index.ts",
+                "packages/utils/src/diff/types.ts",
+                "packages/vitest/src/types/general.ts"
+              ],
+              "public_types_used_by": 5,
+              "public_types_used_by_files": [
+                "packages/vitest/src/api/types.ts",
+                "packages/vitest/src/integrations/vi.ts",
+                "packages/vitest/src/runtime/runners/benchmark.ts",
+                "packages/vitest/src/runtime/runners/test.ts",
+                "packages/vitest/src/types/worker.ts"
+              ],
+              "edges": []
+            },
+            {
+              "path": "packages/runner/src/types/runner.ts",
+              "public_api_depends_on": 2,
+              "public_api_depends_on_files": [
+                "packages/runner/src/types/tasks.ts",
+                "packages/utils/src/diff/types.ts"
+              ],
+              "public_types_used_by": 6,
+              "public_types_used_by_files": [
+                "packages/vitest/src/runtime/config.ts",
+                "packages/vitest/src/runtime/runners/benchmark.ts",
+                "packages/vitest/src/runtime/runners/test.ts",
+                "packages/vitest/src/types/browser.ts",
+                "packages/vitest/src/types/rpc.ts",
+                "packages/vitest/src/types/worker.ts"
+              ],
+              "edges": []
+            },
+            {
+              "path": "packages/vitest/src/api/types.ts",
+              "public_api_depends_on": 7,
+              "public_api_depends_on_files": [
+                "packages/runner/src/types/tasks.ts",
+                "packages/utils/src/types.ts",
+                "packages/vitest/src/runtime/config.ts",
+                "packages/vitest/src/runtime/types/utils.ts",
+                "packages/vitest/src/types/general.ts",
+                "packages/vitest/src/types/global.ts",
+                "packages/vitest/src/types/module-locations.ts"
+              ],
+              "public_types_used_by": 0,
+              "edges": []
+            },
+            {
+              "path": "packages/vitest/src/types/rpc.ts",
+              "public_api_depends_on": 6,
+              "public_api_depends_on_files": [
+                "packages/runner/src/types/runner.ts",
+                "packages/runner/src/types/tasks.ts",
+                "packages/snapshot/src/types/index.ts",
+                "packages/vitest/src/types/general.ts",
+                "packages/vitest/src/types/global.ts",
+                "packages/vitest/src/utils/traces.ts"
+              ],
+              "public_types_used_by": 0,
+              "edges": []
+            },
+            {
+              "path": "packages/expect/src/types.ts",
+              "public_api_depends_on": 2,
+              "public_api_depends_on_files": [
+                "packages/spy/src/types.ts",
+                "packages/vitest/src/types/global.ts"
+              ],
+              "public_types_used_by": 3,
+              "public_types_used_by_files": [
+                "packages/vitest/src/integrations/chai/index.ts",
+                "packages/vitest/src/integrations/snapshot/chai.ts",
+                "packages/vitest/src/types/global.ts"
+              ],
+              "edges": [
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Assertion",
+                    "local_name": "Assertion",
+                    "line": 645,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/spy/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "MockInstance",
+                    "local_name": "MockInstance",
+                    "line": 211,
+                    "col": 0
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 700,
+                    "col": 33
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "ExpectStatic",
+                    "local_name": "ExpectStatic",
+                    "line": 121,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Assertion",
+                    "local_name": "Assertion",
+                    "line": 52,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 125,
+                    "col": 36
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "ExpectStatic",
+                    "local_name": "ExpectStatic",
+                    "line": 121,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "MatcherState",
+                    "local_name": "MatcherState",
+                    "line": 26,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 129,
+                    "col": 18
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Matcher",
+                    "local_name": "RawMatcherFn",
+                    "line": 105,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "MatcherState",
+                    "local_name": "MatcherState",
+                    "line": 26,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 105,
+                    "col": 40
+                  },
+                  "scope": "project-local-public-signatures"
+                },
+                {
+                  "source": {
+                    "path": "packages/expect/src/types.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "MatcherState",
+                    "local_name": "MatcherState",
+                    "line": 44,
+                    "col": 0
+                  },
+                  "target": {
+                    "path": "packages/vitest/src/types/global.ts",
+                    "namespace": "type",
+                    "declaration_kind": "interface",
+                    "exported_name": "Assertion",
+                    "local_name": "Assertion",
+                    "line": 52,
+                    "col": 2
+                  },
+                  "relation": "public API depends on",
+                  "evidence": {
+                    "path": "packages/expect/src/types.ts",
+                    "line": 90,
+                    "col": 22
+                  },
+                  "scope": "project-local-public-signatures"
+                }
+              ]
+            },
+            {
+              "path": "packages/snapshot/src/types/index.ts",
+              "public_api_depends_on": 3,
+              "public_api_depends_on_files": [
+                "packages/pretty-format/src/types.ts",
+                "packages/snapshot/src/port/rawSnapshot.ts",
+                "packages/snapshot/src/types/environment.ts"
+              ],
+              "public_types_used_by": 2,
+              "public_types_used_by_files": [
+                "packages/vitest/src/runtime/config.ts",
+                "packages/vitest/src/types/rpc.ts"
+              ],
+              "edges": []
+            },
+            {
+              "path": "packages/vitest/src/runtime/runners/test.ts",
+              "public_api_depends_on": 5,
+              "public_api_depends_on_files": [
+                "packages/runner/src/types/runner.ts",
+                "packages/runner/src/types/tasks.ts",
+                "packages/vitest/src/runtime/config.ts",
+                "packages/vitest/src/types/global.ts",
+                "packages/vitest/src/utils/traces.ts"
+              ],
+              "public_types_used_by": 0,
+              "edges": []
+            },
+            {
+              "path": "packages/vitest/src/types/general.ts",
+              "public_api_depends_on": 0,
+              "public_types_used_by": 5,
+              "public_types_used_by_files": [
+                "packages/vitest/src/api/types.ts",
+                "packages/vitest/src/integrations/inject.ts",
+                "packages/vitest/src/runtime/config.ts",
+                "packages/vitest/src/types/global.ts",
+                "packages/vitest/src/types/rpc.ts"
+              ],
+              "edges": []
+            }
+          ],
+          "cycles": [
+            {
+              "files": [
+                "packages/expect/src/types.ts",
+                "packages/vitest/src/types/global.ts",
+                "packages/expect/src/types.ts"
+              ]
+            }
+          ],
+          "source_evidence": [
+            {
+              "path": "packages/expect/src/types.ts",
+              "line": 700,
+              "col": 33,
+              "excerpt": "toHaveBeenCalledBefore: (mock: MockInstance, failIfNoFirstInvocation?: boolean) => void"
+            },
+            {
+              "path": "packages/expect/src/types.ts",
+              "line": 125,
+              "col": 36,
+              "excerpt": "<T>(actual: T, message?: string): Assertion<T>"
+            },
+            {
+              "path": "packages/expect/src/types.ts",
+              "line": 129,
+              "col": 18,
+              "excerpt": "getState: () => MatcherState"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

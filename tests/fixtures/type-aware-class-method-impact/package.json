@@ -1,0 +1,6 @@
+{
+  "name": "type-aware-class-method-impact-fixture",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

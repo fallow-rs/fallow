@@ -166,6 +166,10 @@
         "suggestInlineSuppression": true
       }
     },
+    "typeAware": {
+      "description": "Opts into TypeScript semantic analysis for project-wide symbol use,\nprovenance, API surface, symbol impact, and public-signature coupling.\nThis does not surface compiler diagnostics or typed lint rules.",
+      "$ref": "#/$defs/TypeAwareConfig"
+    },
     "rules": {
       "description": "Sets per-issue-type severity, keyed by kebab-case rule id: `error` reports and fails CI (non-zero exit), `warn` reports without failing, `off` disables detection and reporting entirely (e.g. `{ \"unused-files\": \"error\", \"unused-exports\": \"warn\", \"private-type-leaks\": \"off\" }`). Set a rule `off` to silence it, `warn` to demote below CI gating, or `error` to promote a warn/off-default rule to gating; most rules default to `error`, dev/optional-dependency and component/store/inject/CSS/catalog rules default to `warn`, and opt-in rules (`private-type-leaks`, `security-*`, `prop-drilling`, `thin-wrapper`, `duplicate-prop-shape`, `coverage-gaps`, `feature-flags`, `require-suppression-reason`) default to `off`. Singular aliases (`unused-file`) and `warning`/`none` severity spellings are accepted.",
       "$ref": "#/$defs/RulesConfig",
@@ -1137,6 +1141,44 @@
           "description": "Legacy spelling for [`EmailMode::Anonymized`].",
           "type": "string",
           "const": "hash"
+        }
+      ]
+    },
+    "TypeAwareConfig": {
+      "description": "Shared opt-in configuration for TypeScript semantic analysis.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable the optional TypeScript semantic pass. Disabled by default.",
+          "type": "boolean",
+          "default": false
+        },
+        "projects": {
+          "description": "TypeScript project config paths, resolved relative to the project root.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "require": {
+          "description": "Decide whether partial semantic analysis is advisory or gating.",
+          "$ref": "#/$defs/TypeAwareRequire"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypeAwareRequire": {
+      "description": "Completeness policy for opt-in TypeScript semantic analysis.",
+      "oneOf": [
+        {
+          "description": "Keep conservative findings and report semantic gaps without failing.",
+          "type": "string",
+          "const": "best-effort"
+        },
+        {
+          "description": "Fail the quality gate when any requested semantic query is incomplete.",
+          "type": "string",
+          "const": "complete"
         }
       ]
     },
@@ -2365,6 +2407,18 @@
     "RegressionBaseline": {
       "type": "object",
       "properties": {
+        "analysisIdentity": {
+          "description": "Compatibility identity for the analysis that produced these counts.\nMissing values in existing configs are treated as syntactic.",
+          "$ref": "#/$defs/SemanticAnalysisIdentity",
+          "default": {
+            "mode": "syntactic",
+            "semantic_schema_version": 1,
+            "capabilities": [],
+            "project_config_hash": "",
+            "backend_family": "",
+            "completeness": "complete"
+          }
+        },
         "totalIssues": {
           "type": "integer",
           "format": "uint",
@@ -2492,6 +2546,114 @@
           "default": 0
         }
       }
+    },
+    "SemanticAnalysisIdentity": {
+      "description": "Compatibility identity for comparing two analysis results.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "Syntactic or type-aware analysis mode.",
+          "$ref": "#/$defs/SemanticAnalysisMode"
+        },
+        "semantic_schema_version": {
+          "description": "Version of the semantic result schema, independent of tool versions.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "capabilities": {
+          "description": "Sorted capability set requested for the analysis.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SemanticCapability"
+          }
+        },
+        "project_config_hash": {
+          "description": "Hash of normalized project ownership and compiler configuration.",
+          "type": "string"
+        },
+        "backend_family": {
+          "description": "Backend family, such as `typescript-go`.",
+          "type": "string"
+        },
+        "completeness": {
+          "description": "Completeness of the resulting semantic analysis.",
+          "$ref": "#/$defs/SemanticCompleteness"
+        }
+      },
+      "required": [
+        "mode",
+        "semantic_schema_version",
+        "capabilities",
+        "project_config_hash",
+        "backend_family",
+        "completeness"
+      ]
+    },
+    "SemanticAnalysisMode": {
+      "description": "Analysis mode stored with baselines, snapshots, audit sides, and impact data.",
+      "oneOf": [
+        {
+          "description": "Normal Fallow analysis with no TypeScript semantic backend.",
+          "type": "string",
+          "const": "syntactic"
+        },
+        {
+          "description": "Opt-in analysis with one or more semantic capabilities.",
+          "type": "string",
+          "const": "type-aware"
+        }
+      ]
+    },
+    "SemanticCapability": {
+      "description": "Semantic capabilities that can share one TypeScript Program session.",
+      "oneOf": [
+        {
+          "description": "Confirm exact project-wide symbol use for an existing finding.",
+          "type": "string",
+          "const": "symbol-use"
+        },
+        {
+          "description": "Explain exact declarations, references, aliases, and re-exports.",
+          "type": "string",
+          "const": "symbol-trace"
+        },
+        {
+          "description": "Describe package-public signatures and private type leaks.",
+          "type": "string",
+          "const": "api-surface"
+        },
+        {
+          "description": "Find exact symbol consumers, affected files, and targeted tests.",
+          "type": "string",
+          "const": "symbol-impact"
+        },
+        {
+          "description": "Measure project-local public-signature coupling.",
+          "type": "string",
+          "const": "type-coupling"
+        }
+      ]
+    },
+    "SemanticCompleteness": {
+      "description": "Whether the semantic backend answered every requested query safely.",
+      "oneOf": [
+        {
+          "description": "Every requested query completed without omissions.",
+          "type": "string",
+          "const": "complete"
+        },
+        {
+          "description": "Some evidence is valid, but bounded or unsupported relations remain.",
+          "type": "string",
+          "const": "partial"
+        },
+        {
+          "description": "No safe semantic assertion could be made.",
+          "type": "string",
+          "const": "unavailable"
+        }
+      ]
     },
     "AuditConfig": {
       "type": "object",

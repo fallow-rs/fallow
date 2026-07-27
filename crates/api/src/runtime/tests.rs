@@ -478,6 +478,7 @@ fn serialize_health_report_json_tags_meta_and_strips_paths() {
         root,
         elapsed: std::time::Duration::ZERO,
         explain: true,
+        type_aware: None,
         grouped_by: None,
         groups: None,
         workspace_diagnostics: vec![WorkspaceDiagnostic::new(

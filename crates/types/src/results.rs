@@ -232,7 +232,7 @@ pub struct ReactComponentIntel {
 /// assert_eq!(results.total_issues(), 1);
 /// assert!(results.has_issues());
 /// ```
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AnalysisResults {
     /// Files not reachable from any entry point. Wrapped in
@@ -581,6 +581,11 @@ pub struct AnalysisResults {
     /// See [`ReactComponentIntel`].
     #[serde(skip)]
     pub react_component_intel: Vec<ReactComponentIntel>,
+    /// Plugin-owned framework contracts carried only into the optional
+    /// semantic reconciliation pass.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
 struct AnalysisResultsCoreMergeParts {
@@ -654,6 +659,7 @@ struct AnalysisResultsMetadataMergeParts {
     entry_point_summary: Option<EntryPointSummary>,
     render_fan_in: Option<RenderFanInMetric>,
     react_component_intel: Vec<ReactComponentIntel>,
+    semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
 /// Exhaustively destructure `other` into the five grouped merge-part structs.
@@ -734,6 +740,7 @@ fn split_merge_parts(
         entry_point_summary,
         render_fan_in,
         react_component_intel,
+        semantic_framework_contracts,
     } = other;
 
     (
@@ -804,6 +811,7 @@ fn split_merge_parts(
             entry_point_summary,
             render_fan_in,
             react_component_intel,
+            semantic_framework_contracts,
         },
     )
 }
@@ -1183,6 +1191,11 @@ impl AnalysisResults {
         }
         self.react_component_intel
             .extend(parts.react_component_intel);
+        for contract in parts.semantic_framework_contracts {
+            if !self.semantic_framework_contracts.contains(&contract) {
+                self.semantic_framework_contracts.push(contract);
+            }
+        }
     }
 
     /// Sort all result arrays for deterministic output ordering.
@@ -1192,6 +1205,7 @@ impl AnalysisResults {
     /// across runs. This method canonicalises every result list by sorting on
     /// (path, line, col, name) so that JSON/SARIF/human output is stable.
     pub fn sort(&mut self) {
+        self.semantic_framework_contracts.sort();
         self.sort_core_findings();
         self.sort_dependency_findings();
         self.sort_graph_findings();
@@ -1700,7 +1714,7 @@ fn catalog_sort_key(name: &str) -> (u8, &str) {
 }
 
 /// A file that is not reachable from any entry point.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedFile {
     /// Absolute path to the unused file.
@@ -1709,7 +1723,7 @@ pub struct UnusedFile {
 }
 
 /// An export that is never imported by other modules.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedExport {
     /// File containing the unused export.
@@ -1730,7 +1744,7 @@ pub struct UnusedExport {
 }
 
 /// A public export signature that references a same-file private type.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PrivateTypeLeak {
     /// File containing the exported symbol.
@@ -1746,12 +1760,16 @@ pub struct PrivateTypeLeak {
     pub col: u32,
     /// Byte offset of the type reference.
     pub span_start: u32,
+    /// Exact checker-backed provenance when type-aware analysis confirmed the
+    /// package-public leak across files or re-exports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<crate::semantic::SemanticPrivateTypeLeak>,
 }
 
 /// A `"use client"` file that exports a Next.js server-only / route-segment
 /// config name. Next.js rejects this combination at build time; fallow catches
 /// it statically before the build runs.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InvalidClientExport {
     /// File carrying the `"use client"` directive and the illegal export.
@@ -1773,7 +1791,7 @@ pub struct InvalidClientExport {
 /// server-only origin module. Importing one name from such a barrel drags the
 /// other's directive context across the React Server Components boundary (the
 /// Next.js App Router footgun); fallow catches it statically.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MixedClientServerBarrel {
     /// The barrel file re-exporting both a client and a server-only origin.
@@ -1797,7 +1815,7 @@ pub struct MixedClientServerBarrel {
 /// statement precedes it the string is parsed as an ordinary expression and
 /// silently ignored: the intended client/server boundary never takes effect.
 /// The fix is to move the directive to the very top of the file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisplacedDirective {
     /// The file carrying the misplaced directive.
@@ -1817,7 +1835,7 @@ pub struct MisplacedDirective {
 /// symbol with cross-file identity, so an unmatched key is a real dead-half DI
 /// link: at runtime the inject returns `undefined`, surfaced only at render.
 /// The fix is binary: provide the key somewhere, or remove the dead inject.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnprovidedInject {
     /// The file carrying the orphan inject / getContext call.
@@ -1841,7 +1859,7 @@ pub struct UnprovidedInject {
 /// endpoint is unreachable: Next still registers the action id, so it stays
 /// POST-able. It means no project code calls it (likely forgotten / dead, and a
 /// candidate for removal to shrink surface area).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedServerAction {
     /// The `"use server"` file that exports the unreferenced action.
@@ -1861,7 +1879,7 @@ pub struct UnusedServerAction {
 /// a real server/DB fetch cost on every request for data nothing renders. The
 /// fix is a human call (delete the key, or wire a consumer): a load fetch may
 /// have side effects, so there is no safe auto-fix.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedLoadDataKey {
     /// The producer `+page.{ts,server.ts,js,server.js}` file declaring the key.
@@ -1886,7 +1904,7 @@ pub struct UnusedLoadDataKey {
 /// registration, no `h()`/auto-import use, and no script value-read. It survives
 /// `unused-file` (a barrel re-export keeps it reachable) and `unused-export`
 /// (the re-export counts as a use), yet no file actually instantiates it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnrenderedComponent {
     /// The component file that is reachable but rendered nowhere.
@@ -1919,7 +1937,7 @@ pub struct UnrenderedComponent {
 /// prop that is referenced NOWHERE inside its own component. Single-component
 /// finding, zero-FP doctrine: the component abstains on any opaque public or
 /// fallthrough signal.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentProp {
     /// The component file declaring the unused prop.
@@ -1939,7 +1957,7 @@ pub struct UnusedComponentProp {
 /// inside its own single-file component (no `emit('<name>')` call). Single-file
 /// finding, zero-FP doctrine: the whole file abstains on any
 /// unharvestable / dynamic-emit / whole-object-use / `defineModel` signal.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentEmit {
     /// The `.vue` SFC declaring the unused emit.
@@ -1961,7 +1979,7 @@ pub struct UnusedComponentEmit {
 /// Zero-FP doctrine: the whole component abstains on any dynamic-dispatch or
 /// whole-`dispatch`-value signal, and a listener on ANY component anywhere
 /// credits the event name (the liberal over-credit direction).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedSvelteEvent {
     /// The `.svelte` component dispatching the unlistened event.
@@ -1980,7 +1998,7 @@ pub struct UnusedSvelteEvent {
 /// One hop in a prop-drilling chain: a component that received the prop and
 /// passed it along (or, at the chain ends, the source that owns it and the
 /// consumer that substantively reads it).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PropDrillHop {
     /// The file containing this hop's component.
@@ -2003,7 +2021,7 @@ pub struct PropDrillHop {
 /// lift to context at hop B"). Zero-FP doctrine: any spread / `cloneElement` /
 /// element-as-prop / render-prop / context-provider / dynamic shape in the path
 /// abstains the whole chain.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PropDrillingChain {
     /// The drilled prop name as declared at the chain SOURCE.
@@ -2025,7 +2043,7 @@ pub struct PropDrillingChain {
 /// doctrine: `forwardRef` / `memo` / exported / context-provider /
 /// `cloneElement` / render-prop / named-attr / unresolved-child wrappers all
 /// abstain (each is an intentional indirection or unprovable shape).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ThinWrapper {
     /// The file containing the wrapper component.
@@ -2045,7 +2063,7 @@ pub struct ThinWrapper {
 /// the same significant prop-name set, listed in each member's
 /// `sharing_components`. Path-sorted for stable output. A located reference (no
 /// `shape`, which is carried once on the owning [`DuplicatePropShape`]).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicatePropShapeMember {
     /// The file containing the sibling component.
@@ -2069,7 +2087,7 @@ pub struct DuplicatePropShapeMember {
 /// (opt-in), so this is dormant until enabled. Exact full-set identity only: a
 /// superset / subset relationship does NOT group (so the finding always fits one
 /// extracted shared type).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicatePropShape {
     /// The file containing this component.
@@ -2097,7 +2115,7 @@ pub struct DuplicatePropShape {
 /// nor the class body). Single-file dead-input direction; the Angular analogue
 /// of [`UnusedComponentProp`]. The whole component abstains on an unresolved
 /// `extends` heritage clause (a base class in another file may read `this.foo`).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentInput {
     /// The Angular component/directive `.ts` file declaring the unused input.
@@ -2119,7 +2137,7 @@ pub struct UnusedComponentInput {
 /// `model()` is recorded as an input only, so its framework-driven `update:`
 /// emit is never flagged here. The whole component abstains on an unresolved
 /// `extends` heritage clause.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentOutput {
     /// The Angular component/directive `.ts` file declaring the unused output.
@@ -2140,7 +2158,7 @@ pub struct UnusedComponentOutput {
 /// pages that resolve to the same path"); fallow catches it statically and
 /// names every colliding file at once. One finding is emitted per colliding
 /// file; `conflicting_paths` lists the sibling files that share the URL.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RouteCollision {
     /// This colliding route file (a `page` or `route` leaf).
@@ -2167,7 +2185,7 @@ pub struct RouteCollision {
 /// `next build` does NOT catch it, so fallow's static catch surfaces a route
 /// that would otherwise pass CI and crash at request time. One finding is
 /// emitted per involved file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DynamicSegmentNameConflict {
     /// This route file living under one of the conflicting dynamic segments.
@@ -2191,7 +2209,7 @@ pub struct DynamicSegmentNameConflict {
 }
 
 /// A dependency that is listed in package.json but never imported.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependency {
     /// Package name, including internal workspace package names.
@@ -2206,6 +2224,7 @@ pub struct UnusedDependency {
     pub line: u32,
     /// Workspace roots that import this package even though the declaring workspace does not.
     #[serde(
+        default,
         serialize_with = "serde_path::serialize_vec",
         skip_serializing_if = "Vec::is_empty"
     )]
@@ -2229,7 +2248,7 @@ pub struct UnusedDependency {
 /// assert!(format!("{dev:?}").contains("DevDependencies"));
 /// assert!(format!("{opt:?}").contains("OptionalDependencies"));
 /// ```
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum DependencyLocation {
@@ -2242,7 +2261,7 @@ pub enum DependencyLocation {
 }
 
 /// An unused enum or class member.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedMember {
     /// File containing the unused member.
@@ -2261,7 +2280,7 @@ pub struct UnusedMember {
 }
 
 /// An import that could not be resolved.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedImport {
     /// File containing the unresolved import.
@@ -2279,7 +2298,7 @@ pub struct UnresolvedImport {
 }
 
 /// A dependency used in code but not listed in package.json.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnlistedDependency {
     /// Package name, including internal workspace package names, that is
@@ -2290,7 +2309,7 @@ pub struct UnlistedDependency {
 }
 
 /// A location where an import occurs.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImportSite {
     /// File containing the import.
@@ -2303,7 +2322,7 @@ pub struct ImportSite {
 }
 
 /// An export that appears multiple times across the project.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicateExport {
     /// The duplicated export name.
@@ -2313,7 +2332,7 @@ pub struct DuplicateExport {
 }
 
 /// A location where a duplicate export appears.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicateLocation {
     /// File containing the duplicate export.
@@ -2328,7 +2347,7 @@ pub struct DuplicateLocation {
 /// A production dependency that is only used via type-only imports.
 /// In production builds, type imports are erased, so this dependency
 /// is not needed at runtime and could be moved to devDependencies.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeOnlyDependency {
     /// Production dependency that is only used via type-only imports.
@@ -2896,7 +2915,7 @@ pub struct SecurityFinding {
 /// (`catalogs.<name>`) use their declared name. The source file is
 /// `pnpm-workspace.yaml` for pnpm catalogs or root `package.json` for Bun
 /// catalogs.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntry {
     /// Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
@@ -2922,7 +2941,7 @@ pub struct UnusedCatalogEntry {
 }
 
 /// A named `catalogs.<name>` group with no package entries.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EmptyCatalogGroup {
     /// Catalog group name declared under the `catalogs` map.
@@ -2943,7 +2962,7 @@ pub struct EmptyCatalogGroup {
 ///
 /// The default catalog (bare `catalog:`) uses `catalog_name: "default"`.
 /// Named catalogs (`catalog:react17`) use the declared catalog name.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedCatalogReference {
     /// Package name being referenced via the catalog protocol (e.g. `"react"`).
@@ -3006,7 +3025,7 @@ impl std::fmt::Display for DependencyOverrideSource {
 /// `package.json` and is not present in `pnpm-lock.yaml`. Projects without a
 /// readable lockfile fall back to package manifest checks; the `hint` field
 /// flags that conservative mode.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependencyOverride {
     /// The full original override key as written in the source (e.g.
@@ -3074,7 +3093,7 @@ impl DependencyOverrideMisconfigReason {
 /// An override entry whose key or value is malformed. Default severity is
 /// `error` because pnpm refuses to install (or silently produces a no-op
 /// override) when it encounters these shapes.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisconfiguredDependencyOverride {
     /// The full original override key as written in the source.
@@ -3108,7 +3127,7 @@ pub struct MisconfiguredDependencyOverride {
 
 /// A production dependency that is only imported by test files.
 /// Since it is never used in production code, it could be moved to devDependencies.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestOnlyDependency {
     /// Production dependency that is only imported by test files, consider
@@ -3126,7 +3145,7 @@ pub struct TestOnlyDependency {
 /// (`pnpm install --prod`) omits devDependencies, it would break at runtime, so
 /// the package should be promoted to `dependencies`. The promote-side mirror of
 /// [`TestOnlyDependency`] / [`TypeOnlyDependency`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DevDependencyInProduction {
     /// devDependency imported at runtime from production code, consider moving
@@ -3241,7 +3260,7 @@ pub enum ReExportCycleKind {
 }
 
 /// An import that crosses an architecture boundary rule.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryViolation {
     /// The file making the disallowed import.
@@ -3263,7 +3282,7 @@ pub struct BoundaryViolation {
 }
 
 /// A source file that does not match any configured architecture boundary zone.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryCoverageViolation {
     /// The unmatched source file.
@@ -3278,7 +3297,7 @@ pub struct BoundaryCoverageViolation {
 /// A call from a zoned file to a callee forbidden for that zone via
 /// `boundaries.calls.forbidden`. One finding is reported per unique callee
 /// path per file (first occurrence wins).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryCallViolation {
     /// The zoned source file making the forbidden call.
@@ -3298,7 +3317,7 @@ pub struct BoundaryCallViolation {
 }
 
 /// Which rule-pack rule kind produced a [`PolicyViolation`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum PolicyRuleKind {
@@ -3316,7 +3335,7 @@ pub enum PolicyRuleKind {
 /// overrides the `rules."policy-violation"` master; `off` rules emit nothing,
 /// so only `error` and `warn` appear on the wire. The exit-code gate inspects
 /// this per-finding value, not the master severity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum PolicyViolationSeverity {
@@ -3332,7 +3351,7 @@ pub enum PolicyViolationSeverity {
 /// wins, matching `boundary_call_violations`); banned-import findings anchor
 /// at each matching import or re-export declaration; banned-export findings
 /// anchor at matching export declarations.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PolicyViolation {
     /// The source file containing the banned call, import, or effectful usage.
@@ -3363,7 +3382,7 @@ pub struct PolicyViolation {
 }
 
 /// The origin of a stale suppression: inline comment or JSDoc tag.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SuppressionOrigin {
@@ -3409,28 +3428,15 @@ const fn is_true(b: &bool) -> bool {
 /// so schemars marks the field non-required in the generated JSON Schema AND
 /// the absent case round-trips to the recognized-kind interpretation.
 /// Referenced by the always-emitted `#[serde(default = "default_true")]`
-/// attribute. Today `SuppressionOrigin` derives only `Serialize`, so serde
-/// itself never calls this; schemars (under the `schema` feature) reads the
-/// attribute textually to mark `kind_known` non-required. The `cfg_attr`
-/// applies `#[expect(dead_code)]` only on builds WITHOUT the `schema` feature
-/// (where the function is genuinely dead): under the feature schemars
-/// references it, the lint does not fire, and an unconditional `#[expect]`
-/// would be unfulfilled. The function stays un-gated so a future
-/// `Deserialize` derive on `SuppressionOrigin` does not produce a missing-
-/// function compile error on non-`schema` builds.
-#[cfg_attr(
-    not(feature = "schema"),
-    expect(
-        dead_code,
-        reason = "referenced via #[serde(default = ...)]; only consumed by schemars under the `schema` feature, dead on default builds today"
-    )
-)]
+/// attribute. Serde uses it when saved reports deserialize the output back
+/// into the typed findings, while schemars uses it to keep `kind_known`
+/// optional in the generated schema.
 const fn default_true() -> bool {
     true
 }
 
 /// A suppression comment or JSDoc tag that no longer matches any issue.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StaleSuppression {
     /// File containing the stale suppression.
@@ -3638,7 +3644,7 @@ pub struct ActiveSuppression {
 }
 
 /// The detection method used to identify a feature flag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FlagKind {
@@ -3651,7 +3657,7 @@ pub enum FlagKind {
 }
 
 /// Detection confidence for a feature flag finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FlagConfidence {
@@ -3664,7 +3670,7 @@ pub enum FlagConfidence {
 }
 
 /// A detected feature flag use site.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlag {
     /// File containing the feature flag usage.
@@ -3707,7 +3713,7 @@ const _: () = assert!(std::mem::size_of::<FeatureFlag>() <= 160);
 
 /// Usage count for an export symbol. Used by the LSP Code Lens to show
 /// reference counts above each export declaration.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExportUsage {
     /// File containing the export.
@@ -3727,7 +3733,7 @@ pub struct ExportUsage {
 }
 
 /// A location where an export is referenced (import site in another file).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReferenceLocation {
     /// File containing the import that references the export.
@@ -3787,6 +3793,14 @@ mod tests {
 
     #[test]
     fn merge_into_appends_counts_and_preserves_existing_optional_metadata() {
+        let framework_contract = crate::semantic::SemanticFrameworkContract {
+            framework: "lit".to_string(),
+            package: "lit".to_string(),
+            heritage_symbol: "LitElement".to_string(),
+            heritage_names: vec!["LitElement".to_string()],
+            relation: crate::semantic::SemanticFrameworkRelation::Extends,
+            members: vec!["render".to_string()],
+        };
         let mut target = AnalysisResults {
             unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("a.ts"),
@@ -3798,6 +3812,7 @@ mod tests {
                 total: 1,
                 by_source: vec![("existing".to_string(), 1)],
             }),
+            semantic_framework_contracts: vec![framework_contract.clone()],
             ..AnalysisResults::default()
         };
         let source = AnalysisResults {
@@ -3813,6 +3828,7 @@ mod tests {
                 by_source: vec![("incoming".to_string(), 1)],
             }),
             render_fan_in: Some(RenderFanInMetric::default()),
+            semantic_framework_contracts: vec![framework_contract],
             ..AnalysisResults::default()
         };
 
@@ -3839,6 +3855,7 @@ mod tests {
             Some("existing")
         );
         assert!(target.render_fan_in.is_some());
+        assert_eq!(target.semantic_framework_contracts.len(), 1);
     }
 
     fn test_unused_export(path: &str, export_name: &str, is_type_only: bool) -> UnusedExport {

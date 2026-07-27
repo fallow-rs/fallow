@@ -159,6 +159,21 @@ test("CI runs the checked-in Action against the current Rust binary", () => {
   assert.doesNotMatch(publishedCompatibilityWorkflow, /cargo build --bin fallow/);
 });
 
+test("Action PR comment smoke requires and verifies the branded GitHub App", () => {
+  const workflow = readWorkflow(".github/workflows/test-action.yml");
+  const job = indentedBlock(workflow, "test-comment", 2);
+
+  assert.match(job, /permissions:\n\s+contents: read\n\s+id-token: write\n\s+pull-requests: write/);
+  assert.match(
+    job,
+    /if: github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
+  );
+  assert.match(job, /EXPECTED_COMMENT_AUTHOR: fallow-cloud\[bot\]/);
+  assert.match(job, /"\$COMMENT_COUNT" -ne 1/);
+  assert.match(job, /COMMENT_AUTHOR=.*jq -r '\.\[0\]\.user\.login \/\/ empty'/);
+  assert.match(job, /"\$COMMENT_AUTHOR" != "\$EXPECTED_COMMENT_AUTHOR"/);
+});
+
 test("binary-size workflow isolates incompatible release builds", () => {
   const workflow = readWorkflow(".github/workflows/bloat.yml");
   const globalEnv = indentedBlock(workflow, "env", 0);
@@ -214,6 +229,8 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     windowsRustPaths.includes("crates/core/tests/integration_test/symlink_root_containment.rs"),
   );
   assert.ok(windowsRustPaths.includes("crates/engine/src/repo_refs.rs"));
+  assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
+  assert.ok(windowsRustPaths.includes("crates/cli/src/type_aware.rs"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
   assert.match(windowsRustJob, /cargo test -p fallow-engine changed_files::tests/);
   assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
@@ -229,7 +246,11 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   );
   assert.match(
     windowsRustJob,
-    /^[ \t]+run: cargo clippy -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
+    /cargo test -p fallow-cli windows_job_object_terminates_descendants_without_taskkill_lookup/,
+  );
+  assert.match(
+    windowsRustJob,
+    /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
   );
   assert.match(zedJob, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
@@ -271,6 +292,28 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /cd crates\/napi && npm test/);
   assert.match(job, /audit_orphan_sweep_removes_dead_pid_worktree/);
   assert.match(job, /run_fallow_timeout_terminates_and_reaps_windows_job_tree/);
+});
+
+test("NAPI builds preserve the maintained native loader", () => {
+  const packageJson = JSON.parse(readFileSync("crates/napi/package.json", "utf8"));
+  for (const script of [packageJson.scripts.build, packageJson.scripts["build:debug"]]) {
+    assert.match(script, /\bnapi build\b/u);
+    assert.match(script, /--no-js\b/u);
+  }
+
+  for (const path of [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/release-validation.yml",
+  ]) {
+    const commands = [...readWorkflow(path).matchAll(/\bnpx napi build[^\n]*/gu)].map(
+      (match) => match[0],
+    );
+    assert.ok(commands.length > 0, `${path} must build the NAPI addon`);
+    for (const command of commands) {
+      assert.match(command, /--no-js\b/u, `${path}: ${command}`);
+    }
+  }
 });
 
 test("release runs Zed verification on macOS and Windows without credentials", () => {
@@ -445,6 +488,8 @@ test("coverage required check succeeds as a no-op while trusted events still run
 
   for (const name of [
     "Set up Rust",
+    "Set up Node.js",
+    "Install type-aware sidecar dependencies",
     "Install cargo-llvm-cov",
     "Build CLI binary for e2e tests",
     "Run tests with coverage",

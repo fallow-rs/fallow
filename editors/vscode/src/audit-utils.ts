@@ -1,5 +1,7 @@
 import { escapeMarkdownText } from "./markdown-utils.js";
 import type { AuditGate, AuditOutput, AuditVerdict } from "./types.js";
+import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
+import { appendCommonScopeArgs, type BuiltCliArgs } from "./cli-args-utils.js";
 
 interface AuditArgsOptions {
   /**
@@ -19,6 +21,9 @@ interface AuditArgsOptions {
    * the workspace forwarding in `buildAnalysisArgs`.
    */
   readonly workspace: string;
+  readonly typeAware?: TypeAwareArgsOptions;
+  /** Version of the exact CLI binary this argv will be passed to. */
+  readonly cliVersion: string | null;
 }
 
 /**
@@ -28,40 +33,36 @@ interface AuditArgsOptions {
  * `audit` is the first positional (the subcommand selector) and must precede
  * every flag. The argv stays lean: only flags that shipped with the `audit`
  * command itself are emitted (`--format`, `--quiet`, `--changed-since`,
- * `--production`, `--config`, `--gate`), so there is nothing version-gated to
- * strip on an older CLI. Audit owns its own sub-pass selection, so no `--skip`
- * is passed. The sidebar's `--dupes-*` tuning knobs are intentionally not
- * forwarded; audit does not accept them in this surface.
+ * `--production`, `--config`, `--gate`). Type-aware options are gated against
+ * the resolved binary, and unknown versions use the shared tolerant executor.
+ * Audit owns its own sub-pass selection, so no `--skip` is passed. The
+ * sidebar's `--dupes-*` tuning knobs are intentionally not forwarded.
  *
  * `--gate all` is appended only when explicitly requested. The CLI default is
  * `new-only`, so omitting the flag for the default keeps the argv minimal and
  * matches the established `buildAnalysisArgs` style (default values are no-ops
  * we simply omit).
  */
-export const buildAuditArgs = (options: AuditArgsOptions): string[] => {
+export const buildAuditArgs = (options: AuditArgsOptions): BuiltCliArgs => {
   const args = ["audit", "--format", "json", "--quiet"];
+  const skipped = [];
 
-  if (options.changedSince) {
-    args.push("--changed-since", options.changedSince);
-  }
-
-  if (options.workspace) {
-    args.push("--workspace", options.workspace);
-  }
+  appendCommonScopeArgs(args, options);
 
   if (options.production) {
     args.push("--production");
   }
 
-  if (options.configPath) {
-    args.push("--config", options.configPath);
+  const skippedTypeAware = appendTypeAwareArgs(args, options.typeAware, options.cliVersion);
+  if (skippedTypeAware) {
+    skipped.push(skippedTypeAware);
   }
 
   if (options.gate === "all") {
     args.push("--gate", "all");
   }
 
-  return args;
+  return { args, skipped };
 };
 
 /**

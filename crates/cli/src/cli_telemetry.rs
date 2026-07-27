@@ -269,6 +269,7 @@ pub fn telemetry_workflow_for_command(
             | Command::CiTemplate { .. }
             | Command::Migrate { .. }
             | Command::Telemetry { .. }
+            | Command::TypeAware { .. }
             | Command::SetupHooks { .. }
             | Command::AuditCache { .. },
         ) => telemetry::Workflow::Setup,

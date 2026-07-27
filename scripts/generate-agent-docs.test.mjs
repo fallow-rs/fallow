@@ -87,6 +87,9 @@ const SCHEMA = {
         boolFlag("--unused-files", "Only report unused files"),
         boolFlag("--unused-exports", "Only report unused exports"),
         boolFlag("--unused-deps", "Only report unused dependencies"),
+        boolFlag("--type-aware", "Type-aware semantic refinement"),
+        stringFlag("--type-aware-project", "TypeScript project selection"),
+        stringFlag("--type-aware-require", "Type-aware completeness policy"),
         boolFlag("--trace", "Trace export usage"),
         stringFlag("--file", "Scope output to files"),
       ],
@@ -556,6 +559,9 @@ test("CLI reference keeps issue filters separate from command flags", () => {
     out.indexOf("<!-- generated:flags:dead-code-filters:end -->"),
   );
   assert.doesNotMatch(deadCodeBlock, /--unused-files/);
+  assert.match(deadCodeBlock, /--type-aware/);
+  assert.match(deadCodeBlock, /--type-aware-project/);
+  assert.match(deadCodeBlock, /--type-aware-require/);
   assert.match(deadCodeBlock, /--trace/);
   assert.match(filterBlock, /\| `--unused-files` \| Curated unused files prose \|/);
   assert.match(filterBlock, /\| `--unused-deps` \|/);

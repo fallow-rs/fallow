@@ -233,6 +233,13 @@ RUNNER_TMP="$INSTALL_TMP/runner"
 mkdir -p "$RUNNER_TMP/bin" "$RUNNER_TMP/root"
 cat > "$RUNNER_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
+if [ -n "${FALLOW_TEST_ENV_FILE:-}" ]; then
+  printf '%s\n' \
+    "FALLOW_TYPE_AWARE=${FALLOW_TYPE_AWARE:-}" \
+    "FALLOW_TYPE_AWARE_PROJECTS=${FALLOW_TYPE_AWARE_PROJECTS:-}" \
+    "FALLOW_TYPE_AWARE_REQUIRE=${FALLOW_TYPE_AWARE_REQUIRE:-}" \
+    > "$FALLOW_TEST_ENV_FILE"
+fi
 printf '{"total_issues":0}\n'
 SH
 chmod +x "$RUNNER_TMP/bin/fallow"
@@ -308,6 +315,10 @@ OUT=$(cd "$RUNNER_TMP" && env \
   FALLOW_DRY_RUN=true \
   FALLOW_NO_CACHE=false \
   FALLOW_THREADS= \
+  FALLOW_TYPE_AWARE=true \
+  FALLOW_TYPE_AWARE_PROJECTS=tsconfig.app.json,tsconfig.test.json \
+  FALLOW_TYPE_AWARE_REQUIRE=complete \
+  FALLOW_TEST_ENV_FILE="$RUNNER_TMP/type-aware-env" \
   FALLOW_ONLY= \
   FALLOW_SKIP= \
   FALLOW_SCRIPTS_REF= \
@@ -321,6 +332,13 @@ fi
 ARGS=$(cat "$RUNNER_TMP/fallow-analysis-args.sh")
 assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "run writer: forwards coverage to default combined command"
 assert_contains "$ARGS" "--coverage-root /ci/workspace" "run writer: forwards coverage-root to default combined command"
+TYPE_AWARE_ENV=$(cat "$RUNNER_TMP/type-aware-env")
+assert_contains "$ARGS" "--type-aware" "run writer: enables type-aware CLI mode"
+assert_contains "$ARGS" "--type-aware-project tsconfig.app.json" "run writer: forwards first type-aware project separately"
+assert_contains "$ARGS" "--type-aware-project tsconfig.test.json" "run writer: forwards second type-aware project separately"
+assert_contains "$ARGS" "--type-aware-require complete" "run writer: forwards type-aware completeness policy"
+assert_contains "$TYPE_AWARE_ENV" "FALLOW_TYPE_AWARE_PROJECTS=" "run writer: clears project env after CLI translation"
+assert_contains "$TYPE_AWARE_ENV" "FALLOW_TYPE_AWARE_REQUIRE=" "run writer: clears require env after CLI translation"
 
 # =========================================================================
 # Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml
@@ -1042,6 +1060,10 @@ echo "=== GitLab CI YAML structure ==="
 CI_YAML="$DIR/../gitlab-ci.yml"
 
 echo "  gitlab-ci.yml:"
+assert_contains "$(cat "$CI_YAML")" 'FALLOW_TYPE_AWARE: ""' "GitLab defaults defer type-aware enablement to repository config"
+assert_contains "$(cat "$CI_YAML")" 'FALLOW_TYPE_AWARE_REQUIRE: ""' "GitLab defaults defer completeness policy to repository config"
+assert_contains "$(cat "$CI_YAML")" 'unset FALLOW_TYPE_AWARE_PROJECTS FALLOW_TYPE_AWARE_REQUIRE' "GitLab removes empty env overrides before analysis"
+assert_contains "$(cat "$CI_YAML")" 'Type-aware completeness gate failed' "GitLab preserves semantic completeness failures from valid JSON"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW" "has FALLOW_REVIEW variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW_GUIDANCE" "has FALLOW_REVIEW_GUIDANCE variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_MAX_COMMENTS" "has FALLOW_MAX_COMMENTS variable"

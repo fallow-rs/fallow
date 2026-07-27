@@ -15,7 +15,7 @@ use crate::CoverageModel;
 ///     `render_fan_in_high_pct`, `max_render_fan_in`), the component-graph
 ///     analogue of module fan-in / coupling concentration. Additive optional
 ///     fields (matches the v4 precedent that added coupling concentration).
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 9;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 10;
 
 /// Project-wide vital signs: a fixed set of metrics for trend tracking.
 ///
@@ -236,6 +236,10 @@ pub struct VitalSignsSnapshot {
     /// Coverage model used for CRAP computation. Added in schema v3.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub coverage_model: Option<CoverageModel>,
+    /// Compatibility identity for the analysis that produced this snapshot.
+    /// Legacy snapshots deserialize as syntactic analysis.
+    #[serde(default)]
+    pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
 }
 
 #[cfg(test)]

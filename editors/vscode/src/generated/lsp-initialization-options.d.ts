@@ -26,6 +26,12 @@ export interface LspHealthInitializationOptions {
   readonly inlineComplexity: boolean | undefined;
 }
 
+export interface LspTypeAwareInitializationOptions {
+  readonly enabled: boolean;
+  readonly projects: readonly string[];
+  readonly require: "best-effort" | "complete";
+}
+
 export interface LspInitializationOptions {
   readonly issueTypes: Record<string, boolean>;
   readonly changedSince: string;
@@ -34,4 +40,5 @@ export interface LspInitializationOptions {
   readonly production: boolean | undefined;
   readonly duplication: LspDuplicationOptions;
   readonly health?: LspHealthInitializationOptions;
+  readonly typeAware?: LspTypeAwareInitializationOptions;
 }

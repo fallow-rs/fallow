@@ -2,6 +2,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use fallow_config::OutputFormat;
+use fallow_types::envelope::Meta;
 use serde_json::{Value, json};
 
 use crate::error::emit_error;
@@ -40,6 +41,12 @@ pub struct InspectOptions<'a> {
     /// Only meaningful for a SYMBOL target. Default off (best-effort, off the
     /// ranked path).
     pub symbol_chain: bool,
+    /// Include project-wide TypeScript semantic evidence for symbol targets.
+    pub type_aware: bool,
+    /// Explicit TypeScript project configs for semantic analysis.
+    pub type_aware_projects: &'a [PathBuf],
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
 }
 
 #[derive(Debug)]
@@ -85,6 +92,9 @@ impl NormalizedTarget {
 }
 
 pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
+    if !matches!(opts.output, OutputFormat::Json | OutputFormat::Human) {
+        return emit_error("inspect supports --format json or human", 2, opts.output);
+    }
     let target = match NormalizedTarget::new(opts.root, &opts.target) {
         Ok(target) => target,
         Err(message) => return emit_error(&message, 2, opts.output),
@@ -108,7 +118,9 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
         );
     }
 
-    let evidence = build_inspect_evidence(opts, &target, &trace_file, trace_export.clone());
+    let (evidence, type_aware, semantic_warnings) =
+        build_inspect_evidence(opts, &target, &trace_file, trace_export.clone());
+    warnings.extend(semantic_warnings);
     push_inspect_warnings(&mut warnings, &evidence);
 
     let identity = build_inspect_identity(&target, &trace_file, trace_export.as_ref());
@@ -118,9 +130,62 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
         identity,
         evidence,
         warnings,
+        meta: type_aware.map(|type_aware| Meta {
+            type_aware: Some(type_aware),
+            ..Meta::default()
+        }),
     };
 
-    emit_inspect_bundle(bundle, opts)
+    let completeness_failed = inspect_type_aware_completeness_failed(&bundle);
+    let emitted = emit_inspect_bundle(bundle, opts);
+    if emitted == ExitCode::SUCCESS && completeness_failed {
+        ExitCode::from(1)
+    } else {
+        emitted
+    }
+}
+
+fn inspect_type_aware_completeness_failed(bundle: &InspectOutput) -> bool {
+    let type_aware = bundle
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.type_aware.as_ref());
+    inspect_requires_complete(type_aware)
+        && (inspect_semantic_incomplete(&bundle.evidence)
+            || type_aware.is_some_and(inspect_type_aware_meta_incomplete))
+}
+
+fn inspect_requires_complete(meta: Option<&fallow_types::envelope::TypeAwareMeta>) -> bool {
+    meta.and_then(|meta| meta.required_completeness)
+        == Some(fallow_types::semantic::SemanticCompletenessRequirement::Complete)
+}
+
+fn inspect_type_aware_meta_incomplete(meta: &fallow_types::envelope::TypeAwareMeta) -> bool {
+    meta.identity.as_ref().is_some_and(|identity| {
+        identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
+    }) || meta
+        .queries
+        .iter()
+        .any(|query| query.status != fallow_types::semantic::SemanticCompleteness::Complete)
+}
+
+fn inspect_semantic_incomplete(evidence: &InspectEvidence) -> bool {
+    [
+        evidence.semantic_trace.as_ref(),
+        evidence.api_surface.as_ref(),
+        evidence.symbol_impact.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|section| {
+        section.status != InspectSectionStatus::Ok
+            || section
+                .data
+                .as_ref()
+                .and_then(|value| value.get("status"))
+                .and_then(Value::as_str)
+                .is_some_and(|status| status != "complete")
+    })
 }
 
 /// Run the `trace_export` child when the target is a symbol, else `Ok(None)`.
@@ -142,11 +207,16 @@ fn build_inspect_evidence(
     target: &NormalizedTarget,
     trace_file: &Value,
     trace_export: Option<Value>,
-) -> InspectEvidence {
+) -> (
+    InspectEvidence,
+    Option<fallow_types::envelope::TypeAwareMeta>,
+    Vec<String>,
+) {
     let optional_threads = parallel_child_threads(opts.threads);
     let child_evidence = collect_inspect_child_evidence(opts, target, optional_threads);
 
-    InspectEvidence {
+    let semantic = collect_semantic_evidence(opts, target);
+    let evidence = InspectEvidence {
         trace_file: InspectEvidenceSection::ok(InspectEvidenceScope::File, trace_file.clone()),
         trace_export: trace_export
             .map(|value| InspectEvidenceSection::ok(InspectEvidenceScope::Symbol, value)),
@@ -157,6 +227,193 @@ fn build_inspect_evidence(
         impact_closure: child_evidence.impact_closure,
         churn: child_evidence.churn,
         symbol_chain: build_symbol_chain_section(opts, target, optional_threads),
+        semantic_trace: semantic.semantic_trace,
+        api_surface: semantic.api_surface,
+        symbol_impact: semantic.symbol_impact,
+        targeted_tests: semantic.targeted_tests,
+    };
+    (evidence, semantic.type_aware, semantic.warnings)
+}
+
+struct InspectSemanticEvidence {
+    semantic_trace: Option<InspectEvidenceSection>,
+    api_surface: Option<InspectEvidenceSection>,
+    symbol_impact: Option<InspectEvidenceSection>,
+    targeted_tests: Option<InspectEvidenceSection>,
+    type_aware: Option<fallow_types::envelope::TypeAwareMeta>,
+    warnings: Vec<String>,
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "semantic inspect resolves all related evidence in one shared Program request"
+)]
+fn collect_semantic_evidence(
+    opts: &InspectOptions<'_>,
+    target: &NormalizedTarget,
+) -> InspectSemanticEvidence {
+    let Some(export_name) = target.export_name.as_deref() else {
+        return InspectSemanticEvidence {
+            semantic_trace: None,
+            api_surface: None,
+            symbol_impact: None,
+            targeted_tests: None,
+            type_aware: None,
+            warnings: Vec::new(),
+        };
+    };
+    let config_path = opts.config_path.cloned();
+    let Ok(mut config) = crate::runtime_support::load_config_for_analysis(
+        opts.root,
+        &config_path,
+        crate::runtime_support::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: if opts.no_production {
+                Some(false)
+            } else {
+                opts.production.then_some(true)
+            },
+            quiet: opts.quiet,
+            allow_remote_extends: false,
+        },
+        fallow_config::ProductionAnalysis::DeadCode,
+    ) else {
+        return semantic_error_sections(
+            "could not load type-aware inspect config",
+            opts.type_aware_require.map(Into::into),
+        );
+    };
+    if crate::check::apply_type_aware_overrides_from(
+        opts.output,
+        opts.type_aware,
+        opts.type_aware_projects,
+        opts.type_aware_require,
+        &mut config,
+    )
+    .is_err()
+    {
+        return semantic_error_sections(
+            "invalid type-aware inspect options",
+            Some(config.type_aware.require.into()),
+        );
+    }
+    if !config.type_aware.enabled {
+        return InspectSemanticEvidence {
+            semantic_trace: None,
+            api_surface: None,
+            symbol_impact: None,
+            targeted_tests: None,
+            type_aware: None,
+            warnings: Vec::new(),
+        };
+    }
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let analysis = match session.analyze_dead_code_with_artifacts(false, true) {
+        Ok(analysis) => analysis,
+        Err(error) => {
+            return semantic_error_sections(
+                &format!("analysis failed: {error}"),
+                Some(config.type_aware.require.into()),
+            );
+        }
+    };
+    let Some(graph) = analysis.graph.as_ref() else {
+        return semantic_error_sections(
+            "semantic inspect graph was unavailable",
+            Some(config.type_aware.require.into()),
+        );
+    };
+    let Some(symbol) = fallow_engine::trace::semantic_symbol_for_export(
+        graph,
+        &config.root,
+        &target.file,
+        export_name,
+    ) else {
+        return semantic_error_sections(
+            "could not resolve the exact exported symbol",
+            Some(config.type_aware.require.into()),
+        );
+    };
+    let entry_points = fallow_engine::project_analysis::public_api_entry_paths_for_graph(
+        graph,
+        &config,
+        session.workspaces(),
+    );
+    let projects = config
+        .type_aware
+        .projects
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    let outcome =
+        match fallow_api::inspect_type_aware_symbol(&config.root, &projects, symbol, &entry_points)
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return semantic_error_sections(
+                    &error.to_string(),
+                    Some(config.type_aware.require.into()),
+                );
+            }
+        };
+    let trace = InspectEvidenceSection::semantic(
+        InspectEvidenceScope::Symbol,
+        outcome.trace.status,
+        serde_json::to_value(&outcome.trace).unwrap_or(Value::Null),
+    );
+    let api_surface = InspectEvidenceSection::semantic(
+        InspectEvidenceScope::Symbol,
+        outcome.api_surface.status,
+        serde_json::to_value(&outcome.api_surface).unwrap_or(Value::Null),
+    );
+    let impact_value = serde_json::to_value(&outcome.impact).unwrap_or(Value::Null);
+    let impact = InspectEvidenceSection::semantic(
+        InspectEvidenceScope::Symbol,
+        outcome.impact.status,
+        impact_value.clone(),
+    );
+    let targeted_tests = InspectEvidenceSection::semantic(
+        InspectEvidenceScope::Symbol,
+        outcome.impact.status,
+        json!({
+            "tests": impact_value.get("targeted_tests").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+            "total_test_count": impact_value.get("total_targeted_test_count").cloned().unwrap_or_else(|| Value::from(0)),
+            "confidence": impact_value.get("confidence").cloned(),
+            "status": impact_value.get("status").cloned(),
+            "identity": impact_value.get("identity").cloned(),
+        }),
+    );
+
+    let mut type_aware_meta = outcome.type_aware.meta;
+    type_aware_meta.required_completeness = Some(config.type_aware.require.into());
+    InspectSemanticEvidence {
+        semantic_trace: Some(trace),
+        api_surface: Some(api_surface),
+        symbol_impact: Some(impact),
+        targeted_tests: Some(targeted_tests),
+        type_aware: Some(type_aware_meta),
+        warnings: outcome.type_aware.warnings,
+    }
+}
+
+fn semantic_error_sections(
+    message: &str,
+    required_completeness: Option<fallow_types::semantic::SemanticCompletenessRequirement>,
+) -> InspectSemanticEvidence {
+    let section =
+        || InspectEvidenceSection::error(InspectEvidenceScope::Symbol, message.to_string());
+    InspectSemanticEvidence {
+        semantic_trace: Some(section()),
+        api_surface: Some(section()),
+        symbol_impact: Some(section()),
+        targeted_tests: Some(section()),
+        type_aware: Some(fallow_types::envelope::TypeAwareMeta {
+            required_completeness,
+            ..Default::default()
+        }),
+        warnings: Vec::new(),
     }
 }
 
@@ -455,6 +712,18 @@ fn print_human(bundle: &InspectOutput, quiet: bool) {
     if let Some(section) = bundle.evidence.symbol_chain.as_ref() {
         print_evidence_summary("symbol_chain", section);
     }
+    if let Some(section) = bundle.evidence.semantic_trace.as_ref() {
+        print_evidence_summary("semantic_trace", section);
+    }
+    if let Some(section) = bundle.evidence.api_surface.as_ref() {
+        print_evidence_summary("api_surface", section);
+    }
+    if let Some(section) = bundle.evidence.symbol_impact.as_ref() {
+        print_evidence_summary("symbol_impact", section);
+    }
+    if let Some(section) = bundle.evidence.targeted_tests.as_ref() {
+        print_evidence_summary("targeted_tests", section);
+    }
     if !bundle.warnings.is_empty() && !quiet {
         outln!();
         for warning in &bundle.warnings {
@@ -470,6 +739,7 @@ fn json_display(value: &impl serde::Serialize) -> String {
 fn print_evidence_summary(name: &str, section: &InspectEvidenceSection) {
     let status = match section.status {
         InspectSectionStatus::Ok => "ok",
+        InspectSectionStatus::Partial => "partial",
         InspectSectionStatus::Unavailable => "unavailable",
         InspectSectionStatus::Error => "error",
     };
@@ -819,6 +1089,9 @@ mod tests {
             target,
             churn_cache_dir: None,
             symbol_chain: false,
+            type_aware: false,
+            type_aware_projects: &[],
+            type_aware_require: None,
         }
     }
 
@@ -844,6 +1117,48 @@ mod tests {
         let err = NormalizedTarget::new(&root, &InspectTarget::File { file }).unwrap_err();
 
         assert!(err.contains("inside the project"));
+    }
+
+    #[test]
+    fn completeness_gate_uses_effective_metadata_requirement() {
+        let mut meta = fallow_types::envelope::TypeAwareMeta {
+            required_completeness: Some(
+                fallow_types::semantic::SemanticCompletenessRequirement::Complete,
+            ),
+            ..Default::default()
+        };
+
+        assert!(inspect_requires_complete(Some(&meta)));
+        meta.queries
+            .push(fallow_types::semantic::SemanticQuerySummary {
+                query_id: 0,
+                capability: fallow_types::semantic::SemanticCapability::SymbolTrace,
+                assertion: "exact symbol trace".to_string(),
+                status: fallow_types::semantic::SemanticCompleteness::Partial,
+                reason_code: None,
+                total_evidence_count: 0,
+                truncated: false,
+                omissions: Vec::new(),
+                actions: Vec::new(),
+            });
+        assert!(inspect_type_aware_meta_incomplete(&meta));
+    }
+
+    #[test]
+    fn semantic_error_preserves_effective_completeness_policy() {
+        let evidence = semantic_error_sections(
+            "sidecar unavailable",
+            Some(fallow_types::semantic::SemanticCompletenessRequirement::Complete),
+        );
+
+        assert!(inspect_requires_complete(evidence.type_aware.as_ref()));
+        assert_eq!(
+            evidence
+                .semantic_trace
+                .as_ref()
+                .map(|section| section.status),
+            Some(InspectSectionStatus::Error)
+        );
     }
 
     #[test]

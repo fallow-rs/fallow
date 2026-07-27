@@ -86,24 +86,42 @@ pub fn sarif_finding_fingerprint(rule_id: &str, path: &str, snippet: &str) -> St
 /// Lazily reads source files so SARIF result builders can attach stable line snippets.
 #[derive(Debug, Default)]
 pub struct SarifSourceSnippetCache {
+    root: Option<PathBuf>,
     files: FxHashMap<PathBuf, Vec<String>>,
 }
 
 impl SarifSourceSnippetCache {
+    /// Create a snippet cache that resolves relative finding paths against the
+    /// analyzed project root.
+    #[must_use]
+    pub fn with_root(root: &Path) -> Self {
+        Self {
+            root: Some(root.to_path_buf()),
+            files: FxHashMap::default(),
+        }
+    }
+
     /// Return the 1-based source line from a file, caching the file contents.
     pub fn line(&mut self, path: &Path, line: u32) -> Option<String> {
         if line == 0 {
             return None;
         }
-        if !self.files.contains_key(path) {
-            let lines = std::fs::read_to_string(path)
+        let resolved = if path.is_relative() {
+            self.root
+                .as_deref()
+                .map_or_else(|| path.to_path_buf(), |root| root.join(path))
+        } else {
+            path.to_path_buf()
+        };
+        if !self.files.contains_key(&resolved) {
+            let lines = std::fs::read_to_string(&resolved)
                 .ok()
                 .map(|source| source.lines().map(str::to_owned).collect())
                 .unwrap_or_default();
-            self.files.insert(path.to_path_buf(), lines);
+            self.files.insert(resolved.clone(), lines);
         }
         self.files
-            .get(path)
+            .get(&resolved)
             .and_then(|lines| lines.get(line.saturating_sub(1) as usize))
             .cloned()
     }

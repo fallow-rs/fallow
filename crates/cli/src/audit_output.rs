@@ -246,6 +246,7 @@ fn print_audit_dead_code_section(
             summary: false,
             summary_heading: true,
             show_explain_tip: false,
+            type_aware_scope: None,
             json_style: crate::json_style::JsonStyle::Compact,
         },
     );
@@ -291,6 +292,7 @@ fn print_audit_complexity_section(
             summary: false,
             summary_heading: true,
             show_explain_tip: false,
+            type_aware_scope: None,
             skip_score_and_trend: false,
             css_requested: false,
             json_style: crate::json_style::JsonStyle::Compact,
@@ -735,6 +737,14 @@ fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, Ex
     fallow_api::serialize_audit_json(
         AuditJsonOutputInput {
             header: audit_json_header_input(result),
+            meta: result
+                .check
+                .as_ref()
+                .and_then(|check| check.type_aware_meta.clone())
+                .map(|type_aware| fallow_types::envelope::Meta {
+                    type_aware: Some(type_aware),
+                    ..fallow_types::envelope::Meta::default()
+                }),
             dead_code,
             duplication,
             complexity,
@@ -923,7 +933,10 @@ fn audit_next_steps(result: &AuditResult) -> Vec<fallow_types::output::NextStep>
 
 fn print_audit_sarif(result: &AuditResult) -> ExitCode {
     let check_sarif = result.check.as_ref().map(|check| {
-        report::api_sarif_document(&check.results, &check.config.root, &check.config.rules)
+        let mut sarif =
+            report::api_sarif_document(&check.results, &check.config.root, &check.config.rules);
+        report::sarif::annotate_type_aware_sarif(&mut sarif, check.type_aware_meta.as_ref());
+        sarif
     });
     let health_sarif = result
         .health

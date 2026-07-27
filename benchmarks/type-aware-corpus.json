@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "artifact_directory": "target/type-aware-corpus",
+  "gates": {
+    "minimum_confirmation_precision": 1,
+    "minimum_confirmation_yield": 0.25,
+    "minimum_correct_unused_retention": 1,
+    "maximum_abstention": 0.5,
+    "maximum_p95_marginal_overhead_ms": 5000,
+    "maximum_p95_refined_rss_kb": 2621440
+  },
+  "projects": [
+    {
+      "id": "svelte",
+      "label": "Svelte",
+      "role": "accuracy-core",
+      "repo": "sveltejs/svelte",
+      "ref": "svelte@5.54.1",
+      "fixture": "benchmarks/fixtures/real-world/svelte",
+      "candidate_expectation": "nonzero",
+      "feature_buckets": ["framework-runtime", "generics", "project-references"]
+    },
+    {
+      "id": "vue-core",
+      "label": "Vue Core",
+      "role": "accuracy-core",
+      "repo": "vuejs/core",
+      "ref": "v3.5.30",
+      "fixture": "benchmarks/fixtures/real-world/vue-core",
+      "candidate_expectation": "nonzero",
+      "feature_buckets": ["framework-runtime", "vue", "mapped-indexed-access"]
+    },
+    {
+      "id": "astro",
+      "label": "Astro",
+      "role": "accuracy-core",
+      "repo": "withastro/astro",
+      "ref": "astro@6.3.1",
+      "fixture": "benchmarks/fixtures/real-world/astro",
+      "candidate_expectation": "nonzero",
+      "feature_buckets": ["astro", "framework-runtime", "generics"]
+    },
+    {
+      "id": "typescript",
+      "label": "TypeScript",
+      "role": "accuracy-core",
+      "repo": "microsoft/TypeScript",
+      "ref": "v5.9.3",
+      "fixture": "benchmarks/fixtures/real-world/typescript",
+      "candidate_expectation": "nonzero",
+      "feature_buckets": ["decorators", "generics", "mapped-indexed-access"]
+    },
+    {
+      "id": "next.js",
+      "label": "Next.js",
+      "role": "accuracy-core",
+      "repo": "vercel/next.js",
+      "ref": "v16.2.1",
+      "fixture": "benchmarks/fixtures/real-world/next.js",
+      "candidate_expectation": "nonzero",
+      "feature_buckets": ["framework-runtime", "project-references", "allowjs-checkjs"]
+    },
+    {
+      "id": "preact",
+      "label": "Preact",
+      "role": "accuracy-core",
+      "repo": "preactjs/preact",
+      "ref": "10.25.4",
+      "fixture": "benchmarks/fixtures/real-world/preact",
+      "candidate_expectation": "nonzero",
+      "feature_buckets": ["framework-runtime", "generics", "mapped-indexed-access"]
+    },
+    {
+      "id": "query",
+      "label": "TanStack Query",
+      "role": "zero-control",
+      "repo": "TanStack/query",
+      "ref": "v5.90.3",
+      "fixture": "benchmarks/fixtures/real-world/query",
+      "candidate_expectation": "zero",
+      "feature_buckets": []
+    },
+    {
+      "id": "vite",
+      "label": "Vite",
+      "role": "zero-control",
+      "repo": "vitejs/vite",
+      "ref": "v8.0.1",
+      "fixture": "benchmarks/fixtures/real-world/vite",
+      "candidate_expectation": "zero",
+      "feature_buckets": []
+    },
+    {
+      "id": "fastify",
+      "label": "Fastify",
+      "role": "zero-control",
+      "repo": "fastify/fastify",
+      "ref": "v5.2.1",
+      "fixture": "benchmarks/fixtures/real-world/fastify",
+      "candidate_expectation": "zero",
+      "feature_buckets": []
+    },
+    {
+      "id": "zod",
+      "label": "Zod",
+      "role": "zero-control",
+      "repo": "colinhacks/zod",
+      "ref": "v3.24.2",
+      "fixture": "benchmarks/fixtures/real-world/zod",
+      "candidate_expectation": "zero",
+      "feature_buckets": []
+    }
+  ]
+}

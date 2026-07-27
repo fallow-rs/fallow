@@ -28,9 +28,9 @@ use serde_json::{Map, Value};
 use fallow_api::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, AuditOutput,
     BoundariesListLogicalGroup, BoundariesListing, CloneFamilyFinding, CloneGroupFinding,
-    CombinedOutput, DupesReportPayload, DuplicationGroup, FallowOutput, ListBoundariesOutput,
-    ReviewBriefWireOutput, SecurityGate, SecurityGateMode, SecurityOutput, SecuritySummaryOutput,
-    WorkspacesOutput,
+    CombinedOutput, DupesReportPayload, DuplicationGroup, FallowOutput, ImpactOutput,
+    ListBoundariesOutput, ReviewBriefWireOutput, SecurityGate, SecurityGateMode, SecurityOutput,
+    SecuritySummaryOutput, TraceOutput, WorkspacesOutput,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_output::{
@@ -68,8 +68,8 @@ use fallow_output::{
     SuppressionInventoryEntry, SuppressionInventoryFile, SuppressionInventoryLevel,
     SuppressionInventoryOrigin, SuppressionInventoryOutput, SuppressionInventorySchemaVersion,
     SuppressionInventorySummary, SuppressionKindCount, TargetThresholds, TrendCount, TrendSummary,
-    TruncationNote, UntestedExport, UntestedExportFinding, UntestedFile, UntestedFileFinding,
-    VitalSigns, VitalSignsCounts, WalkthroughValidation, WorkspaceInfo,
+    TruncationNote, TypeAwareStatusOutput, UntestedExport, UntestedExportFinding, UntestedFile,
+    UntestedFileFinding, VitalSigns, VitalSignsCounts, WalkthroughValidation, WorkspaceInfo,
 };
 use fallow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
@@ -120,6 +120,7 @@ use fallow_types::results::{
     UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
     UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
+use fallow_types::semantic::{SemanticSymbolImpact, SemanticSymbolTrace};
 
 /// Workspace-relative path to the committed schema.
 #[cfg(not(test))]
@@ -413,6 +414,11 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "ReviewReconcileOutput",
     "InspectEvidenceScope",
     "InspectSectionStatus",
+    "TraceOutput",
+    "ImpactOutput",
+    "SemanticSymbolTrace",
+    "SemanticSymbolImpact",
+    "TypeAwareStatusOutput",
     "FallowOutput",
     "BoundariesListLogicalGroup",
     "BoundariesListRule",
@@ -879,6 +885,11 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<InspectEvidenceScope>();
     // Symbol-level call chain (`fallow trace`, `FallowOutput::Trace`).
     let _ = generator.subschema_for::<fallow_types::trace_chain::SymbolChainTrace>();
+    let _ = generator.subschema_for::<TraceOutput>();
+    let _ = generator.subschema_for::<ImpactOutput>();
+    let _ = generator.subschema_for::<SemanticSymbolTrace>();
+    let _ = generator.subschema_for::<SemanticSymbolImpact>();
+    let _ = generator.subschema_for::<TypeAwareStatusOutput>();
     let _ = generator.subschema_for::<fallow_types::trace_chain::ChainHop>();
     let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedCallee>();
     let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedReason>();
@@ -1031,8 +1042,17 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     ),
     (
         "trace",
-        &["SymbolChainTrace"],
-        "`fallow trace <symbol> --format json`. Symbol-level caller/callee\ntrace rooted at the requested file and symbol.",
+        &[
+            "ExportTrace",
+            "ClassMemberTrace",
+            "FileTrace",
+            "DependencyTrace",
+            "CloneTrace",
+            "ImpactClosureTrace",
+            "SymbolChainTrace",
+            "SemanticSymbolTrace",
+        ],
+        "Export, member, file, dependency, clone, impact-closure, or symbol-level\ntrace, including exact TypeScript checker evidence when requested.",
     ),
     (
         "review-envelope",
@@ -1077,8 +1097,8 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     ),
     (
         "impact",
-        &["ImpactReport"],
-        "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
+        &["ImpactReport", "SemanticSymbolImpact"],
+        "Project-wide change impact or exact TypeScript symbol impact.",
     ),
     (
         "impact-cross-repo",
@@ -1139,6 +1159,11 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "suppression-inventory",
         &["SuppressionInventoryOutput"],
         "`fallow suppressions --format json`. Required `schema_version: \"1\"`\nsingleton plus `summary` and per-file `files` listings. Read-only\nsuppression inventory; always emitted with exit 0.",
+    ),
+    (
+        "type-aware-status",
+        &["TypeAwareStatusOutput"],
+        "`fallow type-aware status --format json`. Companion discovery and\nprotocol compatibility without exposing an absolute host path.",
     ),
 ];
 
@@ -1469,7 +1494,7 @@ mod drift_tests {
             ("Audit", "AuditOutput"),
             ("Explain", "ExplainOutput"),
             ("Inspect", "InspectOutput"),
-            ("Trace", "SymbolChainTrace"),
+            ("Trace", "TraceOutput"),
             ("ReviewEnvelope", "ReviewEnvelopeOutput"),
             ("ReviewReconcile", "ReviewReconcileOutput"),
             ("CoverageSetup", "CoverageSetupOutput"),
@@ -1479,7 +1504,7 @@ mod drift_tests {
             ("Health", "HealthOutput"),
             ("Dupes", "DupesOutput"),
             ("CheckGrouped", "CheckGroupedOutput"),
-            ("Impact", "ImpactReport"),
+            ("Impact", "ImpactOutput"),
             ("ImpactCrossRepo", "CrossRepoImpactReport"),
             ("Security", "SecurityOutput"),
             ("SecuritySummary", "SecuritySummaryOutput"),
@@ -1493,6 +1518,7 @@ mod drift_tests {
             ("WalkthroughGuide", "WalkthroughGuide"),
             ("WalkthroughValidation", "WalkthroughValidation"),
             ("SuppressionInventory", "SuppressionInventoryOutput"),
+            ("TypeAwareStatus", "TypeAwareStatusOutput"),
         ];
 
         #[expect(
@@ -1528,6 +1554,7 @@ mod drift_tests {
                 FallowOutput::WalkthroughGuide(_) => "WalkthroughGuide",
                 FallowOutput::WalkthroughValidation(_) => "WalkthroughValidation",
                 FallowOutput::SuppressionInventory(_) => "SuppressionInventory",
+                FallowOutput::TypeAwareStatus(_) => "TypeAwareStatus",
             }
         }
 

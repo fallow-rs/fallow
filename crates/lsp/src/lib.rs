@@ -23,8 +23,8 @@ mod server_capabilities;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
@@ -32,6 +32,89 @@ use ls_types::*;
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
+
+fn type_aware_resolution_file(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    name.starts_with("tsconfig")
+        || name.starts_with("jsconfig")
+        || matches!(
+            name,
+            "package.json"
+                | "package-lock.json"
+                | "pnpm-lock.yaml"
+                | "yarn.lock"
+                | "bun.lock"
+                | "bun.lockb"
+                | "fallow.json"
+                | "fallow.jsonc"
+                | "fallow.yaml"
+                | "fallow.yml"
+                | "fallow.toml"
+        )
+        || name.ends_with(".d.ts")
+}
+
+fn type_aware_source_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts")
+    )
+}
+
+fn invalidate_type_aware_changes(changes: &mut fallow_api::TypeAwareFileChanges) {
+    changes.invalidate_all = true;
+    changes.changed.clear();
+    changes.created.clear();
+    changes.deleted.clear();
+}
+
+fn type_aware_changes_pending(changes: &fallow_api::TypeAwareFileChanges) -> bool {
+    changes.invalidate_all
+        || !changes.changed.is_empty()
+        || !changes.created.is_empty()
+        || !changes.deleted.is_empty()
+}
+
+fn restore_failed_type_aware_changes(
+    pending: &StdMutex<fallow_api::TypeAwareFileChanges>,
+    attempted: &fallow_api::TypeAwareFileChanges,
+) {
+    if !type_aware_changes_pending(attempted) {
+        return;
+    }
+    let mut pending = pending.lock().unwrap_or_else(|error| error.into_inner());
+    invalidate_type_aware_changes(&mut pending);
+}
+
+fn record_type_aware_file_change(
+    changes: &mut fallow_api::TypeAwareFileChanges,
+    path: PathBuf,
+    change_type: FileChangeType,
+) {
+    if type_aware_resolution_file(&path) || !type_aware_source_file(&path) {
+        invalidate_type_aware_changes(changes);
+        return;
+    }
+    if changes.invalidate_all {
+        return;
+    }
+    let pending_count = changes.changed.len() + changes.created.len() + changes.deleted.len();
+    if pending_count >= MAX_PENDING_TYPE_AWARE_CHANGES {
+        invalidate_type_aware_changes(changes);
+        return;
+    }
+    let target = match change_type {
+        FileChangeType::CREATED => &mut changes.created,
+        FileChangeType::DELETED => &mut changes.deleted,
+        _ => &mut changes.changed,
+    };
+    if !target.contains(&path) {
+        target.push(path);
+    }
+}
 
 use analysis::{
     BlockingAnalysisInput, BlockingAnalysisOutput, LspAnalysisSnapshot, run_blocking_analysis,
@@ -58,7 +141,8 @@ use fallow_config::DetectionMode;
 #[cfg(test)]
 use fallow_config::DuplicatesConfig;
 use initialization::{
-    LspDuplicationOptions, initialization_config_path, parse_initialization_options,
+    LspDuplicationOptions, LspTypeAwareOptions, initialization_config_path,
+    parse_initialization_options,
 };
 #[cfg(test)]
 use initialization::{
@@ -75,8 +159,20 @@ use protocol::{
     diagnostic_issue_type_metas, diagnostic_issue_types,
 };
 use server_capabilities::{
-    build_server_capabilities, client_supports_workspace_diagnostic_refresh,
+    build_server_capabilities, client_supports_watched_file_registration,
+    client_supports_workspace_diagnostic_refresh,
 };
+
+const WATCHED_FILES_REGISTRATION_ID: &str = "fallow-watched-files";
+const WATCHED_FILES_METHOD: &str = "workspace/didChangeWatchedFiles";
+const MAX_PENDING_TYPE_AWARE_CHANGES: usize = 2_048;
+const WATCHED_FILE_GLOBS: &[&str] = &[
+    "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}",
+    "**/*.d.ts",
+    "**/{tsconfig*,jsconfig*}.json",
+    "**/{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock,bun.lock,bun.lockb}",
+    "**/{fallow.json,fallow.jsonc,fallow.yaml,fallow.yml,fallow.toml}",
+];
 
 #[derive(Clone)]
 struct FallowLspServer {
@@ -86,6 +182,8 @@ struct FallowLspServer {
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
     last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
+    /// Monotonic workspace event generation used to reject stale analysis.
+    analysis_epoch: Arc<AtomicU64>,
     /// Per-URI document state tracked from `did_open` / `did_change` /
     /// `did_close`. The `version` field is the LSP-supplied integer used by
     /// `run_analysis` to snapshot the document state at analysis start and
@@ -120,6 +218,10 @@ struct FallowLspServer {
     production_override: Arc<RwLock<Option<bool>>>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
+    /// Optional semantic TypeScript refinement for editor diagnostics.
+    type_aware_options: Arc<RwLock<Option<LspTypeAwareOptions>>>,
+    type_aware_sessions: Arc<StdMutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
+    pending_type_aware_changes: Arc<StdMutex<fallow_api::TypeAwareFileChanges>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -147,6 +249,8 @@ struct FallowLspServer {
     /// therefore all key on THIS flag so push-only clients keep receiving
     /// open-file diagnostics.
     client_pulls: Arc<AtomicBool>,
+    /// Whether the client accepts dynamic watched-file registration.
+    watched_file_registration: Arc<AtomicBool>,
     /// Set by `shutdown()`. `run_analysis` checks this at the top and
     /// before publishing diagnostics so a closing client does not receive
     /// spurious post-shutdown publishes. The 250ms grace on the
@@ -212,10 +316,15 @@ impl LanguageServer for FallowLspServer {
                 .health
                 .and_then(|health| health.inline_complexity)
                 .unwrap_or(false);
+            *self.type_aware_options.write().await = parsed_options.type_aware;
         }
 
         let advertise_pull_diagnostics =
             client_supports_workspace_diagnostic_refresh(&params.capabilities);
+        self.watched_file_registration.store(
+            client_supports_watched_file_registration(&params.capabilities),
+            Ordering::SeqCst,
+        );
 
         Ok(InitializeResult {
             capabilities: build_server_capabilities(advertise_pull_diagnostics),
@@ -224,6 +333,29 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        if self.watched_file_registration.load(Ordering::SeqCst) {
+            let watchers = WATCHED_FILE_GLOBS
+                .iter()
+                .map(|pattern| FileSystemWatcher {
+                    glob_pattern: GlobPattern::String((*pattern).to_string()),
+                    kind: None,
+                })
+                .collect();
+            let options = DidChangeWatchedFilesRegistrationOptions { watchers };
+            let registration = Registration {
+                id: WATCHED_FILES_REGISTRATION_ID.to_string(),
+                method: WATCHED_FILES_METHOD.to_string(),
+                register_options: serde_json::to_value(options).ok(),
+            };
+            if let Err(error) = self.client.register_capability(vec![registration]).await {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("could not register watched files: {error}"),
+                    )
+                    .await;
+            }
+        }
         self.client
             .log_message(MessageType::INFO, "fallow LSP server initialized")
             .await;
@@ -237,10 +369,17 @@ impl LanguageServer for FallowLspServer {
     /// task can settle. NOTE: `tokio::task::spawn_blocking` is not
     /// interruptible; rayon work already running on the blocking thread
     /// pool continues to natural completion and its results are dropped.
+    /// Active type-aware sidecars are terminated before the grace wait so
+    /// semantic analysis does not keep the editor process alive.
     /// The grace is for quiescence, not for cancellation. See issue #477.
     async fn shutdown(&self) -> Result<()> {
         self.cancellation.store(true, Ordering::SeqCst);
+        fallow_api::terminate_active_type_aware_sidecars();
         let _ = tokio::time::timeout(Duration::from_millis(250), self.analysis_guard.lock()).await;
+        fallow_api::terminate_active_type_aware_sidecars();
+        if let Ok(mut sessions) = self.type_aware_sessions.try_lock() {
+            sessions.clear();
+        }
         Ok(())
     }
 
@@ -285,17 +424,51 @@ impl LanguageServer for FallowLspServer {
         ))
     }
 
-    async fn did_save(&self, _params: DidSaveTextDocumentParams) {
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        if let Some(path) = params.text_document.uri.to_file_path() {
+            let mut changes = self
+                .pending_type_aware_changes
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            record_type_aware_file_change(&mut changes, path.into_owned(), FileChangeType::CHANGED);
+        }
+        self.analysis_epoch.fetch_add(1, Ordering::SeqCst);
         {
             let now = Instant::now();
             let mut last = self.last_analysis.lock().await;
-            if now.duration_since(*last) < std::time::Duration::from_millis(500) {
-                return;
-            }
             *last = now;
         }
 
         self.startup_analysis_started.store(true, Ordering::SeqCst);
+        self.run_analysis().await;
+    }
+
+    async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
+        {
+            let mut changes = self
+                .pending_type_aware_changes
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            invalidate_type_aware_changes(&mut changes);
+        }
+        self.analysis_epoch.fetch_add(1, Ordering::SeqCst);
+        self.run_analysis().await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        {
+            let mut changes = self
+                .pending_type_aware_changes
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            for change in params.changes {
+                let Some(path) = change.uri.to_file_path() else {
+                    continue;
+                };
+                record_type_aware_file_change(&mut changes, path.into_owned(), change.typ);
+            }
+        }
+        self.analysis_epoch.fetch_add(1, Ordering::SeqCst);
         self.run_analysis().await;
     }
 
@@ -437,6 +610,7 @@ impl FallowLspServer {
                     .unwrap_or_else(Instant::now),
             )),
             analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
+            analysis_epoch: Arc::new(AtomicU64::new(0)),
             documents: Arc::new(RwLock::new(FxHashMap::default())),
             startup_analysis_started: Arc::new(AtomicBool::new(false)),
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
@@ -446,9 +620,15 @@ impl FallowLspServer {
             duplication_options: Arc::new(RwLock::new(None)),
             production_override: Arc::new(RwLock::new(None)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
+            type_aware_options: Arc::new(RwLock::new(None)),
+            type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
+            pending_type_aware_changes: Arc::new(StdMutex::new(
+                fallow_api::TypeAwareFileChanges::default(),
+            )),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
             client_pulls: Arc::new(AtomicBool::new(false)),
+            watched_file_registration: Arc::new(AtomicBool::new(false)),
             cancellation: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -557,6 +737,7 @@ impl FallowLspServer {
         }
 
         let version_snapshot = self.snapshot_document_versions().await;
+        let analysis_epoch = self.analysis_epoch.load(Ordering::SeqCst);
 
         self.client
             .log_message(MessageType::INFO, "Running fallow analysis...")
@@ -574,10 +755,21 @@ impl FallowLspServer {
         let duplication_options = self.duplication_options.read().await.clone();
         let production_override = *self.production_override.read().await;
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
+        let type_aware_options = self.type_aware_options.read().await.clone();
+        let type_aware_sessions = Arc::clone(&self.type_aware_sessions);
+        let type_aware_changes = {
+            let mut pending = self
+                .pending_type_aware_changes
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            std::mem::take(&mut *pending)
+        };
+        let failed_type_aware_changes = type_aware_changes.clone();
 
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
         let blocking_root = root.clone();
         let blocking_toplevel = resolved_toplevel.clone();
+        let cancellation = Arc::clone(&self.cancellation);
 
         let join_result = tokio::task::spawn_blocking(move || {
             let input = BlockingAnalysisInput {
@@ -587,25 +779,45 @@ impl FallowLspServer {
                 duplication_options,
                 production_override,
                 inline_complexity_enabled,
+                type_aware_options,
+                type_aware_sessions,
+                type_aware_changes,
                 root: blocking_root,
                 toplevel: blocking_toplevel,
                 changed_since,
+                cancellation,
             };
             run_blocking_analysis(&input)
         })
         .await;
 
         match join_result {
-            Ok(Ok(output)) => {
+            Ok(Ok(output)) if self.analysis_epoch.load(Ordering::SeqCst) == analysis_epoch => {
                 self.apply_analysis_output(output, &root, &version_snapshot)
                     .await;
             }
+            Ok(Ok(_)) => {
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        "Discarded stale fallow analysis after a newer workspace event",
+                    )
+                    .await;
+            }
             Ok(Err(error)) => {
+                restore_failed_type_aware_changes(
+                    &self.pending_type_aware_changes,
+                    &failed_type_aware_changes,
+                );
                 self.client
                     .log_message(MessageType::ERROR, format!("Analysis failed: {error}"))
                     .await;
             }
             Err(e) => {
+                restore_failed_type_aware_changes(
+                    &self.pending_type_aware_changes,
+                    &failed_type_aware_changes,
+                );
                 self.client
                     .log_message(MessageType::ERROR, format!("Analysis failed: {e}"))
                     .await;

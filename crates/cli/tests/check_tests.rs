@@ -7,9 +7,11 @@
 #[path = "common/mod.rs"]
 mod common;
 
+use std::path::Path;
+
 use common::{
     fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
-    run_fallow_raw,
+    run_fallow_raw, run_fallow_raw_with_env,
 };
 
 #[test]
@@ -73,6 +75,353 @@ fn check_json_format_produces_valid_json() {
         "JSON output should have schema_version"
     );
     assert!(json.is_object(), "JSON output should be an object");
+}
+
+#[test]
+fn empty_type_aware_candidate_set_starts_no_companion() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"clean-type-aware","exports":"./src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"strict":true,"noEmit":true},"include":["src/**/*.ts"]}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const live = 1;\n").unwrap();
+    let root_arg = root.to_string_lossy();
+    let missing_companion = root.join("missing-type-aware-companion");
+    let missing_companion_arg = missing_companion.to_string_lossy();
+
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--type-aware",
+            "--unused-exports",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &missing_companion_arg)],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["total_issues"], 0);
+    assert_eq!(json["_meta"]["type_aware"]["elapsed_ms"], 0);
+    assert_eq!(
+        json["_meta"]["type_aware"]["identity"]["capabilities"],
+        serde_json::json!(["symbol-use"])
+    );
+}
+
+#[test]
+fn focused_type_aware_trace_rejects_unsupported_output_formats() {
+    let output = run_fallow(
+        "dead-code",
+        "basic-project",
+        &[
+            "--type-aware",
+            "--trace",
+            "src/index.ts:anotherUnused3",
+            "--format",
+            "compact",
+            "--quiet",
+        ],
+    );
+
+    assert_eq!(output.code, 2);
+    assert!(
+        output
+            .stderr
+            .contains("focused trace and impact queries support human and JSON output"),
+        "stderr: {}",
+        output.stderr
+    );
+    assert!(output.stdout.is_empty(), "stdout: {}", output.stdout);
+}
+
+#[test]
+fn environment_enabled_type_aware_rejects_renderer_without_semantic_provenance() {
+    let root = fixture_path("basic-project");
+    let root_arg = root.to_string_lossy();
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--format",
+            "review-github",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE", "1")],
+    );
+
+    assert_eq!(output.code, 2);
+    assert!(
+        format!("{}{}", output.stdout, output.stderr)
+            .contains("type-aware analysis supports human, JSON, SARIF"),
+        "stdout: {}\nstderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}
+
+#[test]
+fn type_aware_class_method_impact_uses_exact_owner_identity() {
+    let root = fixture_path("type-aware-class-method-impact");
+    let root_arg = root.to_string_lossy();
+    let sidecar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/type-aware-sidecar/fallow-type-aware.mjs");
+    let sidecar_arg = sidecar.to_string_lossy();
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--type-aware",
+            "--symbol-impact",
+            "src/repository.ts:UserRepository.save",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["target"]["owner"], serde_json::json!("UserRepository"));
+    assert_eq!(json["target"]["local_name"], serde_json::json!("save"));
+    let direct_consumers = json["direct_consumers"]
+        .as_array()
+        .expect("direct consumers");
+    assert!(
+        direct_consumers
+            .iter()
+            .any(|consumer| consumer["path"] == "src/service.ts")
+    );
+    assert!(
+        direct_consumers
+            .iter()
+            .all(|consumer| consumer["path"] != "src/repository.ts"),
+        "the same-named AuditRepository.save declaration is not a consumer"
+    );
+
+    let preview = run_fallow_raw_with_env(
+        &[
+            "fix",
+            "--root",
+            &root_arg,
+            "--type-aware",
+            "--dry-run",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    );
+    assert_eq!(preview.code, 0, "stderr: {}", preview.stderr);
+    let preview = parse_json(&preview);
+    let fixes = preview["fixes"].as_array().expect("fix preview");
+    assert!(fixes.iter().any(|fix| {
+        fix["type"] == "remove_class_member"
+            && fix["parent"] == "UserRepository"
+            && fix["name"] == "purge"
+            && fix["closed_world_eligible"] == true
+    }));
+    assert!(
+        fixes
+            .iter()
+            .all(|fix| !(fix["parent"] == "UserRepository" && fix["name"] == "save")),
+        "an exact call must prevent a class-member fix"
+    );
+}
+
+#[test]
+fn type_aware_refines_ambiguous_unused_exports_without_unsafe_fixes() {
+    let root = fixture_path("type-aware-unused-export-refinement");
+    let root_arg = root.to_string_lossy();
+    let sidecar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/type-aware-sidecar/fallow-type-aware.mjs");
+    let sidecar_arg = sidecar.to_string_lossy();
+    let args = [
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--unused-exports",
+        "--unused-types",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+
+    let syntactic = parse_json(&run_fallow_raw(&args));
+    let syntactic_exports = syntactic["unused_exports"]
+        .as_array()
+        .expect("unused exports");
+    let syntactic_types = syntactic["unused_types"].as_array().expect("unused types");
+    assert!(syntactic_exports.iter().any(|issue| {
+        matches!(
+            issue["export_name"].as_str(),
+            Some("PublicApi" | "PublicMerged")
+        )
+    }));
+    assert!(
+        syntactic_types
+            .iter()
+            .any(|issue| { issue["export_name"] == "PublicComplex" })
+    );
+
+    let type_aware_args = [
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--type-aware",
+        "--unused-exports",
+        "--unused-types",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    let typed = parse_json(&run_fallow_raw_with_env(
+        &type_aware_args,
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    ));
+    let typed_exports = typed["unused_exports"].as_array().expect("unused exports");
+    let typed_types = typed["unused_types"].as_array().expect("unused types");
+
+    for confirmed_used in ["PublicApi", "PublicComplex", "PublicMerged"] {
+        assert!(
+            typed_exports
+                .iter()
+                .chain(typed_types)
+                .all(|issue| issue["export_name"] != confirmed_used),
+            "{confirmed_used} should be removed after exact semantic use is confirmed"
+        );
+    }
+
+    let runtime_only = typed_exports
+        .iter()
+        .find(|issue| issue["export_name"] == "RuntimeOnly")
+        .expect("dynamic import candidate");
+    assert_eq!(runtime_only["actions"][0]["auto_fixable"], false);
+
+    let actually_unused = typed_exports
+        .iter()
+        .find(|issue| issue["export_name"] == "actuallyUnused")
+        .expect("confirmed unused export");
+    assert_eq!(actually_unused["actions"][0]["auto_fixable"], true);
+
+    let decisions = typed["_meta"]["type_aware"]["candidate_decisions"]
+        .as_array()
+        .expect("candidate decisions");
+    let runtime_decision = decisions
+        .iter()
+        .find(|decision| decision["subject"]["exported_name"] == "RuntimeOnly")
+        .expect("dynamic import decision");
+    assert_eq!(runtime_decision["decision"], "retained-abstained");
+    assert_eq!(runtime_decision["reason_code"], "dynamic-behavior");
+
+    let unused_decision = decisions
+        .iter()
+        .find(|decision| decision["subject"]["exported_name"] == "actuallyUnused")
+        .expect("unused export decision");
+    assert_eq!(
+        unused_decision["decision"],
+        "confirmed-no-static-references"
+    );
+}
+
+#[test]
+fn type_aware_framework_contract_requires_package_provenance() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create source directory");
+    std::fs::create_dir_all(root.join("node_modules/lit")).expect("create fake lit package");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"framework-contract","private":true,"type":"module","main":"src/index.ts","dependencies":{"lit":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"module":"nodenext","moduleResolution":"nodenext","strict":true},"include":["src/**/*.ts"]}"#,
+    )
+    .expect("write tsconfig");
+    std::fs::write(
+        root.join("node_modules/lit/package.json"),
+        r#"{"name":"lit","version":"1.0.0","types":"index.d.ts"}"#,
+    )
+    .expect("write fake lit manifest");
+    std::fs::write(
+        root.join("node_modules/lit/index.d.ts"),
+        "export declare class LitElement {}\n",
+    )
+    .expect("write fake lit declaration");
+    std::fs::write(
+        root.join("src/real.ts"),
+        "import { LitElement } from \"lit\";\nexport class RealElement extends LitElement {\n  render(): unknown { return null; }\n}\n",
+    )
+    .expect("write package-backed class");
+    std::fs::write(
+        root.join("src/local.ts"),
+        "class LitElement {}\nexport class LocalElement extends LitElement {\n  render(): unknown { return null; }\n}\n",
+    )
+    .expect("write local same-name class");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { RealElement } from \"./real.js\";\nimport { LocalElement } from \"./local.js\";\nnew RealElement();\nnew LocalElement();\n",
+    )
+    .expect("write entry point");
+
+    let root_arg = root.to_string_lossy();
+    let sidecar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/type-aware-sidecar/fallow-type-aware.mjs");
+    let sidecar_arg = sidecar.to_string_lossy();
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            &root_arg,
+            "--unused-class-members",
+            "--type-aware",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+    );
+
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let decisions = json["_meta"]["type_aware"]["candidate_decisions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("semantic decisions missing: {}", output.stdout));
+    let real = decisions
+        .iter()
+        .find(|decision| decision["subject"]["owner"] == "RealElement")
+        .expect("real framework method decision");
+    assert_eq!(real["decision"], "contract-preserved");
+    assert_eq!(real["framework_contract"]["package"], "lit");
+    assert!(
+        real["explanation"]
+            .as_str()
+            .is_some_and(|explanation| explanation.contains("lit contract"))
+    );
+    let local = decisions
+        .iter()
+        .find(|decision| decision["subject"]["owner"] == "LocalElement")
+        .expect("local same-name method decision");
+    assert_eq!(local["decision"], "confirmed-no-static-references");
+    assert!(local.get("framework_contract").is_none());
+    assert_eq!(local["closed_world_eligible"], true);
 }
 
 #[test]

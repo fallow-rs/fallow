@@ -106,6 +106,12 @@ impl HealthArgsBuilder<'_> {
             self.params.threads,
         );
         push_remote_extends(&mut self.args, self.params.allow_remote_extends);
+        super::push_type_aware(
+            &mut self.args,
+            self.params.type_aware,
+            self.params.type_aware_projects.as_deref(),
+            self.params.type_aware_require,
+        );
         push_scope(
             &mut self.args,
             self.params.production,
@@ -152,6 +158,9 @@ impl HealthArgsBuilder<'_> {
         }
         if self.params.css == Some(true) {
             self.args.push("--css".to_string());
+        }
+        if self.params.type_coupling == Some(true) {
+            self.args.push("--type-coupling".to_string());
         }
     }
 
@@ -271,7 +280,14 @@ impl HealthArgsBuilder<'_> {
 }
 
 fn requires_cli_fallback(params: &HealthParams) -> bool {
-    cli_fallback_reason(params).is_some()
+    params.type_aware == Some(true)
+        || params.type_coupling == Some(true)
+        || params
+            .type_aware_projects
+            .as_ref()
+            .is_some_and(|projects| !projects.is_empty())
+        || params.type_aware_require.is_some()
+        || cli_fallback_reason(params).is_some()
 }
 
 fn cli_fallback_reason(params: &HealthParams) -> Option<CliFallbackReason> {

@@ -159,6 +159,13 @@ pub struct AuditOptions<'a> {
     pub show_deprioritized: bool,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct AuditTypeAwareOptions<'a> {
+    pub enabled: bool,
+    pub projects: &'a [std::path::PathBuf],
+    pub require: Option<fallow_config::TypeAwareRequire>,
+}
+
 #[path = "audit_base_ref.rs"]
 mod base_ref;
 #[path = "audit_cache.rs"]
@@ -195,6 +202,8 @@ fn styling_finding_gates(rules: &fallow_config::RulesConfig, code: &str) -> bool
 }
 
 pub struct AuditKeySnapshot {
+    type_aware_identity: Option<fallow_types::semantic::SemanticAnalysisIdentity>,
+    type_aware_gap_signature: Vec<String>,
     dead_code: FxHashSet<String>,
     health: FxHashSet<String>,
     styling: FxHashSet<String>,
@@ -232,6 +241,7 @@ with `env -u {var} fallow audit` to confirm."
 
 fn compute_base_snapshot(
     opts: &AuditOptions<'_>,
+    type_aware: AuditTypeAwareOptions<'_>,
     base_ref: &str,
     changed_files: &FxHashSet<PathBuf>,
     base_sha: Option<&str>,
@@ -265,6 +275,7 @@ fn compute_base_snapshot(
         || {
             run_audit_check(
                 &base_opts,
+                type_aware,
                 None,
                 base_changed_files_ref,
                 share_dead_code_parse_with_health,
@@ -321,6 +332,12 @@ fn snapshot_from_results(
         },
     );
     AuditKeySnapshot {
+        type_aware_identity: check
+            .and_then(|result| result.type_aware_meta.as_ref())
+            .and_then(|meta| meta.identity.clone()),
+        type_aware_gap_signature: check
+            .and_then(|result| result.type_aware_meta.as_ref())
+            .map_or_else(Vec::new, type_aware_gap_signature),
         dead_code: check.map_or_else(FxHashSet::default, |r| {
             dead_code_keys(&r.results, &r.config.root)
         }),
@@ -337,6 +354,30 @@ fn snapshot_from_results(
         cycles,
         public_api,
     }
+}
+
+fn type_aware_gap_signature(meta: &fallow_types::envelope::TypeAwareMeta) -> Vec<String> {
+    let mut signature = meta
+        .queries
+        .iter()
+        .filter(|query| query.status != fallow_types::semantic::SemanticCompleteness::Complete)
+        .map(|query| {
+            let mut omissions = query
+                .omissions
+                .iter()
+                .map(|omission| format!("{:?}:{}", omission.reason_code, omission.count))
+                .collect::<Vec<_>>();
+            omissions.sort();
+            format!(
+                "{:?}:{:?}:{}",
+                query.capability,
+                query.reason_code,
+                omissions.join(",")
+            )
+        })
+        .collect::<Vec<_>>();
+    signature.sort();
+    signature
 }
 
 /// Compute the exports-aware public-export key set from a check result's retained
@@ -727,8 +768,13 @@ type HeadAndBaseResult = (
 
 /// Run the HEAD analyses, optionally alongside a fresh base snapshot via
 /// `rayon::join` when `run_base` is set. Mirrors the previous inline branch.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "HEAD and base analysis inputs stay explicit at the parallel execution boundary"
+)]
 fn run_audit_head_and_base(
     opts: &AuditOptions<'_>,
+    type_aware: AuditTypeAwareOptions<'_>,
     changed_since: Option<&str>,
     changed_files: &FxHashSet<PathBuf>,
     base_ref: &str,
@@ -738,13 +784,13 @@ fn run_audit_head_and_base(
     if run_base {
         let base_sha = base_cache_key.map(|key| key.base_sha.as_str());
         let (h, b) = rayon::join(
-            || run_audit_head_analyses(opts, changed_since, changed_files),
-            || compute_base_snapshot(opts, base_ref, changed_files, base_sha),
+            || run_audit_head_analyses(opts, type_aware, changed_since, changed_files),
+            || compute_base_snapshot(opts, type_aware, base_ref, changed_files, base_sha),
         );
         (h, Some(b))
     } else {
         (
-            run_audit_head_analyses(opts, changed_since, changed_files),
+            run_audit_head_analyses(opts, type_aware, changed_since, changed_files),
             None,
         )
     }
@@ -808,6 +854,7 @@ struct AuditBriefDataInput<'a> {
 /// [`compute_base_snapshot`], which operates on an isolated worktree.
 fn run_audit_head_analyses(
     opts: &AuditOptions<'_>,
+    type_aware: AuditTypeAwareOptions<'_>,
     changed_since: Option<&str>,
     changed_files: &FxHashSet<PathBuf>,
 ) -> Result<HeadAnalyses, ExitCode> {
@@ -820,6 +867,7 @@ fn run_audit_head_analyses(
 
     let mut check = run_audit_check(
         opts,
+        type_aware,
         changed_since,
         changed_files,
         share_dead_code_parse_with_health,
@@ -967,6 +1015,13 @@ fn compute_brief_focus_facts(
 
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
 pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
+    execute_audit_with_type_aware(opts, AuditTypeAwareOptions::default())
+}
+
+pub fn execute_audit_with_type_aware(
+    opts: &AuditOptions<'_>,
+    type_aware: AuditTypeAwareOptions<'_>,
+) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
 
     let (base_ref, base_description) = resolve_base_ref(opts)?;
@@ -1018,12 +1073,17 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     } else {
         None
     };
-    let cached_base_snapshot = base_cache_key
-        .as_ref()
-        .and_then(|key| load_cached_base_snapshot(opts, key));
+    let cached_base_snapshot = if type_aware.enabled {
+        None
+    } else {
+        base_cache_key
+            .as_ref()
+            .and_then(|key| load_cached_base_snapshot(opts, key))
+    };
 
     let (head_res, base_res) = run_audit_head_and_base(
         opts,
+        type_aware,
         changed_since,
         &changed_files,
         &base_ref,
@@ -1036,7 +1096,11 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         head_res,
         base_res,
         cached_base_snapshot,
-        base_cache_key,
+        base_cache_key: if type_aware.enabled {
+            None
+        } else {
+            base_cache_key
+        },
         changed_files,
         changed_files_count,
         base_ref,
@@ -1061,6 +1125,10 @@ struct AuditAssemblyInput<'a> {
 
 /// Resolve the base snapshot, compute attribution/verdict/summary, and build the
 /// final `AuditResult` from the HEAD-side analyses.
+#[expect(
+    clippy::too_many_lines,
+    reason = "audit assembly keeps compatibility checks and final attribution in one transaction"
+)]
 fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, ExitCode> {
     let opts = input.opts;
     let head = input.head_res?;
@@ -1079,6 +1147,39 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
             health: health_result.as_ref(),
         },
     )?;
+    let head_type_aware = check_result
+        .as_ref()
+        .and_then(|result| result.type_aware_meta.as_ref());
+    let base_type_aware_identity = base_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.type_aware_identity.as_ref());
+    if base_snapshot.is_some() && base_type_aware_identity.is_some() != head_type_aware.is_some() {
+        return Err(emit_error(
+            "type-aware audit cannot compare base and head because only one side has semantic analysis identity",
+            2,
+            opts.output,
+        ));
+    }
+    if let (Some(base_identity), Some(head_identity)) = (
+        base_type_aware_identity,
+        head_type_aware.and_then(|meta| meta.identity.as_ref()),
+    ) && base_identity != head_identity
+    {
+        return Err(emit_error(
+            "type-aware audit cannot compare base and head because their semantic analysis identities differ",
+            2,
+            opts.output,
+        ));
+    }
+    if let (Some(base), Some(head)) = (base_snapshot.as_ref(), head_type_aware)
+        && base.type_aware_gap_signature != type_aware_gap_signature(head)
+    {
+        return Err(emit_error(
+            "type-aware audit cannot compare base and head because their incomplete query reasons or omissions differ",
+            2,
+            opts.output,
+        ));
+    }
     drop_check_shared_parse(&mut check_result);
     let comparison = build_cli_audit_comparison(
         check_result.as_ref(),
@@ -1901,6 +2002,7 @@ fn empty_audit_result(
 /// Run dead code analysis for the audit pipeline.
 fn run_audit_check<'a>(
     opts: &'a AuditOptions<'a>,
+    type_aware: AuditTypeAwareOptions<'a>,
     changed_since: Option<&'a str>,
     changed_files: &FxHashSet<PathBuf>,
     retain_modules_for_health: bool,
@@ -1916,6 +2018,7 @@ fn run_audit_check<'a>(
         trace_file: None,
         trace_dependency: None,
         impact_closure: None,
+        symbol_impact: None,
         performance: opts.performance,
     };
     match crate::check::execute_check(&CheckOptions {
@@ -1941,6 +2044,9 @@ fn run_audit_check<'a>(
         changed_workspaces: opts.changed_workspaces,
         group_by: opts.group_by,
         include_dupes: false,
+        type_aware: type_aware.enabled,
+        type_aware_projects: type_aware.projects,
+        type_aware_require: type_aware.require,
         trace_opts: &trace_opts,
         explain: opts.explain,
         top: None,
@@ -2146,6 +2252,7 @@ fn build_audit_health_options<'a>(
         performance: opts.performance,
         runtime_coverage,
         churn_file: None,
+        analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: opts.group_by.map(Into::into),
     }
@@ -2160,12 +2267,11 @@ pub use output::{
     print_audit_findings, print_audit_result, print_audit_result_with_style,
 };
 
-/// Run the full audit command: execute analyses, print results, return exit code.
-/// Run audit, optionally tagged with a gate marker (e.g. `"pre-commit"`) so
-/// Fallow Impact can record a containment event when the gate blocks then
-/// clears. The marker only affects the local Impact store; it never changes
-/// the verdict, exit code, or output.
-pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode {
+pub fn run_audit_with_type_aware(
+    opts: &AuditOptions<'_>,
+    gate_marker: Option<&str>,
+    type_aware: AuditTypeAwareOptions<'_>,
+) -> ExitCode {
     if let Err(e) = fallow_engine::health::validate_coverage_root_absolute(opts.coverage_root) {
         return crate::error::emit_error_with_style(&e, 2, opts.output, opts.json_style);
     }
@@ -2180,16 +2286,53 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
         runtime_coverage: runtime_coverage_resolved.as_deref(),
         ..*opts
     };
-    match execute_audit(&resolved_opts) {
+    match execute_audit_with_type_aware(&resolved_opts, type_aware) {
         Ok(result) => {
-            record_audit_impact(opts, gate_marker, &result);
-            print_audit_command_result(opts, &result, opts.json_style)
+            let _ = record_audit_impact(opts, gate_marker, &result);
+            let report_exit = print_audit_command_result(opts, &result, opts.json_style);
+            if report_exit == ExitCode::SUCCESS && audit_type_aware_completeness_failed(&result) {
+                ExitCode::from(1)
+            } else {
+                report_exit
+            }
         }
         Err(code) => code,
     }
 }
 
-fn record_audit_impact(opts: &AuditOptions<'_>, gate_marker: Option<&str>, result: &AuditResult) {
+fn audit_type_aware_completeness_failed(result: &AuditResult) -> bool {
+    type_aware_meta_completeness_failed(
+        result
+            .check
+            .as_ref()
+            .and_then(|check| check.type_aware_meta.as_ref()),
+    )
+}
+
+fn type_aware_meta_completeness_failed(
+    meta: Option<&fallow_types::envelope::TypeAwareMeta>,
+) -> bool {
+    let Some(meta) = meta else {
+        return false;
+    };
+    if meta.required_completeness
+        != Some(fallow_types::semantic::SemanticCompletenessRequirement::Complete)
+    {
+        return false;
+    }
+    meta.identity.as_ref().is_some_and(|identity| {
+        identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
+    }) || meta
+        .queries
+        .iter()
+        .any(|query| query.status != fallow_types::semantic::SemanticCompleteness::Complete)
+}
+
+fn record_audit_impact(
+    opts: &AuditOptions<'_>,
+    gate_marker: Option<&str>,
+    result: &AuditResult,
+) -> Result<(), String> {
     let mut findings = result
         .check
         .as_ref()
@@ -2214,6 +2357,12 @@ fn record_audit_impact(opts: &AuditOptions<'_>, gate_marker: Option<&str>, resul
         clones,
         suppressions,
     };
+    let analysis_identity = result
+        .check
+        .as_ref()
+        .and_then(|check| check.type_aware_meta.as_ref())
+        .and_then(|meta| meta.identity.clone())
+        .unwrap_or_default();
     crate::impact::record_audit_run(
         opts.root,
         &result.summary,
@@ -2224,8 +2373,9 @@ fn record_audit_impact(opts: &AuditOptions<'_>, gate_marker: Option<&str>, resul
             version: env!("CARGO_PKG_VERSION"),
             timestamp: &crate::vital_signs::chrono_timestamp(),
             attribution: Some(&attribution),
+            analysis_identity: &analysis_identity,
         },
-    );
+    )
 }
 
 fn print_audit_command_result(

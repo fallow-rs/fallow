@@ -202,6 +202,7 @@ fn local_health_options<'a>(
         performance: false,
         runtime_coverage: Some(runtime_coverage),
         churn_file: None,
+        analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: None,
     }

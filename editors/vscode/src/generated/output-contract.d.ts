@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `type-aware-status`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -50,7 +50,7 @@ kind: "audit"
 kind: "explain"
 }) | (InspectOutput & {
 kind: "inspect_target"
-}) | (SymbolChainTrace & {
+}) | ((ExportTrace | ClassMemberTrace | FileTrace | DependencyTrace | CloneTrace | ImpactClosureTrace | SymbolChainTrace | SemanticSymbolTrace) & {
 kind: "trace"
 }) | (ReviewEnvelopeOutput & {
 kind: "review-envelope"
@@ -70,7 +70,7 @@ kind: "health"
 kind: "dupes"
 }) | (CheckGroupedOutput & {
 kind: "dead-code-grouped"
-}) | (ImpactReport & {
+}) | ((ImpactReport | SemanticSymbolImpact) & {
 kind: "impact"
 }) | (CrossRepoImpactReport & {
 kind: "impact-cross-repo"
@@ -96,6 +96,8 @@ kind: "review-walkthrough-guide"
 kind: "review-walkthrough-validation"
 }) | (SuppressionInventoryOutput & {
 kind: "suppression-inventory"
+}) | (TypeAwareStatusOutput & {
+kind: "type-aware-status"
 }))
 /**
  * Schema version for this output format (independent of tool version). Bump
@@ -138,6 +140,62 @@ export type AuditVerdict = ("pass" | "warn" | "fail")
  */
 export type ElapsedMs = number
 export type AuditGate = ("new-only" | "all")
+/**
+ * Analysis mode stored with baselines, snapshots, audit sides, and impact data.
+ */
+export type SemanticAnalysisMode = ("syntactic" | "type-aware")
+/**
+ * Semantic capabilities that can share one TypeScript Program session.
+ */
+export type SemanticCapability = ("symbol-use" | "symbol-trace" | "api-surface" | "symbol-impact" | "type-coupling")
+/**
+ * Whether the semantic backend answered every requested query safely.
+ */
+export type SemanticCompleteness = ("complete" | "partial" | "unavailable")
+/**
+ * Effective policy applied when semantic evidence is incomplete.
+ */
+export type SemanticCompletenessRequirement = ("best-effort" | "complete")
+/**
+ * Stable reason why semantic evidence is partial or unavailable.
+ */
+export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unsupported-syntax")
+/**
+ * Value or type namespace for one exact declaration or reference.
+ */
+export type SemanticNamespace = ("value" | "type")
+/**
+ * Conservative outcome for one existing Fallow dead-code candidate.
+ */
+export type SemanticCandidateDecisionKind = ("confirmed-used" | "contract-preserved" | "confirmed-no-static-references" | "retained-abstained" | "retained-unresolved")
+/**
+ * How a class member participates in an inherited or implemented relation.
+ */
+export type SemanticContractRelation = ("interface-implementation" | "abstract-implementation" | "override" | "optional-contract")
+/**
+ * Heritage relation used by a framework-owned class-member contract.
+ */
+export type SemanticFrameworkRelation = ("extends" | "implements")
+/**
+ * Confidence of exact-symbol impact analysis after known dynamic gaps.
+ */
+export type SemanticImpactConfidence = ("high" | "bounded" | "unavailable")
+/**
+ * How a TypeScript project was selected for semantic refinement.
+ */
+export type TypeAwareProjectSource = ("auto" | "explicit")
+/**
+ * Outcome of semantic refinement for one TypeScript project.
+ */
+export type TypeAwareProjectStatus = ("refined" | "abstained" | "complete" | "unavailable")
+/**
+ * How a persistent semantic snapshot was refreshed.
+ */
+export type TypeAwareInvalidationKind = ("full" | "incremental" | "none")
+/**
+ * Closed set of reasons for retaining a candidate without semantic scanning.
+ */
+export type TypeAwareAbstentionReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics")
 /**
  * A suggested action attached to a finding in the JSON output. Each finding
  * carries an `actions` array; consumers (agents, IDE clients, CI bots) can
@@ -651,7 +709,7 @@ export_name: string
 type: "symbol"
 })
 export type InspectIdentity = (InspectFileIdentity | InspectSymbolIdentity)
-export type InspectSectionStatus = ("ok" | "unavailable" | "error")
+export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
  * Best-effort classification of why a callee did not resolve to an edge.
@@ -979,6 +1037,10 @@ docs?: (string | null)
  */
 telemetry?: (TelemetryMeta | null)
 /**
+ * Provenance for the opt-in TypeScript semantic analysis pass.
+ */
+type_aware?: (TypeAwareMeta | null)
+/**
  * Per-field definitions for envelope fields and action payload fields.
  */
 field_definitions?: {
@@ -1007,6 +1069,830 @@ export interface TelemetryMeta {
  * machine, project, or cloud data.
  */
 analysis_run_id?: (string | null)
+}
+/**
+ * Bounded provenance emitted when the opt-in type-aware pass runs.
+ */
+export interface TypeAwareMeta {
+/**
+ * Compatibility identity used by audit, baselines, snapshots, and stores.
+ */
+identity?: (SemanticAnalysisIdentity | null)
+/**
+ * Effective CLI or repository policy for incomplete semantic evidence.
+ */
+required_completeness?: (SemanticCompletenessRequirement | null)
+/**
+ * Compact status for every requested semantic query.
+ */
+queries?: SemanticQuerySummary[]
+/**
+ * Bounded decision and evidence for each semantic dead-code candidate.
+ */
+candidate_decisions?: SemanticCandidateDecision[]
+/**
+ * Checker-backed trace evidence requested by focused symbol queries.
+ */
+symbol_traces?: SemanticSymbolTrace[]
+/**
+ * Package-public surface and confirmed private type leaks.
+ */
+api_surface?: (ApiSurfaceResult | null)
+/**
+ * Exact-symbol blast radius and targeted-test recommendations.
+ */
+symbol_impacts?: SemanticSymbolImpact[]
+/**
+ * Advisory project-local public-signature coupling.
+ */
+type_coupling?: (TypeCouplingReport | null)
+/**
+ * Whether the semantic companion executed at least one query.
+ */
+executed: boolean
+/**
+ * Version of Fallow's backend-neutral sidecar protocol.
+ */
+protocol_version: number
+/**
+ * Version of the sidecar package that executed the query.
+ */
+sidecar_version?: (string | null)
+/**
+ * Semantic backend capability identifier.
+ */
+backend: string
+/**
+ * Backend compiler or engine version that executed the query.
+ */
+backend_version?: (string | null)
+/**
+ * TypeScript project configs selected for candidate files.
+ */
+selected_tsconfigs: string[]
+/**
+ * Number of candidate findings sent to the sidecar.
+ */
+candidate_count: number
+/**
+ * Number of candidates confirmed as used and removed.
+ */
+confirmed_used_count: number
+/**
+ * Number of candidates preserved because they implement or override a contract.
+ */
+contract_preserved_count: number
+/**
+ * Number of candidates with complete, closed-world no-static-reference evidence.
+ */
+no_static_references_count: number
+/**
+ * Number of retained class members eligible for a guarded type-aware fix.
+ */
+fix_eligible_count: number
+/**
+ * Number of candidates retained because semantic use was unresolved.
+ */
+unresolved_count: number
+/**
+ * Number of candidates retained because semantic analysis abstained.
+ */
+abstained_count: number
+abstention_reasons: TypeAwareAbstentionCounts
+/**
+ * Per-project semantic refinement status and evidence.
+ */
+projects: TypeAwareProjectMeta[]
+/**
+ * Number of bounded warnings returned by the sidecar.
+ */
+warning_count: number
+/**
+ * Bounded semantic warnings. Findings mentioned here were retained.
+ */
+warnings: string[]
+/**
+ * Semantic pass duration as reported by the sidecar.
+ */
+elapsed_ms: number
+phase_timings_ms: TypeAwarePhaseTimings
+}
+/**
+ * Compatibility identity for comparing two analysis results.
+ */
+export interface SemanticAnalysisIdentity {
+mode: SemanticAnalysisMode
+/**
+ * Version of the semantic result schema, independent of tool versions.
+ */
+semantic_schema_version: number
+/**
+ * Sorted capability set requested for the analysis.
+ */
+capabilities: SemanticCapability[]
+/**
+ * Hash of normalized project ownership and compiler configuration.
+ */
+project_config_hash: string
+/**
+ * Backend family, such as `typescript-go`.
+ */
+backend_family: string
+completeness: SemanticCompleteness
+}
+/**
+ * Compact per-query status embedded in run metadata.
+ */
+export interface SemanticQuerySummary {
+/**
+ * Stable query identifier within this analysis run.
+ */
+query_id: number
+capability: SemanticCapability
+/**
+ * Operation-specific assertion, never a generic compiler verdict.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Stable primary gap reason when partial or unavailable.
+ */
+reason_code?: (SemanticGapReason | null)
+/**
+ * Evidence count before bounding.
+ */
+total_evidence_count: number
+/**
+ * Whether evidence or payload arrays were truncated.
+ */
+truncated: boolean
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * Counted omission attached to a partial or unavailable result.
+ */
+export interface SemanticOmission {
+reason_code: SemanticGapReason
+/**
+ * Number of omitted items or relations.
+ */
+count: number
+}
+/**
+ * Bounded, inspectable decision record for one semantic dead-code candidate.
+ */
+export interface SemanticCandidateDecision {
+/**
+ * Query identifier used to correlate low-level query metadata.
+ */
+query_id: number
+subject: SemanticSymbol
+decision: SemanticCandidateDecisionKind
+status: SemanticCompleteness
+/**
+ * Every selected TypeScript project that owns the declaration.
+ */
+owning_projects: string[]
+/**
+ * Bounded checker-resolved reference or uncertainty evidence.
+ */
+evidence?: SemanticReference[]
+/**
+ * Inherited contract evidence, when present.
+ */
+contract?: (SemanticContractEvidence | null)
+/**
+ * Framework-owned contract evidence, distinct from TypeScript contracts.
+ */
+framework_contract?: (SemanticFrameworkContractEvidence | null)
+/**
+ * Whether this exact decision may enable a guarded class-member fix.
+ */
+closed_world_eligible: boolean
+/**
+ * Exact declaration guard required before a source edit.
+ */
+edit_guard?: (SemanticEditGuard | null)
+/**
+ * Primary reason when the candidate remains unresolved or abstained.
+ */
+reason_code?: (SemanticGapReason | null)
+/**
+ * Concise explanation suitable for dry-run and agent output.
+ */
+explanation: string
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+/**
+ * Evidence count before bounding.
+ */
+total_evidence_count: number
+/**
+ * Whether evidence was truncated.
+ */
+truncated: boolean
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+}
+/**
+ * Stable identity for a declaration sent to or returned by the backend.
+ */
+export interface SemanticSymbol {
+/**
+ * Project-root-relative declaration path.
+ */
+path: string
+namespace: SemanticNamespace
+/**
+ * Stable declaration kind, such as `function` or `class-method`.
+ */
+declaration_kind: string
+/**
+ * Name exposed to consumers.
+ */
+exported_name: string
+/**
+ * Local declaration name.
+ */
+local_name: string
+/**
+ * Optional owning class or namespace.
+ */
+owner?: (string | null)
+/**
+ * One-based declaration line.
+ */
+line: number
+/**
+ * Zero-based UTF-8 byte column.
+ */
+col: number
+}
+/**
+ * Located semantic reference evidence.
+ */
+export interface SemanticReference {
+/**
+ * Project-root-relative reference path.
+ */
+path: string
+/**
+ * One-based source line.
+ */
+line: number
+/**
+ * Zero-based UTF-8 byte column.
+ */
+col: number
+/**
+ * Reference role, such as `read`, `type`, `alias`, or `re-export`.
+ */
+role: string
+namespace: SemanticNamespace
+/**
+ * Alias and re-export hops between the reference and declaration.
+ */
+via?: SemanticAliasHop[]
+}
+/**
+ * One alias or re-export hop in semantic provenance.
+ */
+export interface SemanticAliasHop {
+/**
+ * Project-root-relative hop path.
+ */
+path: string
+/**
+ * Name before this hop.
+ */
+from_name: string
+/**
+ * Name exposed after this hop.
+ */
+to_name: string
+/**
+ * Relation, such as `import-alias` or `re-export`.
+ */
+relation: string
+}
+/**
+ * Exact declaration evidence for an inherited or implemented class-member relation.
+ */
+export interface SemanticContractEvidence {
+relation: SemanticContractRelation
+declaration: SemanticSymbol
+/**
+ * Whether the source contract marks this member optional.
+ */
+optional: boolean
+}
+/**
+ * Checker-validated evidence that a framework contract preserves a member.
+ */
+export interface SemanticFrameworkContractEvidence {
+/**
+ * Fallow plugin that supplied the contract.
+ */
+framework: string
+/**
+ * Exact package that owns the heritage declaration.
+ */
+package: string
+relation: SemanticFrameworkRelation
+declaration: SemanticSymbol
+}
+/**
+ * Exact source span and content hash used to guard semantic source edits.
+ */
+export interface SemanticEditGuard {
+/**
+ * Zero-based UTF-8 byte offset where the declaration starts.
+ */
+start: number
+/**
+ * Exclusive zero-based UTF-8 byte offset where the declaration ends.
+ */
+end: number
+/**
+ * Lowercase SHA-256 digest of the exact declaration text.
+ */
+declaration_sha256: string
+}
+/**
+ * Typed semantic trace attached to an existing syntactic trace.
+ */
+export interface SemanticSymbolTrace {
+target: SemanticSymbol
+identity: SemanticAnalysisIdentity
+/**
+ * TypeScript project selected for this symbol.
+ */
+selected_project: string
+/**
+ * Concrete assertion, such as `references-found`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Bounded reference evidence.
+ */
+references: SemanticReference[]
+/**
+ * Count before evidence bounding.
+ */
+total_reference_count: number
+/**
+ * Exact reference locations found by the TypeScript checker.
+ */
+checker_evidence_count: number
+/**
+ * Alias and re-export hops derived from the semantic graph.
+ */
+graph_evidence_count: number
+/**
+ * Whether reference evidence was truncated.
+ */
+truncated: boolean
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions for a user or automation consumer.
+ */
+actions?: string[]
+}
+/**
+ * Package API surface result shared by inspect and private-leak analysis.
+ */
+export interface ApiSurfaceResult {
+/**
+ * Concrete assertion, such as `leak-confirmed`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Public API entries.
+ */
+entries: ApiSurfaceEntry[]
+/**
+ * Confirmed private type leaks.
+ */
+private_type_leaks: SemanticPrivateTypeLeak[]
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * One package-public API entry described by the semantic backend.
+ */
+export interface ApiSurfaceEntry {
+exposed: SemanticSymbol
+origin: SemanticSymbol
+/**
+ * Stable normalized signature fingerprint.
+ */
+signature_fingerprint: string
+/**
+ * Project-local types referenced by the signature.
+ */
+referenced_types: PublicTypeReference[]
+}
+/**
+ * One project-local type referenced by a public signature.
+ */
+export interface PublicTypeReference {
+declaration: SemanticSymbol
+/**
+ * Signature relation, such as return type or generic constraint.
+ */
+relation: string
+}
+/**
+ * Exact semantic evidence for a private type leak.
+ */
+export interface SemanticPrivateTypeLeak {
+exposed: SemanticSymbol
+private_declaration: SemanticSymbol
+/**
+ * Signature relation through which the type is exposed.
+ */
+relation: string
+/**
+ * Stable TypeScript diagnostic code used as supporting evidence.
+ */
+diagnostic_code?: (number | null)
+}
+/**
+ * Exact-symbol impact and targeted-test recommendation.
+ */
+export interface SemanticSymbolImpact {
+target: SemanticSymbol
+identity: SemanticAnalysisIdentity
+/**
+ * TypeScript project selected for this symbol.
+ */
+selected_project: string
+/**
+ * Concrete assertion, such as `consumers-found`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Files that reference the exact symbol directly.
+ */
+direct_consumers: SemanticImpactPath[]
+/**
+ * Direct consumer count before evidence bounding.
+ */
+total_direct_consumer_count: number
+/**
+ * Transitively affected production files.
+ */
+affected_files: SemanticImpactPath[]
+/**
+ * Transitive affected-file count before evidence bounding.
+ */
+total_affected_file_count: number
+/**
+ * Directly relevant test entry points.
+ */
+targeted_tests: SemanticImpactPath[]
+/**
+ * Targeted-test count before evidence bounding.
+ */
+total_targeted_test_count: number
+confidence: SemanticImpactConfidence
+/**
+ * Counted omissions, including dynamic behavior.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * One production file or test reached by exact-symbol impact analysis.
+ */
+export interface SemanticImpactPath {
+/**
+ * Project-root-relative affected path.
+ */
+path: string
+/**
+ * Relation to the target, such as `direct-value-consumer`.
+ */
+relation: string
+/**
+ * Shortest graph distance from the target.
+ */
+distance: number
+/**
+ * Located provenance path.
+ */
+via?: string[]
+}
+/**
+ * Advisory project-local public-signature coupling report.
+ */
+export interface TypeCouplingReport {
+identity: SemanticAnalysisIdentity
+/**
+ * Concrete assertion, such as `coupling-found`.
+ */
+assertion: string
+status: SemanticCompleteness
+/**
+ * Project summary. Absent when analysis is unavailable, never a fake zero.
+ */
+summary?: (TypeCouplingSummary | null)
+/**
+ * Per-file coupling details.
+ */
+files: TypeCouplingFile[]
+/**
+ * Highest-degree files contributing to project coupling.
+ */
+top_contributors?: TypeCouplingFile[]
+/**
+ * Located project-local type cycles.
+ */
+cycles?: TypeCouplingCycle[]
+/**
+ * Counted omissions.
+ */
+omissions?: SemanticOmission[]
+/**
+ * Plain next actions.
+ */
+actions?: string[]
+}
+/**
+ * Project summary for advisory type coupling.
+ */
+export interface TypeCouplingSummary {
+/**
+ * Measurement boundary, currently project-local public signatures.
+ */
+scope: string
+/**
+ * Edge direction, currently directed.
+ */
+direction: string
+/**
+ * Distinct project files in the selected TypeScript projects.
+ */
+project_size: number
+/**
+ * Distinct project files included in the denominator.
+ */
+files_analyzed: number
+/**
+ * Files participating in at least one project-local type edge.
+ */
+distinct_coupled_files: number
+/**
+ * Project-local public-signature edge count before evidence bounding.
+ */
+edge_count: number
+/**
+ * Percentage of analyzed files participating in a type edge.
+ */
+coupled_file_pct: number
+/**
+ * Median distinct-file type connections.
+ */
+p50_distinct_connections: number
+/**
+ * P90 distinct-file type connections.
+ */
+p90_distinct_connections: number
+/**
+ * P95 incoming distinct-file type coupling.
+ */
+p95_public_types_used_by: number
+/**
+ * P95 outgoing distinct-file type coupling.
+ */
+p95_public_api_depends_on: number
+/**
+ * Percentage of files above the adaptive high-coupling threshold.
+ */
+high_coupling_pct: number
+/**
+ * Share of edge endpoints represented by the top contributors.
+ */
+concentration: number
+/**
+ * Number of project-local public-signature cycles.
+ */
+cycle_count: number
+}
+/**
+ * Per-file project-local public-signature coupling.
+ */
+export interface TypeCouplingFile {
+/**
+ * Project-root-relative file path.
+ */
+path: string
+/**
+ * Distinct files this file's public API depends on.
+ */
+public_api_depends_on: number
+/**
+ * Located project files this file's public API depends on.
+ */
+public_api_depends_on_files?: string[]
+/**
+ * Distinct files whose public types use this file.
+ */
+public_types_used_by: number
+/**
+ * Located project files whose public types use this file.
+ */
+public_types_used_by_files?: string[]
+/**
+ * Located public-signature edges.
+ */
+edges: TypeCouplingEdge[]
+}
+/**
+ * One project-local public-signature type edge.
+ */
+export interface TypeCouplingEdge {
+source: SemanticSymbol
+target: SemanticSymbol
+/**
+ * Signature relation.
+ */
+relation: string
+evidence: SemanticSourceLocation
+/**
+ * Scope, such as `module-export` or `package-public`.
+ */
+scope: string
+}
+/**
+ * One project-root-relative source location used as semantic evidence.
+ */
+export interface SemanticSourceLocation {
+/**
+ * Project-root-relative source path.
+ */
+path: string
+/**
+ * One-based source line.
+ */
+line: number
+/**
+ * Zero-based UTF-8 byte column.
+ */
+col: number
+}
+/**
+ * One project-local cycle through public-signature type dependencies.
+ */
+export interface TypeCouplingCycle {
+/**
+ * Ordered project-root-relative files, ending at the start file.
+ */
+files: string[]
+}
+/**
+ * Closed abstention reason counts for stable machine consumption.
+ */
+export interface TypeAwareAbstentionCounts {
+/**
+ * Candidates not contained by a selected TypeScript project.
+ */
+no_project: number
+/**
+ * Candidates contained by more than one explicit TypeScript project.
+ */
+ambiguous_project: number
+/**
+ * Candidates retained because structural diagnostics block scanning.
+ */
+blocking_diagnostics: number
+/**
+ * Candidates whose exact declaration identity could not be resolved.
+ */
+unknown_symbol: number
+/**
+ * Candidates using declaration syntax unsupported by the semantic backend.
+ */
+unsupported_syntax: number
+/**
+ * Candidates retained because the bounded semantic request reached capacity.
+ */
+capacity: number
+}
+/**
+ * Bounded provenance for one TypeScript project handled by the sidecar.
+ */
+export interface TypeAwareProjectMeta {
+/**
+ * Project config relative to the analysis root, or `<inferred>`.
+ */
+config: string
+source: TypeAwareProjectSource
+status: TypeAwareProjectStatus
+/**
+ * Candidates assigned to this project.
+ */
+candidate_count: number
+/**
+ * Candidates confirmed as used and removed.
+ */
+confirmed_used_count: number
+/**
+ * Candidates retained because they implement or override a contract.
+ */
+contract_preserved_count: number
+/**
+ * Candidates with complete no-static-reference evidence.
+ */
+no_static_references_count: number
+/**
+ * Candidates eligible for a guarded class-member fix.
+ */
+fix_eligible_count: number
+/**
+ * Candidates whose exact semantic outcome remained unresolved.
+ */
+unresolved_count: number
+/**
+ * Candidates retained without scanning because the project was unsafe.
+ */
+abstained_count: number
+/**
+ * Config, program, syntactic, and bind diagnostics that block scanning.
+ */
+blocking_diagnostic_count: number
+/**
+ * Source files loaded into this TypeScript program.
+ */
+source_file_count: number
+/**
+ * Whether this Program served more than one semantic query in the batch.
+ */
+program_reused?: (boolean | null)
+/**
+ * Whether this Program served more than one query in the current batch.
+ */
+program_shared_across_queries?: (boolean | null)
+/**
+ * Whether the root-bound semantic session reused the prior snapshot.
+ */
+program_reused_from_previous_snapshot?: (boolean | null)
+/**
+ * Monotonic revision within the root-bound semantic session.
+ */
+snapshot_revision?: (number | null)
+/**
+ * Full, incremental, or no invalidation before this query.
+ */
+invalidation_kind?: (TypeAwareInvalidationKind | null)
+/**
+ * Stable project-level gap reason.
+ */
+reason_code?: (SemanticGapReason | null)
+abstain_reason?: TypeAwareAbstentionReason
+}
+/**
+ * Semantic sidecar timings, separated from Fallow's syntactic pipeline.
+ */
+export interface TypeAwarePhaseTimings {
+/**
+ * TypeScript API construction and project snapshot selection.
+ */
+project_setup: number
+/**
+ * TypeScript diagnostics collected before any candidate refinement.
+ */
+diagnostics: number
+/**
+ * Batched symbol lookup and exact declaration matching.
+ */
+symbol_scan: number
 }
 /**
  * Single-metric definition inside [`Meta::metrics`].
@@ -1822,6 +2708,10 @@ is_re_export: boolean
  */
 actions: IssueAction[]
 /**
+ * Type-aware evidence for this exact candidate when requested.
+ */
+semantic?: (SemanticCandidateDecision | null)
+/**
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
@@ -1868,6 +2758,10 @@ is_re_export: boolean
  */
 actions: IssueAction[]
 /**
+ * Type-aware evidence for this exact candidate when requested.
+ */
+semantic?: (SemanticCandidateDecision | null)
+/**
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
@@ -1903,6 +2797,11 @@ col: number
  * Byte offset of the type reference.
  */
 span_start: number
+/**
+ * Exact checker-backed provenance when type-aware analysis confirmed the
+ * package-public leak across files or re-exports.
+ */
+semantic?: (SemanticPrivateTypeLeak | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -2095,6 +2994,10 @@ col: number
  * forward-compat).
  */
 actions: IssueAction[]
+/**
+ * Type-aware evidence for this exact candidate when requested.
+ */
+semantic?: (SemanticCandidateDecision | null)
 /**
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
@@ -7187,6 +8090,7 @@ target: InspectTargetDescriptor
 identity: InspectIdentity
 evidence: InspectEvidence
 warnings: string[]
+_meta?: (Meta | null)
 }
 export interface InspectFileIdentity {
 file: string
@@ -7224,12 +8128,344 @@ churn?: (InspectEvidenceSection | null)
  * best-effort and not part of the trusted ranked evidence.
  */
 symbol_chain?: (InspectEvidenceSection | null)
+/**
+ * Checker-backed declaration, alias, re-export, and use-site evidence.
+ * Present only for a symbol target in type-aware mode.
+ */
+semantic_trace?: (InspectEvidenceSection | null)
+/**
+ * Package-public TypeScript surface and private-type reachability.
+ * Present only for a symbol target in type-aware mode.
+ */
+api_surface?: (InspectEvidenceSection | null)
+/**
+ * Exact-symbol consumers and transitive affected files.
+ * Present only for a symbol target in type-aware mode.
+ */
+symbol_impact?: (InspectEvidenceSection | null)
+/**
+ * Test entry points reachable from the exact symbol, with provenance.
+ * Present only for a symbol target in type-aware mode.
+ */
+targeted_tests?: (InspectEvidenceSection | null)
 }
 export interface InspectEvidenceSection {
 status: InspectSectionStatus
 scope: InspectEvidenceScope
 message?: (string | null)
 data?: unknown
+}
+/**
+ * Result of tracing an export: why it is considered used or unused.
+ */
+export interface ExportTrace {
+/**
+ * The file containing the export.
+ */
+file: string
+/**
+ * The export name being traced.
+ */
+export_name: string
+/**
+ * Whether the file is reachable from an entry point.
+ */
+file_reachable: boolean
+/**
+ * Whether the file is an entry point.
+ */
+is_entry_point: boolean
+/**
+ * Whether the export is considered used.
+ */
+is_used: boolean
+/**
+ * Files that reference this export directly.
+ */
+direct_references: ExportReference[]
+/**
+ * Re-export chains that pass through this export.
+ */
+re_export_chains: ReExportChain[]
+/**
+ * Human-readable reason summary.
+ */
+reason: string
+/**
+ * Exact checker-backed references when type-aware tracing is enabled.
+ */
+semantic?: (SemanticSymbolTrace | null)
+}
+/**
+ * A direct reference to an export.
+ */
+export interface ExportReference {
+/**
+ * File that contains the reference.
+ */
+from_file: string
+/**
+ * Reference kind, such as named import, default import, or re-export.
+ */
+kind: string
+}
+/**
+ * A re-export chain showing how an export is propagated.
+ */
+export interface ReExportChain {
+/**
+ * The barrel file that re-exports this symbol.
+ */
+barrel_file: string
+/**
+ * The name it is re-exported as.
+ */
+exported_as: string
+/**
+ * Number of references on the barrel's re-exported symbol.
+ */
+reference_count: number
+}
+/**
+ * Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
+ * fallback when `NAME` is not a top-level export but a member declared on one
+ * (issue #1744). The trace runs on the module graph only, so it reports the
+ * OWNING export's reachability and usage (the gating precondition for
+ * member-level crediting) plus a pointer to the right `--unused-*-members`
+ * command, rather than per-member crediting provenance.
+ */
+export interface ClassMemberTrace {
+/**
+ * The file containing the member.
+ */
+file: string
+/**
+ * The member name being traced.
+ */
+member_name: string
+/**
+ * The member kind: `class-method`, `class-property`, `enum-member`,
+ * `store-member`, or `namespace-member`.
+ */
+member_kind: string
+/**
+ * The export that declares this member (the class / enum / store name).
+ */
+owner_export: string
+/**
+ * Whether the owning export is considered used.
+ */
+owner_is_used: boolean
+/**
+ * Whether the file is reachable from an entry point.
+ */
+owner_file_reachable: boolean
+/**
+ * Whether the file is an entry point.
+ */
+owner_is_entry_point: boolean
+/**
+ * Files that reference the owning export directly.
+ */
+owner_direct_references: ExportReference[]
+/**
+ * Re-export chains through which the owning export is reachable. Populated
+ * so a machine consumer can tell "used via a barrel" (empty direct refs but
+ * non-empty chains) from "genuinely unreferenced".
+ */
+owner_re_export_chains: ReExportChain[]
+/**
+ * Human-readable reason summary plus the follow-up command to inspect the
+ * member finding.
+ */
+reason: string
+/**
+ * Exact checker-backed member references when type-aware tracing is enabled.
+ */
+semantic?: (SemanticSymbolTrace | null)
+}
+/**
+ * Result of tracing all edges for a file.
+ */
+export interface FileTrace {
+/**
+ * The traced file.
+ */
+file: string
+/**
+ * Whether this file is reachable from entry points.
+ */
+is_reachable: boolean
+/**
+ * Whether this file is an entry point.
+ */
+is_entry_point: boolean
+/**
+ * Exports declared by this file.
+ */
+exports: TracedExport[]
+/**
+ * Files that this file imports from.
+ */
+imports_from: string[]
+/**
+ * Files that import from this file.
+ */
+imported_by: string[]
+/**
+ * Re-exports declared by this file.
+ */
+re_exports: TracedReExport[]
+}
+/**
+ * An export with usage information.
+ */
+export interface TracedExport {
+/**
+ * Export name.
+ */
+name: string
+/**
+ * Whether the export is type-only.
+ */
+is_type_only: boolean
+/**
+ * Number of references to this export.
+ */
+reference_count: number
+/**
+ * Files that reference this export.
+ */
+referenced_by: ExportReference[]
+}
+/**
+ * A re-export with source information.
+ */
+export interface TracedReExport {
+/**
+ * Source file being re-exported from.
+ */
+source_file: string
+/**
+ * Imported symbol name.
+ */
+imported_name: string
+/**
+ * Exported symbol name.
+ */
+exported_name: string
+}
+/**
+ * Result of tracing a dependency: where it is used.
+ */
+export interface DependencyTrace {
+/**
+ * The dependency name being traced.
+ */
+package_name: string
+/**
+ * Files that import this dependency.
+ */
+imported_by: string[]
+/**
+ * Files that import this dependency with type-only imports.
+ */
+type_only_imported_by: string[]
+/**
+ * Whether the dependency is invoked from package.json scripts or CI configs.
+ */
+used_in_scripts: boolean
+/**
+ * Whether the dependency is used at all.
+ */
+is_used: boolean
+/**
+ * Total import count.
+ */
+import_count: number
+}
+/**
+ * Result of tracing a clone: all groups containing the code at a source
+ * location or addressed by a stable clone fingerprint.
+ */
+export interface CloneTrace {
+/**
+ * File passed to the trace request, root-relative when a group matches.
+ */
+file: string
+/**
+ * 1-based line passed to the trace request or representative group line.
+ */
+line: number
+/**
+ * The matched clone instance, if one exists.
+ */
+matched_instance?: (CloneInstance | null)
+/**
+ * Clone groups matched by the trace request.
+ */
+clone_groups: TracedCloneGroup[]
+}
+/**
+ * One clone group returned from a clone trace request.
+ */
+export interface TracedCloneGroup {
+/**
+ * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+ * report collisions.
+ */
+fingerprint: string
+/**
+ * Number of tokens in the duplicated block.
+ */
+token_count: number
+/**
+ * Number of lines in the duplicated block.
+ */
+line_count: number
+/**
+ * Root-relative clone instances in this group.
+ */
+instances: CloneInstance[]
+suggestion: RefactoringSuggestion
+/**
+ * Best-effort name for the extracted function. Advisory only.
+ */
+suggested_name?: (string | null)
+}
+/**
+ * Result of computing the impact closure for a single file as the seed.
+ */
+export interface ImpactClosureTrace {
+/**
+ * The seed file, root-relative.
+ */
+seed: string
+/**
+ * Root-relative paths transitively affected by the seed.
+ */
+affected_not_shown: string[]
+/**
+ * Coordination gaps between the seed and consumers.
+ */
+coordination_gap: ImpactClosureGap[]
+}
+/**
+ * One coordination-gap entry in an [`ImpactClosureTrace`].
+ */
+export interface ImpactClosureGap {
+/**
+ * Root-relative path of the consumer module.
+ */
+consumer_file: string
+/**
+ * Exported symbol names the consumer references.
+ */
+consumed_symbols: string[]
+/**
+ * Scope note for the syntactic trace.
+ */
+note: string
 }
 /**
  * The result of a symbol-level call-chain trace. Its own surface (`kind:
@@ -10351,6 +11587,25 @@ reason?: (string | null)
  * Whether a human-authored reason is present.
  */
 reason_present: boolean
+}
+/**
+ * Envelope emitted by `fallow type-aware status --format json`.
+ */
+export interface TypeAwareStatusOutput {
+schema_version: SchemaVersion
+version: ToolVersion
+available: boolean
+discovery_source?: (string | null)
+/**
+ * Root-relative companion path, or only the executable name when the
+ * companion lives outside the analyzed project.
+ */
+companion_path?: (string | null)
+package_version?: (string | null)
+protocol_version: number
+backend_family?: (string | null)
+backend_version?: (string | null)
+remediation?: (string | null)
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

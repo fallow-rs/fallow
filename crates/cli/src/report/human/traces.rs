@@ -1,10 +1,13 @@
 use std::path::Path;
 
 use colored::Colorize;
+use fallow_types::semantic::{SemanticCompleteness, SemanticSymbolImpact, SemanticSymbolTrace};
 use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ReExportChain, TracedCloneGroup,
 };
+
+use crate::report::{human_status_line, semantic_status};
 
 use super::{plural, relative_path};
 
@@ -64,6 +67,9 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
 
     push_export_trace_direct_references(&mut lines, trace);
     push_export_trace_re_export_chains(&mut lines, trace);
+    if let Some(semantic) = &trace.semantic {
+        push_semantic_trace(&mut lines, semantic);
+    }
     lines.push(String::new());
     lines
 }
@@ -124,8 +130,109 @@ fn build_class_member_trace_human_lines(trace: &ClassMemberTrace) -> Vec<String>
 
     push_direct_references(&mut lines, &trace.owner_direct_references);
     push_re_export_chains(&mut lines, &trace.owner_re_export_chains);
+    if let Some(semantic) = &trace.semantic {
+        push_semantic_trace(&mut lines, semantic);
+    }
     lines.push(String::new());
     lines
+}
+
+fn push_semantic_trace(lines: &mut Vec<String>, trace: &SemanticSymbolTrace) {
+    lines.push(String::new());
+    lines.push(format!(
+        "  {}",
+        human_status_line(
+            semantic_status(trace.status),
+            format!(
+                "Type-aware proof: {} ({})",
+                trace.assertion,
+                completeness_name(trace.status)
+            )
+        )
+    ));
+    lines.push(format!("  TypeScript project: {}", trace.selected_project));
+    for reference in &trace.references {
+        lines.push(format!(
+            "    {} {}:{}:{} ({}, {:?})",
+            "->".dimmed(),
+            reference.path.display(),
+            reference.line,
+            reference.col,
+            reference.role,
+            reference.namespace
+        ));
+    }
+    if trace.truncated {
+        lines.push(format!(
+            "  Evidence was bounded; {} checker references exist.",
+            trace.total_reference_count
+        ));
+    }
+    for action in &trace.actions {
+        lines.push(format!("  Next: {action}"));
+    }
+}
+
+pub(in crate::report) fn print_symbol_impact_human(impact: &SemanticSymbolImpact) {
+    let mut lines = vec![
+        String::new(),
+        format!(
+            "  {} {} in {}",
+            "SYMBOL IMPACT".cyan().bold(),
+            impact.target.exported_name.bold(),
+            impact.target.path.display().to_string().dimmed()
+        ),
+        format!(
+            "  {}",
+            human_status_line(
+                semantic_status(impact.status),
+                format!(
+                    "Proof: {} ({}, confidence: {})",
+                    impact.assertion,
+                    completeness_name(impact.status),
+                    impact.confidence
+                )
+            )
+        ),
+        format!("  TypeScript project: {}", impact.selected_project),
+    ];
+    push_impact_paths(&mut lines, "Direct consumers", &impact.direct_consumers);
+    push_impact_paths(&mut lines, "Affected files", &impact.affected_files);
+    push_impact_paths(&mut lines, "Targeted tests", &impact.targeted_tests);
+    for action in &impact.actions {
+        lines.push(format!("  Next: {action}"));
+    }
+    lines.push(String::new());
+    print_lines(&lines);
+}
+
+fn push_impact_paths(
+    lines: &mut Vec<String>,
+    heading: &str,
+    paths: &[fallow_types::semantic::SemanticImpactPath],
+) {
+    if paths.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push(format!("  {heading}:"));
+    for path in paths {
+        lines.push(format!(
+            "    {} {} ({}, distance {})",
+            "->".dimmed(),
+            path.path.display(),
+            path.relation,
+            path.distance
+        ));
+    }
+}
+
+const fn completeness_name(status: SemanticCompleteness) -> &'static str {
+    match status {
+        SemanticCompleteness::Complete => "complete",
+        SemanticCompleteness::Partial => "partial",
+        SemanticCompleteness::Unavailable => "unavailable",
+    }
 }
 
 fn push_export_trace_re_export_chains(lines: &mut Vec<String>, trace: &ExportTrace) {
@@ -420,6 +527,7 @@ mod tests {
                 reference_count: 2,
             }],
             reason: "referenced from reachable code".to_string(),
+            semantic: None,
         };
 
         let rendered = plain(&build_export_trace_human_lines(&trace));
@@ -453,6 +561,7 @@ mod tests {
                 reference_count: 1,
             }],
             reason: "member reason text".to_string(),
+            semantic: None,
         };
 
         let rendered = plain(&build_class_member_trace_human_lines(&trace));

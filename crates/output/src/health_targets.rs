@@ -22,7 +22,7 @@ pub struct TargetThresholds {
 }
 
 /// Category of refactoring recommendation.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RecommendationCategory {
@@ -105,7 +105,7 @@ pub struct ContributingFactor {
 ///
 /// Surfaces quick wins: high-priority, low-effort targets rank first.
 /// Effort estimate for a refactoring target.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum EffortEstimate {
@@ -145,7 +145,7 @@ impl EffortEstimate {
 /// - **High**: deterministic graph/AST analysis (dead code, circular deps, complexity)
 /// - **Medium**: heuristic thresholds (fan-in/fan-out coupling)
 /// - **Low**: depends on git history quality (churn-based recommendations)
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {

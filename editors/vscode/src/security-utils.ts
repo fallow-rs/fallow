@@ -1,4 +1,5 @@
 import type { SecurityFinding, SecurityOutput, TraceHopRole } from "./types.js";
+import { appendCommonScopeArgs } from "./cli-args-utils.js";
 
 /**
  * Options for building the `fallow security` argument vector. These mirror the
@@ -30,17 +31,7 @@ export interface SecurityArgsOptions {
 export const buildSecurityArgs = (options: SecurityArgsOptions): string[] => {
   const args = ["security", "--format", "json", "--quiet"];
 
-  if (options.changedSince) {
-    args.push("--changed-since", options.changedSince);
-  }
-
-  if (options.workspace) {
-    args.push("--workspace", options.workspace);
-  }
-
-  if (options.configPath) {
-    args.push("--config", options.configPath);
-  }
+  appendCommonScopeArgs(args, options);
 
   return args;
 };

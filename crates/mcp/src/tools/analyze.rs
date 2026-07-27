@@ -95,6 +95,12 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
         params.threads,
     );
     push_remote_extends(&mut args, params.allow_remote_extends);
+    super::push_type_aware(
+        &mut args,
+        params.type_aware,
+        params.type_aware_projects.as_deref(),
+        params.type_aware_require,
+    );
     push_scope(&mut args, params.production, params.workspace.as_deref());
 
     push_analyze_issue_type_flags(&mut args, params)?;
@@ -126,7 +132,13 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
 }
 
 fn requires_cli_fallback(params: &AnalyzeParams) -> bool {
-    cli_fallback_reason(params).is_some()
+    params.type_aware == Some(true)
+        || params
+            .type_aware_projects
+            .as_ref()
+            .is_some_and(|projects| !projects.is_empty())
+        || params.type_aware_require.is_some()
+        || cli_fallback_reason(params).is_some()
 }
 
 fn cli_fallback_reason(params: &AnalyzeParams) -> Option<CliFallbackReason> {

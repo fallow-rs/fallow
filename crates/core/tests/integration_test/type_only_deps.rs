@@ -3,6 +3,7 @@ use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
 
 fn create_production_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         extends: vec![],
         entry: vec![],

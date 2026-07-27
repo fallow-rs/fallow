@@ -2,7 +2,9 @@
 //!
 //! Doc comments feed both rustdoc and the published JSON Schema.
 
-use schemars::JsonSchema;
+use std::borrow::Cow;
+
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::Deserialize;
 
 /// Privacy mode for author emails emitted by `--ownership`.
@@ -22,6 +24,22 @@ impl EmailModeParam {
             Self::Handle => "handle",
             Self::Anonymized => "anonymized",
             Self::Hash => "hash",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeAwareRequireParam {
+    BestEffort,
+    Complete,
+}
+
+impl TypeAwareRequireParam {
+    pub const fn as_cli(self) -> &'static str {
+        match self {
+            Self::BestEffort => "best-effort",
+            Self::Complete => "complete",
         }
     }
 }
@@ -66,6 +84,15 @@ pub struct AnalyzeParams {
     pub no_cache: Option<bool>,
 
     pub threads: Option<usize>,
+
+    /// Refine project-wide public API findings with TypeScript symbol identity.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -337,6 +364,15 @@ pub struct InspectTargetParams {
 
     pub threads: Option<usize>,
 
+    /// Include project-wide TypeScript semantic evidence for symbol targets.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
+
     /// OPT-IN (default off): attach target-level git churn evidence. Missing
     /// git history is returned as an explicit unavailable evidence section.
     pub include_churn: Option<bool>,
@@ -402,6 +438,157 @@ pub struct TraceExportParams {
     pub no_cache: Option<bool>,
 
     pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SemanticSymbolParams {
+    #[schemars(length(min = 1))]
+    pub file: String,
+
+    #[schemars(length(min = 1))]
+    pub export_name: String,
+
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    pub allow_remote_extends: Option<bool>,
+
+    /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
+
+    pub no_cache: Option<bool>,
+
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticExportSelector {
+    /// Exact exported symbol name in `file`.
+    #[schemars(length(min = 1))]
+    pub export_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticClassMethodSelector {
+    /// Exact exported class name in `file`.
+    #[schemars(length(min = 1))]
+    pub class_name: String,
+
+    /// Exact method name declared by `class_name`.
+    #[schemars(length(min = 1))]
+    pub member_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SemanticImpactSelector {
+    Export(SemanticExportSelector),
+    ClassMethod(SemanticClassMethodSelector),
+}
+
+#[derive(Deserialize)]
+pub struct SemanticImpactParams {
+    /// Project-root-relative declaration file.
+    pub file: String,
+
+    /// Choose exactly one target shape: `export_name`, or `class_name` plus
+    /// `member_name`.
+    #[serde(flatten)]
+    pub target: SemanticImpactSelector,
+
+    /// Project root. Defaults to the MCP server working directory.
+    pub root: Option<String>,
+
+    /// Optional Fallow config path.
+    pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
+    /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
+
+    /// Disable Fallow's normal analysis cache for this request.
+    pub no_cache: Option<bool>,
+
+    /// Worker thread limit for Fallow's syntactic analysis.
+    pub threads: Option<usize>,
+}
+
+#[expect(
+    dead_code,
+    reason = "schema-only mirror used by the manual XOR JsonSchema implementation"
+)]
+#[derive(JsonSchema)]
+#[schemars(deny_unknown_fields)]
+struct SemanticImpactParamsSchema {
+    /// Project-root-relative declaration file.
+    #[schemars(length(min = 1))]
+    file: String,
+    /// Exact exported symbol name. Mutually exclusive with the class-method
+    /// selector.
+    #[schemars(length(min = 1))]
+    export_name: Option<String>,
+    /// Exact exported class name. Must be paired with `member_name`.
+    #[schemars(length(min = 1))]
+    class_name: Option<String>,
+    /// Exact method name. Must be paired with `class_name`.
+    #[schemars(length(min = 1))]
+    member_name: Option<String>,
+    /// Project root. Defaults to the MCP server working directory.
+    root: Option<String>,
+    /// Optional Fallow config path.
+    config: Option<String>,
+    /// Allow trusted HTTPS config inheritance for this request.
+    allow_remote_extends: Option<bool>,
+    /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
+    type_aware_projects: Option<Vec<String>>,
+    /// Whether incomplete semantic evidence is advisory or gating.
+    type_aware_require: Option<TypeAwareRequireParam>,
+    /// Disable Fallow's normal analysis cache for this request.
+    no_cache: Option<bool>,
+    /// Worker thread limit for Fallow's syntactic analysis.
+    threads: Option<usize>,
+}
+
+impl JsonSchema for SemanticImpactParams {
+    fn schema_name() -> Cow<'static, str> {
+        "SemanticImpactParams".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = SemanticImpactParamsSchema::json_schema(generator);
+        schema.ensure_object().insert(
+            "oneOf".to_string(),
+            serde_json::json!([
+                {
+                    "required": ["export_name"],
+                    "not": {
+                        "anyOf": [
+                            {"required": ["class_name"]},
+                            {"required": ["member_name"]}
+                        ]
+                    }
+                },
+                {
+                    "required": ["class_name", "member_name"],
+                    "not": {"required": ["export_name"]}
+                }
+            ]),
+        );
+        schema
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -645,6 +832,18 @@ pub struct HealthParams {
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 
+    /// Enable the TypeScript semantic backend.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
+
+    /// Include advisory project-local public-signature type coupling.
+    pub type_coupling: Option<bool>,
+
     /// Compare current metrics against the most recent saved snapshot and show per-metric deltas.
     /// Implies --score. Reads from `.fallow/snapshots/`.
     pub trend: Option<bool>,
@@ -831,6 +1030,15 @@ pub struct AuditParams {
 
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
+
+    /// Refine both audit sides with TypeScript symbol identity before attribution.
+    pub type_aware: Option<bool>,
+
+    /// Explicit tsconfig paths for type-aware analysis.
+    pub type_aware_projects: Option<Vec<String>>,
+
+    /// Whether incomplete semantic evidence is advisory or gating.
+    pub type_aware_require: Option<TypeAwareRequireParam>,
 
     /// Group audit findings by CODEOWNERS ownership, directory, workspace
     /// package, or GitLab CODEOWNERS section. Values: "owner", "directory",

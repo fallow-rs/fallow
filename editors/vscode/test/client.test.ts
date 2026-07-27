@@ -14,6 +14,15 @@ let mockDuplicationSkipLocal = false;
 let mockDuplicationCrossLanguage = false;
 let mockDuplicationIgnoreImports = false;
 let mockHealthInlineComplexity = false;
+let mockTypeAwareSettings: {
+  enabled: boolean;
+  projects: string[];
+  require: "best-effort" | "complete";
+} = {
+  enabled: false,
+  projects: [],
+  require: "best-effort",
+};
 let mockMutedDiagnosticCategories = new Set<string>();
 let mockIssueTypesResponse: unknown = [];
 
@@ -109,7 +118,8 @@ vi.mock("../src/binary-utils.js", () => ({
       ? { command: mockBinaryResolution.localBinary, args: [] }
       : null,
   findBinaryInPath: () => mockBinaryResolution.pathBinary,
-  resolveConfiguredBinaryPath: (configured: string) => mockBinaryResolution.configuredBinary ?? configured,
+  resolveConfiguredBinaryPath: (configured: string) =>
+    mockBinaryResolution.configuredBinary ?? configured,
 }));
 
 vi.mock("../src/download.js", () => ({
@@ -127,6 +137,7 @@ vi.mock("../src/config.js", () => ({
   getResolvedConfigPath: () => mockConfigPath,
   getAllowRemoteExtends: () => mockAllowRemoteExtends,
   getProductionOverride: () => mockProductionOverride,
+  getTypeAwareSettings: () => mockTypeAwareSettings,
   getDuplicationModeOverride: () => mockDuplicationMode,
   getDuplicationThresholdOverride: () => mockDuplicationThreshold,
   getDuplicationMinTokensOverride: () => mockDuplicationMinTokens,
@@ -178,6 +189,7 @@ beforeEach(() => {
   mockDuplicationCrossLanguage = true;
   mockDuplicationIgnoreImports = true;
   mockHealthInlineComplexity = false;
+  mockTypeAwareSettings = { enabled: false, projects: [], require: "best-effort" };
   mockMutedDiagnosticCategories = new Set();
   mockIssueTypesResponse = [];
   mockBinaryResolution.localBinary = "/mock/fallow-lsp";
@@ -204,6 +216,7 @@ describe("createInitializationOptions", () => {
       configPath: "/workspace/.fallowrc.jsonc",
       allowRemoteExtends: false,
       production: undefined,
+      typeAware: { enabled: false, projects: [], require: "best-effort" },
       duplication: {
         mode: "semantic",
         threshold: 8,
@@ -215,6 +228,52 @@ describe("createInitializationOptions", () => {
         ignoreImports: true,
       },
     });
+  });
+
+  it("forwards type-aware settings to fallow-lsp", () => {
+    mockTypeAwareSettings = {
+      enabled: true,
+      projects: ["tsconfig.app.json"],
+      require: "complete",
+    };
+
+    expect(createInitializationOptions().typeAware).toEqual(mockTypeAwareSettings);
+  });
+
+  it("disables type-aware LSP settings for a known old binary", () => {
+    mockTypeAwareSettings = {
+      enabled: true,
+      projects: ["tsconfig.app.json"],
+      require: "complete",
+    };
+
+    expect(createInitializationOptions("3.9.1").typeAware).toEqual({
+      ...mockTypeAwareSettings,
+      enabled: false,
+    });
+  });
+
+  it("disables type-aware LSP settings when the selected binary cannot be verified", () => {
+    mockTypeAwareSettings = {
+      enabled: true,
+      projects: ["tsconfig.app.json"],
+      require: "complete",
+    };
+
+    expect(createInitializationOptions(null).typeAware).toEqual({
+      ...mockTypeAwareSettings,
+      enabled: false,
+    });
+  });
+
+  it("forwards type-aware LSP settings at the capability floor", () => {
+    mockTypeAwareSettings = {
+      enabled: true,
+      projects: ["tsconfig.app.json"],
+      require: "complete",
+    };
+
+    expect(createInitializationOptions("3.9.2").typeAware).toEqual(mockTypeAwareSettings);
   });
 
   it("forwards the remote config trust opt-in to fallow-lsp", () => {

@@ -50,6 +50,17 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         probe: &["dead-code", "--trace", "src/index.ts:foo"],
     },
     TaskRow {
+        task: "prove a TypeScript symbol's exact consumers before refactoring",
+        command: "fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>",
+        note: None,
+        probe: &[
+            "dead-code",
+            "--type-aware",
+            "--symbol-impact",
+            "src/index.ts:foo",
+        ],
+    },
+    TaskRow {
         task: "delete an \"unused\" dependency",
         command: "fallow dead-code --trace-dependency <name>",
         note: None,

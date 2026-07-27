@@ -94,6 +94,11 @@
         "icon": "$(inspect)"
       },
       {
+        "command": "fallow.inspectActiveSymbol",
+        "title": "Fallow: Inspect Symbol at Cursor",
+        "icon": "$(references)"
+      },
+      {
         "command": "fallow.setBaselineAtHead",
         "title": "Fallow: Set Baseline at HEAD",
         "icon": "$(git-commit)"
@@ -223,6 +228,32 @@
           "default": false,
           "scope": "machine",
           "markdownDescription": "Allow the language server to load trusted `https://` config inheritance. Disabled by default."
+        },
+        "fallow.typeAware.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Refine Fallow's project-wide public API analysis with TypeScript symbol identity. This does not surface compiler diagnostics or generic typed lint rules."
+        },
+        "fallow.typeAware.projects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Optional tsconfig paths for type-aware analysis. Relative paths resolve from the workspace root."
+        },
+        "fallow.typeAware.require": {
+          "type": "string",
+          "enum": [
+            "best-effort",
+            "complete"
+          ],
+          "enumDescriptions": [
+            "Keep conservative findings and report incomplete semantic evidence as advisory.",
+            "Keep conservative findings, but fail the analysis when semantic evidence is incomplete."
+          ],
+          "default": "best-effort",
+          "markdownDescription": "Choose whether incomplete semantic evidence stays advisory or fails the analysis after emitting its conservative result."
         },
         "fallow.autoDownload": {
           "type": "boolean",
@@ -866,14 +897,14 @@
     "codegen:contracts": "node ./scripts/codegen-contracts.mjs",
     "check:contracts": "node ./scripts/codegen-contracts.mjs --check",
     "prebuild": "pnpm run codegen:contracts",
-    "build": "rolldown -c",
+    "build": "rolldown -c && node ./scripts/package-type-aware.mjs",
     "watch": "rolldown -c --watch",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm run test:unit && pnpm run test:integration",
     "test:unit": "vitest run",
     "test:integration": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/runTest.js",
     "test:integration:real": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/real/runTest.js",
-    "prepackage": "pnpm run codegen:contracts && cp ../../LICENSE ./LICENSE",
+    "prepackage": "pnpm run codegen:contracts && pnpm run build && cp ../../LICENSE ./LICENSE",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
     "publish:ovsx": "ovsx publish --no-dependencies"

@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{AutoImportRule, EntryPointRole, PackageJson, UsedClassMemberRule};
+use fallow_types::semantic::SemanticFrameworkContract;
 use regex::Regex;
 
 const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
@@ -756,6 +757,12 @@ pub trait Plugin: Send + Sync {
     /// extending `HTMLElement`). Default: empty. Plugins override when they
     /// need scoping; flat names should still come from `used_class_members`.
     fn used_class_member_rules(&self) -> Vec<UsedClassMemberRule> {
+        Vec::new()
+    }
+
+    /// Exact package-backed framework contracts that type-aware analysis may
+    /// verify for latent class-member candidates.
+    fn framework_class_member_contracts(&self) -> Vec<SemanticFrameworkContract> {
         Vec::new()
     }
 

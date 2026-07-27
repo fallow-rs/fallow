@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashSet;
 
 use fallow_config::ResolvedConfig;
+use fallow_types::discover::StableFileKey;
 
 pub use crate::results::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
@@ -52,6 +53,29 @@ pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf])
 )]
 pub fn filter_by_changed_files(results: &mut AnalysisResults, changed_files: &FxHashSet<PathBuf>) {
     crate::changed_files::filter_results_by_changed_files(results, changed_files);
+}
+
+/// Apply configured source-owned finding exclusions to an analysis result.
+///
+/// Analysis stages that append findings after the engine pipeline, such as
+/// type-aware reconciliation, must call this before exposing their final
+/// result.
+pub fn filter_configured_ignored_findings(results: &mut AnalysisResults, config: &ResolvedConfig) {
+    if config.ignore_findings.is_empty() {
+        return;
+    }
+
+    results.remove_ignored_source_owned_issues(|path| {
+        let key = if path.is_absolute() {
+            let Ok(relative) = path.strip_prefix(&config.root) else {
+                return false;
+            };
+            StableFileKey::from_relative(relative)
+        } else {
+            StableFileKey::from_relative(path)
+        };
+        config.ignore_findings.is_ignored(key.as_str())
+    });
 }
 
 fn filter_workspace_source_findings(
@@ -229,8 +253,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use fallow_types::output_dead_code::UnusedFileFinding;
-    use fallow_types::results::UnusedFile;
+    use fallow_types::output_dead_code::{PrivateTypeLeakFinding, UnusedFileFinding};
+    use fallow_types::results::{PrivateTypeLeak, UnusedFile};
 
     #[test]
     fn workspace_filter_keeps_findings_under_workspace_root() {
@@ -254,5 +278,38 @@ mod tests {
             results.unused_files[0].file.path,
             root.join("src/unused.ts")
         );
+    }
+
+    #[test]
+    fn configured_filter_removes_findings_added_after_engine_analysis() {
+        let project = tempfile::tempdir().expect("project");
+        let config = serde_json::from_str::<fallow_config::FallowConfig>(
+            r#"{"ignoreFindings":["src/hidden.ts"]}"#,
+        )
+        .expect("config parses")
+        .resolve(
+            project.path().to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+                path: project.path().join("src/hidden.ts"),
+                export_name: "publicApi".to_string(),
+                type_name: "PrivateShape".to_string(),
+                line: 1,
+                col: 0,
+                span_start: 0,
+                semantic: None,
+            }));
+
+        filter_configured_ignored_findings(&mut results, &config);
+
+        assert!(results.private_type_leaks.is_empty());
     }
 }

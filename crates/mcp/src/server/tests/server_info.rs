@@ -32,6 +32,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"fix_apply".to_string()));
     assert!(names.contains(&"project_info".to_string()));
     assert!(names.contains(&"trace_export".to_string()));
+    assert!(names.contains(&"trace_symbol".to_string()));
+    assert!(names.contains(&"symbol_impact".to_string()));
     assert!(names.contains(&"trace_file".to_string()));
     assert!(names.contains(&"impact_closure".to_string()));
     assert!(names.contains(&"trace_dependency".to_string()));
@@ -52,7 +54,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
     assert!(names.contains(&"recommend".to_string()));
-    assert_eq!(tools.len(), 31);
+    assert_eq!(tools.len(), 33);
 }
 
 #[test]
@@ -70,6 +72,8 @@ fn read_only_tools_have_annotations() {
         "fix_preview",
         "project_info",
         "trace_export",
+        "trace_symbol",
+        "symbol_impact",
         "trace_file",
         "impact_closure",
         "trace_dependency",
@@ -151,6 +155,8 @@ fn open_world_hint_on_analysis_tools() {
         "fix_preview",
         "project_info",
         "trace_export",
+        "trace_symbol",
+        "symbol_impact",
         "trace_file",
         "impact_closure",
         "trace_dependency",
@@ -661,6 +667,27 @@ fn trace_export_schema_contains_expected_properties() {
             .and_then(|v| v.as_u64()),
         Some(1)
     );
+}
+
+#[test]
+fn symbol_impact_schema_exposes_exclusive_export_or_class_method_selectors() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "symbol_impact").unwrap();
+    let schema = serde_json::to_value(&tool.input_schema).unwrap();
+    let encoded = serde_json::to_string(&schema).unwrap();
+
+    for field in ["file", "export_name", "class_name", "member_name"] {
+        assert!(
+            encoded.contains(field),
+            "symbol_impact schema should contain selector field '{field}'"
+        );
+    }
+    assert!(
+        encoded.contains("oneOf"),
+        "symbol_impact schema must make the two selector shapes explicit"
+    );
+    assert_required_fields(&schema, &["file"]);
 }
 
 #[test]

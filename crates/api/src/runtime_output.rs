@@ -73,6 +73,7 @@ pub struct HealthJsonReportInput<'a> {
     pub root: &'a Path,
     pub elapsed: std::time::Duration,
     pub explain: bool,
+    pub type_aware: Option<fallow_types::envelope::TypeAwareMeta>,
     pub grouped_by: Option<GroupByMode>,
     pub groups: Option<Vec<HealthGroup>>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
@@ -405,6 +406,19 @@ pub fn serialize_health_report_json(
     input: HealthJsonReportInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", input.root.display());
+    let meta = match (input.explain, input.type_aware) {
+        (false, None) => None,
+        (true, None) => Some(health_meta()),
+        (false, Some(type_aware)) => Some(fallow_types::envelope::Meta {
+            type_aware: Some(type_aware),
+            ..fallow_types::envelope::Meta::default()
+        }),
+        (true, Some(type_aware)) => {
+            let mut meta = health_meta();
+            meta.type_aware = Some(type_aware);
+            Some(meta)
+        }
+    };
     fallow_output::serialize_health_json_output(HealthJsonOutputInput {
         output: HealthOutputInput {
             schema_version: HEALTH_SCHEMA_VERSION,
@@ -413,7 +427,7 @@ pub fn serialize_health_report_json(
             report: input.report,
             grouped_by: input.grouped_by,
             groups: input.groups,
-            meta: input.explain.then(health_meta),
+            meta,
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
         },

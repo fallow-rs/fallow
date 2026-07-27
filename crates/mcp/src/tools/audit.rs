@@ -79,6 +79,12 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
         params.threads,
     );
     push_remote_extends(&mut args, params.allow_remote_extends);
+    super::push_type_aware(
+        &mut args,
+        params.type_aware,
+        params.type_aware_projects.as_deref(),
+        params.type_aware_require,
+    );
     push_str_flag(&mut args, "--base", params.base.as_deref());
     push_scope(&mut args, params.production, params.workspace.as_deref());
     push_audit_production_flags(&mut args, params);
@@ -149,7 +155,13 @@ fn push_audit_coverage_flags(args: &mut Vec<String>, params: &AuditParams) {
 }
 
 fn requires_cli_fallback(params: &AuditParams) -> bool {
-    cli_fallback_reason(params).is_some()
+    params.type_aware == Some(true)
+        || params
+            .type_aware_projects
+            .as_ref()
+            .is_some_and(|projects| !projects.is_empty())
+        || params.type_aware_require.is_some()
+        || cli_fallback_reason(params).is_some()
 }
 
 fn cli_fallback_reason(params: &AuditParams) -> Option<&'static str> {
@@ -182,6 +194,7 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
             workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
             changed_workspaces: None,
             explain: true,
+            type_aware: fallow_api::TypeAwareOptions::default(),
         },
         base: non_empty_string(params.base.as_deref()),
         production: params.production.unwrap_or(false),

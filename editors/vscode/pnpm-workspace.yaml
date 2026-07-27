@@ -1,3 +1,5 @@
 allowBuilds:
   '@vscode/vsce-sign': false
   keytar: false
+minimumReleaseAgeExclude:
+  - brace-expansion@5.0.8

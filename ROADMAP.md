@@ -62,7 +62,10 @@ Continuous work across releases.
 
 Acknowledged gaps. Fixes land opportunistically.
 
-- **Syntactic analysis only** -- no TypeScript type information. Projects using `isolatedModules: true` (the modern default) are well-served; legacy tsc-only patterns may produce false positives.
+- **Syntactic by default** -- the fast Rust-native path does not require
+  TypeScript. The optional `--type-aware` companion adds bounded checker
+  evidence for exact symbol use, API leaks, targeted tests, and public type
+  coupling. It does not replace compiler diagnostics or general typed linting.
 - **Config parsing ceiling** -- AST-based extraction handles static configs. Computed values and conditionals are out of reach without JS eval.
 - **Svelte export false negatives** -- props (`export let`) can't be distinguished from utility exports without Svelte compiler semantics.
 - **NestJS/DI class members** -- abstract methods consumed via DI are not tracked. Use `unused_class_members = "off"` for DI-heavy projects.

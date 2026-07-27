@@ -78,6 +78,7 @@ fn list_boundaries_options_from_params(params: &ListBoundariesParams) -> ListBou
             workspace: None,
             changed_workspaces: None,
             explain: false,
+            type_aware: fallow_api::TypeAwareOptions::default(),
         },
     }
 }

@@ -1,7 +1,7 @@
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BinaryExpression, BindingPattern, CallExpression, Class,
     ClassElement, Expression, MethodDefinitionKind, ObjectPropertyKind, PropertyDefinition,
-    Statement, TSAccessibility, TSSignature, TSType, TSTypeAnnotation, TSTypeName,
+    PropertyKey, Statement, TSAccessibility, TSSignature, TSType, TSTypeAnnotation, TSTypeName,
 };
 use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
@@ -876,6 +876,7 @@ fn build_method_member(
 ) -> Option<MemberInfo> {
     let name_str = method.key.static_name()?.to_string();
     if name_str == "constructor"
+        || matches!(method.key, PropertyKey::PrivateIdentifier(_))
         || matches!(
             method.accessibility,
             Some(TSAccessibility::Private | oxc_ast::ast::TSAccessibility::Protected)
@@ -910,6 +911,7 @@ fn build_property_member(
 ) -> Option<MemberInfo> {
     let name = prop.key.static_name()?;
     if prop.declare
+        || matches!(prop.key, PropertyKey::PrivateIdentifier(_))
         || matches!(
             prop.accessibility,
             Some(TSAccessibility::Private | oxc_ast::ast::TSAccessibility::Protected)

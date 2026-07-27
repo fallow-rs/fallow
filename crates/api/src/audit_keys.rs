@@ -164,6 +164,7 @@ impl DeadCodeAuditLedger {
             entry_point_summary: _entry_point_summary,
             render_fan_in: _render_fan_in,
             react_component_intel: _react_component_intel,
+            semantic_framework_contracts: _semantic_framework_contracts,
         } = results;
 
         macro_rules! annotate {
@@ -910,6 +911,7 @@ impl DeadCodeKeyCollector<'_> {
             // Per-component React intel is a descriptive ambient-editor carrier,
             // not an issue collection; no attribution key needed.
             react_component_intel: _react_component_intel,
+            semantic_framework_contracts: _semantic_framework_contracts,
         } = results;
 
         self.add_core_findings(
@@ -2099,6 +2101,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         // Per-component React intel is a descriptive ambient-editor carrier, not
         // an issue collection; no key needed.
         react_component_intel: _react_component_intel,
+        semantic_framework_contracts: _semantic_framework_contracts,
     } = results;
 }
 
@@ -3312,6 +3315,7 @@ mod tests {
                 line: 7,
                 col: 12,
                 span_start: 64,
+                semantic: None,
             }));
         results
             .unused_dev_dependencies

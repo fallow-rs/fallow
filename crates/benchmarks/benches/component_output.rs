@@ -78,8 +78,13 @@ fn create_inspect_output() -> InspectOutput {
             impact_closure: section,
             churn: None,
             symbol_chain: None,
+            semantic_trace: None,
+            api_surface: None,
+            symbol_impact: None,
+            targeted_tests: None,
         },
         warnings: Vec::new(),
+        meta: None,
     }
 }
 

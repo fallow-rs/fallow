@@ -36,6 +36,7 @@ import {
   runFix,
   runHealthAnalysis,
   runInspectActiveFile,
+  runInspectActiveSymbol,
   runSecurityAnalysis,
   runWorkspaces,
 } from "./commands.js";
@@ -98,6 +99,7 @@ import {
 import { RuntimeCoverageTreeProvider } from "./coverageView.js";
 import { runCoverageAnalysis } from "./coverageCommand.js";
 import { coverageWatermarkMessage } from "./coverage-utils.js";
+import { configureBundledTypeAwareCompanion } from "./typeAwareCompanion.js";
 import { killActiveChildren } from "./process-registry.js";
 import type {
   AuditOutput,
@@ -161,6 +163,7 @@ export interface ExtensionApi {
 }
 
 export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
+  configureBundledTypeAwareCompanion(context.extensionPath);
   outputChannel = vscode.window.createOutputChannel("Fallow", { log: true });
   context.subscriptions.push(outputChannel);
 
@@ -798,6 +801,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.inspectActiveFile", () =>
       runInspectActiveFile(context, outputChannel),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.inspectActiveSymbol", () =>
+      runInspectActiveSymbol(context, outputChannel),
     ),
   );
   context.subscriptions.push(

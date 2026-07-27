@@ -85,6 +85,20 @@ pub enum IssueAction {
     AddToConfig(AddToConfigAction),
 }
 
+impl IssueAction {
+    /// Whether the current finding-specific action can be applied by
+    /// `fallow fix`.
+    #[must_use]
+    pub const fn is_auto_fixable(&self) -> bool {
+        match self {
+            Self::Fix(action) => action.auto_fixable,
+            Self::SuppressLine(action) => action.auto_fixable,
+            Self::SuppressFile(action) => action.auto_fixable,
+            Self::AddToConfig(action) => action.auto_fixable,
+        }
+    }
+}
+
 /// A code-change fix. `type` is one of the kebab-case identifiers in
 /// [`FixActionType`].
 #[derive(Debug, Clone, Serialize, Deserialize)]

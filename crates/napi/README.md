@@ -24,6 +24,11 @@ Enum-like option values use lowercase CLI-style strings such as `"mild"`, `"cycl
 
 Shared options mirror analysis-affecting CLI globals, including `root`, `configPath`, `noCache`, `threads`, `diffFile`, `production`, `changedSince`, `workspace`, `changedWorkspaces`, and `explain`. Object-shaped JSON roots always carry the top-level `kind` discriminator; consumers should branch on `kind`. `diffFile` accepts a path to a unified diff file; stdin diff sources are CLI-only.
 
+The rich public declarations live in `types/index.d.ts`. The package-level
+`index.d.ts` is a generated entry point that re-exports that canonical source.
+This keeps the package root stable when NAPI-RS regenerates its temporary
+declarations during a native build.
+
 Rejected promises throw a `FallowNodeError` with:
 
 - `message`

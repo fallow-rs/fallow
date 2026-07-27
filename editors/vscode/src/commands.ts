@@ -23,6 +23,8 @@ import {
   getChangedSince,
   getResolvedConfigPath,
   getAutoDownload,
+  getTypeAwareSettings,
+  type TypeAwareSettings,
 } from "./config.js";
 import {
   buildAnalysisArgs,
@@ -49,6 +51,7 @@ import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-u
 import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js";
 import { registerChild, unregisterChild } from "./process-registry.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
+import { appendTypeAwareArgs, TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
 import {
   cacheWorkspacesOutput,
   getCachedWorkspacesOutput,
@@ -331,8 +334,22 @@ const noteBinarySkew = (
 
   const where = binaryPath ? ` (resolved binary: ${binaryPath})` : "";
   showBinarySkewToastOnce(
-    `Fallow: the resolved CLI is older than the extension, so some options were ignored and results use CLI defaults for them${where}. Update the fallow binary, or remove the older one from PATH to use the managed auto-download. See the Fallow output channel for details.`,
+    `Fallow: the resolved CLI does not support all requested options, so affected settings were not applied${where}. Update the fallow binary, or enable fallow.autoDownload to use the managed CLI. See the Fallow output channel for details.`,
   );
+};
+
+const noteSkippedCapabilities = (
+  skipped: ReadonlyArray<{ flag: string; requires: string; cliVersion: string }>,
+  binaryPath: string | null,
+  outputChannel?: vscode.OutputChannel,
+): void => {
+  for (const skip of skipped) {
+    noteBinarySkew(
+      `omitted ${skip.flag} (your setting is not applied): resolved CLI v${skip.cliVersion} predates v${skip.requires}.`,
+      binaryPath,
+      outputChannel,
+    );
+  }
 };
 
 /**
@@ -343,7 +360,7 @@ const noteBinarySkew = (
  * the flag is stripped and the run retried; every other failure propagates
  * untouched so genuine errors stay loud.
  */
-const execAnalysisTolerant = async (
+const execFallowTolerant = async (
   initialArgs: ReadonlyArray<string>,
   cwd: string,
   binaryPath: string | null,
@@ -380,7 +397,7 @@ const execInspectWithManagedFallback = async (
   outputChannel?: vscode.OutputChannel,
 ): Promise<string> => {
   try {
-    return await execFallow(initialBinary, args, cwd);
+    return await execFallowTolerant(args, cwd, initialBinary, outputChannel);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!parseUnknownSubcommand(message, "inspect")) {
@@ -394,7 +411,7 @@ const execInspectWithManagedFallback = async (
         outputChannel?.appendLine(
           "Fallow: resolved CLI does not support inspect; switched to the managed CLI.",
         );
-        return execFallow(managed, args, cwd);
+        return execFallowTolerant(args, cwd, managed, outputChannel);
       }
     }
 
@@ -412,13 +429,19 @@ export interface RunAnalysisOptions {
 
 export interface InspectArgsOptions {
   readonly filePath: string;
+  readonly symbol?: string;
   readonly production: boolean | undefined;
   readonly workspace: string;
   readonly configPath: string;
+  readonly typeAware?: TypeAwareSettings;
+  readonly cliVersion?: string | null;
 }
 
 export const buildInspectArgs = (options: InspectArgsOptions): string[] => {
-  const args = ["inspect", "--file", options.filePath, "--format", "json", "--quiet"];
+  const targetArgs = options.symbol
+    ? ["--symbol", `${options.filePath}:${options.symbol}`]
+    : ["--file", options.filePath];
+  const args = ["inspect", ...targetArgs, "--format", "json", "--quiet"];
 
   if (options.workspace) {
     args.push("--workspace", options.workspace);
@@ -432,6 +455,10 @@ export const buildInspectArgs = (options: InspectArgsOptions): string[] => {
 
   if (options.configPath) {
     args.push("--config", options.configPath);
+  }
+
+  if (options.symbol) {
+    appendTypeAwareArgs(args, options.typeAware, options.cliVersion ?? null);
   }
 
   return args;
@@ -670,7 +697,7 @@ export const runAnalysis = async (
     // settings would be silent no-ops). The probed version belongs to the
     // binary we will actually spawn, so version-gated flags are forwarded only
     // when accepted; a null version means "unknown" and we forward optimistically
-    // and lean on execAnalysisTolerant as the backstop.
+    // and lean on execFallowTolerant as the backstop.
     const { binary: cliBinary, version: cliVersion } = await resolveCliForRun(
       context,
       outputChannel,
@@ -689,6 +716,7 @@ export const runAnalysis = async (
       dupesSkipLocal: getDuplicationSkipLocalOverride(),
       dupesCrossLanguage: getDuplicationCrossLanguageOverride(),
       dupesIgnoreImports: getDuplicationIgnoreImportsOverride(),
+      typeAware: getTypeAwareSettings(),
       cliVersion,
     });
     backoffKey = buildAnalysisBackoffKey(root, analysisArgs);
@@ -700,15 +728,9 @@ export const runAnalysis = async (
       throw new AnalysisBackoffBlockedError(blocked.failures);
     }
 
-    for (const skip of skipped) {
-      noteBinarySkew(
-        `omitted ${skip.flag} (your setting is not applied): resolved CLI v${skip.cliVersion} predates v${skip.requires}.`,
-        cliBinary,
-        outputChannel,
-      );
-    }
+    noteSkippedCapabilities(skipped, cliBinary, outputChannel);
 
-    const output = await execAnalysisTolerant(analysisArgs, root, cliBinary, outputChannel, {
+    const output = await execFallowTolerant(analysisArgs, root, cliBinary, outputChannel, {
       env: buildAnalysisProcessEnv(),
     });
 
@@ -852,16 +874,22 @@ export const runAudit = async (
   auditInFlight = true;
 
   try {
-    const { binary: cliBinary } = await resolveCliForRun(context, outputChannel);
-    const auditArgs = buildAuditArgs({
+    const { binary: cliBinary, version: cliVersion } = await resolveCliForRun(
+      context,
+      outputChannel,
+    );
+    const { args: auditArgs, skipped } = buildAuditArgs({
       production: getProductionOverride(),
       changedSince: getChangedSince(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
       gate: getAuditGate(),
+      typeAware: getTypeAwareSettings(),
+      cliVersion,
     });
 
-    const output = await execFallow(cliBinary, auditArgs, root);
+    noteSkippedCapabilities(skipped, cliBinary, outputChannel);
+    const output = await execFallowTolerant(auditArgs, root, cliBinary, outputChannel);
     return parseAuditOutput(output);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -911,6 +939,7 @@ const activeEditorInspectTarget = (): {
 export const runInspectActiveFile = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
+  symbol?: string,
 ): Promise<FallowInspectResult | null> => {
   const target = activeEditorInspectTarget();
   if (!target) {
@@ -928,13 +957,35 @@ export const runInspectActiveFile = async (
       }
     }
 
-    const { binary } = await resolveCliForRun(context, outputChannel);
+    const { binary, version: cliVersion } = await resolveCliForRun(context, outputChannel);
+    const typeAware = getTypeAwareSettings();
     const args = buildInspectArgs({
       filePath: target.filePath,
+      symbol,
       production: getProductionOverride(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(target.root),
+      typeAware,
+      cliVersion,
     });
+    if (
+      symbol &&
+      typeAware.enabled &&
+      cliVersion !== null &&
+      compareVersions(cliVersion, TYPE_AWARE_MIN_CLI_VERSION) < 0
+    ) {
+      noteSkippedCapabilities(
+        [
+          {
+            flag: "--type-aware",
+            requires: TYPE_AWARE_MIN_CLI_VERSION,
+            cliVersion,
+          },
+        ],
+        binary,
+        outputChannel,
+      );
+    }
 
     const output = await execInspectWithManagedFallback(
       context,
@@ -949,16 +1000,37 @@ export const runInspectActiveFile = async (
     }
 
     const result = JSON.parse(output) as FallowInspectResult;
-    outputChannel?.appendLine(`Fallow inspect: ${target.filePath}`);
+    const label = symbol ? `${target.filePath}:${symbol}` : target.filePath;
+    outputChannel?.appendLine(`Fallow inspect: ${label}`);
     outputChannel?.appendLine(JSON.stringify(result, null, 2));
     outputChannel?.show();
-    void vscode.window.showInformationMessage(`Fallow inspect complete: ${target.filePath}`);
+    void vscode.window.showInformationMessage(`Fallow inspect complete: ${label}`);
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow inspect failed: ${message}`);
     return null;
   }
+};
+
+export const runInspectActiveSymbol = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<FallowInspectResult | null> => {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== "file") {
+    void vscode.window.showWarningMessage("Fallow: no active file to inspect.");
+    return null;
+  }
+  const range = editor.document.getWordRangeAtPosition(editor.selection.active);
+  const symbol = range ? editor.document.getText(range).trim() : "";
+  if (!symbol) {
+    void vscode.window.showWarningMessage(
+      "Fallow: place the cursor on an exported symbol to inspect it.",
+    );
+    return null;
+  }
+  return runInspectActiveFile(context, outputChannel, symbol);
 };
 
 export const runFix = async (
@@ -982,8 +1054,12 @@ export const runFix = async (
       fixArgs.push("--config", configPath);
     }
 
-    const { binary } = await resolveCliForRun(context);
-    const output = await execFallow(binary, fixArgs, root);
+    const { binary, version: cliVersion } = await resolveCliForRun(context);
+    const skipped = appendTypeAwareArgs(fixArgs, getTypeAwareSettings(), cliVersion);
+    if (skipped) {
+      noteSkippedCapabilities([skipped], binary);
+    }
+    const output = await execFallowTolerant(fixArgs, root, binary);
     const result = JSON.parse(output) as FallowFixResult;
 
     if (dryRun) {
@@ -1049,7 +1125,7 @@ export const runHealthAnalysis = async (
   }
 
   try {
-    const { binary } = await resolveCliForRun(context, outputChannel);
+    const { binary, version: cliVersion } = await resolveCliForRun(context, outputChannel);
 
     // When the inline breakdown is on, fetch a larger top-N so files outside
     // the tree's top-N still get decorated; the tree slices back to
@@ -1059,7 +1135,7 @@ export const runHealthAnalysis = async (
       ? Math.max(getHealthTopFindings(), getComplexityDecorationCap())
       : getHealthTopFindings();
 
-    const args = buildHealthArgs({
+    const { args, skipped } = buildHealthArgs({
       hotspots: getHealthHotspots(),
       topFindings,
       configPath: getResolvedConfigPath(),
@@ -1067,9 +1143,12 @@ export const runHealthAnalysis = async (
       production: getProductionOverride(),
       workspace: resolveActiveWorkspaceScope(context),
       complexityBreakdown: breakdownEnabled,
+      typeAware: getTypeAwareSettings(),
+      cliVersion,
     });
 
-    const output = await execAnalysisTolerant(args, root, binary, outputChannel);
+    noteSkippedCapabilities(skipped, binary, outputChannel);
+    const output = await execFallowTolerant(args, root, binary, outputChannel);
 
     if (output.trim().length === 0) {
       // A successful exit with empty stdout means there was nothing to report.

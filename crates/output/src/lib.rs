@@ -63,9 +63,11 @@ mod report_contract;
 mod review_envelopes;
 mod root_envelopes;
 mod sarif;
+mod saved_health;
 mod security;
 mod suppressions;
 mod trace_envelopes;
+mod type_aware_envelopes;
 mod walkthrough_render;
 
 pub use analysis_sarif::{
@@ -295,6 +297,7 @@ pub use sarif::{
     build_sarif_result_with_snippet, build_sarif_rule, normalize_sarif_snippet,
     sarif_finding_fingerprint,
 };
+pub use saved_health::health_report_from_saved_value;
 pub use security::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGate, SecurityGateVerdict,
@@ -315,6 +318,7 @@ pub use suppressions::{
     build_suppression_inventory_output, serialize_suppression_inventory_json_output,
 };
 pub use trace_envelopes::serialize_trace_json_output;
+pub use type_aware_envelopes::{TypeAwareStatusOutput, serialize_type_aware_status_json_output};
 pub use walkthrough_render::{
     MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_names, clean_decision_fact,
     visible_stage_units,

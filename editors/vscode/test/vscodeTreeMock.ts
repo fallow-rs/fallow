@@ -51,8 +51,19 @@ export const createTreeViewVscodeMock = (workspacePath: string): Record<string, 
     ) {}
   }
 
+  class FakeMarkdownString {
+    public value = "";
+    public supportThemeIcons = false;
+
+    public appendMarkdown(value: string): FakeMarkdownString {
+      this.value += value;
+      return this;
+    }
+  }
+
   return {
     EventEmitter: FakeEventEmitter,
+    MarkdownString: FakeMarkdownString,
     Range: FakeRange,
     ThemeIcon: class {
       public constructor(public readonly id: string) {}
@@ -61,11 +72,16 @@ export const createTreeViewVscodeMock = (workspacePath: string): Record<string, 
     TreeItemCollapsibleState: {
       None: 0,
       Collapsed: 1,
+      Expanded: 2,
     },
     Uri: {
       file: (fsPath: string) => ({ fsPath }),
     },
     workspace: {
+      getConfiguration: () => ({
+        get: (_key: string, fallback: unknown) => fallback,
+        inspect: () => undefined,
+      }),
       workspaceFolders: [
         {
           uri: {

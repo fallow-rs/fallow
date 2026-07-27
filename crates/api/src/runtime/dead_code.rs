@@ -103,9 +103,20 @@ pub(super) fn run_dead_code_with_session(
     apply_dead_code_scope(options, resolved, session, changed_files, &mut results)?;
     apply_dead_code_filters(&options.filters, &mut results);
     post_filter(&mut results);
+    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
+        &options.analysis.type_aware,
+        &options.filters,
+        session,
+        &mut results,
+    )?;
 
     Ok(build_dead_code_programmatic_output(
-        options, resolved, session, results, start,
+        options,
+        resolved,
+        session,
+        results,
+        type_aware_meta,
+        start,
     ))
 }
 
@@ -134,9 +145,20 @@ pub(super) fn run_dead_code_with_session_artifacts(
     )?;
     apply_dead_code_filters(&options.filters, &mut artifacts.results);
     post_filter(&mut artifacts.results);
+    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
+        &options.analysis.type_aware,
+        &options.filters,
+        session,
+        &mut artifacts.results,
+    )?;
 
     Ok(build_dead_code_run_with_artifacts(
-        options, resolved, session, artifacts, start,
+        options,
+        resolved,
+        session,
+        artifacts,
+        type_aware_meta,
+        start,
     ))
 }
 
@@ -156,9 +178,20 @@ pub(super) fn run_dead_code_from_artifacts(
         &mut artifacts.results,
     )?;
     apply_dead_code_filters(&options.filters, &mut artifacts.results);
+    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
+        &options.analysis.type_aware,
+        &options.filters,
+        session,
+        &mut artifacts.results,
+    )?;
 
     Ok(build_dead_code_run_with_artifacts(
-        options, resolved, session, artifacts, start,
+        options,
+        resolved,
+        session,
+        artifacts,
+        type_aware_meta,
+        start,
     ))
 }
 
@@ -167,6 +200,7 @@ fn build_dead_code_run_with_artifacts(
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
     artifacts: DeadCodeAnalysisArtifacts,
+    type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
     start: Instant,
 ) -> DeadCodeProgrammaticRunWithArtifacts {
     let output = build_dead_code_programmatic_output(
@@ -174,6 +208,7 @@ fn build_dead_code_run_with_artifacts(
         resolved,
         session,
         artifacts.results.clone(),
+        type_aware_meta,
         start,
     );
     DeadCodeProgrammaticRunWithArtifacts { output, artifacts }
@@ -184,6 +219,7 @@ fn build_dead_code_programmatic_output(
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
     results: AnalysisResults,
+    type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
     start: Instant,
 ) -> DeadCodeProgrammaticOutput {
     let root = session.root();
@@ -199,13 +235,17 @@ fn build_dead_code_programmatic_output(
     });
     let config_fixable =
         fallow_config::is_config_fixable(&resolved.root, resolved.config_path.as_ref());
+    let mut meta = options.analysis.explain.then(check_meta);
+    if let Some(type_aware) = type_aware_meta {
+        meta.get_or_insert_with(Default::default).type_aware = Some(type_aware);
+    }
     let output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: start.elapsed(),
         results,
         config_fixable,
-        meta: options.analysis.explain.then(check_meta),
+        meta,
         workspace_diagnostics: session.current_workspace_diagnostics(),
         next_steps,
     });

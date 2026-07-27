@@ -294,6 +294,9 @@ pub struct TraceOptions {
     /// Impact closure for a single file as the seed. Powers the
     /// `inspect_target` MCP tool's `impact_closure` evidence section.
     pub impact_closure: Option<String>,
+    /// Exact symbol-level impact query, including targeted tests when the
+    /// type-aware backend can prove the relation.
+    pub symbol_impact: Option<String>,
     pub performance: bool,
 }
 
@@ -303,6 +306,7 @@ impl TraceOptions {
             || self.trace_file.is_some()
             || self.trace_dependency.is_some()
             || self.impact_closure.is_some()
+            || self.symbol_impact.is_some()
             || self.performance
     }
 }
@@ -330,6 +334,12 @@ pub struct CheckOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
     pub include_dupes: bool,
+    /// Run opt-in TypeScript semantic refinement for supported dead-code findings.
+    pub type_aware: bool,
+    /// Explicit TypeScript project configs used by the semantic refinement.
+    pub type_aware_projects: &'a [std::path::PathBuf],
+    /// CLI completeness override. Config and environment are resolved later.
+    pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
     pub trace_opts: &'a TraceOptions,
     pub explain: bool,
     pub top: Option<usize>,
@@ -362,6 +372,13 @@ pub struct CheckResult {
     pub timings: Option<fallow_types::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
+    /// Provenance for the opt-in TypeScript semantic analysis pass.
+    pub type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
+    /// Advisory coupling report produced in the same semantic batch when a
+    /// combined run also requested health analysis.
+    pub type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
+    /// Bounded non-fatal diagnostics from the semantic backend.
+    pub type_aware_warnings: Vec<String>,
     /// Impact closure for the review brief: the transitive
     /// affected-but-not-in-diff set plus coordination gaps. Populated by the
     /// audit brief path from the retained graph against the changed-file set;
@@ -467,7 +484,7 @@ fn run_check_analysis(
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
-    if opts.trace_opts.any_active() {
+    if opts.trace_opts.any_active() || config.type_aware.enabled {
         return session
             .analyze_dead_code_with_artifacts(false, true)
             .map(|mut output| {
@@ -503,8 +520,100 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
     if opts.include_entry_exports {
         config.include_entry_exports = true;
     }
+    apply_type_aware_overrides(opts, &mut config)?;
     opts.filters.activate_explicit_opt_ins(&mut config.rules);
+    if config.type_aware.enabled
+        && !opts.filters.any_active()
+        && config.rules.private_type_leaks == Severity::Off
+    {
+        config.rules.private_type_leaks = Severity::Warn;
+    }
     Ok(config)
+}
+
+fn apply_type_aware_overrides(
+    opts: &CheckOptions<'_>,
+    config: &mut ResolvedConfig,
+) -> Result<(), ExitCode> {
+    apply_type_aware_overrides_from(
+        opts.output,
+        opts.type_aware,
+        opts.type_aware_projects,
+        opts.type_aware_require,
+        config,
+    )
+}
+
+pub fn apply_type_aware_overrides_from(
+    output: fallow_config::OutputFormat,
+    enabled: bool,
+    projects: &[std::path::PathBuf],
+    require: Option<fallow_config::TypeAwareRequire>,
+    config: &mut ResolvedConfig,
+) -> Result<(), ExitCode> {
+    let env_enabled = match std::env::var("FALLOW_TYPE_AWARE") {
+        Ok(value) => Some(parse_type_aware_bool(&value, output)?),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(emit_error(
+                "FALLOW_TYPE_AWARE must be valid UTF-8",
+                2,
+                output,
+            ));
+        }
+    };
+    config.type_aware.enabled = if enabled {
+        true
+    } else {
+        env_enabled.unwrap_or(config.type_aware.enabled)
+    };
+
+    if !projects.is_empty() {
+        config.type_aware.projects = projects
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+    } else if let Some(paths) = std::env::var_os("FALLOW_TYPE_AWARE_PROJECTS") {
+        config.type_aware.projects = std::env::split_paths(&paths)
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+    }
+
+    config.type_aware.require = if let Some(require) = require {
+        require
+    } else if let Ok(value) = std::env::var("FALLOW_TYPE_AWARE_REQUIRE") {
+        parse_type_aware_require(&value, output)?
+    } else {
+        config.type_aware.require
+    };
+    Ok(())
+}
+
+fn parse_type_aware_bool(value: &str, output: OutputFormat) -> Result<bool, ExitCode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(emit_error(
+            "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off",
+            2,
+            output,
+        )),
+    }
+}
+
+fn parse_type_aware_require(
+    value: &str,
+    output: OutputFormat,
+) -> Result<fallow_config::TypeAwareRequire, ExitCode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "best-effort" => Ok(fallow_config::TypeAwareRequire::BestEffort),
+        "complete" => Ok(fallow_config::TypeAwareRequire::Complete),
+        _ => Err(emit_error(
+            "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete",
+            2,
+            output,
+        )),
+    }
 }
 
 fn handle_trace_side_effects(
@@ -522,6 +631,15 @@ fn handle_trace_side_effects(
     }
     if let Some(graph) = trace_graph {
         crate::telemetry::note_graph_structure(graph);
+        if let Some(code) = output::handle_type_aware_trace_output(
+            graph,
+            opts.trace_opts,
+            config,
+            opts.explain,
+            opts.json_style,
+        ) {
+            return Err(code);
+        }
         if let Some(code) = output::handle_trace_output(
             graph,
             opts.trace_opts,
@@ -621,24 +739,31 @@ fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {
 fn save_check_regression_baseline(
     opts: &CheckOptions<'_>,
     results: &AnalysisResults,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<Option<regression::CheckCounts>, ExitCode> {
     let counts = match opts.regression_opts.save_target {
         regression::SaveRegressionTarget::None => return Ok(None),
         regression::SaveRegressionTarget::File(save_path) => {
             let counts = regression::CheckCounts::from_results(results);
-            regression::save_regression_baseline(
+            regression::save_regression_baseline_with_identity(
                 save_path,
                 opts.root,
                 Some(&counts),
                 None,
                 opts.output,
+                analysis_identity,
             )?;
             counts
         }
         regression::SaveRegressionTarget::Config => {
             let counts = regression::CheckCounts::from_results(results);
             let config_path = regression_config_path(opts);
-            regression::save_baseline_to_config(&config_path, &counts, opts.output)?;
+            regression::save_baseline_to_config_with_identity(
+                &config_path,
+                &counts,
+                opts.output,
+                analysis_identity,
+            )?;
             counts
         }
     };
@@ -680,18 +805,26 @@ fn resolve_check_regression(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
     results: &AnalysisResults,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<Option<RegressionOutcome>, ExitCode> {
     warn_scoped_regression_save(opts);
 
-    let just_saved_baseline = save_check_regression_baseline(opts, results)?;
+    let just_saved_baseline = save_check_regression_baseline(opts, results, analysis_identity)?;
 
-    let config_baseline_ref = just_saved_baseline
-        .as_ref()
-        .map(regression::CheckCounts::to_config_baseline);
+    let config_baseline_ref = just_saved_baseline.as_ref().map(|counts| {
+        let mut baseline = counts.to_config_baseline();
+        baseline.analysis_identity = analysis_identity.clone();
+        baseline
+    });
     let config_baseline = config_baseline_ref
         .as_ref()
         .or_else(|| config.regression.as_ref().and_then(|r| r.baseline.as_ref()));
-    regression::compare_check_regression(results, &opts.regression_opts, config_baseline)
+    regression::compare_check_regression_with_identity(
+        results,
+        &opts.regression_opts,
+        config_baseline,
+        analysis_identity,
+    )
 }
 
 struct CheckCompletionInput<'a> {
@@ -701,6 +834,8 @@ struct CheckCompletionInput<'a> {
     elapsed: Duration,
     regression_outcome: Option<RegressionOutcome>,
     baseline_matched: Option<(usize, usize)>,
+    type_aware: Option<fallow_api::TypeAwareOutcome>,
+    type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
 }
 
 fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
@@ -711,6 +846,8 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         elapsed,
         regression_outcome,
         baseline_matched,
+        type_aware,
+        type_coupling,
     } = input;
     let CheckAnalysisData {
         results,
@@ -723,7 +860,13 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     } = data;
 
     if let Some(sarif_path) = opts.sarif_file {
-        output::write_sarif_file(&results, &config, sarif_path, opts.quiet);
+        output::write_sarif_file(
+            &results,
+            &config,
+            sarif_path,
+            opts.quiet,
+            type_aware.as_ref().map(|outcome| &outcome.meta),
+        );
     }
 
     let retained_files_for_cross_reference = if opts.include_dupes && retained_modules.is_some() {
@@ -744,6 +887,15 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     );
 
     let config_fixable = crate::fix::is_config_fixable(opts.root, opts.config_path.as_ref());
+    let required_completeness = config.type_aware.require.into();
+    let (type_aware_meta, type_aware_warnings) = type_aware.map_or_else(
+        || (None, Vec::new()),
+        |outcome| {
+            let mut meta = outcome.meta;
+            meta.required_completeness = Some(required_completeness);
+            (Some(meta), outcome.warnings)
+        },
+    );
 
     // Report result volume to telemetry from the real result, independent of
     // the exit-code gate. Exact counts are bucketed before serialization.
@@ -760,6 +912,9 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_matched,
         timings: trace_timings,
         shared_parse,
+        type_aware_meta,
+        type_coupling,
+        type_aware_warnings,
         impact_closure: None,
         public_api_keys: None,
         partition_order: None,
@@ -772,10 +927,15 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
 }
 
 /// Run analysis, filtering, and baseline handling. Returns results without printing.
+#[expect(
+    clippy::too_many_lines,
+    reason = "check execution keeps pipeline ordering and stored identity handling explicit"
+)]
 pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
     let config = prepare_check_config(opts)?;
+    validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
 
     let ws_roots = filtering::resolve_workspace_scope(
         opts.root,
@@ -789,7 +949,6 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         .and_then(|git_ref| filtering::get_changed_files(opts.root, git_ref));
 
     let mut data = run_check_analysis(opts, &config)?;
-    let elapsed = start.elapsed();
 
     if let Err(code) = handle_trace_side_effects(
         opts,
@@ -820,6 +979,57 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     apply_rules_and_filters(opts, &config, &mut data.results);
 
+    let (type_aware, type_coupling) = if config.type_aware.enabled {
+        let include_symbol_use = if opts.filters.any_active() {
+            opts.filters.unused_exports
+                || opts.filters.unused_types
+                || opts.filters.unused_class_members
+        } else {
+            config.rules.unused_exports != Severity::Off
+                || config.rules.unused_types != Severity::Off
+                || config.rules.unused_class_members != Severity::Off
+        };
+        let type_aware_projects = config
+            .type_aware
+            .projects
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect::<Vec<_>>();
+        let entry_points = data.trace_graph.as_ref().map_or_else(Vec::new, |graph| {
+            fallow_engine::project_analysis::public_api_entry_paths_for_graph(
+                graph,
+                &config,
+                &data.workspaces,
+            )
+        });
+        let outcome = fallow_api::refine_type_aware_results_with_config(
+            &config,
+            &mut data.results,
+            &type_aware_projects,
+            &entry_points,
+            include_symbol_use,
+            config.rules.private_type_leaks != Severity::Off,
+            opts.retain_modules_for_health,
+        )
+        .map_err(|error| {
+            emit_error(
+                &format!("Type-aware analysis failed: {error}"),
+                2,
+                opts.output,
+            )
+        })?;
+        outcome.map_or((None, None), |outcome| {
+            (Some(outcome.type_aware), outcome.type_coupling)
+        })
+    } else {
+        (None, None)
+    };
+    let elapsed = start.elapsed();
+    let analysis_identity = type_aware
+        .as_ref()
+        .and_then(|outcome| outcome.meta.identity.clone())
+        .unwrap_or_default();
+
     let baseline_matched = handle_baseline(
         &mut data.results,
         opts.save_baseline,
@@ -827,9 +1037,11 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         &config.root,
         opts.quiet,
         opts.output,
+        &analysis_identity,
     )?;
 
-    let regression_outcome = resolve_check_regression(opts, &config, &data.results)?;
+    let regression_outcome =
+        resolve_check_regression(opts, &config, &data.results, &analysis_identity)?;
 
     Ok(complete_check_execution(CheckCompletionInput {
         opts,
@@ -838,7 +1050,33 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         elapsed,
         regression_outcome,
         baseline_matched,
+        type_aware,
+        type_coupling,
     }))
+}
+
+fn validate_effective_type_aware_output(
+    output: fallow_config::OutputFormat,
+    enabled: bool,
+) -> Result<(), ExitCode> {
+    if enabled
+        && !matches!(
+            output,
+            fallow_config::OutputFormat::Human
+                | fallow_config::OutputFormat::Json
+                | fallow_config::OutputFormat::Sarif
+                | fallow_config::OutputFormat::Compact
+                | fallow_config::OutputFormat::Markdown
+                | fallow_config::OutputFormat::CodeClimate
+        )
+    {
+        return Err(emit_error(
+            "type-aware analysis supports human, JSON, SARIF, compact, markdown, and CodeClimate output; pair CodeClimate with the JSON artifact to preserve semantic provenance",
+            2,
+            output,
+        ));
+    }
+    Ok(())
 }
 
 pub struct PrintCheckOptions {
@@ -850,6 +1088,7 @@ pub struct PrintCheckOptions {
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
+    pub type_aware_scope: Option<&'static str>,
     pub json_style: crate::json_style::JsonStyle,
 }
 
@@ -869,6 +1108,8 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             elapsed: result.elapsed,
             quiet: opts.quiet,
             explain: opts.explain,
+            type_aware: result.type_aware_meta.as_ref(),
+            type_aware_scope: opts.type_aware_scope,
             group_by: opts.group_by,
             top: opts.top,
             summary: opts.summary,
@@ -912,6 +1153,13 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         return report_code;
     }
 
+    print_type_aware_summary(result);
+    print_type_aware_warnings(result);
+
+    if type_aware_completeness_failed(result, prepared.quiet) {
+        return ExitCode::from(1);
+    }
+
     if let Some(exit) = check_regression_exit_code(result.regression.as_ref(), prepared.quiet) {
         return exit;
     }
@@ -919,6 +1167,96 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
     issue_severity_exit_code(result, &prepared.effective_rules)
+}
+
+fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {
+    if result.config.type_aware.require != fallow_config::TypeAwareRequire::Complete {
+        return false;
+    }
+    let Some(meta) = &result.type_aware_meta else {
+        return false;
+    };
+    let incomplete = meta.identity.as_ref().is_some_and(|identity| {
+        identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
+    }) || meta
+        .queries
+        .iter()
+        .any(|query| query.status != fallow_types::semantic::SemanticCompleteness::Complete);
+    if !incomplete {
+        return false;
+    }
+    if !quiet {
+        eprintln!(
+            "{}",
+            crate::report::human_status_line(
+                crate::report::HumanStatus::Warning,
+                "Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+            )
+        );
+    }
+    true
+}
+
+fn print_type_aware_summary(result: &CheckResult) {
+    if !matches!(result.config.output, OutputFormat::Human) {
+        return;
+    }
+    if let Some(meta) = &result.type_aware_meta {
+        println!(
+            "{}",
+            crate::report::human_status_line(
+                crate::report::type_aware_meta_status(meta),
+                format_type_aware_summary(meta)
+            )
+        );
+    }
+}
+
+fn format_type_aware_summary(meta: &fallow_types::envelope::TypeAwareMeta) -> String {
+    let candidates = count_noun(meta.candidate_count, "candidate", "candidates");
+    let confirmed = count_noun(meta.confirmed_used_count, "confirmed use", "confirmed uses");
+    let contracts = count_noun(
+        meta.contract_preserved_count,
+        "preserved contract",
+        "preserved contracts",
+    );
+    let no_static_references = count_noun(
+        meta.no_static_references_count,
+        "candidate without static references",
+        "candidates without static references",
+    );
+    let fixable = count_noun(meta.fix_eligible_count, "guarded fix", "guarded fixes");
+    let unresolved = count_noun(
+        meta.unresolved_count,
+        "unresolved finding",
+        "unresolved findings",
+    );
+    let abstained = count_noun(
+        meta.abstained_count,
+        "abstained finding",
+        "abstained findings",
+    );
+    format!(
+        "Type-aware refinement: {candidates}, {confirmed}, {contracts}, \
+         {no_static_references} ({fixable}), {unresolved}, {abstained}"
+    )
+}
+
+fn count_noun(count: usize, singular: &str, plural: &str) -> String {
+    let noun = if count == 1 { singular } else { plural };
+    format!("{count} {noun}")
+}
+
+fn print_type_aware_warnings(result: &CheckResult) {
+    for warning in &result.type_aware_warnings {
+        eprintln!(
+            "{}",
+            crate::report::human_status_line(
+                crate::report::HumanStatus::Warning,
+                format_args!("Type-aware: {warning}")
+            )
+        );
+    }
 }
 
 fn check_regression_exit_code(
@@ -1003,6 +1341,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
+            type_aware_scope: None,
             json_style: opts.json_style,
         },
     );
@@ -1026,6 +1365,10 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
 /// Returns `Some(ExitCode)` on fatal errors (serialization/IO failure),
 /// `Ok(None)` when no baseline was loaded, `Ok(Some((entries, matched)))` when
 /// a baseline was loaded, or `Err(ExitCode)` on fatal errors.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "baseline I/O keeps scope, output, and semantic compatibility inputs explicit"
+)]
 fn handle_baseline(
     results: &mut fallow_types::results::AnalysisResults,
     save_path: Option<&std::path::Path>,
@@ -1033,13 +1376,29 @@ fn handle_baseline(
     root: &std::path::Path,
     quiet: bool,
     output: OutputFormat,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<Option<(usize, usize)>, ExitCode> {
     if let Some(baseline_path) = save_path {
-        save_baseline_file(results, baseline_path, root, quiet, output)?;
+        save_baseline_file(
+            results,
+            baseline_path,
+            root,
+            quiet,
+            output,
+            analysis_identity,
+        )?;
     }
 
     if let Some(baseline_path) = load_path {
-        return load_and_compare_baseline(results, baseline_path, root, quiet, output).map(Some);
+        return load_and_compare_baseline(
+            results,
+            baseline_path,
+            root,
+            quiet,
+            output,
+            analysis_identity,
+        )
+        .map(Some);
     }
 
     Ok(None)
@@ -1052,8 +1411,10 @@ fn save_baseline_file(
     root: &std::path::Path,
     quiet: bool,
     output: OutputFormat,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<(), ExitCode> {
-    let baseline_data = BaselineData::from_results(results, root);
+    let baseline_data =
+        BaselineData::from_results_with_identity(results, root, analysis_identity.clone());
     let mut json = serde_json::to_string_pretty(&baseline_data)
         .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, output))?;
     json.push('\n');
@@ -1088,11 +1449,34 @@ fn load_and_compare_baseline(
     root: &std::path::Path,
     quiet: bool,
     output: OutputFormat,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<(usize, usize), ExitCode> {
     let content = std::fs::read_to_string(baseline_path)
         .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, output))?;
     let baseline_data = serde_json::from_str::<BaselineData>(&content)
         .map_err(|e| emit_error(&format!("failed to parse baseline: {e}"), 2, output))?;
+    let incompatible = baseline_data
+        .analysis_identity()
+        .incompatible_fields(analysis_identity);
+    if !incompatible.is_empty() {
+        let type_aware_flag = if matches!(
+            analysis_identity.mode,
+            fallow_types::semantic::SemanticAnalysisMode::TypeAware
+        ) {
+            " --type-aware"
+        } else {
+            ""
+        };
+        return Err(emit_error(
+            &format!(
+                "baseline analysis identity is incompatible in: {}. Regenerate it with: fallow dead-code{type_aware_flag} --save-baseline {}",
+                incompatible.join(", "),
+                baseline_path.display(),
+            ),
+            2,
+            output,
+        ));
+    }
     let baseline_entries = baseline_data.total_entries();
     let before = results.total_issues();
     *results = filter_new_issues(std::mem::take(results), &baseline_data, root);
@@ -1158,6 +1542,49 @@ mod tests {
             route_collisions: false,
             dynamic_segment_name_conflicts: false,
         }
+    }
+
+    #[test]
+    fn type_aware_summary_reports_clean_and_retained_outcomes() {
+        let clean = fallow_types::envelope::TypeAwareMeta {
+            candidate_count: 1,
+            confirmed_used_count: 1,
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
+        assert_eq!(
+            format_type_aware_summary(&clean),
+            "Type-aware refinement: 1 candidate, 1 confirmed use, 0 preserved contracts, \
+             0 candidates without static references (0 guarded fixes), 0 unresolved findings, \
+             0 abstained findings"
+        );
+
+        let retained = fallow_types::envelope::TypeAwareMeta {
+            candidate_count: 3,
+            confirmed_used_count: 1,
+            no_static_references_count: 1,
+            fix_eligible_count: 1,
+            unresolved_count: 1,
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
+        assert_eq!(
+            format_type_aware_summary(&retained),
+            "Type-aware refinement: 3 candidates, 1 confirmed use, 0 preserved contracts, \
+             1 candidate without static references (1 guarded fix), 1 unresolved finding, \
+             0 abstained findings"
+        );
+
+        let abstained = fallow_types::envelope::TypeAwareMeta {
+            candidate_count: 2,
+            contract_preserved_count: 1,
+            abstained_count: 1,
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
+        assert_eq!(
+            format_type_aware_summary(&abstained),
+            "Type-aware refinement: 2 candidates, 0 confirmed uses, 1 preserved contract, \
+             0 candidates without static references (0 guarded fixes), 0 unresolved findings, \
+             1 abstained finding"
+        );
     }
 
     #[test]
@@ -1295,6 +1722,7 @@ mod tests {
             std::path::Path::new("/project"),
             true,
             OutputFormat::Json,
+            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
         )
         .expect("baseline save succeeds");
 
@@ -1441,6 +1869,7 @@ mod tests {
             trace_file: None,
             trace_dependency: None,
             impact_closure: None,
+            symbol_impact: None,
             performance: false,
         };
         assert!(!t.any_active());
@@ -1453,6 +1882,7 @@ mod tests {
             trace_file: None,
             trace_dependency: None,
             impact_closure: None,
+            symbol_impact: None,
             performance: false,
         };
         assert!(t.any_active());
@@ -1465,6 +1895,7 @@ mod tests {
             trace_file: Some("src/foo.ts".into()),
             trace_dependency: None,
             impact_closure: None,
+            symbol_impact: None,
             performance: false,
         };
         assert!(t.any_active());
@@ -1477,6 +1908,7 @@ mod tests {
             trace_file: None,
             trace_dependency: Some("lodash".into()),
             impact_closure: None,
+            symbol_impact: None,
             performance: false,
         };
         assert!(t.any_active());
@@ -1486,6 +1918,7 @@ mod tests {
             trace_file: None,
             trace_dependency: None,
             impact_closure: Some("src/foo.ts".into()),
+            symbol_impact: None,
             performance: false,
         };
         assert!(t.any_active());
@@ -1498,6 +1931,7 @@ mod tests {
             trace_file: None,
             trace_dependency: None,
             impact_closure: None,
+            symbol_impact: None,
             performance: true,
         };
         assert!(t.any_active());

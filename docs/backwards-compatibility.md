@@ -30,7 +30,7 @@ These interfaces are covered by semver , breaking changes only happen in major v
 - **Audit styling fields**: `fallow audit` includes styling analytics by default. The nested health block may contain `css_analytics`, `styling_health`, and `styling_findings` for CSS, Sass/Less, CSS Modules, Tailwind/shadcn/CVA, StyleX/PandaCSS, vanilla-extract, styled-components, and Emotion projects. Under `gate: new-only`, styling findings carry the same optional `introduced` marker as other findings and the attribution block includes `styling_introduced` / `styling_inherited` totals. These fields are additive JSON output, and styling findings are verdict-neutral unless the corresponding rule is configured to `error`; they do not require a `schema_version` bump under the additive-field policy. Snapshot-diffing consumers can set `audit.css: false` or pass `--no-css` to suppress styling entirely.
 - **Document-root structure**: every object-shaped `--format json` envelope covered by the typed root schema (`FallowOutput`) carries a top-level `kind` discriminator. Consumers should branch on `kind` instead of probing for unique field presence. The authoritative set of typed root kinds lives in `docs/output-schema.json`; the factual list below is checked against that schema manifest:
   <!-- fallow-output-kind-list:start -->
-  `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`
+  `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `type-aware-status`
   <!-- fallow-output-kind-list:end -->
   Tagged root envelopes are now the only supported object-shaped JSON contract. The CLI `check` command is a legacy alias for `dead-code`; new JSON discriminators use the canonical `dead-code` name. `CodeClimateOutput` stays as a sibling root branch because the Code Climate / GitLab Code Quality spec requires a bare JSON array at the root; discriminate it by checking whether the document root is an array. Helper/spec JSON roots outside `FallowOutput`, such as `fix`, `fallow config`, non-boundary `fallow list` modes, SARIF, CodeClimate, telemetry, and baseline/config files written by fallow, are not part of this envelope contract.
 - **Security survivor schema**: `security-survivors` uses schema version `2`; `summary.unverdicted` is required and reports candidates without matching verifier verdicts.
@@ -112,6 +112,20 @@ The following surfaces are intentional bridges, not architecture boundaries to b
 
 - **Plugin file structure**: as documented in `docs/plugin-authoring.md`
 - **Detection types**: `dependency`, `fileExists`, `all`, `any`
+
+### Type-aware protocol
+
+- **Stable starting point**: wire protocol version 6 is the first stable
+  contract between Fallow and the optional `fallow-type-aware` companion.
+- **Exact-version pairing**: the native binary and companion package must have
+  the same Fallow version. The backend version and supported operations come
+  from `crates/api/type-aware-protocol.json`.
+- **Evolution**: additive response fields may be introduced when older readers
+  can ignore them. Removing or changing an operation, envelope, or required
+  field requires a new wire protocol version and a documented compatibility
+  path.
+- **Pre-stable protocols**: development-only protocols before version 6 are
+  rejected and are not part of the compatibility guarantee.
 
 ## What may change in minor/patch versions
 

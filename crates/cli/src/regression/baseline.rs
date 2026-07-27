@@ -66,23 +66,39 @@ fn current_git_sha(root: &Path) -> Option<String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
-/// Save the current analysis results as a regression baseline.
-///
-/// # Errors
-///
-/// Returns an error if the baseline cannot be serialized or written to disk.
-pub fn save_regression_baseline(
+#[cfg(test)]
+fn save_regression_baseline(
     path: &Path,
     root: &Path,
     check_counts: Option<&CheckCounts>,
     dupes_counts: Option<&DupesCounts>,
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
+    save_regression_baseline_with_identity(
+        path,
+        root,
+        check_counts,
+        dupes_counts,
+        output,
+        &fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
+    )
+}
+
+/// Save counts with the compatibility identity of the producing analysis.
+pub fn save_regression_baseline_with_identity(
+    path: &Path,
+    root: &Path,
+    check_counts: Option<&CheckCounts>,
+    dupes_counts: Option<&DupesCounts>,
+    output: OutputFormat,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+) -> Result<(), ExitCode> {
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
         timestamp: chrono_now(),
         git_sha: current_git_sha(root),
+        analysis_identity: analysis_identity.clone(),
         check: check_counts.cloned(),
         dupes: dupes_counts.cloned(),
     };
@@ -113,19 +129,26 @@ pub fn save_regression_baseline(
     Ok(())
 }
 
-/// Save regression baseline counts into the project's config file.
-///
-/// Reads the existing config, adds/updates the `regression.baseline` section,
-/// and writes it back. For JSONC files, comments are preserved using a targeted
-/// insertion/replacement strategy.
-///
-/// # Errors
-///
-/// Returns an error if the config file cannot be read, updated, or written back.
-pub fn save_baseline_to_config(
+/// Save config-embedded counts with their analysis compatibility identity.
+#[cfg(test)]
+fn save_baseline_to_config(
     config_path: &Path,
     counts: &CheckCounts,
     output: OutputFormat,
+) -> Result<(), ExitCode> {
+    save_baseline_to_config_with_identity(
+        config_path,
+        counts,
+        output,
+        &fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
+    )
+}
+
+pub fn save_baseline_to_config_with_identity(
+    config_path: &Path,
+    counts: &CheckCounts,
+    output: OutputFormat,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<(), ExitCode> {
     let content = match std::fs::read_to_string(config_path) {
         Ok(c) => c,
@@ -149,7 +172,8 @@ pub fn save_baseline_to_config(
         }
     };
 
-    let baseline = counts.to_config_baseline();
+    let mut baseline = counts.to_config_baseline();
+    baseline.analysis_identity = analysis_identity.clone();
     let is_toml = config_path.extension().is_some_and(|ext| ext == "toml");
 
     let updated = if is_toml {
@@ -535,7 +559,7 @@ pub fn load_regression_baseline(
         };
         emit_error(&message, 2, output)
     })?;
-    if baseline.schema_version != REGRESSION_SCHEMA_VERSION {
+    if !matches!(baseline.schema_version, 1 | REGRESSION_SCHEMA_VERSION) {
         let message = format_schema_mismatch_error(
             path,
             REGRESSION_SCHEMA_VERSION,
@@ -547,21 +571,26 @@ pub fn load_regression_baseline(
     Ok(baseline)
 }
 
-/// Compare current check results against a regression baseline.
-///
-/// Resolution order for the baseline:
-/// 1. Explicit file via `--regression-baseline <PATH>`
-/// 2. Config-embedded `regression.baseline` section
-/// 3. Error with actionable message
-///
-/// # Errors
-///
-/// Returns an error if the baseline file cannot be loaded, is missing check data,
-/// or no baseline source is available.
-pub fn compare_check_regression(
+/// Compare counts only when the stored and live semantic identities match.
+#[cfg(test)]
+fn compare_check_regression(
     results: &AnalysisResults,
     opts: &RegressionOpts<'_>,
     config_baseline: Option<&fallow_config::RegressionBaseline>,
+) -> Result<Option<RegressionOutcome>, ExitCode> {
+    compare_check_regression_with_identity(
+        results,
+        opts,
+        config_baseline,
+        &fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
+    )
+}
+
+pub fn compare_check_regression_with_identity(
+    results: &AnalysisResults,
+    opts: &RegressionOpts<'_>,
+    config_baseline: Option<&fallow_config::RegressionBaseline>,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<Option<RegressionOutcome>, ExitCode> {
     if !opts.fail_on_regression {
         return Ok(None);
@@ -578,6 +607,12 @@ pub fn compare_check_regression(
 
     let baseline_counts: CheckCounts = if let Some(baseline_path) = opts.regression_baseline_file {
         let baseline = load_regression_baseline(baseline_path, opts.output)?;
+        ensure_regression_identity(
+            &baseline.analysis_identity,
+            analysis_identity,
+            baseline_path,
+            opts.output,
+        )?;
         let Some(counts) = baseline.check else {
             return Err(emit_error(
                 &format!(
@@ -590,6 +625,12 @@ pub fn compare_check_regression(
         };
         counts
     } else if let Some(config_baseline) = config_baseline {
+        ensure_regression_identity(
+            &config_baseline.analysis_identity,
+            analysis_identity,
+            Path::new("project config"),
+            opts.output,
+        )?;
         CheckCounts::from_config_baseline(config_baseline)
     } else {
         return Err(emit_error(
@@ -620,6 +661,36 @@ pub fn compare_check_regression(
             current_total,
         }))
     }
+}
+
+fn ensure_regression_identity(
+    stored: &fallow_types::semantic::SemanticAnalysisIdentity,
+    current: &fallow_types::semantic::SemanticAnalysisIdentity,
+    path: &Path,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    let incompatible = stored.incompatible_fields(current);
+    if incompatible.is_empty() {
+        return Ok(());
+    }
+    let type_aware_flag = if matches!(
+        current.mode,
+        fallow_types::semantic::SemanticAnalysisMode::TypeAware
+    ) {
+        " --type-aware"
+    } else {
+        ""
+    };
+    Err(emit_error(
+        &format!(
+            "regression baseline '{}' has an incompatible analysis identity in: {}. Regenerate it with: fallow dead-code{type_aware_flag} --save-regression-baseline {}",
+            path.display(),
+            incompatible.join(", "),
+            path.display(),
+        ),
+        2,
+        output,
+    ))
 }
 
 /// ISO 8601 UTC timestamp without external dependencies.

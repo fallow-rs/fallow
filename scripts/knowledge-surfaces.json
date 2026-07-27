@@ -102,6 +102,10 @@
         "section": "architecture"
       },
       {
+        "path": "docs/type-aware-analysis.md",
+        "section": "architecture"
+      },
+      {
         "path": "docs/benchmarking.md",
         "section": "verification"
       },

@@ -19,6 +19,8 @@ config -> discovery -> extraction -> resolution -> graph -> detection -> output
 - `crates/engine/` combines discovery, graph, core analysis, duplication,
   health, security, and cross-reference results.
 - `crates/output/` and `crates/api/` turn typed results into public contracts.
+- `crates/api/src/type_aware/` owns semantic requests, reconciliation,
+  provenance, and sidecar transport.
 
 Fix the earliest incorrect stage. Do not compensate for an extraction or graph
 error by suppressing a downstream detector.
@@ -48,7 +50,16 @@ error by suppressing a downstream detector.
 
 ## Accuracy invariants
 
-- Fallow is syntactic. Do not add TypeScript compiler dependence.
+- Fallow's default analysis is syntactic and has no TypeScript compiler
+  dependency. Type-aware refinement is explicit opt-in through the
+  version-matched sidecar and may only refine Fallow-owned project questions.
+- Type-aware public API traversal follows checker symbols that resolve to
+  project-local declarations. Parameter names and generic type parameters are
+  not reusable private types.
+- Complete semantic confirmation may remove unmatched syntactic private-leak
+  guesses. Partial or unavailable evidence retains the original finding.
+- Overlapping TypeScript projects deduplicate API entries and coupling edges by
+  stable semantic identity.
 - Prefer conservative advisory output over noisy speculation.
 - Preserve entry points, re-export chains, workspace edges, type-only usage,
   framework conventions, and suppression behavior through the full pipeline.

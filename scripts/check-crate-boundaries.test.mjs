@@ -3,6 +3,9 @@ import test from "node:test";
 
 import {
   findCrateBoundaryViolations,
+  findProcessTreeOwnershipViolations,
+  findSemanticOwnershipViolations,
+  main,
   workspaceDependencyEdges,
 } from "./check-crate-boundaries.mjs";
 
@@ -35,6 +38,7 @@ test("workspaceDependencyEdges keeps only workspace package edges", () => {
 test("findCrateBoundaryViolations accepts current intended layering", () => {
   const metadata = metadataFor({
     "fallow-types": [],
+    "fallow-process": [],
     "fallow-config": ["fallow-types"],
     "fallow-output": ["fallow-types"],
     "fallow-engine": ["fallow-core", "fallow-output"],
@@ -50,6 +54,7 @@ test("findCrateBoundaryViolations accepts current intended layering", () => {
 
 test("findCrateBoundaryViolations rejects protocol and analysis back-edges", () => {
   const metadata = metadataFor({
+    "fallow-process": ["fallow-types"],
     "fallow-types": ["fallow-cli"],
     "fallow-output": ["fallow-engine"],
     "fallow-lsp": ["fallow-core"],
@@ -61,9 +66,83 @@ test("findCrateBoundaryViolations rejects protocol and analysis back-edges", () 
   assert.deepEqual(
     findCrateBoundaryViolations(metadata).map((violation) => violation.rule),
     [
+      "process-must-remain-independent",
       "foundation-must-not-depend-on-protocol",
       "output-must-not-start-analysis",
       "protocol-must-use-api-or-engine",
     ],
   );
+});
+
+test("semantic protocol ownership cannot move into protocol adapters", () => {
+  const adapterFiles = [
+    ["fallow-cli", "crates/cli/src/semantic_queries.rs"],
+    ["fallow-lsp", "crates/lsp/src/semantic_queries.rs"],
+    ["fallow-mcp", "crates/mcp/src/semantic_queries.rs"],
+    ["fallow-node", "crates/napi/src/semantic_queries.rs"],
+  ];
+
+  for (const [crateName, path] of adapterFiles) {
+    assert.deepEqual(
+      findSemanticOwnershipViolations([
+        {
+          path,
+          source: "struct SemanticRequest { protocol_version: u32 }",
+        },
+      ]),
+      [
+        {
+          rule: "semantic-client-owned-by-api",
+          from: crateName,
+          to: "fallow-api",
+          message: `${path} contains API-owned semantic client marker struct SemanticRequest`,
+        },
+      ],
+    );
+  }
+
+  assert.deepEqual(
+    findSemanticOwnershipViolations([
+      {
+        path: "crates/cli/src/check.rs",
+        source: "fallow_api::refine_type_aware_results();",
+      },
+    ]),
+    [],
+  );
+});
+
+test("process-tree ownership cannot move into protocol adapters", () => {
+  const path = "crates/mcp/src/tools/process_tree.rs";
+
+  assert.deepEqual(
+    findProcessTreeOwnershipViolations([
+      {
+        path,
+        source: "command.process_group(0);",
+      },
+    ]),
+    [
+      {
+        rule: "process-tree-owned-by-process-crate",
+        from: "fallow-mcp",
+        to: "fallow-process",
+        message: `${path} contains process-tree owner marker process_group(0)`,
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    findProcessTreeOwnershipViolations([
+      {
+        path: "crates/mcp/src/tools/mod.rs",
+        source: "fallow_process::configure_tokio_command(&mut command);",
+      },
+    ]),
+    [],
+  );
+});
+
+test("the live repository satisfies the complete crate boundary gate", () => {
+  assert.equal(main([]), 0);
 });

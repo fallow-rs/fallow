@@ -33,6 +33,179 @@ pub(super) fn handle_trace_output(
         .or_else(|| handle_impact_closure_trace(graph, trace_opts, root, output, json_style))
 }
 
+/// Handle semantic trace and exact-symbol impact before the syntactic trace
+/// fallback consumes the focused command.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the focused trace renderer preserves one shared output contract across formats"
+)]
+pub(super) fn handle_type_aware_trace_output(
+    graph: &RetainedModuleGraph,
+    trace_opts: &TraceOptions,
+    config: &ResolvedConfig,
+    explain: bool,
+    json_style: crate::json_style::JsonStyle,
+) -> Option<ExitCode> {
+    if !config.type_aware.enabled {
+        return None;
+    }
+    let projects = config
+        .type_aware
+        .projects
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    if let Some(trace_spec) = trace_opts.trace_export.as_ref() {
+        let Some((file_path, export_name)) = parse_trace_spec(trace_spec) else {
+            return Some(emit_error(
+                "--trace requires FILE:EXPORT_NAME format (e.g., src/utils.ts:foo)",
+                2,
+                config.output,
+            ));
+        };
+        if let Some(mut trace) =
+            fallow_engine::trace::trace_export(graph, &config.root, file_path, export_name)
+        {
+            let Some(symbol) = fallow_engine::trace::semantic_symbol_for_export(
+                graph,
+                &config.root,
+                file_path,
+                export_name,
+            ) else {
+                return Some(emit_error(
+                    &format!("could not resolve semantic identity for '{trace_spec}'"),
+                    2,
+                    config.output,
+                ));
+            };
+            match fallow_api::trace_type_aware_symbol(&config.root, &projects, symbol) {
+                Ok(semantic) => {
+                    let exit =
+                        semantic_completeness_exit(config.type_aware.require, semantic.status);
+                    trace.semantic = Some(semantic);
+                    report::print_semantic_export_trace(&trace, config.output, explain, json_style);
+                    return Some(exit);
+                }
+                Err(error) => {
+                    return Some(emit_error(
+                        &format!("Type-aware trace failed: {error}"),
+                        2,
+                        config.output,
+                    ));
+                }
+            }
+        }
+        if let Some(mut trace) =
+            fallow_engine::trace::trace_class_member(graph, &config.root, file_path, export_name)
+        {
+            let Some(symbol) = fallow_engine::trace::semantic_symbol_for_class_member(
+                graph,
+                &config.root,
+                file_path,
+                export_name,
+            ) else {
+                return Some(emit_error(
+                    &format!("could not resolve semantic identity for '{trace_spec}'"),
+                    2,
+                    config.output,
+                ));
+            };
+            match fallow_api::trace_type_aware_symbol(&config.root, &projects, symbol) {
+                Ok(semantic) => {
+                    let exit =
+                        semantic_completeness_exit(config.type_aware.require, semantic.status);
+                    trace.semantic = Some(semantic);
+                    report::print_semantic_class_member_trace(
+                        &trace,
+                        config.output,
+                        explain,
+                        json_style,
+                    );
+                    return Some(exit);
+                }
+                Err(error) => {
+                    return Some(emit_error(
+                        &format!("Type-aware trace failed: {error}"),
+                        2,
+                        config.output,
+                    ));
+                }
+            }
+        }
+        return Some(emit_error(
+            &format!("export or member '{export_name}' not found in '{file_path}'"),
+            2,
+            config.output,
+        ));
+    }
+    let impact_spec = trace_opts.symbol_impact.as_ref()?;
+    let Some((file_path, target_name)) = parse_trace_spec(impact_spec) else {
+        return Some(emit_error(
+            "--symbol-impact requires FILE:EXPORT_NAME or FILE:CLASS.METHOD format",
+            2,
+            config.output,
+        ));
+    };
+    let symbol = if let Some(symbol) = fallow_engine::trace::semantic_symbol_for_export(
+        graph,
+        &config.root,
+        file_path,
+        target_name,
+    ) {
+        symbol
+    } else if let Some((owner_name, member_name)) = parse_class_method_target(target_name) {
+        match fallow_engine::trace::semantic_symbol_for_exact_class_method(
+            graph,
+            &config.root,
+            file_path,
+            owner_name,
+            member_name,
+        ) {
+            Ok(symbol) => symbol,
+            Err(reason) => {
+                return Some(emit_error(
+                    &format!(
+                        "class method '{target_name}' is unavailable for exact impact analysis: {reason}"
+                    ),
+                    2,
+                    config.output,
+                ));
+            }
+        }
+    } else {
+        return Some(emit_error(
+            &format!("export or class method '{target_name}' not found in '{file_path}'"),
+            2,
+            config.output,
+        ));
+    };
+    match fallow_api::type_aware_symbol_impact(&config.root, &projects, symbol) {
+        Ok(impact) => {
+            let exit = semantic_completeness_exit(config.type_aware.require, impact.status);
+            report::print_symbol_impact(&impact, config.output, explain, json_style);
+            Some(exit)
+        }
+        Err(error) => Some(emit_error(
+            &format!("Type-aware symbol impact failed: {error}"),
+            2,
+            config.output,
+        )),
+    }
+}
+
+fn semantic_completeness_exit(
+    require: fallow_config::TypeAwareRequire,
+    status: fallow_types::semantic::SemanticCompleteness,
+) -> ExitCode {
+    if require == fallow_config::TypeAwareRequire::Complete
+        && status != fallow_types::semantic::SemanticCompleteness::Complete
+    {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 fn handle_trace_export(
     graph: &RetainedModuleGraph,
     trace_opts: &TraceOptions,
@@ -130,8 +303,10 @@ pub fn write_sarif_file(
     config: &ResolvedConfig,
     sarif_path: &std::path::Path,
     quiet: bool,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) {
-    let sarif = report::api_sarif_document(results, &config.root, &config.rules);
+    let mut sarif = report::api_sarif_document(results, &config.root, &config.rules);
+    crate::report::sarif::annotate_type_aware_sarif(&mut sarif, type_aware);
     if let Some(parent) = sarif_path.parent()
         && !parent.as_os_str().is_empty()
         && let Err(e) = std::fs::create_dir_all(parent)
@@ -190,6 +365,14 @@ fn parse_trace_spec(spec: &str) -> Option<(&str, &str)> {
     spec.rsplit_once(':')
 }
 
+fn parse_class_method_target(target: &str) -> Option<(&str, &str)> {
+    let (owner, member) = target.split_once('.')?;
+    if owner.is_empty() || member.is_empty() || member.contains('.') {
+        return None;
+    }
+    Some((owner, member))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,12 +420,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_class_method_target_requires_exact_owner_and_member() {
+        assert_eq!(
+            parse_class_method_target("UserRepository.save"),
+            Some(("UserRepository", "save"))
+        );
+        assert_eq!(parse_class_method_target("save"), None);
+        assert_eq!(parse_class_method_target("A.B.save"), None);
+        assert_eq!(parse_class_method_target(".save"), None);
+        assert_eq!(parse_class_method_target("Repository."), None);
+    }
+
+    #[test]
     fn handle_trace_output_returns_none_when_no_trace_active() {
         let trace_opts = TraceOptions {
             trace_export: None,
             trace_file: None,
             trace_dependency: None,
             impact_closure: None,
+            symbol_impact: None,
             performance: false,
         };
         assert!(!trace_opts.any_active());
@@ -270,6 +466,7 @@ mod tests {
             unused_component_props_ignore: None,
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
+            type_aware: fallow_config::TypeAwareConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             boundaries: fallow_config::ResolvedBoundaryConfig::default(),
             production: false,
@@ -303,7 +500,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let sarif_path = dir.path().join("output.sarif");
 
-        write_sarif_file(&results, &config, &sarif_path, true);
+        write_sarif_file(&results, &config, &sarif_path, true, None);
 
         assert!(sarif_path.exists());
         let content = std::fs::read_to_string(&sarif_path).expect("read sarif");
@@ -320,7 +517,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let sarif_path = dir.path().join("nested").join("dir").join("output.sarif");
 
-        write_sarif_file(&results, &config, &sarif_path, true);
+        write_sarif_file(&results, &config, &sarif_path, true, None);
 
         assert!(sarif_path.exists());
     }

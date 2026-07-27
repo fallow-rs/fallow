@@ -445,6 +445,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
       pull-requests: write
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     steps:
@@ -470,18 +471,25 @@ jobs:
 
       - name: Verify comment was posted
         env:
+          EXPECTED_COMMENT_AUTHOR: fallow-cloud[bot]
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_REPO: ${{ github.repository }}
         run: |
           COMMENTS=$(gh api \
             "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->"))] | length')
-          if [ "$COMMENTS" -eq 0 ]; then
-            echo "::error::Expected a fallow PR comment but found none"
+            --jq '[.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->"))]')
+          COMMENT_COUNT=$(printf '%s\n' "$COMMENTS" | jq 'length')
+          if [ "$COMMENT_COUNT" -ne 1 ]; then
+            echo "::error::Expected exactly one fallow PR comment, found $COMMENT_COUNT"
             exit 1
           fi
-          echo "Found $COMMENTS fallow comment(s)"
+          COMMENT_AUTHOR=$(printf '%s\n' "$COMMENTS" | jq -r '.[0].user.login // empty')
+          if [ "$COMMENT_AUTHOR" != "$EXPECTED_COMMENT_AUTHOR" ]; then
+            echo "::error::Expected comment author ${EXPECTED_COMMENT_AUTHOR}, found ${COMMENT_AUTHOR:-none}"
+            exit 1
+          fi
+          echo "Found $COMMENT_COUNT fallow comment(s) authored by $COMMENT_AUTHOR"
 
       - name: Clean up smoke-test comment
         if: always()

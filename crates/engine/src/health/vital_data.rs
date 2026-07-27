@@ -200,7 +200,7 @@ pub fn prepare_health_vital_data(
     });
     maybe_save_health_snapshot(input, &vital_signs, &counts, health_score.as_ref())?;
     let health_trend =
-        compute_health_trend(input.opts, &vital_signs, &counts, health_score.as_ref());
+        compute_health_trend(input.opts, &vital_signs, &counts, health_score.as_ref())?;
 
     Ok(HealthVitalData {
         vital_signs,
@@ -287,6 +287,7 @@ fn save_snapshot(input: SnapshotInput<'_>) -> Result<(), HealthError> {
         shallow,
         input.health_score,
         input.coverage_model,
+        input.opts.analysis_identity.clone(),
     );
     let explicit = if input.snapshot_path.as_os_str().is_empty() {
         None
@@ -310,9 +311,9 @@ fn compute_health_trend(
     vital_signs: &fallow_output::VitalSigns,
     counts: &fallow_output::VitalSignsCounts,
     health_score: Option<&fallow_output::HealthScore>,
-) -> Option<fallow_output::HealthTrend> {
+) -> Result<Option<fallow_output::HealthTrend>, HealthError> {
     if !opts.trend {
-        return None;
+        return Ok(None);
     }
     if opts.changed_since.is_some() && !opts.quiet {
         eprintln!(
@@ -327,10 +328,24 @@ fn compute_health_trend(
              baseline, then use --trend on subsequent runs to track progress."
         );
     }
-    vital_signs::compute_trend(
+    if let Some(previous) = snapshots.last() {
+        let incompatible = previous
+            .analysis_identity
+            .incompatible_fields(&opts.analysis_identity);
+        if !incompatible.is_empty() {
+            return Err(HealthError::message(
+                format!(
+                    "health trend snapshot has an incompatible analysis identity ({}); regenerate it with `fallow health --save-snapshot --type-aware` using the same semantic options",
+                    incompatible.join(", ")
+                ),
+                2,
+            ));
+        }
+    }
+    Ok(vital_signs::compute_trend(
         vital_signs,
         counts,
         health_score.map(|s| s.score),
         &snapshots,
-    )
+    ))
 }

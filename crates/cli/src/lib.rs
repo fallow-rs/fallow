@@ -161,7 +161,7 @@ Setup and configuration:
 Automation and CI:
   ci             Build PR/MR feedback envelopes
   ci-template    Print or vendor CI integration templates
-  report         Re-render a saved --format json results file (GitHub formats)
+  report         Re-render saved JSON as GitHub or CodeClimate output
   hooks          Install or remove fallow-managed Git and agent hooks
   setup-hooks    Legacy agent-hook installer
 
@@ -179,6 +179,7 @@ Use --only/--skip to select specific analyses.
 
 When the agent is about to...
   delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
+  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
   delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
   commit or open a PR                      fallow audit --base <ref>
   prioritize refactoring                   fallow health --hotspots --targets
@@ -494,6 +495,25 @@ struct Cli {
     /// Report unused exports in entry files instead of auto-marking them as used.
     #[arg(long, global = true)]
     include_entry_exports: bool,
+
+    /// Opt in to TypeScript semantic analysis for project-wide symbol evidence.
+    /// This does not emit compiler diagnostics or typed lint findings.
+    #[arg(long, global = true)]
+    type_aware: bool,
+
+    /// TypeScript project config to use for type-aware analysis (repeatable).
+    #[arg(long, global = true, value_name = "PATH", action = clap::ArgAction::Append)]
+    type_aware_project: Vec<PathBuf>,
+
+    /// Decide whether incomplete type-aware analysis is advisory or gating.
+    #[arg(long, global = true, value_enum)]
+    type_aware_require: Option<TypeAwareRequireArg>,
+}
+
+#[derive(Clone, Copy, Subcommand)]
+enum TypeAwareCli {
+    /// Report companion availability and version compatibility without analysis.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -643,6 +663,10 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         impact_closure: Option<String>,
 
+        /// Compute exact-symbol consumers, affected files, and targeted tests.
+        #[arg(long, value_name = "FILE:EXPORT")]
+        symbol_impact: Option<String>,
+
         /// Show only the top N items per category
         #[arg(long)]
         top: Option<usize>,
@@ -659,6 +683,12 @@ enum Command {
         /// Don't clear the screen between re-analyses
         #[arg(long)]
         no_clear: bool,
+    },
+
+    /// Inspect the optional TypeScript semantic companion.
+    TypeAware {
+        #[command(subcommand)]
+        subcommand: TypeAwareCli,
     },
 
     /// Inspect one file or exported symbol as a bundled evidence query
@@ -1025,6 +1055,11 @@ enum Command {
         /// coupling, churn, and dead code signals. Requires full analysis pipeline.
         #[arg(long)]
         targets: bool,
+
+        /// Show advisory project-local public-signature type coupling. Requires
+        /// type-aware analysis and does not change the health score.
+        #[arg(long)]
+        type_coupling: bool,
 
         /// Add structural CSS analytics: specificity hotspots, !important density,
         /// over-complex selectors, deep nesting, and conservative cleanup
@@ -1475,8 +1510,8 @@ enum Command {
 
     /// Render a saved `--format json` results file in another format without
     /// re-running analysis (analyze once, render annotations and the job
-    /// summary from the same file). v1 renders the GitHub-native formats only:
-    /// `--format github-annotations` or `--format github-summary`.
+    /// summary from the same file). Supports `github-annotations`,
+    /// `github-summary`, `codeclimate`, and `sarif`.
     Report {
         /// Path to a fallow JSON results file produced by `--format json`
         /// (dead-code, dupes, health, audit, security, or bare combined).
@@ -2239,6 +2274,24 @@ enum CiProviderArg {
     Gitlab,
 }
 
+/// CLI mirror of [`fallow_config::TypeAwareRequire`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum TypeAwareRequireArg {
+    /// Keep conservative findings and report semantic gaps.
+    BestEffort,
+    /// Fail the quality gate when a requested semantic query is incomplete.
+    Complete,
+}
+
+impl From<TypeAwareRequireArg> for fallow_config::TypeAwareRequire {
+    fn from(value: TypeAwareRequireArg) -> Self {
+        match value {
+            TypeAwareRequireArg::BestEffort => Self::BestEffort,
+            TypeAwareRequireArg::Complete => Self::Complete,
+        }
+    }
+}
+
 /// Filter refactoring targets by effort level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum EffortFilter {
@@ -2850,6 +2903,9 @@ fn run_bare_combined(
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,
+        type_aware: cli.type_aware,
+        type_aware_projects: &cli.type_aware_project,
+        type_aware_require: cli.type_aware_require.map(Into::into),
         explain: cli.explain,
         explain_skipped: cli.explain_skipped,
         performance: cli.performance,
@@ -2890,6 +2946,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
     match command {
         check @ Command::Check { .. } => dispatch_check_command(check, dispatch),
         Command::Watch { no_clear } => dispatch_watch(dispatch, no_clear),
+        Command::TypeAware { subcommand } => dispatch_type_aware_command(dispatch, subcommand),
         Command::Inspect {
             file,
             symbol,
@@ -2963,7 +3020,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             no_open,
             viz_format,
         } => dispatch_viz(dispatch, viz_output.as_deref(), no_open, viz_format),
-        Command::Report { from } => cli_report::run_report(&from, output, root),
+        Command::Report { from } => {
+            cli_report::run_report(&from, output, root, cli.config.as_deref())
+        }
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
         Command::License { subcommand } => {
@@ -2977,6 +3036,124 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
     }
 }
 
+fn dispatch_type_aware_command(
+    dispatch: &DispatchContext<'_>,
+    subcommand: TypeAwareCli,
+) -> ExitCode {
+    match subcommand {
+        TypeAwareCli::Status => {
+            let status = fallow_api::type_aware_status(dispatch.root);
+            match dispatch.output {
+                fallow_config::OutputFormat::Json => {
+                    let output = type_aware_status_output(dispatch.root, status);
+                    match fallow_output::serialize_type_aware_status_json_output(
+                        output,
+                        crate::output_runtime::current_root_envelope_mode(),
+                    ) {
+                        Ok(value) => match dispatch.json_style.serialize(&value) {
+                            Ok(json) => {
+                                crate::report::sink::outln!("{json}");
+                                ExitCode::SUCCESS
+                            }
+                            Err(error) => emit_error(
+                                &format!("failed to serialize type-aware status: {error}"),
+                                2,
+                                dispatch.output,
+                            ),
+                        },
+                        Err(error) => emit_error(
+                            &format!("failed to build type-aware status: {error}"),
+                            2,
+                            dispatch.output,
+                        ),
+                    }
+                }
+                fallow_config::OutputFormat::Human => {
+                    if status.available {
+                        crate::report::sink::outln!(
+                            "{}",
+                            report::human_status_line(
+                                report::HumanStatus::Ok,
+                                format_args!(
+                                    "Type-aware companion: available ({}, protocol {}, TypeScript {})",
+                                    status.package_version.as_deref().unwrap_or("unknown"),
+                                    status.protocol_version,
+                                    status.backend_version.as_deref().unwrap_or("unknown"),
+                                )
+                            )
+                        );
+                    } else {
+                        crate::report::sink::outln!(
+                            "{}",
+                            report::human_status_line(
+                                report::HumanStatus::Inactive,
+                                "Type-aware companion: unavailable"
+                            )
+                        );
+                        if let Some(remediation) = status.remediation {
+                            crate::report::sink::outln!(
+                                "{}",
+                                report::human_status_line(
+                                    report::HumanStatus::Warning,
+                                    format_args!("Action: {remediation}")
+                                )
+                            );
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                _ => emit_error(
+                    "type-aware status supports human and json output",
+                    2,
+                    dispatch.output,
+                ),
+            }
+        }
+    }
+}
+
+fn type_aware_status_output(
+    root: &Path,
+    status: fallow_api::TypeAwareStatus,
+) -> fallow_output::TypeAwareStatusOutput {
+    let companion_path = status.companion_path.as_deref().map(|path| {
+        if let Ok(relative) = path.strip_prefix(root)
+            && !relative.as_os_str().is_empty()
+        {
+            relative.to_string_lossy().replace('\\', "/")
+        } else {
+            path.file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned()
+        }
+    });
+    let remediation = status.remediation.map(|message| {
+        let without_root = message.replace(root.to_string_lossy().as_ref(), ".");
+        status.companion_path.as_deref().map_or_else(
+            || without_root.clone(),
+            |path| {
+                without_root.replace(
+                    path.to_string_lossy().as_ref(),
+                    companion_path.as_deref().unwrap_or("fallow-type-aware"),
+                )
+            },
+        )
+    });
+    fallow_output::TypeAwareStatusOutput {
+        schema_version: fallow_types::envelope::SchemaVersion(report::SCHEMA_VERSION),
+        version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        available: status.available,
+        discovery_source: status.discovery_source.map(str::to_string),
+        companion_path,
+        package_version: status.package_version,
+        protocol_version: status.protocol_version,
+        backend_family: status.backend_family,
+        backend_version: status.backend_version,
+        remediation,
+    }
+}
+
 /// Destructure the `Command::Check` arm and forward to `dispatch_check`.
 fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     let filters = check_issue_filters(&command);
@@ -2986,6 +3163,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         trace_file,
         trace_dependency,
         impact_closure,
+        symbol_impact,
         top,
         file,
         ..
@@ -3003,9 +3181,13 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
                 trace_file,
                 trace_dependency,
                 impact_closure,
+                symbol_impact,
                 performance: dispatch.cli.performance,
             },
             include_dupes,
+            type_aware: dispatch.cli.type_aware,
+            type_aware_project: dispatch.cli.type_aware_project.clone(),
+            type_aware_require: dispatch.cli.type_aware_require,
             top,
             file,
         },
@@ -3207,6 +3389,9 @@ fn dispatch_inspect_command(
             .as_ref()
             .map(|config| config.cache_dir.as_path()),
         symbol_chain,
+        type_aware: dispatch.cli.type_aware,
+        type_aware_projects: &dispatch.cli.type_aware_project,
+        type_aware_require: dispatch.cli.type_aware_require.map(Into::into),
     })
 }
 
@@ -3625,6 +3810,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         ownership,
         ownership_emails,
         targets,
+        type_coupling,
         css,
         effort,
         score,
@@ -3662,6 +3848,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         ownership,
         ownership_emails: ownership_emails.map(EmailModeArg::to_config),
         targets,
+        type_coupling,
         css,
         effort,
         score,
@@ -4278,6 +4465,9 @@ struct CheckDispatchArgs {
     filters: IssueFilters,
     trace_opts: TraceOptions,
     include_dupes: bool,
+    type_aware: bool,
+    type_aware_project: Vec<std::path::PathBuf>,
+    type_aware_require: Option<TypeAwareRequireArg>,
     top: Option<usize>,
     file: Vec<std::path::PathBuf>,
 }
@@ -4347,6 +4537,9 @@ fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
         clear_screen: !no_clear,
         explain: cli.explain,
         include_entry_exports: cli.include_entry_exports,
+        type_aware: cli.type_aware,
+        type_aware_projects: &cli.type_aware_project,
+        type_aware_require: cli.type_aware_require.map(Into::into),
     })
 }
 
@@ -4376,6 +4569,9 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
         yes: args.yes,
         production,
         no_create_config: args.no_create_config,
+        type_aware: cli.type_aware,
+        type_aware_projects: &cli.type_aware_project,
+        type_aware_require: cli.type_aware_require.map(Into::into),
     })
 }
 
@@ -4410,6 +4606,9 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         Ok(production) => production,
         Err(code) => return code,
     };
+    if let Some(code) = validate_type_aware_check_options(dispatch, args) {
+        return code;
+    }
     check::run_check(&CheckOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -4433,6 +4632,9 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,
         include_dupes: args.include_dupes,
+        type_aware: args.type_aware,
+        type_aware_projects: &args.type_aware_project,
+        type_aware_require: args.type_aware_require.map(Into::into),
         trace_opts: &args.trace_opts,
         explain: cli.explain,
         top: args.top,
@@ -4448,6 +4650,69 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         retain_modules_for_health: false,
         defer_performance: false,
     })
+}
+
+fn validate_type_aware_check_options(
+    dispatch: &DispatchContext<'_>,
+    args: &CheckDispatchArgs,
+) -> Option<ExitCode> {
+    let output = dispatch.output;
+    if !args.type_aware_project.is_empty() && !args.type_aware {
+        return Some(emit_error(
+            "--type-aware-project requires --type-aware",
+            2,
+            output,
+        ));
+    }
+    if args.type_aware_require.is_some() && !args.type_aware {
+        return Some(emit_error(
+            "--type-aware-require requires --type-aware",
+            2,
+            output,
+        ));
+    }
+    if args.trace_opts.symbol_impact.is_some() && !args.type_aware {
+        return Some(emit_error(
+            "--symbol-impact requires --type-aware",
+            2,
+            output,
+        ));
+    }
+    let focused_output = args.trace_opts.trace_export.is_some()
+        || args.trace_opts.trace_file.is_some()
+        || args.trace_opts.trace_dependency.is_some()
+        || args.trace_opts.impact_closure.is_some()
+        || args.trace_opts.symbol_impact.is_some();
+    if focused_output
+        && !matches!(
+            output,
+            fallow_config::OutputFormat::Human | fallow_config::OutputFormat::Json
+        )
+    {
+        return Some(emit_error(
+            "focused trace and impact queries support human and JSON output",
+            2,
+            output,
+        ));
+    }
+    if args.type_aware
+        && !matches!(
+            output,
+            fallow_config::OutputFormat::Human
+                | fallow_config::OutputFormat::Json
+                | fallow_config::OutputFormat::Sarif
+                | fallow_config::OutputFormat::Compact
+                | fallow_config::OutputFormat::Markdown
+                | fallow_config::OutputFormat::CodeClimate
+        )
+    {
+        return Some(emit_error(
+            "--type-aware supports human, JSON, SARIF, compact, markdown, and CodeClimate output; pair CodeClimate with the JSON artifact to preserve semantic provenance",
+            2,
+            output,
+        ));
+    }
+    None
 }
 
 /// Resolve the three-state `ignoreImports` CLI override from the opt-in /
@@ -4664,7 +4929,7 @@ fn run_resolved_audit(
     inputs: &ResolvedAuditInputs,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    audit::run_audit(
+    audit::run_audit_with_type_aware(
         &audit::AuditOptions {
             root: dispatch.root,
             config_path: &cli.config,
@@ -4711,6 +4976,11 @@ fn run_resolved_audit(
             show_deprioritized: args.show_deprioritized,
         },
         args.gate_marker.as_deref(),
+        audit::AuditTypeAwareOptions {
+            enabled: cli.type_aware,
+            projects: &cli.type_aware_project,
+            require: cli.type_aware_require.map(Into::into),
+        },
     )
 }
 
@@ -4824,6 +5094,7 @@ struct HealthDispatchArgs<'a> {
     ownership: bool,
     ownership_emails: Option<fallow_config::EmailMode>,
     targets: bool,
+    type_coupling: bool,
     css: bool,
     effort: Option<EffortFilter>,
     score: bool,
@@ -4984,29 +5255,46 @@ fn derive_health_dispatch_run<'a>(
     coverage_inputs: &'a ResolvedHealthCoverageInputs,
     runtime_coverage: Option<fallow_engine::health::RuntimeCoverageOptions>,
 ) -> fallow_engine::health::HealthRunOptions<'a> {
-    fallow_engine::health::derive_health_run_options(fallow_engine::health::HealthRunOptionsInput {
-        output,
-        thresholds: health_threshold_overrides(args),
-        top: args.top,
-        sort: args.sort.clone().into(),
-        complexity: args.complexity,
-        file_scores: args.file_scores,
-        coverage_gaps: args.coverage_gaps,
-        hotspots: args.hotspots,
-        ownership: args.ownership,
-        ownership_emails: args.ownership_emails,
-        targets: args.targets,
-        css: args.css,
-        effort: args.effort.map(EffortFilter::to_estimate),
-        score: args.score,
-        gates: health_gate_options(args),
-        snapshot_requested: args.save_snapshot.is_some(),
-        trend: args.trend,
-        since: args.since,
-        min_commits: args.min_commits,
-        coverage_inputs: health_coverage_inputs(coverage_inputs),
-        runtime_coverage,
-    })
+    let mut run = fallow_engine::health::derive_health_run_options(
+        fallow_engine::health::HealthRunOptionsInput {
+            output,
+            thresholds: health_threshold_overrides(args),
+            top: args.top,
+            sort: args.sort.clone().into(),
+            complexity: args.complexity,
+            file_scores: args.file_scores,
+            coverage_gaps: args.coverage_gaps,
+            hotspots: args.hotspots,
+            ownership: args.ownership,
+            ownership_emails: args.ownership_emails,
+            targets: args.targets,
+            css: args.css,
+            effort: args.effort.map(EffortFilter::to_estimate),
+            score: args.score,
+            gates: health_gate_options(args),
+            snapshot_requested: args.save_snapshot.is_some(),
+            trend: args.trend,
+            since: args.since,
+            min_commits: args.min_commits,
+            coverage_inputs: health_coverage_inputs(coverage_inputs),
+            runtime_coverage,
+        },
+    );
+    if args.type_coupling && !run.sections.any_section {
+        run.sections = fallow_engine::health::DerivedHealthSections {
+            any_section: true,
+            complexity: false,
+            file_scores: false,
+            coverage_gaps: false,
+            hotspots: false,
+            targets: false,
+            css: false,
+            score: false,
+            force_full: false,
+            score_only_output: false,
+        };
+    }
+    run
 }
 
 fn health_threshold_overrides(
@@ -5106,11 +5394,33 @@ fn run_health_dispatch(
             performance: cli.performance,
             runtime_coverage: run.runtime_coverage,
             churn_file: cli.churn_file.as_deref(),
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             complexity_breakdown: args.complexity_breakdown,
             group_by: cli.group_by.map(Into::into),
         },
         dispatch.json_style,
+        &health::TypeAwareHealthOptions {
+            enabled: cli.type_aware,
+            requested: args.type_coupling,
+            unfiltered: health_type_coupling_is_default_section(args),
+            projects: &cli.type_aware_project,
+            require: cli.type_aware_require.map(Into::into),
+        },
     )
+}
+
+fn health_type_coupling_is_default_section(args: &HealthDispatchArgs<'_>) -> bool {
+    !args.complexity
+        && !args.file_scores
+        && !args.coverage_gaps
+        && !args.hotspots
+        && !args.ownership
+        && !args.targets
+        && !args.css
+        && !args.score
+        && args.min_score.is_none()
+        && args.min_severity.is_none()
+        && args.runtime_coverage.is_none()
 }
 
 #[cfg(test)]
@@ -5662,6 +5972,63 @@ mod tests {
             panic!("dead-code --coverage should fail to parse");
         };
         assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn type_aware_flags_parse_for_semantic_analysis() {
+        let cli = Cli::try_parse_from([
+            "fallow",
+            "dead-code",
+            "--unused-class-members",
+            "--type-aware",
+            "--type-aware-project",
+            "tsconfig.json",
+            "--type-aware-project",
+            "packages/web/tsconfig.json",
+        ])
+        .expect("type-aware flag should parse");
+        assert!(cli.type_aware);
+        assert_eq!(
+            cli.type_aware_project,
+            [
+                PathBuf::from("tsconfig.json"),
+                PathBuf::from("packages/web/tsconfig.json")
+            ]
+        );
+        let Some(Command::Check {
+            unused_class_members,
+            ..
+        }) = cli.command
+        else {
+            panic!("dead-code should parse as the check command");
+        };
+        assert!(unused_class_members);
+    }
+
+    #[test]
+    fn type_aware_status_output_hides_host_paths() {
+        let root = Path::new("/private/work/project");
+        let output = type_aware_status_output(
+            root,
+            fallow_api::TypeAwareStatus {
+                available: false,
+                discovery_source: Some("environment-override"),
+                companion_path: Some(PathBuf::from("/private/tools/fallow-type-aware")),
+                package_version: None,
+                protocol_version: 6,
+                backend_family: None,
+                backend_version: None,
+                remediation: Some(
+                    "failed to launch /private/tools/fallow-type-aware from /private/work/project"
+                        .to_string(),
+                ),
+            },
+        );
+
+        assert_eq!(output.companion_path.as_deref(), Some("fallow-type-aware"));
+        let remediation = output.remediation.expect("remediation");
+        assert!(!remediation.contains("/private/"));
+        assert!(remediation.contains("fallow-type-aware"));
     }
 
     #[test]

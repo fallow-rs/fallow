@@ -1,4 +1,16 @@
 import type { DuplicationMode, FallowCheckResult, FallowDupesResult } from "./types.js";
+import {
+  appendTypeAwareArgs,
+  TYPE_AWARE_MIN_CLI_VERSION,
+  TYPE_AWARE_VERSION_GATED_FLAGS,
+  type TypeAwareArgsOptions,
+} from "./type-aware-utils.js";
+import {
+  appendCommonScopeArgs,
+  compareVersions,
+  type BuiltCliArgs,
+  type SkippedCliCapability,
+} from "./cli-args-utils.js";
 
 /**
  * Analysis flags that did not exist in every CLI release the extension may
@@ -26,6 +38,10 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   // flag yields the same behavior the user is asking for; degrade silently.
   "--dupes-no-ignore-imports": "2.96.0",
   "--complexity-breakdown": "2.89.0",
+  "--type-aware": TYPE_AWARE_MIN_CLI_VERSION,
+  "--type-aware-project": TYPE_AWARE_MIN_CLI_VERSION,
+  "--type-aware-require": TYPE_AWARE_MIN_CLI_VERSION,
+  "--type-coupling": TYPE_AWARE_MIN_CLI_VERSION,
 };
 
 interface AnalysisArgsOptions {
@@ -44,6 +60,7 @@ interface AnalysisArgsOptions {
    */
   readonly workspace: string;
   readonly configPath: string;
+  readonly typeAware?: TypeAwareArgsOptions;
   readonly dupesMode: DuplicationMode | undefined;
   readonly dupesThreshold: number | undefined;
   readonly dupesMinTokens: number | undefined;
@@ -60,21 +77,11 @@ interface AnalysisArgsOptions {
   readonly cliVersion: string | null;
 }
 
-/** A flag omitted up front because the resolved CLI is too old to accept it. */
-export interface SkippedFlag {
-  readonly flag: string;
-  readonly requires: string;
-  readonly cliVersion: string;
-}
-
-export interface BuiltAnalysisArgs {
-  readonly args: string[];
-  readonly skipped: readonly SkippedFlag[];
-}
+export type BuiltAnalysisArgs = BuiltCliArgs;
 
 const pushVersionGatedFlag = (
   args: string[],
-  skipped: SkippedFlag[],
+  skipped: SkippedCliCapability[],
   flag: string,
   cliVersion: string | null,
   value?: string,
@@ -91,26 +98,7 @@ const pushVersionGatedFlag = (
   }
 };
 
-/**
- * Compare two dotted numeric versions. Returns a negative number when `a < b`,
- * zero when equal, positive when `a > b`. Missing or non-numeric segments are
- * treated as 0; any pre-release suffix is ignored (we only gate on the X.Y.Z
- * core, matching what `getBinaryVersion` parses out of `--version`).
- */
-export const compareVersions = (a: string, b: string): number => {
-  const parse = (v: string): number[] =>
-    v.split(".").map((segment) => Number.parseInt(segment, 10) || 0);
-  const pa = parse(a);
-  const pb = parse(b);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i += 1) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (diff !== 0) {
-      return diff;
-    }
-  }
-  return 0;
-};
+export { compareVersions };
 
 /**
  * Build the argument vector for the combined `fallow` analysis run that backs
@@ -121,7 +109,7 @@ export const compareVersions = (a: string, b: string): number => {
  */
 export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisArgs => {
   const args = ["--format", "json", "--quiet", "--skip", "health"];
-  const skipped: SkippedFlag[] = [];
+  const skipped: SkippedCliCapability[] = [];
 
   if (options.production === true) {
     args.push("--production");
@@ -129,16 +117,11 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
     pushVersionGatedFlag(args, skipped, "--no-production", options.cliVersion);
   }
 
-  if (options.changedSince) {
-    args.push("--changed-since", options.changedSince);
-  }
+  appendCommonScopeArgs(args, options);
 
-  if (options.workspace) {
-    args.push("--workspace", options.workspace);
-  }
-
-  if (options.configPath) {
-    args.push("--config", options.configPath);
+  const skippedTypeAware = appendTypeAwareArgs(args, options.typeAware, options.cliVersion);
+  if (skippedTypeAware) {
+    skipped.push(skippedTypeAware);
   }
 
   if (options.dupesMode !== undefined) {
@@ -263,13 +246,24 @@ export const planDegradation = (
   if (!offending || !Object.hasOwn(VERSION_GATED_FLAGS, offending)) {
     return { kind: "rethrow" };
   }
-  const reduced = stripArgument(args, offending);
+  const isTypeAwareFlag = TYPE_AWARE_VERSION_GATED_FLAGS.includes(
+    offending as (typeof TYPE_AWARE_VERSION_GATED_FLAGS)[number],
+  );
+  const relatedFlags = isTypeAwareFlag ? TYPE_AWARE_VERSION_GATED_FLAGS : [offending];
+  const reduced = relatedFlags.reduce<string[]>(
+    (current, flag) => stripArgument(current, flag),
+    [...args],
+  );
   if (reduced.length === args.length) {
     // Nothing was stripped (the flag is not actually in our argv); surface the
     // error rather than spin.
     return { kind: "rethrow" };
   }
-  return { kind: "retry", args: reduced, dropped: offending };
+  return {
+    kind: "retry",
+    args: reduced,
+    dropped: isTypeAwareFlag ? "type-aware flags" : offending,
+  };
 };
 
 export const countCheckIssues = (result: FallowCheckResult | null): number => {

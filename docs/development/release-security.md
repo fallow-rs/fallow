@@ -47,7 +47,7 @@ Run the repository release tests plus:
 
 ```bash
 actionlint .github/workflows/release.yml
-zizmor --persona auditor --no-online-audits --format plain --config .github/zizmor.yml --min-confidence medium .github/workflows/release.yml
+uvx zizmor@1.26.1 --config .github/zizmor.yml --min-confidence medium --format plain .github/workflows/release.yml
 python3 -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"
 ```
 

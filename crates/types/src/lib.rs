@@ -70,6 +70,9 @@ pub mod output_health;
 pub mod path_util;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
+/// Shared TypeScript semantic identity, provenance, API surface, impact, and
+/// public-signature coupling contracts.
+pub mod semantic;
 /// Custom serde serializers for cross-platform path output.
 pub mod serde_path;
 /// Shared source-file freshness metadata used by cache invalidation.

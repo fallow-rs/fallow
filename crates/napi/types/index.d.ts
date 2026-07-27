@@ -12,7 +12,17 @@ export interface AnalysisOptions {
   explain?: boolean;
 }
 
-export interface DeadCodeOptions extends AnalysisOptions {
+export interface TypeAwareAnalysisOptions extends AnalysisOptions {
+  typeAware?: TypeAwareOptions;
+}
+
+export interface TypeAwareOptions {
+  enabled?: boolean;
+  projects?: string[];
+  require?: 'best-effort' | 'complete';
+}
+
+export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   unusedFiles?: boolean;
   unusedExports?: boolean;
   unusedDeps?: boolean;
@@ -71,7 +81,7 @@ export type ComplexitySort = 'cyclomatic' | 'cognitive' | 'lines' | 'severity';
 export type OwnershipEmailMode = 'raw' | 'handle' | 'anonymized' | 'hash';
 export type TargetEffort = 'low' | 'medium' | 'high';
 
-export interface ComplexityOptions extends AnalysisOptions {
+export interface ComplexityOptions extends TypeAwareAnalysisOptions {
   maxCyclomatic?: number;
   maxCognitive?: number;
   maxCrap?: number;

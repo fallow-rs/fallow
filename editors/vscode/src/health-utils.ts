@@ -1,5 +1,7 @@
 import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { FindingSeverity, HealthReport, HealthScorePenalties } from "./types.js";
+import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
+import { appendCommonScopeArgs, type BuiltCliArgs } from "./cli-args-utils.js";
 
 /**
  * Options for {@link buildHealthArgs}. Kept as a plain data object (no config
@@ -32,6 +34,9 @@ export interface HealthArgsOptions {
    * forwarded when true. Drives the inline editor decorations.
    */
   readonly complexityBreakdown?: boolean;
+  readonly typeAware?: TypeAwareArgsOptions;
+  /** Version of the exact CLI binary this argv will be passed to. */
+  readonly cliVersion: string | null;
 }
 
 /**
@@ -44,8 +49,9 @@ export interface HealthArgsOptions {
  * user opted in, since that section walks git history. The combined sidebar run
  * is untouched (it keeps `--skip health`); this is a separate, lazy spawn.
  */
-export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
+export const buildHealthArgs = (options: HealthArgsOptions): BuiltCliArgs => {
   const args = ["health", "--format", "json", "--quiet", "--score", "--complexity", "--targets"];
+  const skipped = [];
 
   if (options.hotspots) {
     args.push("--hotspots");
@@ -63,19 +69,16 @@ export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
     args.push("--production");
   }
 
-  if (options.changedSince) {
-    args.push("--changed-since", options.changedSince);
+  appendCommonScopeArgs(args, options);
+
+  const skippedTypeAware = appendTypeAwareArgs(args, options.typeAware, options.cliVersion, [
+    "--type-coupling",
+  ]);
+  if (skippedTypeAware) {
+    skipped.push(skippedTypeAware);
   }
 
-  if (options.workspace) {
-    args.push("--workspace", options.workspace);
-  }
-
-  if (options.configPath) {
-    args.push("--config", options.configPath);
-  }
-
-  return args;
+  return { args, skipped };
 };
 
 /**

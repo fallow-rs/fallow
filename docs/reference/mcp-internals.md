@@ -15,7 +15,8 @@ subprocess safety.
 - `crates/mcp/src/tools/fallback_policy.rs` makes CLI fallback explicit.
 - `crates/mcp/src/tools/code_mode.rs` and `code_mode_subprocess.rs` own code
   execution and subprocess isolation.
-- `crates/mcp/src/tools/process_tree.rs` owns descendant cleanup.
+- `crates/process/` owns shared descendant cleanup for MCP and type-aware
+  sidecars.
 
 Do not hand-copy the complete tool list into durable prose. Read
 `MCP_TOOLS` or generated user documentation for the current inventory.
@@ -35,6 +36,9 @@ Do not hand-copy the complete tool list into durable prose. Read
   completion, cancellation, or timeout.
 - Never inherit unbounded environment or filesystem authority into code mode.
 - Keep tool ordering deterministic.
+- `trace_symbol` and `symbol_impact` expose exact TypeScript evidence for
+  Fallow-owned project questions. They do not expose compiler diagnostics or
+  typed lint findings.
 
 ## Verification
 

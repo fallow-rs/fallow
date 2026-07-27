@@ -3,8 +3,7 @@
 //! flow: `fallow --format json -o results.json`, then one `report` call per
 //! rendered surface).
 //!
-//! v1 supports only the GitHub-native text formats; SARIF and markdown
-//! re-rendering from a saved envelope is a recorded follow-up. Dispatch is on
+//! Supports the GitHub-native text formats plus CodeClimate and SARIF. Dispatch is on
 //! the envelope's `kind` field, so any envelope produced by `--format json`
 //! (dead-code, dupes, health, audit, security, or the bare combined run)
 //! renders byte-identically to the direct `--format` run. The `fallow fix`
@@ -14,21 +13,38 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::OutputFormat;
+use fallow_config::{FallowConfig, OutputFormat};
+use fallow_output::GroupByMode;
 
 use crate::report::github_annotations::{self, EnvelopeKind};
 use crate::report::github_summary;
 use crate::telemetry;
 
 /// Run `fallow report --from <file>` with the global `--format` and `--root`.
-pub fn run_report(from: &Path, output: OutputFormat, root: &Path) -> ExitCode {
-    let summary = match output {
-        OutputFormat::GithubAnnotations => false,
-        OutputFormat::GithubSummary => true,
+pub fn run_report(
+    from: &Path,
+    output: OutputFormat,
+    root: &Path,
+    config_path: Option<&Path>,
+) -> ExitCode {
+    if let Some(path) = config_path
+        && let Err(error) = FallowConfig::load(path)
+    {
+        return crate::emit_known_failure(
+            &format!("failed to load report config {}: {error}", path.display()),
+            2,
+            output,
+            telemetry::FailureReason::Validation,
+        );
+    }
+    let target = match output {
+        OutputFormat::GithubAnnotations => ReportTarget::GithubAnnotations,
+        OutputFormat::GithubSummary => ReportTarget::GithubSummary,
+        OutputFormat::CodeClimate => ReportTarget::CodeClimate,
+        OutputFormat::Sarif => ReportTarget::Sarif,
         _ => {
             return crate::emit_known_failure(
-                "fallow report supports --format github-annotations or github-summary only \
-                 (re-rendering saved envelopes as sarif or markdown is a recorded follow-up)",
+                "fallow report supports --format github-annotations, github-summary, codeclimate, or sarif only",
                 2,
                 output,
                 telemetry::FailureReason::UnsupportedFormat,
@@ -39,15 +55,142 @@ pub fn run_report(from: &Path, output: OutputFormat, root: &Path) -> ExitCode {
         Ok(envelope) => envelope,
         Err(code) => return code,
     };
-    let kind = match envelope_kind(&envelope, from, output) {
+    let saved = normalize_saved_envelope(envelope);
+    let kind = match envelope_kind(&saved.envelope, from, output) {
         Ok(kind) => kind,
         Err(code) => return code,
     };
-    if summary {
-        github_summary::print_summary(kind, &envelope, root)
-    } else {
-        github_annotations::print_annotations(kind, &envelope, root)
+    if matches!(target, ReportTarget::CodeClimate) && kind == EnvelopeKind::Security {
+        return crate::emit_known_failure(
+            "fallow security supports --format human, json, sarif, github-annotations, or github-summary only.",
+            2,
+            output,
+            telemetry::FailureReason::UnsupportedFormat,
+        );
     }
+    let resolver = match saved_group_resolver(saved.grouped_by, root, config_path, output) {
+        Ok(resolver) => resolver,
+        Err(code) => return code,
+    };
+    match target {
+        ReportTarget::GithubAnnotations => {
+            github_annotations::print_annotations(kind, &saved.envelope, root)
+        }
+        ReportTarget::GithubSummary => github_summary::print_summary(kind, &saved.envelope, root),
+        ReportTarget::CodeClimate => {
+            crate::report::codeclimate::print_envelope_codeclimate_with_config(
+                kind,
+                &saved.envelope,
+                root,
+                config_path,
+                resolver.as_ref(),
+            )
+        }
+        ReportTarget::Sarif => crate::report::sarif::print_envelope_sarif_with_config(
+            kind,
+            &saved.envelope,
+            root,
+            config_path,
+            resolver.as_ref(),
+        ),
+    }
+}
+
+struct SavedEnvelope {
+    envelope: serde_json::Value,
+    grouped_by: Option<GroupByMode>,
+}
+
+fn normalize_saved_envelope(mut envelope: serde_json::Value) -> SavedEnvelope {
+    let grouped_by = envelope
+        .get("grouped_by")
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_group_by_mode);
+    if envelope.get("kind").and_then(serde_json::Value::as_str) != Some("dead-code-grouped") {
+        return SavedEnvelope {
+            envelope,
+            grouped_by,
+        };
+    }
+    let Some(root) = envelope.as_object_mut() else {
+        return SavedEnvelope {
+            envelope,
+            grouped_by,
+        };
+    };
+    let groups = root
+        .remove("groups")
+        .and_then(|groups| groups.as_array().cloned())
+        .unwrap_or_default();
+    root.remove("grouped_by");
+    root.insert(
+        "kind".to_string(),
+        serde_json::Value::String("dead-code".to_string()),
+    );
+    for group in groups {
+        let Some(group) = group.as_object() else {
+            continue;
+        };
+        for (key, value) in group {
+            if matches!(key.as_str(), "key" | "owners" | "total_issues") {
+                continue;
+            }
+            let Some(items) = value.as_array() else {
+                continue;
+            };
+            let target = root
+                .entry(key.clone())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+            if let Some(target) = target.as_array_mut() {
+                target.extend(items.iter().cloned());
+            }
+        }
+    }
+    SavedEnvelope {
+        envelope,
+        grouped_by,
+    }
+}
+
+fn parse_group_by_mode(value: &str) -> Option<GroupByMode> {
+    match value {
+        "owner" => Some(GroupByMode::Owner),
+        "directory" => Some(GroupByMode::Directory),
+        "package" => Some(GroupByMode::Package),
+        "section" => Some(GroupByMode::Section),
+        _ => None,
+    }
+}
+
+fn saved_group_resolver(
+    grouped_by: Option<GroupByMode>,
+    root: &Path,
+    config_path: Option<&Path>,
+    output: OutputFormat,
+) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
+    let codeowners = config_path
+        .and_then(|path| FallowConfig::load(path).ok())
+        .and_then(|config| config.codeowners)
+        .or_else(|| {
+            FallowConfig::find_and_load(root)
+                .ok()
+                .flatten()
+                .and_then(|(config, _)| config.codeowners)
+        });
+    crate::runtime_support::build_ownership_resolver_for_mode(
+        grouped_by,
+        root,
+        codeowners.as_deref(),
+        output,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum ReportTarget {
+    GithubAnnotations,
+    GithubSummary,
+    CodeClimate,
+    Sarif,
 }
 
 fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value, ExitCode> {
@@ -167,6 +310,30 @@ mod tests {
         assert_eq!(parse_envelope_kind("dead-code-grouped"), None);
         assert_eq!(parse_envelope_kind("feature-flags"), None);
         assert_eq!(parse_envelope_kind(""), None);
+    }
+
+    #[test]
+    fn grouped_dead_code_is_flattened_for_saved_renderers() {
+        let normalized = normalize_saved_envelope(serde_json::json!({
+            "kind": "dead-code-grouped",
+            "grouped_by": "owner",
+            "total_issues": 1,
+            "groups": [{
+                "key": "@team",
+                "owners": ["@team"],
+                "total_issues": 1,
+                "unused_files": [{"path": "src/dead.ts", "actions": []}]
+            }]
+        }));
+
+        assert_eq!(normalized.grouped_by, Some(GroupByMode::Owner));
+        assert_eq!(normalized.envelope["kind"], "dead-code");
+        assert_eq!(
+            normalized.envelope["unused_files"][0]["path"],
+            "src/dead.ts"
+        );
+        assert!(normalized.envelope.get("groups").is_none());
+        assert!(normalized.envelope.get("grouped_by").is_none());
     }
 
     #[test]

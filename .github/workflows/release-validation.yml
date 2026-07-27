@@ -83,7 +83,7 @@ jobs:
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
       - name: Build NAPI package
-        run: cd crates/napi && npx napi build --platform --profile napi-release && npm run publish:prepare
+        run: cd crates/napi && npx napi build --platform --profile napi-release --no-js && npm run publish:prepare
 
       - name: Run NAPI smoke test
         run: cd crates/napi && npm test
@@ -157,4 +157,3 @@ jobs:
 
       - name: Verify generated contract bundle
         run: CI=true npm run generate:contracts:check
-

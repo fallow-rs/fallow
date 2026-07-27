@@ -15,6 +15,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{
     GroupedByFileInput, MAX_FLAT_ITEMS, build_grouped_by_file, build_section_header, format_path,
     print_explain_tip_if_tty, push_section_footer_rollup, push_section_footer_with_count,
+    push_section_footer_with_fixability,
 };
 use crate::report::grouping::OwnershipResolver;
 use crate::report::shared::NAMESPACE_BARREL_HINT;
@@ -731,29 +732,43 @@ fn push_unused_export_sections(
     suppressed_exports: usize,
     suppressed_types: usize,
 ) {
-    build_human_grouped_section(GroupedSectionInput {
-        lines: input.lines,
-        items: filtered_exports,
-        title: "Unused exports",
-        level: severity_to_level(input.rules.unused_exports),
-        root: input.root,
-        max_files: input.max_grouped_files,
-        get_path: |e| e.export.path.as_path(),
-        format_detail: &|e: &UnusedExportFinding| format_unused_export(&e.export),
-    });
+    let has_fixable_export = filtered_exports
+        .iter()
+        .flat_map(|finding| &finding.actions)
+        .any(fallow_types::output::IssueAction::is_auto_fixable);
+    build_human_grouped_section_with_fixability(
+        GroupedSectionInput {
+            lines: input.lines,
+            items: filtered_exports,
+            title: "Unused exports",
+            level: severity_to_level(input.rules.unused_exports),
+            root: input.root,
+            max_files: input.max_grouped_files,
+            get_path: |e| e.export.path.as_path(),
+            format_detail: &|e: &UnusedExportFinding| format_unused_export(&e.export),
+        },
+        has_fixable_export,
+    );
     push_suppressed_count_note(input.lines, suppressed_exports);
     insert_test_src_split(input.lines, filtered_exports, |e| &e.export.path);
 
-    build_human_grouped_section(GroupedSectionInput {
-        lines: input.lines,
-        items: filtered_types,
-        title: "Unused type exports",
-        level: severity_to_level(input.rules.unused_types),
-        root: input.root,
-        max_files: input.max_grouped_files,
-        get_path: |e| e.export.path.as_path(),
-        format_detail: &|e: &UnusedTypeFinding| format_unused_export(&e.export),
-    });
+    let has_fixable_type = filtered_types
+        .iter()
+        .flat_map(|finding| &finding.actions)
+        .any(fallow_types::output::IssueAction::is_auto_fixable);
+    build_human_grouped_section_with_fixability(
+        GroupedSectionInput {
+            lines: input.lines,
+            items: filtered_types,
+            title: "Unused type exports",
+            level: severity_to_level(input.rules.unused_types),
+            root: input.root,
+            max_files: input.max_grouped_files,
+            get_path: |e| e.export.path.as_path(),
+            format_detail: &|e: &UnusedTypeFinding| format_unused_export(&e.export),
+        },
+        has_fixable_type,
+    );
     push_suppressed_count_note(input.lines, suppressed_types);
 
     build_human_grouped_section(GroupedSectionInput {
@@ -775,27 +790,43 @@ fn build_unused_member_sections(
     rules: &RulesConfig,
     max_grouped_files: usize,
 ) {
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_enum_members,
-        title: "Unused enum members",
-        level: severity_to_level(rules.unused_enum_members),
-        root,
-        max_files: max_grouped_files,
-        get_path: |m| m.member.path.as_path(),
-        format_detail: &|m: &UnusedEnumMemberFinding| format_unused_member(&m.member),
-    });
+    let has_fixable_enum_member = results
+        .unused_enum_members
+        .iter()
+        .flat_map(|finding| &finding.actions)
+        .any(fallow_types::output::IssueAction::is_auto_fixable);
+    build_human_grouped_section_with_fixability(
+        GroupedSectionInput {
+            lines,
+            items: &results.unused_enum_members,
+            title: "Unused enum members",
+            level: severity_to_level(rules.unused_enum_members),
+            root,
+            max_files: max_grouped_files,
+            get_path: |m| m.member.path.as_path(),
+            format_detail: &|m: &UnusedEnumMemberFinding| format_unused_member(&m.member),
+        },
+        has_fixable_enum_member,
+    );
 
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_class_members,
-        title: "Unused class members",
-        level: severity_to_level(rules.unused_class_members),
-        root,
-        max_files: max_grouped_files,
-        get_path: |m| m.member.path.as_path(),
-        format_detail: &|m: &UnusedClassMemberFinding| format_unused_member(&m.member),
-    });
+    let has_fixable_class_member = results
+        .unused_class_members
+        .iter()
+        .flat_map(|finding| &finding.actions)
+        .any(fallow_types::output::IssueAction::is_auto_fixable);
+    build_human_grouped_section_with_fixability(
+        GroupedSectionInput {
+            lines,
+            items: &results.unused_class_members,
+            title: "Unused class members",
+            level: severity_to_level(rules.unused_class_members),
+            root,
+            max_files: max_grouped_files,
+            get_path: |m| m.member.path.as_path(),
+            format_detail: &|m: &UnusedClassMemberFinding| format_unused_member(&m.member),
+        },
+        has_fixable_class_member,
+    );
 
     build_human_grouped_section(GroupedSectionInput {
         lines,
@@ -2280,6 +2311,26 @@ where
     P: Fn(&'a T) -> &'a Path,
     F: Fn(&T) -> String,
 {
+    build_human_grouped_section_impl(input, None);
+}
+
+fn build_human_grouped_section_with_fixability<'a, T, P, F>(
+    input: GroupedSectionInput<'a, T, P, F>,
+    has_auto_fixable_action: bool,
+) where
+    P: Fn(&'a T) -> &'a Path,
+    F: Fn(&T) -> String,
+{
+    build_human_grouped_section_impl(input, Some(has_auto_fixable_action));
+}
+
+fn build_human_grouped_section_impl<'a, T, P, F>(
+    input: GroupedSectionInput<'a, T, P, F>,
+    auto_fixable_override: Option<bool>,
+) where
+    P: Fn(&'a T) -> &'a Path,
+    F: Fn(&T) -> String,
+{
     let GroupedSectionInput {
         lines,
         items,
@@ -2303,7 +2354,11 @@ where
         max_files,
         max_items_per_file: MAX_ITEMS_PER_FILE,
     });
-    push_section_footer_with_count(lines, title, items.len());
+    if let Some(has_auto_fixable_action) = auto_fixable_override {
+        push_section_footer_with_fixability(lines, title, items.len(), has_auto_fixable_action);
+    } else {
+        push_section_footer_with_count(lines, title, items.len());
+    }
     lines.push(String::new());
 }
 

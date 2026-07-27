@@ -19,6 +19,7 @@ doctest = false
 fallow-config = { workspace = true }
 fallow-engine = { workspace = true }
 fallow-output = { workspace = true }
+fallow-process = { workspace = true }
 fallow-types = { workspace = true }
 dunce = { workspace = true }
 globset = { workspace = true }
@@ -27,6 +28,7 @@ rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true, optional = true }
+sha2 = { workspace = true }
 xxhash-rust = { workspace = true }
 
 [features]
@@ -35,6 +37,10 @@ schema = ["dep:schemars", "fallow-engine/schema", "fallow-output/schema", "fallo
 [dev-dependencies]
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
+
+[build-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

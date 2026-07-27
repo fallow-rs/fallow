@@ -24,6 +24,7 @@ pub type ImpactClosureGap = fallow_types::trace::ImpactClosureGap;
 pub type ImpactClosureTrace = fallow_types::trace::ImpactClosureTrace;
 pub type PipelineTimings = fallow_types::trace::PipelineTimings;
 pub type ReExportChain = fallow_types::trace::ReExportChain;
+pub use trace_impl::SemanticClassMethodResolutionError;
 pub type TracedCloneGroup = fallow_types::trace::TracedCloneGroup;
 pub type TracedExport = fallow_types::trace::TracedExport;
 pub type TracedReExport = fallow_types::trace::TracedReExport;
@@ -37,6 +38,45 @@ pub fn trace_export(
     export_name: &str,
 ) -> Option<ExportTrace> {
     trace_impl::trace_export(graph.as_graph(), root, file_path, export_name)
+}
+
+/// Resolve the source identity for an exact semantic export query.
+#[must_use]
+pub fn semantic_symbol_for_export(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    file_path: &str,
+    export_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    trace_impl::semantic_symbol_for_export(graph.as_graph(), root, file_path, export_name)
+}
+
+/// Resolve the source identity for an exact semantic class-member query.
+#[must_use]
+pub fn semantic_symbol_for_class_member(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    file_path: &str,
+    member_name: &str,
+) -> Option<fallow_types::semantic::SemanticSymbol> {
+    trace_impl::semantic_symbol_for_class_member(graph.as_graph(), root, file_path, member_name)
+}
+
+/// Resolve one exact exported class method for semantic impact analysis.
+pub fn semantic_symbol_for_exact_class_method(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    file_path: &str,
+    owner_name: &str,
+    member_name: &str,
+) -> Result<fallow_types::semantic::SemanticSymbol, SemanticClassMethodResolutionError> {
+    trace_impl::semantic_symbol_for_exact_class_method(
+        graph.as_graph(),
+        root,
+        file_path,
+        owner_name,
+        member_name,
+    )
 }
 
 /// Trace a class / enum / store member (the `--trace FILE:MEMBER` fallback when

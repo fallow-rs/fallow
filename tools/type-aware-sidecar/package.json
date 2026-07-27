@@ -1,0 +1,37 @@
+{
+  "name": "fallow-type-aware",
+  "version": "3.10.0",
+  "description": "Optional TypeScript-Go semantic refinement sidecar for Fallow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fallow-rs/fallow.git",
+    "directory": "tools/type-aware-sidecar"
+  },
+  "files": [
+    "fallow-type-aware.mjs",
+    "src"
+  ],
+  "type": "module",
+  "bin": {
+    "fallow-type-aware": "fallow-type-aware.mjs"
+  },
+  "scripts": {
+    "bench": "node bench/session.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@codspeed/tinybench-plugin": "5.7.1",
+    "tinybench": "6.1.2"
+  }
+}

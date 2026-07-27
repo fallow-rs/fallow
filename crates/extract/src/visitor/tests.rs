@@ -1907,6 +1907,8 @@ fn skips_private_and_protected_members() {
             export class Foo {
                 private secret: string;
                 protected internal(): void {}
+                #runtimePrivate = 1;
+                #runtimeMethod(): void {}
                 public visible: number;
             }
             ",
@@ -1923,6 +1925,14 @@ fn skips_private_and_protected_members() {
     assert!(
         !members.iter().any(|m| m.name == "internal"),
         "protected members should be skipped"
+    );
+    assert!(
+        !members.iter().any(|m| m.name == "runtimePrivate"),
+        "ECMAScript private properties should be left to the compiler or linter"
+    );
+    assert!(
+        !members.iter().any(|m| m.name == "runtimeMethod"),
+        "ECMAScript private methods should be left to the compiler or linter"
     );
     assert!(
         members.iter().any(|m| m.name == "visible"),

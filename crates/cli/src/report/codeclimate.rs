@@ -5,15 +5,16 @@ use fallow_config::RulesConfig;
 #[cfg(test)]
 use fallow_config::Severity;
 use fallow_output::{
-    CodeClimateAnnotationField, CodeClimateIssue, HealthReport, annotate_codeclimate_issues,
-    codeclimate_issues_to_value,
+    CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
+    CodeClimateLocation, CodeClimateSeverity, HealthReport, annotate_codeclimate_issues,
+    codeclimate_fingerprint_hash, codeclimate_issues_to_value,
 };
-#[cfg(test)]
-use fallow_output::{CodeClimateSeverity, codeclimate_fingerprint_hash};
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 
 use super::github::report_prefix;
+use super::github::{AnnotationLevel, resolve_render_options};
+use super::github_annotations::{EnvelopeKind, collect_annotations};
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
 
@@ -45,6 +46,302 @@ fn emit_codeclimate(mut issues: Vec<CodeClimateIssue>) -> ExitCode {
     rebase_codeclimate_paths(&mut issues);
     let value = codeclimate_issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
+}
+
+/// Re-render a stored JSON envelope as a CodeClimate issue array without
+/// repeating analysis. Semantic provenance stays in the paired JSON artifact.
+pub fn print_envelope_codeclimate_with_config(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+    config_path: Option<&Path>,
+    resolver: Option<&OwnershipResolver>,
+) -> ExitCode {
+    emit_codeclimate(envelope_codeclimate_issues_with_context(
+        kind,
+        envelope,
+        root,
+        config_path,
+        resolver,
+    ))
+}
+
+#[cfg(test)]
+fn envelope_codeclimate_issues(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+) -> Vec<CodeClimateIssue> {
+    envelope_codeclimate_issues_with_config(kind, envelope, root, None)
+}
+
+#[cfg(test)]
+fn envelope_codeclimate_issues_with_config(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+    config_path: Option<&Path>,
+) -> Vec<CodeClimateIssue> {
+    envelope_codeclimate_issues_with_context(kind, envelope, root, config_path, None)
+}
+
+fn envelope_codeclimate_issues_with_context(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+    config_path: Option<&Path>,
+    resolver: Option<&OwnershipResolver>,
+) -> Vec<CodeClimateIssue> {
+    if let Some(issues) =
+        saved_native_codeclimate_issues(kind, envelope, root, config_path, resolver)
+    {
+        return issues;
+    }
+    let options = resolve_render_options(root);
+    let mut issues = collect_annotations(kind, envelope, options.pm)
+        .into_iter()
+        .map(|annotation| {
+            // Keep the analysis-root-relative path here. `emit_codeclimate`
+            // applies the process-wide report prefix exactly once.
+            let path = annotation.path;
+            let line = annotation.line.unwrap_or(1).clamp(1, u64::from(u32::MAX)) as u32;
+            let rule_id = super::sarif::native_rule_id(&annotation.title);
+            let severity = if rule_id == "fallow/runtime-safe-to-delete" {
+                CodeClimateSeverity::Critical
+            } else if rule_id == "fallow/runtime-review-required" {
+                CodeClimateSeverity::Major
+            } else if super::sarif::is_dead_code_rule_id(&rule_id) {
+                super::sarif::envelope_rule_level_with_config(
+                    kind,
+                    &annotation.title,
+                    root,
+                    config_path,
+                )
+                .as_deref()
+                .map_or_else(
+                    || annotation_codeclimate_severity(annotation.level),
+                    sarif_level_to_codeclimate,
+                )
+            } else {
+                annotation_codeclimate_severity(annotation.level)
+            };
+            let description = format!("{}: {}", annotation.title, annotation.message);
+            let fingerprint = envelope_fingerprint(&rule_id, &path, line, &annotation.message);
+            CodeClimateIssue {
+                kind: CodeClimateIssueKind::Issue,
+                check_name: rule_id.clone(),
+                description,
+                categories: vec![native_category(&rule_id).to_string()],
+                severity,
+                fingerprint,
+                location: CodeClimateLocation {
+                    path,
+                    lines: CodeClimateLines { begin: line },
+                },
+                owner: None,
+                group: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    if resolver.is_some() {
+        annotate_saved_fallback_grouping(&mut issues, kind, resolver);
+    }
+    issues
+}
+
+fn saved_native_codeclimate_issues(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+    config_path: Option<&Path>,
+    resolver: Option<&OwnershipResolver>,
+) -> Option<Vec<CodeClimateIssue>> {
+    let rules = super::sarif::saved_report_rules(root, config_path);
+    match kind {
+        EnvelopeKind::DeadCode => {
+            let results = serde_json::from_value::<AnalysisResults>(envelope.clone()).ok()?;
+            let mut issues = api_codeclimate_issues(&results, root, &rules);
+            annotate_dead_code_owner(&mut issues, resolver);
+            Some(issues)
+        }
+        EnvelopeKind::Dupes => {
+            let report = serde_json::from_value::<DuplicationReport>(envelope.clone()).ok()?;
+            let mut issues = api_duplication_codeclimate_issues(&report, root);
+            annotate_duplication_groups(&mut issues, &report, root, resolver);
+            Some(issues)
+        }
+        EnvelopeKind::Health => {
+            let report = fallow_output::health_report_from_saved_value(envelope)?;
+            let mut issues = api_health_codeclimate_issues(&report, root);
+            annotate_health_groups(&mut issues, resolver);
+            Some(issues)
+        }
+        EnvelopeKind::Audit => saved_multi_analysis_codeclimate(
+            envelope,
+            root,
+            &rules,
+            "/dead_code",
+            "/duplication",
+            "/complexity",
+        ),
+        EnvelopeKind::Combined => {
+            saved_multi_analysis_codeclimate(envelope, root, &rules, "/check", "/dupes", "/health")
+        }
+        EnvelopeKind::Security | EnvelopeKind::Fix => None,
+    }
+}
+
+fn annotate_dead_code_owner(issues: &mut [CodeClimateIssue], resolver: Option<&OwnershipResolver>) {
+    let Some(resolver) = resolver else {
+        return;
+    };
+    annotate_codeclimate_issues(issues, CodeClimateAnnotationField::Owner, |path| {
+        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
+    });
+}
+
+fn annotate_health_groups(issues: &mut [CodeClimateIssue], resolver: Option<&OwnershipResolver>) {
+    let Some(resolver) = resolver else {
+        return;
+    };
+    annotate_codeclimate_issues(issues, CodeClimateAnnotationField::Group, |path| {
+        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
+    });
+}
+
+fn annotate_duplication_groups(
+    issues: &mut [CodeClimateIssue],
+    report: &DuplicationReport,
+    root: &Path,
+    resolver: Option<&OwnershipResolver>,
+) {
+    let Some(resolver) = resolver else {
+        return;
+    };
+    use rustc_hash::FxHashMap;
+    let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
+    for group in &report.clone_groups {
+        let owner = super::dupes_grouping::largest_owner(group, root, resolver);
+        for instance in &group.instances {
+            path_to_owner.insert(cc_path(&instance.file, root), owner.clone());
+        }
+    }
+    annotate_codeclimate_issues(issues, CodeClimateAnnotationField::Group, |path| {
+        path_to_owner
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string())
+    });
+}
+
+fn annotate_saved_fallback_grouping(
+    issues: &mut [CodeClimateIssue],
+    kind: EnvelopeKind,
+    resolver: Option<&OwnershipResolver>,
+) {
+    match kind {
+        EnvelopeKind::Health | EnvelopeKind::Dupes => annotate_health_groups(issues, resolver),
+        _ => annotate_dead_code_owner(issues, resolver),
+    }
+}
+
+fn saved_multi_analysis_codeclimate(
+    envelope: &serde_json::Value,
+    root: &Path,
+    rules: &RulesConfig,
+    dead_code_pointer: &str,
+    duplication_pointer: &str,
+    health_pointer: &str,
+) -> Option<Vec<CodeClimateIssue>> {
+    let dead_code = parse_optional_section::<AnalysisResults>(envelope, dead_code_pointer).ok()?;
+    let duplication =
+        parse_optional_section::<DuplicationReport>(envelope, duplication_pointer).ok()?;
+    let health = match envelope.pointer(health_pointer) {
+        Some(value) => Some(fallow_output::health_report_from_saved_value(value)?),
+        None => None,
+    };
+
+    let mut issues = Vec::new();
+    if let Some(results) = dead_code {
+        issues.extend(api_codeclimate_issues(&results, root, rules));
+    }
+    if let Some(report) = duplication {
+        issues.extend(api_duplication_codeclimate_issues(&report, root));
+    }
+    if let Some(report) = health {
+        issues.extend(api_health_codeclimate_issues(&report, root));
+    }
+    Some(issues)
+}
+
+fn parse_optional_section<T: serde::de::DeserializeOwned>(
+    envelope: &serde_json::Value,
+    pointer: &str,
+) -> Result<Option<T>, serde_json::Error> {
+    let Some(value) = envelope.pointer(pointer) else {
+        return Ok(None);
+    };
+    serde_json::from_value(value.clone()).map(Some)
+}
+
+const fn annotation_codeclimate_severity(level: AnnotationLevel) -> CodeClimateSeverity {
+    match level {
+        AnnotationLevel::Error => CodeClimateSeverity::Major,
+        AnnotationLevel::Warning => CodeClimateSeverity::Minor,
+        AnnotationLevel::Notice => CodeClimateSeverity::Info,
+    }
+}
+
+fn sarif_level_to_codeclimate(level: &str) -> CodeClimateSeverity {
+    match level {
+        "error" => CodeClimateSeverity::Major,
+        "warning" => CodeClimateSeverity::Minor,
+        _ => CodeClimateSeverity::Info,
+    }
+}
+
+fn native_category(rule_id: &str) -> &'static str {
+    if rule_id == "fallow/code-duplication" {
+        "Duplication"
+    } else if rule_id.starts_with("fallow/high-") || rule_id == "fallow/complexity" {
+        "Complexity"
+    } else if rule_id.starts_with("fallow/css-") {
+        "Style"
+    } else if rule_id.contains("untested") {
+        "Coverage"
+    } else {
+        "Bug Risk"
+    }
+}
+
+fn envelope_fingerprint(rule_id: &str, path: &str, line: u32, message: &str) -> String {
+    if rule_id == "fallow/unused-file" {
+        return codeclimate_fingerprint_hash(&[rule_id, path]);
+    }
+    if matches!(
+        rule_id,
+        "fallow/unused-dependency"
+            | "fallow/unused-dev-dependency"
+            | "fallow/unused-optional-dependency"
+            | "fallow/type-only-dependency"
+            | "fallow/test-only-dependency"
+            | "fallow/dev-dependency-in-production"
+    ) && let Some(subject) = first_quoted_subject(message)
+    {
+        return codeclimate_fingerprint_hash(&[rule_id, subject]);
+    }
+    let line = line.to_string();
+    if let Some(subject) = first_quoted_subject(message) {
+        codeclimate_fingerprint_hash(&[rule_id, path, &line, subject])
+    } else {
+        codeclimate_fingerprint_hash(&[rule_id, path, &line])
+    }
+}
+
+fn first_quoted_subject(message: &str) -> Option<&str> {
+    let (_, remainder) = message.split_once('\'')?;
+    let (subject, _) = remainder.split_once('\'')?;
+    (!subject.is_empty()).then_some(subject)
 }
 
 /// Map fallow severity to CodeClimate severity.
@@ -180,9 +477,7 @@ pub(super) fn print_grouped_codeclimate(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut issues = api_codeclimate_issues(results, root, rules);
-    annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Owner, |path| {
-        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
-    });
+    annotate_dead_code_owner(&mut issues, Some(resolver));
     emit_codeclimate(issues)
 }
 
@@ -214,9 +509,7 @@ pub(super) fn print_grouped_health_codeclimate(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut issues = api_health_codeclimate_issues(report, root);
-    annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Group, |path| {
-        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
-    });
+    annotate_health_groups(&mut issues, Some(resolver));
     emit_codeclimate(issues)
 }
 
@@ -248,22 +541,7 @@ pub(super) fn print_grouped_duplication_codeclimate(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut issues = api_duplication_codeclimate_issues(report, root);
-
-    use rustc_hash::FxHashMap;
-    let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
-    for group in &report.clone_groups {
-        let owner = super::dupes_grouping::largest_owner(group, root, resolver);
-        for instance in &group.instances {
-            path_to_owner.insert(cc_path(&instance.file, root), owner.clone());
-        }
-    }
-
-    annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Group, |path| {
-        path_to_owner
-            .get(path)
-            .cloned()
-            .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string())
-    });
+    annotate_duplication_groups(&mut issues, report, root, Some(resolver));
     emit_codeclimate(issues)
 }
 
@@ -300,6 +578,202 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn stored_dead_code_envelope_renders_codeclimate_without_analysis() {
+        let envelope = serde_json::json!({
+            "kind": "dead-code",
+            "unused_files": [{ "path": "src/dead.ts" }]
+        });
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
+        let issues = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &envelope, root);
+
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].check_name, "fallow/unused-file");
+        assert_eq!(issues[0].location.path, "src/dead.ts");
+        assert_eq!(issues[0].location.lines.begin, 1);
+    }
+
+    #[test]
+    fn stored_codeclimate_uses_native_health_categories() {
+        assert_eq!(
+            native_category("fallow/high-cyclomatic-complexity"),
+            "Complexity"
+        );
+        assert_eq!(native_category("fallow/css-selector-complexity"), "Style");
+        assert_eq!(native_category("fallow/untested-file"), "Coverage");
+        assert_eq!(
+            native_category("fallow/runtime-coverage-unavailable"),
+            "Bug Risk"
+        );
+        assert_eq!(
+            native_category("fallow/coverage-intelligence-review"),
+            "Bug Risk"
+        );
+    }
+
+    #[test]
+    fn stored_health_codeclimate_preserves_runtime_and_intelligence_contracts() {
+        let envelope = serde_json::json!({
+            "kind": "health",
+            "summary": {},
+            "findings": [],
+            "runtime_coverage": {
+                "findings": [{
+                    "path": "src/cold.ts",
+                    "function": "cold",
+                    "line": 7,
+                    "verdict": "safe_to_delete",
+                    "invocations": 0,
+                    "confidence": "high",
+                    "evidence": {
+                        "static_status": "unused",
+                        "test_coverage": "not_covered",
+                        "v8_tracking": "tracked"
+                    },
+                    "actions": []
+                }]
+            },
+            "coverage_intelligence": {
+                "findings": [{
+                    "id": "fallow:coverage-intel:test",
+                    "path": "src/risky.ts",
+                    "identity": "risky",
+                    "line": 11,
+                    "verdict": "risky-change-detected",
+                    "recommendation": "add-test-or-split-before-merge"
+                }]
+            }
+        });
+
+        let issues =
+            envelope_codeclimate_issues(EnvelopeKind::Health, &envelope, Path::new("/project"));
+        let runtime = issues
+            .iter()
+            .find(|issue| issue.check_name == "fallow/runtime-safe-to-delete")
+            .expect("runtime issue");
+        let intelligence = issues
+            .iter()
+            .find(|issue| issue.check_name == "fallow/coverage-intelligence-risky-change")
+            .expect("coverage intelligence issue");
+
+        assert_eq!(runtime.severity, CodeClimateSeverity::Critical);
+        assert_eq!(intelligence.severity, CodeClimateSeverity::Major);
+    }
+
+    #[test]
+    fn stored_codeclimate_preserves_native_unused_file_contract() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            root.path().join(".fallowrc.json"),
+            r#"{"rules":{"unused-files":"warn"}}"#,
+        )
+        .expect("write config");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.path().join("src/dead.ts"),
+            }));
+        let rules = RulesConfig {
+            unused_files: Severity::Warn,
+            ..RulesConfig::default()
+        };
+        let direct = api_codeclimate_issues(&results, root.path(), &rules);
+        let mut envelope = serde_json::to_value(&results).expect("serialize results");
+        envelope["kind"] = serde_json::json!("dead-code");
+        envelope["unused_files"][0]["path"] = serde_json::json!("src/dead.ts");
+
+        let saved = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &envelope, root.path());
+
+        assert_eq!(
+            codeclimate_issues_to_value(&saved),
+            codeclimate_issues_to_value(&direct)
+        );
+    }
+
+    #[test]
+    fn stored_grouped_dead_code_preserves_native_owner_contract() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root.path().join("CODEOWNERS"), "src/* @frontend\n")
+            .expect("write CODEOWNERS");
+        let resolver = OwnershipResolver::Owner(
+            crate::codeowners::CodeOwners::load(root.path(), None).expect("load CODEOWNERS"),
+        );
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.path().join("src/button.ts"),
+                export_name: "legacyButton".to_string(),
+                is_type_only: false,
+                line: 4,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let rules = RulesConfig::default();
+        let mut direct = api_codeclimate_issues(&results, root.path(), &rules);
+        annotate_codeclimate_issues(&mut direct, CodeClimateAnnotationField::Owner, |path| {
+            grouping::resolve_owner(Path::new(path), Path::new(""), &resolver)
+        });
+        let mut envelope = serde_json::to_value(&results).expect("serialize results");
+        envelope["kind"] = serde_json::json!("dead-code");
+        fallow_output::strip_root_prefix(&mut envelope, &format!("{}/", root.path().display()));
+
+        let saved = envelope_codeclimate_issues_with_context(
+            EnvelopeKind::DeadCode,
+            &envelope,
+            root.path(),
+            None,
+            Some(&resolver),
+        );
+
+        assert_eq!(
+            codeclimate_issues_to_value(&saved),
+            codeclimate_issues_to_value(&direct)
+        );
+        assert_eq!(saved[0].owner.as_deref(), Some("@frontend"));
+    }
+
+    #[test]
+    fn stored_codeclimate_path_is_rebased_once_at_emit_boundary() {
+        let envelope = serde_json::json!({
+            "kind": "dead-code",
+            "unused_files": [{ "path": "src/dead.ts" }]
+        });
+        let root = PathBuf::from("/project/packages/app");
+
+        let mut issues = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &envelope, &root);
+        assert_eq!(issues[0].location.path, "src/dead.ts");
+
+        issues[0].location.path =
+            fallow_output::apply_path_prefix("packages/app", &issues[0].location.path);
+        assert_eq!(issues[0].location.path, "packages/app/src/dead.ts");
+    }
+
+    #[test]
+    fn stored_dead_code_codeclimate_covers_native_findings() {
+        let root = PathBuf::from("/project");
+        let results = sample_results(&root);
+        let rules = RulesConfig::default();
+        let direct = api_codeclimate_issues(&results, &root, &rules);
+        let mut envelope = serde_json::to_value(&results).expect("serialize results");
+        envelope["kind"] = serde_json::json!("dead-code");
+        fallow_output::strip_root_prefix(&mut envelope, "/project/");
+        let _: AnalysisResults =
+            serde_json::from_value(envelope.clone()).expect("saved dead-code envelope round-trip");
+
+        let saved = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &envelope, &root);
+        assert_eq!(
+            codeclimate_issues_to_value(&saved),
+            codeclimate_issues_to_value(&direct)
+        );
     }
 
     #[test]
@@ -1548,6 +2022,7 @@ mod tests {
                 line: 7,
                 col: 0,
                 span_start: 0,
+                semantic: None,
             }));
         // private_type_leaks defaults to Off; enable it so the issue is emitted.
         let rules = RulesConfig {

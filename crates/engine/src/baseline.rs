@@ -53,6 +53,11 @@ fn retain_new_by_keys<T>(
 /// Baseline data for comparison.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct BaselineData {
+    /// Compatibility identity for the analysis that produced this baseline.
+    /// Legacy baselines deserialize as syntactic and are never silently
+    /// compared with type-aware output.
+    #[serde(default)]
+    analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
     unused_files: Vec<String>,
     unused_exports: Vec<String>,
     unused_types: Vec<String>,
@@ -188,6 +193,18 @@ pub struct BaselineData {
 
 impl BaselineData {
     pub fn from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
+        Self::from_results_with_identity(
+            results,
+            root,
+            fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
+        )
+    }
+
+    pub fn from_results_with_identity(
+        results: &crate::results::AnalysisResults,
+        root: &Path,
+        analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
+    ) -> Self {
         let file_exports = baseline_file_export_keys(results, root);
         let member_imports = baseline_member_import_keys(results, root);
         let dependencies = baseline_dependency_keys(results, root);
@@ -195,6 +212,7 @@ impl BaselineData {
         let catalog = baseline_catalog_keys(results, root);
 
         Self {
+            analysis_identity,
             unused_files: file_exports.unused_files,
             unused_exports: file_exports.unused_exports,
             unused_types: file_exports.unused_types,
@@ -238,6 +256,11 @@ impl BaselineData {
             route_collisions: file_exports.route_collisions,
             dynamic_segment_name_conflicts: file_exports.dynamic_segment_name_conflicts,
         }
+    }
+
+    #[must_use]
+    pub const fn analysis_identity(&self) -> &fallow_types::semantic::SemanticAnalysisIdentity {
+        &self.analysis_identity
     }
 
     /// Total number of entries across all categories.
@@ -2211,6 +2234,7 @@ mod tests {
     #[test]
     fn filter_keeps_new_issues_not_in_baseline() {
         let baseline = BaselineData {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             unused_files: vec!["src/old.ts".to_string()],
             unused_exports: vec![],
             unused_types: vec![],
@@ -2276,6 +2300,7 @@ mod tests {
     #[test]
     fn filter_with_empty_baseline_keeps_all() {
         let baseline = BaselineData {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             unused_files: vec![],
             unused_exports: vec![],
             unused_types: vec![],
@@ -2328,6 +2353,7 @@ mod tests {
     #[test]
     fn filter_new_exports_by_file_and_name() {
         let baseline = BaselineData {
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             unused_files: vec![],
             unused_exports: vec!["src/utils.ts:helperA".to_string()],
             unused_types: vec![],

@@ -92,6 +92,7 @@ fn feature_flags_options_from_params(params: &FeatureFlagsParams) -> FeatureFlag
                 .map(|workspace| vec![workspace]),
             changed_workspaces: None,
             explain: true,
+            type_aware: fallow_api::TypeAwareOptions::default(),
         },
         top: params.top,
     }

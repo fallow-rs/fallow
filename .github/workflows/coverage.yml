@@ -53,6 +53,7 @@ jobs:
               - 'editors/vscode/src/generated/lsp-initialization-options.d.ts'
               - 'editors/vscode/src/generated/issue-types.ts'
               - 'editors/vscode/package.json'
+              - 'tools/type-aware-sidecar/src/generated-protocol.mjs'
               - 'scripts/generate-all.mjs'
               - 'scripts/generation-transaction.mjs'
               - 'scripts/contract-surfaces.mjs'
@@ -80,6 +81,16 @@ jobs:
       - name: Set up Rust
         if: steps.coverage_policy.outputs.run == 'true'
         uses: ./.github/actions/setup-rust
+
+      - name: Set up Node.js
+        if: steps.coverage_policy.outputs.run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Install type-aware sidecar dependencies
+        if: steps.coverage_policy.outputs.run == 'true'
+        run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
 
       - name: Install cargo-llvm-cov
         if: steps.coverage_policy.outputs.run == 'true'

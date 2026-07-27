@@ -1233,6 +1233,7 @@ mod tests {
         std::fs::write(root.join("tests/app.test.ts"), "export const test = 1;").unwrap();
 
         let config = FallowConfig {
+            type_aware: fallow_config::TypeAwareConfig::default(),
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1393,6 +1394,7 @@ mod tests {
         .unwrap();
 
         let config = FallowConfig {
+            type_aware: fallow_config::TypeAwareConfig::default(),
             schema: None,
             extends: vec![],
             entry: vec![],

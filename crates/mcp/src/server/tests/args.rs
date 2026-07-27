@@ -150,6 +150,9 @@ fn analyze_args_with_all_options() {
         include_entry_exports: None,
         no_cache: Some(true),
         threads: Some(4),
+        type_aware: None,
+        type_aware_projects: None,
+        type_aware_require: None,
     };
     let args = build_analyze_args(&params).unwrap();
     assert_eq!(
@@ -1392,6 +1395,49 @@ fn health_args_minimal() {
 }
 
 #[test]
+fn type_aware_options_reach_analyze_health_and_audit() {
+    let analyze = build_analyze_args(&AnalyzeParams {
+        type_aware: Some(true),
+        type_aware_projects: Some(vec!["tsconfig.app.json".to_string()]),
+        type_aware_require: Some(TypeAwareRequireParam::Complete),
+        ..Default::default()
+    })
+    .expect("type-aware analyze params are valid");
+    assert!(analyze.contains(&"--type-aware".to_string()));
+    assert!(
+        analyze
+            .windows(2)
+            .any(|args| args == ["--type-aware-project", "tsconfig.app.json"])
+    );
+    assert!(
+        analyze
+            .windows(2)
+            .any(|args| args == ["--type-aware-require", "complete"])
+    );
+
+    let health = build_health_args(&HealthParams {
+        type_aware: Some(true),
+        type_coupling: Some(true),
+        ..Default::default()
+    });
+    assert!(health.contains(&"--type-aware".to_string()));
+    assert!(health.contains(&"--type-coupling".to_string()));
+
+    let audit = build_audit_args(&AuditParams {
+        type_aware: Some(true),
+        type_aware_require: Some(TypeAwareRequireParam::BestEffort),
+        ..Default::default()
+    })
+    .expect("type-aware audit params are valid");
+    assert!(audit.contains(&"--type-aware".to_string()));
+    assert!(
+        audit
+            .windows(2)
+            .any(|args| args == ["--type-aware-require", "best-effort"])
+    );
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "test fixture; linear setup/assert, length is not a maintainability concern"
@@ -1418,6 +1464,10 @@ fn health_args_with_all_options() {
         min_score: None,
         since: Some("6m".to_string()),
         min_commits: Some(5),
+        type_aware: None,
+        type_aware_projects: None,
+        type_aware_require: None,
+        type_coupling: None,
         churn_file: None,
         workspace: Some("packages/ui".to_string()),
         production: Some(true),
@@ -2280,6 +2330,9 @@ fn audit_args_with_all_options() {
         workspace: Some("@app/core".to_string()),
         no_cache: Some(true),
         threads: Some(4),
+        type_aware: None,
+        type_aware_projects: None,
+        type_aware_require: None,
         group_by: None,
         gate: Some("all".to_string()),
         dead_code_baseline: None,

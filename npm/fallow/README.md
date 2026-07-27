@@ -47,9 +47,30 @@ Every issue carries an `actions[]` array with an `auto_fixable` flag, so scripts
 - Architecture boundary violations, with zero-config presets
 - Design-system styling drift for CSS and CSS-in-JS (Sass/Less, CSS Modules, Tailwind, styled-components, Emotion, and more)
 - A changed-file PR gate with per-finding attribution (`fallow audit`)
+- Optional TypeScript checker evidence for exact symbol use, affected files, targeted tests, cross-file private type leaks, and public-signature coupling (`--type-aware`)
 - Optional runtime intelligence: hot paths, cold code, runtime-weighted health, stale flags (licensed Fallow Runtime; a single local coverage capture is free)
 
 For head-to-head timings against [knip](https://knip.dev) and [jscpd](https://github.com/kucherenko/jscpd), see [BENCHMARKS.md](https://github.com/fallow-rs/fallow/blob/main/BENCHMARKS.md): fallow is faster than knip on smaller projects, knip is faster on several larger repos, and jscpd's Rust rewrite is faster at raw duplication scanning.
+
+### Optional TypeScript semantic evidence
+
+Default analysis stays Rust-native and syntactic. Use `--type-aware` when a
+cleanup or refactor needs exact checker-backed identity across aliases,
+re-exports, packages, or tests:
+
+```bash
+npx fallow dead-code --unused-class-members --type-aware --format json --quiet
+npx fallow fix --type-aware --dry-run --format json --quiet
+npx fallow dead-code --type-aware --symbol-impact src/api.ts:Client --format json --quiet
+npx fallow health --type-aware --type-coupling --format json --quiet
+```
+
+This complements `tsc --noEmit` and Oxlint. It does not emit compiler
+diagnostics or duplicate local typed lint rules. If the optional companion
+cannot prove a result safely, fallow retains the finding and reports why.
+Required interface, abstract, and override members are removed from the
+findings. A class member is automatically fixable only with complete
+closed-world evidence and a matching declaration guard.
 
 ## Built for agents
 
@@ -83,7 +104,7 @@ Over 100 built-in framework plugins covering Next.js, Nuxt, Remix, Qwik, SvelteK
 
 ## Configuration
 
-Works out of the box. To customize, let [`fallow recommend`](https://docs.fallow.tools/cli/recommend) propose a config from the detected stack (read-only; `--format json` returns the full decision set for agents), run `fallow init`, or create a config file in your project root:
+Works out of the box. To customize, let [`fallow recommend`](https://docs.fallow.tools/cli/recommend) propose a config from the detected stack (read-only; `--format json` returns the full decision set for agents and points TypeScript projects to the optional `--type-aware` pass without enabling it), run `fallow init`, or create a config file in your project root:
 
 ```jsonc
 // .fallowrc.json

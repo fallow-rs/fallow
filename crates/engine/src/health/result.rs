@@ -1233,6 +1233,7 @@ fn build_health_result<R>(input: HealthResultInput<R>) -> HealthAnalysisResult<R
 
     HealthAnalysisResult {
         report,
+        type_aware_meta: None,
         grouping,
         group_resolver,
         config,

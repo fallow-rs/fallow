@@ -209,6 +209,119 @@ const buildTargetLeaves = (report: HealthReport): HealthLeafItem[] =>
     });
   });
 
+type TypeCouplingReport = NonNullable<
+  NonNullable<NonNullable<HealthOutput["_meta"]>["type_aware"]>["type_coupling"]
+>;
+type TypeCouplingSummary = NonNullable<TypeCouplingReport["summary"]>;
+type TypeCouplingFile = TypeCouplingReport["files"][number];
+type TypeCouplingEdge = TypeCouplingFile["edges"][number];
+type TypeCouplingCycle = NonNullable<TypeCouplingReport["cycles"]>[number];
+
+const typeCouplingReport = (report: HealthOutput): TypeCouplingReport | null =>
+  report._meta?.type_aware?.type_coupling ?? null;
+
+const buildTypeCouplingUnavailableLeaf = (coupling: TypeCouplingReport): HealthLeafItem => {
+  const message = coupling.actions?.[0] ?? `Semantic analysis is ${coupling.status}.`;
+  return new HealthLeafItem(message, "info", { tooltip: message });
+};
+
+const buildTypeCouplingSummaryLeaf = (summary: TypeCouplingSummary): HealthLeafItem => {
+  const summaryText = `${summary.distinct_coupled_files} of ${summary.project_size} files coupled, ${summary.edge_count} edges, ${summary.cycle_count} cycles`;
+  const tooltip = new vscode.MarkdownString();
+  tooltip.appendMarkdown(
+    `**Type coupling summary**\n\n${escapeHealthMarkdown(summaryText)}\n\nScope: ${escapeHealthMarkdown(summary.scope)}, ${escapeHealthMarkdown(summary.direction)}. P50 connections: ${summary.p50_distinct_connections.toFixed(1)}, P90: ${summary.p90_distinct_connections.toFixed(1)}, concentration: ${(summary.concentration * 100).toFixed(1)}%.\n\nAdvisory TypeScript public-signature coupling. It does not affect the health score.`,
+  );
+  return new HealthLeafItem(summaryText, "info", { tooltip });
+};
+
+const typeCouplingScore = (file: TypeCouplingFile): number =>
+  file.public_api_depends_on + file.public_types_used_by;
+
+const buildTypeCouplingEvidenceLeaf = (edge: TypeCouplingEdge): HealthLeafItem => {
+  const { relative } = resolveFilePath(edge.evidence.path);
+  const label = `${edge.source.exported_name} -> ${edge.target.exported_name} (${edge.relation})`;
+  const tooltip = `${label}\n${relative}:${edge.evidence.line}:${edge.evidence.col}`;
+  return new HealthLeafItem(label, undefined, {
+    tooltip,
+    open: edge.evidence,
+  });
+};
+
+const buildTypeCouplingContributorLeaf = (file: TypeCouplingFile): HealthLeafItem => {
+  const { relative } = resolveFilePath(file.path);
+  const detailText = `public API depends on ${file.public_api_depends_on}, public types used by ${file.public_types_used_by}`;
+  const tooltip = new vscode.MarkdownString();
+  tooltip.appendMarkdown(
+    `**${escapeHealthMarkdown(relative)}**\n\n${escapeHealthMarkdown(detailText)}\n\nAdvisory TypeScript public-signature coupling. It does not affect the health score.`,
+  );
+  const evidence = file.edges.map(buildTypeCouplingEvidenceLeaf);
+  const children =
+    evidence.length > 0
+      ? evidence
+      : [
+          new HealthLeafItem(`${detailText} (no located edge evidence)`, undefined, {
+            tooltip,
+            open: { path: file.path, line: 1, col: 0 },
+          }),
+        ];
+  return new HealthLeafItem(middleElidePath(relative), "references", {
+    tooltip,
+    children,
+  });
+};
+
+const buildTypeCouplingContributorLeaves = (coupling: TypeCouplingReport): HealthLeafItem[] => {
+  const ranked = coupling.top_contributors?.length ? coupling.top_contributors : coupling.files;
+  return ranked
+    .toSorted((left, right) => typeCouplingScore(right) - typeCouplingScore(left))
+    .slice(0, getHealthTopFindings())
+    .map(buildTypeCouplingContributorLeaf);
+};
+
+const buildTypeCouplingCycleLeaf = (
+  cycle: TypeCouplingCycle,
+  coupling: TypeCouplingReport,
+): HealthLeafItem => {
+  const path = cycle.files.join(" -> ");
+  const edges = coupling.files.flatMap((file) => file.edges);
+  const hops = cycle.files.slice(0, -1).map((sourcePath, index) => {
+    const targetPath = cycle.files[index + 1];
+    const edge = edges.find(
+      (candidate) => candidate.source.path === sourcePath && candidate.target.path === targetPath,
+    );
+    if (edge) {
+      return buildTypeCouplingEvidenceLeaf(edge);
+    }
+    return new HealthLeafItem(`${sourcePath} -> ${targetPath}`, undefined, {
+      tooltip: `Cycle hop without located edge evidence: ${sourcePath} -> ${targetPath}`,
+      open: { path: sourcePath, line: 1, col: 0 },
+    });
+  });
+  return new HealthLeafItem(`Cycle: ${path}`, "references", {
+    tooltip: path,
+    children: hops,
+  });
+};
+
+const buildTypeCouplingLeaves = (report: HealthOutput): HealthLeafItem[] => {
+  const coupling = typeCouplingReport(report);
+  if (!coupling) {
+    return [];
+  }
+  if (!coupling.summary) {
+    return [buildTypeCouplingUnavailableLeaf(coupling)];
+  }
+
+  const cycles = (coupling.cycles ?? [])
+    .slice(0, getHealthTopFindings())
+    .map((cycle) => buildTypeCouplingCycleLeaf(cycle, coupling));
+  return [
+    buildTypeCouplingSummaryLeaf(coupling.summary),
+    ...buildTypeCouplingContributorLeaves(coupling),
+    ...cycles,
+  ];
+};
+
 export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
   private report: HealthOutput | null = null;
   private view: vscode.TreeView<HealthItem> | null = null;
@@ -272,6 +385,8 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
     );
     addSection("hotspots", buildHotspotLeaves(this.report), this.report.hotspots?.length ?? 0);
     addSection("targets", buildTargetLeaves(this.report), this.report.targets?.length ?? 0);
+    const coupling = typeCouplingReport(this.report);
+    addSection("typeCoupling", buildTypeCouplingLeaves(this.report), coupling?.files.length ?? 0);
 
     return sections;
   }

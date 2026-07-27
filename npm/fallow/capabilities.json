@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.9.1",
+  "version": "3.10.0",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
@@ -468,6 +468,32 @@
         "true",
         "false"
       ]
+    },
+    {
+      "name": "--type-aware",
+      "type": "bool",
+      "required": false,
+      "description": "Opt in to TypeScript semantic analysis for project-wide symbol evidence. This does not emit compiler diagnostics or typed lint findings",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--type-aware-project",
+      "type": "string",
+      "required": false,
+      "description": "TypeScript project config to use for type-aware analysis (repeatable)"
+    },
+    {
+      "name": "--type-aware-require",
+      "type": "string",
+      "required": false,
+      "description": "Decide whether incomplete type-aware analysis is advisory or gating",
+      "possible_values": [
+        "best-effort",
+        "complete"
+      ]
     }
   ],
   "commands": [
@@ -810,6 +836,12 @@
           "description": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains; powers the `inspect_target` MCP tool"
         },
         {
+          "name": "--symbol-impact",
+          "type": "string",
+          "required": false,
+          "description": "Compute exact-symbol consumers, affected files, and targeted tests"
+        },
+        {
           "name": "--top",
           "type": "string",
           "required": false,
@@ -838,6 +870,11 @@
           ]
         }
       ]
+    },
+    {
+      "name": "type-aware",
+      "description": "Inspect the optional TypeScript semantic companion",
+      "flags": []
     },
     {
       "name": "inspect",
@@ -1350,6 +1387,16 @@
           ]
         },
         {
+          "name": "--type-coupling",
+          "type": "bool",
+          "required": false,
+          "description": "Show advisory project-local public-signature type coupling. Requires type-aware analysis and does not change the health score",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "--css",
           "type": "bool",
           "required": false,
@@ -1810,7 +1857,7 @@
     },
     {
       "name": "report",
-      "description": "Render a saved `--format json` results file in another format without re-running analysis (analyze once, render annotations and the job summary from the same file). v1 renders the GitHub-native formats only: `--format github-annotations` or `--format github-summary`",
+      "description": "Render a saved `--format json` results file in another format without re-running analysis (analyze once, render annotations and the job summary from the same file). Supports `github-annotations`, `github-summary`, `codeclimate`, and `sarif`",
       "flags": [
         {
           "name": "--from",
@@ -6743,6 +6790,38 @@
         "read_only": true
       },
       {
+        "name": "trace_symbol",
+        "kind": "trace",
+        "description": "Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat semantic.references, semantic.status, and semantic.identity as the authoritative exact evidence. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface.",
+        "cli_command": "fallow dead-code --type-aware --trace <file:export> --format json --quiet",
+        "key_params": [
+          "file",
+          "export_name",
+          "type_aware_projects",
+          "type_aware_require"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "symbol_impact",
+        "kind": "impact",
+        "description": "Return advisory exact-symbol consumers, affected files, and targeted tests for a TypeScript export or exported class method; select either export_name, or both class_name and member_name; not a substitute for tsc or Oxlint",
+        "cli_command": "fallow dead-code --type-aware --symbol-impact <file:export-or-class.member> --format json --quiet",
+        "key_params": [
+          "file",
+          "export_name",
+          "class_name",
+          "member_name",
+          "type_aware_projects",
+          "type_aware_require"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
         "name": "trace_file",
         "kind": "trace",
         "description": "Trace all module-graph edges for a file (imports, exports, importers, re-exports)",
@@ -6927,6 +7006,11 @@
     {
       "task": "delete an \"unused\" export or file",
       "command": "fallow dead-code --trace <file>:<export>",
+      "note": null
+    },
+    {
+      "task": "prove a TypeScript symbol's exact consumers before refactoring",
+      "command": "fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>",
       "note": null
     },
     {

@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
-use fallow_types::discover::{DiscoveredFile, StableFileKey};
+use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
+#[cfg(test)]
 use fallow_types::results::AnalysisResults;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::workspace::WorkspaceDiagnostic;
@@ -911,7 +912,7 @@ fn run_engine_owned_dead_code_pipeline(
         collect_usages,
         &entry_points,
     );
-    remove_configured_ignored_findings(&mut detector.results, config);
+    crate::dead_code::filter_configured_ignored_findings(&mut detector.results, config);
     let profile =
         core_backend::dead_code_pipeline_profile(core_backend::DeadCodePipelineProfileInput {
             retain_timings: retain_graph,
@@ -939,24 +940,6 @@ fn run_engine_owned_dead_code_pipeline(
         script_used_packages,
         file_hashes,
     })
-}
-
-fn remove_configured_ignored_findings(results: &mut AnalysisResults, config: &ResolvedConfig) {
-    if config.ignore_findings.is_empty() {
-        return;
-    }
-
-    results.remove_ignored_source_owned_issues(|path| {
-        let key = if path.is_absolute() {
-            let Ok(relative) = path.strip_prefix(&config.root) else {
-                return false;
-            };
-            StableFileKey::from_relative(relative)
-        } else {
-            StableFileKey::from_relative(path)
-        };
-        config.ignore_findings.is_ignored(key.as_str())
-    });
 }
 
 fn resolve_or_build_dead_code_graph(
@@ -1148,7 +1131,7 @@ mod tests {
             ..AnalysisResults::default()
         };
 
-        remove_configured_ignored_findings(&mut results, &config);
+        crate::dead_code::filter_configured_ignored_findings(&mut results, &config);
 
         assert_eq!(results.unused_files.len(), 1);
         assert_eq!(results.unused_files[0].file.path, outside);
