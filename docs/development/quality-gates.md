@@ -2,6 +2,22 @@
 
 Use this before large changes, reviews, commits, and pushes.
 
+## One-time local setup
+
+The type-aware CLI tests launch the real sidecar from
+`tools/type-aware-sidecar/`, which needs its own dependencies:
+
+```bash
+npm --prefix tools/type-aware-sidecar install
+```
+
+Without it, `type_aware_class_method_impact_uses_exact_owner_identity`,
+`type_aware_framework_contract_requires_package_provenance`, and
+`type_aware_refines_ambiguous_unused_exports_without_unsafe_fixes` fail with an
+exit code of 2 and empty stderr. That failure looks like a code defect but is a
+missing install; CI installs the sidecar, so these pass there either way. Check
+this first before investigating those three.
+
 ## Canonical commands
 
 Run the smallest useful scope first:
