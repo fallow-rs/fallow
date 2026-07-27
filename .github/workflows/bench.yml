@@ -14,7 +14,6 @@ on:
       - '.github/scripts/generate-benchmark-matrix.mjs'
       - '.github/scripts/generate-benchmark-matrix.test.mjs'
       - 'scripts/check-benchmark-harness.py'
-      - 'tools/type-aware-sidecar/**'
   push:
     branches: [main]
     paths:
@@ -27,7 +26,6 @@ on:
       - '.github/scripts/generate-benchmark-matrix.mjs'
       - '.github/scripts/generate-benchmark-matrix.test.mjs'
       - 'scripts/check-benchmark-harness.py'
-      - 'tools/type-aware-sidecar/**'
   workflow_dispatch:
 
 concurrency:
