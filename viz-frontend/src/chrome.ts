@@ -86,7 +86,7 @@ const LENSES: LensDef[] = [
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MARK_VIEW_BOX = "173.11 97.47 1008.49 1008.49";
-const FAVICON_VIEW_BOX = "139.5 63.86 1075.72 1075.72";
+const FAVICON_VIEW_BOX = "273.96 198.32 806.79 806.79";
 
 /**
  * The fallow f-wing mark, inlined so the single-file HTML report stays
