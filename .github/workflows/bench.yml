@@ -14,7 +14,6 @@ on:
       - '.github/scripts/generate-benchmark-matrix.mjs'
       - '.github/scripts/generate-benchmark-matrix.test.mjs'
       - 'scripts/check-benchmark-harness.py'
-      - 'tools/type-aware-sidecar/**'
   push:
     branches: [main]
     paths:
@@ -27,7 +26,6 @@ on:
       - '.github/scripts/generate-benchmark-matrix.mjs'
       - '.github/scripts/generate-benchmark-matrix.test.mjs'
       - 'scripts/check-benchmark-harness.py'
-      - 'tools/type-aware-sidecar/**'
   workflow_dispatch:
 
 concurrency:
@@ -118,34 +116,6 @@ jobs:
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
-
-  benchmark-type-aware:
-    name: CodSpeed walltime (type-aware cold and warm)
-    needs: benchmark-harness
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: tools/type-aware-sidecar/package-lock.json
-
-      - name: Install type-aware benchmark dependencies
-        run: npm ci --no-audit --no-fund
-        working-directory: tools/type-aware-sidecar
-
-      - name: Run type-aware benchmarks
-        uses: CodSpeedHQ/action@f99becdce5e5d51fd556489ebef684f4ecfd6286 # v4.18.5
-        with:
-          mode: walltime
-          run: npm run bench --prefix tools/type-aware-sidecar
 
   benchmark-full:
     name: CodSpeed full simulation (${{ matrix.label }})
