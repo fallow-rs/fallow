@@ -89,3 +89,5 @@ pub mod trace_chain;
 /// `workspace_diagnostics[]` keeps its typed JSON schema. The
 /// `schemars::JsonSchema` derive is gated on the `schema` feature.
 pub mod workspace;
+
+// Diagnostic no-op for issue #2024; this branch is not for merging.
