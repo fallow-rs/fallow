@@ -24,7 +24,13 @@ pub use store::GraphCacheStore;
 /// graph types that derive serde for the cache, the manifest types, or the
 /// store envelope) changes, so a stale `graph-cache.bin` written by an older
 /// binary is rejected rather than deserialized into the wrong shape.
-pub const GRAPH_CACHE_VERSION: u32 = 3;
+///
+/// Bump it for import-resolution semantics changes too, not only for wire-shape
+/// changes. The manifest compares this constant, the cache mode, and per-file
+/// fingerprints, and carries no binary version, so a cache written before a
+/// classification change replays the old classification verbatim on an
+/// unmodified tree and silently hides the new behaviour.
+pub const GRAPH_CACHE_VERSION: u32 = 4;
 
 /// Cached form of a resolved target.
 ///

@@ -1152,10 +1152,38 @@ fn resolve_style_canonical_path(
     {
         return ResolveResult::NpmPackage(pkg_name);
     }
+    if is_inside_project_root(ctx, &canonical)
+        && matches_nearest_tsconfig_path_alias(ctx, from_file, specifier)
+    {
+        return ResolveResult::ExternalFile(canonical);
+    }
     if let Some(pkg_name) = package_usage_name_for_external_bare_specifier(specifier) {
         return ResolveResult::NpmPackage(pkg_name);
     }
     ResolveResult::ExternalFile(canonical)
+}
+
+/// Whether `path` lives under the analyzed project root.
+///
+/// Containment is tested against both the configured root and its canonicalized
+/// form: the resolver returns realpaths (`ResolveOptions::symlinks` defaults to
+/// true) while the configured root may itself be reached through a symlink, as
+/// it is under `/tmp` on macOS.
+///
+/// This separates the two cases that reach the bare-specifier classification
+/// tail with no `node_modules` segment in the resolved path. A path-alias target
+/// inside the root is a project file the alias points at, which stays a concrete
+/// `ExternalFile` when `ignorePatterns` kept it out of the file index. A target
+/// outside the root is a workspace package reached through its install symlink,
+/// which must keep npm-package accounting so the declared dependency is credited
+/// (see `package_usage_name_for_external_bare_specifier`).
+fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> bool {
+    if path.starts_with(ctx.root) {
+        return true;
+    }
+    ctx.canonicalize_cache
+        .get(ctx.root)
+        .is_some_and(|canonical_root| path.starts_with(canonical_root))
 }
 
 /// Package-usage key for an import that resolved into `node_modules`.
@@ -1285,7 +1313,9 @@ impl ResolvedPathContext<'_, '_> {
         // A resolved path alias target can be absent from the project file index when
         // ignorePatterns excluded it. Keep the concrete target instead of reclassifying
         // the alias's bare-looking specifier as an npm package.
-        if matches_nearest_tsconfig_path_alias(self.ctx, self.from_file, self.specifier) {
+        if is_inside_project_root(self.ctx, path)
+            && matches_nearest_tsconfig_path_alias(self.ctx, self.from_file, self.specifier)
+        {
             return Some(ResolveResult::ExternalFile(path.to_path_buf()));
         }
 

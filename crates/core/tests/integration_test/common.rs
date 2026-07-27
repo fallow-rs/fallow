@@ -56,6 +56,21 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
+/// A config with `ignorePatterns` set, resolved through the same path a user's
+/// `fallow.toml` takes. Building the `GlobSet` this way keeps the default ignore
+/// set (`node_modules`, build output) that overwriting `ResolvedConfig::ignore_patterns`
+/// after the fact would discard. Everything else defaults.
+pub fn create_config_with_ignore_patterns(
+    root: PathBuf,
+    ignore_patterns: &[&str],
+) -> fallow_config::ResolvedConfig {
+    FallowConfig {
+        ignore_patterns: ignore_patterns.iter().map(|p| (*p).to_string()).collect(),
+        ..Default::default()
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
+}
+
 /// A config with `unusedComponentProps.ignorePattern` set, used to exercise the
 /// opt-in prop-exemption knob. Everything else defaults.
 pub fn create_config_with_unused_props_ignore(

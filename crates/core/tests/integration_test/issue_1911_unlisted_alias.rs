@@ -8,10 +8,17 @@
 //! `tsconfig.json` / `tsconfig.*.json` config file, so its `compilerOptions.paths`
 //! are registered project-wide, the valid alias imports resolve internally, and
 //! only a genuinely-broken alias target surfaces as `unresolved-import`.
+//!
+//! Also covers issue #1942, the same misreport reached from the other side: the
+//! alias target exists but `ignorePatterns` kept it out of the file index, so
+//! the bare-looking specifier fell through to npm-package classification. The
+//! resolver now keeps the concrete target for alias matches that land inside the
+//! analyzed root, while targets outside it stay npm packages so workspace
+//! install symlinks keep their dependency credit (#1008).
 
 use std::path::Path;
 
-use super::common::create_config;
+use super::common::{create_config, create_config_with_ignore_patterns};
 
 fn write(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {
@@ -132,31 +139,115 @@ fn issue_1942_ignored_paths_alias_not_reported_as_unlisted_dependency() {
             "include": ["src/**/*.ts", "sparta/**/*.ts"]
         }"#,
     );
+    // The second import is the positive control: a specifier that matches no
+    // alias and is installed nowhere must still be reported, so a regression
+    // that suppresses every unlisted dependency cannot make this test pass.
     write(
         &root.join("src/entry.ts"),
         r#"import { localValue } from "@synthetic/api/local-module";
-           console.log(localValue);"#,
+           import { helper } from "definitely-not-installed";
+           console.log(localValue, helper);"#,
     );
     write(
         &root.join("sparta/api/local-module.ts"),
         r#"export const localValue = "resolved inside the workspace";"#,
     );
 
-    let mut config = create_config(root.to_path_buf());
-    config.ignore_patterns = globset::GlobSetBuilder::new()
-        .add(globset::Glob::new("sparta/api/local-module.ts").expect("valid ignore glob"))
-        .build()
-        .expect("build ignore glob set");
+    let config =
+        create_config_with_ignore_patterns(root.to_path_buf(), &["sparta/api/local-module.ts"]);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
     assert!(
-        results.unlisted_dependencies.is_empty(),
-        "ignored local alias target should not be an unlisted dependency: {:?}",
-        results.unlisted_dependencies
+        !unlisted.contains(&"@synthetic/api"),
+        "ignored local alias target should not be an unlisted dependency, got {unlisted:?}"
     );
     assert!(
-        results.unresolved_imports.is_empty(),
-        "ignored local alias target should still resolve: {:?}",
-        results.unresolved_imports
+        unlisted.contains(&"definitely-not-installed"),
+        "a genuinely unlisted dependency must still be reported, got {unlisted:?}"
+    );
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|finding| finding.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved.contains(&"@synthetic/api/local-module"),
+        "ignored local alias target should still resolve, got {unresolved:?}"
+    );
+}
+
+/// The alias guard added for #1942 must not swallow npm-package accounting for
+/// a workspace dependency whose install symlink resolves outside the analyzed
+/// root, which is the case `package_usage_name_for_external_bare_specifier`
+/// exists to serve (#1008). The specifier shape alone is ambiguous: `@acme/ui`
+/// pattern-matches the `@acme/*` alias key, so only the resolved target's
+/// location distinguishes the two.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn issue_1942_guard_still_credits_workspace_package_resolved_outside_root() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let repo = dir.path();
+    let app = repo.join("apps/web");
+
+    write(
+        &repo.join("packages/ui/package.json"),
+        r#"{ "name": "@acme/ui", "version": "1.0.0", "main": "src/index.ts" }"#,
+    );
+    write(
+        &repo.join("packages/ui/src/index.ts"),
+        r#"export const Button = "button";"#,
+    );
+
+    write(
+        &app.join("package.json"),
+        r#"{
+            "name": "web",
+            "private": true,
+            "dependencies": { "@acme/ui": "workspace:*" }
+        }"#,
+    );
+    // A `paths` key whose prefix matches the workspace scope, which is what makes
+    // the specifier indistinguishable from an aliased project file by shape.
+    write(
+        &app.join("tsconfig.json"),
+        r#"{
+            "compilerOptions": { "paths": { "@acme/*": ["../../packages/*/src"] } },
+            "include": ["src/**/*.ts"]
+        }"#,
+    );
+    write(
+        &app.join("src/main.ts"),
+        r#"import { Button } from "@acme/ui";
+           console.log(Button);"#,
+    );
+
+    let link = app.join("node_modules/@acme/ui");
+    std::fs::create_dir_all(link.parent().expect("link parent")).expect("create node_modules dir");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(repo.join("packages/ui"), &link).expect("symlink workspace package");
+    #[cfg(windows)]
+    if std::os::windows::fs::symlink_dir(repo.join("packages/ui"), &link).is_err() {
+        // Windows needs developer mode or elevation for symlinks; without the
+        // link there is nothing to regress, so skip rather than fail spuriously.
+        return;
+    }
+
+    let config = create_config(app);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused.contains(&"@acme/ui"),
+        "imported workspace package must stay credited as used, got {unused:?}"
     );
 }
