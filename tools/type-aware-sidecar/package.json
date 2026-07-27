@@ -17,7 +17,12 @@
     "fallow-type-aware": "./fallow-type-aware.mjs"
   },
   "scripts": {
+    "bench": "node bench/session.mjs",
     "test": "node --test"
+  },
+  "devDependencies": {
+    "@codspeed/benchmark.js-plugin": "5.7.1",
+    "benchmark": "2.1.4"
   },
   "dependencies": {
     "typescript": "7.0.2"

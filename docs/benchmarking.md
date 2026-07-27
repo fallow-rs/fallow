@@ -5,6 +5,11 @@ Fallow uses Criterion-compatible Rust benchmarks with CodSpeed simulation in
 shards so PR feedback stays useful and noisy suites do not hide real
 regressions.
 
+The optional TypeScript semantic companion is measured separately with
+CodSpeed walltime. Simulation cannot measure the interpreted Node.js process or
+its child process, so `tools/type-aware-sidecar/bench/session.mjs` tracks cold
+Program construction and warm persistent-session reuse as distinct benchmarks.
+
 Fast PR shards are selected by `.github/scripts/generate-benchmark-matrix.mjs`.
 Like Oxc's benchmark workflow, this keeps the tracked surface broad while only
 running the shards affected by a given change. Manual and merge-queue runs use
@@ -68,6 +73,7 @@ For local signal, prefer targeted Criterion runs:
 ```bash
 cargo bench -p fallow-benchmarks --bench programmatic_stable <filter> -- --sample-size 10
 cargo bench -p fallow-core --bench analysis <filter> -- --sample-size 10
+npm run bench --prefix tools/type-aware-sidecar
 ```
 
 Use CodSpeed CI as the release-grade signal. Local `cargo codspeed` runs are

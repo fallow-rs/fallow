@@ -24,6 +24,10 @@ MATRIX_SCRIPT = REPO_ROOT / ".github" / "scripts" / "generate-benchmark-matrix.m
 FAST_JOB = "benchmark"
 FULL_JOB = "benchmark-full"
 EXPECTED_MODE = "simulation"
+TYPE_AWARE_JOB = "benchmark-type-aware"
+TYPE_AWARE_MODE = "walltime"
+TYPE_AWARE_BENCH = REPO_ROOT / "tools" / "type-aware-sidecar" / "bench" / "session.mjs"
+TYPE_AWARE_MANIFEST = REPO_ROOT / "tools" / "type-aware-sidecar" / "package.json"
 MAX_BENCHES_PER_SHARD = 1_000
 NOISY_FAST_TARGETS = {
     ("fallow-benchmarks", "programmatic_commands"),
@@ -184,15 +188,50 @@ def assert_codspeed_action_modes(text: str) -> list[str]:
     elif len(set(action_refs)) != 1:
         errors.append(f"CodSpeed action refs differ: {sorted(set(action_refs))}")
 
-    modes = re.findall(r"mode:\s*([^\s]+)", text)
+    job_match = re.search(
+        rf"(?ms)^  {TYPE_AWARE_JOB}:\s*$\n(.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\Z)",
+        text,
+    )
+    if job_match is None:
+        errors.append(f"bench workflow is missing {TYPE_AWARE_JOB}")
+        rust_jobs = text
+    else:
+        type_aware_job = job_match.group(1)
+        if re.findall(r"mode:\s*([^\s]+)", type_aware_job) != [TYPE_AWARE_MODE]:
+            errors.append(f"{TYPE_AWARE_JOB} must use {TYPE_AWARE_MODE} mode")
+        rust_jobs = f"{text[: job_match.start()]}{text[job_match.end() :]}"
+
+    modes = re.findall(r"mode:\s*([^\s]+)", rust_jobs)
     codspeed_modes = [mode for mode in modes if mode in {"simulation", "walltime", "memory"}]
     if not codspeed_modes:
         errors.append("bench workflow does not declare a CodSpeed mode")
     elif any(mode != EXPECTED_MODE for mode in codspeed_modes):
-        errors.append(f"CodSpeed modes must all be {EXPECTED_MODE}: {codspeed_modes}")
+        errors.append(f"Rust CodSpeed modes must all be {EXPECTED_MODE}: {codspeed_modes}")
 
     if "id-token: write" not in text:
         errors.append("bench workflow must keep OIDC id-token permission for CodSpeed shards")
+    return errors
+
+
+def validate_type_aware_benchmark(text: str) -> list[str]:
+    errors: list[str] = []
+    if not TYPE_AWARE_BENCH.is_file():
+        errors.append(f"type-aware benchmark is missing at {TYPE_AWARE_BENCH}")
+    else:
+        source = TYPE_AWARE_BENCH.read_text(encoding="utf-8")
+        for name in (
+            "type-aware cold semantic analysis",
+            "type-aware warm semantic session",
+        ):
+            if f'.add("{name}"' not in source:
+                errors.append(f"type-aware benchmark is missing {name!r}")
+    manifest = json.loads(TYPE_AWARE_MANIFEST.read_text(encoding="utf-8"))
+    if manifest.get("scripts", {}).get("bench") != "node bench/session.mjs":
+        errors.append("type-aware package must expose the stable bench/session.mjs command")
+    if "npm run bench --prefix tools/type-aware-sidecar" not in text:
+        errors.append("type-aware CodSpeed job does not run the package benchmark")
+    if "tools/type-aware-sidecar/**" not in text:
+        errors.append("type-aware benchmark paths do not trigger the benchmark workflow")
     return errors
 
 
@@ -286,6 +325,7 @@ def main() -> int:
     errors.extend(validate_targets(targets))
     errors.extend(validate_required_targets(targets))
     errors.extend(validate_unique_names())
+    errors.extend(validate_type_aware_benchmark(text))
 
     if not any(target.job == FAST_JOB for target in targets):
         errors.append("fast benchmark job has no matrix targets")
