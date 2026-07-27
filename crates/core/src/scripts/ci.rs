@@ -113,7 +113,7 @@ fn extract_ci_signals(
 /// Recognizes:
 /// - YAML list items in script blocks: `  - npx tool --flag`
 /// - GitHub Actions run fields: `  run: command`
-/// - Multi-line run blocks: `  run: |` followed by indented lines
+/// - Block scalar run blocks: `  run: |` or `  run: >` followed by indented lines
 fn extract_ci_commands(content: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut multiline_run = MultilineRunState::default();
@@ -195,8 +195,28 @@ fn yaml_run_value(trimmed: &str) -> Option<&str> {
         .map(str::trim)
 }
 
+/// Recognize a YAML block scalar header on a `run:` value.
+///
+/// Accepts the literal (`|`) and folded (`>`) styles with any combination of a
+/// chomping indicator (`-`, `+`) and an explicit indentation indicator (`1`-`9`),
+/// in either order, matching the YAML block header grammar. A header carrying a
+/// trailing comment is still not recognized.
 fn is_multiline_run_marker(value: &str) -> bool {
-    matches!(value, "|" | "|-" | "|+")
+    let mut chars = value.chars();
+    if !matches!(chars.next(), Some('|' | '>')) {
+        return false;
+    }
+
+    let mut chomping = false;
+    let mut indentation = false;
+    for ch in chars {
+        match ch {
+            '-' | '+' if !chomping => chomping = true,
+            '1'..='9' if !indentation => indentation = true,
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn push_yaml_list_command(trimmed: &str, commands: &mut Vec<String>) {
@@ -520,5 +540,25 @@ jobs:
         assert!(!is_yaml_mapping("npm ci"));
         assert!(!is_yaml_mapping("npx eslint src"));
         assert!(!is_yaml_mapping("https://example.com"));
+    }
+
+    /// GitHub Actions accepts the folded style as readily as the literal one, and
+    /// fallow's own release-validation workflow uses it.
+    #[test]
+    fn folded_run_scalar_is_a_block_marker() {
+        for marker in ["|", "|-", "|+", ">", ">-", ">+", "|2", ">2-", ">-2"] {
+            assert!(
+                is_multiline_run_marker(marker),
+                "{marker} is a block header"
+            );
+        }
+        for value in [
+            "", "npm ci", "|foo", ">out.txt", "||", ">>", "-", "|0", "|--",
+        ] {
+            assert!(
+                !is_multiline_run_marker(value),
+                "{value} is a command, not a block header"
+            );
+        }
     }
 }

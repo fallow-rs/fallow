@@ -4,7 +4,6 @@
 //! Parses `project.json` to extract executor references as tooling dependencies
 //! and `options.main` as entry points.
 
-#[cfg(test)]
 use std::path::Path;
 
 use super::config_parser;
@@ -13,7 +12,7 @@ use super::{Plugin, PluginResult};
 define_plugin!(
     struct NxPlugin => "nx",
     enablers: &["nx"],
-    config_patterns: &["**/project.json"],
+    config_patterns: &["nx.json", "**/project.json"],
     always_used: &["nx.json", "**/project.json"],
     tooling_dependencies: &[
         "nx",
@@ -38,6 +37,10 @@ define_plugin!(
         "@nx/nest",
     ],
     resolve_config(config_path, source, _root) {
+        if config_path.file_name().is_some_and(|name| name == "nx.json") {
+            return resolve_nx_json(config_path, source);
+        }
+
         let mut result = PluginResult::default();
 
         let executor_strings = config_parser::extract_config_object_nested_strings(
@@ -117,6 +120,72 @@ define_plugin!(
         result
     },
 );
+
+/// Read the workspace-level dependency references out of `nx.json`.
+///
+/// Nx cannot run a target whose plugin, executor, or task runner is missing, so
+/// every package named here is load-bearing.
+fn resolve_nx_json(config_path: &Path, source: &str) -> PluginResult {
+    let mut result = PluginResult::default();
+
+    let plugins = config_parser::extract_config_shallow_strings_or_object_property(
+        source,
+        config_path,
+        "plugins",
+        "plugin",
+    );
+
+    let executors = config_parser::extract_config_object_nested_strings(
+        source,
+        config_path,
+        &["targetDefaults"],
+        &["executor"],
+    );
+
+    // Nx also accepts an executor string as a `targetDefaults` key, which sets
+    // defaults for every target that runs it. A plain target name has no colon.
+    let executor_keys: Vec<String> =
+        config_parser::extract_config_object_keys(source, config_path, &["targetDefaults"])
+            .into_iter()
+            .filter(|key| key.contains(':'))
+            .collect();
+
+    let runners = config_parser::extract_config_object_nested_strings(
+        source,
+        config_path,
+        &["tasksRunnerOptions"],
+        &["runner"],
+    );
+
+    for reference in plugins
+        .iter()
+        .chain(&executors)
+        .chain(&executor_keys)
+        .chain(&runners)
+    {
+        if let Some(package) = nx_reference_package(reference) {
+            result.referenced_dependencies.push(package);
+        }
+    }
+
+    result
+}
+
+/// Resolve an Nx plugin, executor, or task-runner reference to its npm package.
+///
+/// Executors are `<package>:<executor>` and a plugin may name a subpath such as
+/// `@nx/vite/plugin`. A workspace-local plugin is addressed by path, which is a
+/// file rather than a dependency.
+fn nx_reference_package(reference: &str) -> Option<String> {
+    if reference.starts_with("./") || reference.starts_with('/') {
+        return None;
+    }
+    let package = reference.split(':').next()?;
+    if package.is_empty() {
+        return None;
+    }
+    Some(crate::resolve::extract_package_name(package))
+}
 
 /// Expand Nx workspace tokens in a path string.
 ///
@@ -503,5 +572,71 @@ mod tests {
             expand_nx_tokens("{projectRoot}/src/styles", ""),
             "src/styles"
         );
+    }
+
+    #[test]
+    fn resolve_nx_json_credits_plugins_target_defaults_and_runner() {
+        let source = r#"{
+            "plugins": [
+                "nx-stylelint",
+                { "plugin": "@monodon/rust/plugin", "options": {} },
+                "./tools/local-plugin"
+            ],
+            "targetDefaults": {
+                "@jscutlery/semver:version": { "cache": true },
+                "build": { "executor": "@nx/vite:build" }
+            },
+            "tasksRunnerOptions": {
+                "default": { "runner": "nx-cloud" }
+            }
+        }"#;
+        let result = NxPlugin.resolve_config(Path::new("nx.json"), source, Path::new("/project"));
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"nx-stylelint".to_string()), "{deps:?}");
+        assert!(
+            deps.contains(&"@monodon/rust".to_string()),
+            "a plugin subpath must credit its scoped package, not the subpath: {deps:?}"
+        );
+        assert!(deps.contains(&"@jscutlery/semver".to_string()), "{deps:?}");
+        assert!(deps.contains(&"@nx/vite".to_string()), "{deps:?}");
+        assert!(deps.contains(&"nx-cloud".to_string()), "{deps:?}");
+    }
+
+    #[test]
+    fn resolve_nx_json_skips_local_paths_and_plain_target_names() {
+        let source = r#"{
+            "plugins": ["./tools/local-plugin", "/abs/plugin"],
+            "targetDefaults": {
+                "build": { "cache": true },
+                "e2e": { "executor": "./tools/executors/e2e:run" }
+            }
+        }"#;
+        let result = NxPlugin.resolve_config(Path::new("nx.json"), source, Path::new("/project"));
+        assert!(
+            result.referenced_dependencies.is_empty(),
+            "workspace-local paths and plain target names are not packages: {:?}",
+            result.referenced_dependencies
+        );
+    }
+
+    #[test]
+    fn resolve_config_project_json_ignores_nx_json_keys() {
+        let source = r#"{
+            "plugins": ["nx-stylelint"],
+            "tasksRunnerOptions": { "default": { "runner": "nx-cloud" } },
+            "targets": { "build": { "executor": "@nx/vite:build" } }
+        }"#;
+        let result = NxPlugin.resolve_config(
+            Path::new("apps/app/project.json"),
+            source,
+            Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"@nx/vite".to_string()), "{deps:?}");
+        assert!(
+            !deps.contains(&"nx-stylelint".to_string()),
+            "nx.json-only keys must not be read from project.json: {deps:?}"
+        );
+        assert!(!deps.contains(&"nx-cloud".to_string()), "{deps:?}");
     }
 }

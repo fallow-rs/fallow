@@ -31,7 +31,7 @@ pub use store::GraphCacheStore;
 /// classification change replays the old classification verbatim on an
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
-pub const GRAPH_CACHE_VERSION: u32 = 5;
+pub const GRAPH_CACHE_VERSION: u32 = 6;
 
 /// Cached form of a resolved target.
 ///

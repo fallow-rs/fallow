@@ -8,7 +8,9 @@ use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["semantic-release"];
 
-const CONFIG_PATTERNS: &[&str] = &["release.config.{js,cjs,mjs}", ".releaserc.{js,cjs}"];
+// The YAML forms and bare `.releaserc` (JSON or YAML, with no extension to tell
+// them apart) stay activation-only: the extractor is a JS/JSON parser.
+const CONFIG_PATTERNS: &[&str] = &["release.config.{js,cjs,mjs}", ".releaserc.{js,cjs,json}"];
 
 const ALWAYS_USED: &[&str] = &[
     "release.config.{js,cjs,mjs}",
@@ -162,6 +164,38 @@ mod tests {
             result
                 .referenced_dependencies
                 .contains(&"@semantic-release/git".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_json_releaserc_credits_plugin_outside_name_prefix() {
+        let source = r#"{
+            "branches": ["main"],
+            "plugins": [
+                ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+                "conventional-changelog-conventionalcommits"
+            ]
+        }"#;
+        let plugin = SemanticReleasePlugin;
+        let result =
+            plugin.resolve_config(Path::new(".releaserc.json"), source, Path::new("/project"));
+        let deps = &result.referenced_dependencies;
+        assert!(
+            deps.contains(&"conventional-changelog-conventionalcommits".to_string()),
+            "a plugin outside the `semantic-release` name prefix is not covered by the \
+             tooling.toml prefix exemption, so only config extraction can credit it: {deps:?}"
+        );
+    }
+
+    #[test]
+    fn config_patterns_cover_json_releaserc_but_not_yaml() {
+        let patterns = SemanticReleasePlugin.config_patterns();
+        assert!(patterns.contains(&".releaserc.{js,cjs,json}"));
+        assert!(
+            !patterns
+                .iter()
+                .any(|p| p.contains("yaml") || p.contains("yml")),
+            "the extractor is a JS/JSON parser; the YAML forms stay activation-only"
         );
     }
 }

@@ -8,6 +8,10 @@ use super::{Plugin, PluginResult};
 
 const CONFIG_EXPORTS: &[&str] = &["default"];
 
+/// Vite ships the lightningcss integration but not the package: either of these
+/// config values makes the build fail until the project installs it itself.
+const LIGHTNINGCSS_SELECTOR_PATHS: &[&[&str]] = &[&["css", "transformer"], &["build", "cssMinify"]];
+
 fn additional_data_entry_pattern(
     root: &std::path::Path,
     source: &fallow_extract::css::CssImportSource,
@@ -175,6 +179,17 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(dep));
         }
 
+        for selector in LIGHTNINGCSS_SELECTOR_PATHS {
+            if config_parser::extract_config_string(source, config_path, selector)
+                .is_some_and(|value| value == "lightningcss")
+            {
+                result
+                    .referenced_dependencies
+                    .push("lightningcss".to_string());
+                break;
+            }
+        }
+
         for preprocessor in ["scss", "sass", "less", "stylus"] {
             let body = config_parser::extract_config_string_or_array(
                 source,
@@ -200,6 +215,8 @@ define_plugin!(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -707,6 +724,70 @@ mod tests {
         assert!(
             !result.referenced_dependencies.contains(&"src".to_string()),
             "local style references should not be misclassified as packages"
+        );
+    }
+
+    #[test]
+    fn resolve_config_lightningcss_transformer_credits_dependency() {
+        let source = r#"export default defineConfig({ css: { transformer: "lightningcss" } });"#;
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"lightningcss".to_string()),
+            "{:?}",
+            result.referenced_dependencies
+        );
+    }
+
+    #[test]
+    fn resolve_config_lightningcss_css_minify_credits_dependency() {
+        let source = r#"export default defineConfig({ build: { cssMinify: "lightningcss" } });"#;
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"lightningcss".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_default_css_pipeline_does_not_credit_lightningcss() {
+        let source = r#"export default defineConfig({ css: { transformer: "postcss" }, build: { cssMinify: "esbuild" } });"#;
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"lightningcss".to_string()),
+            "the default pipeline must not exempt an unused lightningcss"
+        );
+    }
+
+    #[test]
+    fn resolve_config_lightningcss_string_under_another_key_does_not_credit_dependency() {
+        let source = r#"export default defineConfig({ define: { __CSS_ENGINE__: "lightningcss" }, build: { minify: "lightningcss" } });"#;
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"lightningcss".to_string()),
+            "only the two selector keys make the package load-bearing"
         );
     }
 }
