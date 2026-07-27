@@ -1212,23 +1212,42 @@ fn extract_object_from_function<'a>(func: &'a Function<'a>) -> Option<&'a Object
         .and_then(|body| extract_object_from_function_body(body))
 }
 
+/// Resolve the object a config callback returns.
+///
+/// A return at the body's own level is the callback's main config and always
+/// wins, which keeps the overwhelmingly common `guard clause; return { ... }`
+/// shape resolving to the real config rather than to the guard's early return.
+/// Only a body with no top-level return falls back to searching branches, which
+/// is the shape Vite documents for switching config by command:
+/// `if (command === "serve") { return { ... } } else { return { ... } }`.
 fn extract_object_from_function_body<'a>(
     body: &'a FunctionBody<'a>,
 ) -> Option<&'a ObjectExpression<'a>> {
-    find_returned_object(&body.statements, MAX_CONFIG_BRANCH_DEPTH)
+    find_top_level_returned_object(&body.statements)
+        .or_else(|| find_returned_object(&body.statements, MAX_CONFIG_BRANCH_DEPTH))
 }
 
 /// Maximum control-flow nesting searched for a config `return`.
 const MAX_CONFIG_BRANCH_DEPTH: u8 = 4;
 
+/// Find the first object returned by a statement at this exact level.
+fn find_top_level_returned_object<'a>(
+    statements: &'a [Statement<'a>],
+) -> Option<&'a ObjectExpression<'a>> {
+    statements.iter().find_map(|stmt| match stmt {
+        Statement::ReturnStatement(ret) => ret
+            .argument
+            .as_ref()
+            .and_then(|argument| extract_object_from_expression(argument)),
+        _ => None,
+    })
+}
+
 /// Find the first returned object literal in `statements`, descending into
 /// control flow.
 ///
-/// A config callback routinely branches on the build mode
-/// (`if (command === "serve") { return { ... } } return { ... }`), so looking at
-/// top-level statements only means the whole config extracts nothing. Nested
-/// function and arrow bodies are deliberately not searched: their returns belong
-/// to the inner function, not to the config callback.
+/// Nested function and arrow bodies are deliberately not searched: their returns
+/// belong to the inner function, not to the config callback.
 ///
 /// The first return in source order wins. A config whose branches declare
 /// different values therefore contributes only the first branch's.
@@ -3452,7 +3471,9 @@ mod tests {
         );
     }
 
-    /// Vite's documented mode-branching config shape.
+    /// Vite's documented shape for switching config by command: every branch
+    /// returns and the callback has no return of its own, so extraction has to
+    /// descend to find anything at all.
     #[test]
     fn conditional_config_callback_extracts_branch_return() {
         let source = r#"
@@ -3460,13 +3481,15 @@ mod tests {
             export default defineConfig(({ command }) => {
                 if (command === "serve") {
                     return { test: { environment: "jsdom" } };
+                } else {
+                    return { test: { environment: "node" } };
                 }
-                return { test: { environment: "node" } };
             });
         "#;
         assert_eq!(
             extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
-            Some("jsdom")
+            Some("jsdom"),
+            "with no top-level return, the first branch in source order wins"
         );
     }
 
@@ -3506,10 +3529,11 @@ mod tests {
         );
     }
 
-    /// A guard clause followed by the real return must still resolve to the
-    /// trailing return, which is what worked before branch descent existed.
+    /// A guard clause followed by the real return must resolve to the trailing
+    /// return. Descending into branches before checking this level regressed it:
+    /// the guard's early return shadowed the actual config.
     #[test]
-    fn guard_clause_then_top_level_return_is_unchanged() {
+    fn guard_clause_does_not_shadow_the_top_level_return() {
         let source = r#"
             import { defineConfig } from 'vite';
             export default defineConfig(({ mode }) => {
@@ -3521,8 +3545,29 @@ mod tests {
         "#;
         assert_eq!(
             extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
-            None,
-            "the first return in source order wins, even when it is a guard clause"
+            Some("jsdom"),
+            "a return at the callback's own level is the main config"
+        );
+    }
+
+    /// The same precedence with an else-if chain, where every branch returns and
+    /// the trailing return is the default config.
+    #[test]
+    fn else_if_chain_does_not_shadow_the_top_level_return() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            export default defineConfig(({ mode }) => {
+                if (mode === "a") {
+                    return { base: "/a/" };
+                } else if (mode === "b") {
+                    return { base: "/b/" };
+                }
+                return { test: { environment: "jsdom" } };
+            });
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("jsdom")
         );
     }
 
