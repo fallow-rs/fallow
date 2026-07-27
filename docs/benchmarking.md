@@ -6,11 +6,10 @@ shards so PR feedback stays useful and noisy suites do not hide real
 regressions.
 
 The optional TypeScript semantic companion is measured separately with
-CodSpeed walltime on its macro runner. Simulation cannot measure the
-interpreted Node.js process or its child process, so
-`tools/type-aware-sidecar/bench/session.mjs` uses the supported Tinybench
-integration to track cold Program construction and warm persistent-session
-reuse as distinct benchmarks.
+CodSpeed walltime. Simulation cannot measure the interpreted Node.js process or
+its child process, so `tools/type-aware-sidecar/bench/session.mjs` uses the
+supported Tinybench integration to track cold Program construction and warm
+persistent-session reuse as distinct benchmarks.
 
 Fast PR shards are selected by `.github/scripts/generate-benchmark-matrix.mjs`.
 Like Oxc's benchmark workflow, this keeps the tracked surface broad while only

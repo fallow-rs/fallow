@@ -234,8 +234,6 @@ def validate_type_aware_benchmark(text: str) -> list[str]:
         errors.append("type-aware benchmark must use CodSpeed's walltime-compatible Tinybench plugin")
     if "npm run bench --prefix tools/type-aware-sidecar" not in text:
         errors.append("type-aware CodSpeed job does not run the package benchmark")
-    if "runs-on: codspeed-macro" not in text:
-        errors.append("type-aware walltime benchmark must run on a CodSpeed macro runner")
     if "tools/type-aware-sidecar/**" not in text:
         errors.append("type-aware benchmark paths do not trigger the benchmark workflow")
     return errors
