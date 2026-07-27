@@ -309,14 +309,14 @@ fn migrate_knip_ignore_suppresses_findings_without_removing_files() {
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect();
 
-    let normalised: Vec<String> = files.iter().map(|f| f.replace('\\', "/")).collect();
+    let normalized: Vec<String> = files.iter().map(|f| f.replace('\\', "/")).collect();
     assert!(
-        normalised.iter().any(|path| path == "src/hidden.ts"),
-        "ignored findings must not remove their source file from discovery: {normalised:?}"
+        normalized.iter().any(|path| path == "src/hidden.ts"),
+        "ignored findings must not remove their source file from discovery: {normalized:?}"
     );
     assert!(
-        normalised.iter().any(|path| path == "vitest.config.ts"),
-        "an ignored entry must stay discovered so its imports remain reachable: {normalised:?}"
+        normalized.iter().any(|path| path == "vitest.config.ts"),
+        "an ignored entry must stay discovered so its imports remain reachable: {normalized:?}"
     );
 
     let dead_code = run_fallow_raw(&[
