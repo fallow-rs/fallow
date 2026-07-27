@@ -183,15 +183,18 @@ def benchmark_names(path: Path) -> list[str]:
     return re.findall(r'bench_function\(\s*"([^"]+)"', text)
 
 
-def assert_codspeed_action_modes(text: str) -> list[str]:
+def assert_codspeed_action_modes(text: str, type_aware_text: str) -> list[str]:
     errors: list[str] = []
-    action_refs = re.findall(r"uses:\s*CodSpeedHQ/action@([^\s]+)", text)
+    # Both workflows upload through the same action, so the pin is checked across
+    # the pair: splitting them must not let one drift to another version.
+    action_refs = re.findall(
+        r"uses:\s*CodSpeedHQ/action@([^\s]+)", f"{text}\n{type_aware_text}"
+    )
     if not action_refs:
-        errors.append("bench workflow does not use CodSpeedHQ/action")
+        errors.append("benchmark workflows do not use CodSpeedHQ/action")
     elif len(set(action_refs)) != 1:
         errors.append(f"CodSpeed action refs differ: {sorted(set(action_refs))}")
 
-    type_aware_text = TYPE_AWARE_WORKFLOW.read_text(encoding="utf-8")
     if f"  {TYPE_AWARE_JOB}:" not in type_aware_text:
         errors.append(f"type-aware workflow is missing {TYPE_AWARE_JOB}")
     elif re.findall(r"mode:\s*([^\s]+)", type_aware_text) != [TYPE_AWARE_MODE]:
@@ -316,6 +319,10 @@ def validate_unique_names() -> list[str]:
 
 def main() -> int:
     text = BENCH_WORKFLOW.read_text(encoding="utf-8")
+    if not TYPE_AWARE_WORKFLOW.is_file():
+        error(f"type-aware benchmark workflow is missing at {TYPE_AWARE_WORKFLOW}")
+        return 1
+    type_aware_text = TYPE_AWARE_WORKFLOW.read_text(encoding="utf-8")
     try:
         static_targets = extract_matrix_targets(text)
         targets = fast_targets_from_generator() + [
@@ -326,11 +333,11 @@ def main() -> int:
         return 1
 
     errors = []
-    errors.extend(assert_codspeed_action_modes(text))
+    errors.extend(assert_codspeed_action_modes(text, type_aware_text))
     errors.extend(validate_targets(targets))
     errors.extend(validate_required_targets(targets))
     errors.extend(validate_unique_names())
-    errors.extend(validate_type_aware_benchmark(TYPE_AWARE_WORKFLOW.read_text(encoding="utf-8")))
+    errors.extend(validate_type_aware_benchmark(type_aware_text))
 
     if not any(target.job == FAST_JOB for target in targets):
         errors.append("fast benchmark job has no matrix targets")
