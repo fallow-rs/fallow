@@ -156,6 +156,9 @@ pub struct ScriptCommand {
     pub config_args: Vec<String>,
     /// File path arguments (positional args that look like file paths).
     pub file_args: Vec<String>,
+    /// Packages this command names through a flag value rather than by
+    /// importing them or invoking them as the binary.
+    pub flag_packages: Vec<String>,
 }
 
 /// Filter scripts to only production-relevant ones (start, build, and their pre/post hooks).
@@ -373,6 +376,7 @@ fn accumulate_parsed_commands(
             }
         }
 
+        result.used_packages.extend(cmd.flag_packages);
         result.config_files.extend(cmd.config_args);
         result.entry_files.extend(cmd.file_args);
     }
@@ -542,17 +546,74 @@ fn parse_command_segment(
             binary,
             config_args: Vec::new(),
             file_args: Vec::new(),
+            flag_packages: Vec::new(),
         });
     }
 
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
     let (file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
+    let flag_packages = flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     Some(ScriptCommand {
         binary,
         config_args,
         file_args,
+        flag_packages,
     })
+}
+
+/// Built-in eslint formatters, which ship inside eslint itself and resolve to no
+/// separate package.
+const ESLINT_BUILTIN_FORMATTERS: &[&str] = &["stylish", "json", "json-with-metadata", "html"];
+
+/// Packages a CLI names through a flag value rather than a positional argument.
+///
+/// eslint expands `--format gha` to the `eslint-formatter-gha` package using a
+/// documented shorthand, so a formatter invoked only from a CI command has no
+/// import, no config entry, and no binary invocation anywhere in the project and
+/// is reported as an unused dependency (issue #2006).
+///
+/// The synthesized name only ever exempts an already-declared dependency from
+/// the unused scan; it is not consulted by unlisted-dependency detection, so an
+/// undeclared formatter cannot turn into a new finding.
+fn flag_referenced_packages(binary: &str, args: &[&str]) -> Vec<String> {
+    if binary != "eslint" {
+        return Vec::new();
+    }
+
+    let mut packages = Vec::new();
+    let mut idx = 0;
+    while idx < args.len() {
+        let token = args[idx];
+        let value = if let Some(value) = token
+            .strip_prefix("--format=")
+            .or_else(|| token.strip_prefix("-f="))
+        {
+            idx += 1;
+            value
+        } else if matches!(token, "--format" | "-f") {
+            idx += 2;
+            let Some(value) = args.get(idx - 1) else {
+                break;
+            };
+            value
+        } else {
+            idx += 1;
+            continue;
+        };
+
+        let value = strip_surrounding_quotes(value);
+        // A path or a scoped/namespaced package is passed through as written by
+        // eslint, so only the bare shorthand expands.
+        if value.is_empty()
+            || value.contains(['/', '\\', '.'])
+            || ESLINT_BUILTIN_FORMATTERS.contains(&value)
+        {
+            continue;
+        }
+        packages.push(format!("eslint-formatter-{value}"));
+    }
+    packages
 }
 
 /// Extract a config file path from a `--config` or `-c` flag.
