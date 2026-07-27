@@ -1146,13 +1146,20 @@ fn extract_object_from_expression<'a>(
             for arg in &call.arguments {
                 match arg {
                     Argument::ObjectExpression(obj) => return Some(obj),
+                    // Both arrow forms reach here: the concise
+                    // `defineConfig(() => ({ ... }))` and the block body
+                    // `defineConfig(({ mode }) => { ...; return { ... }; })`.
+                    // The block form is the common shape for configs that
+                    // branch on the mode, and handling only the concise one
+                    // made every such config invisible to extraction.
                     Argument::ArrowFunctionExpression(arrow) => {
-                        if arrow.expression
-                            && !arrow.body.statements.is_empty()
-                            && let Statement::ExpressionStatement(expr_stmt) =
-                                &arrow.body.statements[0]
-                        {
-                            return extract_object_from_expression(&expr_stmt.expression);
+                        if let Some(obj) = extract_object_from_arrow_function(arrow) {
+                            return Some(obj);
+                        }
+                    }
+                    Argument::FunctionExpression(func) => {
+                        if let Some(obj) = extract_object_from_function(func) {
+                            return Some(obj);
                         }
                     }
                     _ => {}
@@ -3186,6 +3193,48 @@ mod tests {
         "#;
         let include = extract_config_string_array(source, &ts_path(), &["test", "include"]);
         assert_eq!(include, vec!["**/*.test.ts"]);
+    }
+
+    /// A block-bodied callback is the common shape for configs that branch on
+    /// the build mode. Only the concise arrow used to be traversed, so every
+    /// such config extracted nothing at all (issue #2005).
+    #[test]
+    fn extract_define_config_block_body_arrow_function() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            export default defineConfig(({ mode }) => {
+                const isProduction = mode === 'production';
+                return {
+                    test: {
+                        environment: "jsdom",
+                        setupFiles: "./tests/setup.ts"
+                    },
+                    base: isProduction ? '/app/' : '/'
+                };
+            });
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("jsdom")
+        );
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "setupFiles"]).as_deref(),
+            Some("./tests/setup.ts")
+        );
+    }
+
+    #[test]
+    fn extract_define_config_function_expression() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            export default defineConfig(function () {
+                return { test: { environment: "happy-dom" } };
+            });
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("happy-dom")
+        );
     }
 
     #[test]

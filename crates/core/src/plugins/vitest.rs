@@ -24,6 +24,10 @@ const ENTRY_PATTERNS: &[&str] = &[
 const CONFIG_PATTERNS: &[&str] = &[
     "**/vitest.config.{ts,js,mts,mjs}",
     "vitest.workspace.{ts,js}",
+    // A vite config carrying a `test` block IS the vitest config for that
+    // project; vitest reads it directly. Every extraction below is keyed under
+    // `test`, so a vite config without one contributes nothing.
+    "**/vite.config.{ts,js,mts,mjs}",
 ];
 
 const ALWAYS_USED: &[&str] = &[
@@ -228,14 +232,24 @@ fn add_vitest_setup_files(
 }
 
 fn add_vitest_environment_dependency(result: &mut PluginResult, source: &str, config_path: &Path) {
-    if let Some(env) =
+    let Some(env) =
         config_parser::extract_config_string(source, config_path, &["test", "environment"])
-        && !matches!(env.as_str(), "node" | "jsdom" | "happy-dom")
-    {
-        result
-            .referenced_dependencies
-            .push(format!("vitest-environment-{env}"));
-        result.referenced_dependencies.push(env);
+    else {
+        return;
+    };
+
+    match env.as_str() {
+        "node" => {}
+        "jsdom" | "happy-dom" => {
+            result.referenced_dependencies.push(env.clone());
+            super::credit_environment_optional_peers(&env, result);
+        }
+        _ => {
+            result
+                .referenced_dependencies
+                .push(format!("vitest-environment-{env}"));
+            result.referenced_dependencies.push(env);
+        }
     }
 }
 

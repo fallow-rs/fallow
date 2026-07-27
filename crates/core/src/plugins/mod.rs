@@ -1155,6 +1155,23 @@ fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, c
     }
 }
 
+/// Credit the optional peer dependencies a test environment loads at runtime.
+///
+/// `jsdom` declares `canvas` as an optional peer and requires it lazily when it
+/// is installed, so a project that installs `canvas` to give jsdom real canvas
+/// support has no import of it anywhere in its own source. Without this credit
+/// the dependency is reported as unused and removing it silently breaks every
+/// canvas-backed test (issue #2005).
+///
+/// `happy-dom` ships its own canvas stub and takes no such peer, so it gets no
+/// credit here. Only names already declared in the manifest can be credited, so
+/// this never invents an unlisted dependency.
+fn credit_environment_optional_peers(environment: &str, result: &mut PluginResult) {
+    if environment == "jsdom" {
+        result.referenced_dependencies.push("canvas".to_string());
+    }
+}
+
 mod adonis;
 mod angular;
 mod astro;

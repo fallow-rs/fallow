@@ -286,7 +286,9 @@ fn credit_inline_project_runner_fields(
     }
 
     for value in read("testEnvironment") {
-        if !matches!(value.as_str(), "node" | "jsdom") {
+        if matches!(value.as_str(), "node" | "jsdom") {
+            super::credit_environment_optional_peers(&value, result);
+        } else {
             result
                 .referenced_dependencies
                 .push(crate::resolve::extract_package_name(&value));
@@ -578,12 +580,15 @@ fn extract_jest_scalar_dependencies(
 ) {
     if let Some(env) =
         config_parser::extract_config_string(parse_source, parse_path, &["testEnvironment"])
-        && !matches!(env.as_str(), "node" | "jsdom")
     {
-        result
-            .referenced_dependencies
-            .push(format!("jest-environment-{env}"));
-        result.referenced_dependencies.push(env);
+        if matches!(env.as_str(), "node" | "jsdom") {
+            super::credit_environment_optional_peers(&env, result);
+        } else {
+            result
+                .referenced_dependencies
+                .push(format!("jest-environment-{env}"));
+            result.referenced_dependencies.push(env);
+        }
     }
 
     if let Some(resolver) =
