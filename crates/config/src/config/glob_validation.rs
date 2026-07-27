@@ -233,6 +233,9 @@ pub fn validate_user_globs(
 /// Validate finding-ignore patterns, treating a leading `!` as a report
 /// exception, validating each project-relative body, and proving both matcher
 /// sets can be compiled together.
+///
+/// An empty body is only an error after an explicit `!`. A bare empty pattern is
+/// a glob that matches nothing, which `ignorePatterns` already accepts.
 pub fn validate_user_finding_ignore_globs(
     patterns: &[String],
     field: &'static str,
@@ -240,13 +243,15 @@ pub fn validate_user_finding_ignore_globs(
 ) {
     let initial_error_count = errors.len();
     for pattern in patterns {
-        let body = pattern.strip_prefix('!').unwrap_or(pattern);
-        if body.is_empty() {
+        let negated_body = pattern.strip_prefix('!');
+        if negated_body.is_some_and(str::is_empty) {
             errors.push(GlobValidationError::EmptyNegation {
                 field,
                 pattern: pattern.clone(),
             });
-        } else if let Err(error) = compile_user_glob(body, field) {
+            continue;
+        }
+        if let Err(error) = compile_user_glob(negated_body.unwrap_or(pattern.as_str()), field) {
             errors.push(error);
         }
     }
@@ -492,5 +497,38 @@ mod tests {
     fn field_name_in_error_message() {
         let err = compile_user_glob("../oops", "duplicates.ignore").unwrap_err();
         assert!(err.to_string().starts_with("duplicates.ignore:"));
+    }
+
+    /// `ignorePatterns` accepts an empty pattern, so `ignoreFindings` rejecting it
+    /// was both an asymmetry and a misleading message about a `!` it lacks.
+    #[test]
+    fn finding_ignore_globs_accept_empty_pattern_like_ignore_patterns() {
+        let mut findings_errors = Vec::new();
+        validate_user_finding_ignore_globs(
+            &[String::new()],
+            "ignoreFindings",
+            &mut findings_errors,
+        );
+
+        let mut patterns_errors = Vec::new();
+        validate_user_globs(&[String::new()], "ignorePatterns", &mut patterns_errors);
+
+        assert!(findings_errors.is_empty(), "errors: {findings_errors:?}");
+        assert!(patterns_errors.is_empty(), "errors: {patterns_errors:?}");
+    }
+
+    #[test]
+    fn finding_ignore_globs_reject_empty_body_only_after_bang() {
+        let mut errors = Vec::new();
+        validate_user_finding_ignore_globs(
+            &[String::new(), "!".to_string(), "src/**".to_string()],
+            "ignoreFindings",
+            &mut errors,
+        );
+        assert_eq!(errors.len(), 1, "only the bare `!` is invalid: {errors:?}");
+        assert!(matches!(
+            errors[0],
+            GlobValidationError::EmptyNegation { .. }
+        ));
     }
 }
