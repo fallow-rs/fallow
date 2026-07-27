@@ -407,3 +407,135 @@ fn migrate_no_config_exits_2() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Fixture for entry-glob conformance: a Next.js-shaped tree where the knip
+/// `entry` globs select a known subset and the rest must stay out of scope.
+fn entry_glob_fixture(suffix: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "fallow-migrate-roundtrip-{}-{}",
+        std::process::id(),
+        suffix
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "roundtrip-fixture", "main": "app/page.tsx"}"#,
+    )
+    .unwrap();
+
+    let matched = [
+        "app/layout.tsx",
+        "app/page.tsx",
+        "app/api/route.ts",
+        "components/button.tsx",
+        "components/card.tsx",
+        "lib/utils.ts",
+        "lib/db.ts",
+        // Matches `lib/**/*.ts` like any other file there; knip selects it too.
+        "lib/db.test.ts",
+        "pages/_app.tsx",
+        "pages/api/hello.ts",
+    ];
+    let unmatched = [
+        "__tests__/utils.test.ts",
+        "dist/bundle.js",
+        "node_modules/foo/index.js",
+        "scripts/build.ts",
+    ];
+
+    for rel in matched.iter().chain(unmatched.iter()) {
+        let path = dir.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "export const x = 1;\n").unwrap();
+    }
+
+    dir
+}
+
+/// Migrated knip `entry` globs must scope the same file set knip documents.
+///
+/// This is the entry half of the former `migrate_roundtrip_globs_match_knip_documented_semantics`.
+/// Its `ignore` half moved to `migrate_knip_ignore_suppresses_findings_without_removing_files`
+/// when `ignore` started migrating to `ignoreFindings`, which deliberately no
+/// longer narrows the file set. Entry-glob scoping did not change, so it keeps
+/// its own end-to-end guard: a brace-expansion or globset regression in the
+/// migrator's pattern copy would otherwise go unnoticed.
+///
+/// Asserts on `list --entry-points`, not `list --files`: discovery is scoped by
+/// `ignorePatterns`, so the file list would measure the ignore path rather than
+/// the entry globs this test is about.
+#[test]
+fn migrate_roundtrip_entry_globs_match_knip_documented_semantics() {
+    let knip = r#"{
+        "entry": [
+            "app/**/*.{ts,tsx}",
+            "pages/**/*.{ts,tsx}",
+            "components/**/*.{ts,tsx}",
+            "lib/**/*.ts"
+        ]
+    }"#;
+
+    let dir = entry_glob_fixture("entry-globs");
+    fs::write(dir.join("knip.json"), knip).unwrap();
+
+    let migrate = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(
+        migrate.code, 0,
+        "migrate should exit 0, stderr: {}",
+        migrate.stderr
+    );
+    assert!(
+        dir.join(".fallowrc.json").exists(),
+        ".fallowrc.json should be written"
+    );
+
+    let list = run_fallow_raw(&[
+        "list",
+        "--entry-points",
+        "--format",
+        "json",
+        "--root",
+        dir.to_str().unwrap(),
+        "--quiet",
+    ]);
+    assert_eq!(
+        list.code, 0,
+        "list --entry-points should exit 0, stderr: {}",
+        list.stderr
+    );
+
+    let body = parse_json(&list);
+    let entries: Vec<String> = body
+        .get("entry_points")
+        .and_then(|v| v.as_array())
+        .expect("list --entry-points JSON should carry an entry_points array")
+        .iter()
+        .filter_map(|v| v.get("path").and_then(|p| p.as_str()).map(str::to_owned))
+        .collect();
+
+    let expected: Vec<&str> = vec![
+        "app/api/route.ts",
+        "app/layout.tsx",
+        "app/page.tsx",
+        "components/button.tsx",
+        "components/card.tsx",
+        "lib/db.test.ts",
+        "lib/db.ts",
+        "lib/utils.ts",
+        "pages/_app.tsx",
+        "pages/api/hello.ts",
+    ];
+
+    let normalised: Vec<String> = entries.iter().map(|f| f.replace('\\', "/")).collect();
+    assert_eq!(
+        normalised, expected,
+        "fallow's entry set diverged from knip's documented entry-glob \
+         semantics, including `{{ts,tsx}}` brace expansion. If knip recently \
+         changed engines this is real drift; otherwise check fallow's globset \
+         or the migrator's pattern copy."
+    );
+
+    cleanup(&dir);
+}

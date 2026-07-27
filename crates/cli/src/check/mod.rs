@@ -656,6 +656,7 @@ fn handle_trace_side_effects(
 
 fn apply_scope_filters(
     opts: &CheckOptions<'_>,
+    config: &ResolvedConfig,
     results: &mut AnalysisResults,
     ws_roots: Option<&Vec<std::path::PathBuf>>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -674,6 +675,14 @@ fn apply_scope_filters(
     if let Some(diff_index) = diff_index {
         filtering::filter_results_by_diff(results, diff_index, opts.root);
     }
+
+    // Scope filters prune the owner list of a multi-owner finding in place
+    // (`duplicate_exports` narrows `locations`), so a group the engine kept
+    // because one owner was outside `ignoreFindings` can end up holding only
+    // ignored owners. Re-apply the ignore filter over the scoped result so the
+    // "hidden only when every owner matches" contract holds for what is actually
+    // reported. The helper returns immediately when no patterns are configured.
+    fallow_engine::dead_code::filter_configured_ignored_findings(results, config);
 }
 
 fn apply_rules_and_filters(
@@ -971,6 +980,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     apply_scope_filters(
         opts,
+        &config,
         &mut data.results,
         ws_roots.as_ref(),
         changed_files.as_ref(),

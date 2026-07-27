@@ -125,7 +125,7 @@ fn write_string_section(
     let _ = writeln!(output, "\n[{section}]");
     for (key, value) in section_obj {
         if let Some(s) = value.as_str() {
-            let _ = writeln!(output, "{key} = \"{s}\"");
+            let _ = writeln!(output, "{key} = {}", toml_string(s));
         }
     }
 }
@@ -153,7 +153,7 @@ fn write_duplicates_value(output: &mut String, key: &str, value: &serde_json::Va
             let _ = writeln!(output, "{key} = {b}");
         }
         serde_json::Value::String(s) => {
-            let _ = writeln!(output, "{key} = \"{s}\"");
+            let _ = writeln!(output, "{key} = {}", toml_string(s));
         }
         serde_json::Value::Array(arr) => {
             let _ = writeln!(output, "{key} = [{}]", quoted_items(arr).join(", "));
@@ -164,6 +164,17 @@ fn write_duplicates_value(output: &mut String, key: &str, value: &serde_json::Va
 
 fn quoted_items(arr: &[serde_json::Value]) -> Vec<String> {
     arr.iter()
-        .filter_map(|v| v.as_str().map(|s| format!("\"{s}\"")))
+        .filter_map(|v| v.as_str().map(toml_string))
         .collect()
+}
+
+/// Render `value` as a TOML string literal.
+///
+/// Migrated values come verbatim from a knip config, so a glob can carry a
+/// backslash (Windows-style separators, an escaped brace) or a quote. Splicing
+/// those into `"{value}"` emits a `fallow.toml` that fails to parse, or worse
+/// parses into a different glob, while `migrate` still reports success.
+/// Serializing through `toml` applies the escaping rules the parser expects.
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
 }
