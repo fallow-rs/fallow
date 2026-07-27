@@ -159,6 +159,21 @@ test("CI runs the checked-in Action against the current Rust binary", () => {
   assert.doesNotMatch(publishedCompatibilityWorkflow, /cargo build --bin fallow/);
 });
 
+test("Action PR comment smoke requires and verifies the branded GitHub App", () => {
+  const workflow = readWorkflow(".github/workflows/test-action.yml");
+  const job = indentedBlock(workflow, "test-comment", 2);
+
+  assert.match(job, /permissions:\n\s+contents: read\n\s+id-token: write\n\s+pull-requests: write/);
+  assert.match(
+    job,
+    /if: github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
+  );
+  assert.match(job, /EXPECTED_COMMENT_AUTHOR: fallow-cloud\[bot\]/);
+  assert.match(job, /"\$COMMENT_COUNT" -ne 1/);
+  assert.match(job, /COMMENT_AUTHOR=.*jq -r '\.\[0\]\.user\.login \/\/ empty'/);
+  assert.match(job, /"\$COMMENT_AUTHOR" != "\$EXPECTED_COMMENT_AUTHOR"/);
+});
+
 test("binary-size workflow isolates incompatible release builds", () => {
   const workflow = readWorkflow(".github/workflows/bloat.yml");
   const globalEnv = indentedBlock(workflow, "env", 0);
