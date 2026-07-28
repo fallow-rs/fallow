@@ -33,6 +33,9 @@ pub struct CiAnalysis {
 ///
 /// CI files always live at `.gitlab-ci.yml` or `.github/workflows/*.yml`
 /// relative to the project root, so no workspace-prefix transformation applies.
+/// The catalog spans the whole project, so a CI step that resolves to a script
+/// declared only by a workspace package credits that body's dependencies but
+/// contributes none of its file arguments, which are relative to that package.
 pub fn analyze_ci_files(
     root: &Path,
     bin_map: &FxHashMap<String, String>,
@@ -499,6 +502,39 @@ jobs:
         );
         assert!(analysis.used_packages.contains("eslint"));
         assert!(analysis.used_packages.contains("eslint-formatter-gha"));
+    }
+
+    /// A root CI step resolving to a workspace-only script must not turn that
+    /// body's file arguments into root-relative entry patterns (issue #2016).
+    #[test]
+    fn workspace_only_script_body_does_not_seed_root_entry_files() {
+        let content = r"
+jobs:
+  build:
+    steps:
+      - run: npm run build -- --mode ci
+";
+        #[expect(
+            clippy::disallowed_types,
+            reason = "ScriptCatalog is built from serde-deserialized HashMap"
+        )]
+        let ws_scripts: std::collections::HashMap<String, String> =
+            std::iter::once(("build".to_string(), "esbuild scripts/bundle.js".to_string()))
+                .collect();
+        let mut scripts = ScriptCatalog::default();
+        scripts.merge_workspace_scripts(&ws_scripts);
+
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &set(&["esbuild"]),
+            &scripts,
+            &mut analysis,
+        );
+        assert!(analysis.used_packages.contains("esbuild"));
+        assert!(analysis.entry_files.is_empty());
     }
 
     #[test]

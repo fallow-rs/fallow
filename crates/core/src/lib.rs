@@ -1851,7 +1851,7 @@ fn collect_all_scripts(
     }
     for (_, ws_pkg) in workspace_pkgs {
         if let Some(ref ws_scripts) = ws_pkg.scripts {
-            catalog.merge_scripts(ws_scripts);
+            catalog.merge_workspace_scripts(ws_scripts);
         }
     }
     catalog
@@ -1893,7 +1893,7 @@ fn analyze_root_scripts(
     } else {
         pkg_scripts.clone()
     };
-    let catalog = scripts::ScriptCatalog::from_scripts(pkg_scripts);
+    let catalog = scripts::ScriptCatalog::from_scripts(&scripts_to_analyze);
     let script_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &config.root,
@@ -1964,7 +1964,7 @@ fn analyze_one_workspace_scripts(
     } else {
         ws_scripts.clone()
     };
-    let catalog = scripts::ScriptCatalog::from_scripts(ws_scripts);
+    let catalog = scripts::ScriptCatalog::from_scripts(&scripts_to_analyze);
     let ws_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &ws.root,

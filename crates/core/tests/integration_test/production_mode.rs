@@ -259,3 +259,46 @@ fn analyze_project_honors_per_analysis_dead_code_production() {
         "per-analysis production.deadCode=true should exclude *.test.ts from analyze_project, found: {unused_file_names:?}"
     );
 }
+
+/// Under production filtering the script catalog is filtered too, so
+/// `npm run lint -- --fix` inside a production script cannot reach the
+/// dev-only `lint` body and credit its binary (issue #2016).
+#[test]
+fn production_mode_does_not_follow_indirection_into_filtered_scripts() {
+    let root = fixture_path("production-script-indirection");
+    let config = create_production_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        unused.contains(&"indirect-only-tool"),
+        "indirect-only-tool is only reachable through a filtered-out script, got {unused:?}"
+    );
+}
+
+#[test]
+fn non_production_mode_follows_indirection_into_dev_scripts() {
+    let root = fixture_path("production-script-indirection");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused.contains(&"indirect-only-tool"),
+        "the lint script is analyzed outside production mode, got {unused:?}"
+    );
+    assert!(
+        unused.contains(&"unused-control"),
+        "an unreferenced control dependency must still be reported, got {unused:?}"
+    );
+}
