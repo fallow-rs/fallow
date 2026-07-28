@@ -334,44 +334,88 @@ test("release runs Zed verification on macOS and Windows without credentials", (
 
 test("release publication waits for the aggregate verification gate", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
+  const context = indentedBlock(workflow, "release-context", 2);
+  const build = indentedBlock(workflow, "build", 2);
+  const validate = indentedBlock(workflow, "validate", 2);
   const gate = indentedBlock(workflow, "release-verified", 2);
   const publishCrates = indentedBlock(workflow, "publish-crates", 2);
-  const release = indentedBlock(workflow, "release", 2);
+  const releaseAssets = indentedBlock(workflow, "release-assets", 2);
+  const releaseReady = indentedBlock(workflow, "release-ready", 2);
   const npmPublish = indentedBlock(workflow, "npm-publish", 2);
   const vscodePublish = indentedBlock(workflow, "vscode-publish", 2);
 
+  assert.match(context, /permissions:\n\s+contents: read/);
+  assert.match(build, /needs: release-context/);
+  assert.match(validate, /needs: release-context/);
   assert.match(gate, /needs: \[build, validate\]/);
   assert.match(gate, /permissions: \{\}/);
-  assert.match(publishCrates, /needs: \[release-verified, release\]/);
-  assert.match(release, /needs: release-verified/);
-  assert.match(npmPublish, /needs: \[npm-prep, release\]/);
-  assert.match(vscodePublish, /needs: \[vscode-prep, release\]/);
+  assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
+  assert.match(releaseAssets, /needs: release-verified/);
+  assert.match(releaseAssets, /permissions:\n\s+contents: read/);
+  assert.match(npmPublish, /needs: \[npm-prep, release-assets\]/);
+  assert.match(vscodePublish, /needs: \[vscode-prep, release-assets\]/);
+  assert.match(
+    releaseReady,
+    /needs: \[publish-crates, npm-publish, vscode-publish, release-assets\]/,
+  );
+  assert.match(releaseReady, /permissions:\n\s+contents: read/);
+  assert.match(releaseReady, /Release tag .* appeared before the release workflow completed/u);
 });
 
-test("release requires curated public notes before uploading assets", () => {
+test("release keeps the version tag last and requires curated public notes", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
-  const release = indentedBlock(workflow, "release", 2);
+  const context = indentedBlock(workflow, "release-context", 2);
+  const releaseAssets = indentedBlock(workflow, "release-assets", 2);
   const skill = readFileSync(".agents/skills/release/SKILL.md", "utf8");
-  const verifyStep = release.indexOf("- name: Verify curated release metadata");
-  const uploadStep = release.indexOf("- name: Upload assets to curated GitHub Release");
+  const downloadStep = releaseAssets.indexOf("- name: Download all artifacts");
+  const absentTagStep = releaseAssets.indexOf("- name: Reconfirm release tag is absent");
+  const assembleStep = releaseAssets.indexOf("- name: Assemble release asset bundle");
+  const uploadStep = releaseAssets.indexOf("- name: Upload release asset bundle");
+  const workflowDispatch = skill.indexOf("gh workflow run release.yml");
+  const downloadBundle = skill.indexOf('gh run download "$RUN_ID"');
+  const signedTag = skill.indexOf('git tag -s "$TAG"');
+  const createRelease = skill.indexOf('gh release create "$TAG"');
 
-  assert.notEqual(verifyStep, -1, "release must verify curated metadata");
-  assert.notEqual(uploadStep, -1, "release must upload to the curated release");
-  assert.ok(verifyStep < uploadStep, "curated metadata must be verified before asset upload");
-  assert.match(release, /gh release view "\$TAG_NAME"/u);
-  assert.match(release, /Curated GitHub Release title is empty/u);
-  assert.match(release, /title is missing a user-facing summary/u);
-  assert.match(release, /Curated GitHub Release body is empty/u);
-  assert.match(release, /compare_suffix="\.\.\.\$\{TAG_NAME\}"/u);
-  assert.match(release, /full changelog comparison link/u);
-  assert.match(release, /fail_on_unmatched_files: true/u);
-  assert.match(release, /generate_release_notes: false/u);
+  assert.notEqual(downloadStep, -1, "release must download every built artifact");
+  assert.notEqual(absentTagStep, -1, "release must reconfirm tag absence");
+  assert.notEqual(assembleStep, -1, "release must assemble the final asset bundle");
+  assert.notEqual(uploadStep, -1, "release must store the final asset bundle");
+  assert.ok(downloadStep < absentTagStep);
+  assert.ok(absentTagStep < assembleStep);
+  assert.ok(assembleStep < uploadStep);
+  assert.match(workflow, /^  workflow_dispatch:$/mu);
+  assert.match(workflow, /^\s{6}tag:$/mu);
+  assert.doesNotMatch(workflow, /^\s{6}release_id:$/mu);
+  assert.doesNotMatch(workflow, /^  push:\n\s+tags:/mu);
+  assert.doesNotMatch(workflow, /github\.ref_name|refs\/tags\/v/mu);
+  assert.match(context, /GITHUB_REF.*refs\/heads\/main/su);
+  assert.match(context, /Release tag must match vMAJOR\.MINOR\.PATCH/u);
+  assert.match(context, /immutable-releases/u);
+  assert.match(context, /Release tag .* already exists; tag creation must remain near the end/u);
+  assert.match(releaseAssets, /Release tag .* appeared before publication completed/u);
+  assert.match(releaseAssets, /No release assets were downloaded/u);
+  assert.match(releaseAssets, /Duplicate release asset name/u);
+  assert.match(releaseAssets, /name: release-assets/u);
+  assert.match(releaseAssets, /if-no-files-found: error/u);
+  assert.match(releaseAssets, /retention-days: 7/u);
+  assert.doesNotMatch(
+    workflow,
+    /gh release create|softprops\/action-gh-release|git tag|git push origin/u,
+  );
 
-  assert.match(skill, /Draft curated public GitHub release notes before pushing the release tag/u);
-  assert.match(skill, /gh release create "\$TAG"/u);
-  assert.match(skill, /--notes-file "\$NOTES_FILE"/u);
+  assert.match(skill, /Draft curated public GitHub release notes before starting the publication/u);
   assert.match(skill, /exact full-changelog comparison URL/u);
   assert.match(skill, /non-empty body/u);
+  assert.match(skill, /--name release-assets/u);
+  assert.match(skill, /--verify-tag/u);
+  assert.match(skill, /--notes-file "\$NOTES_FILE"/u);
+  assert.notEqual(workflowDispatch, -1, "skill must dispatch the release workflow");
+  assert.notEqual(downloadBundle, -1, "skill must download the exact run asset bundle");
+  assert.notEqual(signedTag, -1, "skill must create a signed release tag");
+  assert.notEqual(createRelease, -1, "skill must create the immutable release");
+  assert.ok(workflowDispatch < downloadBundle, "workflow must complete before asset download");
+  assert.ok(downloadBundle < signedTag, "asset bundle must exist before tag creation");
+  assert.ok(signedTag < createRelease, "signed tag must exist before release creation");
 });
 
 test("release verifies committed signing-key parity before signing", () => {

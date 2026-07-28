@@ -1,9 +1,14 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag to publish, for example v3.11.0
+        required: true
+        type: string
+
+run-name: Release ${{ inputs.tag }} from ${{ github.sha }}
 
 concurrency:
   group: release
@@ -13,11 +18,78 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.tag }}
 
 jobs:
+  release-context:
+    name: Verify tag-last release context
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify dispatch inputs and release version
+        shell: bash
+        env:
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Release workflow must be dispatched from main"
+            exit 1
+          fi
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must match vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          workspace_version="$(
+            sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml
+          )"
+          if [ "$TAG_NAME" != "v${workspace_version}" ]; then
+            echo "::error::Release tag ${TAG_NAME} does not match workspace version ${workspace_version}"
+            exit 1
+          fi
+
+      - name: Verify release immutability is enabled
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --jq 'select(.enabled == true) | .enabled' >/dev/null
+
+      - name: Verify release tag is absent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          set +e
+          tag_error="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG_NAME}" 2>&1
+          )"
+          tag_status=$?
+          set -e
+          if [ "$tag_status" -eq 0 ]; then
+            echo "::error::Release tag ${TAG_NAME} already exists; tag creation must remain near the end"
+            exit 1
+          fi
+          if ! grep -qF "(HTTP 404)" <<<"$tag_error"; then
+            printf '%s\n' "$tag_error"
+            echo "::error::Could not prove that release tag ${TAG_NAME} is absent"
+            exit 1
+          fi
+
   publish-crates:
     name: Publish Rust crates
-    needs: [release-verified, release]
+    needs: [release-verified, release-assets]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,7 +110,7 @@ jobs:
       # would compile every transitive dependency's build.rs with
       # CARGO_REGISTRY_TOKEN available in the environment; a single compromised
       # build script could exfiltrate the token. The same code already built
-      # cleanly in CI on the commit that produced this tag, so the verify build
+      # cleanly in CI on the commit selected for this release, so the verify build
       # is a redundant safety net we can drop on the privileged path.
 
       - name: Authenticate to crates.io
@@ -104,6 +176,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.target }})
+    needs: release-context
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     permissions:
@@ -438,84 +511,77 @@ jobs:
 
   validate:
     name: Release validation
+    needs: release-context
     uses: ./.github/workflows/release-validation.yml
     permissions:
       contents: read
 
-  release:
-    name: Upload Release assets
+  release-assets:
+    name: Stage GitHub Release assets
     needs: release-verified
     runs-on: ubuntu-latest
     permissions:
-      # Required only to validate the curated GitHub Release and upload assets.
-      # Release metadata, tag creation, and rolling Action tag updates stay in
-      # the maintainer release workflow.
-      contents: write
+      contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
           pattern: fallow-*
 
-      - name: Verify curated release metadata
+      - name: Reconfirm release tag is absent
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if ! release_json="$(gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json name,body,isDraft,isPrerelease)"; then
-            echo "::error::Create the curated GitHub Release before the tag workflow reaches publication"
+          set +e
+          tag_error="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG_NAME}" 2>&1
+          )"
+          tag_status=$?
+          set -e
+          if [ "$tag_status" -eq 0 ]; then
+            echo "::error::Release tag ${TAG_NAME} appeared before publication completed"
+            exit 1
+          fi
+          if ! grep -qF "(HTTP 404)" <<<"$tag_error"; then
+            printf '%s\n' "$tag_error"
+            echo "::error::Could not reconfirm that release tag ${TAG_NAME} is absent"
             exit 1
           fi
 
-          title="$(jq -r '.name // ""' <<<"$release_json")"
-          body="$(jq -r '.body // ""' <<<"$release_json")"
-          is_draft="$(jq -r '.isDraft' <<<"$release_json")"
-          is_prerelease="$(jq -r '.isPrerelease' <<<"$release_json")"
-
-          if [ -z "${title//[[:space:]]/}" ]; then
-            echo "::error::Curated GitHub Release title is empty"
-            exit 1
-          fi
-          if [[ "$title" != "$TAG_NAME: "* ]]; then
-            echo "::error::Curated GitHub Release title must start with '$TAG_NAME: '"
-            exit 1
-          fi
-          summary="${title#"$TAG_NAME: "}"
-          if [ -z "${summary//[[:space:]]/}" ]; then
-            echo "::error::Curated GitHub Release title is missing a user-facing summary"
-            exit 1
-          fi
-          if [ -z "${body//[[:space:]]/}" ]; then
-            echo "::error::Curated GitHub Release body is empty"
-            exit 1
-          fi
-          compare_prefix="https://github.com/${GITHUB_REPOSITORY}/compare/"
-          compare_suffix="...${TAG_NAME}"
-          if ! grep -qF "$compare_prefix" <<<"$body" || ! grep -qF "$compare_suffix" <<<"$body"; then
-            echo "::error::Curated GitHub Release body is missing the full changelog comparison link"
-            exit 1
-          fi
-          if [ "$is_draft" != "false" ] || [ "$is_prerelease" != "false" ]; then
-            echo "::error::Stable GitHub Release must be published and not marked as a prerelease"
+      - name: Assemble release asset bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' assets < <(find artifacts -type f -print0)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "::error::No release assets were downloaded"
             exit 1
           fi
 
-      - name: Upload assets to curated GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+          mkdir release-assets
+          declare -A asset_names=()
+          for asset in "${assets[@]}"; do
+            name="$(basename "$asset")"
+            if [[ -n "${asset_names[$name]+present}" ]]; then
+              echo "::error::Duplicate release asset name: ${name}"
+              exit 1
+            fi
+            asset_names["$name"]=1
+            cp "$asset" "release-assets/$name"
+          done
+
+      - name: Upload release asset bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          files: artifacts/**/*
-          fail_on_unmatched_files: true
-          generate_release_notes: false
-          draft: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
 
       # The rolling v1/v3 action tags are pushed by the maintainer's release
       # workflow, not from here: GITHUB_TOKEN can never update a ref whose diff
@@ -527,7 +593,7 @@ jobs:
   # hand. These are refreshed by the maintainer's release workflow, not from
   # here. Like the crates/napi lockfile catch-up and the rolling v1/v3 tags,
   # the pin depends on the musl
-  # binaries the `build` matrix compiles and `release` uploads, which only exist
+  # binaries the `build` matrix compiles and `release-assets` stages, which only exist
   # after the publish this workflow performs. The maintainer workflow downloads
   # those assets, re-hashes them, runs
   # .github/scripts/update-dockerfile-pins.mjs, and pushes the
@@ -536,9 +602,9 @@ jobs:
 
   # Belt-and-suspenders generated contract drift check before either privileged
   # publish job runs. PR CI runs `npm run generate:contracts:check` on every relevant
-  # contract change, but a release tag could in theory be cut on a commit where
+  # contract change, but a release could in theory be dispatched from a commit where
   # a committed generated surface disagrees with what regen would produce
-  # (force-push to main, history rewrite, tag pointed at an old SHA). The root
+  # (force-push to main or history rewrite). The root
   # bundle validates config/plugin/rule-pack schemas, output schema, npm
   # capability metadata, issue registry export, TS output contracts, NAPI types,
   # and agent docs.
@@ -608,13 +674,8 @@ jobs:
           done
 
       - name: Update versions
-        env:
-          # The ref is read via process.env in the embedded node script, not
-          # interpolated into a heredoc, so a malformed ref cannot break out
-          # of the script body.
-          PKG_VERSION_REF: ${{ github.ref }}
         run: |
-          VERSION="${PKG_VERSION_REF#refs/tags/v}"
+          VERSION="${RELEASE_TAG#v}"
           export PKG_VERSION="$VERSION"
           for pkg in npm/*/package.json; do
             PKG_PATH="$pkg" node -e '
@@ -688,10 +749,8 @@ jobs:
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
       - name: Update NAPI package version
-        env:
-          PKG_VERSION_REF: ${{ github.ref }}
         run: |
-          VERSION="${PKG_VERSION_REF#refs/tags/v}"
+          VERSION="${RELEASE_TAG#v}"
           PKG_VERSION="$VERSION" node -e '
             const fs = require("fs");
             const path = "crates/napi/package.json";
@@ -830,7 +889,7 @@ jobs:
     # - --ignore-scripts on every publish blocks lifecycle scripts inside the
     #   tarballs from executing here.
     # Anything that needs `npm ci` or runs dependency code belongs in npm-prep.
-    needs: [npm-prep, release]
+    needs: [npm-prep, release-assets]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -873,14 +932,12 @@ jobs:
 
       - name: Publish all tarballs
         shell: bash
-        env:
-          PKG_VERSION_REF: ${{ github.ref }}
         run: |
           if [ ! -s tarballs/manifest.tsv ]; then
             echo "::error::tarballs/manifest.tsv missing or empty; npm-prep did not produce any tarballs"
             exit 1
           fi
-          VERSION="${PKG_VERSION_REF#refs/tags/v}"
+          VERSION="${RELEASE_TAG#v}"
           # Fixed expected count: 8 cli platform + 1 type-aware companion +
           # 1 cli root + 8 napi platform + 1 napi root = 19 entries. If this number changes, update the
           # numbered-stage matrix in npm-prep AND this constant together.
@@ -995,10 +1052,8 @@ jobs:
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Update extension version
-        env:
-          PKG_VERSION_REF: ${{ github.ref }}
         run: |
-          VERSION="${PKG_VERSION_REF#refs/tags/v}"
+          VERSION="${RELEASE_TAG#v}"
           PKG_VERSION="$VERSION" node -e '
             const fs = require("fs");
             const path = "editors/vscode/package.json";
@@ -1024,7 +1079,7 @@ jobs:
 
   vscode-publish:
     name: Publish VS Code Extension
-    needs: [vscode-prep, release]
+    needs: [vscode-prep, release-assets]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1078,3 +1133,34 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
           VSIX_PATH: ${{ steps.vsix.outputs.path }}
         run: ovsx publish "$VSIX_PATH" --no-dependencies
+
+  release-ready:
+    name: Release ready for signed tag
+    needs: [publish-crates, npm-publish, vscode-publish, release-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require the release tag to remain absent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          set +e
+          tag_error="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG_NAME}" 2>&1
+          )"
+          tag_status=$?
+          set -e
+          if [ "$tag_status" -eq 0 ]; then
+            echo "::error::Release tag ${TAG_NAME} appeared before the release workflow completed"
+            exit 1
+          fi
+          if ! grep -qF "(HTTP 404)" <<<"$tag_error"; then
+            printf '%s\n' "$tag_error"
+            echo "::error::Could not prove that release tag ${TAG_NAME} remains absent"
+            exit 1
+          fi
+          echo "Release workflow completed with ${TAG_NAME} still absent"

@@ -1,17 +1,20 @@
 # Release security
 
 Use this reference when editing `.github/workflows/release.yml` or the release
-workflow skill. The workflow is triggered by a version tag created by the
-maintainer release flow. It never creates or moves Git tags itself.
+workflow skill. The maintainer dispatches the workflow against the signed
+release commit while the version tag is still absent. The workflow never
+creates, moves, or publishes Git tags or GitHub Releases.
 
 ## Job boundaries
 
 | Job | Responsibility | Credentials |
 |---|---|---|
+| `release-context` | Bind the dispatch to `main`, the release version, release immutability, and an absent tag | Read only |
 | `build` | Build and sign release artifacts | Artifact signing only |
 | `validate` | Reusable release validation | Read only |
 | `release-verified` | Join build and validation | None |
-| `release` | Validate curated release metadata and upload artifacts | GitHub contents write |
+| `release-assets` | Flatten and store the complete GitHub asset bundle as a run artifact | Read only |
+| `release-ready` | Join publication jobs and prove the tag is still absent | Read only |
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
 | `npm-prep` | Install, assemble, and pack npm artifacts | Read only |
 | `npm-publish` | Publish downloaded tarballs | npm publication |
@@ -37,12 +40,22 @@ globally with `--ignore-scripts`.
   release publish-list test.
 - Keep artifact inventory and package-name constants aligned with the build
   matrix.
-- Create the curated GitHub Release from the maintainer flow immediately after
-  pushing the signed tag. The credential-bearing workflow only validates its
-  title and body and uploads assets to it.
-- Keep `generate_release_notes: false`. Require a non-empty title, a non-empty
-  body, the repository comparison URL, and at least one matched release asset.
-  Missing curated metadata must fail before package publication can continue.
+- Require repository release immutability before publication.
+- Dispatch the release workflow from `main` with the strict semantic-version
+  tag. Reject a mismatched version or existing remote tag before expensive work
+  starts, then reconfirm tag absence before staging the final asset bundle.
+- Flatten the complete binary inventory into the `release-assets` Actions
+  artifact. Reject an empty inventory or duplicate asset name.
+- Keep the version tag absent until validation, asset staging, and every
+  registry and marketplace publication have completed successfully.
+- Create and push the signed version tag near the end of the maintainer flow.
+  Immediately create the GitHub Release with the curated notes and the exact
+  `release-assets` bundle. GitHub CLI creates a draft, uploads every asset, and
+  publishes only after upload, so release immutability is applied to a complete
+  release.
+- Do not generate release notes. Require a non-empty title, a non-empty body,
+  the exact repository comparison URL, and the complete asset inventory before
+  creating the tag.
 - Push rolling Action tags and refresh Dockerfile binary pins from the
   maintainer release workflow after published assets exist, not from the
   credential-bearing GitHub workflow.

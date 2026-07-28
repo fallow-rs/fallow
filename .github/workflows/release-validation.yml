@@ -1,7 +1,7 @@
 # Every release-gating validation job, extracted so it can run BEFORE a
 # version number exists anywhere. Three consumers:
-#   1. release.yml `uses:` this workflow (workflow_call), so tag runs gate
-#      publishes on exactly this set;
+#   1. release.yml `uses:` this workflow (workflow_call), so the manually
+#      dispatched tag-last flow gates publishes on exactly this set;
 #   2. the /fallow-release pre-flight dispatches it on main and waits for
 #      green BEFORE bumping any version (workflow_dispatch), so a failing
 #      check can never burn a release tag again (v3.4.0 and v3.4.1 were both
