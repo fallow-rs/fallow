@@ -420,7 +420,7 @@ Angular templates contribute synthetic `<template>` complexity findings whenever
 | `--min-observation-volume` | `string` | - | Minimum total trace volume before the sidecar may emit high-confidence `safe_to_delete` / `review_required` verdicts. Below this, confidence is capped at `medium`. |
 | `--low-traffic-threshold` | `string` | - | Fraction of total trace count below which an invoked function is classified `low_traffic` rather than `active`. Expressed as a decimal (0.001 = 0.1%). |
 
-Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags), [`--changed-since`](#global-flags), [`--churn-file`](#global-flags), [`--workspace`](#global-flags), [`--group-by`](#global-flags), [`--baseline`](#global-flags), [`--save-baseline`](#global-flags), [`--production`](#global-flags), [`--no-production`](#global-flags), [`--explain`](#global-flags).
+Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags), [`--changed-since`](#global-flags), [`--churn-file`](#global-flags), [`--workspace`](#global-flags), [`--group-by`](#global-flags), [`--baseline`](#global-flags), [`--baseline-mode`](#global-flags), [`--save-baseline`](#global-flags), [`--production`](#global-flags), [`--no-production`](#global-flags), [`--explain`](#global-flags).
 <!-- generated:flags:health:end -->
 ### Exit Codes
 
@@ -472,6 +472,10 @@ fallow health --format json --quiet --workspace my-package
 # Incremental adoption with baseline
 fallow health --format json --quiet --save-baseline fallow-baselines/health.json
 fallow health --format json --quiet --baseline fallow-baselines/health.json
+
+# Strict adoption: a hotspot that replaces a baselined hotspot is reported
+fallow health --format json --quiet --save-baseline fallow-baselines/health.json --baseline-mode identity
+fallow health --format json --quiet --baseline fallow-baselines/health.json --baseline-mode identity
 
 # CI: fail if any function is too complex
 fallow health --max-cyclomatic 25 --max-cognitive 20 --quiet
@@ -1677,6 +1681,7 @@ Available on all commands:
 | `--churn-file` | `string` | - | Import change history from a `fallow-churn/v1` JSON file instead of `git log`, powering hotspots, ownership, and bus-factor on projects with no git repository (Yandex Arc, Mercurial, Perforce). A small wrapper translates your VCS log into the contract. Resolved relative to `--root`. Affects `health --hotspots` / `--ownership` / `--targets` only; `audit`, `impact`, and `--changed-since` still require git |
 | `--max-file-size` | `string` | - | Skip source files larger than this many megabytes (default 5) instead of parsing them, guarding against the out-of-memory blowup a single multi-MB generated/vendored/bundled file causes on large repos. Use `0` for no limit. Declaration files (`.d.ts`) are always analyzed. Skipped files are reported and excluded from every analysis. Also settable via `FALLOW_MAX_FILE_SIZE` |
 | `--baseline` | `string` | - | Compare to baseline |
+| `--baseline-mode` | `count\|identity` | `count` | How `--baseline` matches health findings: per file and category (`count`, the default) or per function identity (`identity`, strict) |
 | `--parent-run` | `string` | - | Correlate this run with a previous telemetry analysis run |
 | `--save-baseline` | `string` | - | Save results as baseline |
 | `--production` | `bool` | `false` | Exclude test/dev files, only start/build scripts (applies to every analysis) |

@@ -170,6 +170,7 @@ const CLI_REFERENCE_FLAG_SECTIONS = {
       "--workspace",
       "--group-by",
       "--baseline",
+      "--baseline-mode",
       "--save-baseline",
       "--production",
       "--no-production",

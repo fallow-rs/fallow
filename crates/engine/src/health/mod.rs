@@ -385,8 +385,10 @@ pub struct HealthExecutionOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     pub baseline: Option<&'a Path>,
     pub save_baseline: Option<&'a Path>,
-    /// How a loaded baseline is matched against current findings. Saving always
-    /// records both count and identity buckets, so this only affects `baseline`.
+    /// Controls both halves of the baseline lifecycle: which buckets
+    /// `save_baseline` writes and how a loaded `baseline` is matched. An
+    /// identity save writes count and identity buckets, a count save writes
+    /// count buckets only.
     pub baseline_mode: crate::baseline::HealthBaselineMode,
     pub complexity: bool,
     pub file_scores: bool,

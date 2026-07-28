@@ -1277,6 +1277,59 @@ fn health_identity_baseline_reports_replacement_hotspot() {
     assert_eq!(identity_mode.code, 1, "identity mode should fail the gate");
 }
 
+/// The mode chosen at save time decides which buckets land on disk: an identity
+/// save writes count and identity buckets, a count save writes count buckets
+/// only (#2010).
+#[test]
+fn health_baseline_save_mode_controls_written_buckets() {
+    let dir = hotspot_project("firstHotspot");
+    let count_path = dir.path().join("count-baseline.json");
+    run_health_with_baseline(
+        dir.path(),
+        &["--save-baseline", count_path.to_str().unwrap()],
+    );
+    let count_baseline: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&count_path).unwrap()).unwrap();
+    assert!(
+        !count_baseline["finding_counts"]
+            .as_object()
+            .expect("count baseline should carry count buckets")
+            .is_empty(),
+        "count save should record count buckets: {count_baseline:#?}"
+    );
+    assert!(
+        count_baseline.get("identity_finding_counts").is_none(),
+        "count save must not record identity buckets: {count_baseline:#?}"
+    );
+
+    let identity_path = dir.path().join("identity-baseline.json");
+    run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            identity_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    let identity_baseline: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&identity_path).unwrap()).unwrap();
+    assert!(
+        !identity_baseline["finding_counts"]
+            .as_object()
+            .expect("identity baseline should also carry count buckets")
+            .is_empty(),
+        "identity save should stay readable in count mode: {identity_baseline:#?}"
+    );
+    assert!(
+        !identity_baseline["identity_finding_counts"]
+            .as_object()
+            .expect("identity baseline should carry identity buckets")
+            .is_empty(),
+        "identity save should record identity buckets: {identity_baseline:#?}"
+    );
+}
+
 /// Identity mode must stay quiet when the same hotspot only moves down the file.
 #[test]
 fn health_identity_baseline_survives_line_shifts() {
