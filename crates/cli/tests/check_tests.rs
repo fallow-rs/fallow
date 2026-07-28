@@ -810,3 +810,92 @@ fn check_human_output_unused_deps_has_content() {
         "should list unused-dep"
     );
 }
+
+/// Build a project with one unused file under `src/legacy` and one under `src`,
+/// plus the given `ignoreFindings` patterns.
+fn ignore_findings_project(patterns: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/legacy")).expect("create source directories");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"ignore-findings","private":true,"type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(r#"{{"ignoreFindings": {patterns}}}"#),
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export const main = (): void => {};\n",
+    )
+    .expect("write entry point");
+    std::fs::write(root.join("src/legacy/old.ts"), "export const old = 1;\n")
+        .expect("write legacy file");
+    std::fs::write(root.join("src/orphan.ts"), "export const orphan = 1;\n")
+        .expect("write orphan file");
+    dir
+}
+
+#[test]
+fn ignore_findings_pattern_matching_nothing_prints_note() {
+    let dir = ignore_findings_project(r#"["src/legacy/**", "src/legcy/**"]"#);
+    let output = run_fallow_in_root("dead-code", dir.path(), &["--unused-files"]);
+
+    assert!(
+        output
+            .stderr
+            .contains("ignoreFindings pattern matched no finding")
+            && output.stderr.contains("src/legcy/**"),
+        "stderr should name the pattern that matched nothing; stderr: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("src/legacy/**"),
+        "the matching pattern should not be named; stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn ignore_findings_pattern_that_matches_prints_no_note() {
+    let dir = ignore_findings_project(r#"["src/legacy/**"]"#);
+    let output = run_fallow_in_root("dead-code", dir.path(), &["--unused-files"]);
+
+    assert!(
+        !output.stderr.contains("ignoreFindings"),
+        "a matching pattern should stay silent; stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn no_ignore_findings_configuration_prints_no_note() {
+    let dir = ignore_findings_project("[]");
+    let output = run_fallow_in_root("dead-code", dir.path(), &["--unused-files"]);
+
+    assert!(
+        !output.stderr.contains("ignoreFindings"),
+        "an empty configuration should stay silent; stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn ignore_findings_note_stays_out_of_json_output() {
+    let dir = ignore_findings_project(r#"["src/legacy/**", "src/legcy/**"]"#);
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--unused-files", "--format", "json"],
+    );
+
+    assert!(
+        !output.stdout.contains("ignoreFindings") && !output.stderr.contains("ignoreFindings"),
+        "json output must not carry the human note; stdout: {}\nstderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}

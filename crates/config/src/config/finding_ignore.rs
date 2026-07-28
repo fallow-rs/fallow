@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 /// Compiled project-relative patterns for hiding source-owned findings.
@@ -9,7 +12,43 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 pub struct FindingIgnoreMatcher {
     hidden: GlobSet,
     reported: GlobSet,
-    has_patterns: bool,
+    usage: Option<Arc<PatternUsage>>,
+}
+
+/// Per-pattern hit state for the shared matcher.
+///
+/// The matcher is cloned along with the resolved config and consulted from
+/// several pipeline stages, so the state lives behind an `Arc` and every clone
+/// records into the same run.
+#[derive(Debug)]
+struct PatternUsage {
+    patterns: Vec<String>,
+    /// Original pattern index for each glob in `hidden`, in build order.
+    hidden_origins: Vec<usize>,
+    /// Original pattern index for each glob in `reported`, in build order.
+    reported_origins: Vec<usize>,
+    matched: Vec<AtomicBool>,
+    consulted: AtomicBool,
+}
+
+impl PatternUsage {
+    fn record(&self, origins: &[usize], set_indices: &[usize]) {
+        for &index in set_indices {
+            if let Some(&origin) = origins.get(index)
+                && let Some(flag) = self.matched.get(origin)
+            {
+                flag.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// Compiled glob sets plus the mapping back to the configured pattern order.
+struct CompiledSets {
+    hidden: GlobSet,
+    reported: GlobSet,
+    hidden_origins: Vec<usize>,
+    reported_origins: Vec<usize>,
 }
 
 impl FindingIgnoreMatcher {
@@ -22,13 +61,19 @@ impl FindingIgnoreMatcher {
             return Self::default();
         }
 
-        let (hidden, reported) = Self::build_sets(patterns)
+        let sets = Self::build_sets(patterns)
             .expect("ignoreFindings pattern sets were validated before config resolution");
 
         Self {
-            hidden,
-            reported,
-            has_patterns: true,
+            hidden: sets.hidden,
+            reported: sets.reported,
+            usage: Some(Arc::new(PatternUsage {
+                patterns: patterns.to_vec(),
+                hidden_origins: sets.hidden_origins,
+                reported_origins: sets.reported_origins,
+                matched: patterns.iter().map(|_| AtomicBool::new(false)).collect(),
+                consulted: AtomicBool::new(false),
+            })),
         }
     }
 
@@ -36,35 +81,80 @@ impl FindingIgnoreMatcher {
         Self::build_sets(patterns).map(|_| ())
     }
 
-    fn build_sets(patterns: &[String]) -> Result<(GlobSet, GlobSet), globset::Error> {
+    fn build_sets(patterns: &[String]) -> Result<CompiledSets, globset::Error> {
         let mut hidden = GlobSetBuilder::new();
         let mut reported = GlobSetBuilder::new();
+        let mut hidden_origins = Vec::new();
+        let mut reported_origins = Vec::new();
 
-        for pattern in patterns {
-            let (builder, pattern) = if let Some(pattern) = pattern.strip_prefix('!') {
-                (&mut reported, pattern)
+        for (index, pattern) in patterns.iter().enumerate() {
+            let (builder, origins, pattern) = if let Some(pattern) = pattern.strip_prefix('!') {
+                (&mut reported, &mut reported_origins, pattern)
             } else {
-                (&mut hidden, pattern.as_str())
+                (&mut hidden, &mut hidden_origins, pattern.as_str())
             };
             let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
             builder.add(Glob::new(pattern)?);
+            origins.push(index);
         }
 
-        Ok((hidden.build()?, reported.build()?))
+        Ok(CompiledSets {
+            hidden: hidden.build()?,
+            reported: reported.build()?,
+            hidden_origins,
+            reported_origins,
+        })
     }
 
     /// Whether no finding-ignore patterns were configured.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        !self.has_patterns
+        self.usage.is_none()
     }
 
     /// Whether a normalized project-root-relative source path is hidden.
     #[must_use]
     pub fn is_ignored(&self, path: &str) -> bool {
-        self.has_patterns
-            && (self.hidden.is_empty() || self.hidden.is_match(path))
-            && !self.reported.is_match(path)
+        let Some(usage) = self.usage.as_deref() else {
+            return false;
+        };
+        usage.consulted.store(true, Ordering::Relaxed);
+
+        // Both sets are matched unconditionally so a negated pattern is not
+        // reported as a no-op merely because the positive set short-circuited.
+        let mut indices = Vec::new();
+        self.hidden.matches_into(path, &mut indices);
+        let hidden_hit = !indices.is_empty();
+        usage.record(&usage.hidden_origins, &indices);
+
+        self.reported.matches_into(path, &mut indices);
+        let reported_hit = !indices.is_empty();
+        usage.record(&usage.reported_origins, &indices);
+
+        (self.hidden.is_empty() || hidden_hit) && !reported_hit
+    }
+
+    /// Configured patterns that matched no candidate finding path, in config
+    /// order.
+    ///
+    /// Empty when nothing was configured or when the matcher was never
+    /// consulted, because a run without candidate paths says nothing about
+    /// whether a pattern is a typo.
+    #[must_use]
+    pub fn unmatched_patterns(&self) -> Vec<&str> {
+        let Some(usage) = self.usage.as_deref() else {
+            return Vec::new();
+        };
+        if !usage.consulted.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
+        usage
+            .patterns
+            .iter()
+            .zip(&usage.matched)
+            .filter(|(_, matched)| !matched.load(Ordering::Relaxed))
+            .map(|(pattern, _)| pattern.as_str())
+            .collect()
     }
 }
 
@@ -129,6 +219,55 @@ mod tests {
         for path in ["src/private/app.ts", "src/public/app.ts", "README.md"] {
             assert_eq!(first.is_ignored(path), second.is_ignored(path));
         }
+    }
+
+    #[test]
+    fn empty_configuration_reports_no_unmatched_patterns() {
+        let matcher = matcher(&[]);
+
+        assert!(!matcher.is_ignored("src/app.ts"));
+        assert!(matcher.unmatched_patterns().is_empty());
+    }
+
+    #[test]
+    fn matching_pattern_is_not_reported_as_unmatched() {
+        let matcher = matcher(&["**/*.test.ts"]);
+
+        assert!(matcher.is_ignored("src/app.test.ts"));
+        assert!(matcher.unmatched_patterns().is_empty());
+    }
+
+    #[test]
+    fn pattern_matching_nothing_is_reported() {
+        let matcher = matcher(&["**/*.test.ts", "src/legcy/**"]);
+
+        assert!(matcher.is_ignored("src/app.test.ts"));
+        assert_eq!(matcher.unmatched_patterns(), vec!["src/legcy/**"]);
+    }
+
+    #[test]
+    fn unconsulted_matcher_reports_no_unmatched_patterns() {
+        let matcher = matcher(&["src/legcy/**"]);
+
+        assert!(matcher.unmatched_patterns().is_empty());
+    }
+
+    #[test]
+    fn negated_pattern_matching_nothing_is_reported() {
+        let matcher = matcher(&["**/*.ts", "!src/public/**", "!src/publik/**"]);
+
+        assert!(matcher.is_ignored("src/private/app.ts"));
+        assert!(!matcher.is_ignored("src/public/app.ts"));
+        assert_eq!(matcher.unmatched_patterns(), vec!["!src/publik/**"]);
+    }
+
+    #[test]
+    fn usage_state_is_shared_across_clones() {
+        let matcher = matcher(&["**/*.test.ts"]);
+        let clone = matcher.clone();
+
+        assert!(clone.is_ignored("src/app.test.ts"));
+        assert!(matcher.unmatched_patterns().is_empty());
     }
 
     #[test]
