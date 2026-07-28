@@ -281,6 +281,15 @@ fn production_mode_does_not_follow_indirection_into_filtered_scripts() {
     );
 }
 
+/// Counterpart of the production case: the same fixture must still credit
+/// `indirect-only-tool` when nothing is filtered.
+///
+/// This is a control, not a falsification of the indirection feature. Outside
+/// production the `lint` script is analyzed as a script of its own, so its
+/// binary would be credited even without following `npm run lint -- --fix`.
+/// The falsifying coverage for the indirection itself lives in the unit tests
+/// in `crates/core/src/scripts/mod.rs`, where the reached binary is named only
+/// inside the body that indirection has to enter.
 #[test]
 fn non_production_mode_follows_indirection_into_dev_scripts() {
     let root = fixture_path("production-script-indirection");

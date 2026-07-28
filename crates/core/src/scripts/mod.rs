@@ -174,6 +174,29 @@ impl ScriptCatalog {
         catalog
     }
 
+    /// Build a catalog whose names come from `all` but whose bodies are limited
+    /// to `analyzed`.
+    ///
+    /// Production runs analyze only production-relevant scripts. Names and
+    /// bodies must be filtered separately: a package manager resolves
+    /// `pnpm <name>` to the declared script and never to a same-named binary,
+    /// so dropping a filtered script's name would credit a dependency that
+    /// shares the name. The body of a filtered script must stay unreachable, so
+    /// argument-bearing indirection cannot enter a script the filter skipped.
+    #[must_use]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "API matches serde-deserialized HashMap from package.json"
+    )]
+    pub fn from_scripts_with_bodies(
+        all: &HashMap<String, String>,
+        analyzed: &HashMap<String, String>,
+    ) -> Self {
+        let mut catalog = Self::from_scripts(analyzed);
+        catalog.names.extend(all.keys().cloned());
+        catalog
+    }
+
     /// Fold the analyzed package's own `scripts` map into the catalog.
     #[expect(
         clippy::disallowed_types,
@@ -286,6 +309,23 @@ pub struct ScriptAnalysis {
     pub config_files: Vec<String>,
     /// File paths extracted as positional arguments (entry point candidates).
     pub entry_files: Vec<String>,
+}
+
+impl ScriptAnalysis {
+    /// Drop repeated config and entry paths, keeping first-seen order.
+    ///
+    /// A body reached both as its own script and through package-manager
+    /// indirection is scanned more than once, and every consumer turns these
+    /// lists into patterns one by one.
+    fn dedupe_paths(&mut self) {
+        retain_first_seen(&mut self.config_files);
+        retain_first_seen(&mut self.entry_files);
+    }
+}
+
+fn retain_first_seen(values: &mut Vec<String>) {
+    let mut seen: FxHashSet<String> = FxHashSet::default();
+    values.retain(|value| seen.insert(value.clone()));
 }
 
 /// Normalize a script-extracted file path into a project-relative entry pattern.
@@ -476,6 +516,7 @@ where
         accumulate_command_with_context(command, root, bin_map, &context, &mut result);
     }
 
+    result.dedupe_paths();
     result
 }
 
@@ -643,9 +684,12 @@ fn parse_script_internal(
 /// anyway would add nothing.
 ///
 /// Reachability is exactly what the caller put in the catalog. A production run
-/// that analyzes filtered scripts must also build the catalog from the filtered
-/// map, otherwise `npm run lint -- --fix` would reach a dev-only body that
-/// script filtering deliberately skipped.
+/// that analyzes filtered scripts must build the catalog with
+/// [`ScriptCatalog::from_scripts_with_bodies`]: the names stay complete so the
+/// package-manager form still resolves to the script rather than to a
+/// same-named binary, while only the analyzed bodies are reachable, so
+/// `npm run lint -- --fix` cannot enter a dev-only body that script filtering
+/// deliberately skipped.
 ///
 /// Expansion is bounded twice: [`MAX_SCRIPT_INDIRECTION_DEPTH`] bounds a single
 /// path, [`MAX_SCRIPT_EXPANSIONS`] bounds the total number of bodies expanded
@@ -2039,8 +2083,9 @@ mod tests {
         );
     }
 
-    /// Under production filtering the catalog is built from the same filtered
-    /// map, so an argument-bearing call cannot reach a dev-only body.
+    /// Under production filtering only the bodies are filtered, so an
+    /// argument-bearing call still resolves to the script name but cannot reach
+    /// the dev-only body behind it.
     #[test]
     fn production_filtered_catalog_does_not_reach_a_dev_script_body() {
         let scripts = HashMap::from([
@@ -2056,10 +2101,50 @@ mod tests {
             Path::new("/nonexistent"),
             &FxHashMap::default(),
             &package_set(&["eslint", "vite"]),
-            &ScriptCatalog::from_scripts(&filtered),
+            &ScriptCatalog::from_scripts_with_bodies(&scripts, &filtered),
         );
         assert!(result.used_packages.contains("vite"));
         assert!(!result.used_packages.contains("eslint"));
+    }
+
+    /// The filtered catalog keeps every declared name, so a body reached
+    /// through indirection is unreachable while the name itself still resolves.
+    #[test]
+    fn filtered_catalog_keeps_names_and_drops_bodies() {
+        let scripts = HashMap::from([
+            ("build".to_string(), "vite build".to_string()),
+            ("lint".to_string(), "eslint .".to_string()),
+        ]);
+        let filtered = filter_production_scripts(&scripts);
+        let catalog = ScriptCatalog::from_scripts_with_bodies(&scripts, &filtered);
+        assert!(catalog.contains("lint"));
+        assert!(catalog.contains("build"));
+        assert!(catalog.body("lint").is_none());
+        assert!(catalog.body("build").is_some());
+    }
+
+    /// A body reached both as its own script and through indirection must not
+    /// contribute the same entry file twice.
+    #[test]
+    fn repeated_expansion_does_not_duplicate_entry_files() {
+        let scripts = HashMap::from([
+            (
+                "build".to_string(),
+                "npm run bundle -- --minify && npm run bundle -- --watch".to_string(),
+            ),
+            (
+                "bundle".to_string(),
+                "esbuild scripts/bundle.js".to_string(),
+            ),
+        ]);
+        let result = analyze_scripts_with_dependency_context(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["esbuild"]),
+            &ScriptCatalog::from_scripts(&scripts),
+        );
+        assert_eq!(result.entry_files, vec!["scripts/bundle.js".to_string()]);
     }
 
     /// A body merged from another workspace package still credits dependencies,
@@ -2099,6 +2184,8 @@ mod tests {
         );
     }
 
+    /// Built the same way as the production callers build it, so the guard this
+    /// test covers is the one that actually runs.
     #[test]
     fn production_filtered_context_skips_non_production_script_name() {
         let scripts = HashMap::from([
@@ -2111,9 +2198,34 @@ mod tests {
             Path::new("/nonexistent"),
             &FxHashMap::default(),
             &package_set(&["lint"]),
-            &ScriptCatalog::from_scripts(&scripts),
+            &ScriptCatalog::from_scripts_with_bodies(&scripts, &filtered),
         );
         assert!(!result.used_packages.contains("lint"));
+    }
+
+    /// `pnpm <name>` runs the declared script, never a same-named binary. A
+    /// filtered-out script keeps its name for exactly that reason: dropping it
+    /// would credit the dependency and pick up the remaining tokens as files.
+    #[test]
+    fn filtered_script_name_shadowing_a_dependency_bin_credits_nothing() {
+        let scripts = HashMap::from([
+            (
+                "build".to_string(),
+                "pnpm lint --fix src/app.ts".to_string(),
+            ),
+            ("lint".to_string(), "eslint src".to_string()),
+        ]);
+        let filtered = filter_production_scripts(&scripts);
+        let result = analyze_scripts_with_dependency_context(
+            &filtered,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["lint", "eslint"]),
+            &ScriptCatalog::from_scripts_with_bodies(&scripts, &filtered),
+        );
+        assert!(!result.used_packages.contains("lint"));
+        assert!(!result.used_packages.contains("eslint"));
+        assert!(result.entry_files.is_empty());
     }
 
     #[test]

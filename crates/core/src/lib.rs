@@ -1893,7 +1893,8 @@ fn analyze_root_scripts(
     } else {
         pkg_scripts.clone()
     };
-    let catalog = scripts::ScriptCatalog::from_scripts(&scripts_to_analyze);
+    let catalog =
+        scripts::ScriptCatalog::from_scripts_with_bodies(pkg_scripts, &scripts_to_analyze);
     let script_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &config.root,
@@ -1964,7 +1965,7 @@ fn analyze_one_workspace_scripts(
     } else {
         ws_scripts.clone()
     };
-    let catalog = scripts::ScriptCatalog::from_scripts(&scripts_to_analyze);
+    let catalog = scripts::ScriptCatalog::from_scripts_with_bodies(ws_scripts, &scripts_to_analyze);
     let ws_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &ws.root,

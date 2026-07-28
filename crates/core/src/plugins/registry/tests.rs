@@ -122,6 +122,45 @@ fn opennext_cloudflare_detected_from_adapter_script() {
     );
 }
 
+/// Production filtering must reach plugin activation as well. An
+/// argument-bearing call into a script body that production filtering skipped
+/// must not credit the adapter binary, because activating the plugin would add
+/// entry patterns and always-used config that suppress findings (issue #2016).
+#[test]
+fn production_activation_does_not_follow_indirection_into_filtered_script_bodies() {
+    let json = serde_json::json!({
+        "dependencies": deps_json(&["next"]),
+        "scripts": {
+            "build": "npm run deploy -- --env ci",
+            "deploy": "opennextjs-cloudflare deploy"
+        }
+    });
+    let pkg: PackageJson = serde_json::from_value(json).unwrap();
+    let registry = PluginRegistry::default();
+    let root = Path::new("/project");
+
+    let production = registry
+        .try_run_with_search_roots(&pkg, root, &[], &[root], true, None)
+        .expect("plugin run should succeed");
+    assert!(
+        !production
+            .active_plugins
+            .contains(&"opennext-cloudflare".to_string()),
+        "the deploy body is filtered out of production, got {:?}",
+        production.active_plugins
+    );
+
+    let full = registry
+        .try_run_with_search_roots(&pkg, root, &[], &[root], false, None)
+        .expect("plugin run should succeed");
+    assert!(
+        full.active_plugins
+            .contains(&"opennext-cloudflare".to_string()),
+        "outside production the deploy script is analyzed, got {:?}",
+        full.active_plugins
+    );
+}
+
 #[test]
 fn opennext_cloudflare_not_detected_for_plain_nextjs_project() {
     let registry = PluginRegistry::default();

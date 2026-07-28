@@ -73,6 +73,31 @@ error by suppressing a downstream detector.
 - Security findings are verification candidates until an agent or human
   confirms the evidence.
 
+## Script indirection crediting
+
+`crates/core/src/scripts/` credits dependencies, config files, and entry files
+from package.json scripts and from CI workflow commands. A package-manager
+invocation of a declared script (`npm run lint -- --format gha`,
+`yarn lint --fix`) is resolved to that script's body with the call-site
+arguments appended, so binaries and flag values behind the indirection are
+credited. The indirection is only followed when the call site adds arguments,
+because a plain `npm run build` reaches a body that is already analyzed on its
+own.
+
+The script catalog separates names from bodies. Names are always the full set of
+declared scripts, because a package manager resolves `pnpm <name>` to the script
+and never to a same-named binary. Bodies are only the scripts the current run
+analyzes, so a production run cannot enter a body that script filtering skipped.
+A name declared with different bodies in several workspace packages keeps its
+name but permanently loses its body.
+
+Expansion is bounded twice. `MAX_SCRIPT_INDIRECTION_DEPTH` caps the depth of a
+single chain, and `MAX_SCRIPT_EXPANSIONS` caps the total number of bodies
+expanded for one command, because the cycle guard only rejects names on the
+current path and mutually calling scripts otherwise fan out per path. Both
+bounds are deliberate ceilings: a project that exceeds them loses crediting for
+the deepest calls rather than degrading analysis time.
+
 ## Adding or changing an analyzer
 
 Follow [analyzer authoring](../analyzer-authoring.md). Update the shared issue
