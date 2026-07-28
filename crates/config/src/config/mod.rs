@@ -32,7 +32,7 @@ pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig};
 pub use parsing::ConfigLoadOptions;
 pub use resolution::{
-    CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
+    AnalysisSnapshot, CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
     CompiledIgnoreExportRule, ConfigOverride, DEFAULT_MAX_FILE_SIZE_BYTES,
     DEFAULT_MAX_FILE_SIZE_MB, IgnoreCatalogReferenceRule, IgnoreDependencyOverrideRule,
     IgnoreExportRule, ResolvedConfig, ResolvedOverride, resolve_max_file_size_bytes,

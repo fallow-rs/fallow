@@ -489,6 +489,7 @@ mod tests {
             cache_max_size_mb: None,
             cache_config_hash: 0,
             max_file_size_bytes: None,
+            analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         }
     }
 

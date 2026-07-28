@@ -176,6 +176,7 @@ fn build_combined_check_options<'a>(
         regression_opts: opts.regression_opts,
         retain_modules_for_health: opts.run_health,
         defer_performance: true,
+        analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
     })
 }
 

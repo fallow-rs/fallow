@@ -279,6 +279,7 @@ fn compute_base_snapshot(
                 None,
                 base_changed_files_ref,
                 share_dead_code_parse_with_health,
+                fallow_config::AnalysisSnapshot::Base,
             )
         },
         || run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None),
@@ -871,6 +872,7 @@ fn run_audit_head_analyses(
         changed_since,
         changed_files,
         share_dead_code_parse_with_health,
+        fallow_config::AnalysisSnapshot::Current,
     )?;
     let dupes_files = if share_dead_code_files_with_dupes {
         check
@@ -2006,6 +2008,7 @@ fn run_audit_check<'a>(
     changed_since: Option<&'a str>,
     changed_files: &FxHashSet<PathBuf>,
     retain_modules_for_health: bool,
+    analysis_snapshot: fallow_config::AnalysisSnapshot,
 ) -> Result<Option<CheckResult>, ExitCode> {
     let filters = IssueFilters::default();
     // The review brief needs the module graph for the impact closure, which
@@ -2064,6 +2067,7 @@ fn run_audit_check<'a>(
         },
         retain_modules_for_health,
         defer_performance: false,
+        analysis_snapshot,
     }) {
         Ok(mut result) => {
             fallow_engine::changed_files::filter_results_by_changed_files(

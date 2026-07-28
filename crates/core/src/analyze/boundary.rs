@@ -210,13 +210,29 @@ fn warn_unmatched_boundary_zones(
         zone_cache.values().filter_map(|z| z.as_deref()).collect();
     for zone in &config.boundaries.zones {
         if !classified_zones.contains(zone.name.as_str()) {
-            tracing::warn!(
-                "boundary zone '{}' matched 0 reachable files, check your directory \
-                 structure, pattern, or whether these files are all currently unreachable",
-                zone.name
-            );
+            tracing::warn!("{}", unmatched_zone_warning(&zone.name, config));
         }
     }
+}
+
+/// Message for a boundary zone that classified no reachable file.
+///
+/// The `audit --base` pass analyzes the base revision, where a zone can be
+/// legitimately empty while the working tree matches it. That pass is labelled
+/// explicitly so the warning is not read as a defect in the current
+/// configuration (issue #2013). The working-tree wording is unchanged.
+fn unmatched_zone_warning(zone: &str, config: &ResolvedConfig) -> String {
+    if config.analysis_snapshot.is_base() {
+        return format!(
+            "base revision snapshot (audit --base): boundary zone '{zone}' matched 0 reachable \
+             files in the base revision, this is about the base revision only and not about your \
+             current configuration"
+        );
+    }
+    format!(
+        "boundary zone '{zone}' matched 0 reachable files, check your directory \
+         structure, pattern, or whether these files are all currently unreachable"
+    )
 }
 
 #[cfg(test)]
@@ -683,6 +699,38 @@ mod tests {
         assert!(
             violations.is_empty(),
             "import already in `allow` must not fire regardless of allowTypeOnly"
+        );
+    }
+
+    #[test]
+    fn unmatched_zone_warning_keeps_current_revision_wording() {
+        let config = make_config(PathBuf::from("/project"), BoundaryConfig::default());
+
+        assert_eq!(
+            unmatched_zone_warning("ui", &config),
+            "boundary zone 'ui' matched 0 reachable files, check your directory structure, \
+             pattern, or whether these files are all currently unreachable"
+        );
+    }
+
+    #[test]
+    fn unmatched_zone_warning_labels_the_base_revision_snapshot() {
+        let mut config = make_config(PathBuf::from("/project"), BoundaryConfig::default());
+        config.analysis_snapshot = fallow_config::AnalysisSnapshot::Base;
+
+        let message = unmatched_zone_warning("ui", &config);
+
+        assert!(
+            message.starts_with("base revision snapshot (audit --base): "),
+            "base-revision warning must be labelled, got: {message}"
+        );
+        assert_ne!(
+            message,
+            unmatched_zone_warning(
+                "ui",
+                &make_config(PathBuf::from("/project"), BoundaryConfig::default())
+            ),
+            "base-revision warning must differ from the current-revision warning"
         );
     }
 }

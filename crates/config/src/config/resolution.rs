@@ -165,6 +165,29 @@ pub struct ResolvedOverride {
     pub rules: PartialRulesConfig,
 }
 
+/// Which revision an analysis pass describes.
+///
+/// `fallow audit --base <ref>` analyzes the base revision in an isolated
+/// worktree in addition to the working tree. Diagnostics raised while the base
+/// pass runs must say which revision they came from, otherwise a base-only
+/// condition reads as a defect in the current configuration (issue #2013).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AnalysisSnapshot {
+    /// The working tree, which is what every command analyzes by default.
+    #[default]
+    Current,
+    /// The base revision analyzed by `audit --base`.
+    Base,
+}
+
+impl AnalysisSnapshot {
+    /// True when this pass analyzes the `audit --base` revision.
+    #[must_use]
+    pub const fn is_base(self) -> bool {
+        matches!(self, Self::Base)
+    }
+}
+
 /// Fully resolved configuration with all globs pre-compiled.
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
@@ -229,6 +252,11 @@ pub struct ResolvedConfig {
     /// [`DEFAULT_MAX_FILE_SIZE_MB`] MB; the CLI overrides it post-resolve from
     /// `--max-file-size` / `FALLOW_MAX_FILE_SIZE` (`0` = unlimited).
     pub max_file_size_bytes: Option<u64>,
+    /// Which revision this analysis pass describes. Always
+    /// [`AnalysisSnapshot::Current`] out of [`FallowConfig::resolve`]; the CLI
+    /// sets [`AnalysisSnapshot::Base`] post-resolve for the isolated
+    /// `audit --base` pass so diagnostics can name the base revision.
+    pub analysis_snapshot: AnalysisSnapshot,
 }
 
 /// Default per-file size ceiling (in megabytes) for source discovery. A value
@@ -678,6 +706,7 @@ impl FallowConfig {
             include_entry_exports: self.include_entry_exports,
             auto_imports: self.auto_imports,
             max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
+            analysis_snapshot: AnalysisSnapshot::Current,
         }
     }
 }

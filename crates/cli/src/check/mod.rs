@@ -356,6 +356,10 @@ pub struct CheckOptions<'a> {
     /// When true, return timings without printing them so combined mode can add
     /// later stages before rendering the table.
     pub defer_performance: bool,
+    /// Which revision this pass analyzes. `Base` marks the isolated
+    /// `audit --base` pass so revision-specific diagnostics name the base
+    /// revision instead of reading as a current-configuration defect.
+    pub analysis_snapshot: fallow_config::AnalysisSnapshot,
 }
 
 /// Result of executing check analysis without printing.
@@ -517,6 +521,7 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
         },
         fallow_config::ProductionAnalysis::DeadCode,
     )?;
+    config.analysis_snapshot = opts.analysis_snapshot;
     if opts.include_entry_exports {
         config.include_entry_exports = true;
     }

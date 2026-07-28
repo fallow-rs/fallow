@@ -34,6 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-saved. (Closes
   [#2029](https://github.com/fallow-rs/fallow/issues/2029).)
 
+- **`fallow audit --base` now labels empty-boundary-zone warnings that come
+  from the base revision.** The base revision is analyzed in its own worktree,
+  so a zone whose files only exist in the working tree matched nothing there
+  and produced the same unqualified `boundary zone ... matched 0 reachable
+  files` warning used for the working tree. That read as a broken current
+  configuration even though `fallow dead-code --boundary-violations` stayed
+  silent. The base pass now prefixes the warning with
+  `base revision snapshot (audit --base)` and says the finding is about the
+  base revision only. The working-tree warning, all output formats, and exit
+  codes are unchanged; `--quiet` still shows the warning, since suppressing it
+  would hide a real problem in the recommended agent mode. (Closes
+  [#2013](https://github.com/fallow-rs/fallow/issues/2013).)
+
 - **`fallow dupes` again fails when duplication exceeds the configured
   threshold.** Standalone runs rendered through a code path that returned the
   renderer's exit code without ever consulting the threshold, so

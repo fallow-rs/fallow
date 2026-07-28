@@ -4649,6 +4649,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         ),
         retain_modules_for_health: false,
         defer_performance: false,
+        analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
     })
 }
 
