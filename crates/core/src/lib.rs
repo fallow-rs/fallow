@@ -1800,7 +1800,7 @@ fn analyze_all_scripts(
 ) {
     let all_dep_names = collect_all_dependency_names(root_pkg, workspace_pkgs);
     let all_dep_set: FxHashSet<String> = all_dep_names.iter().cloned().collect();
-    let all_script_names = collect_all_script_names(root_pkg, workspace_pkgs);
+    let all_scripts = collect_all_scripts(root_pkg, workspace_pkgs);
 
     let nm_roots = collect_node_modules_roots(config, workspaces);
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, &all_dep_names);
@@ -1813,13 +1813,7 @@ fn analyze_all_scripts(
         &all_dep_set,
         plugin_result,
     );
-    analyze_ci_scripts(
-        config,
-        &bin_map,
-        &all_dep_set,
-        &all_script_names,
-        plugin_result,
-    );
+    analyze_ci_scripts(config, &bin_map, &all_dep_set, &all_scripts, plugin_result);
 
     plugin_result
         .entry_point_roles
@@ -1844,23 +1838,23 @@ fn collect_all_dependency_names(
     all_dep_names
 }
 
-/// Gather the union of script names declared in the root and workspace packages.
-fn collect_all_script_names(
+/// Gather the scripts declared by the root and workspace packages.
+fn collect_all_scripts(
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[LoadedWorkspacePackage],
-) -> FxHashSet<String> {
-    let mut all_script_names: FxHashSet<String> = FxHashSet::default();
+) -> scripts::ScriptCatalog {
+    let mut catalog = scripts::ScriptCatalog::default();
     if let Some(pkg) = root_pkg
         && let Some(ref pkg_scripts) = pkg.scripts
     {
-        all_script_names.extend(pkg_scripts.keys().cloned());
+        catalog.merge_scripts(pkg_scripts);
     }
     for (_, ws_pkg) in workspace_pkgs {
         if let Some(ref ws_scripts) = ws_pkg.scripts {
-            all_script_names.extend(ws_scripts.keys().cloned());
+            catalog.merge_scripts(ws_scripts);
         }
     }
-    all_script_names
+    catalog
 }
 
 /// Collect every directory (root and workspaces) that has a local `node_modules`.
@@ -1899,13 +1893,13 @@ fn analyze_root_scripts(
     } else {
         pkg_scripts.clone()
     };
-    let script_names: FxHashSet<String> = pkg_scripts.keys().cloned().collect();
+    let catalog = scripts::ScriptCatalog::from_scripts(pkg_scripts);
     let script_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &config.root,
         bin_map,
         all_dep_set,
-        &script_names,
+        &catalog,
     );
     plugin_result.script_used_packages = script_analysis.used_packages;
 
@@ -1970,13 +1964,13 @@ fn analyze_one_workspace_scripts(
     } else {
         ws_scripts.clone()
     };
-    let script_names: FxHashSet<String> = ws_scripts.keys().cloned().collect();
+    let catalog = scripts::ScriptCatalog::from_scripts(ws_scripts);
     let ws_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &ws.root,
         bin_map,
         all_dep_set,
-        &script_names,
+        &catalog,
     );
     used_packages.extend(ws_analysis.used_packages);
 
@@ -2001,11 +1995,11 @@ fn analyze_ci_scripts(
     config: &ResolvedConfig,
     bin_map: &rustc_hash::FxHashMap<String, String>,
     all_dep_set: &FxHashSet<String>,
-    all_script_names: &FxHashSet<String>,
+    all_scripts: &scripts::ScriptCatalog,
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
     let ci_analysis =
-        scripts::ci::analyze_ci_files(&config.root, bin_map, all_dep_set, all_script_names);
+        scripts::ci::analyze_ci_files(&config.root, bin_map, all_dep_set, all_scripts);
     plugin_result
         .script_used_packages
         .extend(ci_analysis.used_packages);

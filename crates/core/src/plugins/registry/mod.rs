@@ -1367,14 +1367,14 @@ fn script_activation_packages(
     }
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, all_deps);
     let dep_set: FxHashSet<String> = all_deps.iter().cloned().collect();
-    let script_names: FxHashSet<String> = pkg_scripts.keys().cloned().collect();
+    let catalog = scripts::ScriptCatalog::from_scripts(pkg_scripts);
 
     scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         root,
         &bin_map,
         &dep_set,
-        &script_names,
+        &catalog,
     )
     .used_packages
 }

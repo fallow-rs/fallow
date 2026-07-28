@@ -86,9 +86,123 @@ const PNPM_BUILTIN_COMMANDS: &[&str] = &[
 /// Boolean pnpm flags that can appear before an implicit binary invocation.
 const PNPM_IMPLICIT_EXEC_FLAGS: &[&str] = &["--silent", "-s"];
 
+/// Package manager subcommands that never name a package.json script, even when
+/// a script with the same name exists. `yarn install` runs the installer, not a
+/// script called `install`.
+const PACKAGE_MANAGER_BUILTIN_COMMANDS: &[&str] = &[
+    "add",
+    "audit",
+    "bin",
+    "cache",
+    "config",
+    "create",
+    "dedupe",
+    "dlx",
+    "exec",
+    "global",
+    "import",
+    "info",
+    "init",
+    "install",
+    "link",
+    "list",
+    "login",
+    "logout",
+    "ls",
+    "node",
+    "outdated",
+    "pack",
+    "patch",
+    "publish",
+    "remove",
+    "run",
+    "run-script",
+    "set",
+    "unlink",
+    "up",
+    "upgrade",
+    "version",
+    "why",
+    "workspace",
+    "workspaces",
+];
+
+/// Maximum depth of `npm run <script>` indirection that is followed. Guards
+/// against pathological nesting on top of the cycle guard.
+const MAX_SCRIPT_INDIRECTION_DEPTH: usize = 8;
+
+/// Script names declared by a project, with the bodies that a package manager
+/// invocation such as `npm run lint -- --format gha` resolves to.
+///
+/// A name whose body is ambiguous (declared by several packages with different
+/// bodies) keeps its name but drops its body, so the indirection is not
+/// followed and nothing is credited from the wrong package.
+#[derive(Debug, Default, Clone)]
+pub struct ScriptCatalog {
+    names: FxHashSet<String>,
+    bodies: FxHashMap<String, String>,
+}
+
+impl ScriptCatalog {
+    /// Build a catalog from one package's `scripts` map.
+    #[must_use]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "API matches serde-deserialized HashMap from package.json"
+    )]
+    pub fn from_scripts(scripts: &HashMap<String, String>) -> Self {
+        let mut catalog = Self::default();
+        catalog.merge_scripts(scripts);
+        catalog
+    }
+
+    /// Fold another package's `scripts` map into the catalog.
+    #[expect(
+        clippy::disallowed_types,
+        reason = "API matches serde-deserialized HashMap from package.json"
+    )]
+    pub fn merge_scripts(&mut self, scripts: &HashMap<String, String>) {
+        for (name, body) in scripts {
+            self.names.insert(name.clone());
+            match self.bodies.get(name) {
+                Some(existing) if existing == body => {}
+                Some(_) => {
+                    self.bodies.remove(name);
+                }
+                None => {
+                    self.bodies.insert(name.clone(), body.clone());
+                }
+            }
+        }
+    }
+
+    /// Whether a script with this name is declared anywhere in the project.
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
+        self.names.contains(name)
+    }
+
+    fn body(&self, name: &str) -> Option<&str> {
+        self.bodies.get(name).map(String::as_str)
+    }
+}
+
 struct ScriptCommandContext<'a> {
     declared_packages: &'a FxHashSet<String>,
-    script_names: &'a FxHashSet<String>,
+    scripts: &'a ScriptCatalog,
+}
+
+/// Where the real command starts once the package manager prefix is consumed.
+enum PackageManagerTarget {
+    /// A binary invocation starting at this token index.
+    Binary(usize),
+    /// A package.json script invocation. The script body is re-scanned with the
+    /// call-site arguments starting at `extra_args_from` appended, which is what
+    /// the package manager itself does.
+    Script {
+        name: String,
+        extra_args_from: usize,
+    },
 }
 
 /// Result of analyzing all package.json scripts.
@@ -243,17 +357,11 @@ pub fn analyze_scripts_with_dependencies(
     bin_map: &FxHashMap<String, String>,
     declared_packages: &FxHashSet<String>,
 ) -> ScriptAnalysis {
-    let script_names: FxHashSet<String> = scripts.keys().cloned().collect();
-    analyze_scripts_with_dependency_context(
-        scripts,
-        root,
-        bin_map,
-        declared_packages,
-        &script_names,
-    )
+    let catalog = ScriptCatalog::from_scripts(scripts);
+    analyze_scripts_with_dependency_context(scripts, root, bin_map, declared_packages, &catalog)
 }
 
-/// Analyze scripts with dependency context and an explicit full package script-name set.
+/// Analyze scripts with dependency context and the project-wide script catalog.
 #[must_use]
 #[expect(
     clippy::disallowed_types,
@@ -264,25 +372,24 @@ pub fn analyze_scripts_with_dependency_context(
     root: &Path,
     bin_map: &FxHashMap<String, String>,
     declared_packages: &FxHashSet<String>,
-    script_names: &FxHashSet<String>,
+    catalog: &ScriptCatalog,
 ) -> ScriptAnalysis {
-    analyze_commands_with_context(
-        scripts.values(),
-        root,
-        bin_map,
-        declared_packages,
-        script_names,
-    )
+    analyze_commands_with_context(scripts.values(), root, bin_map, declared_packages, catalog)
 }
 
-/// Analyze arbitrary shell commands with dependency and script-name context.
+/// Analyze arbitrary shell commands with dependency and script-catalog context.
+///
+/// A command that invokes a declared script through a package manager
+/// (`npm run lint -- --format gha`) is resolved to that script's body with the
+/// call-site arguments appended, so binaries and flag values behind the
+/// indirection are credited.
 #[must_use]
 pub fn analyze_commands_with_context<'a, I>(
     commands: I,
     root: &Path,
     bin_map: &FxHashMap<String, String>,
     declared_packages: &FxHashSet<String>,
-    script_names: &FxHashSet<String>,
+    catalog: &ScriptCatalog,
 ) -> ScriptAnalysis
 where
     I: IntoIterator<Item = &'a String>,
@@ -290,7 +397,7 @@ where
     let mut result = ScriptAnalysis::default();
     let context = ScriptCommandContext {
         declared_packages,
-        script_names,
+        scripts: catalog,
     };
 
     for command in commands {
@@ -387,9 +494,18 @@ fn accumulate_parsed_commands(
 /// Splits on shell operators (`&&`, `||`, `;`, `|`, `&`) and parses each segment.
 #[must_use]
 pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
-    parse_script_internal(script, |tokens, idx| {
-        shell::advance_past_package_manager(tokens, idx)
-    })
+    let mut commands = Vec::new();
+    let mut active = Vec::new();
+    parse_script_internal(
+        script,
+        &|tokens, idx| {
+            shell::advance_past_package_manager(tokens, idx).map(PackageManagerTarget::Binary)
+        },
+        None,
+        &mut active,
+        &mut commands,
+    );
+    commands
 }
 
 fn parse_script_with_context(
@@ -398,28 +514,83 @@ fn parse_script_with_context(
     bin_map: &FxHashMap<String, String>,
     context: &ScriptCommandContext<'_>,
 ) -> Vec<ScriptCommand> {
-    parse_script_internal(script, |tokens, idx| {
-        advance_past_package_manager_with_context(tokens, idx, root, bin_map, context)
-    })
+    let mut commands = Vec::new();
+    let mut active = Vec::new();
+    parse_script_internal(
+        script,
+        &|tokens, idx| {
+            advance_past_package_manager_with_context(tokens, idx, root, bin_map, context)
+        },
+        Some(context.scripts),
+        &mut active,
+        &mut commands,
+    );
+    commands
 }
 
 fn parse_script_internal(
     script: &str,
-    advance_package_manager: impl Fn(&[&str], usize) -> Option<usize>,
-) -> Vec<ScriptCommand> {
-    let mut commands = Vec::new();
-
+    advance_package_manager: &impl Fn(&[&str], usize) -> Option<PackageManagerTarget>,
+    catalog: Option<&ScriptCatalog>,
+    active: &mut Vec<String>,
+    commands: &mut Vec<ScriptCommand>,
+) {
     for segment in shell::split_shell_operators(script) {
         let segment = segment.trim();
         if segment.is_empty() {
             continue;
         }
-        if let Some(cmd) = parse_command_segment(segment, &advance_package_manager) {
-            commands.push(cmd);
+        match parse_command_segment(segment, advance_package_manager) {
+            Some(SegmentOutcome::Command(cmd)) => commands.push(cmd),
+            Some(SegmentOutcome::ScriptCall { name, extra_args }) => {
+                resolve_script_call(
+                    &name,
+                    &extra_args,
+                    advance_package_manager,
+                    catalog,
+                    active,
+                    commands,
+                );
+            }
+            None => {}
         }
     }
+}
 
-    commands
+/// Re-scan the body of a script invoked through a package manager, with the
+/// call-site arguments appended.
+///
+/// Only follows the indirection when the call site adds arguments: without them
+/// the body is already analyzed as a script of its own package, and following it
+/// anyway would credit script bodies that script filtering deliberately skipped.
+fn resolve_script_call(
+    name: &str,
+    extra_args: &str,
+    advance_package_manager: &impl Fn(&[&str], usize) -> Option<PackageManagerTarget>,
+    catalog: Option<&ScriptCatalog>,
+    active: &mut Vec<String>,
+    commands: &mut Vec<ScriptCommand>,
+) {
+    if extra_args.is_empty() || active.len() >= MAX_SCRIPT_INDIRECTION_DEPTH {
+        return;
+    }
+    let Some(body) = catalog.and_then(|catalog| catalog.body(name)) else {
+        return;
+    };
+    if active.iter().any(|active_name| active_name == name) {
+        return;
+    }
+
+    let expanded = format!("{body} {extra_args}");
+    active.push(name.to_string());
+    parse_script_internal(
+        &expanded,
+        advance_package_manager,
+        catalog,
+        active,
+        commands,
+    );
+    active.pop();
 }
 
 /// Extract file path arguments and `--config`/`-c` arguments from the remaining tokens.
@@ -491,9 +662,13 @@ fn advance_past_package_manager_with_context(
     root: &Path,
     bin_map: &FxHashMap<String, String>,
     context: &ScriptCommandContext<'_>,
-) -> Option<usize> {
+) -> Option<PackageManagerTarget> {
+    if let Some(target) = script_invocation_target(tokens, idx, context) {
+        return Some(target);
+    }
+
     if tokens[idx] != "pnpm" {
-        return shell::advance_past_package_manager(tokens, idx);
+        return shell::advance_past_package_manager(tokens, idx).map(PackageManagerTarget::Binary);
     }
 
     let mut next = idx + 1;
@@ -510,24 +685,91 @@ fn advance_past_package_manager_with_context(
         while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
             next += 1;
         }
-        return (next < tokens.len()).then_some(next);
+        return (next < tokens.len())
+            .then_some(next)
+            .map(PackageManagerTarget::Binary);
     }
 
     if subcmd.starts_with('-')
         || PNPM_BUILTIN_COMMANDS.contains(&subcmd)
-        || context.script_names.contains(subcmd)
+        || context.scripts.contains(subcmd)
     {
         return None;
     }
 
-    resolve_known_dependency_binary(subcmd, root, bin_map, context.declared_packages).map(|_| next)
+    resolve_known_dependency_binary(subcmd, root, bin_map, context.declared_packages)
+        .map(|_| PackageManagerTarget::Binary(next))
+}
+
+/// Recognize a package manager invocation of a package.json script.
+///
+/// Handles the explicit `run` form for npm, pnpm, yarn, and bun, plus the bare
+/// `yarn <script>` and `pnpm <script>` forms. npm only forwards arguments that
+/// follow `--`; the other managers forward them directly and tolerate a `--`
+/// separator.
+fn script_invocation_target(
+    tokens: &[&str],
+    idx: usize,
+    context: &ScriptCommandContext<'_>,
+) -> Option<PackageManagerTarget> {
+    let manager = tokens[idx];
+    if !matches!(manager, "npm" | "pnpm" | "yarn" | "bun") {
+        return None;
+    }
+
+    let mut next = idx + 1;
+    if manager == "pnpm" {
+        while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
+            next += 1;
+        }
+    }
+    let subcmd = *tokens.get(next)?;
+
+    let (name_idx, requires_double_dash) = if matches!(subcmd, "run" | "run-script") {
+        (next + 1, manager == "npm")
+    } else if matches!(manager, "yarn" | "pnpm")
+        && !subcmd.starts_with('-')
+        && !PACKAGE_MANAGER_BUILTIN_COMMANDS.contains(&subcmd)
+    {
+        (next, false)
+    } else {
+        return None;
+    };
+
+    let name = *tokens.get(name_idx)?;
+    if !context.scripts.contains(name) {
+        return None;
+    }
+
+    let mut extra_args_from = name_idx + 1;
+    if tokens.get(extra_args_from) == Some(&"--") {
+        extra_args_from += 1;
+    } else if requires_double_dash {
+        return None;
+    }
+
+    Some(PackageManagerTarget::Script {
+        name: name.to_string(),
+        extra_args_from,
+    })
+}
+
+/// What a command segment resolved to.
+enum SegmentOutcome {
+    Command(ScriptCommand),
+    /// A package manager invocation of a package.json script, with the
+    /// arguments the call site forwards to that script's body.
+    ScriptCall {
+        name: String,
+        extra_args: String,
+    },
 }
 
 /// Parse a single command segment (after splitting on shell operators).
 fn parse_command_segment(
     segment: &str,
-    advance_package_manager: &impl Fn(&[&str], usize) -> Option<usize>,
-) -> Option<ScriptCommand> {
+    advance_package_manager: &impl Fn(&[&str], usize) -> Option<PackageManagerTarget>,
+) -> Option<SegmentOutcome> {
     let tokens: Vec<&str> = segment
         .split_whitespace()
         .map(strip_surrounding_quotes)
@@ -537,29 +779,50 @@ fn parse_command_segment(
     }
 
     let idx = shell::skip_initial_wrappers(&tokens, 0)?;
-    let idx = advance_package_manager(&tokens, idx)?;
+    let idx = match advance_package_manager(&tokens, idx)? {
+        PackageManagerTarget::Binary(idx) => idx,
+        PackageManagerTarget::Script {
+            name,
+            extra_args_from,
+        } => {
+            return Some(SegmentOutcome::ScriptCall {
+                name,
+                extra_args: forwarded_arguments(segment, extra_args_from),
+            });
+        }
+    };
 
     let binary = tokens[idx].to_string();
 
     if SCRIPT_MULTIPLEXERS.contains(&binary.as_str()) {
-        return Some(ScriptCommand {
+        return Some(SegmentOutcome::Command(ScriptCommand {
             binary,
             config_args: Vec::new(),
             file_args: Vec::new(),
             flag_packages: Vec::new(),
-        });
+        }));
     }
 
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
     let (file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
     let flag_packages = flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
-    Some(ScriptCommand {
+    Some(SegmentOutcome::Command(ScriptCommand {
         binary,
         config_args,
         file_args,
         flag_packages,
-    })
+    }))
+}
+
+/// The raw tail of a segment, keeping quoting intact so the re-scanned script
+/// body sees the arguments as the shell would pass them.
+fn forwarded_arguments(segment: &str, from_token: usize) -> String {
+    segment
+        .split_whitespace()
+        .skip(from_token)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Packages a CLI names through a flag value rather than a positional argument.
@@ -775,6 +1038,27 @@ mod tests {
     fn formatter_packages(command: &str) -> Vec<String> {
         let tokens: Vec<&str> = command.split_whitespace().collect();
         flag_referenced_packages("eslint", &tokens)
+    }
+
+    /// Analyze a CI-style command against a project whose package.json declares
+    /// `scripts` and every package in `declared`.
+    fn analyze_ci_command(
+        command: &str,
+        scripts: &[(&str, &str)],
+        declared: &[&str],
+    ) -> ScriptAnalysis {
+        let scripts: HashMap<String, String> = scripts
+            .iter()
+            .map(|(name, body)| ((*name).to_string(), (*body).to_string()))
+            .collect();
+        let commands = vec![command.to_string()];
+        analyze_commands_with_context(
+            &commands,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(declared),
+            &ScriptCatalog::from_scripts(&scripts),
+        )
     }
 
     #[test]
@@ -1456,19 +1740,166 @@ mod tests {
     }
 
     #[test]
+    fn npm_run_forwards_call_site_flags_into_script_body() {
+        let result = analyze_ci_command(
+            "npm run lint -- --format gha",
+            &[("lint", "eslint .")],
+            &["eslint", "eslint-formatter-gha"],
+        );
+        assert!(result.used_packages.contains("eslint"));
+        assert!(result.used_packages.contains("eslint-formatter-gha"));
+    }
+
+    #[test]
+    fn yarn_script_without_double_dash_forwards_call_site_flags() {
+        let result = analyze_ci_command(
+            "yarn lint --format gha",
+            &[("lint", "eslint .")],
+            &["eslint", "eslint-formatter-gha"],
+        );
+        assert!(result.used_packages.contains("eslint-formatter-gha"));
+    }
+
+    #[test]
+    fn pnpm_and_bun_script_forms_forward_call_site_flags() {
+        for command in ["pnpm lint --format gha", "bun run lint --format gha"] {
+            let result = analyze_ci_command(
+                command,
+                &[("lint", "eslint .")],
+                &["eslint", "eslint-formatter-gha"],
+            );
+            assert!(
+                result.used_packages.contains("eslint-formatter-gha"),
+                "{command} credited nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn script_body_flags_and_call_site_flags_are_both_credited() {
+        let result = analyze_ci_command(
+            "npm run lint -- --format gha",
+            &[("lint", "eslint . --format json")],
+            &["eslint"],
+        );
+        assert!(result.used_packages.contains("eslint-formatter-json"));
+        assert!(result.used_packages.contains("eslint-formatter-gha"));
+    }
+
+    #[test]
+    fn unknown_script_name_credits_nothing() {
+        let result = analyze_ci_command(
+            "npm run typecheck -- --format gha",
+            &[("lint", "eslint .")],
+            &["eslint"],
+        );
+        assert!(result.used_packages.is_empty());
+    }
+
+    #[test]
+    fn npm_run_without_double_dash_credits_nothing() {
+        let result = analyze_ci_command(
+            "npm run lint --format gha",
+            &[("lint", "eslint .")],
+            &["eslint"],
+        );
+        assert!(result.used_packages.is_empty());
+    }
+
+    #[test]
+    fn package_manager_builtin_is_not_a_script_invocation() {
+        let result = analyze_ci_command(
+            "yarn install --frozen-lockfile",
+            &[("install", "eslint .")],
+            &["eslint"],
+        );
+        assert!(result.used_packages.is_empty());
+    }
+
+    #[test]
+    fn mutually_recursive_scripts_terminate() {
+        let result = analyze_ci_command(
+            "npm run a -- --fix",
+            &[
+                ("a", "npm run b -- --format gha"),
+                ("b", "npm run a -- --format json"),
+            ],
+            &["eslint"],
+        );
+        assert!(result.used_packages.is_empty());
+    }
+
+    #[test]
+    fn self_recursive_script_terminates_after_one_expansion() {
+        let result = analyze_ci_command(
+            "npm run loop -- --fix",
+            &[("loop", "eslint . && npm run loop -- --format gha")],
+            &["eslint"],
+        );
+        assert!(result.used_packages.contains("eslint"));
+        assert!(!result.used_packages.contains("eslint-formatter-gha"));
+    }
+
+    #[test]
+    fn deep_script_chain_stops_at_the_depth_limit() {
+        let chain: Vec<(String, String)> = (0..12)
+            .map(|step| {
+                (
+                    format!("s{step}"),
+                    if step == 11 {
+                        "eslint .".to_string()
+                    } else {
+                        format!("npm run s{} -- --cache", step + 1)
+                    },
+                )
+            })
+            .collect();
+        let scripts: Vec<(&str, &str)> = chain
+            .iter()
+            .map(|(name, body)| (name.as_str(), body.as_str()))
+            .collect();
+        let result = analyze_ci_command("npm run s0 -- --fix", &scripts, &["eslint"]);
+        assert!(result.used_packages.is_empty());
+
+        let shallow = analyze_ci_command("npm run s9 -- --fix", &scripts, &["eslint"]);
+        assert!(shallow.used_packages.contains("eslint"));
+    }
+
+    #[test]
+    fn ambiguous_script_body_is_not_followed() {
+        let mut catalog = ScriptCatalog::from_scripts(&HashMap::from([(
+            "lint".to_string(),
+            "eslint .".to_string(),
+        )]));
+        catalog.merge_scripts(&HashMap::from([(
+            "lint".to_string(),
+            "biome check".to_string(),
+        )]));
+        let commands = vec!["npm run lint -- --format gha".to_string()];
+        let result = analyze_commands_with_context(
+            &commands,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["eslint", "biome"]),
+            &catalog,
+        );
+        assert!(catalog.contains("lint"));
+        assert!(result.used_packages.is_empty());
+    }
+
+    #[test]
     fn production_filtered_context_skips_non_production_script_name() {
         let scripts = HashMap::from([
             ("build".to_string(), "pnpm lint".to_string()),
             ("lint".to_string(), "eslint src".to_string()),
         ]);
         let filtered = filter_production_scripts(&scripts);
-        let script_names: FxHashSet<String> = scripts.keys().cloned().collect();
         let result = analyze_scripts_with_dependency_context(
             &filtered,
             Path::new("/nonexistent"),
             &FxHashMap::default(),
             &package_set(&["lint"]),
-            &script_names,
+            &ScriptCatalog::from_scripts(&scripts),
         );
         assert!(!result.used_packages.contains("lint"));
     }
