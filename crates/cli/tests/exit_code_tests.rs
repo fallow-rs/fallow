@@ -24,19 +24,18 @@ fn fail_on_issues_check_exits_1_with_issues() {
     );
 }
 
+/// Named for the flag that actually drives the exit code. This case previously
+/// also passed `--fail-on-issues` and was named for it, but `dupes` never reads
+/// that flag (`dispatch_dupes` discards it and `DupesOptions` has no such
+/// field), so the assertion was carried entirely by `--threshold`. Wiring
+/// `--fail-on-issues` into `dupes` is a separate behaviour change; until then
+/// this test pins the threshold gate only, under a name that matches.
 #[test]
-fn fail_on_issues_dupes_exits_1_with_clones() {
+fn dupes_threshold_exits_1_with_clones() {
     let output = run_fallow(
         "dupes",
         "duplicate-code",
-        &[
-            "--threshold",
-            "0.1",
-            "--fail-on-issues",
-            "--format",
-            "json",
-            "--quiet",
-        ],
+        &["--threshold", "0.1", "--format", "json", "--quiet"],
     );
     assert_eq!(
         output.code, 1,
