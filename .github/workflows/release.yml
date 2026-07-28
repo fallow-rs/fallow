@@ -17,7 +17,7 @@ env:
 jobs:
   publish-crates:
     name: Publish Rust crates
-    needs: release-verified
+    needs: [release-verified, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -443,12 +443,13 @@ jobs:
       contents: read
 
   release:
-    name: Create Release
+    name: Upload Release assets
     needs: release-verified
     runs-on: ubuntu-latest
     permissions:
-      # Required only to create the GitHub Release. Tag creation and rolling
-      # Action tag updates stay in the maintainer release workflow.
+      # Required only to validate the curated GitHub Release and upload assets.
+      # Release metadata, tag creation, and rolling Action tag updates stay in
+      # the maintainer release workflow.
       contents: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -461,10 +462,56 @@ jobs:
           path: artifacts
           pattern: fallow-*
 
-      - name: Create GitHub Release
+      - name: Verify curated release metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! release_json="$(gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json name,body,isDraft,isPrerelease)"; then
+            echo "::error::Create the curated GitHub Release before the tag workflow reaches publication"
+            exit 1
+          fi
+
+          title="$(jq -r '.name // ""' <<<"$release_json")"
+          body="$(jq -r '.body // ""' <<<"$release_json")"
+          is_draft="$(jq -r '.isDraft' <<<"$release_json")"
+          is_prerelease="$(jq -r '.isPrerelease' <<<"$release_json")"
+
+          if [ -z "${title//[[:space:]]/}" ]; then
+            echo "::error::Curated GitHub Release title is empty"
+            exit 1
+          fi
+          if [[ "$title" != "$TAG_NAME: "* ]]; then
+            echo "::error::Curated GitHub Release title must start with '$TAG_NAME: '"
+            exit 1
+          fi
+          summary="${title#"$TAG_NAME: "}"
+          if [ -z "${summary//[[:space:]]/}" ]; then
+            echo "::error::Curated GitHub Release title is missing a user-facing summary"
+            exit 1
+          fi
+          if [ -z "${body//[[:space:]]/}" ]; then
+            echo "::error::Curated GitHub Release body is empty"
+            exit 1
+          fi
+          compare_prefix="https://github.com/${GITHUB_REPOSITORY}/compare/"
+          compare_suffix="...${TAG_NAME}"
+          if ! grep -qF "$compare_prefix" <<<"$body" || ! grep -qF "$compare_suffix" <<<"$body"; then
+            echo "::error::Curated GitHub Release body is missing the full changelog comparison link"
+            exit 1
+          fi
+          if [ "$is_draft" != "false" ] || [ "$is_prerelease" != "false" ]; then
+            echo "::error::Stable GitHub Release must be published and not marked as a prerelease"
+            exit 1
+          fi
+
+      - name: Upload assets to curated GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: artifacts/**/*
+          fail_on_unmatched_files: true
           generate_release_notes: false
           draft: false
         env:

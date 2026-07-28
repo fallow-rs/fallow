@@ -342,10 +342,36 @@ test("release publication waits for the aggregate verification gate", () => {
 
   assert.match(gate, /needs: \[build, validate\]/);
   assert.match(gate, /permissions: \{\}/);
-  assert.match(publishCrates, /needs: release-verified/);
+  assert.match(publishCrates, /needs: \[release-verified, release\]/);
   assert.match(release, /needs: release-verified/);
   assert.match(npmPublish, /needs: \[npm-prep, release\]/);
   assert.match(vscodePublish, /needs: \[vscode-prep, release\]/);
+});
+
+test("release requires curated public notes before uploading assets", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const release = indentedBlock(workflow, "release", 2);
+  const skill = readFileSync(".agents/skills/release/SKILL.md", "utf8");
+  const verifyStep = release.indexOf("- name: Verify curated release metadata");
+  const uploadStep = release.indexOf("- name: Upload assets to curated GitHub Release");
+
+  assert.notEqual(verifyStep, -1, "release must verify curated metadata");
+  assert.notEqual(uploadStep, -1, "release must upload to the curated release");
+  assert.ok(verifyStep < uploadStep, "curated metadata must be verified before asset upload");
+  assert.match(release, /gh release view "\$TAG_NAME"/u);
+  assert.match(release, /Curated GitHub Release title is empty/u);
+  assert.match(release, /title is missing a user-facing summary/u);
+  assert.match(release, /Curated GitHub Release body is empty/u);
+  assert.match(release, /compare_suffix="\.\.\.\$\{TAG_NAME\}"/u);
+  assert.match(release, /full changelog comparison link/u);
+  assert.match(release, /fail_on_unmatched_files: true/u);
+  assert.match(release, /generate_release_notes: false/u);
+
+  assert.match(skill, /Draft curated public GitHub release notes before pushing the release tag/u);
+  assert.match(skill, /gh release create "\$TAG"/u);
+  assert.match(skill, /--notes-file "\$NOTES_FILE"/u);
+  assert.match(skill, /exact full-changelog comparison URL/u);
+  assert.match(skill, /non-empty body/u);
 });
 
 test("release verifies committed signing-key parity before signing", () => {

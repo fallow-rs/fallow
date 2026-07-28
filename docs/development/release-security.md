@@ -11,7 +11,7 @@ maintainer release flow. It never creates or moves Git tags itself.
 | `build` | Build and sign release artifacts | Artifact signing only |
 | `validate` | Reusable release validation | Read only |
 | `release-verified` | Join build and validation | None |
-| `release` | Create the GitHub Release from artifacts | GitHub contents write |
+| `release` | Validate curated release metadata and upload artifacts | GitHub contents write |
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
 | `npm-prep` | Install, assemble, and pack npm artifacts | Read only |
 | `npm-publish` | Publish downloaded tarballs | npm publication |
@@ -37,6 +37,12 @@ globally with `--ignore-scripts`.
   release publish-list test.
 - Keep artifact inventory and package-name constants aligned with the build
   matrix.
+- Create the curated GitHub Release from the maintainer flow immediately after
+  pushing the signed tag. The credential-bearing workflow only validates its
+  title and body and uploads assets to it.
+- Keep `generate_release_notes: false`. Require a non-empty title, a non-empty
+  body, the repository comparison URL, and at least one matched release asset.
+  Missing curated metadata must fail before package publication can continue.
 - Push rolling Action tags and refresh Dockerfile binary pins from the
   maintainer release workflow after published assets exist, not from the
   credential-bearing GitHub workflow.
