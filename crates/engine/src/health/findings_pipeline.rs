@@ -257,6 +257,7 @@ fn apply_health_baseline_and_top(
             findings,
             &config.root,
             opts.quiet,
+            opts.baseline_mode,
         )?)
     } else {
         None
@@ -283,6 +284,7 @@ pub(super) fn save_health_baseline_if_requested(
             targets,
             config_root: &config.root,
             quiet: opts.quiet,
+            mode: opts.baseline_mode,
         })?;
     }
     Ok(())

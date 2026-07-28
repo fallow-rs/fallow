@@ -346,6 +346,7 @@ fn derive_programmatic_health_execution_options<'a>(
         changed_workspaces: resolved.changed_workspaces(),
         baseline: None,
         save_baseline: None,
+        baseline_mode: fallow_engine::baseline::HealthBaselineMode::Count,
         complexity: run.sections.complexity,
         file_scores: run.sections.file_scores,
         coverage_gaps: run.sections.coverage_gaps,

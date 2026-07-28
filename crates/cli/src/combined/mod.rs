@@ -541,6 +541,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         changed_workspaces: opts.changed_workspaces,
         baseline: None,
         save_baseline: None,
+        baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         complexity: true,
         file_scores: true,
         coverage_gaps: false,

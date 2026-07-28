@@ -293,6 +293,19 @@ struct Cli {
     #[arg(long, global = true)]
     baseline: Option<PathBuf>,
 
+    /// How `--baseline` matches health findings: per file and category
+    /// (`count`, the default) or per function identity (`identity`, strict).
+    ///
+    /// Identity comparison needs a baseline saved with `--baseline-mode
+    /// identity`; such a baseline still works in count mode.
+    #[arg(
+        long = "baseline-mode",
+        value_enum,
+        default_value = "count",
+        global = true
+    )]
+    baseline_mode: BaselineModeArg,
+
     /// Correlate this run with a previous telemetry analysis run.
     ///
     /// Used only for opt-in telemetry follow-up measurement. The value is not
@@ -2266,6 +2279,26 @@ enum RulePackCli {
 
     /// Print the JSON Schema for rule pack files
     Schema,
+}
+
+/// CLI mirror of [`fallow_engine::baseline::HealthBaselineMode`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum BaselineModeArg {
+    /// Match a saved health baseline per file and finding category.
+    #[default]
+    Count,
+    /// Match a saved health baseline per function identity and finding
+    /// category, so a hotspot that replaces another hotspot is reported.
+    Identity,
+}
+
+impl From<BaselineModeArg> for fallow_engine::baseline::HealthBaselineMode {
+    fn from(value: BaselineModeArg) -> Self {
+        match value {
+            BaselineModeArg::Count => Self::Count,
+            BaselineModeArg::Identity => Self::Identity,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -4955,6 +4988,7 @@ fn run_resolved_audit(
             dead_code_baseline: inputs.dead_code_baseline.as_deref(),
             health_baseline: inputs.health_baseline.as_deref(),
             dupes_baseline: inputs.dupes_baseline.as_deref(),
+            health_baseline_mode: cli.baseline_mode.into(),
             max_crap: args.max_crap,
             coverage: inputs.coverage.as_deref(),
             coverage_root: args.coverage_root.as_deref(),
@@ -5060,6 +5094,7 @@ fn decision_surface_audit_options<'a>(
         dead_code_baseline: inputs.dead_code_baseline.as_deref(),
         health_baseline: inputs.health_baseline.as_deref(),
         dupes_baseline: inputs.dupes_baseline.as_deref(),
+        health_baseline_mode: cli.baseline_mode.into(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -5367,6 +5402,7 @@ fn run_health_dispatch(
             changed_workspaces: cli.changed_workspaces.as_deref(),
             baseline: cli.baseline.as_deref(),
             save_baseline: cli.save_baseline.as_deref(),
+            baseline_mode: cli.baseline_mode.into(),
             complexity: sections.complexity,
             file_scores: sections.file_scores,
             coverage_gaps: sections.coverage_gaps,

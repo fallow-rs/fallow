@@ -104,6 +104,8 @@ pub struct AuditOptions<'a> {
     pub health_baseline: Option<&'a std::path::Path>,
     /// Baseline file for duplication analysis (as produced by `fallow dupes --save-baseline`).
     pub dupes_baseline: Option<&'a std::path::Path>,
+    /// How the health baseline is matched against current findings.
+    pub health_baseline_mode: fallow_engine::baseline::HealthBaselineMode,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
     pub max_crap: Option<f64>,
@@ -435,6 +437,7 @@ fn build_base_audit_options<'a>(
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: opts.max_crap,
         coverage: opts.coverage,
         coverage_root: opts.coverage_root,
@@ -2223,6 +2226,7 @@ fn build_audit_health_options<'a>(
         changed_workspaces: opts.changed_workspaces,
         baseline: opts.health_baseline,
         save_baseline: None,
+        baseline_mode: opts.health_baseline_mode,
         complexity: true,
         file_scores: false,
         coverage_gaps: false,

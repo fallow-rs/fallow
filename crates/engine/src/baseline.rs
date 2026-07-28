@@ -1657,6 +1657,13 @@ pub fn recompute_stats(report: &DuplicationReport) -> crate::duplicates::Duplica
 /// line shifts do not leak pre-existing findings. Legacy baselines with
 /// `findings: ["path:name:line"]` still load so users can refresh them in
 /// place with `--save-baseline`.
+///
+/// `identity_finding_counts` carries the same counts bucketed per function
+/// identity instead of per file, for the stricter [`HealthBaselineMode::Identity`]
+/// comparison. It is written only when the baseline is saved in identity mode,
+/// so default baselines keep their count-only shape. Identity baselines still
+/// carry `finding_counts`, so they also work in count mode and with older
+/// binaries.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct HealthBaselineData {
     /// Legacy health baseline keys: `relative_path:function_name:line`.
@@ -1665,6 +1672,9 @@ pub struct HealthBaselineData {
     /// Count-per-category-per-file baseline buckets.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) finding_counts: HealthFindingCountMap,
+    /// Count-per-category buckets keyed by `relative_path\0function_name`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) identity_finding_counts: HealthFindingCountMap,
     /// Stable runtime-coverage finding IDs from the sidecar.
     #[serde(default)]
     pub(crate) runtime_coverage_findings: Vec<String>,
@@ -1687,6 +1697,20 @@ pub struct HealthBaselineCount {
 }
 
 type HealthFindingCountMap = BTreeMap<String, BTreeMap<String, HealthBaselineCount>>;
+
+/// How a saved health baseline is matched against current findings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HealthBaselineMode {
+    /// Match per file and finding category. Resilient to renames and line
+    /// shifts, but a replacement hotspot consumes the allowance of the hotspot
+    /// it replaced.
+    #[default]
+    Count,
+    /// Match per function identity (path plus function name) and finding
+    /// category. A hotspot that replaces another hotspot in the same file is
+    /// reported, while line shifts and in-place edits stay suppressed.
+    Identity,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HealthFindingDimension {
@@ -1738,7 +1762,8 @@ impl HealthBaselineData {
     ) -> Self {
         Self {
             findings: Vec::new(),
-            finding_counts: health_finding_counts(findings, root),
+            finding_counts: health_finding_counts(findings, root, HealthBaselineMode::Count),
+            identity_finding_counts: HealthFindingCountMap::new(),
             runtime_coverage_findings: runtime_coverage_findings
                 .iter()
                 .map(|f| runtime_coverage_finding_key(f, root))
@@ -1766,14 +1791,45 @@ impl HealthBaselineData {
         }
     }
 
+    /// Add per-function identity buckets to a saved baseline.
+    ///
+    /// Only [`HealthBaselineMode::Identity`] saves record these, so a default
+    /// baseline keeps carrying counts alone and stays free of function names.
+    #[must_use]
+    pub(crate) fn with_identity(
+        mut self,
+        findings: &[fallow_output::ComplexityViolation],
+        root: &Path,
+    ) -> Self {
+        self.identity_finding_counts =
+            health_finding_counts(findings, root, HealthBaselineMode::Identity);
+        self
+    }
+
+    /// `true` when identity matching would silently degrade because the saved
+    /// baseline predates `identity_finding_counts` yet does carry findings.
+    pub(crate) fn lacks_identity_data(&self) -> bool {
+        self.identity_finding_counts.is_empty()
+            && (!self.finding_counts.is_empty() || !self.findings.is_empty())
+    }
+
+    fn counts_for(&self, mode: HealthBaselineMode) -> &HealthFindingCountMap {
+        match mode {
+            HealthBaselineMode::Count => &self.finding_counts,
+            HealthBaselineMode::Identity => &self.identity_finding_counts,
+        }
+    }
+
     pub(crate) fn overlap_entry_count(
         &self,
         findings: &[fallow_output::ComplexityViolation],
         root: &Path,
+        mode: HealthBaselineMode,
     ) -> usize {
-        if !self.finding_counts.is_empty() {
-            let current_counts = health_finding_counts(findings, root);
-            health_overlap_entry_count(&current_counts, &self.finding_counts)
+        let baseline_counts = self.counts_for(mode);
+        if !baseline_counts.is_empty() {
+            let current_counts = health_finding_counts(findings, root, mode);
+            health_overlap_entry_count(&current_counts, baseline_counts)
         } else {
             let baseline_keys: FxHashSet<&str> = self.findings.iter().map(String::as_str).collect();
             findings
@@ -1805,14 +1861,31 @@ fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path)
     )
 }
 
+/// Bucket a finding belongs to for the given comparison mode.
+///
+/// The NUL separator keeps the identity bucket unambiguous for paths and
+/// function names that contain `:`.
+fn health_bucket_key(
+    finding: &fallow_output::ComplexityViolation,
+    root: &Path,
+    mode: HealthBaselineMode,
+) -> String {
+    let path = relative_path(&finding.path, root);
+    match mode {
+        HealthBaselineMode::Count => path,
+        HealthBaselineMode::Identity => format!("{path}\0{}", finding.name),
+    }
+}
+
 fn health_finding_counts(
     findings: &[fallow_output::ComplexityViolation],
     root: &Path,
+    mode: HealthBaselineMode,
 ) -> HealthFindingCountMap {
     let mut counts = BTreeMap::new();
     for finding in findings {
-        let path = relative_path(&finding.path, root);
-        let file_counts = counts.entry(path).or_insert_with(BTreeMap::new);
+        let bucket = health_bucket_key(finding, root, mode);
+        let file_counts = counts.entry(bucket).or_insert_with(BTreeMap::new);
         for category in health_finding_categories(finding).into_iter().flatten() {
             file_counts
                 .entry(category.key().to_string())
@@ -1994,14 +2067,15 @@ pub(crate) fn filter_new_health_findings(
     mut findings: Vec<fallow_output::ComplexityViolation>,
     baseline: &HealthBaselineData,
     root: &Path,
+    mode: HealthBaselineMode,
 ) -> Vec<fallow_output::ComplexityViolation> {
-    if !baseline.finding_counts.is_empty() {
-        let current_counts = health_finding_counts(&findings, root);
-        let overflow_categories =
-            health_overflow_categories(&current_counts, &baseline.finding_counts);
+    let baseline_counts = baseline.counts_for(mode);
+    if !baseline_counts.is_empty() {
+        let current_counts = health_finding_counts(&findings, root, mode);
+        let overflow_categories = health_overflow_categories(&current_counts, baseline_counts);
         findings.retain(|finding| {
-            let path = relative_path(&finding.path, root);
-            overflow_categories.get(&path).is_some_and(|categories| {
+            let bucket = health_bucket_key(finding, root, mode);
+            overflow_categories.get(&bucket).is_some_and(|categories| {
                 health_finding_categories(finding)
                     .into_iter()
                     .flatten()
@@ -2785,6 +2859,17 @@ mod tests {
         assert!((stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
     }
 
+    /// Count-mode wrapper shadowing the mode-aware function, so the existing
+    /// count-mode expectations stay readable. Identity-mode tests call
+    /// `super::filter_new_health_findings` directly.
+    fn filter_new_health_findings(
+        findings: Vec<fallow_output::ComplexityViolation>,
+        baseline: &HealthBaselineData,
+        root: &Path,
+    ) -> Vec<fallow_output::ComplexityViolation> {
+        super::filter_new_health_findings(findings, baseline, root, HealthBaselineMode::Count)
+    }
+
     fn make_health_finding(
         root: &Path,
         name: &str,
@@ -2906,6 +2991,7 @@ mod tests {
         let baseline = HealthBaselineData {
             findings: vec!["src/utils.ts:parseExpression:42".to_owned()],
             finding_counts: BTreeMap::new(),
+            identity_finding_counts: BTreeMap::new(),
             target_keys: vec![],
             runtime_coverage_findings: vec![],
             runtime_coverage_source_hashes: vec![],
@@ -3029,8 +3115,130 @@ mod tests {
                 make_health_finding(&root, "newFunction", 100),
             ],
             &root,
+            HealthBaselineMode::Count,
         );
         assert_eq!(overlap, 1);
+    }
+
+    /// Baseline saved the way `--baseline-mode identity` saves it.
+    fn identity_baseline(
+        findings: &[fallow_output::ComplexityViolation],
+        root: &Path,
+    ) -> HealthBaselineData {
+        HealthBaselineData::from_findings(findings, &[], &[], root).with_identity(findings, root)
+    }
+
+    #[test]
+    fn health_identity_baseline_reports_replacement_hotspot() {
+        let root = PathBuf::from("/project");
+        let baseline = identity_baseline(&[make_health_finding(&root, "firstHotspot", 3)], &root);
+        let replacement = vec![make_health_finding(&root, "replacementHotspot", 3)];
+
+        assert!(
+            filter_new_health_findings(replacement.clone(), &baseline, &root).is_empty(),
+            "count mode keeps the per-file allowance and suppresses the replacement"
+        );
+
+        let filtered = super::filter_new_health_findings(
+            replacement,
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "replacementHotspot");
+    }
+
+    #[test]
+    fn health_identity_baseline_survives_line_moves() {
+        let root = PathBuf::from("/project");
+        let baseline =
+            identity_baseline(&[make_health_finding(&root, "parseExpression", 42)], &root);
+        let filtered = super::filter_new_health_findings(
+            vec![make_health_finding(&root, "parseExpression", 512)],
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn health_identity_baseline_suppresses_severity_improvement() {
+        let root = PathBuf::from("/project");
+        let baseline = identity_baseline(
+            &[make_health_finding_with(
+                &root,
+                "parseExpression",
+                42,
+                fallow_output::ExceededThreshold::Both,
+                fallow_output::FindingSeverity::Critical,
+            )],
+            &root,
+        );
+        let filtered = super::filter_new_health_findings(
+            vec![make_health_finding_with(
+                &root,
+                "parseExpression",
+                42,
+                fallow_output::ExceededThreshold::Both,
+                fallow_output::FindingSeverity::Moderate,
+            )],
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn health_identity_baseline_reports_added_finding_for_known_function() {
+        let root = PathBuf::from("/project");
+        let baseline =
+            identity_baseline(&[make_health_finding(&root, "parseExpression", 42)], &root);
+        let filtered = super::filter_new_health_findings(
+            vec![
+                make_health_finding(&root, "parseExpression", 42),
+                make_health_finding(&root, "parseStatement", 90),
+            ],
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "parseStatement");
+    }
+
+    #[test]
+    fn health_identity_buckets_are_written_only_in_identity_mode() {
+        let root = PathBuf::from("/project");
+        let findings = [make_health_finding(&root, "parseExpression", 42)];
+        let count_only = HealthBaselineData::from_findings(&findings, &[], &[], &root);
+        let json = serde_json::to_string(&count_only).unwrap();
+        assert!(!json.contains("identity_finding_counts"));
+        assert!(count_only.lacks_identity_data());
+
+        let identity = identity_baseline(&findings, &root);
+        assert!(!identity.lacks_identity_data());
+        assert_eq!(
+            identity.identity_finding_counts["src/utils.ts\0parseExpression"]["complexity_high"]
+                .count,
+            1
+        );
+        assert!(
+            !identity.finding_counts.is_empty(),
+            "an identity baseline stays readable in count mode"
+        );
+    }
+
+    #[test]
+    fn health_identity_data_is_absent_for_legacy_and_empty_baselines() {
+        let legacy = HealthBaselineData {
+            findings: vec!["src/utils.ts:parseExpression:42".to_string()],
+            ..HealthBaselineData::default()
+        };
+        assert!(legacy.lacks_identity_data());
+        assert!(!HealthBaselineData::default().lacks_identity_data());
     }
 
     #[test]
@@ -3040,6 +3248,7 @@ mod tests {
         let baseline = HealthBaselineData {
             findings: vec![],
             finding_counts: BTreeMap::new(),
+            identity_finding_counts: BTreeMap::new(),
             target_keys: vec![],
             runtime_coverage_findings: vec![],
             runtime_coverage_source_hashes: vec![],

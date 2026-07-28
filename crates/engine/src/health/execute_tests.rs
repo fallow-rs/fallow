@@ -1274,6 +1274,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
     let baseline = HealthBaselineData {
         findings: vec![],
         finding_counts: std::collections::BTreeMap::new(),
+        identity_finding_counts: std::collections::BTreeMap::new(),
         runtime_coverage_findings: vec![
             "fallow:prod:aaaaaaaa".to_owned(),
             "fallow:prod:bbbbbbbb".to_owned(),
@@ -1392,6 +1393,7 @@ fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_rem
     let baseline = HealthBaselineData {
         findings: vec![],
         finding_counts: std::collections::BTreeMap::new(),
+        identity_finding_counts: std::collections::BTreeMap::new(),
         runtime_coverage_findings: vec!["fallow:prod:aaaaaaaa".to_owned()],
         runtime_coverage_source_hashes: vec![],
         target_keys: vec![],

@@ -2007,6 +2007,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2082,6 +2083,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2169,6 +2171,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2253,6 +2256,7 @@ fn audit_gate_all_skips_base_snapshot() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2357,6 +2361,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2462,6 +2467,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2551,6 +2557,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2729,6 +2736,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2875,6 +2883,7 @@ export function App() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -3028,6 +3037,7 @@ export function App() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -3121,6 +3131,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -3209,6 +3220,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -3242,6 +3254,10 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn audit_base_current_config_attribution_survives_cache_hit() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let root = tmp.path();
@@ -3302,6 +3318,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -3419,6 +3436,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: None,
         coverage: None,
         coverage_root: None,

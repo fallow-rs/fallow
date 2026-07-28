@@ -1228,6 +1228,7 @@ fn security_runtime_health_options<'a>(
         changed_workspaces: opts.changed_workspaces,
         baseline: None,
         save_baseline: None,
+        baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         complexity: false,
         file_scores: false,
         coverage_gaps: false,

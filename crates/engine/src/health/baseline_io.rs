@@ -5,7 +5,7 @@
     reason = "health baseline save/load preserves existing human stderr notes"
 )]
 
-use crate::baseline::{HealthBaselineData, filter_new_health_findings};
+use crate::baseline::{HealthBaselineData, HealthBaselineMode, filter_new_health_findings};
 
 use super::HealthError;
 
@@ -16,6 +16,7 @@ pub(super) struct HealthBaselineSaveInput<'a> {
     pub(super) targets: &'a [fallow_output::RefactoringTarget],
     pub(super) config_root: &'a std::path::Path,
     pub(super) quiet: bool,
+    pub(super) mode: HealthBaselineMode,
 }
 
 /// Save health baseline to disk.
@@ -27,6 +28,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
         targets,
         config_root,
         quiet,
+        mode,
     } = *input;
     let baseline = HealthBaselineData::from_findings(
         findings,
@@ -34,6 +36,10 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
         targets,
         config_root,
     );
+    let baseline = match mode {
+        HealthBaselineMode::Count => baseline,
+        HealthBaselineMode::Identity => baseline.with_identity(findings, config_root),
+    };
     match serde_json::to_string_pretty(&baseline) {
         Ok(json) => {
             if let Some(parent) = save_path.parent()
@@ -69,15 +75,27 @@ pub(super) fn load_health_baseline(
     findings: &mut Vec<fallow_output::ComplexityViolation>,
     root: &std::path::Path,
     quiet: bool,
+    mode: HealthBaselineMode,
 ) -> Result<HealthBaselineData, HealthError> {
     let json = std::fs::read_to_string(baseline_path)
         .map_err(|e| HealthError::message(format!("failed to read health baseline: {e}"), 2))?;
     let baseline: HealthBaselineData = serde_json::from_str(&json)
         .map_err(|e| HealthError::message(format!("failed to parse health baseline: {e}"), 2))?;
+    if mode == HealthBaselineMode::Identity && baseline.lacks_identity_data() {
+        return Err(HealthError::message(
+            format!(
+                "health baseline {} carries no finding identities, so --baseline-mode identity \
+                 cannot compare against it. Re-save it with: --save-baseline {}",
+                baseline_path.display(),
+                baseline_path.display()
+            ),
+            2,
+        ));
+    }
     let baseline_entries = baseline.finding_entry_count();
     let before = findings.len();
-    let overlap_entries = baseline.overlap_entry_count(findings, root);
-    *findings = filter_new_health_findings(std::mem::take(findings), &baseline, root);
+    let overlap_entries = baseline.overlap_entry_count(findings, root, mode);
+    *findings = filter_new_health_findings(std::mem::take(findings), &baseline, root, mode);
     if !quiet {
         eprintln!(
             "Comparing against health baseline: {}",

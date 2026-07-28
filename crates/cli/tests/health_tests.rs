@@ -1165,6 +1165,187 @@ fn health_save_baseline_creates_parent_directory() {
     );
 }
 
+/// Body of a single hotspot function, parameterized by name so a replacement
+/// keeps the exact same metrics and finding category.
+fn hotspot_source(name: &str) -> String {
+    format!(
+        "export const {name} = (values: number[]): number => {{
+  let total = 0;
+  for (const value of values) {{
+    if (value > 10) {{
+      if (value % 2 === 0) {{
+        total += value;
+      }} else if (value % 3 === 0) {{
+        total -= value;
+      }} else {{
+        total += 1;
+      }}
+    }} else if (value < 0) {{
+      total -= 1;
+    }}
+  }}
+  return total;
+}};
+"
+    )
+}
+
+fn hotspot_project(name: &str) -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"health-identity","version":"1.0.0"}"#,
+    );
+    write_file(&dir.path().join("src/index.ts"), &hotspot_source(name));
+    dir
+}
+
+fn run_health_with_baseline(root: &Path, extra: &[&str]) -> common::CommandOutput {
+    let mut args = vec![
+        "--complexity",
+        "--max-cyclomatic",
+        "3",
+        "--max-crap",
+        "10000",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    args.extend_from_slice(extra);
+    run_fallow_in_root("health", root, &args)
+}
+
+/// A hotspot that replaces another hotspot in the same file and category is
+/// invisible to the count baseline but reported in identity mode (#2010).
+#[test]
+fn health_identity_baseline_reports_replacement_hotspot() {
+    let dir = hotspot_project("firstHotspot");
+    let baseline_path = dir.path().join("health-baseline.json");
+    let saved = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    assert!(
+        baseline_path.exists(),
+        "saving a health baseline should write the file: {}",
+        redact_all(&saved.stderr, dir.path())
+    );
+
+    write_file(
+        &dir.path().join("src/index.ts"),
+        &hotspot_source("replacementHotspot"),
+    );
+
+    let count_mode = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--fail-on-issues",
+        ],
+    );
+    assert_eq!(
+        count_mode.code,
+        0,
+        "count mode keeps the per-file allowance: {}",
+        redact_all(&count_mode.stdout, dir.path())
+    );
+
+    let identity_mode = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+            "--fail-on-issues",
+        ],
+    );
+    let json = parse_json(&identity_mode);
+    let findings = json["findings"].as_array().expect("findings array");
+    assert_eq!(
+        findings.len(),
+        1,
+        "identity mode should report the replacement: {json:#?}"
+    );
+    assert_eq!(findings[0]["name"], "replacementHotspot");
+    assert_eq!(identity_mode.code, 1, "identity mode should fail the gate");
+}
+
+/// Identity mode must stay quiet when the same hotspot only moves down the file.
+#[test]
+fn health_identity_baseline_survives_line_shifts() {
+    let dir = hotspot_project("firstHotspot");
+    let baseline_path = dir.path().join("health-baseline.json");
+    run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+
+    write_file(
+        &dir.path().join("src/index.ts"),
+        &format!(
+            "export const untouched = 1;\nexport const alsoUntouched = 2;\n\n{}",
+            hotspot_source("firstHotspot")
+        ),
+    );
+
+    let output = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+            "--fail-on-issues",
+        ],
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "a line shift must not reopen a baselined hotspot: {}",
+        redact_all(&output.stdout, dir.path())
+    );
+}
+
+/// A baseline saved before identity buckets existed must fail loudly instead of
+/// silently degrading to count matching.
+#[test]
+fn health_identity_baseline_rejects_legacy_baseline() {
+    let dir = hotspot_project("firstHotspot");
+    let baseline_path = dir.path().join("legacy-baseline.json");
+    write_file(
+        &baseline_path,
+        r#"{"finding_counts":{"src/index.ts":{"complexity_moderate":{"count":1}}},"runtime_coverage_findings":[],"target_keys":[]}"#,
+    );
+
+    let output = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    let rendered = redact_all(&format!("{}\n{}", output.stdout, output.stderr), dir.path());
+    assert_eq!(output.code, 2, "legacy baseline should be an input error");
+    assert!(
+        rendered.contains("no finding identities"),
+        "error should explain the re-save: {rendered}"
+    );
+}
+
 #[test]
 fn health_exits_0_below_threshold() {
     let output = run_fallow(

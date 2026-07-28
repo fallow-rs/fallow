@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--baseline-mode identity` gates health baselines on finding identity.**
+  The default count baseline matches per file and category, so a new hotspot
+  that replaced an old hotspot in the same file consumed the existing allowance
+  and `health --baseline ... --fail-on-issues` stayed green. Save a baseline
+  with `fallow health --save-baseline baseline.json --baseline-mode identity`
+  and compare with `--baseline baseline.json --baseline-mode identity` to match
+  per function identity instead: a replacement hotspot is reported, line shifts
+  and severity improvements stay suppressed, and resolved findings still
+  disappear without a refresh. The default stays `count`, identity baselines
+  keep their count buckets so both modes read them, and comparing in identity
+  mode against a count-only baseline is an input error instead of a silent
+  fallback. (Refs
+  [#2010](https://github.com/fallow-rs/fallow/issues/2010).)
+
 - **`ignoreFindings` hides source-owned dead-code findings without removing
   matching files from analysis.** Project-root-relative globs support `!`
   exceptions with Knip-compatible set semantics. Matching files remain in
