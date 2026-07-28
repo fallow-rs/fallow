@@ -294,10 +294,15 @@ struct Cli {
     baseline: Option<PathBuf>,
 
     /// How `--baseline` matches health findings: per file and category
-    /// (`count`, the default) or per function identity (`identity`, strict).
+    /// (`count`, the default) or per function identity (`identity`, strict,
+    /// and only against a baseline that was saved with `--baseline-mode
+    /// identity`; such a baseline still reads in count mode).
     ///
-    /// Identity comparison needs a baseline saved with `--baseline-mode
-    /// identity`; such a baseline still works in count mode.
+    /// A finding's identity is its file path plus its function name, so
+    /// renaming or moving a function that is still in the baseline reports it
+    /// as new. Re-save the baseline after that kind of refactor. Functions
+    /// that share a name in one file, and unnamed functions, share one
+    /// identity and can mask each other.
     #[arg(
         long = "baseline-mode",
         value_enum,
