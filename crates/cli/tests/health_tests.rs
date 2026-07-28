@@ -1397,6 +1397,14 @@ fn health_identity_baseline_rejects_legacy_baseline() {
         rendered.contains("no finding identities"),
         "error should explain the re-save: {rendered}"
     );
+    let Some((_, hint)) = rendered.split_once("Re-save it with:") else {
+        panic!("error should carry a re-save hint: {rendered}");
+    };
+    assert!(
+        hint.contains("--baseline-mode identity"),
+        "the re-save hint must itself request identity mode, otherwise following it \
+         literally reproduces the same error: {rendered}"
+    );
 }
 
 #[test]

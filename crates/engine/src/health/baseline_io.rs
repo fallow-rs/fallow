@@ -85,7 +85,8 @@ pub(super) fn load_health_baseline(
         return Err(HealthError::message(
             format!(
                 "health baseline {} carries no finding identities, so --baseline-mode identity \
-                 cannot compare against it. Re-save it with: --save-baseline {}",
+                 cannot compare against it. Re-save it with: --save-baseline {} \
+                 --baseline-mode identity",
                 baseline_path.display(),
                 baseline_path.display()
             ),
