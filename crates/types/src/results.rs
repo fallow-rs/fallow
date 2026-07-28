@@ -903,6 +903,8 @@ impl_single_source_dead_code! {
     UnusedSvelteEventFinding => event.path,
     UnusedServerActionFinding => action.path,
     UnusedLoadDataKeyFinding => key.path,
+    ThinWrapperFinding => wrapper.file,
+    DuplicatePropShapeFinding => shape.file,
 }
 
 macro_rules! impl_never_ignored_finding {
@@ -984,6 +986,29 @@ impl FindingIgnorePolicy for ReExportCycleFinding {
     }
 }
 
+impl FindingIgnorePolicy for PropDrillingChainFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(self.chain.hops.iter().map(|hop| &hop.file), predicate)
+    }
+}
+
+/// Source-owned result families that are excluded from
+/// [`AnalysisResults::total_issues`] but still hidden by `ignoreFindings`.
+///
+/// They live outside [`counted_analysis_result_fields`] because they are opt-in
+/// health signals rather than counted issues; ownership-wise they behave exactly
+/// like the counted dead-code families.
+macro_rules! uncounted_source_owned_result_fields {
+    ($callback:ident $(, $arg:expr)? ) => {
+        $callback! {
+            $($arg,)?
+            prop_drilling_chains => "prop_drilling_chains",
+            thin_wrappers => "thin_wrappers",
+            duplicate_prop_shapes => "duplicate_prop_shapes",
+        }
+    };
+}
+
 macro_rules! remove_configured_ignored_findings {
     ($state:expr, $($field:ident => $key:literal,)+) => {{
         let (results, predicate) = $state;
@@ -1011,18 +1036,103 @@ macro_rules! counted_result_field_sum {
 pub const TOTAL_ISSUE_RESULT_KEYS: &[&str] =
     counted_analysis_result_fields!(counted_result_key_slice);
 
+/// Compile-time coverage guard for [`AnalysisResults::remove_ignored_dead_code_findings`].
+///
+/// Every `AnalysisResults` field is destructured without a rest pattern, so a
+/// new result family fails to compile here until it is deliberately classified
+/// as hideable (a source-owned finding family routed through the ignore filter)
+/// or always visible. Without this guard a new family silently escapes
+/// `ignoreFindings`, which is the failure mode issue #2017 describes.
+fn classify_ignore_findings_fields(results: &AnalysisResults) {
+    let AnalysisResults {
+        // Hideable: counted source-owned dead-code families.
+        unused_files: _unused_files,
+        unused_exports: _unused_exports,
+        unused_types: _unused_types,
+        private_type_leaks: _private_type_leaks,
+        unused_enum_members: _unused_enum_members,
+        unused_class_members: _unused_class_members,
+        unused_store_members: _unused_store_members,
+        unresolved_imports: _unresolved_imports,
+        unlisted_dependencies: _unlisted_dependencies,
+        duplicate_exports: _duplicate_exports,
+        circular_dependencies: _circular_dependencies,
+        re_export_cycles: _re_export_cycles,
+        unprovided_injects: _unprovided_injects,
+        unrendered_components: _unrendered_components,
+        unused_component_props: _unused_component_props,
+        unused_component_emits: _unused_component_emits,
+        unused_component_inputs: _unused_component_inputs,
+        unused_component_outputs: _unused_component_outputs,
+        unused_svelte_events: _unused_svelte_events,
+        unused_server_actions: _unused_server_actions,
+        unused_load_data_keys: _unused_load_data_keys,
+        // Hideable: uncounted source-owned React health signals.
+        prop_drilling_chains: _prop_drilling_chains,
+        thin_wrappers: _thin_wrappers,
+        duplicate_prop_shapes: _duplicate_prop_shapes,
+        // Always visible: manifest-owned package and catalog findings.
+        unused_dependencies: _unused_dependencies,
+        unused_dev_dependencies: _unused_dev_dependencies,
+        unused_optional_dependencies: _unused_optional_dependencies,
+        type_only_dependencies: _type_only_dependencies,
+        test_only_dependencies: _test_only_dependencies,
+        dev_dependencies_in_production: _dev_dependencies_in_production,
+        unused_catalog_entries: _unused_catalog_entries,
+        empty_catalog_groups: _empty_catalog_groups,
+        unresolved_catalog_references: _unresolved_catalog_references,
+        unused_dependency_overrides: _unused_dependency_overrides,
+        misconfigured_dependency_overrides: _misconfigured_dependency_overrides,
+        // Always visible: architecture, policy, suppression hygiene, and
+        // framework-correctness findings.
+        boundary_violations: _boundary_violations,
+        boundary_coverage_violations: _boundary_coverage_violations,
+        boundary_call_violations: _boundary_call_violations,
+        policy_violations: _policy_violations,
+        stale_suppressions: _stale_suppressions,
+        invalid_client_exports: _invalid_client_exports,
+        mixed_client_server_barrels: _mixed_client_server_barrels,
+        misplaced_directives: _misplaced_directives,
+        route_collisions: _route_collisions,
+        dynamic_segment_name_conflicts: _dynamic_segment_name_conflicts,
+        // Always visible: security candidates and their blind-spot metadata. A
+        // path glob must never silence a leak candidate or turn an unresolved
+        // blind spot into a clean bill.
+        security_findings: _security_findings,
+        security_unresolved_edge_files: _security_unresolved_edge_files,
+        security_unresolved_callee_sites: _security_unresolved_callee_sites,
+        security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
+        // Not findings: counters, metadata, and descriptive carriers.
+        unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
+        suppression_count: _suppression_count,
+        unused_component_props_exempted: _unused_component_props_exempted,
+        active_suppressions: _active_suppressions,
+        feature_flags: _feature_flags,
+        export_usages: _export_usages,
+        entry_point_summary: _entry_point_summary,
+        render_fan_in: _render_fan_in,
+        react_component_intel: _react_component_intel,
+        semantic_framework_contracts: _semantic_framework_contracts,
+    } = results;
+}
+
 impl AnalysisResults {
     /// Remove dead-code findings whose complete, non-empty source-owner set
     /// matches `is_ignored`.
     ///
-    /// Architecture, policy, suppression-hygiene, framework-correctness, and
-    /// package/project findings are retained. Context paths embedded in a
-    /// dead-code finding are not owners.
+    /// Architecture, policy, suppression-hygiene, framework-correctness,
+    /// security, and package/project findings are retained. Context paths
+    /// embedded in a dead-code finding are not owners.
     #[doc(hidden)]
     pub fn remove_ignored_dead_code_findings(&mut self, mut is_ignored: impl FnMut(&Path) -> bool) {
+        classify_ignore_findings_fields(self);
         counted_analysis_result_fields!(
             remove_configured_ignored_findings,
-            (self, &mut is_ignored)
+            (&mut *self, &mut is_ignored)
+        );
+        uncounted_source_owned_result_fields!(
+            remove_configured_ignored_findings,
+            (&mut *self, &mut is_ignored)
         );
     }
 
@@ -5091,6 +5201,156 @@ mod tests {
         results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
 
         assert_eq!(results.unused_dependencies.len(), 1);
+    }
+
+    fn thin_wrapper_finding(path: &str) -> ThinWrapperFinding {
+        ThinWrapperFinding::with_actions(ThinWrapper {
+            file: PathBuf::from(path),
+            line: 1,
+            component: "Wrapper".to_string(),
+            child_component: "Child".to_string(),
+        })
+    }
+
+    fn duplicate_prop_shape_finding(path: &str) -> DuplicatePropShapeFinding {
+        DuplicatePropShapeFinding::with_actions(DuplicatePropShape {
+            file: PathBuf::from(path),
+            line: 1,
+            component: "Card".to_string(),
+            shape: vec!["title".to_string(), "subtitle".to_string()],
+            group_size: 3,
+            sharing_components: vec![],
+        })
+    }
+
+    fn prop_drilling_chain_finding(paths: &[&str]) -> PropDrillingChainFinding {
+        PropDrillingChainFinding::with_actions(PropDrillingChain {
+            prop: "user".to_string(),
+            depth: paths.len() as u32,
+            hops: paths
+                .iter()
+                .map(|path| PropDrillHop {
+                    file: PathBuf::from(path),
+                    line: 1,
+                    component: "Hop".to_string(),
+                })
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn finding_ignore_hides_thin_wrappers_by_wrapper_file() {
+        let mut results = AnalysisResults {
+            thin_wrappers: vec![
+                thin_wrapper_finding("ignored/Wrapper.tsx"),
+                thin_wrapper_finding("src/Wrapper.tsx"),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
+
+        assert_eq!(results.thin_wrappers.len(), 1);
+        assert_eq!(
+            results.thin_wrappers[0].wrapper.file,
+            PathBuf::from("src/Wrapper.tsx")
+        );
+    }
+
+    #[test]
+    fn finding_ignore_hides_duplicate_prop_shapes_by_component_file() {
+        let mut results = AnalysisResults {
+            duplicate_prop_shapes: vec![
+                duplicate_prop_shape_finding("ignored/Card.tsx"),
+                duplicate_prop_shape_finding("src/Card.tsx"),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
+
+        assert_eq!(results.duplicate_prop_shapes.len(), 1);
+        assert_eq!(
+            results.duplicate_prop_shapes[0].shape.file,
+            PathBuf::from("src/Card.tsx")
+        );
+    }
+
+    #[test]
+    fn finding_ignore_hides_prop_drilling_chains_only_when_every_hop_matches() {
+        let mut results = AnalysisResults {
+            prop_drilling_chains: vec![
+                prop_drilling_chain_finding(&["ignored/a.tsx", "ignored/b.tsx"]),
+                prop_drilling_chain_finding(&["ignored/a.tsx", "src/b.tsx"]),
+                prop_drilling_chain_finding(&[]),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
+
+        assert_eq!(results.prop_drilling_chains.len(), 2);
+        assert_eq!(results.prop_drilling_chains[0].chain.hops.len(), 2);
+        assert!(results.prop_drilling_chains[1].chain.hops.is_empty());
+    }
+
+    #[test]
+    fn finding_ignore_retains_security_findings_and_blind_spot_diagnostics() {
+        let path = PathBuf::from("ignored/leak.ts");
+        let mut results = AnalysisResults {
+            security_findings: vec![SecurityFinding {
+                finding_id: "id".to_string(),
+                kind: SecurityFindingKind::TaintedSink,
+                category: Some("dangerous-html".to_string()),
+                cwe: Some(79),
+                path: path.clone(),
+                line: 1,
+                col: 0,
+                evidence: "candidate".to_string(),
+                source_backed: false,
+                source_read: None,
+                severity: SecuritySeverity::Low,
+                trace: vec![TraceHop {
+                    path: path.clone(),
+                    line: 1,
+                    col: 0,
+                    role: TraceHopRole::Sink,
+                }],
+                actions: vec![],
+                dead_code: None,
+                reachability: None,
+                candidate: SecurityCandidate {
+                    source_kind: None,
+                    sink: SecurityCandidateSink {
+                        path: path.clone(),
+                        line: 1,
+                        col: 0,
+                        category: Some("dangerous-html".to_string()),
+                        cwe: Some(79),
+                        callee: None,
+                        url_shape: None,
+                    },
+                    boundary: SecurityCandidateBoundary::default(),
+                    network: None,
+                },
+                taint_flow: None,
+                runtime: None,
+                attack_surface: None,
+            }],
+            security_unresolved_callee_diagnostics: vec![SecurityUnresolvedCalleeDiagnostic {
+                path,
+                line: 1,
+                col: 0,
+                reason: SkippedSecurityCalleeReason::DynamicDispatch,
+                expression_kind: SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+            }],
+            ..AnalysisResults::default()
+        };
+
+        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
+
+        assert_eq!(results.security_findings.len(), 1);
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
     }
 
     // ── export_usages not counted in total_issues ───────────────
