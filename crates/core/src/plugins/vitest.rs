@@ -248,20 +248,23 @@ fn add_vitest_environment_dependency(result: &mut PluginResult, source: &str, co
             result.referenced_dependencies.push(env.clone());
             super::credit_environment_optional_peers(&env, result);
         }
-        // A built-in vitest environment backed by an optional peer. There is no
-        // `vitest-environment-edge-runtime` package, and `edge-runtime` is an
-        // unrelated CLI package, so crediting either name exempted the wrong
-        // dependency while leaving the one vitest actually loads unreported.
-        "edge-runtime" => {
-            result
-                .referenced_dependencies
-                .push("@edge-runtime/vm".to_string());
-        }
         _ => {
-            result
-                .referenced_dependencies
-                .push(format!("vitest-environment-{env}"));
-            result.referenced_dependencies.push(env);
+            // A built-in vitest environment names no installable package: there
+            // is no `vitest-environment-<value>` package, and the bare name may
+            // belong to an unrelated one, so crediting either exempts the wrong
+            // dependency while leaving the peer vitest actually loads
+            // unreported. The catalogue rows carry that peer instead.
+            let credited = super::credit_config_value(
+                super::config_value_credits::CreditSurface::VitestBuiltinEnvironment,
+                &env,
+                result,
+            );
+            if !credited {
+                result
+                    .referenced_dependencies
+                    .push(format!("vitest-environment-{env}"));
+                result.referenced_dependencies.push(env);
+            }
         }
     }
 }

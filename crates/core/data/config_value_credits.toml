@@ -1,0 +1,75 @@
+# Community-maintainable catalogue of config-value dependency credits.
+#
+# Some packages are loaded at runtime purely because a config VALUE names them,
+# with no import anywhere in the project. `test.environment = "jsdom"` makes
+# jsdom lazily require its optional peer `canvas`; `css.transformer =
+# "lightningcss"` makes Vite require `lightningcss`. Without a credit those
+# declared dependencies are reported as unused, and removing them breaks the
+# build or the test run.
+#
+# This file is the single source of truth for those rules: it is embedded into
+# the binary via `include_str!` and parsed once at startup (see
+# `crates/core/src/plugins/config_value_credits.rs`). There is NO regeneration
+# step. To add a rule for an existing surface, add one entry below and open a
+# PR.
+#
+# Each entry is `(surface, value) -> credits`:
+#   - `surface`: which config location the value was read from. The set of
+#     surfaces is closed, because each one has a call site in a plugin; an
+#     unknown surface fails the catalogue parse loudly. Adding a surface means
+#     adding the enum variant and its call site in the same PR.
+#   - `value`: the exact config value, after any surface-specific
+#     normalization (the test-environment surfaces strip the
+#     `jest-environment-` / `vitest-environment-` prefix first).
+#   - `credits`: the packages to credit as referenced. Must be non-empty. Only
+#     names the project actually declares are ever reported, so a credit never
+#     invents a dependency.
+#   - `notes`: optional human context; does not affect matching.
+#
+# This catalogue is deliberately NOT "credit every optional peer of a used
+# package". Vite alone declares twelve optional peers, so that rule would
+# silently exempt all of them. Each row here is a specific, config-observable
+# reason a package is loaded.
+
+# ── test-environment-optional-peer ────────────────────────────────────────
+# Read from Jest `testEnvironment` and Vitest `test.environment`. Credits the
+# optional peers the selected environment requires at runtime, in ADDITION to
+# whatever package the environment name itself resolves to.
+
+[[credit]]
+surface = "test-environment-optional-peer"
+value = "jsdom"
+credits = ["canvas"]
+notes = """
+jsdom declares `canvas` as an optional peer and requires it lazily when it is
+installed, so a project that installs it for real canvas support has no import
+of it anywhere. happy-dom ships its own canvas stub and takes no such peer, so
+it gets no row here (issue #2005).
+"""
+
+# ── vitest-builtin-environment ────────────────────────────────────────────
+# Read from Vitest `test.environment`. These values name a built-in Vitest
+# environment rather than an installable package: there is no
+# `vitest-environment-<value>` package, and the bare name may belong to an
+# unrelated package. Only the listed credits are recorded, so the wrong
+# dependency is never exempted.
+
+[[credit]]
+surface = "vitest-builtin-environment"
+value = "edge-runtime"
+credits = ["@edge-runtime/vm"]
+notes = """
+`edge-runtime` is a built-in Vitest environment backed by the optional peer
+`@edge-runtime/vm`. The unrelated `edge-runtime` CLI package and the
+non-existent `vitest-environment-edge-runtime` must not be credited.
+"""
+
+# ── vite-css-implementation ───────────────────────────────────────────────
+# Read from Vite `css.transformer` and `build.cssMinify`. Vite ships the
+# integration but not the implementation package, so naming one here makes the
+# build fail until the project installs it itself.
+
+[[credit]]
+surface = "vite-css-implementation"
+value = "lightningcss"
+credits = ["lightningcss"]

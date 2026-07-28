@@ -8,9 +8,12 @@ use super::{Plugin, PluginResult};
 
 const CONFIG_EXPORTS: &[&str] = &["default"];
 
-/// Vite ships the lightningcss integration but not the package: either of these
-/// config values makes the build fail until the project installs it itself.
-const LIGHTNINGCSS_SELECTOR_PATHS: &[&[&str]] = &[&["css", "transformer"], &["build", "cssMinify"]];
+/// Vite ships the CSS integrations but not the implementation packages: naming
+/// one under either of these keys makes the build fail until the project
+/// installs it itself. The value-to-package rules are catalogue rows under the
+/// `vite-css-implementation` surface.
+const CSS_IMPLEMENTATION_SELECTOR_PATHS: &[&[&str]] =
+    &[&["css", "transformer"], &["build", "cssMinify"]];
 
 fn additional_data_entry_pattern(
     root: &std::path::Path,
@@ -82,6 +85,30 @@ fn local_style_candidate_exists(root: &std::path::Path, normalized: &str) -> boo
             || root.join(path).join(format!("_index.{ext}")).is_file()
             || root.join(path).join(format!("index.{ext}")).is_file()
     })
+}
+
+/// Credit the CSS implementation package named under one of the CSS keys.
+///
+/// The first key that carries a catalogued value wins; Vite loads one
+/// implementation, so a second credit would exempt a package it never requires.
+fn add_css_implementation_dependency(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &std::path::Path,
+) {
+    for selector in CSS_IMPLEMENTATION_SELECTOR_PATHS {
+        let Some(value) = config_parser::extract_config_string(source, config_path, selector)
+        else {
+            continue;
+        };
+        if super::credit_config_value(
+            super::config_value_credits::CreditSurface::ViteCssImplementation,
+            &value,
+            result,
+        ) {
+            break;
+        }
+    }
 }
 
 define_plugin!(
@@ -179,16 +206,7 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(dep));
         }
 
-        for selector in LIGHTNINGCSS_SELECTOR_PATHS {
-            if config_parser::extract_config_string(source, config_path, selector)
-                .is_some_and(|value| value == "lightningcss")
-            {
-                result
-                    .referenced_dependencies
-                    .push("lightningcss".to_string());
-                break;
-            }
-        }
+        add_css_implementation_dependency(&mut result, source, config_path);
 
         for preprocessor in ["scss", "sass", "less", "stylus"] {
             let body = config_parser::extract_config_string_or_array(

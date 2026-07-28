@@ -197,6 +197,23 @@ ecosystem = "core"
 - Do **not** add framework-plugin packages (`vite-plugin-*`, `prettier-plugin-*`, `eslint-plugin-*`, `@rollup/plugin-*`, or scoped forms like `@ianvs/prettier-plugin-sort-imports`). Those must be credited by the relevant plugin's config parser when they actually appear in the config file; listing them here would hide a declared-but-unused plugin. The catalogue's parse tests reject such entries.
 - Run `cargo test -p fallow-core plugins::tooling` to validate the catalogue (it checks the TOML parses, has no empty/whitespace prefixes, no duplicates, and no framework-plugin entries). The file is embedded into the binary via `include_str!`, so a passing test means a working release.
 
+## Crediting a dependency named by a config value
+
+Some packages are loaded at runtime only because a config value names them, with no import anywhere: `test.environment: "jsdom"` makes jsdom lazily require its optional peer `canvas`, and Vite's `css.transformer: "lightningcss"` makes Vite require `lightningcss`. Those rules live in a second data-driven catalogue at `crates/core/data/config_value_credits.toml`, next to `tooling.toml` and parsed the same way (embedded via `include_str!`, no regeneration step):
+
+```toml
+[[credit]]
+surface = "test-environment-optional-peer"
+value = "jsdom"
+credits = ["canvas"]
+notes = "optional, human context only"
+```
+
+- `surface` says which config location the value came from. The set is closed, because each surface has a call site in a plugin that knows how to normalize the value first. Adding a row for an existing surface is pure data; adding a surface means adding the `CreditSurface` variant and its call site in the same change.
+- `value` is matched exactly, after that normalization (the test-environment surfaces strip the `jest-environment-` / `vitest-environment-` prefix). `credits` must be non-empty. Only packages the project actually declares are ever reported, so a credit never invents a dependency.
+- Do **not** turn this into "credit every optional peer of a used package". Vite alone declares twelve optional peers, so that rule would silently exempt all of them and hide genuinely unused dependencies. Every row needs a specific, config-observable reason the package is loaded.
+- Run `cargo test -p fallow-core config_value_credits` to validate the catalogue (it checks the TOML parses, rejects unknown surfaces and fields, empty values or credits, and duplicate rows).
+
 ## Editing the JSON output contract
 
 Fallow's JSON output schema lives in `docs/output-schema.json` (JSON Schema draft-07) and is consumed by downstream tools (VS Code extension TypeScript codegen, GitHub Action jq scripts, AI agents using AJV validation).

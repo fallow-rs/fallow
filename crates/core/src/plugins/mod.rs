@@ -1138,6 +1138,7 @@ macro_rules! define_plugin {
 }
 
 pub mod config_parser;
+mod config_value_credits;
 mod manifest;
 pub mod manifest_entries;
 pub mod registry;
@@ -1157,19 +1158,39 @@ fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, c
 
 /// Credit the optional peer dependencies a test environment loads at runtime.
 ///
-/// `jsdom` declares `canvas` as an optional peer and requires it lazily when it
-/// is installed, so a project that installs `canvas` to give jsdom real canvas
-/// support has no import of it anywhere in its own source. Without this credit
-/// the dependency is reported as unused and removing it silently breaks every
-/// canvas-backed test (issue #2005).
+/// The rules are data: see the `test-environment-optional-peer` rows in
+/// `crates/core/data/config_value_credits.toml`. `jsdom` requires its optional
+/// peer `canvas` lazily when it is installed, so a project installing it for
+/// real canvas support has no import of it anywhere and would see the
+/// dependency reported as unused (issue #2005). Environments without such a
+/// peer, like `happy-dom`, have no row.
 ///
-/// `happy-dom` ships its own canvas stub and takes no such peer, so it gets no
-/// credit here. Only names already declared in the manifest can be credited, so
-/// this never invents an unlisted dependency.
+/// Only names already declared in the manifest can be credited, so this never
+/// invents an unlisted dependency.
 fn credit_environment_optional_peers(environment: &str, result: &mut PluginResult) {
-    if canonical_test_environment(environment) == "jsdom" {
-        result.referenced_dependencies.push("canvas".to_string());
-    }
+    credit_config_value(
+        config_value_credits::CreditSurface::TestEnvironmentOptionalPeer,
+        canonical_test_environment(environment),
+        result,
+    );
+}
+
+/// Record the catalogue credits for a config value, if any.
+///
+/// Returns whether a rule matched, which callers use when the credited packages
+/// replace the dependencies derived from the value itself.
+fn credit_config_value(
+    surface: config_value_credits::CreditSurface,
+    value: &str,
+    result: &mut PluginResult,
+) -> bool {
+    let Some(packages) = config_value_credits::credited_packages(surface, value) else {
+        return false;
+    };
+    result
+        .referenced_dependencies
+        .extend(packages.iter().cloned());
+    true
 }
 
 /// Strip the runner prefix from a test environment specifier.
@@ -1336,6 +1357,30 @@ mod tests {
         let plugin = nextjs::NextJsPlugin;
         let deps: Vec<String> = vec![];
         assert!(!plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn environment_optional_peers_come_from_the_credit_catalogue() {
+        for environment in [
+            "jsdom",
+            "jest-environment-jsdom",
+            "vitest-environment-jsdom",
+        ] {
+            let mut result = PluginResult::default();
+            credit_environment_optional_peers(environment, &mut result);
+            assert_eq!(
+                result.referenced_dependencies,
+                vec!["canvas".to_string()],
+                "expected the catalogue credit for {environment}"
+            );
+        }
+    }
+
+    #[test]
+    fn environment_without_a_catalogue_row_credits_nothing() {
+        let mut result = PluginResult::default();
+        credit_environment_optional_peers("happy-dom", &mut result);
+        assert!(result.referenced_dependencies.is_empty());
     }
 
     #[test]
