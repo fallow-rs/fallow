@@ -470,7 +470,7 @@ fn apply_duplication_baseline(
     };
 
     let baseline_data = read_duplication_baseline(path, opts.output)?;
-    let baseline_entries = baseline_data.clone_groups.len();
+    let baseline_entries = baseline_data.entry_count();
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
     let matched = before.saturating_sub(report.clone_groups.len());
@@ -892,7 +892,7 @@ mod tests {
             end_line: end,
             start_col: 0,
             end_col: 0,
-            fragment: String::new(),
+            fragment: format!("// clone body of {file}"),
         }
     }
 
@@ -1872,7 +1872,30 @@ mod tests {
     fn baseline_empty_json_object_uses_defaults() {
         let result = serde_json::from_str::<DuplicationBaselineData>(r#"{"clone_groups": []}"#);
         assert!(result.is_ok());
-        assert!(result.unwrap().clone_groups.is_empty());
+        let baseline = result.unwrap();
+        assert!(baseline.clone_groups.is_empty());
+        assert!(baseline.clone_fingerprints.is_empty());
+        assert_eq!(baseline.entry_count(), 0);
+    }
+
+    #[test]
+    fn baseline_entry_count_prefers_fingerprints() {
+        let root = Path::new("/project");
+        let report = make_report(
+            vec![make_group(
+                vec![
+                    instance("/project/src/a.ts", 1, 10),
+                    instance("/project/src/b.ts", 1, 10),
+                ],
+                50,
+                10,
+            )],
+            10,
+            1000,
+        );
+        let baseline = DuplicationBaselineData::from_report(&report, root);
+        assert_eq!(baseline.clone_fingerprints.len(), 1);
+        assert_eq!(baseline.entry_count(), 1);
     }
 
     #[test]

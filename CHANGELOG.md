@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A saved duplication baseline keeps matching after unrelated line shifts.**
+  Baselines stored `path:start-end` pairs per clone group, so inserting a line
+  above a clone made every instance in that group look new and the accepted
+  duplication reappeared as a finding. New baselines also store a content
+  fingerprint plus the number of instances in the group, which survives line
+  shifts while still reporting a clone that gains a fresh copy in another file.
+  The location keys are still written and still read, so baselines saved by
+  earlier versions keep working unchanged and no baseline needs to be
+  re-saved. (Closes
+  [#2029](https://github.com/fallow-rs/fallow/issues/2029).)
+
 - **`fallow dupes` again fails when duplication exceeds the configured
   threshold.** Standalone runs rendered through a code path that returned the
   renderer's exit code without ever consulting the threshold, so

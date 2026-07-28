@@ -654,6 +654,62 @@ fn dupes_save_baseline_creates_parent_directory() {
 }
 
 #[test]
+fn dupes_baseline_survives_line_shift_and_reports_extra_copy() {
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-baseline-shift","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    let clone = "export function shared(value) {\n  if (value > 1) {\n    return value * 2;\n  }\n  return value + 1;\n}\n";
+    std::fs::write(dir.path().join("src/one.ts"), clone).unwrap();
+    std::fs::write(dir.path().join("src/two.ts"), clone).unwrap();
+
+    let baseline_path = dir.path().join("dupes-baseline.json");
+    let thresholds = ["--min-tokens", "10", "--min-lines", "2"];
+    let mut save_args = vec!["--save-baseline", baseline_path.to_str().unwrap()];
+    save_args.extend(thresholds);
+    save_args.extend(["--format", "json", "--quiet", "--no-cache"]);
+    let saved = run_fallow_in_root("dupes", dir.path(), &save_args);
+    let saved_json = parse_json(&saved);
+    assert!(
+        has_clone_group_with_files(&saved_json, &["src/one.ts", "src/two.ts"]),
+        "fixture should produce a clone group. stdout: {} stderr: {}",
+        saved.stdout,
+        saved.stderr
+    );
+
+    std::fs::write(
+        dir.path().join("src/one.ts"),
+        format!("// unrelated new comment\n\n{clone}"),
+    )
+    .unwrap();
+
+    let mut compare_args = vec!["--baseline", baseline_path.to_str().unwrap()];
+    compare_args.extend(thresholds);
+    compare_args.extend(["--format", "json", "--quiet", "--no-cache"]);
+    let shifted = run_fallow_in_root("dupes", dir.path(), &compare_args);
+    let shifted_json = parse_json(&shifted);
+    assert!(
+        shifted_json["clone_groups"].as_array().unwrap().is_empty(),
+        "a line shift must not resurface a baselined clone. stdout: {} stderr: {}",
+        shifted.stdout,
+        shifted.stderr
+    );
+
+    std::fs::write(dir.path().join("src/three.ts"), clone).unwrap();
+    let copied = run_fallow_in_root("dupes", dir.path(), &compare_args);
+    let copied_json = parse_json(&copied);
+    assert!(
+        has_clone_group_with_files(&copied_json, &["src/three.ts"]),
+        "a fresh copy in a third file must be reported. stdout: {} stderr: {}",
+        copied.stdout,
+        copied.stderr
+    );
+}
+
+#[test]
 fn dupes_json_paths_are_relative() {
     let output = run_fallow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
