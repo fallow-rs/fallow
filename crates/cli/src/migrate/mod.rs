@@ -162,8 +162,17 @@ fn reject_existing_fallow_config(root: &Path) -> Option<ExitCode> {
     None
 }
 
-/// Print the migrated-sources list, migration warnings, and the
-/// knip glob-engine caveat after a successful migration.
+/// Scope difference between knip's `ignore` and fallow's `ignoreFindings`.
+/// knip suppresses every issue whose file path matches, including
+/// dependency and manifest issues; `ignoreFindings` only hides findings that
+/// a matching source file owns. Printed for every knip migration, not only
+/// when `ignore` was present, so the narrower semantics are stated before a
+/// user reaches for the key.
+const KNIP_IGNORE_SCOPE_NOTE: &str = "Note: knip's ignore also suppresses dependency and manifest issues by file path; fallow's ignoreFindings never hides manifest-owned findings such as unused dependencies. See https://docs.fallow.tools/migration/from-knip";
+
+/// Print the migrated-sources list, migration warnings, the knip
+/// glob-engine caveat, and the knip ignore-scope note after a successful
+/// migration.
 fn report_migration_outcome(result: &MigrationResult) {
     for source in &result.sources {
         eprintln!("Migrated from: {}", source_head(source));
@@ -184,6 +193,11 @@ fn report_migration_outcome(result: &MigrationResult) {
         eprintln!(
             "Note: knip and fallow use different glob engines; verify migrated entry / ignoreFindings with `fallow dead-code` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
         );
+    }
+
+    if knip_contributed(result) {
+        eprintln!();
+        eprintln!("{KNIP_IGNORE_SCOPE_NOTE}");
     }
 }
 
@@ -625,14 +639,18 @@ fn source_head(s: &str) -> &str {
     s
 }
 
+/// Whether a knip config contributed to the migration result.
+fn knip_contributed(result: &MigrationResult) -> bool {
+    result.sources.iter().any(|s| s.contains("knip"))
+}
+
 /// Decide whether the migrate command should print a glob-semantics caveat
 /// after the warnings block. Emitted only when knip contributed to the
 /// migration AND the resulting config carries `entry` or `ignoreFindings`,
 /// since those are the only fields where knip's glob engine and fallow's
 /// `globset` can diverge. See issue #457.
 fn should_emit_glob_caveat(result: &MigrationResult) -> bool {
-    let knip_contributed = result.sources.iter().any(|s| s.contains("knip"));
-    if !knip_contributed {
+    if !knip_contributed(result) {
         return false;
     }
     let Some(obj) = result.config.as_object() else {

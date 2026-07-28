@@ -365,6 +365,55 @@ fn migrate_knip_ignore_warns_for_invalid_entries_without_dropping_valid_patterns
     cleanup(&dir);
 }
 
+/// Marker phrase of the note that states how knip's `ignore` scope differs
+/// from fallow's `ignoreFindings`.
+const IGNORE_SCOPE_NOTE_MARKER: &str =
+    "knip's ignore also suppresses dependency and manifest issues";
+
+#[test]
+fn migrate_knip_states_ignore_scope_difference_once_even_without_ignore() {
+    let dir = migrate_temp_dir(
+        "ignore-scope-note",
+        "knip.json",
+        r#"{"entry": ["src/index.ts"]}"#,
+    );
+    let output = run_fallow_raw(&["migrate", "--dry-run", "--root", dir.to_str().unwrap()]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        !output.stdout.contains("ignoreFindings"),
+        "the note must not change the generated config: {}",
+        output.stdout
+    );
+    assert_eq!(
+        output.stderr.matches(IGNORE_SCOPE_NOTE_MARKER).count(),
+        1,
+        "expected exactly one ignore-scope note, got stderr: {}",
+        output.stderr
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_without_knip_omits_ignore_scope_note() {
+    let dir = migrate_temp_dir(
+        "ignore-scope-note-jscpd",
+        ".jscpd.json",
+        r#"{"minTokens": 100}"#,
+    );
+    let output = run_fallow_raw(&["migrate", "--dry-run", "--root", dir.to_str().unwrap()]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        !output.stderr.contains(IGNORE_SCOPE_NOTE_MARKER),
+        "a jscpd-only migration should not mention knip's ignore: {}",
+        output.stderr
+    );
+
+    cleanup(&dir);
+}
+
 #[test]
 fn migrate_knip_workspace_ignore_warns_instead_of_guessing_a_root() {
     let dir = migrate_temp_dir(
