@@ -25,7 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::resolve::{ResolvedModule, ResolvedReplacedModuleTarget};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
-use types::{ReferencePathInterner, ReferencePathIter, ReferencePathNode};
+use types::{ReferencePathInterner, ReferencePathNode, ReferenceRouteNodeId, ReferenceRoutes};
 
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
@@ -89,6 +89,8 @@ pub struct ModuleGraph {
     test_reachability_index: TestReachabilityIndex,
     /// Flat interned linked paths used by exact export references.
     reference_paths: Vec<ReferencePathNode>,
+    /// Compact transition graphs used by namespace-derived references.
+    reference_routes: ReferenceRoutes,
     /// Reverse index: for each `FileId`, which files import it.
     pub reverse_deps: Vec<Vec<FileId>>,
     /// Precomputed: which modules have namespace imports (import * as ns).
@@ -199,10 +201,13 @@ impl TestReachabilityIndex {
             .map(|index| self.masked_profiles[index].profiles.as_slice())
     }
 
-    fn covers_path<I>(&self, source: FileId, hops: &I) -> bool
-    where
-        I: Iterator<Item = (FileId, ModuleLoadMechanism)> + Clone,
-    {
+    fn covers_reference_path(
+        &self,
+        source: FileId,
+        path: types::ReferencePathId,
+        paths: &[ReferencePathNode],
+        routes: &ReferenceRoutes,
+    ) -> bool {
         let Some(source_profiles) = self.profiles_for(&self.reachable_profiles, source) else {
             return false;
         };
@@ -213,22 +218,32 @@ impl TestReachabilityIndex {
                 continue;
             }
 
-            for (target, mechanism) in (*hops).clone() {
-                let Some(target_word) = self
-                    .profiles_for(&self.reachable_profiles, target)
-                    .and_then(|profiles| profiles.get(word_index))
-                else {
+            let mut next = Some(path);
+            while let Some(path_id) = next {
+                let Some(path_node) = paths.get(path_id.index()) else {
                     return false;
                 };
-                active_profiles &= target_word;
-                if matches!(mechanism, ModuleLoadMechanism::EsModule)
-                    && let Some(masked_profiles) = self.masked_profiles_for(target)
-                {
-                    let Some(masked_word) = masked_profiles.get(word_index) else {
-                        return false;
-                    };
-                    active_profiles &= !masked_word;
-                }
+                next = path_node.parent();
+                active_profiles = match *path_node {
+                    ReferencePathNode::Hop {
+                        target, mechanism, ..
+                    } => self.active_hop_profiles(target, mechanism, word_index, active_profiles),
+                    ReferencePathNode::Route {
+                        graph,
+                        start,
+                        terminal,
+                        start_mechanism,
+                        ..
+                    } => self.active_route_profiles(
+                        routes,
+                        graph,
+                        start,
+                        terminal,
+                        start_mechanism,
+                        word_index,
+                        active_profiles,
+                    ),
+                };
                 if active_profiles == 0 {
                     break;
                 }
@@ -240,6 +255,143 @@ impl TestReachabilityIndex {
         }
 
         false
+    }
+
+    #[cfg(test)]
+    fn covers_path<I>(&self, source: FileId, hops: &I) -> bool
+    where
+        I: Iterator<Item = (FileId, ModuleLoadMechanism)> + Clone,
+    {
+        let Some(source_profiles) = self.profiles_for(&self.reachable_profiles, source) else {
+            return false;
+        };
+        for (word_index, &source_word) in source_profiles.iter().enumerate() {
+            let mut active_profiles = source_word;
+            for (target, mechanism) in (*hops).clone() {
+                active_profiles =
+                    self.active_hop_profiles(target, mechanism, word_index, active_profiles);
+                if active_profiles == 0 {
+                    break;
+                }
+            }
+            if active_profiles != 0 {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn active_hop_profiles(
+        &self,
+        target: FileId,
+        mechanism: ModuleLoadMechanism,
+        word_index: usize,
+        mut active_profiles: u64,
+    ) -> u64 {
+        let Some(target_word) = self
+            .profiles_for(&self.reachable_profiles, target)
+            .and_then(|profiles| profiles.get(word_index))
+        else {
+            return 0;
+        };
+        active_profiles &= target_word;
+        if matches!(mechanism, ModuleLoadMechanism::EsModule)
+            && let Some(masked_profiles) = self.masked_profiles_for(target)
+        {
+            let Some(masked_word) = masked_profiles.get(word_index) else {
+                return 0;
+            };
+            active_profiles &= !masked_word;
+        }
+        active_profiles
+    }
+
+    /// Evaluate one compact namespace transition graph with a monotone
+    /// profile-bit worklist. Each `(route node, profile bit)` is processed at
+    /// most once, including cyclic graphs.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the route identity and profile word form one evaluation contract"
+    )]
+    fn active_route_profiles(
+        &self,
+        routes: &ReferenceRoutes,
+        graph_id: types::ReferenceRouteGraphId,
+        start: ReferenceRouteNodeId,
+        terminal: ReferenceRouteNodeId,
+        start_mechanism: Option<ModuleLoadMechanism>,
+        word_index: usize,
+        candidate_profiles: u64,
+    ) -> u64 {
+        let Some(graph) = routes.graphs.get(graph_id.0 as usize) else {
+            return 0;
+        };
+        let node_count = graph.nodes.end.saturating_sub(graph.nodes.start) as usize;
+        let start_index = start.0 as usize;
+        let terminal_index = terminal.0 as usize;
+        if start_index >= node_count || terminal_index >= node_count {
+            return 0;
+        }
+
+        let mut attempted = vec![0_u64; node_count];
+        let mut pending = vec![0_u64; node_count];
+        let mut queued = vec![false; node_count];
+        let mut queue = std::collections::VecDeque::from([start_index]);
+        pending[start_index] = candidate_profiles;
+        queued[start_index] = true;
+        let mut successful_profiles = 0_u64;
+
+        while let Some(local_index) = queue.pop_front() {
+            queued[local_index] = false;
+            let incoming = pending[local_index] & !attempted[local_index];
+            pending[local_index] = 0;
+            attempted[local_index] |= incoming;
+            if incoming == 0 {
+                continue;
+            }
+
+            let Some(node) = routes.nodes.get(graph.nodes.start as usize + local_index) else {
+                return 0;
+            };
+            let active = if local_index == start_index {
+                start_mechanism.map_or(incoming, |mechanism| {
+                    self.active_hop_profiles(node.target, mechanism, word_index, incoming)
+                })
+            } else {
+                self.active_hop_profiles(node.target, node.mechanism, word_index, incoming)
+            };
+            if active == 0 {
+                continue;
+            }
+            if local_index == terminal_index {
+                successful_profiles |= active;
+                continue;
+            }
+
+            let Some(successors) = routes
+                .edges
+                .get(node.successors.start as usize..node.successors.end as usize)
+            else {
+                return 0;
+            };
+            for successor in successors {
+                let successor_index = successor.0 as usize;
+                if successor_index >= node_count {
+                    return 0;
+                }
+                let new_profiles = active & !attempted[successor_index] & !pending[successor_index];
+                if new_profiles == 0 {
+                    continue;
+                }
+                pending[successor_index] |= new_profiles;
+                if !queued[successor_index] {
+                    queued[successor_index] = true;
+                    queue.push_back(successor_index);
+                }
+            }
+        }
+
+        successful_profiles
     }
 
     #[cfg(test)]
@@ -429,7 +581,9 @@ impl ModuleGraph {
 
         graph.re_export_cycles =
             graph.resolve_re_export_chains(&module_by_id, &mut reference_paths);
-        graph.reference_paths = reference_paths.finalize(&mut graph.modules);
+        let finalized_paths = reference_paths.finalize(&mut graph.modules);
+        graph.reference_paths = finalized_paths.paths;
+        graph.reference_routes = finalized_paths.routes;
 
         graph
     }
@@ -466,9 +620,12 @@ impl ModuleGraph {
             return self.is_test_reachable(reference.from_file);
         }
 
-        let hops = ReferencePathIter::new(&self.reference_paths, reference.path);
-        self.test_reachability_index
-            .covers_path(reference.from_file, &hops)
+        self.test_reachability_index.covers_reference_path(
+            reference.from_file,
+            reference.path,
+            &self.reference_paths,
+            &self.reference_routes,
+        )
     }
 
     #[cfg(test)]
@@ -476,7 +633,32 @@ impl ModuleGraph {
         &self,
         reference: &SymbolReference,
     ) -> Vec<(FileId, ModuleLoadMechanism)> {
-        ReferencePathIter::new(&self.reference_paths, reference.path).collect()
+        let mut hops = Vec::new();
+        let mut next = Some(reference.path);
+        while let Some(path_id) = next {
+            let Some(node) = self.reference_paths.get(path_id.index()) else {
+                return Vec::new();
+            };
+            next = node.parent();
+            match *node {
+                ReferencePathNode::Hop {
+                    target, mechanism, ..
+                } => hops.push((target, mechanism)),
+                ReferencePathNode::Route {
+                    graph,
+                    start,
+                    terminal,
+                    start_mechanism,
+                    ..
+                } => hops.extend(self.reference_routes.canonical_hops(
+                    graph,
+                    start,
+                    terminal,
+                    start_mechanism,
+                )),
+            }
+        }
+        hops
     }
 
     /// Rebuild the `namespace_imported` bitset from the edge set.

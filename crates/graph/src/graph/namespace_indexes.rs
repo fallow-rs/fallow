@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
@@ -10,7 +10,10 @@ use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
 use crate::resolve::{ResolvedImport, ResolvedModule};
 
 use super::ModuleGraph;
-use super::types::{ReferencePathId, ReferencePathInterner};
+use super::types::{
+    ReferencePathId, ReferencePathInterner, ReferenceRouteGraphId, ReferenceRouteGraphSpec,
+    ReferenceRouteNodeId, ReferenceRouteNodeSpec,
+};
 
 #[derive(Default)]
 struct ReExportTargets {
@@ -24,83 +27,28 @@ pub(super) struct ConsumerImport<'a> {
     pub(super) import: &'a ResolvedImport,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct NamespaceRouteId(usize);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct NamespaceRouteNode {
-    parent: Option<NamespaceRouteId>,
-    file_id: FileId,
-    exported_name: String,
-}
-
-#[derive(Default)]
-struct NamespaceRouteInterner {
-    nodes: Vec<NamespaceRouteNode>,
-    ids: FxHashMap<NamespaceRouteNode, NamespaceRouteId>,
-}
-
-impl NamespaceRouteInterner {
-    fn extend(
-        &mut self,
-        parent: Option<NamespaceRouteId>,
-        file_id: FileId,
-        exported_name: &str,
-    ) -> NamespaceRouteId {
-        let node = NamespaceRouteNode {
-            parent,
-            file_id,
-            exported_name: exported_name.to_string(),
-        };
-        if let Some(route) = self.ids.get(&node) {
-            return *route;
-        }
-        let route = NamespaceRouteId(self.nodes.len());
-        self.nodes.push(node.clone());
-        self.ids.insert(node, route);
-        route
-    }
-
-    fn contains(
-        &self,
-        mut route: Option<NamespaceRouteId>,
-        file_id: FileId,
-        exported_name: &str,
-    ) -> bool {
-        while let Some(route_id) = route {
-            let Some(node) = self.nodes.get(route_id.0) else {
-                return false;
-            };
-            if node.file_id == file_id && node.exported_name == exported_name {
-                return true;
-            }
-            route = node.parent;
-        }
-        false
-    }
-}
-
-/// One outward-reachable namespace export plus its exact inward re-export route.
+/// One namespace export state in the compact transition graph.
 pub(super) struct ReachableNamespaceExport {
     pub(super) file_id: FileId,
     pub(super) exported_name: String,
-    route: Option<NamespaceRouteId>,
+    state_index: usize,
+    /// Inward transitions from this outward export toward the namespace seed.
+    inward: Vec<usize>,
 }
 
-/// All simple named/star re-export paths reachable from one namespace export.
+/// All reachable `(file, export-name)` states for one namespace export.
 ///
-/// Distinct routes to the same `(file, name)` remain distinct. Coverage must
-/// evaluate the route actually used by each consumer rather than collapsing a
-/// diamond into aggregate file reachability.
+/// A state is retained once, while named/star diamonds become transition
+/// edges. Cycles remain ordinary graph cycles and are evaluated later by the
+/// profile-aware monotone worklist; no simple paths are materialized.
 pub(super) struct ReachableNamespaceExports {
     exports: Vec<ReachableNamespaceExport>,
-    routes: NamespaceRouteInterner,
 }
 
 struct NamespaceTraversal {
     reachable: ReachableNamespaceExports,
     frontier: VecDeque<usize>,
-    seen: FxHashSet<(FileId, String, Option<NamespaceRouteId>)>,
+    state_by_export: FxHashMap<(FileId, String), usize>,
 }
 
 impl NamespaceTraversal {
@@ -108,51 +56,95 @@ impl NamespaceTraversal {
         let seed = ReachableNamespaceExport {
             file_id: seed_file,
             exported_name: seed_name.to_string(),
-            route: None,
+            state_index: 0,
+            inward: Vec::new(),
         };
         Self {
             reachable: ReachableNamespaceExports {
                 exports: vec![seed],
-                routes: NamespaceRouteInterner::default(),
             },
             frontier: VecDeque::from([0]),
-            seen: FxHashSet::from_iter([(seed_file, seed_name.to_string(), None)]),
+            state_by_export: FxHashMap::from_iter([((seed_file, seed_name.to_string()), 0)]),
         }
     }
 
-    fn push(
-        &mut self,
-        source_file: FileId,
-        source_name: &str,
-        source_route: Option<NamespaceRouteId>,
-        barrel_file: FileId,
-        exported_name: &str,
-    ) {
-        if (barrel_file == source_file && exported_name == source_name)
-            || self
-                .reachable
-                .routes
-                .contains(source_route, barrel_file, exported_name)
-        {
-            return;
+    fn connect(&mut self, source_index: usize, barrel_file: FileId, exported_name: &str) {
+        let key = (barrel_file, exported_name.to_string());
+        let barrel_index = if let Some(index) = self.state_by_export.get(&key) {
+            *index
+        } else {
+            let index = self.reachable.exports.len();
+            self.reachable.exports.push(ReachableNamespaceExport {
+                file_id: barrel_file,
+                exported_name: exported_name.to_string(),
+                state_index: index,
+                inward: Vec::new(),
+            });
+            self.state_by_export.insert(key, index);
+            self.frontier.push_back(index);
+            index
+        };
+        if source_index != barrel_index {
+            self.reachable.exports[barrel_index]
+                .inward
+                .push(source_index);
         }
-        let route = Some(
-            self.reachable
-                .routes
-                .extend(source_route, source_file, source_name),
-        );
-        if !self
-            .seen
-            .insert((barrel_file, exported_name.to_string(), route))
-        {
-            return;
+    }
+
+    fn finish(mut self) -> ReachableNamespaceExports {
+        for export in &mut self.reachable.exports {
+            export.inward.sort_unstable();
+            export.inward.dedup();
         }
-        self.reachable.exports.push(ReachableNamespaceExport {
-            file_id: barrel_file,
-            exported_name: exported_name.to_string(),
-            route,
-        });
-        self.frontier.push_back(self.reachable.exports.len() - 1);
+        self.reachable
+    }
+}
+
+/// One canonical persisted route graph plus the local node for every export
+/// state in `ReachableNamespaceExports`.
+pub(super) struct NamespaceReferenceRoutes {
+    graph: ReferenceRouteGraphId,
+    route_node_by_state: Vec<ReferenceRouteNodeId>,
+    terminal: ReferenceRouteNodeId,
+}
+
+impl NamespaceReferenceRoutes {
+    /// Intern the complete consumer-to-target route without expanding its
+    /// named/star alternatives.
+    pub(super) fn consumer_path(
+        &self,
+        export: &ReachableNamespaceExport,
+        consumer: &ConsumerImport<'_>,
+        reference_paths: &mut ReferencePathInterner,
+    ) -> ReferencePathId {
+        let mechanism = if consumer.import.target.is_commonjs_require() {
+            ModuleLoadMechanism::CommonJsRequire
+        } else {
+            ModuleLoadMechanism::EsModule
+        };
+        reference_paths.route(
+            None,
+            self.graph,
+            self.route_node_by_state[export.state_index],
+            self.terminal,
+            Some(mechanism),
+        )
+    }
+
+    /// Intern an external-entry traversal. The entry module is the reference
+    /// source, so traversal begins after its export state.
+    pub(super) fn entry_path(
+        &self,
+        export: &ReachableNamespaceExport,
+        reference_paths: &mut ReferencePathInterner,
+    ) -> ReferencePathId {
+        reference_paths.route(
+            None,
+            self.graph,
+            self.route_node_by_state[export.state_index],
+            self.terminal,
+            None,
+        )
     }
 }
 
@@ -161,54 +153,67 @@ impl ReachableNamespaceExports {
         self.exports.iter()
     }
 
-    fn route_hops(&self, export: &ReachableNamespaceExport) -> impl Iterator<Item = FileId> + '_ {
-        let mut next = export.route;
-        std::iter::from_fn(move || {
-            let route = next?;
-            let node = self.routes.nodes.get(route.0)?;
-            next = node.parent;
-            Some(node.file_id)
-        })
-    }
-
-    /// Intern the complete consumer-to-target module-load path.
-    pub(super) fn consumer_path(
+    /// Intern one canonical transition graph shared by every consumer and
+    /// entry-point reference for this namespace seed.
+    pub(super) fn intern_routes(
         &self,
-        export: &ReachableNamespaceExport,
-        consumer: &ConsumerImport<'_>,
         final_target: FileId,
         final_mechanism: ModuleLoadMechanism,
         reference_paths: &mut ReferencePathInterner,
-    ) -> ReferencePathId {
-        let direct_mechanism = if consumer.import.target.is_commonjs_require() {
-            ModuleLoadMechanism::CommonJsRequire
-        } else {
-            ModuleLoadMechanism::EsModule
-        };
-        let mut path = reference_paths.direct(export.file_id, direct_mechanism);
-        for hop in self.route_hops(export) {
-            path = reference_paths.extend(path, hop, ModuleLoadMechanism::EsModule);
+    ) -> NamespaceReferenceRoutes {
+        let mut canonical_order: Vec<usize> = (0..self.exports.len()).collect();
+        canonical_order.sort_unstable_by(|&left, &right| {
+            let left_export = &self.exports[left];
+            let right_export = &self.exports[right];
+            (left_export.file_id.0, left_export.exported_name.as_str())
+                .cmp(&(right_export.file_id.0, right_export.exported_name.as_str()))
+        });
+
+        let mut route_node_by_state = vec![ReferenceRouteNodeId(0); self.exports.len()];
+        for (route_index, state_index) in canonical_order.iter().copied().enumerate() {
+            route_node_by_state[state_index] = ReferenceRouteNodeId(route_index as u32);
         }
-        reference_paths.extend(path, final_target, final_mechanism)
+        let terminal = ReferenceRouteNodeId(self.exports.len() as u32);
+
+        let mut nodes = Vec::with_capacity(self.exports.len() + 1);
+        for state_index in canonical_order {
+            let export = &self.exports[state_index];
+            let mut successors: Vec<_> = export
+                .inward
+                .iter()
+                .map(|&inward| route_node_by_state[inward])
+                .collect();
+            if state_index == 0 {
+                successors.push(terminal);
+            }
+            nodes.push(ReferenceRouteNodeSpec::new(
+                export.file_id,
+                ModuleLoadMechanism::EsModule,
+                successors,
+            ));
+        }
+        nodes.push(ReferenceRouteNodeSpec::new(
+            final_target,
+            final_mechanism,
+            Vec::new(),
+        ));
+
+        let graph = reference_paths.intern_route_graph(ReferenceRouteGraphSpec::new(nodes));
+        NamespaceReferenceRoutes {
+            graph,
+            route_node_by_state,
+            terminal,
+        }
     }
 
-    /// Intern the synthetic external-entry-to-target path for an entry barrel.
-    pub(super) fn entry_path(
-        &self,
-        export: &ReachableNamespaceExport,
-        final_target: FileId,
-        final_mechanism: ModuleLoadMechanism,
-        reference_paths: &mut ReferencePathInterner,
-    ) -> ReferencePathId {
-        let mut hops = self.route_hops(export);
-        let Some(first_hop) = hops.next() else {
-            return reference_paths.direct(final_target, final_mechanism);
-        };
-        let mut path = reference_paths.direct(first_hop, ModuleLoadMechanism::EsModule);
-        for hop in hops {
-            path = reference_paths.extend(path, hop, ModuleLoadMechanism::EsModule);
-        }
-        reference_paths.extend(path, final_target, final_mechanism)
+    #[cfg(test)]
+    pub(super) fn state_count(&self) -> usize {
+        self.exports.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn transition_count(&self) -> usize {
+        self.exports.iter().map(|export| export.inward.len()).sum()
     }
 }
 
@@ -236,6 +241,18 @@ impl<'a> NamespacePropagationIndexes<'a> {
                         .or_default()
                         .push((module.file_id, edge.exported_name.clone()));
                 }
+            }
+        }
+        for targets in re_exports_by_source.values_mut() {
+            targets
+                .star_barrels
+                .sort_unstable_by_key(|file_id| file_id.0);
+            targets.star_barrels.dedup();
+            for named in targets.named.values_mut() {
+                named.sort_unstable_by(|left, right| {
+                    (left.0.0, left.1.as_str()).cmp(&(right.0.0, right.1.as_str()))
+                });
+                named.dedup();
             }
         }
 
@@ -284,38 +301,25 @@ impl<'a> NamespacePropagationIndexes<'a> {
     ) -> ReachableNamespaceExports {
         let mut traversal = NamespaceTraversal::new(seed_file, seed_name);
 
-        while let Some(export_index) = traversal.frontier.pop_front() {
-            let source_file = traversal.reachable.exports[export_index].file_id;
-            let source_name = traversal.reachable.exports[export_index]
+        while let Some(source_index) = traversal.frontier.pop_front() {
+            let source_file = traversal.reachable.exports[source_index].file_id;
+            let source_name = traversal.reachable.exports[source_index]
                 .exported_name
                 .clone();
-            let source_route = traversal.reachable.exports[export_index].route;
             let Some(targets) = self.re_exports_by_source.get(&source_file) else {
                 continue;
             };
             if let Some(named) = targets.named.get(source_name.as_str()) {
                 for (barrel_file, exported_name) in named {
-                    traversal.push(
-                        source_file,
-                        &source_name,
-                        source_route,
-                        *barrel_file,
-                        exported_name,
-                    );
+                    traversal.connect(source_index, *barrel_file, exported_name);
                 }
             }
             for &barrel_file in &targets.star_barrels {
-                traversal.push(
-                    source_file,
-                    &source_name,
-                    source_route,
-                    barrel_file,
-                    &source_name,
-                );
+                traversal.connect(source_index, barrel_file, &source_name);
             }
         }
 
-        traversal.reachable
+        traversal.finish()
     }
 
     pub(super) fn consumers_for(
@@ -327,5 +331,71 @@ impl<'a> NamespacePropagationIndexes<'a> {
             .get(&target)
             .and_then(|by_name| by_name.get(imported_name))
             .map_or(&[], Vec::as_slice)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_indexes() -> NamespacePropagationIndexes<'static> {
+        NamespacePropagationIndexes {
+            re_exports_by_source: FxHashMap::default(),
+            consumers_by_target: FxHashMap::default(),
+        }
+    }
+
+    #[test]
+    fn dense_namespace_cycle_retains_one_state_per_export() {
+        const BARREL_COUNT: u32 = 14;
+        let mut indexes = empty_indexes();
+        for source in 0..BARREL_COUNT {
+            let targets = indexes
+                .re_exports_by_source
+                .entry(FileId(source))
+                .or_default();
+            targets.star_barrels.extend(
+                (0..BARREL_COUNT)
+                    .filter(|&barrel| barrel != source)
+                    .map(FileId),
+            );
+        }
+
+        let reachable = indexes.enumerate_reachable_barrels(FileId(0), "Ns");
+
+        assert_eq!(reachable.state_count(), BARREL_COUNT as usize);
+        assert_eq!(
+            reachable.transition_count(),
+            (BARREL_COUNT * (BARREL_COUNT - 1)) as usize
+        );
+    }
+
+    #[test]
+    fn repeated_namespace_diamonds_grow_by_states_and_edges_not_paths() {
+        const LAYERS: u32 = 24;
+        let mut indexes = empty_indexes();
+        let mut previous = vec![FileId(0)];
+        let mut next_file = 1_u32;
+        for _ in 0..LAYERS {
+            let next = vec![FileId(next_file), FileId(next_file + 1)];
+            next_file += 2;
+            for source in &previous {
+                indexes
+                    .re_exports_by_source
+                    .entry(*source)
+                    .or_default()
+                    .star_barrels
+                    .extend(next.iter().copied());
+            }
+            previous = next;
+        }
+
+        let reachable = indexes.enumerate_reachable_barrels(FileId(0), "Ns");
+
+        assert_eq!(reachable.state_count(), 1 + (LAYERS as usize * 2));
+        assert_eq!(
+            reachable.transition_count(),
+            2 + ((LAYERS as usize - 1) * 4)
+        );
     }
 }

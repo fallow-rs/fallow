@@ -48,7 +48,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 15: Vitest mock and unmock state is selected after specifiers
 /// resolve, using the canonical target file rather than literal source text.
-pub const GRAPH_CACHE_VERSION: u32 = 15;
+///
+/// Bumped to 16: namespace references persist compact transition graphs
+/// instead of materialized simple re-export paths.
+pub const GRAPH_CACHE_VERSION: u32 = 16;
 
 /// Cached form of a resolved target.
 ///

@@ -34,7 +34,9 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
 use super::ModuleGraph;
-use super::namespace_indexes::{NamespacePropagationIndexes, ReachableNamespaceExports};
+use super::namespace_indexes::{
+    NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
+};
 use super::narrowing::{
     ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
     mark_all_exports_referenced_at_site, mark_member_exports_referenced_at_site,
@@ -99,6 +101,11 @@ pub(super) fn propagate_namespace_re_exports(
         };
 
         let reachable = indexes.enumerate_reachable_barrels(*barrel_file_id, exported_name);
+        let routes = reachable.intern_routes(
+            *source_file_id,
+            ModuleLoadMechanism::EsModule,
+            reference_paths,
+        );
 
         for export in reachable.iter().filter(|export| {
             graph
@@ -106,12 +113,7 @@ pub(super) fn propagate_namespace_re_exports(
                 .get(export.file_id.0 as usize)
                 .is_some_and(super::types::ModuleNode::is_entry_point)
         }) {
-            let path = reachable.entry_path(
-                export,
-                *source_file_id,
-                ModuleLoadMechanism::EsModule,
-                reference_paths,
-            );
+            let path = routes.entry_path(export, reference_paths);
             pending.push(PendingCredit {
                 target_module_idx,
                 kind: CreditKind::AllExports,
@@ -125,9 +127,8 @@ pub(super) fn propagate_namespace_re_exports(
             indexes,
             seed_barrel_file: *barrel_file_id,
             target_module_idx,
-            final_target: *source_file_id,
         };
-        collect_consumer_credits(&context, &reachable, &mut pending, reference_paths);
+        collect_consumer_credits(&context, &reachable, &routes, &mut pending, reference_paths);
     }
 
     apply_pending_credits(graph, &pending);
@@ -148,12 +149,12 @@ struct ConsumerCreditContext<'indexes, 'modules> {
     indexes: &'indexes NamespacePropagationIndexes<'modules>,
     seed_barrel_file: FileId,
     target_module_idx: usize,
-    final_target: FileId,
 }
 
 fn collect_consumer_credits(
     context: &ConsumerCreditContext<'_, '_>,
     reachable: &ReachableNamespaceExports,
+    routes: &NamespaceReferenceRoutes,
     pending: &mut Vec<PendingCredit>,
     reference_paths: &mut ReferencePathInterner,
 ) {
@@ -167,13 +168,7 @@ fn collect_consumer_credits(
             if consumer.file_id == context.seed_barrel_file {
                 continue;
             }
-            let path = reachable.consumer_path(
-                export,
-                indexed,
-                context.final_target,
-                ModuleLoadMechanism::EsModule,
-                reference_paths,
-            );
+            let path = routes.consumer_path(export, indexed, reference_paths);
 
             let consumer_local = import.info.local_name.as_str();
             if consumer_local.is_empty() {
@@ -343,6 +338,21 @@ mod tests {
         }
     }
 
+    fn side_effect_import(source: &str, target: FileId, span: oxc_span::Span) -> ResolvedImport {
+        ResolvedImport {
+            info: ImportInfo {
+                source: source.to_string(),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span,
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(target),
+        }
+    }
+
     fn ns_re_export(source: &str, alias: &str, target: FileId) -> ResolvedReExport {
         ResolvedReExport {
             info: ReExportInfo {
@@ -369,6 +379,19 @@ mod tests {
         }
     }
 
+    fn star_re_export(source: &str, target: FileId) -> ResolvedReExport {
+        ResolvedReExport {
+            info: ReExportInfo {
+                source: source.to_string(),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::new(0, 10),
+            },
+            target: ResolveResult::InternalModule(target),
+        }
+    }
+
     fn namespace_coverage_graph(commonjs_consumer: bool) -> ModuleGraph {
         let files = vec![
             discovered_file(0, "/project/consumer.test.ts", 100),
@@ -382,18 +405,7 @@ mod tests {
                 path: files[0].path.clone(),
                 resolved_imports: vec![
                     named_import_with_mechanism("./barrel", "Ns", FileId(1), commonjs_consumer),
-                    ResolvedImport {
-                        info: ImportInfo {
-                            source: "./alternate".to_string(),
-                            imported_name: ImportedName::SideEffect,
-                            local_name: String::new(),
-                            is_type_only: false,
-                            from_style: false,
-                            span: oxc_span::Span::new(20, 30),
-                            source_span: oxc_span::Span::default(),
-                        },
-                        target: ResolveResult::InternalModule(FileId(3)),
-                    },
+                    side_effect_import("./alternate", FileId(3), oxc_span::Span::new(20, 30)),
                 ],
                 member_accesses: vec![MemberAccess {
                     object: "Ns".to_string(),
@@ -416,18 +428,11 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(3),
                 path: files[3].path.clone(),
-                resolved_imports: vec![ResolvedImport {
-                    info: ImportInfo {
-                        source: "./source".to_string(),
-                        imported_name: ImportedName::SideEffect,
-                        local_name: String::new(),
-                        is_type_only: false,
-                        from_style: false,
-                        span: oxc_span::Span::new(0, 10),
-                        source_span: oxc_span::Span::default(),
-                    },
-                    target: ResolveResult::InternalModule(FileId(2)),
-                }],
+                resolved_imports: vec![side_effect_import(
+                    "./source",
+                    FileId(2),
+                    oxc_span::Span::new(0, 10),
+                )],
                 ..Default::default()
             },
         ];
@@ -442,6 +447,93 @@ mod tests {
                 source_file: FileId(0),
                 target_file: FileId(1),
             }],
+            &test_entries,
+            &[],
+            &test_entries,
+            &files,
+        )
+    }
+
+    fn namespace_diamond_graph(mask_both_branches: bool) -> ModuleGraph {
+        let files: Vec<_> = (0..7)
+            .map(|id| discovered_file(id, &format!("/project/file-{id}.ts"), 50))
+            .collect();
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![
+                    named_import_from("./outer", "Ns", FileId(1)),
+                    side_effect_import("./alternate", FileId(6), oxc_span::Span::new(20, 30)),
+                ],
+                member_accesses: vec![MemberAccess {
+                    object: "Ns".to_string(),
+                    member: "used".to_string(),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![
+                    star_re_export("./left", FileId(2)),
+                    star_re_export("./right", FileId(3)),
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                re_exports: vec![star_re_export("./namespace", FileId(4))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                re_exports: vec![star_re_export("./namespace", FileId(4))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(4),
+                path: files[4].path.clone(),
+                re_exports: vec![ns_re_export("./source", "Ns", FileId(5))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(5),
+                path: files[5].path.clone(),
+                exports: vec![named_export("used")],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(6),
+                path: files[6].path.clone(),
+                resolved_imports: vec![side_effect_import(
+                    "./source",
+                    FileId(5),
+                    oxc_span::Span::new(0, 10),
+                )],
+                ..Default::default()
+            },
+        ];
+        let test_entries = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let mut replacements = vec![ResolvedReplacedModuleTarget {
+            source_file: FileId(0),
+            target_file: FileId(2),
+        }];
+        if mask_both_branches {
+            replacements.push(ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(3),
+            });
+        }
+
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &replacements,
             &test_entries,
             &[],
             &test_entries,
@@ -478,6 +570,45 @@ mod tests {
             ]
         );
         assert!(graph.is_test_reference_covered(reference));
+    }
+
+    #[test]
+    fn compact_namespace_routes_survive_graph_cache_roundtrip() {
+        let graph = namespace_coverage_graph(false);
+        let encoded = postcard::to_allocvec(&graph).expect("encode namespace route graph");
+        let decoded: ModuleGraph =
+            postcard::from_bytes(&encoded).expect("decode namespace route graph");
+        let reference = &decoded.modules[2].exports[0].references[0];
+
+        assert_eq!(
+            decoded.reference_path_hops(reference),
+            vec![
+                (FileId(2), ModuleLoadMechanism::EsModule),
+                (FileId(1), ModuleLoadMechanism::EsModule),
+            ]
+        );
+        assert!(!decoded.is_test_reference_covered(reference));
+        assert_eq!(decoded.reference_routes.graphs.len(), 1);
+        assert_eq!(decoded.reference_routes.nodes.len(), 2);
+    }
+
+    #[test]
+    fn namespace_diamond_is_covered_when_one_route_remains_active() {
+        let graph = namespace_diamond_graph(false);
+        let references = &graph.modules[5].exports[0].references;
+
+        assert_eq!(references.len(), 1);
+        assert!(graph.is_test_reference_covered(&references[0]));
+    }
+
+    #[test]
+    fn namespace_diamond_is_uncovered_when_every_route_is_masked() {
+        let graph = namespace_diamond_graph(true);
+        let references = &graph.modules[5].exports[0].references;
+
+        assert!(graph.modules[5].is_test_reachable());
+        assert_eq!(references.len(), 1);
+        assert!(!graph.is_test_reference_covered(&references[0]));
     }
 
     #[test]

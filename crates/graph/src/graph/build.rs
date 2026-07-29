@@ -403,6 +403,7 @@ impl ModuleGraph {
                 test_entry_points: test_entry_point_ids.clone(),
                 test_reachability_index: super::TestReachabilityIndex::default(),
                 reference_paths: Vec::new(),
+                reference_routes: super::types::ReferenceRoutes::default(),
                 reverse_deps,
                 namespace_imported: acc.namespace_imported,
                 re_export_cycles: Vec::new(),

@@ -18,7 +18,9 @@
 //! (reachability) so any reference attached here participates in reachability
 //! and re-export chain propagation downstream.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
+
+use rustc_hash::FxHashMap;
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ImportedName, ModuleLoadMechanism, NamespaceObjectAlias};
@@ -26,12 +28,17 @@ use fallow_types::extract::{ImportedName, ModuleLoadMechanism, NamespaceObjectAl
 use crate::resolve::ResolvedModule;
 
 use super::ModuleGraph;
-use super::namespace_indexes::{NamespacePropagationIndexes, ReachableNamespaceExports};
+use super::namespace_indexes::{
+    NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
+};
 use super::narrowing::{
     ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
     mark_member_exports_referenced_at_site,
 };
-use super::types::{ReferenceKind, ReferencePathId, ReferencePathInterner};
+use super::types::{
+    ReferenceKind, ReferencePathId, ReferencePathInterner, ReferenceRouteGraphSpec,
+    ReferenceRouteNodeId, ReferenceRouteNodeSpec,
+};
 
 /// One credit operation collected during the scan and applied after the loop
 /// to keep mutable borrows of `ModuleGraph::modules` localised.
@@ -70,7 +77,9 @@ fn collect_pending_credits(
 ) -> Vec<PendingCredit> {
     let mut pending = Vec::new();
 
-    for alias_module in module_by_id.values() {
+    let mut alias_modules: Vec<_> = module_by_id.values().copied().collect();
+    alias_modules.sort_unstable_by_key(|module| module.file_id.0);
+    for alias_module in alias_modules {
         if alias_module.namespace_object_aliases.is_empty() {
             continue;
         }
@@ -85,6 +94,11 @@ fn collect_pending_credits(
             };
             let reachable =
                 indexes.enumerate_reachable_barrels(alias_file_id, &alias.via_export_name);
+            let routes = reachable.intern_routes(
+                namespace_target.file_id,
+                namespace_target.mechanism,
+                reference_paths,
+            );
             collect_credits_for_alias(NamespaceCreditInput {
                 graph,
                 indexes,
@@ -92,7 +106,7 @@ fn collect_pending_credits(
                 alias,
                 target_module_idx,
                 reachable: &reachable,
-                namespace_target,
+                routes: &routes,
                 pending: &mut pending,
                 reference_paths,
             });
@@ -148,7 +162,7 @@ struct NamespaceCreditInput<'a> {
     alias: &'a NamespaceObjectAlias,
     target_module_idx: usize,
     reachable: &'a ReachableNamespaceExports,
-    namespace_target: NamespaceTarget,
+    routes: &'a NamespaceReferenceRoutes,
     pending: &'a mut Vec<PendingCredit>,
     reference_paths: &'a mut ReferencePathInterner,
 }
@@ -172,7 +186,7 @@ fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
         alias,
         target_module_idx,
         reachable,
-        namespace_target,
+        routes,
         pending,
         reference_paths,
     } = input;
@@ -184,13 +198,7 @@ fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
             if consumer.file_id == alias_file_id {
                 continue;
             }
-            let path = reachable.consumer_path(
-                export,
-                indexed,
-                namespace_target.file_id,
-                namespace_target.mechanism,
-                reference_paths,
-            );
+            let path = routes.consumer_path(export, indexed, reference_paths);
             collect_credits_for_consumer_import(&mut ConsumerCreditInput {
                 graph,
                 consumer,
@@ -234,8 +242,6 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
             import_span: import.info.span,
             path,
         });
-        let mut visited: FxHashSet<usize> = FxHashSet::default();
-        visited.insert(target_module_idx);
         let mut ctx = ChainWalkContext {
             graph,
             consumer,
@@ -249,7 +255,6 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
             &access.member,
             &format!("{expected_object}.{}", access.member),
             path,
-            &mut visited,
         );
     }
 }
@@ -266,6 +271,180 @@ struct ChainWalkContext<'a> {
     reference_paths: &'a mut ReferencePathInterner,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct AliasChainStateKey {
+    module_idx: usize,
+    credited_name: String,
+    accessor_prefix: String,
+}
+
+struct AliasChainState {
+    key: AliasChainStateKey,
+    successors: Vec<usize>,
+}
+
+struct AliasChain {
+    states: Vec<AliasChainState>,
+}
+
+impl AliasChain {
+    fn build(
+        graph: &ModuleGraph,
+        consumer: &ResolvedModule,
+        target_module_idx: usize,
+        credited_name: &str,
+        accessor_prefix: &str,
+    ) -> Self {
+        let root = AliasChainStateKey {
+            module_idx: target_module_idx,
+            credited_name: credited_name.to_string(),
+            accessor_prefix: accessor_prefix.to_string(),
+        };
+        let mut states = vec![AliasChainState {
+            key: root.clone(),
+            successors: Vec::new(),
+        }];
+        let mut state_by_key = FxHashMap::from_iter([(root, 0)]);
+        let mut frontier = VecDeque::from([0]);
+
+        while let Some(state_index) = frontier.pop_front() {
+            let state = &states[state_index].key;
+            let Some(barrel) = graph.modules.get(state.module_idx) else {
+                continue;
+            };
+            let mut chained_targets: Vec<FileId> = barrel
+                .re_exports
+                .iter()
+                .filter(|edge| {
+                    edge.imported_name == "*" && edge.exported_name == state.credited_name
+                })
+                .map(|edge| edge.source_file)
+                .collect();
+            chained_targets.sort_unstable_by_key(|file_id| file_id.0);
+            chained_targets.dedup();
+
+            let mut accessed_members: Vec<String> = consumer
+                .member_accesses
+                .iter()
+                .filter(|access| access.object == state.accessor_prefix)
+                .map(|access| access.member.clone())
+                .collect();
+            accessed_members.sort_unstable();
+            accessed_members.dedup();
+
+            let accessor_prefix = state.accessor_prefix.clone();
+            for source_file in chained_targets {
+                let Some(source_module_idx) = module_index_for_file(graph, source_file) else {
+                    continue;
+                };
+                for member in &accessed_members {
+                    let key = AliasChainStateKey {
+                        module_idx: source_module_idx,
+                        credited_name: member.clone(),
+                        accessor_prefix: format!("{accessor_prefix}.{member}"),
+                    };
+                    let successor = if let Some(index) = state_by_key.get(&key) {
+                        *index
+                    } else {
+                        let index = states.len();
+                        states.push(AliasChainState {
+                            key: key.clone(),
+                            successors: Vec::new(),
+                        });
+                        state_by_key.insert(key, index);
+                        frontier.push_back(index);
+                        index
+                    };
+                    states[state_index].successors.push(successor);
+                }
+            }
+        }
+        for state in &mut states {
+            state.successors.sort_unstable();
+            state.successors.dedup();
+        }
+        Self { states }
+    }
+
+    fn collect_credits(&self, ctx: &mut ChainWalkContext<'_>, base_path: ReferencePathId) {
+        if self.states.len() == 1 {
+            return;
+        }
+
+        let mut canonical_order: Vec<usize> = (0..self.states.len()).collect();
+        canonical_order.sort_unstable_by(|&left, &right| {
+            let left_state = &self.states[left].key;
+            let right_state = &self.states[right].key;
+            (
+                ctx.graph.modules[left_state.module_idx].file_id.0,
+                left_state.credited_name.as_str(),
+                left_state.accessor_prefix.as_str(),
+            )
+                .cmp(&(
+                    ctx.graph.modules[right_state.module_idx].file_id.0,
+                    right_state.credited_name.as_str(),
+                    right_state.accessor_prefix.as_str(),
+                ))
+        });
+
+        let mut route_node_by_state = vec![ReferenceRouteNodeId(0); self.states.len()];
+        for (route_index, state_index) in canonical_order.iter().copied().enumerate() {
+            route_node_by_state[state_index] = ReferenceRouteNodeId(route_index as u32);
+        }
+
+        let nodes = canonical_order
+            .iter()
+            .map(|&state_index| {
+                let state = &self.states[state_index];
+                ReferenceRouteNodeSpec::new(
+                    ctx.graph.modules[state.key.module_idx].file_id,
+                    ModuleLoadMechanism::EsModule,
+                    state
+                        .successors
+                        .iter()
+                        .map(|&successor| route_node_by_state[successor])
+                        .collect(),
+                )
+            })
+            .collect();
+        let graph = ctx
+            .reference_paths
+            .intern_route_graph(ReferenceRouteGraphSpec::new(nodes));
+        let root = route_node_by_state[0];
+
+        for state_index in canonical_order {
+            if state_index == 0 {
+                continue;
+            }
+            let state = &self.states[state_index].key;
+            let path = ctx.reference_paths.route(
+                Some(base_path),
+                graph,
+                root,
+                route_node_by_state[state_index],
+                None,
+            );
+            ctx.pending.push(PendingCredit {
+                target_module_idx: state.module_idx,
+                member: state.credited_name.clone(),
+                consumer_file_id: ctx.consumer.file_id,
+                import_span: ctx.import_span,
+                path,
+            });
+        }
+    }
+
+    #[cfg(test)]
+    fn state_count(&self) -> usize {
+        self.states.len()
+    }
+
+    #[cfg(test)]
+    fn transition_count(&self) -> usize {
+        self.states.iter().map(|state| state.successors.len()).sum()
+    }
+}
+
 /// Follow `export * as <name> from './source'` chains on the alias target
 /// side. When `barrel_module_idx.re_exports` contains an edge with
 /// `imported_name == "*" && exported_name == credited_name`, every consumer
@@ -278,53 +457,15 @@ fn collect_chained_re_export_credits(
     credited_name: &str,
     accessor_prefix: &str,
     path: ReferencePathId,
-    visited: &mut FxHashSet<usize>,
 ) {
-    let Some(barrel) = ctx.graph.modules.get(barrel_module_idx) else {
-        return;
-    };
-    let chained_targets: Vec<FileId> = barrel
-        .re_exports
-        .iter()
-        .filter(|edge| edge.imported_name == "*" && edge.exported_name == credited_name)
-        .map(|edge| edge.source_file)
-        .collect();
-    for source_file in chained_targets {
-        let Some(source_module_idx) = module_index_for_file(ctx.graph, source_file) else {
-            continue;
-        };
-        if !visited.insert(source_module_idx) {
-            continue;
-        }
-        let source_path =
-            ctx.reference_paths
-                .extend(path, source_file, ModuleLoadMechanism::EsModule);
-        let accessed_members: Vec<String> = ctx
-            .consumer
-            .member_accesses
-            .iter()
-            .filter(|access| access.object == accessor_prefix)
-            .map(|access| access.member.clone())
-            .collect();
-        for member in accessed_members {
-            ctx.pending.push(PendingCredit {
-                target_module_idx: source_module_idx,
-                member: member.clone(),
-                consumer_file_id: ctx.consumer.file_id,
-                import_span: ctx.import_span,
-                path: source_path,
-            });
-            collect_chained_re_export_credits(
-                ctx,
-                source_module_idx,
-                &member,
-                &format!("{accessor_prefix}.{member}"),
-                source_path,
-                visited,
-            );
-        }
-        visited.remove(&source_module_idx);
-    }
+    AliasChain::build(
+        ctx.graph,
+        ctx.consumer,
+        barrel_module_idx,
+        credited_name,
+        accessor_prefix,
+    )
+    .collect_credits(ctx, path);
 }
 
 /// Apply collected credits, grouping by `(target_module_idx, consumer, import_span)`
@@ -367,5 +508,113 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
             &members,
             &found_members,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::PathBuf;
+
+    use crate::resolve::{ResolveResult, ResolvedModule, ResolvedReExport};
+    use fallow_types::discover::DiscoveredFile;
+    use fallow_types::extract::{MemberAccess, ReExportInfo};
+
+    fn build_namespace_reexport_graph(adjacency: &[Vec<u32>]) -> ModuleGraph {
+        let files: Vec<_> = adjacency
+            .iter()
+            .enumerate()
+            .map(|(index, _)| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(format!("/project/module-{index}.ts")),
+                size_bytes: 10,
+            })
+            .collect();
+        let modules: Vec<_> = adjacency
+            .iter()
+            .enumerate()
+            .map(|(index, targets)| ResolvedModule {
+                file_id: FileId(index as u32),
+                path: files[index].path.clone(),
+                re_exports: targets
+                    .iter()
+                    .map(|&target| ResolvedReExport {
+                        info: ReExportInfo {
+                            source: format!("./module-{target}"),
+                            imported_name: "*".to_string(),
+                            exported_name: "N".to_string(),
+                            is_type_only: false,
+                            span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(target)),
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .collect();
+        ModuleGraph::build(&modules, &[], &files)
+    }
+
+    fn chain_consumer(depth: usize) -> ResolvedModule {
+        let mut object = "API.foo.N".to_string();
+        let mut member_accesses = Vec::with_capacity(depth);
+        for _ in 0..depth {
+            member_accesses.push(MemberAccess {
+                object: object.clone(),
+                member: "N".to_string(),
+            });
+            object.push_str(".N");
+        }
+        ResolvedModule {
+            file_id: FileId(u32::MAX),
+            member_accesses,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn dense_alias_cycle_is_bounded_by_member_states() {
+        const MODULES: usize = 10;
+        const DEPTH: usize = 8;
+        let adjacency: Vec<Vec<u32>> = (0..MODULES)
+            .map(|source| {
+                (0..MODULES)
+                    .filter(|&target| target != source)
+                    .map(|target| target as u32)
+                    .collect()
+            })
+            .collect();
+        let graph = build_namespace_reexport_graph(&adjacency);
+        let consumer = chain_consumer(DEPTH);
+
+        let chain = AliasChain::build(&graph, &consumer, 0, "N", "API.foo.N");
+
+        assert!(chain.state_count() <= 1 + (MODULES * DEPTH));
+        assert!(chain.transition_count() <= MODULES * (MODULES - 1) * DEPTH);
+    }
+
+    #[test]
+    fn repeated_alias_diamonds_grow_by_states_and_edges_not_paths() {
+        const LAYERS: usize = 24;
+        let module_count = 1 + (LAYERS * 2);
+        let mut adjacency = vec![Vec::new(); module_count];
+        let mut previous = vec![0_usize];
+        let mut next_module = 1_usize;
+        for _ in 0..LAYERS {
+            let next = vec![next_module, next_module + 1];
+            next_module += 2;
+            for source in &previous {
+                adjacency[*source].extend(next.iter().map(|target| *target as u32));
+            }
+            previous = next;
+        }
+        let graph = build_namespace_reexport_graph(&adjacency);
+        let consumer = chain_consumer(LAYERS);
+
+        let chain = AliasChain::build(&graph, &consumer, 0, "N", "API.foo.N");
+
+        assert_eq!(chain.state_count(), 1 + (LAYERS * 2));
+        assert_eq!(chain.transition_count(), 2 + ((LAYERS - 1) * 4));
     }
 }
