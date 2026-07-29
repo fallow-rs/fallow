@@ -36,7 +36,10 @@ pub use store::GraphCacheStore;
 /// plugin config extraction, which seeds entry points and path aliases.
 /// Bumped to 11 for issue #2031: cached graphs retain compact root-correlation
 /// profiles plus exact ESM/CommonJS reference and dynamic-pattern mechanisms.
-pub const GRAPH_CACHE_VERSION: u32 = 11;
+///
+/// Bumped to 12: test profile masks use target-sparse rows and profiled
+/// reachability uses the bit-parallel worklist schema.
+pub const GRAPH_CACHE_VERSION: u32 = 12;
 
 /// Cached form of a resolved target.
 ///

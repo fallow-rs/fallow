@@ -140,17 +140,26 @@ pub struct ImportedSymbol {
     mechanism: ModuleLoadMechanism,
 }
 
-/// Flat bitset index mapping files to the test profiles that reach or mask them.
+/// Flat bitset index mapping files to the test profiles that reach them.
 ///
-/// Each file owns `words_per_file` contiguous words in both arrays. This bounds
-/// storage by `files * ceil(distinct_profiles / 64)` and lets correlation
-/// queries intersect machine words instead of scanning profile file lists.
+/// Each file owns `words_per_file` contiguous reachable-profile words. Masks are
+/// target-sparse: only explicit replacement targets own a row, while every row
+/// retains dense profile words for constant-time word lookup. Retained storage
+/// is `O((files + replaced_targets) * ceil(profiles / 64))`; correlation queries
+/// intersect machine words instead of scanning profile file lists.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct TestReachabilityIndex {
     profile_count: usize,
     words_per_file: usize,
     reachable_profiles: Vec<u64>,
-    masked_profiles: Vec<u64>,
+    masked_profiles: Vec<MaskedTestProfiles>,
+}
+
+/// Sparse profile-mask row for one replaced target.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct MaskedTestProfiles {
+    target: FileId,
+    profiles: Vec<u64>,
 }
 
 impl TestReachabilityIndex {
@@ -161,51 +170,30 @@ impl TestReachabilityIndex {
             profile_count,
             words_per_file,
             reachable_profiles: vec![0; storage_len],
-            masked_profiles: vec![0; storage_len],
+            masked_profiles: Vec::new(),
         }
     }
 
-    fn set_reachable(&mut self, file_id: FileId, profile: usize) {
-        let words_per_file = self.words_per_file;
-        Self::set_profile_bit(
-            &mut self.reachable_profiles,
-            words_per_file,
-            file_id,
-            profile,
-        );
-    }
-
-    fn set_masked(&mut self, file_id: FileId, profile: usize) {
-        let words_per_file = self.words_per_file;
-        Self::set_profile_bit(&mut self.masked_profiles, words_per_file, file_id, profile);
-    }
-
-    fn set_profile_bit(
-        storage: &mut [u64],
-        words_per_file: usize,
-        file_id: FileId,
-        profile: usize,
-    ) {
-        if words_per_file == 0 {
-            return;
-        }
-        let Some(file_start) = (file_id.0 as usize).checked_mul(words_per_file) else {
-            return;
-        };
-        let word = profile / u64::BITS as usize;
-        let Some(slot_index) = file_start.checked_add(word) else {
-            return;
-        };
-        let Some(slot) = storage.get_mut(slot_index) else {
-            return;
-        };
-        *slot |= 1_u64 << (profile % u64::BITS as usize);
+    fn set_sparse_masks(&mut self, masks: FxHashMap<FileId, Vec<u64>>) {
+        let mut rows: Vec<_> = masks
+            .into_iter()
+            .map(|(target, profiles)| MaskedTestProfiles { target, profiles })
+            .collect();
+        rows.sort_unstable_by_key(|row| row.target.0);
+        self.masked_profiles = rows;
     }
 
     fn profiles_for<'a>(&self, storage: &'a [u64], file_id: FileId) -> Option<&'a [u64]> {
         let start = (file_id.0 as usize).checked_mul(self.words_per_file)?;
         let end = start.checked_add(self.words_per_file)?;
         storage.get(start..end)
+    }
+
+    fn masked_profiles_for(&self, file_id: FileId) -> Option<&[u64]> {
+        self.masked_profiles
+            .binary_search_by_key(&file_id.0, |row| row.target.0)
+            .ok()
+            .map(|index| self.masked_profiles[index].profiles.as_slice())
     }
 
     fn shares_profile(
@@ -220,21 +208,22 @@ impl TestReachabilityIndex {
         let Some(source_profiles) = self.profiles_for(&self.reachable_profiles, source) else {
             return false;
         };
-        let Some(masked_profiles) = self.profiles_for(&self.masked_profiles, target) else {
-            return false;
-        };
+        let masked_profiles = self.masked_profiles_for(target);
 
         target_profiles
             .iter()
             .zip(source_profiles)
-            .zip(masked_profiles)
-            .any(|((&target_word, &source_word), &masked_word)| {
+            .enumerate()
+            .any(|(word_index, (&target_word, &source_word))| {
                 let shared = target_word & source_word;
                 if matches!(mechanism, ModuleLoadMechanism::CommonJsRequire) {
-                    shared != 0
-                } else {
-                    shared & !masked_word != 0
+                    return shared != 0;
                 }
+                let masked_word = masked_profiles
+                    .and_then(|profiles| profiles.get(word_index))
+                    .copied()
+                    .unwrap_or_default();
+                shared & !masked_word != 0
             })
     }
 
@@ -252,7 +241,9 @@ impl TestReachabilityIndex {
 
     #[cfg(test)]
     fn profile_masks(&self, file_id: FileId, profile: usize) -> bool {
-        self.profile_contains(&self.masked_profiles, file_id, profile)
+        self.masked_profiles_for(file_id)
+            .and_then(|words| words.get(profile / u64::BITS as usize))
+            .is_some_and(|word| word & (1_u64 << (profile % u64::BITS as usize)) != 0)
     }
 }
 

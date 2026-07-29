@@ -17,6 +17,8 @@ enum TestReachability {
     Profiled {
         reachable: FixedBitSet,
         index: TestReachabilityIndex,
+        #[cfg(test)]
+        worklist_pops: usize,
     },
 }
 
@@ -25,7 +27,9 @@ impl TestReachability {
         match self {
             Self::NoRoots => (None, TestReachabilityIndex::default()),
             Self::Legacy(reachable) => (Some(reachable), TestReachabilityIndex::default()),
-            Self::Profiled { reachable, index } => (Some(reachable), index),
+            Self::Profiled {
+                reachable, index, ..
+            } => (Some(reachable), index),
         }
     }
 
@@ -34,7 +38,15 @@ impl TestReachability {
         match self {
             Self::NoRoots => 0,
             Self::Legacy(_) => 1,
-            Self::Profiled { index, .. } => index.profile_count,
+            Self::Profiled { .. } => 1,
+        }
+    }
+
+    #[cfg(test)]
+    const fn worklist_pop_count(&self) -> usize {
+        match self {
+            Self::Profiled { worklist_pops, .. } => *worklist_pops,
+            Self::NoRoots | Self::Legacy(_) => 0,
         }
     }
 }
@@ -72,50 +84,138 @@ impl ModuleGraph {
         visited
     }
 
-    fn collect_reachable_with_mask(
+    fn collect_profiled_reachable(
         &self,
-        entry_points: &FxHashSet<FileId>,
-        masked_targets: &FixedBitSet,
+        grouped_roots: &[(Vec<FileId>, Vec<FileId>)],
         total_capacity: usize,
-    ) -> FixedBitSet {
-        let mut visited = FixedBitSet::with_capacity(total_capacity);
+    ) -> (FixedBitSet, TestReachabilityIndex, usize) {
+        let profile_count = grouped_roots.len();
+        let mut index = TestReachabilityIndex::new(total_capacity, profile_count);
+        let words_per_file = index.words_per_file;
+        let mut masked_profiles: FxHashMap<FileId, Vec<u64>> = FxHashMap::default();
+
+        for (profile, (masked_targets, _)) in grouped_roots.iter().enumerate() {
+            let word_index = profile / u64::BITS as usize;
+            let profile_bit = 1_u64 << (profile % u64::BITS as usize);
+            for &target in masked_targets {
+                masked_profiles
+                    .entry(target)
+                    .or_insert_with(|| vec![0; words_per_file])[word_index] |= profile_bit;
+            }
+        }
+
+        let mut all_reachable = FixedBitSet::with_capacity(total_capacity);
+        let mut pending_profiles = vec![0_u64; index.reachable_profiles.len()];
+        let mut queued = FixedBitSet::with_capacity(total_capacity);
         let mut queue = VecDeque::new();
 
-        for &ep_id in entry_points {
-            if (ep_id.0 as usize) < total_capacity {
-                visited.insert(ep_id.0 as usize);
-                queue.push_back(ep_id);
-            }
-        }
-
-        while let Some(file_id) = queue.pop_front() {
-            if (file_id.0 as usize) >= self.modules.len() {
-                continue;
-            }
-            let module = &self.modules[file_id.0 as usize];
-            for edge in &self.edges[module.edge_range.clone()] {
-                let target_idx = edge.target.0 as usize;
-                let target_is_replaced = masked_targets.contains(target_idx)
-                    && edge.symbols.iter().all(|symbol| {
-                        !matches!(symbol.mechanism, ModuleLoadMechanism::CommonJsRequire)
-                    });
-                if target_is_replaced {
+        for (profile, (_, roots)) in grouped_roots.iter().enumerate() {
+            let word_index = profile / u64::BITS as usize;
+            let profile_bit = 1_u64 << (profile % u64::BITS as usize);
+            for &root in roots {
+                let root_index = root.0 as usize;
+                if root_index >= total_capacity {
                     continue;
                 }
-                if target_idx < total_capacity && !visited.contains(target_idx) {
-                    visited.insert(target_idx);
-                    queue.push_back(edge.target);
+                let Some(slot) = root_index
+                    .checked_mul(words_per_file)
+                    .and_then(|start| start.checked_add(word_index))
+                else {
+                    continue;
+                };
+                let Some(reachable_word) = index.reachable_profiles.get_mut(slot) else {
+                    continue;
+                };
+                if *reachable_word & profile_bit != 0 {
+                    continue;
+                }
+                *reachable_word |= profile_bit;
+                pending_profiles[slot] |= profile_bit;
+                all_reachable.insert(root_index);
+                if !queued.contains(root_index) {
+                    queued.insert(root_index);
+                    queue.push_back(root);
                 }
             }
         }
 
-        visited
+        let mut worklist_pops = 0;
+        let mut source_delta = vec![0_u64; words_per_file];
+        while let Some(file_id) = queue.pop_front() {
+            worklist_pops += 1;
+            let file_index = file_id.0 as usize;
+            queued.remove(file_index);
+            let Some(source_start) = file_index.checked_mul(words_per_file) else {
+                continue;
+            };
+            let Some(source_end) = source_start.checked_add(words_per_file) else {
+                continue;
+            };
+            let Some(pending_source) = pending_profiles.get_mut(source_start..source_end) else {
+                continue;
+            };
+            source_delta.copy_from_slice(pending_source);
+            pending_source.fill(0);
+
+            let Some(module) = self.modules.get(file_index) else {
+                continue;
+            };
+            for edge in &self.edges[module.edge_range.clone()] {
+                let target_idx = edge.target.0 as usize;
+                if target_idx >= total_capacity {
+                    continue;
+                }
+                let Some(target_start) = target_idx.checked_mul(words_per_file) else {
+                    continue;
+                };
+                let edge_is_esm_only = edge
+                    .symbols
+                    .iter()
+                    .all(|symbol| {
+                        !matches!(symbol.mechanism, ModuleLoadMechanism::CommonJsRequire)
+                    });
+                let edge_mask = if edge_is_esm_only {
+                    masked_profiles.get(&edge.target)
+                } else {
+                    None
+                };
+
+                let mut target_changed = false;
+                for (word_index, &delta_word) in source_delta.iter().enumerate() {
+                    let propagated = edge_mask
+                        .and_then(|mask| mask.get(word_index))
+                        .map_or(delta_word, |mask_word| delta_word & !mask_word);
+                    let Some(target_slot) = target_start.checked_add(word_index) else {
+                        continue;
+                    };
+                    let Some(reachable_word) =
+                        index.reachable_profiles.get_mut(target_slot)
+                    else {
+                        continue;
+                    };
+                    let new_profiles = propagated & !*reachable_word;
+                    if new_profiles == 0 {
+                        continue;
+                    }
+                    *reachable_word |= new_profiles;
+                    pending_profiles[target_slot] |= new_profiles;
+                    target_changed = true;
+                }
+
+                if target_changed {
+                    all_reachable.insert(target_idx);
+                    if !queued.contains(target_idx) {
+                        queued.insert(target_idx);
+                        queue.push_back(edge.target);
+                    }
+                }
+            }
+        }
+
+        index.set_sparse_masks(masked_profiles);
+        (all_reachable, index, worklist_pops)
     }
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "reachable indices originate from u32 FileIds"
-    )]
     fn collect_test_reachable(
         &self,
         test_entry_points: &FxHashSet<FileId>,
@@ -148,10 +248,10 @@ impl ModuleGraph {
             );
         }
 
-        let mut roots_by_mask: FxHashMap<Vec<FileId>, FxHashSet<FileId>> = FxHashMap::default();
+        let mut roots_by_mask: FxHashMap<Vec<FileId>, Vec<FileId>> = FxHashMap::default();
         for &root in test_entry_points {
             let mask = targets_by_root.remove(&root).unwrap_or_default();
-            roots_by_mask.entry(mask).or_default().insert(root);
+            roots_by_mask.entry(mask).or_default().push(root);
         }
 
         let mut grouped_roots: Vec<_> = roots_by_mask.into_iter().collect();
@@ -161,29 +261,19 @@ impl ModuleGraph {
                 .map(|file_id| file_id.0)
                 .cmp(right_mask.iter().map(|file_id| file_id.0))
         });
-
-        let mut all_test_reachable = FixedBitSet::with_capacity(total_capacity);
-        let mut index = TestReachabilityIndex::new(total_capacity, grouped_roots.len());
-        for (profile, (masked_targets, roots)) in grouped_roots.into_iter().enumerate() {
-            let mut roots: Vec<_> = roots.into_iter().collect();
+        for (_, roots) in &mut grouped_roots {
             roots.sort_unstable_by_key(|root| root.0);
-
-            let mut mask = FixedBitSet::with_capacity(total_capacity);
-            for target in &masked_targets {
-                mask.insert(target.0 as usize);
-                index.set_masked(*target, profile);
-            }
-            let root_set = roots.iter().copied().collect();
-            let reachable = self.collect_reachable_with_mask(&root_set, &mask, total_capacity);
-            all_test_reachable.union_with(&reachable);
-            for file_index in reachable.ones() {
-                index.set_reachable(FileId(file_index as u32), profile);
-            }
+            roots.dedup();
         }
 
+        let (reachable, index, _worklist_pops) =
+            self.collect_profiled_reachable(&grouped_roots, total_capacity);
+
         TestReachability::Profiled {
-            reachable: all_test_reachable,
+            reachable,
             index,
+            #[cfg(test)]
+            worklist_pops: _worklist_pops,
         }
     }
 
@@ -883,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn many_roots_use_one_traversal_per_distinct_mask() {
+    fn many_roots_share_one_profile_worklist() {
         let test_roots: Vec<u32> = (0..128).collect();
         let edges: Vec<_> = test_roots
             .iter()
@@ -907,7 +997,86 @@ mod tests {
 
         let reachability = graph.collect_test_reachable(&root_set, &replacements, 129);
 
-        assert_eq!(reachability.traversal_count(), 2);
+        assert_eq!(reachability.traversal_count(), 1);
+        assert_eq!(reachability.worklist_pop_count(), 129);
+    }
+
+    #[test]
+    fn unique_masks_cross_profile_words_in_one_deterministic_worklist() {
+        let test_roots: Vec<u32> = (0..65).collect();
+        let mut edges = Vec::with_capacity(test_roots.len() * 2);
+        let mut replacements = Vec::with_capacity(test_roots.len());
+        for &root in &test_roots {
+            let masked_target = 65 + root;
+            edges.push((root, masked_target, false));
+            edges.push((root, 130, false));
+            replacements.push(ResolvedReplacedModuleTarget {
+                source_file: FileId(root),
+                target_file: FileId(masked_target),
+            });
+        }
+        let graph = build_reachability_graph_with_replacements(
+            131,
+            &edges,
+            &[],
+            &test_roots,
+            &replacements,
+        );
+        let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
+
+        let reachability = graph.collect_test_reachable(&root_set, &replacements, 131);
+
+        assert_eq!(reachability.traversal_count(), 1);
+        assert_eq!(reachability.worklist_pop_count(), 66);
+        assert_eq!(graph.test_reachability_index.profile_count, 65);
+        assert_eq!(graph.test_reachability_index.words_per_file, 2);
+        assert_eq!(graph.test_reachability_index.masked_profiles.len(), 65);
+        assert!(
+            graph
+                .test_reachability_index
+                .profile_reaches(FileId(130), 0)
+        );
+        assert!(
+            graph
+                .test_reachability_index
+                .profile_reaches(FileId(130), 64)
+        );
+        assert!(
+            graph
+                .test_reachability_index
+                .profile_masks(FileId(65), 0)
+        );
+        assert!(
+            graph
+                .test_reachability_index
+                .profile_masks(FileId(129), 64)
+        );
+        assert!(
+            !graph
+                .test_reachability_index
+                .profile_reaches(FileId(65), 0)
+        );
+        assert!(
+            !graph
+                .test_reachability_index
+                .profile_reaches(FileId(129), 64)
+        );
+
+        let encoded = postcard::to_allocvec(&graph).expect("encode graph");
+        let decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
+        assert_eq!(decoded.test_reachability_index.profile_count, 65);
+        assert_eq!(decoded.test_reachability_index.words_per_file, 2);
+        assert_eq!(decoded.test_reachability_index.masked_profiles.len(), 65);
+        assert!(
+            decoded
+                .test_reachability_index
+                .profile_reaches(FileId(130), 64)
+        );
+        assert!(
+            decoded
+                .test_reachability_index
+                .profile_masks(FileId(129), 64)
+        );
     }
 
     #[test]
