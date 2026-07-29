@@ -20,8 +20,7 @@ use super::static_imports::resolve_static_imports;
 use super::types::{CanonicalizeCache, ResolveContext, TsconfigCache};
 use super::upgrades::apply_specifier_upgrades;
 use super::{
-    ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
-    resolve_replaced_module_targets,
+    ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport, resolve_replacement_candidates,
 };
 
 fn dummy_span() -> Span {
@@ -221,7 +220,17 @@ fn replaced_module_targets_resolve_internal_files_and_abstain_on_missing_targets
         }),
     ];
 
-    let targets = resolve_replaced_module_targets(FileId(0), &facts, &ctx, &test_file);
+    let mut candidates = resolve_replacement_candidates(FileId(0), &facts, &ctx, &test_file);
+    apply_specifier_upgrades(&mut [], &mut candidates);
+    let targets: Vec<_> = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            Some(super::ResolvedReplacedModuleTarget {
+                source_file: candidate.source_file,
+                target_file: candidate.target.internal_file_id()?,
+            })
+        })
+        .collect();
 
     assert_eq!(
         targets,
@@ -230,6 +239,103 @@ fn replaced_module_targets_resolve_internal_files_and_abstain_on_missing_targets
             target_file: FileId(1),
         }]
     );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn cross_tsconfig_bare_alias_upgrades_replacement_target() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dunce::canonicalize(dir.path()).expect("canonicalize temp dir");
+    let aliased_dir = root.join("packages/app");
+    let aliased_source = aliased_dir.join("src/source.ts");
+    let test_file = root.join("tests/example.test.ts");
+    let dependency_file = root.join("shared/dependency.ts");
+    std::fs::create_dir_all(aliased_source.parent().expect("source parent"))
+        .expect("create aliased source dir");
+    std::fs::create_dir_all(test_file.parent().expect("test parent"))
+        .expect("create test source dir");
+    std::fs::create_dir_all(dependency_file.parent().expect("dependency parent"))
+        .expect("create dependency dir");
+    std::fs::write(
+        aliased_dir.join("tsconfig.json"),
+        r#"{
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "shared-alias": ["../../shared/dependency.ts"]
+                }
+            }
+        }"#,
+    )
+    .expect("write tsconfig");
+    std::fs::write(&aliased_source, "").expect("write aliased source");
+    std::fs::write(&test_file, "").expect("write test source");
+    std::fs::write(&dependency_file, "export const value = 1;").expect("write dependency");
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let path_to_id = FxHashMap::from_iter([
+        (aliased_source.as_path(), FileId(0)),
+        (test_file.as_path(), FileId(1)),
+        (dependency_file.as_path(), FileId(2)),
+    ]);
+    let raw_path_to_id = path_to_id.clone();
+    let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
+    let canonicalize_cache = CanonicalizeCache::default();
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root: &root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
+        canonicalize_cache: &canonicalize_cache,
+    };
+
+    let donor_imports = resolve_static_imports(
+        &ctx,
+        &aliased_source,
+        &[make_import(
+            "shared-alias",
+            ImportedName::Named("value".to_string()),
+            "value",
+        )],
+    );
+    assert!(matches!(
+        donor_imports[0].target,
+        ResolveResult::InternalModule(FileId(2))
+    ));
+
+    let mut candidates = resolve_replacement_candidates(
+        FileId(1),
+        &[SemanticFact::ReplacedModuleTarget(
+            ReplacedModuleTargetFact {
+                source: "shared-alias".to_string(),
+            },
+        )],
+        &ctx,
+        &test_file,
+    );
+    assert!(matches!(candidates[0].target, ResolveResult::NpmPackage(_)));
+
+    let mut modules = vec![make_resolved_module(0, donor_imports, vec![], vec![])];
+    apply_specifier_upgrades(&mut modules, &mut candidates);
+
+    assert_eq!(candidates[0].target.internal_file_id(), Some(FileId(2)));
 }
 
 #[test]
@@ -610,7 +716,7 @@ fn specifier_upgrades_npm_to_internal() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -641,7 +747,7 @@ fn specifier_upgrades_noop_when_no_internal() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[0].resolved_imports[0].target,
@@ -656,7 +762,7 @@ fn specifier_upgrades_noop_when_no_internal() {
 #[test]
 fn specifier_upgrades_empty_modules() {
     let mut modules: Vec<ResolvedModule> = vec![];
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
     assert!(modules.is_empty());
 }
 
@@ -683,7 +789,7 @@ fn specifier_upgrades_skips_relative_specifiers() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -714,7 +820,7 @@ fn specifier_upgrades_applies_to_dynamic_imports() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_dynamic_imports[0].target,
@@ -745,7 +851,7 @@ fn specifier_upgrades_applies_to_re_exports() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].re_exports[0].target,
@@ -776,7 +882,7 @@ fn specifier_upgrades_does_not_downgrade_internal() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[0].resolved_imports[0].target,
@@ -820,7 +926,7 @@ fn specifier_upgrades_first_internal_wins() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[2].resolved_imports[0].target,
@@ -851,7 +957,7 @@ fn specifier_upgrades_does_not_touch_unresolvable() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -882,7 +988,7 @@ fn specifier_upgrades_cross_import_and_re_export() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].re_exports[0].target,
@@ -1026,7 +1132,7 @@ fn static_import_bare_specifier_becomes_npm_package() {
 }
 
 #[test]
-fn require_bare_specifier_becomes_npm_package() {
+fn require_bare_specifier_retains_commonjs_provenance() {
     with_empty_ctx(|ctx| {
         let req = make_require("express", vec![], Some("express"));
         let file = Path::new("/project/src/app.js");
@@ -1035,7 +1141,7 @@ fn require_bare_specifier_becomes_npm_package() {
         assert_eq!(result.len(), 1);
         assert!(matches!(
             result[0].target,
-            ResolveResult::NpmPackage(ref pkg) if pkg == "express"
+            ResolveResult::CommonJsNpmPackage(ref pkg) if pkg == "express"
         ));
     });
 }
@@ -1087,7 +1193,7 @@ fn specifier_upgrades_re_export_triggers_import_upgrade() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -1118,7 +1224,7 @@ fn specifier_upgrades_re_export_triggers_dynamic_import_upgrade() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_dynamic_imports[0].target,
@@ -1151,7 +1257,7 @@ fn specifier_upgrades_does_not_upgrade_external_file() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -1306,6 +1412,40 @@ fn dynamic_import_preserves_source_span() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].info.span.start, 42);
         assert_eq!(result[0].info.span.end, 84);
+    });
+}
+
+#[test]
+fn specifier_upgrade_preserves_actual_require_mechanism() {
+    with_empty_ctx(|ctx| {
+        let require_imports = resolve_single_require(
+            ctx,
+            Path::new("/project/src/consumer.js"),
+            &make_require("shared-package", vec![], Some("shared")),
+        );
+        assert!(matches!(
+            require_imports[0].target,
+            ResolveResult::CommonJsNpmPackage(_)
+        ));
+
+        let mut modules = vec![
+            make_resolved_module(
+                0,
+                vec![make_resolved_import(
+                    "shared-package",
+                    ResolveResult::InternalModule(FileId(2)),
+                )],
+                vec![],
+                vec![],
+            ),
+            make_resolved_module(1, require_imports, vec![], vec![]),
+        ];
+        apply_specifier_upgrades(&mut modules, &mut []);
+
+        assert!(matches!(
+            modules[1].resolved_imports[0].target,
+            ResolveResult::CommonJsInternalModule(FileId(2))
+        ));
     });
 }
 

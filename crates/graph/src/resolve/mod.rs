@@ -55,7 +55,7 @@ use require_imports::resolve_require_imports;
 use specifier::create_resolver;
 use static_imports::resolve_static_imports;
 use types::{PackageManifestInfo, ResolveContext};
-use upgrades::apply_specifier_upgrades;
+use upgrades::{ResolvedReplacementCandidate, apply_specifier_upgrades};
 
 /// Inputs used to resolve imports for a complete extracted project.
 pub struct ResolveAllImportsInput<'a> {
@@ -207,13 +207,13 @@ pub fn resolve_all_imports_with_session(
         })
         .collect();
     let mut resolved = Vec::with_capacity(resolved_outputs.len());
-    let mut replaced_module_targets = Vec::new();
+    let mut replacement_candidates = Vec::new();
     for output in resolved_outputs {
         resolved.push(output.module);
-        replaced_module_targets.extend(output.replaced_module_targets);
+        replacement_candidates.extend(output.replacement_candidates);
     }
 
-    apply_specifier_upgrades(&mut resolved);
+    apply_specifier_upgrades(&mut resolved, &mut replacement_candidates);
 
     synthesize_auto_import_edges(
         &mut resolved,
@@ -223,6 +223,15 @@ pub fn resolve_all_imports_with_session(
         &raw_path_to_id,
     );
 
+    let mut replaced_module_targets: Vec<_> = replacement_candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            Some(ResolvedReplacedModuleTarget {
+                source_file: candidate.source_file,
+                target_file: candidate.target.internal_file_id()?,
+            })
+        })
+        .collect();
     replaced_module_targets
         .sort_unstable_by_key(|target| (target.source_file.0, target.target_file.0));
     replaced_module_targets.dedup();
@@ -334,8 +343,8 @@ fn resolve_module_imports(
             .unwrap_or(file_path)
     };
 
-    let replaced_module_targets =
-        resolve_replaced_module_targets(module.file_id, &module.semantic_facts, ctx, file_path);
+    let replacement_candidates =
+        resolve_replacement_candidates(module.file_id, &module.semantic_facts, ctx, file_path);
     let module = build_resolved_module(ResolvedModuleBuildInput {
         module,
         ctx,
@@ -348,38 +357,37 @@ fn resolve_module_imports(
 
     Some(ResolvedModuleOutput {
         module,
-        replaced_module_targets,
+        replacement_candidates,
     })
 }
 
 struct ResolvedModuleOutput {
     module: ResolvedModule,
-    replaced_module_targets: Vec<ResolvedReplacedModuleTarget>,
+    replacement_candidates: Vec<ResolvedReplacementCandidate>,
 }
 
-fn resolve_replaced_module_targets(
+fn resolve_replacement_candidates(
     source_file: FileId,
     semantic_facts: &[SemanticFact],
     ctx: &ResolveContext<'_>,
     file_path: &Path,
-) -> Vec<ResolvedReplacedModuleTarget> {
-    let mut targets: Vec<_> = semantic_facts
+) -> Vec<ResolvedReplacementCandidate> {
+    let mut candidates: Vec<_> = semantic_facts
         .iter()
         .filter_map(|fact| {
             let SemanticFact::ReplacedModuleTarget(target) = fact else {
                 return None;
             };
-            let target_file = specifier::resolve_specifier(ctx, file_path, &target.source, false)
-                .internal_file_id()?;
-            Some(ResolvedReplacedModuleTarget {
+            Some(ResolvedReplacementCandidate {
                 source_file,
-                target_file,
+                source_specifier: target.source.clone(),
+                target: specifier::resolve_specifier(ctx, file_path, &target.source, false),
             })
         })
         .collect();
-    targets.sort_unstable_by_key(|target| target.target_file.0);
-    targets.dedup();
-    targets
+    candidates.sort_unstable_by(|left, right| left.source_specifier.cmp(&right.source_specifier));
+    candidates.dedup_by(|left, right| left.source_specifier == right.source_specifier);
+    candidates
 }
 
 struct ResolvedModuleBuildInput<'a> {

@@ -28,7 +28,9 @@ pub fn augment_external_style_package_usage(
         let existing_packages: FxHashSet<String> = module
             .all_resolved_imports()
             .filter_map(|import| match &import.target {
-                ResolveResult::NpmPackage(name) => Some(name.clone()),
+                ResolveResult::NpmPackage(name) | ResolveResult::CommonJsNpmPackage(name) => {
+                    Some(name.clone())
+                }
                 _ => None,
             })
             .collect();
@@ -291,7 +293,7 @@ impl<'a> ExternalStylePackageScanner<'a> {
         packages: &mut FxHashSet<String>,
     ) {
         match &import.target {
-            ResolveResult::NpmPackage(name) => {
+            ResolveResult::NpmPackage(name) | ResolveResult::CommonJsNpmPackage(name) => {
                 packages.insert(name.clone());
             }
             ResolveResult::ExternalFile(child) => {

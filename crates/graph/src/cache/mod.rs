@@ -34,9 +34,9 @@ pub use store::GraphCacheStore;
 /// classification change replays the old classification verbatim on an
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
-/// Bumped to 9 for issue #2031: cached graphs now retain grouped, root-specific
-/// replacement masks and their test reachability results.
-pub const GRAPH_CACHE_VERSION: u32 = 9;
+/// Bumped to 10 for issue #2031: cached resolver targets now distinguish bare
+/// CommonJS package edges before cross-tsconfig specifier upgrades.
+pub const GRAPH_CACHE_VERSION: u32 = 10;
 
 /// Cached form of a resolved target.
 ///
@@ -71,6 +71,8 @@ pub enum CachedResolveResult {
     ExternalFile(PathBuf),
     /// Bare specifier.
     NpmPackage(String),
+    /// Bare specifier referenced through CommonJS `require()`.
+    CommonJsNpmPackage(String),
     /// Could not resolve.
     Unresolvable(String),
 }
@@ -106,6 +108,9 @@ impl CachedResolveResult {
             },
             ResolveResult::ExternalFile(path) => Self::ExternalFile(path.clone()),
             ResolveResult::NpmPackage(package_name) => Self::NpmPackage(package_name.clone()),
+            ResolveResult::CommonJsNpmPackage(package_name) => {
+                Self::CommonJsNpmPackage(package_name.clone())
+            }
             ResolveResult::Unresolvable(specifier) => Self::Unresolvable(specifier.clone()),
         })
     }
@@ -136,6 +141,9 @@ impl CachedResolveResult {
             }
             Self::ExternalFile(path) => ResolveResult::ExternalFile(path),
             Self::NpmPackage(package_name) => ResolveResult::NpmPackage(package_name),
+            Self::CommonJsNpmPackage(package_name) => {
+                ResolveResult::CommonJsNpmPackage(package_name)
+            }
             Self::Unresolvable(specifier) => ResolveResult::Unresolvable(specifier),
         })
     }
@@ -948,6 +956,24 @@ mod tests {
         assert!(matches!(
             restored,
             ResolveResult::CommonJsInternalModule(FileId(8))
+        ));
+    }
+
+    #[test]
+    fn cached_resolve_result_preserves_commonjs_bare_package_provenance() {
+        let cached = CachedResolveResult::from_resolve_result(
+            &ResolveResult::CommonJsNpmPackage("shared-package".to_string()),
+            &FxHashMap::default(),
+        )
+        .expect("bare CommonJS package should not need a stable file key");
+        let restored = cached
+            .into_resolve_result(&FxHashMap::default())
+            .expect("bare CommonJS package should restore without a file map");
+
+        assert!(matches!(
+            restored,
+            ResolveResult::CommonJsNpmPackage(package_name)
+                if package_name == "shared-package"
         ));
     }
 

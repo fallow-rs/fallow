@@ -37,6 +37,8 @@ pub enum ResolveResult {
     ExternalFile(PathBuf),
     /// Bare specifier — an npm package.
     NpmPackage(String),
+    /// Bare npm package referenced through CommonJS `require()`.
+    CommonJsNpmPackage(String),
     /// Could not resolve.
     Unresolvable(String),
 }
@@ -51,7 +53,10 @@ impl ResolveResult {
             | Self::SyntheticAutoImport(file_id)
             | Self::InternalPackageModule { file_id, .. }
             | Self::CommonJsInternalPackageModule { file_id, .. } => Some(*file_id),
-            Self::ExternalFile(_) | Self::NpmPackage(_) | Self::Unresolvable(_) => None,
+            Self::ExternalFile(_)
+            | Self::NpmPackage(_)
+            | Self::CommonJsNpmPackage(_)
+            | Self::Unresolvable(_) => None,
         }
     }
 
@@ -61,16 +66,24 @@ impl ResolveResult {
         matches!(self, Self::SyntheticAutoImport(_))
     }
 
-    /// Return whether this internal edge originated from CommonJS `require()`.
+    /// Return whether this edge originated from CommonJS `require()`.
     #[must_use]
     pub const fn is_commonjs_require(&self) -> bool {
         matches!(
             self,
-            Self::CommonJsInternalModule(_) | Self::CommonJsInternalPackageModule { .. }
+            Self::CommonJsInternalModule(_)
+                | Self::CommonJsInternalPackageModule { .. }
+                | Self::CommonJsNpmPackage(_)
         )
     }
 
-    /// Retain CommonJS provenance on project-internal resolution results.
+    /// Return whether this target is an unresolved bare package edge.
+    #[must_use]
+    pub const fn is_bare_package(&self) -> bool {
+        matches!(self, Self::NpmPackage(_) | Self::CommonJsNpmPackage(_))
+    }
+
+    /// Retain CommonJS provenance on targets that can participate in upgrades.
     #[must_use]
     pub fn into_commonjs_require(self) -> Self {
         match self {
@@ -82,6 +95,24 @@ impl ResolveResult {
                 file_id,
                 package_name,
             },
+            Self::NpmPackage(package_name) => Self::CommonJsNpmPackage(package_name),
+            other => other,
+        }
+    }
+
+    /// Remove CommonJS provenance while preserving the resolved destination.
+    #[must_use]
+    pub fn into_es_module(self) -> Self {
+        match self {
+            Self::CommonJsInternalModule(file_id) => Self::InternalModule(file_id),
+            Self::CommonJsInternalPackageModule {
+                file_id,
+                package_name,
+            } => Self::InternalPackageModule {
+                file_id,
+                package_name,
+            },
+            Self::CommonJsNpmPackage(package_name) => Self::NpmPackage(package_name),
             other => other,
         }
     }
@@ -92,7 +123,8 @@ impl ResolveResult {
         match self {
             Self::InternalPackageModule { package_name, .. }
             | Self::CommonJsInternalPackageModule { package_name, .. }
-            | Self::NpmPackage(package_name) => Some(package_name),
+            | Self::NpmPackage(package_name)
+            | Self::CommonJsNpmPackage(package_name) => Some(package_name),
             Self::InternalModule(_)
             | Self::CommonJsInternalModule(_)
             | Self::SyntheticAutoImport(_)
@@ -521,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn commonjs_provenance_wraps_internal_targets_only() {
+    fn commonjs_provenance_wraps_internal_and_bare_package_targets() {
         assert!(matches!(
             ResolveResult::InternalModule(FileId(4)).into_commonjs_require(),
             ResolveResult::CommonJsInternalModule(FileId(4))
@@ -539,7 +571,7 @@ mod tests {
         ));
         assert!(matches!(
             ResolveResult::NpmPackage("pkg".to_string()).into_commonjs_require(),
-            ResolveResult::NpmPackage(package_name) if package_name == "pkg"
+            ResolveResult::CommonJsNpmPackage(package_name) if package_name == "pkg"
         ));
     }
 }

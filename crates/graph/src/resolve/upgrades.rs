@@ -16,9 +16,23 @@
 
 use rustc_hash::FxHashMap;
 
+use fallow_types::discover::FileId;
+
 use super::ResolvedModule;
 use super::path_info::is_bare_specifier;
 use super::types::ResolveResult;
+
+/// A replacement fact retaining enough resolution state for the global
+/// cross-tsconfig bare-specifier upgrade.
+#[derive(Debug)]
+pub(super) struct ResolvedReplacementCandidate {
+    /// File that declared this replacement.
+    pub(super) source_file: FileId,
+    /// Literal module specifier from the replacement call.
+    pub(super) source_specifier: String,
+    /// Per-file resolution result before the global upgrade.
+    pub(super) target: ResolveResult,
+}
 
 /// Post-resolution pass: deterministic specifier upgrade.
 ///
@@ -35,7 +49,10 @@ use super::types::ResolveResult;
 /// Note: if two tsconfigs map the same specifier to different `FileId`s, the first one
 /// encountered (by module order = `FileId` order) wins. This is deterministic but may be
 /// imprecise for that edge case , both files get connected regardless.
-pub(super) fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
+pub(super) fn apply_specifier_upgrades(
+    resolved: &mut [ResolvedModule],
+    replacements: &mut [ResolvedReplacementCandidate],
+) {
     let mut specifier_upgrades: FxHashMap<String, ResolveResult> = FxHashMap::default();
     for module in resolved.iter() {
         for imp in module
@@ -46,15 +63,25 @@ pub(super) fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
             if is_bare_specifier(&imp.info.source) && imp.target.internal_file_id().is_some() {
                 specifier_upgrades
                     .entry(imp.info.source.clone())
-                    .or_insert_with(|| imp.target.clone());
+                    .or_insert_with(|| imp.target.clone().into_es_module());
             }
         }
         for re in &module.re_exports {
             if is_bare_specifier(&re.info.source) && re.target.internal_file_id().is_some() {
                 specifier_upgrades
                     .entry(re.info.source.clone())
-                    .or_insert_with(|| re.target.clone());
+                    .or_insert_with(|| re.target.clone().into_es_module());
             }
+        }
+    }
+
+    for replacement in replacements.iter() {
+        if is_bare_specifier(&replacement.source_specifier)
+            && replacement.target.internal_file_id().is_some()
+        {
+            specifier_upgrades
+                .entry(replacement.source_specifier.clone())
+                .or_insert_with(|| replacement.target.clone().into_es_module());
         }
     }
 
@@ -68,20 +95,40 @@ pub(super) fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
             .iter_mut()
             .chain(module.resolved_dynamic_imports.iter_mut())
         {
-            if matches!(imp.target, ResolveResult::NpmPackage(_))
-                && let Some(target) = specifier_upgrades.get(&imp.info.source)
-            {
-                imp.target = target.clone();
-            }
+            upgrade_bare_target(&imp.info.source, &mut imp.target, &specifier_upgrades);
         }
         for re in &mut module.re_exports {
-            if matches!(re.target, ResolveResult::NpmPackage(_))
-                && let Some(target) = specifier_upgrades.get(&re.info.source)
-            {
-                re.target = target.clone();
-            }
+            upgrade_bare_target(&re.info.source, &mut re.target, &specifier_upgrades);
         }
     }
+
+    for replacement in replacements {
+        upgrade_bare_target(
+            &replacement.source_specifier,
+            &mut replacement.target,
+            &specifier_upgrades,
+        );
+    }
+}
+
+fn upgrade_bare_target(
+    source_specifier: &str,
+    target: &mut ResolveResult,
+    specifier_upgrades: &FxHashMap<String, ResolveResult>,
+) {
+    if !target.is_bare_package() {
+        return;
+    }
+    let Some(upgraded_target) = specifier_upgrades.get(source_specifier) else {
+        return;
+    };
+
+    let is_commonjs_require = target.is_commonjs_require();
+    *target = if is_commonjs_require {
+        upgraded_target.clone().into_commonjs_require()
+    } else {
+        upgraded_target.clone().into_es_module()
+    };
 }
 
 #[cfg(test)]
@@ -155,7 +202,7 @@ mod tests {
     #[test]
     fn empty_modules_no_crash() {
         let mut resolved: Vec<ResolvedModule> = vec![];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
         assert!(resolved.is_empty());
     }
 
@@ -167,7 +214,7 @@ mod tests {
             make_import("preact", ResolveResult::InternalModule(FileId(2))),
         ];
         let mut resolved = vec![m];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[0].resolved_imports[0].target,
@@ -194,7 +241,7 @@ mod tests {
         )];
 
         let mut resolved = vec![m0, m1];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[0].resolved_imports[0].target,
@@ -221,7 +268,7 @@ mod tests {
         )];
 
         let mut resolved = vec![m0, m1];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[1].re_exports[0].target,
@@ -247,7 +294,7 @@ mod tests {
         ];
 
         let mut resolved = vec![m0, m1];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[1].resolved_imports[0].target,
@@ -267,7 +314,7 @@ mod tests {
             make_import("react", ResolveResult::NpmPackage("react".to_string())),
         ];
         let mut resolved = vec![m];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[0].resolved_imports[0].target,
@@ -294,7 +341,7 @@ mod tests {
         )];
 
         let mut resolved = vec![m0, m1];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[1].resolved_imports[0].target,
@@ -317,7 +364,7 @@ mod tests {
         )];
 
         let mut resolved = vec![m0, m1];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[1].resolved_dynamic_imports[0].target,
@@ -340,7 +387,7 @@ mod tests {
         )];
 
         let mut resolved = vec![m0, m1];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[1].resolved_imports[0].target,
@@ -369,7 +416,7 @@ mod tests {
         )];
 
         let mut resolved = vec![m0, m1, m2];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[2].resolved_imports[0].target,
@@ -392,7 +439,51 @@ mod tests {
         )];
 
         let mut resolved = vec![m0, m1];
-        apply_specifier_upgrades(&mut resolved);
+        apply_specifier_upgrades(&mut resolved, &mut []);
+
+        assert!(matches!(
+            resolved[1].resolved_imports[0].target,
+            ResolveResult::InternalModule(FileId(10))
+        ));
+    }
+
+    #[test]
+    fn esm_donor_preserves_commonjs_recipient_mechanism() {
+        let mut esm_module = empty_module(FileId(0));
+        esm_module.resolved_imports = vec![make_import(
+            "shared-package",
+            ResolveResult::InternalModule(FileId(10)),
+        )];
+        let mut commonjs_module = empty_module(FileId(1));
+        commonjs_module.resolved_imports = vec![make_import(
+            "shared-package",
+            ResolveResult::CommonJsNpmPackage("shared-package".to_string()),
+        )];
+
+        let mut resolved = vec![esm_module, commonjs_module];
+        apply_specifier_upgrades(&mut resolved, &mut []);
+
+        assert!(matches!(
+            resolved[1].resolved_imports[0].target,
+            ResolveResult::CommonJsInternalModule(FileId(10))
+        ));
+    }
+
+    #[test]
+    fn commonjs_donor_does_not_contaminate_esm_recipient() {
+        let mut commonjs_module = empty_module(FileId(0));
+        commonjs_module.resolved_imports = vec![make_import(
+            "shared-package",
+            ResolveResult::CommonJsInternalModule(FileId(10)),
+        )];
+        let mut esm_module = empty_module(FileId(1));
+        esm_module.resolved_imports = vec![make_import(
+            "shared-package",
+            ResolveResult::NpmPackage("shared-package".to_string()),
+        )];
+
+        let mut resolved = vec![commonjs_module, esm_module];
+        apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
             resolved[1].resolved_imports[0].target,
