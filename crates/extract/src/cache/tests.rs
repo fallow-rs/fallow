@@ -1149,6 +1149,9 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 class_local_name: "Service".to_string(),
                 object: "this.client".to_string(),
             }),
+            SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+                source: "./dependency".to_string(),
+            }),
         ]
         .into(),
         whole_object_uses: Box::default(),
@@ -1296,6 +1299,9 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::ClassThisWholeObjectUse(ClassThisWholeObjectUseFact {
                 class_local_name: "Service".to_string(),
                 object: "this.client".to_string(),
+            }),
+            SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+                source: "./dependency".to_string(),
             }),
         ][..]
     );
@@ -4294,7 +4300,9 @@ fn warm_cache_load_matches_cold_parse() {
     let dir = test_cache_dir("warm_equals_cold");
     let path = Path::new("src/warm.tsx");
     let source = "import { useEffect } from 'react';\n\
+         import { vi } from 'vitest';\n\
          import type { Props } from './types';\n\
+         vi.mock('./dependency', () => ({ dependency: vi.fn() }));\n\
          export const App = ({ name }: Props) => {\n\
            useEffect(() => {}, [name]);\n\
            return <Child id={name} />;\n\
@@ -4339,6 +4347,14 @@ fn warm_cache_load_matches_cold_parse() {
     assert_eq!(
         warm_module.render_edges.len(),
         cold_module.render_edges.len()
+    );
+    assert_eq!(warm_module.semantic_facts, cold_module.semantic_facts);
+    assert!(
+        warm_module.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::ReplacedModuleTarget(target) if target.source == "./dependency"
+        )),
+        "warm cache should retain the proven replacement target"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

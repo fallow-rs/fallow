@@ -843,7 +843,11 @@ use crate::MemberKind;
 /// Bumped to 241: ECMAScript `#private` methods and properties are no longer
 /// extracted as reportable class members. Warm 240 caches can retain those
 /// members and reproduce the old false positives.
-pub(super) const CACHE_VERSION: u32 = 241;
+///
+/// Bumped to 242 for issue #2031: proven Vitest replacement factories append a
+/// `SemanticFact::ReplacedModuleTarget`. Warm 241 caches omit that typed fact
+/// and would continue crediting replaced modules as statically test-covered.
+pub(super) const CACHE_VERSION: u32 = 242;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
