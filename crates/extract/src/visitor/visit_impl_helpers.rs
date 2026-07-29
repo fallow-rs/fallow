@@ -376,6 +376,111 @@ pub(super) struct VitestReplacementCandidate {
     pub(super) factory_vi_reference_spans: Vec<Span>,
 }
 
+fn vitest_factory_has_no_parameters(argument: &Argument<'_>) -> Option<bool> {
+    fn expression_has_no_parameters(expression: &Expression<'_>) -> Option<bool> {
+        match expression {
+            Expression::ArrowFunctionExpression(factory) => Some(factory.params.items.is_empty()),
+            Expression::FunctionExpression(factory) => Some(factory.params.items.is_empty()),
+            Expression::ParenthesizedExpression(parenthesized) => {
+                expression_has_no_parameters(&parenthesized.expression)
+            }
+            _ => None,
+        }
+    }
+
+    match argument {
+        Argument::ArrowFunctionExpression(factory) => Some(factory.params.items.is_empty()),
+        Argument::FunctionExpression(factory) => Some(factory.params.items.is_empty()),
+        Argument::ParenthesizedExpression(parenthesized) => {
+            expression_has_no_parameters(&parenthesized.expression)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct VitestFactoryProofVisitor {
+    unsafe_escape: bool,
+    vi_reference_spans: Vec<Span>,
+}
+
+impl<'a> Visit<'a> for VitestFactoryProofVisitor {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            self.unsafe_escape = true;
+            return;
+        };
+        let Expression::Identifier(object) = &member.object else {
+            self.unsafe_escape = true;
+            return;
+        };
+        if object.name != "vi" || member.property.name != "fn" {
+            self.unsafe_escape = true;
+            return;
+        }
+
+        self.vi_reference_spans.push(object.span);
+        walk::walk_call_expression(self, call);
+    }
+
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if identifier.name == "arguments" {
+            self.unsafe_escape = true;
+        }
+    }
+
+    fn visit_import_expression(&mut self, _expression: &ImportExpression<'a>) {
+        self.unsafe_escape = true;
+    }
+
+    fn visit_new_expression(&mut self, _expression: &NewExpression<'a>) {
+        self.unsafe_escape = true;
+    }
+
+    fn visit_tagged_template_expression(&mut self, _expression: &TaggedTemplateExpression<'a>) {
+        self.unsafe_escape = true;
+    }
+
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        if member.property.name == "importActual"
+            && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+        {
+            self.unsafe_escape = true;
+            return;
+        }
+        walk::walk_static_member_expression(self, member);
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if member
+            .static_property_name()
+            .is_some_and(|name| name == "importActual")
+            && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+        {
+            self.unsafe_escape = true;
+            return;
+        }
+        walk::walk_computed_member_expression(self, member);
+    }
+
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        if let (BindingPattern::ObjectPattern(pattern), Some(Expression::Identifier(object))) =
+            (&declarator.id, &declarator.init)
+            && object.name == "vi"
+            && pattern.properties.iter().any(|property| {
+                property
+                    .key
+                    .static_name()
+                    .is_some_and(|name| name == "importActual")
+            })
+        {
+            self.unsafe_escape = true;
+            return;
+        }
+        walk::walk_variable_declarator(self, declarator);
+    }
+}
+
 /// Return a Vitest mock whose factory provably replaces the original module
 /// without loading it.
 ///
@@ -386,122 +491,13 @@ pub(super) struct VitestReplacementCandidate {
 pub(super) fn vitest_replacement_candidate(
     call: &CallExpression<'_>,
 ) -> Option<VitestReplacementCandidate> {
-    fn factory_has_no_parameters(argument: &Argument<'_>) -> Option<bool> {
-        fn expression_has_no_parameters(expression: &Expression<'_>) -> Option<bool> {
-            match expression {
-                Expression::ArrowFunctionExpression(factory) => {
-                    Some(factory.params.items.is_empty())
-                }
-                Expression::FunctionExpression(factory) => Some(factory.params.items.is_empty()),
-                Expression::ParenthesizedExpression(parenthesized) => {
-                    expression_has_no_parameters(&parenthesized.expression)
-                }
-                _ => None,
-            }
-        }
-
-        match argument {
-            Argument::ArrowFunctionExpression(factory) => Some(factory.params.items.is_empty()),
-            Argument::FunctionExpression(factory) => Some(factory.params.items.is_empty()),
-            Argument::ParenthesizedExpression(parenthesized) => {
-                expression_has_no_parameters(&parenthesized.expression)
-            }
-            _ => None,
-        }
-    }
-
-    struct FactoryProofVisitor {
-        unsafe_escape: bool,
-        vi_reference_spans: Vec<Span>,
-    }
-
-    impl<'a> Visit<'a> for FactoryProofVisitor {
-        fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-            let Expression::StaticMemberExpression(member) = &call.callee else {
-                self.unsafe_escape = true;
-                return;
-            };
-            let Expression::Identifier(object) = &member.object else {
-                self.unsafe_escape = true;
-                return;
-            };
-            if object.name != "vi" || member.property.name != "fn" {
-                self.unsafe_escape = true;
-                return;
-            }
-
-            self.vi_reference_spans.push(object.span);
-            walk::walk_call_expression(self, call);
-        }
-
-        fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-            if identifier.name == "arguments" {
-                self.unsafe_escape = true;
-            }
-        }
-
-        fn visit_import_expression(&mut self, _expression: &ImportExpression<'a>) {
-            self.unsafe_escape = true;
-        }
-
-        fn visit_new_expression(&mut self, _expression: &NewExpression<'a>) {
-            self.unsafe_escape = true;
-        }
-
-        fn visit_tagged_template_expression(&mut self, _expression: &TaggedTemplateExpression<'a>) {
-            self.unsafe_escape = true;
-        }
-
-        fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
-            if member.property.name == "importActual"
-                && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
-            {
-                self.unsafe_escape = true;
-                return;
-            }
-            walk::walk_static_member_expression(self, member);
-        }
-
-        fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
-            if member
-                .static_property_name()
-                .is_some_and(|name| name == "importActual")
-                && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
-            {
-                self.unsafe_escape = true;
-                return;
-            }
-            walk::walk_computed_member_expression(self, member);
-        }
-
-        fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
-            if let (BindingPattern::ObjectPattern(pattern), Some(Expression::Identifier(object))) =
-                (&declarator.id, &declarator.init)
-                && object.name == "vi"
-                && pattern.properties.iter().any(|property| {
-                    property
-                        .key
-                        .static_name()
-                        .is_some_and(|name| name == "importActual")
-                })
-            {
-                self.unsafe_escape = true;
-                return;
-            }
-            walk::walk_variable_declarator(self, declarator);
-        }
-    }
-
     vitest_mock_source(call)?;
     let factory = call.arguments.get(1)?;
-    if factory_has_no_parameters(factory) != Some(true) {
+    if vitest_factory_has_no_parameters(factory) != Some(true) {
         return None;
     }
 
-    let mut proof = FactoryProofVisitor {
-        unsafe_escape: false,
-        vi_reference_spans: Vec::new(),
-    };
+    let mut proof = VitestFactoryProofVisitor::default();
     match factory {
         Argument::ArrowFunctionExpression(factory) => {
             proof.visit_arrow_function_expression(factory);
