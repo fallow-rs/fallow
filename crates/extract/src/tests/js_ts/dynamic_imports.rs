@@ -374,6 +374,45 @@ fn vitest_non_replacement_forms_abstain() {
 }
 
 #[test]
+fn vitest_replacement_uses_final_mock_operation_per_target() {
+    for source in [
+        r#"import { vi } from "vitest"; vi.mock("./dep", () => ({})); vi.unmock("./dep");"#,
+        r#"import { vi } from "vitest"; vi.mock("./dep", () => ({})); vi.mock("./dep", importOriginal => importOriginal());"#,
+        r#"import { vi } from "vitest"; vi.mock("./dep", () => ({})); vi.mock("./dep", async () => loadOriginal());"#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            replaced_module_targets(&info).is_empty(),
+            "a final non-replacement operation must clear earlier proof: {source}"
+        );
+    }
+
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.unmock("./dep");
+        vi.mock("./dep", () => ({ request: vi.fn() }));
+        "#,
+    );
+    assert_eq!(replaced_module_targets(&info), vec!["./dep"]);
+}
+
+#[test]
+fn shadowed_vitest_operations_do_not_change_imported_vi_state() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock("./dep", () => ({}));
+        function configure(vi) {
+          vi.unmock("./dep");
+        }
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./dep"]);
+}
+
+#[test]
 fn dynamic_import_await_captures_local_name() {
     let info = parse_source(
         "async function f() { const mod = await import('./service'); mod.doStuff(); }",

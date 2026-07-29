@@ -193,8 +193,16 @@ pub(super) fn is_private_member_key(key: &PropertyKey<'_>) -> bool {
 }
 
 pub(super) fn vitest_mock_source(call: &CallExpression<'_>) -> Option<String> {
-    vitest_mock_object_span(call)?;
+    vitest_method_object_span(call, "mock")?;
+    vitest_static_target_source(call)
+}
 
+pub(super) fn vitest_unmock_source(call: &CallExpression<'_>) -> Option<String> {
+    vitest_method_object_span(call, "unmock")?;
+    vitest_static_target_source(call)
+}
+
+fn vitest_static_target_source(call: &CallExpression<'_>) -> Option<String> {
     call.arguments.first().and_then(|argument| match argument {
         Argument::StringLiteral(value) => Some(value.value.to_string()),
         Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
@@ -210,10 +218,18 @@ pub(super) fn vitest_mock_source(call: &CallExpression<'_>) -> Option<String> {
 }
 
 pub(super) fn vitest_mock_object_span(call: &CallExpression<'_>) -> Option<Span> {
+    vitest_method_object_span(call, "mock")
+}
+
+pub(super) fn vitest_unmock_object_span(call: &CallExpression<'_>) -> Option<Span> {
+    vitest_method_object_span(call, "unmock")
+}
+
+fn vitest_method_object_span(call: &CallExpression<'_>, expected_method: &str) -> Option<Span> {
     let Expression::StaticMemberExpression(member) = &call.callee else {
         return None;
     };
-    if member.property.name != "mock" {
+    if member.property.name != expected_method {
         return None;
     }
     let Expression::Identifier(object) = &member.object else {
@@ -357,7 +373,6 @@ pub(super) fn vi_mock_has_factory(call: &CallExpression<'_>) -> bool {
 
 #[derive(Debug)]
 pub(super) struct VitestReplacementCandidate {
-    pub(super) source: String,
     pub(super) factory_vi_reference_spans: Vec<Span>,
 }
 
@@ -477,7 +492,7 @@ pub(super) fn vitest_replacement_candidate(
         }
     }
 
-    let target = vitest_mock_source(call)?;
+    vitest_mock_source(call)?;
     let factory = call.arguments.get(1)?;
     if factory_has_no_parameters(factory) != Some(true) {
         return None;
@@ -500,7 +515,6 @@ pub(super) fn vitest_replacement_candidate(
         _ => return None,
     }
     (!proof.unsafe_escape).then_some(VitestReplacementCandidate {
-        source: target,
         factory_vi_reference_spans: proof.vi_reference_spans,
     })
 }

@@ -864,7 +864,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 246: proven Vitest replacements now require a structurally closed
 /// factory whose only callable dependency is the imported `vi.fn`.
-pub(super) const CACHE_VERSION: u32 = 246;
+///
+/// Bumped to 247: Vitest replacement facts now reflect the final semantically
+/// proven `vi.mock` or `vi.unmock` operation for each target.
+pub(super) const CACHE_VERSION: u32 = 247;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -9,6 +9,7 @@ use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
     playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source,
     vitest_mock_object_span, vitest_mock_source, vitest_replacement_candidate,
+    vitest_unmock_object_span, vitest_unmock_source,
 };
 
 impl ModuleInfoExtractor {
@@ -251,14 +252,29 @@ impl ModuleInfoExtractor {
             });
         }
 
-        if let Some(candidate) = vitest_replacement_candidate(expr)
-            && let Some(vi_reference_span) = vitest_mock_object_span(expr)
+        if let Some(vi_reference_span) = vitest_mock_object_span(expr) {
+            let factory_vi_reference_spans = vitest_replacement_candidate(expr)
+                .map(|candidate| candidate.factory_vi_reference_spans);
+            self.pending_vitest_replacements
+                .push(PendingVitestReplacement {
+                    source: target_source,
+                    vi_reference_span,
+                    call_start: expr.span.start,
+                    factory_vi_reference_spans,
+                });
+        }
+    }
+
+    pub(super) fn record_vitest_unmock(&mut self, expr: &CallExpression<'_>) {
+        if let Some(source) = vitest_unmock_source(expr)
+            && let Some(vi_reference_span) = vitest_unmock_object_span(expr)
         {
             self.pending_vitest_replacements
                 .push(PendingVitestReplacement {
-                    source: candidate.source,
+                    source,
                     vi_reference_span,
-                    factory_vi_reference_spans: candidate.factory_vi_reference_spans,
+                    call_start: expr.span.start,
+                    factory_vi_reference_spans: None,
                 });
         }
     }
@@ -267,22 +283,42 @@ impl ModuleInfoExtractor {
         &mut self,
         vitest_vi_reference_spans: &rustc_hash::FxHashSet<oxc_span::Span>,
     ) {
-        self.semantic_facts.extend(
-            self.pending_vitest_replacements
-                .drain(..)
-                .filter(|candidate| {
-                    vitest_vi_reference_spans.contains(&candidate.vi_reference_span)
-                        && candidate
-                            .factory_vi_reference_spans
+        let mut operations: Vec<_> = self
+            .pending_vitest_replacements
+            .drain(..)
+            .filter(|operation| vitest_vi_reference_spans.contains(&operation.vi_reference_span))
+            .collect();
+        operations.sort_unstable_by_key(|operation| operation.call_start);
+
+        let mut final_operations = rustc_hash::FxHashMap::default();
+        for operation in operations {
+            final_operations.insert(operation.source.clone(), operation);
+        }
+
+        let mut replacements: Vec<_> = final_operations
+            .into_values()
+            .filter(|operation| {
+                operation
+                    .factory_vi_reference_spans
+                    .as_ref()
+                    .is_some_and(|spans| {
+                        spans
                             .iter()
                             .all(|span| vitest_vi_reference_spans.contains(span))
-                })
-                .map(|candidate| {
-                    SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
-                        source: candidate.source,
                     })
-                }),
-        );
+            })
+            .collect();
+        replacements.sort_unstable_by(|left, right| {
+            left.call_start
+                .cmp(&right.call_start)
+                .then_with(|| left.source.cmp(&right.source))
+        });
+        self.semantic_facts
+            .extend(replacements.into_iter().map(|operation| {
+                SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+                    source: operation.source,
+                })
+            }));
     }
 }
 

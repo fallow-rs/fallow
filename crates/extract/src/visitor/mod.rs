@@ -247,7 +247,8 @@ struct LitCustomElementCandidate {
 pub(super) struct PendingVitestReplacement {
     source: String,
     vi_reference_span: Span,
-    factory_vi_reference_spans: Vec<Span>,
+    call_start: u32,
+    factory_vi_reference_spans: Option<Vec<Span>>,
 }
 
 #[derive(Debug, Clone)]
