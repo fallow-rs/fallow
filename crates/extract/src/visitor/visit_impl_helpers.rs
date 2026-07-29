@@ -355,13 +355,22 @@ pub(super) fn vi_mock_has_factory(call: &CallExpression<'_>) -> bool {
     call.arguments.get(1).is_some_and(is_factory_arg)
 }
 
-/// Return the target of a Vitest mock whose factory provably replaces the
-/// original module without loading it.
+#[derive(Debug)]
+pub(super) struct VitestReplacementCandidate {
+    pub(super) source: String,
+    pub(super) factory_vi_reference_spans: Vec<Span>,
+}
+
+/// Return a Vitest mock whose factory provably replaces the original module
+/// without loading it.
 ///
 /// Import provenance is checked by the caller. This helper stays conservative:
-/// factories with parameters can receive `importOriginal`, and a zero-argument
-/// factory can still call `vi.importActual`, so both shapes abstain.
-pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option<String> {
+/// factories with parameters can receive `importOriginal`; zero-argument
+/// factories abstain when they use `arguments`, construct values, dynamically
+/// import code, invoke an unproven helper, or call an original-module loader.
+pub(super) fn vitest_replacement_candidate(
+    call: &CallExpression<'_>,
+) -> Option<VitestReplacementCandidate> {
     fn factory_has_no_parameters(argument: &Argument<'_>) -> Option<bool> {
         fn expression_has_no_parameters(expression: &Expression<'_>) -> Option<bool> {
             match expression {
@@ -386,16 +395,53 @@ pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option
         }
     }
 
-    struct ImportActualVisitor {
-        found: bool,
+    struct FactoryProofVisitor {
+        unsafe_escape: bool,
+        vi_reference_spans: Vec<Span>,
     }
 
-    impl<'a> Visit<'a> for ImportActualVisitor {
+    impl<'a> Visit<'a> for FactoryProofVisitor {
+        fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+            let Expression::StaticMemberExpression(member) = &call.callee else {
+                self.unsafe_escape = true;
+                return;
+            };
+            let Expression::Identifier(object) = &member.object else {
+                self.unsafe_escape = true;
+                return;
+            };
+            if object.name != "vi" || member.property.name != "fn" {
+                self.unsafe_escape = true;
+                return;
+            }
+
+            self.vi_reference_spans.push(object.span);
+            walk::walk_call_expression(self, call);
+        }
+
+        fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+            if identifier.name == "arguments" {
+                self.unsafe_escape = true;
+            }
+        }
+
+        fn visit_import_expression(&mut self, _expression: &ImportExpression<'a>) {
+            self.unsafe_escape = true;
+        }
+
+        fn visit_new_expression(&mut self, _expression: &NewExpression<'a>) {
+            self.unsafe_escape = true;
+        }
+
+        fn visit_tagged_template_expression(&mut self, _expression: &TaggedTemplateExpression<'a>) {
+            self.unsafe_escape = true;
+        }
+
         fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
             if member.property.name == "importActual"
                 && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
             {
-                self.found = true;
+                self.unsafe_escape = true;
                 return;
             }
             walk::walk_static_member_expression(self, member);
@@ -407,7 +453,7 @@ pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option
                 .is_some_and(|name| name == "importActual")
                 && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
             {
-                self.found = true;
+                self.unsafe_escape = true;
                 return;
             }
             walk::walk_computed_member_expression(self, member);
@@ -424,7 +470,7 @@ pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option
                         .is_some_and(|name| name == "importActual")
                 })
             {
-                self.found = true;
+                self.unsafe_escape = true;
                 return;
             }
             walk::walk_variable_declarator(self, declarator);
@@ -437,20 +483,26 @@ pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option
         return None;
     }
 
-    let mut import_actual = ImportActualVisitor { found: false };
+    let mut proof = FactoryProofVisitor {
+        unsafe_escape: false,
+        vi_reference_spans: Vec::new(),
+    };
     match factory {
         Argument::ArrowFunctionExpression(factory) => {
-            import_actual.visit_arrow_function_expression(factory);
+            proof.visit_arrow_function_expression(factory);
         }
         Argument::FunctionExpression(factory) => {
-            import_actual.visit_function(factory, ScopeFlags::Function);
+            proof.visit_function(factory, ScopeFlags::Function);
         }
         Argument::ParenthesizedExpression(parenthesized) => {
-            import_actual.visit_expression(&parenthesized.expression);
+            proof.visit_expression(&parenthesized.expression);
         }
         _ => return None,
     }
-    (!import_actual.found).then_some(target)
+    (!proof.unsafe_escape).then_some(VitestReplacementCandidate {
+        source: target,
+        factory_vi_reference_spans: proof.vi_reference_spans,
+    })
 }
 
 /// Whether `callee` is a `useMemo` / `React.useMemo` reference.

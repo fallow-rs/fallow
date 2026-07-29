@@ -861,7 +861,10 @@ use crate::MemberKind;
 /// `vi.importActual` escapes through a property read or destructuring, not only
 /// when it is called directly. Warm 244 caches can retain false replacement
 /// facts for aliased original-module loaders.
-pub(super) const CACHE_VERSION: u32 = 245;
+///
+/// Bumped to 246: proven Vitest replacements now require a structurally closed
+/// factory whose only callable dependency is the imported `vi.fn`.
+pub(super) const CACHE_VERSION: u32 = 246;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -8,7 +8,7 @@ use super::super::{ModuleInfoExtractor, PendingPlaywrightFactory, PendingVitestR
 use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
     playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source,
-    vitest_mock_object_span, vitest_mock_source, vitest_replaced_module_source,
+    vitest_mock_object_span, vitest_mock_source, vitest_replacement_candidate,
 };
 
 impl ModuleInfoExtractor {
@@ -251,13 +251,14 @@ impl ModuleInfoExtractor {
             });
         }
 
-        if let Some(source) = vitest_replaced_module_source(expr)
+        if let Some(candidate) = vitest_replacement_candidate(expr)
             && let Some(vi_reference_span) = vitest_mock_object_span(expr)
         {
             self.pending_vitest_replacements
                 .push(PendingVitestReplacement {
-                    source,
+                    source: candidate.source,
                     vi_reference_span,
+                    factory_vi_reference_spans: candidate.factory_vi_reference_spans,
                 });
         }
     }
@@ -271,6 +272,10 @@ impl ModuleInfoExtractor {
                 .drain(..)
                 .filter(|candidate| {
                     vitest_vi_reference_spans.contains(&candidate.vi_reference_span)
+                        && candidate
+                            .factory_vi_reference_spans
+                            .iter()
+                            .all(|span| vitest_vi_reference_spans.contains(span))
                 })
                 .map(|candidate| {
                     SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {

@@ -356,6 +356,12 @@ fn vitest_non_replacement_forms_abstain() {
         r#"import { vi } from "vitest"; vi.mock("./destructured", async () => { const { importActual: loadActual } = vi; return loadActual("./destructured"); });"#,
         r#"import { vi } from "vitest"; vi.mock("./call", async () => vi.importActual.call(vi, "./call"));"#,
         r#"import { vi } from "vitest"; vi.mock("./reflect", async () => Reflect.apply(vi.importActual, vi, ["./reflect"]));"#,
+        r#"import { vi } from "vitest"; vi.mock("./arguments", function () { return arguments[0](); });"#,
+        r#"import { vi } from "vitest"; const loadOriginal = () => vi.importActual("./helper"); vi.mock("./helper", async () => loadOriginal());"#,
+        r#"import { vi } from "vitest"; import { loadOriginal } from "./loader"; vi.mock("./external-helper", async () => loadOriginal());"#,
+        r#"import { vi } from "vitest"; vi.mock("./dynamic", async () => import("./dynamic"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./constructed", () => new Replacement());"#,
+        r#"import { vi } from "vitest"; const localVi = vi; vi.mock("./local-vi", () => ({ request: localVi.fn() }));"#,
         r#"const vi = localMockApi; vi.mock("./local", () => ({}));"#,
         r#"vi.mock("./global", () => ({}));"#,
     ] {
