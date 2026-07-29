@@ -100,9 +100,10 @@ fn extract_accessed_members(source_mod: Option<&&ResolvedModule>, local_name: &s
 
 /// Mark all exports on a module as referenced by a given source file.
 ///
-/// Deduplicates by source and runtime mechanism. A source can retain one ESM
-/// and one CommonJS reference because replacement coverage treats them
-/// differently.
+/// Profiled reachability deduplicates by source and exact runtime path, so ESM
+/// and CommonJS references remain distinct when replacements can affect them.
+/// Legacy reachability deliberately retains the pre-profile source-only
+/// behavior because no replacement mask can distinguish those paths.
 #[cfg(test)]
 pub(super) fn mark_all_exports_referenced(
     exports: &mut Vec<ExportSymbol>,
@@ -684,6 +685,35 @@ mod tests {
             &mut reference_paths,
         );
         assert_eq!(exports[0].references.len(), 1);
+    }
+
+    #[test]
+    fn untracked_reference_sites_preserve_legacy_source_deduplication() {
+        let mut export = ExportSymbol {
+            name: ExportName::Named("a".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 5),
+            references: Vec::new(),
+            members: Vec::new(),
+        };
+
+        attach_reference(
+            &mut export,
+            ReferenceSite::exact(FileId(5), oxc_span::Span::new(0, 10), None),
+            ReferenceKind::NamedImport,
+        );
+        attach_reference(
+            &mut export,
+            ReferenceSite::exact(FileId(5), oxc_span::Span::new(20, 30), None),
+            ReferenceKind::NamespaceImport,
+        );
+
+        assert_eq!(export.references.len(), 1);
+        assert_eq!(export.references[0].kind, ReferenceKind::NamedImport);
+        assert_eq!(export.references[0].import_span, oxc_span::Span::new(0, 10));
     }
 
     #[test]
