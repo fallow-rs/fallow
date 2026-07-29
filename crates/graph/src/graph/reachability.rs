@@ -37,8 +37,7 @@ impl TestReachability {
     const fn traversal_count(&self) -> usize {
         match self {
             Self::NoRoots => 0,
-            Self::Legacy(_) => 1,
-            Self::Profiled { .. } => 1,
+            Self::Legacy(_) | Self::Profiled { .. } => 1,
         }
     }
 
@@ -48,6 +47,166 @@ impl TestReachability {
             Self::Profiled { worklist_pops, .. } => *worklist_pops,
             Self::NoRoots | Self::Legacy(_) => 0,
         }
+    }
+}
+
+/// Owns the transient state for one bit-parallel profiled reachability pass.
+///
+/// Only `index` and `all_reachable` survive the pass. Pending deltas, queue
+/// membership, and the target-sparse mask map remain local to propagation.
+struct ProfileWorklist {
+    index: TestReachabilityIndex,
+    masked_profiles: FxHashMap<FileId, Vec<u64>>,
+    all_reachable: FixedBitSet,
+    pending_profiles: Vec<u64>,
+    queued: FixedBitSet,
+    queue: VecDeque<FileId>,
+    worklist_pops: usize,
+}
+
+impl ProfileWorklist {
+    fn new(
+        grouped_roots: &[(Vec<FileId>, Vec<FileId>)],
+        total_capacity: usize,
+    ) -> Self {
+        let profile_count = grouped_roots.len();
+        let index = TestReachabilityIndex::new(total_capacity, profile_count);
+        let words_per_file = index.words_per_file;
+        let mut masked_profiles: FxHashMap<FileId, Vec<u64>> = FxHashMap::default();
+
+        for (profile, (masked_targets, _)) in grouped_roots.iter().enumerate() {
+            let word_index = profile / u64::BITS as usize;
+            let profile_bit = 1_u64 << (profile % u64::BITS as usize);
+            for &target in masked_targets {
+                masked_profiles
+                    .entry(target)
+                    .or_insert_with(|| vec![0; words_per_file])[word_index] |= profile_bit;
+            }
+        }
+
+        let pending_profiles = vec![0_u64; index.reachable_profiles.len()];
+        let mut worklist = Self {
+            index,
+            masked_profiles,
+            all_reachable: FixedBitSet::with_capacity(total_capacity),
+            pending_profiles,
+            queued: FixedBitSet::with_capacity(total_capacity),
+            queue: VecDeque::new(),
+            worklist_pops: 0,
+        };
+
+        for (profile, (_, roots)) in grouped_roots.iter().enumerate() {
+            let word_index = profile / u64::BITS as usize;
+            let profile_bit = 1_u64 << (profile % u64::BITS as usize);
+            for &root in roots {
+                let root_index = root.0 as usize;
+                if root_index >= total_capacity {
+                    continue;
+                }
+                let Some(slot) = root_index
+                    .checked_mul(words_per_file)
+                    .and_then(|start| start.checked_add(word_index))
+                else {
+                    continue;
+                };
+                let Some(reachable_word) = worklist.index.reachable_profiles.get_mut(slot) else {
+                    continue;
+                };
+                if *reachable_word & profile_bit != 0 {
+                    continue;
+                }
+                *reachable_word |= profile_bit;
+                worklist.pending_profiles[slot] |= profile_bit;
+                worklist.all_reachable.insert(root_index);
+                if !worklist.queued.contains(root_index) {
+                    worklist.queued.insert(root_index);
+                    worklist.queue.push_back(root);
+                }
+            }
+        }
+
+        worklist
+    }
+
+    fn run(
+        mut self,
+        graph: &ModuleGraph,
+    ) -> (FixedBitSet, TestReachabilityIndex, usize) {
+        let words_per_file = self.index.words_per_file;
+        let mut source_delta = vec![0_u64; words_per_file];
+
+        while let Some(file_id) = self.queue.pop_front() {
+            self.worklist_pops += 1;
+            let file_index = file_id.0 as usize;
+            self.queued.remove(file_index);
+            let Some(source_start) = file_index.checked_mul(words_per_file) else {
+                continue;
+            };
+            let Some(source_end) = source_start.checked_add(words_per_file) else {
+                continue;
+            };
+            let Some(pending_source) =
+                self.pending_profiles.get_mut(source_start..source_end)
+            else {
+                continue;
+            };
+            source_delta.copy_from_slice(pending_source);
+            pending_source.fill(0);
+
+            let Some(module) = graph.modules.get(file_index) else {
+                continue;
+            };
+            for edge in &graph.edges[module.edge_range.clone()] {
+                let target_idx = edge.target.0 as usize;
+                if target_idx >= self.all_reachable.len() {
+                    continue;
+                }
+                let Some(target_start) = target_idx.checked_mul(words_per_file) else {
+                    continue;
+                };
+                let edge_is_esm_only = edge.symbols.iter().all(|symbol| {
+                    !matches!(symbol.mechanism, ModuleLoadMechanism::CommonJsRequire)
+                });
+                let edge_mask = if edge_is_esm_only {
+                    self.masked_profiles.get(&edge.target)
+                } else {
+                    None
+                };
+
+                let mut target_changed = false;
+                for (word_index, &delta_word) in source_delta.iter().enumerate() {
+                    let propagated = edge_mask
+                        .and_then(|mask| mask.get(word_index))
+                        .map_or(delta_word, |mask_word| delta_word & !mask_word);
+                    let Some(target_slot) = target_start.checked_add(word_index) else {
+                        continue;
+                    };
+                    let Some(reachable_word) =
+                        self.index.reachable_profiles.get_mut(target_slot)
+                    else {
+                        continue;
+                    };
+                    let new_profiles = propagated & !*reachable_word;
+                    if new_profiles == 0 {
+                        continue;
+                    }
+                    *reachable_word |= new_profiles;
+                    self.pending_profiles[target_slot] |= new_profiles;
+                    target_changed = true;
+                }
+
+                if target_changed {
+                    self.all_reachable.insert(target_idx);
+                    if !self.queued.contains(target_idx) {
+                        self.queued.insert(target_idx);
+                        self.queue.push_back(edge.target);
+                    }
+                }
+            }
+        }
+
+        self.index.set_sparse_masks(self.masked_profiles);
+        (self.all_reachable, self.index, self.worklist_pops)
     }
 }
 
@@ -89,131 +248,7 @@ impl ModuleGraph {
         grouped_roots: &[(Vec<FileId>, Vec<FileId>)],
         total_capacity: usize,
     ) -> (FixedBitSet, TestReachabilityIndex, usize) {
-        let profile_count = grouped_roots.len();
-        let mut index = TestReachabilityIndex::new(total_capacity, profile_count);
-        let words_per_file = index.words_per_file;
-        let mut masked_profiles: FxHashMap<FileId, Vec<u64>> = FxHashMap::default();
-
-        for (profile, (masked_targets, _)) in grouped_roots.iter().enumerate() {
-            let word_index = profile / u64::BITS as usize;
-            let profile_bit = 1_u64 << (profile % u64::BITS as usize);
-            for &target in masked_targets {
-                masked_profiles
-                    .entry(target)
-                    .or_insert_with(|| vec![0; words_per_file])[word_index] |= profile_bit;
-            }
-        }
-
-        let mut all_reachable = FixedBitSet::with_capacity(total_capacity);
-        let mut pending_profiles = vec![0_u64; index.reachable_profiles.len()];
-        let mut queued = FixedBitSet::with_capacity(total_capacity);
-        let mut queue = VecDeque::new();
-
-        for (profile, (_, roots)) in grouped_roots.iter().enumerate() {
-            let word_index = profile / u64::BITS as usize;
-            let profile_bit = 1_u64 << (profile % u64::BITS as usize);
-            for &root in roots {
-                let root_index = root.0 as usize;
-                if root_index >= total_capacity {
-                    continue;
-                }
-                let Some(slot) = root_index
-                    .checked_mul(words_per_file)
-                    .and_then(|start| start.checked_add(word_index))
-                else {
-                    continue;
-                };
-                let Some(reachable_word) = index.reachable_profiles.get_mut(slot) else {
-                    continue;
-                };
-                if *reachable_word & profile_bit != 0 {
-                    continue;
-                }
-                *reachable_word |= profile_bit;
-                pending_profiles[slot] |= profile_bit;
-                all_reachable.insert(root_index);
-                if !queued.contains(root_index) {
-                    queued.insert(root_index);
-                    queue.push_back(root);
-                }
-            }
-        }
-
-        let mut worklist_pops = 0;
-        let mut source_delta = vec![0_u64; words_per_file];
-        while let Some(file_id) = queue.pop_front() {
-            worklist_pops += 1;
-            let file_index = file_id.0 as usize;
-            queued.remove(file_index);
-            let Some(source_start) = file_index.checked_mul(words_per_file) else {
-                continue;
-            };
-            let Some(source_end) = source_start.checked_add(words_per_file) else {
-                continue;
-            };
-            let Some(pending_source) = pending_profiles.get_mut(source_start..source_end) else {
-                continue;
-            };
-            source_delta.copy_from_slice(pending_source);
-            pending_source.fill(0);
-
-            let Some(module) = self.modules.get(file_index) else {
-                continue;
-            };
-            for edge in &self.edges[module.edge_range.clone()] {
-                let target_idx = edge.target.0 as usize;
-                if target_idx >= total_capacity {
-                    continue;
-                }
-                let Some(target_start) = target_idx.checked_mul(words_per_file) else {
-                    continue;
-                };
-                let edge_is_esm_only = edge
-                    .symbols
-                    .iter()
-                    .all(|symbol| {
-                        !matches!(symbol.mechanism, ModuleLoadMechanism::CommonJsRequire)
-                    });
-                let edge_mask = if edge_is_esm_only {
-                    masked_profiles.get(&edge.target)
-                } else {
-                    None
-                };
-
-                let mut target_changed = false;
-                for (word_index, &delta_word) in source_delta.iter().enumerate() {
-                    let propagated = edge_mask
-                        .and_then(|mask| mask.get(word_index))
-                        .map_or(delta_word, |mask_word| delta_word & !mask_word);
-                    let Some(target_slot) = target_start.checked_add(word_index) else {
-                        continue;
-                    };
-                    let Some(reachable_word) =
-                        index.reachable_profiles.get_mut(target_slot)
-                    else {
-                        continue;
-                    };
-                    let new_profiles = propagated & !*reachable_word;
-                    if new_profiles == 0 {
-                        continue;
-                    }
-                    *reachable_word |= new_profiles;
-                    pending_profiles[target_slot] |= new_profiles;
-                    target_changed = true;
-                }
-
-                if target_changed {
-                    all_reachable.insert(target_idx);
-                    if !queued.contains(target_idx) {
-                        queued.insert(target_idx);
-                        queue.push_back(edge.target);
-                    }
-                }
-            }
-        }
-
-        index.set_sparse_masks(masked_profiles);
-        (all_reachable, index, worklist_pops)
+        ProfileWorklist::new(grouped_roots, total_capacity).run(self)
     }
 
     fn collect_test_reachable(
@@ -266,14 +301,16 @@ impl ModuleGraph {
             roots.dedup();
         }
 
-        let (reachable, index, _worklist_pops) =
+        let (reachable, index, worklist_pops) =
             self.collect_profiled_reachable(&grouped_roots, total_capacity);
+        #[cfg(not(test))]
+        let _ = worklist_pops;
 
         TestReachability::Profiled {
             reachable,
             index,
             #[cfg(test)]
-            worklist_pops: _worklist_pops,
+            worklist_pops,
         }
     }
 
