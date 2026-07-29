@@ -11,13 +11,19 @@ use fallow_types::extract::ModuleLoadMechanism;
 
 use super::{ModuleGraph, TestReachabilityIndex};
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct TestReachabilityProfile {
+    masked_targets: Vec<FileId>,
+    roots: Vec<FileId>,
+}
+
 pub(super) enum TestReachabilityPlan<'roots> {
     NoRoots,
     Legacy {
         roots: &'roots FxHashSet<FileId>,
     },
     Profiled {
-        grouped_roots: Vec<(Vec<FileId>, Vec<FileId>)>,
+        profiles: Vec<TestReachabilityProfile>,
     },
 }
 
@@ -59,19 +65,25 @@ impl<'roots> TestReachabilityPlan<'roots> {
             roots_by_mask.entry(mask).or_default().push(root);
         }
 
-        let mut grouped_roots: Vec<_> = roots_by_mask.into_iter().collect();
-        grouped_roots.sort_by(|(left_mask, _), (right_mask, _)| {
-            left_mask
+        let mut profiles: Vec<_> = roots_by_mask
+            .into_iter()
+            .map(|(masked_targets, mut roots)| {
+                roots.sort_unstable_by_key(|root| root.0);
+                roots.dedup();
+                TestReachabilityProfile {
+                    masked_targets,
+                    roots,
+                }
+            })
+            .collect();
+        profiles.sort_by(|left, right| {
+            left.masked_targets
                 .iter()
                 .map(|file_id| file_id.0)
-                .cmp(right_mask.iter().map(|file_id| file_id.0))
+                .cmp(right.masked_targets.iter().map(|file_id| file_id.0))
         });
-        for (_, roots) in &mut grouped_roots {
-            roots.sort_unstable_by_key(|root| root.0);
-            roots.dedup();
-        }
 
-        Self::Profiled { grouped_roots }
+        Self::Profiled { profiles }
     }
 
     pub(super) const fn requires_reference_provenance(&self) -> bool {
@@ -135,16 +147,16 @@ struct ProfileWorklist {
 }
 
 impl ProfileWorklist {
-    fn new(grouped_roots: &[(Vec<FileId>, Vec<FileId>)], total_capacity: usize) -> Self {
-        let profile_count = grouped_roots.len();
+    fn new(profiles: &[TestReachabilityProfile], total_capacity: usize) -> Self {
+        let profile_count = profiles.len();
         let index = TestReachabilityIndex::new(total_capacity, profile_count);
         let words_per_file = index.words_per_file;
         let mut masked_profiles: FxHashMap<FileId, Vec<u64>> = FxHashMap::default();
 
-        for (profile, (masked_targets, _)) in grouped_roots.iter().enumerate() {
+        for (profile, reachability_profile) in profiles.iter().enumerate() {
             let word_index = profile / u64::BITS as usize;
             let profile_bit = 1_u64 << (profile % u64::BITS as usize);
-            for &target in masked_targets {
+            for &target in &reachability_profile.masked_targets {
                 masked_profiles
                     .entry(target)
                     .or_insert_with(|| vec![0; words_per_file])[word_index] |= profile_bit;
@@ -162,10 +174,10 @@ impl ProfileWorklist {
             dirty_word_pops: 0,
         };
 
-        for (profile, (_, roots)) in grouped_roots.iter().enumerate() {
+        for (profile, reachability_profile) in profiles.iter().enumerate() {
             let word_index = profile / u64::BITS as usize;
             let profile_bit = 1_u64 << (profile % u64::BITS as usize);
-            for &root in roots {
+            for &root in &reachability_profile.roots {
                 let root_index = root.0 as usize;
                 if root_index >= total_capacity {
                     continue;
@@ -302,10 +314,10 @@ impl ModuleGraph {
 
     fn collect_profiled_reachable(
         &self,
-        grouped_roots: &[(Vec<FileId>, Vec<FileId>)],
+        profiles: &[TestReachabilityProfile],
         total_capacity: usize,
     ) -> (FixedBitSet, TestReachabilityIndex, usize) {
-        ProfileWorklist::new(grouped_roots, total_capacity).run(self)
+        ProfileWorklist::new(profiles, total_capacity).run(self)
     }
 
     fn collect_test_reachable(
@@ -318,9 +330,9 @@ impl ModuleGraph {
             TestReachabilityPlan::Legacy { roots } => {
                 TestReachability::Legacy(self.collect_reachable(roots, total_capacity))
             }
-            TestReachabilityPlan::Profiled { grouped_roots } => {
+            TestReachabilityPlan::Profiled { profiles } => {
                 let (reachable, index, dirty_word_pops) =
-                    self.collect_profiled_reachable(&grouped_roots, total_capacity);
+                    self.collect_profiled_reachable(&profiles, total_capacity);
                 #[cfg(not(test))]
                 let _ = dirty_word_pops;
 
@@ -381,7 +393,7 @@ mod tests {
 
     use rustc_hash::FxHashSet;
 
-    use super::TestReachabilityPlan;
+    use super::{TestReachabilityPlan, TestReachabilityProfile};
     use crate::graph::ModuleGraph;
     use crate::resolve::{
         ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
@@ -1280,14 +1292,20 @@ mod tests {
         let plan = TestReachabilityPlan::new(&test_roots, &replacements, 5);
 
         assert!(plan.requires_reference_provenance());
-        let TestReachabilityPlan::Profiled { grouped_roots } = plan else {
+        let TestReachabilityPlan::Profiled { profiles } = plan else {
             panic!("valid test-root replacements must use profiled reachability");
         };
         assert_eq!(
-            grouped_roots,
+            profiles,
             vec![
-                (Vec::new(), vec![FileId(2)]),
-                (vec![FileId(4)], vec![FileId(0), FileId(1)]),
+                TestReachabilityProfile {
+                    masked_targets: Vec::new(),
+                    roots: vec![FileId(2)],
+                },
+                TestReachabilityProfile {
+                    masked_targets: vec![FileId(4)],
+                    roots: vec![FileId(0), FileId(1)],
+                },
             ]
         );
     }
