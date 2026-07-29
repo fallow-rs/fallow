@@ -68,7 +68,7 @@ fn collect_untested_exports(
         let has_test_dependency = export
             .references
             .iter()
-            .any(|reference| test_coverage.covers_reference(node.file_id, reference.from_file));
+            .any(|reference| test_coverage.covers_reference(node.file_id, reference));
         if has_test_dependency {
             continue;
         }

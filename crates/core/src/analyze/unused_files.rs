@@ -183,6 +183,7 @@ mod tests {
             references: vec![SymbolReference {
                 from_file: FileId(2),
                 kind: ReferenceKind::NamedImport,
+                mechanism: fallow_types::extract::ModuleLoadMechanism::EsModule,
                 import_span: Span::new(0, 10),
             }],
             members: vec![],
@@ -208,6 +209,7 @@ mod tests {
             references: vec![SymbolReference {
                 from_file: FileId(0),
                 kind: ReferenceKind::NamedImport,
+                mechanism: fallow_types::extract::ModuleLoadMechanism::EsModule,
                 import_span: Span::new(0, 10),
             }],
             members: vec![],

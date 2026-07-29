@@ -4,12 +4,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{ExportName, ImportedName, VisibilityTag};
+use fallow_types::extract::{ExportName, ImportedName, ModuleLoadMechanism, VisibilityTag};
 
 use super::narrowing::attach_symbol_reference;
 use super::types::ModuleNode;
 use super::types::{ExportSymbol, ReExportEdge};
-use super::{Edge, ImportMechanism, ImportedSymbol, ModuleGraph};
+use super::{Edge, ImportedSymbol, ModuleGraph};
 
 pub(super) struct PopulateEdgesInput<'a> {
     pub(super) files: &'a [DiscoveredFile],
@@ -94,9 +94,9 @@ fn collect_import_edge(
                 import_span: import.info.span,
                 is_type_only: import.info.is_type_only,
                 mechanism: if import.target.is_commonjs_require() {
-                    ImportMechanism::CommonJsRequire
+                    ModuleLoadMechanism::CommonJsRequire
                 } else {
-                    ImportMechanism::EsModule
+                    ModuleLoadMechanism::EsModule
                 },
             });
     }
@@ -130,7 +130,7 @@ fn collect_edges_for_module(
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: re_export.info.is_type_only,
-                    mechanism: ImportMechanism::EsModule,
+                    mechanism: ModuleLoadMechanism::EsModule,
                 });
         }
     }
@@ -139,24 +139,18 @@ fn collect_edges_for_module(
         collect_import_edge(import, file_id, &mut edges_by_target, acc);
     }
 
-    // Glob-matched dynamic-import patterns (`import(`./${x}`)`, `require(`./${x}`)`)
-    // each resolve to a set of target files, and a single importing file can hold
-    // many such patterns whose match sets overlap heavily (or are identical). Each
-    // match would otherwise push a fresh `Namespace` symbol onto the target's edge,
-    // so a file with P patterns matching F files accumulates F*P symbols, and Phase 2
-    // attaches a `SymbolReference` per symbol: O(patterns * files) memory that drives
-    // the LSP into tens of GB on large React Native / Expo trees (issue #963). The
-    // duplicate symbols carry no information: a `Namespace` symbol with an empty
-    // `local_name` credits the whole target module for reachability, and the first
-    // one already does that (reachability BFS reads only `edge.target`, never the
-    // symbol list; Phase 2 `attach_reference` already dedups by `from_file`). Credit
-    // each distinct target at most once per importing file. The set is per-file
-    // (not global), so two different importers matching the same target still each
-    // create their own edge.
-    let mut credited_pattern_targets: FxHashSet<FileId> = FxHashSet::default();
-    for (_pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
+    // Patterns from `import()`, `import.meta.glob`, and `require.context` each
+    // resolve to a set of target files. A single importer can hold many patterns
+    // whose match sets overlap heavily, so duplicate matches would otherwise add
+    // redundant namespace symbols and references. Deduplicate by target and load
+    // mechanism: matches with the same mechanism carry no additional information,
+    // while ESM and CommonJS matches must remain distinct for mock-aware coverage.
+    // The set is per-file, so different importers still create their own edges.
+    let mut credited_pattern_targets: FxHashSet<(FileId, ModuleLoadMechanism)> =
+        FxHashSet::default();
+    for (pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
         for target_id in matched_ids {
-            if !credited_pattern_targets.insert(*target_id) {
+            if !credited_pattern_targets.insert((*target_id, pattern.mechanism)) {
                 continue;
             }
             record_namespace_import(*target_id, &mut acc.namespace_imported, acc.total_capacity);
@@ -168,7 +162,7 @@ fn collect_edges_for_module(
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: false,
-                    mechanism: ImportMechanism::EsModule,
+                    mechanism: pattern.mechanism,
                 });
         }
     }
@@ -407,7 +401,7 @@ impl ModuleGraph {
                 entry_points: entry_point_ids.clone(),
                 runtime_entry_points: runtime_entry_point_ids.clone(),
                 test_entry_points: test_entry_point_ids.clone(),
-                test_reachability_profiles: Vec::new(),
+                test_reachability_index: super::TestReachabilityIndex::default(),
                 reverse_deps,
                 namespace_imported: acc.namespace_imported,
                 re_export_cycles: Vec::new(),
@@ -677,7 +671,10 @@ mod tests {
             ImportedName::Named(ref n) if n == "foo"
         ));
         assert!(!acc.namespace_imported.contains(2));
-        assert_eq!(edges[&FileId(2)][0].mechanism, ImportMechanism::EsModule);
+        assert_eq!(
+            edges[&FileId(2)][0].mechanism,
+            ModuleLoadMechanism::EsModule
+        );
     }
 
     #[test]
@@ -693,7 +690,7 @@ mod tests {
 
         assert_eq!(
             edges[&FileId(2)][0].mechanism,
-            ImportMechanism::CommonJsRequire
+            ModuleLoadMechanism::CommonJsRequire
         );
     }
 
@@ -908,6 +905,7 @@ mod tests {
             prefix: "./locales/".to_string(),
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::new(0, 10),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),
@@ -933,6 +931,7 @@ mod tests {
             prefix: prefix.to_string(),
             suffix: None,
             span: oxc_span::Span::new(0, 1),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),
@@ -971,6 +970,7 @@ mod tests {
             prefix: "./x/".to_string(),
             suffix: None,
             span: oxc_span::Span::new(0, 1),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         let importer_a = ResolvedModule {
             file_id: FileId(0),
@@ -1000,6 +1000,42 @@ mod tests {
         );
         assert_eq!(edges_a[0].0, FileId(2));
         assert_eq!(edges_b[0].0, FileId(2));
+    }
+
+    #[test]
+    fn collect_edges_dynamic_patterns_dedup_by_target_and_mechanism() {
+        let pattern = |mechanism| fallow_types::extract::DynamicImportPattern {
+            prefix: "./modules/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::new(0, 1),
+            mechanism,
+        };
+        let resolved = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/loader.ts"),
+            resolved_dynamic_patterns: vec![
+                (pattern(ModuleLoadMechanism::EsModule), vec![FileId(1)]),
+                (
+                    pattern(ModuleLoadMechanism::CommonJsRequire),
+                    vec![FileId(1)],
+                ),
+            ],
+            ..Default::default()
+        };
+        let mut acc = make_acc(2);
+
+        let edges = collect_edges_for_module(&resolved, FileId(0), &mut acc);
+        let mechanisms: FxHashSet<_> = edges[0].1.iter().map(|symbol| symbol.mechanism).collect();
+
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].1.len(), 2);
+        assert_eq!(
+            mechanisms,
+            FxHashSet::from_iter([
+                ModuleLoadMechanism::EsModule,
+                ModuleLoadMechanism::CommonJsRequire,
+            ])
+        );
     }
 
     #[test]

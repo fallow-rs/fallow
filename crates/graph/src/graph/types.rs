@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ExportName, VisibilityTag};
+use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
 
 /// A single module in the graph.
 ///
@@ -192,10 +192,26 @@ pub struct SymbolReference {
     pub from_file: FileId,
     /// How the export is referenced.
     pub kind: ReferenceKind,
+    /// Runtime module mechanism used by the exact reference path.
+    ///
+    /// Re-export propagation records [`ModuleLoadMechanism::EsModule`] because
+    /// the final hop into the owning module is an ESM re-export even when the
+    /// original consumer loaded the barrel through CommonJS.
+    pub mechanism: ModuleLoadMechanism,
     /// Byte span of the import statement in the referencing file.
     /// Used by the LSP to locate references for Code Lens navigation.
     #[serde(with = "crate::cache::span_serde")]
     pub import_span: oxc_span::Span,
+}
+
+impl SymbolReference {
+    /// Carry a consumer reference through an ESM re-export edge.
+    pub(crate) const fn through_re_export(self) -> Self {
+        Self {
+            mechanism: ModuleLoadMechanism::EsModule,
+            ..self
+        }
+    }
 }
 
 /// How an export is referenced.
@@ -274,6 +290,7 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(42),
             kind: ReferenceKind::NamedImport,
+            mechanism: ModuleLoadMechanism::EsModule,
             import_span: oxc_span::Span::new(10, 30),
         };
         assert_eq!(reference.from_file, FileId(42));
@@ -287,6 +304,7 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(7),
             kind: ReferenceKind::ReExport,
+            mechanism: ModuleLoadMechanism::EsModule,
             import_span: oxc_span::Span::new(5, 25),
         };
         let copied = reference;
@@ -412,11 +430,13 @@ mod tests {
                 SymbolReference {
                     from_file: FileId(1),
                     kind: ReferenceKind::NamedImport,
+                    mechanism: ModuleLoadMechanism::EsModule,
                     import_span: oxc_span::Span::new(0, 10),
                 },
                 SymbolReference {
                     from_file: FileId(2),
                     kind: ReferenceKind::ReExport,
+                    mechanism: ModuleLoadMechanism::EsModule,
                     import_span: oxc_span::Span::new(5, 15),
                 },
             ],

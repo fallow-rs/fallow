@@ -138,6 +138,7 @@ fn make_export_with_members(
             vec![SymbolReference {
                 from_file: FileId(from),
                 kind: crate::graph::ReferenceKind::NamedImport,
+                mechanism: fallow_types::extract::ModuleLoadMechanism::EsModule,
                 import_span: Span::new(0, 10),
             }]
         })

@@ -106,9 +106,12 @@ impl<'a> StaticTestCoverage<'a> {
         self.graph.is_test_reachable(file_id)
     }
 
-    pub(crate) fn covers_reference(self, target_file: FileId, source_file: FileId) -> bool {
-        self.graph
-            .shares_test_reachability_profile(target_file, source_file)
+    pub(crate) fn covers_reference(
+        self,
+        target_file: FileId,
+        reference: &fallow_graph::graph::SymbolReference,
+    ) -> bool {
+        self.graph.is_test_reference_covered(target_file, reference)
     }
 }
 
@@ -273,9 +276,10 @@ pub fn module_value_exports(graph: &RetainedModuleGraph) -> Vec<ModuleValueExpor
                     file_id: node.file_id,
                     name: export.name.to_string(),
                     span_start: export.span.start,
-                    test_referenced: export.references.iter().any(|reference| {
-                        test_coverage.covers_reference(node.file_id, reference.from_file)
-                    }),
+                    test_referenced: export
+                        .references
+                        .iter()
+                        .any(|reference| test_coverage.covers_reference(node.file_id, reference)),
                 })
         })
         .collect()
@@ -452,6 +456,14 @@ mod tests {
     use std::path::PathBuf;
 
     fn import(target: FileId, imported_name: ImportedName) -> ResolvedImport {
+        import_with_mechanism(target, imported_name, false)
+    }
+
+    fn import_with_mechanism(
+        target: FileId,
+        imported_name: ImportedName,
+        commonjs: bool,
+    ) -> ResolvedImport {
         ResolvedImport {
             info: ImportInfo {
                 source: "./target".to_string(),
@@ -462,7 +474,25 @@ mod tests {
                 span: oxc_span::Span::new(0, 10),
                 source_span: oxc_span::Span::default(),
             },
-            target: ResolveResult::InternalModule(target),
+            target: if commonjs {
+                ResolveResult::CommonJsInternalModule(target)
+            } else {
+                ResolveResult::InternalModule(target)
+            },
+        }
+    }
+
+    fn value_export(name: &str, span_start: u32) -> ExportInfo {
+        ExportInfo {
+            name: ExportName::Named(name.to_string()),
+            local_name: Some(name.to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(span_start, span_start + 10),
+            members: Vec::new(),
+            is_side_effect_used: false,
+            super_class: None,
         }
     }
 
@@ -500,17 +530,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: files[2].path.clone(),
-                exports: vec![ExportInfo {
-                    name: ExportName::Named("target".to_string()),
-                    local_name: Some("target".to_string()),
-                    is_type_only: false,
-                    visibility: VisibilityTag::None,
-                    expected_unused_reason: None,
-                    span: oxc_span::Span::new(0, 20),
-                    members: Vec::new(),
-                    is_side_effect_used: false,
-                    super_class: None,
-                }],
+                exports: vec![value_export("target", 0)],
                 ..ResolvedModule::default()
             },
         ];
@@ -556,5 +576,66 @@ mod tests {
 
         assert_eq!(exports.len(), 1);
         assert!(exports[0].test_referenced);
+    }
+
+    #[test]
+    fn commonjs_reference_does_not_credit_a_mocked_esm_export() {
+        let files: Vec<_> = (0..2)
+            .map(|id| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(format!("/project/file{id}.ts")),
+                size_bytes: 1,
+            })
+            .collect();
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![
+                    import_with_mechanism(
+                        FileId(1),
+                        ImportedName::Named("esmOnly".to_string()),
+                        false,
+                    ),
+                    import_with_mechanism(
+                        FileId(1),
+                        ImportedName::Named("required".to_string()),
+                        true,
+                    ),
+                ],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: vec![value_export("esmOnly", 0), value_export("required", 20)],
+                ..ResolvedModule::default()
+            },
+        ];
+        let test_entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let graph =
+            RetainedModuleGraph::from(ModuleGraph::build_with_reachability_roots_and_replacements(
+                &modules,
+                &[ResolvedReplacedModuleTarget {
+                    source_file: FileId(0),
+                    target_file: FileId(1),
+                }],
+                &test_entry_points,
+                &[],
+                &test_entry_points,
+                &files,
+            ));
+
+        let exports = module_value_exports(&graph);
+        let coverage: rustc_hash::FxHashMap<_, _> = exports
+            .into_iter()
+            .map(|export| (export.name, export.test_referenced))
+            .collect();
+
+        assert_eq!(coverage.get("esmOnly"), Some(&false));
+        assert_eq!(coverage.get("required"), Some(&true));
     }
 }

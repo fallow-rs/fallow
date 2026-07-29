@@ -8,12 +8,37 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::ResolvedModule;
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportedName, VisibilityTag};
+use fallow_types::extract::{ImportedName, ModuleLoadMechanism, VisibilityTag};
 
 use super::types::{ExportSymbol, ReExportEdge, ReferenceKind, SymbolReference};
 use super::{ImportedSymbol, ModuleNode};
 
 use super::build::{export_matches, is_css_module_path};
+
+#[derive(Clone, Copy)]
+struct ReferenceSite {
+    from_file: FileId,
+    import_span: oxc_span::Span,
+    mechanism: ModuleLoadMechanism,
+}
+
+impl ReferenceSite {
+    const fn esm(source_id: FileId, import_span: oxc_span::Span) -> Self {
+        Self {
+            from_file: source_id,
+            import_span,
+            mechanism: ModuleLoadMechanism::EsModule,
+        }
+    }
+
+    const fn from_symbol(source_id: FileId, symbol: &ImportedSymbol) -> Self {
+        Self {
+            from_file: source_id,
+            import_span: symbol.import_span,
+            mechanism: symbol.mechanism,
+        }
+    }
+}
 
 /// Check whether an import binding is unused in the source file.
 ///
@@ -43,29 +68,42 @@ fn extract_accessed_members(source_mod: Option<&&ResolvedModule>, local_name: &s
 
 /// Mark all exports on a module as referenced by a given source file.
 ///
-/// Deduplicates: skips exports already referenced by `source_id`.
+/// Deduplicates by source and runtime mechanism. A source can retain one ESM
+/// and one CommonJS reference because replacement coverage treats them
+/// differently.
 pub(super) fn mark_all_exports_referenced(
     exports: &mut Vec<ExportSymbol>,
     source_id: FileId,
     import_span: oxc_span::Span,
     kind: ReferenceKind,
 ) {
+    mark_all_exports_referenced_with_mechanism(
+        exports,
+        ReferenceSite::esm(source_id, import_span),
+        kind,
+    );
+}
+
+fn mark_all_exports_referenced_with_mechanism(
+    exports: &mut Vec<ExportSymbol>,
+    site: ReferenceSite,
+    kind: ReferenceKind,
+) {
     for export in exports {
-        attach_reference(export, source_id, kind, import_span);
+        attach_reference(export, site, kind);
     }
 }
 
-fn attach_reference(
-    export: &mut ExportSymbol,
-    source_id: FileId,
-    kind: ReferenceKind,
-    import_span: oxc_span::Span,
-) {
-    if export.references.iter().all(|r| r.from_file != source_id) {
+fn attach_reference(export: &mut ExportSymbol, site: ReferenceSite, kind: ReferenceKind) {
+    let already_referenced = export.references.iter().any(|reference| {
+        reference.from_file == site.from_file && reference.mechanism == site.mechanism
+    });
+    if !already_referenced {
         export.references.push(SymbolReference {
-            from_file: source_id,
+            from_file: site.from_file,
             kind,
-            import_span,
+            mechanism: site.mechanism,
+            import_span: site.import_span,
         });
     }
 }
@@ -80,6 +118,20 @@ pub(super) fn mark_member_exports_referenced(
     import_span: oxc_span::Span,
     kind: ReferenceKind,
 ) -> FxHashSet<String> {
+    mark_member_exports_referenced_with_mechanism(
+        exports,
+        ReferenceSite::esm(source_id, import_span),
+        accessed_members,
+        kind,
+    )
+}
+
+fn mark_member_exports_referenced_with_mechanism(
+    exports: &mut [ExportSymbol],
+    site: ReferenceSite,
+    accessed_members: &[String],
+    kind: ReferenceKind,
+) -> FxHashSet<String> {
     let member_set: FxHashSet<&str> = accessed_members.iter().map(String::as_str).collect();
     let mut found_members: FxHashSet<String> = FxHashSet::default();
     for export in exports {
@@ -89,7 +141,7 @@ pub(super) fn mark_member_exports_referenced(
         };
         if member_set.contains(name_str) {
             found_members.insert(name_str.to_owned());
-            attach_reference(export, source_id, kind, import_span);
+            attach_reference(export, site, kind);
         }
     }
     found_members
@@ -105,6 +157,22 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
     accessed_members: &[String],
     found_members: &FxHashSet<String>,
     import_span: oxc_span::Span,
+) {
+    create_synthetic_exports_for_star_re_exports_with_mechanism(
+        exports,
+        re_exports,
+        ReferenceSite::esm(source_id, import_span),
+        accessed_members,
+        found_members,
+    );
+}
+
+fn create_synthetic_exports_for_star_re_exports_with_mechanism(
+    exports: &mut Vec<ExportSymbol>,
+    re_exports: &[ReExportEdge],
+    site: ReferenceSite,
+    accessed_members: &[String],
+    found_members: &FxHashSet<String>,
 ) {
     let has_star_re_exports = re_exports.iter().any(|re| re.exported_name == "*");
     if !has_star_re_exports {
@@ -122,9 +190,10 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 0),
             references: vec![SymbolReference {
-                from_file: source_id,
+                from_file: site.from_file,
                 kind: ReferenceKind::NamespaceImport,
-                import_span,
+                mechanism: site.mechanism,
+                import_span: site.import_span,
             }],
             members: Vec::new(),
         });
@@ -137,13 +206,12 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
 /// Otherwise, all exports are conservatively marked as referenced.
 fn narrow_namespace_references(
     module: &mut ModuleNode,
-    source_id: FileId,
+    site: ReferenceSite,
     sym_local_name: &str,
-    sym_import_span: oxc_span::Span,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     entry_point_ids: &FxHashSet<FileId>,
 ) {
-    let source_mod = module_by_id.get(&source_id);
+    let source_mod = module_by_id.get(&site.from_file);
     let accessed_members = extract_accessed_members(source_mod, sym_local_name);
 
     let is_whole_object =
@@ -153,37 +221,35 @@ fn narrow_namespace_references(
         m.exports
             .iter()
             .any(|e| e.local_name.as_deref() == Some(sym_local_name))
-    }) && !entry_point_ids.contains(&source_id);
+    }) && !entry_point_ids.contains(&site.from_file);
 
-    let is_entry_with_no_access =
-        accessed_members.is_empty() && !is_whole_object && entry_point_ids.contains(&source_id);
+    let is_entry_with_no_access = accessed_members.is_empty()
+        && !is_whole_object
+        && entry_point_ids.contains(&site.from_file);
 
     if is_whole_object
         || (!is_entry_with_no_access
             && (accessed_members.is_empty() || is_re_exported_from_non_entry))
     {
-        mark_all_exports_referenced(
+        mark_all_exports_referenced_with_mechanism(
             &mut module.exports,
-            source_id,
-            sym_import_span,
+            site,
             ReferenceKind::NamespaceImport,
         );
     } else {
-        let found_members = mark_member_exports_referenced(
+        let found_members = mark_member_exports_referenced_with_mechanism(
             &mut module.exports,
-            source_id,
+            site,
             &accessed_members,
-            sym_import_span,
             ReferenceKind::NamespaceImport,
         );
 
-        create_synthetic_exports_for_star_re_exports(
+        create_synthetic_exports_for_star_re_exports_with_mechanism(
             &mut module.exports,
             &module.re_exports,
-            source_id,
+            site,
             &accessed_members,
             &found_members,
-            sym_import_span,
         );
     }
 }
@@ -195,29 +261,22 @@ fn narrow_namespace_references(
 /// as namespace objects where each property corresponds to a class name (named export).
 fn narrow_css_module_references(
     exports: &mut Vec<ExportSymbol>,
-    source_id: FileId,
+    site: ReferenceSite,
     sym_local_name: &str,
-    sym_import_span: oxc_span::Span,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
 ) {
-    let source_mod = module_by_id.get(&source_id);
+    let source_mod = module_by_id.get(&site.from_file);
     let is_whole_object =
         source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == sym_local_name));
     let accessed_members = extract_accessed_members(source_mod, sym_local_name);
 
     if is_whole_object || accessed_members.is_empty() {
-        mark_all_exports_referenced(
-            exports,
-            source_id,
-            sym_import_span,
-            ReferenceKind::DefaultImport,
-        );
+        mark_all_exports_referenced_with_mechanism(exports, site, ReferenceKind::DefaultImport);
     } else {
-        mark_member_exports_referenced(
+        mark_member_exports_referenced_with_mechanism(
             exports,
-            source_id,
+            site,
             &accessed_members,
-            sym_import_span,
             ReferenceKind::DefaultImport,
         );
     }
@@ -314,9 +373,8 @@ fn attach_direct_export_references(
     if let Some(idx) = fallback_idx {
         attach_reference(
             &mut target_module.exports[idx],
-            source_id,
+            ReferenceSite::from_symbol(source_id, sym),
             ref_kind,
-            sym.import_span,
         );
     }
 }
@@ -366,9 +424,8 @@ fn attach_to_export_groups(
         for idx in group {
             attach_reference(
                 &mut target_module.exports[*idx],
-                source_id,
+                ReferenceSite::from_symbol(source_id, sym),
                 ref_kind,
-                sym.import_span,
             );
         }
     }
@@ -394,19 +451,18 @@ pub(super) fn attach_symbol_reference(
     attach_direct_export_references(target_module, source_id, sym, source_mod, ref_kind);
 
     if matches!(sym.imported_name, ImportedName::Namespace) {
+        let site = ReferenceSite::from_symbol(source_id, sym);
         if sym.local_name.is_empty() {
-            mark_all_exports_referenced(
+            mark_all_exports_referenced_with_mechanism(
                 &mut target_module.exports,
-                source_id,
-                sym.import_span,
+                site,
                 ReferenceKind::NamespaceImport,
             );
         } else {
             narrow_namespace_references(
                 target_module,
-                source_id,
+                site,
                 &sym.local_name,
-                sym.import_span,
                 module_by_id,
                 entry_point_ids,
             );
@@ -419,9 +475,8 @@ pub(super) fn attach_symbol_reference(
     {
         narrow_css_module_references(
             &mut target_module.exports,
-            source_id,
+            ReferenceSite::from_symbol(source_id, sym),
             &sym.local_name,
-            sym.import_span,
             module_by_id,
         );
     }
@@ -583,6 +638,7 @@ mod tests {
             references: vec![SymbolReference {
                 from_file: FileId(5),
                 kind: ReferenceKind::NamedImport,
+                mechanism: ModuleLoadMechanism::EsModule,
                 import_span: oxc_span::Span::new(0, 10),
             }],
             members: Vec::new(),
@@ -1229,6 +1285,7 @@ mod tests {
             references: vec![SymbolReference {
                 from_file: FileId(0),
                 kind: ReferenceKind::NamedImport,
+                mechanism: ModuleLoadMechanism::EsModule,
                 import_span: oxc_span::Span::new(0, 10),
             }],
             members: Vec::new(),

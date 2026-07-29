@@ -678,7 +678,7 @@ fn build_test_referenced_exports(
         let has_test_ref = export
             .references
             .iter()
-            .any(|reference| test_coverage.covers_reference(target_file, reference.from_file));
+            .any(|reference| test_coverage.covers_reference(target_file, reference));
         if has_test_ref {
             set.insert(export.name.to_string());
         }

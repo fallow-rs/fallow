@@ -7,27 +7,25 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::ResolvedReplacedModuleTarget;
 use fallow_types::discover::FileId;
+use fallow_types::extract::ModuleLoadMechanism;
 
-use super::{ModuleGraph, TestReachabilityProfile};
+use super::{ModuleGraph, TestReachabilityIndex};
 
 enum TestReachability {
     NoRoots,
     Legacy(FixedBitSet),
     Profiled {
         reachable: FixedBitSet,
-        profiles: Vec<TestReachabilityProfile>,
+        index: TestReachabilityIndex,
     },
 }
 
 impl TestReachability {
-    fn into_parts(self) -> (Option<FixedBitSet>, Vec<TestReachabilityProfile>) {
+    fn into_parts(self) -> (Option<FixedBitSet>, TestReachabilityIndex) {
         match self {
-            Self::NoRoots => (None, Vec::new()),
-            Self::Legacy(reachable) => (Some(reachable), Vec::new()),
-            Self::Profiled {
-                reachable,
-                profiles,
-            } => (Some(reachable), profiles),
+            Self::NoRoots => (None, TestReachabilityIndex::default()),
+            Self::Legacy(reachable) => (Some(reachable), TestReachabilityIndex::default()),
+            Self::Profiled { reachable, index } => (Some(reachable), index),
         }
     }
 
@@ -36,7 +34,7 @@ impl TestReachability {
         match self {
             Self::NoRoots => 0,
             Self::Legacy(_) => 1,
-            Self::Profiled { profiles, .. } => profiles.len(),
+            Self::Profiled { index, .. } => index.profile_count,
         }
     }
 }
@@ -47,7 +45,31 @@ impl ModuleGraph {
         entry_points: &FxHashSet<FileId>,
         total_capacity: usize,
     ) -> FixedBitSet {
-        self.collect_reachable_with_mask(entry_points, &FixedBitSet::new(), total_capacity)
+        let mut visited = FixedBitSet::with_capacity(total_capacity);
+        let mut queue = VecDeque::new();
+
+        for &ep_id in entry_points {
+            if (ep_id.0 as usize) < total_capacity {
+                visited.insert(ep_id.0 as usize);
+                queue.push_back(ep_id);
+            }
+        }
+
+        while let Some(file_id) = queue.pop_front() {
+            if (file_id.0 as usize) >= self.modules.len() {
+                continue;
+            }
+            let module = &self.modules[file_id.0 as usize];
+            for edge in &self.edges[module.edge_range.clone()] {
+                let target_idx = edge.target.0 as usize;
+                if target_idx < total_capacity && !visited.contains(target_idx) {
+                    visited.insert(target_idx);
+                    queue.push_back(edge.target);
+                }
+            }
+        }
+
+        visited
     }
 
     fn collect_reachable_with_mask(
@@ -74,10 +96,9 @@ impl ModuleGraph {
             for edge in &self.edges[module.edge_range.clone()] {
                 let target_idx = edge.target.0 as usize;
                 let target_is_replaced = masked_targets.contains(target_idx)
-                    && edge
-                        .symbols
-                        .iter()
-                        .all(|symbol| !symbol.mechanism.is_commonjs());
+                    && edge.symbols.iter().all(|symbol| {
+                        !matches!(symbol.mechanism, ModuleLoadMechanism::CommonJsRequire)
+                    });
                 if target_is_replaced {
                     continue;
                 }
@@ -142,29 +163,27 @@ impl ModuleGraph {
         });
 
         let mut all_test_reachable = FixedBitSet::with_capacity(total_capacity);
-        let mut profiles = Vec::with_capacity(grouped_roots.len());
-        for (masked_targets, roots) in grouped_roots {
+        let mut index = TestReachabilityIndex::new(total_capacity, grouped_roots.len());
+        for (profile, (masked_targets, roots)) in grouped_roots.into_iter().enumerate() {
             let mut roots: Vec<_> = roots.into_iter().collect();
             roots.sort_unstable_by_key(|root| root.0);
 
             let mut mask = FixedBitSet::with_capacity(total_capacity);
             for target in &masked_targets {
                 mask.insert(target.0 as usize);
+                index.set_masked(*target, profile);
             }
             let root_set = roots.iter().copied().collect();
             let reachable = self.collect_reachable_with_mask(&root_set, &mask, total_capacity);
             all_test_reachable.union_with(&reachable);
-            let reachable_files = reachable.ones().map(|index| FileId(index as u32)).collect();
-            profiles.push(TestReachabilityProfile {
-                roots,
-                masked_targets,
-                reachable_files,
-            });
+            for file_index in reachable.ones() {
+                index.set_reachable(FileId(file_index as u32), profile);
+            }
         }
 
         TestReachability::Profiled {
             reachable: all_test_reachable,
-            profiles,
+            index,
         }
     }
 
@@ -188,10 +207,10 @@ impl ModuleGraph {
             Some(self.collect_reachable(runtime_entry_points, total_capacity))
         };
 
-        let (test_visited, test_reachability_profiles) = self
+        let (test_visited, test_reachability_index) = self
             .collect_test_reachable(test_entry_points, replaced_module_targets, total_capacity)
             .into_parts();
-        self.test_reachability_profiles = test_reachability_profiles;
+        self.test_reachability_index = test_reachability_index;
 
         for (idx, module) in self.modules.iter_mut().enumerate() {
             module.set_reachable(visited.contains(idx));
@@ -213,10 +232,13 @@ mod tests {
 
     use crate::graph::ModuleGraph;
     use crate::resolve::{
-        ResolveResult, ResolvedImport, ResolvedModule, ResolvedReplacedModuleTarget,
+        ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
+        ResolvedReplacedModuleTarget,
     };
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use fallow_types::extract::{
+        ExportName, ImportInfo, ImportedName, ModuleLoadMechanism, ReExportInfo, VisibilityTag,
+    };
 
     /// Build a graph with separate runtime and test entry point sets.
     ///
@@ -342,6 +364,166 @@ mod tests {
         )
     }
 
+    fn build_masked_re_export_graph(
+        commonjs_to_barrel: bool,
+        commonjs_to_target: bool,
+    ) -> ModuleGraph {
+        let files: Vec<_> = (0..3)
+            .map(|id| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(format!("/project/file{id}.ts")),
+                size_bytes: 100,
+            })
+            .collect();
+        let mut test_imports = vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./barrel".to_string(),
+                imported_name: ImportedName::Named("value".to_string()),
+                local_name: "value".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 10),
+                source_span: oxc_span::Span::default(),
+            },
+            target: if commonjs_to_barrel {
+                ResolveResult::CommonJsInternalModule(FileId(1))
+            } else {
+                ResolveResult::InternalModule(FileId(1))
+            },
+        }];
+        if commonjs_to_target {
+            test_imports.push(ResolvedImport {
+                info: ImportInfo {
+                    source: "./target".to_string(),
+                    imported_name: ImportedName::Named("value".to_string()),
+                    local_name: "requiredValue".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(20, 30),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::CommonJsInternalModule(FileId(2)),
+            });
+        }
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: test_imports,
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![ResolvedReExport {
+                    info: ReExportInfo {
+                        source: "./target".to_string(),
+                        imported_name: "value".to_string(),
+                        exported_name: "value".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
+                    },
+                    target: ResolveResult::InternalModule(FileId(2)),
+                }],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("value".to_string()),
+                    local_name: Some("value".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: Vec::new(),
+                    is_side_effect_used: false,
+                    super_class: None,
+                }],
+                ..ResolvedModule::default()
+            },
+        ];
+        let test_entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(2),
+            }],
+            &test_entry_points,
+            &[],
+            &test_entry_points,
+            &files,
+        )
+    }
+
+    fn build_masked_pattern_graph(mechanisms: &[ModuleLoadMechanism]) -> ModuleGraph {
+        let files: Vec<_> = (0..2)
+            .map(|id| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(format!("/project/file{id}.ts")),
+                size_bytes: 100,
+            })
+            .collect();
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_dynamic_patterns: mechanisms
+                    .iter()
+                    .copied()
+                    .map(|mechanism| {
+                        (
+                            fallow_types::extract::DynamicImportPattern {
+                                prefix: "./modules/".to_string(),
+                                suffix: None,
+                                span: oxc_span::Span::new(0, 10),
+                                mechanism,
+                            },
+                            vec![FileId(1)],
+                        )
+                    })
+                    .collect(),
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("value".to_string()),
+                    local_name: Some("value".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: Vec::new(),
+                    is_side_effect_used: false,
+                    super_class: None,
+                }],
+                ..ResolvedModule::default()
+            },
+        ];
+        let test_entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(1),
+            }],
+            &test_entry_points,
+            &[],
+            &test_entry_points,
+            &files,
+        )
+    }
+
     #[test]
     fn entry_point_is_reachable() {
         let graph = build_reachability_graph(1, &[], &[0], &[]);
@@ -449,11 +631,9 @@ mod tests {
         assert!(graph.modules[1].is_reachable());
         assert!(!graph.modules[1].is_test_reachable());
         assert!(!graph.modules[2].is_test_reachable());
-        assert_eq!(graph.test_reachability_profiles.len(), 1);
-        assert_eq!(
-            graph.test_reachability_profiles[0].reachable_files,
-            vec![FileId(0)]
-        );
+        assert_eq!(graph.test_reachability_index.profile_count, 1);
+        assert!(graph.test_reachability_index.profile_reaches(FileId(0), 0));
+        assert!(!graph.test_reachability_index.profile_reaches(FileId(1), 0));
     }
 
     #[test]
@@ -489,6 +669,104 @@ mod tests {
     }
 
     #[test]
+    fn replacement_masks_a_target_behind_an_esm_re_export() {
+        let graph = build_masked_re_export_graph(false, false);
+        let target_export = &graph.modules[2].exports[0];
+        let reference = target_export
+            .references
+            .first()
+            .expect("barrel consumer reference should propagate");
+
+        assert!(graph.modules[1].is_test_reachable());
+        assert!(!graph.modules[2].is_test_reachable());
+        assert_eq!(reference.mechanism, ModuleLoadMechanism::EsModule);
+        assert!(!graph.is_test_reference_covered(FileId(2), reference));
+    }
+
+    #[test]
+    fn commonjs_loaded_barrel_does_not_bypass_its_esm_re_export() {
+        let graph = build_masked_re_export_graph(true, false);
+        let target_export = &graph.modules[2].exports[0];
+        let reference = target_export
+            .references
+            .first()
+            .expect("barrel consumer reference should propagate");
+
+        assert!(graph.modules[1].is_test_reachable());
+        assert!(!graph.modules[2].is_test_reachable());
+        assert_eq!(reference.mechanism, ModuleLoadMechanism::EsModule);
+        assert!(!graph.is_test_reference_covered(FileId(2), reference));
+    }
+
+    #[test]
+    fn direct_commonjs_and_esm_re_export_retain_distinct_coverage() {
+        let graph = build_masked_re_export_graph(false, true);
+        let references = &graph.modules[2].exports[0].references;
+
+        assert_eq!(references.len(), 2);
+        let esm = references
+            .iter()
+            .find(|reference| reference.mechanism == ModuleLoadMechanism::EsModule)
+            .expect("ESM re-export reference");
+        let commonjs = references
+            .iter()
+            .find(|reference| reference.mechanism == ModuleLoadMechanism::CommonJsRequire)
+            .expect("direct CommonJS reference");
+        assert!(!graph.is_test_reference_covered(FileId(2), esm));
+        assert!(graph.is_test_reference_covered(FileId(2), commonjs));
+    }
+
+    #[test]
+    fn require_context_keeps_a_replaced_target_covered() {
+        let graph = build_masked_pattern_graph(&[ModuleLoadMechanism::CommonJsRequire]);
+        let reference = &graph.modules[1].exports[0].references[0];
+
+        assert!(graph.modules[1].is_test_reachable());
+        assert_eq!(reference.mechanism, ModuleLoadMechanism::CommonJsRequire);
+        assert!(graph.is_test_reference_covered(FileId(1), reference));
+    }
+
+    #[test]
+    fn overlapping_patterns_preserve_exact_esm_and_commonjs_coverage() {
+        let graph = build_masked_pattern_graph(&[
+            ModuleLoadMechanism::EsModule,
+            ModuleLoadMechanism::CommonJsRequire,
+        ]);
+        let references = &graph.modules[1].exports[0].references;
+
+        assert!(graph.modules[1].is_test_reachable());
+        assert_eq!(references.len(), 2);
+        let esm = references
+            .iter()
+            .find(|reference| reference.mechanism == ModuleLoadMechanism::EsModule)
+            .expect("ESM pattern reference");
+        let commonjs = references
+            .iter()
+            .find(|reference| reference.mechanism == ModuleLoadMechanism::CommonJsRequire)
+            .expect("CommonJS pattern reference");
+        assert!(!graph.is_test_reference_covered(FileId(1), esm));
+        assert!(graph.is_test_reference_covered(FileId(1), commonjs));
+    }
+
+    #[test]
+    fn replacement_stops_before_a_masked_cycle_member() {
+        let graph = build_reachability_graph_with_replacements(
+            3,
+            &[(0, 1, false), (1, 2, false), (2, 1, false)],
+            &[],
+            &[0],
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(2),
+            }],
+        );
+
+        assert!(graph.modules[0].is_test_reachable());
+        assert!(graph.modules[1].is_test_reachable());
+        assert!(!graph.modules[2].is_test_reachable());
+    }
+
+    #[test]
     fn identical_masks_share_one_reachability_profile() {
         let graph = build_reachability_graph_with_replacements(
             3,
@@ -507,15 +785,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(graph.test_reachability_profiles.len(), 1);
-        assert_eq!(
-            graph.test_reachability_profiles[0].roots,
-            vec![FileId(0), FileId(1)]
-        );
-        assert_eq!(
-            graph.test_reachability_profiles[0].masked_targets,
-            vec![FileId(2)]
-        );
+        assert_eq!(graph.test_reachability_index.profile_count, 1);
+        assert!(graph.test_reachability_index.profile_masks(FileId(2), 0));
+        assert!(graph.test_reachability_index.profile_reaches(FileId(0), 0));
+        assert!(graph.test_reachability_index.profile_reaches(FileId(1), 0));
         assert!(!graph.modules[2].is_test_reachable());
     }
 
@@ -532,22 +805,23 @@ mod tests {
             }],
         );
 
-        assert_eq!(graph.test_reachability_profiles.len(), 2);
+        assert_eq!(graph.test_reachability_index.profile_count, 2);
         assert!(graph.modules[2].is_test_reachable());
-        assert_eq!(
-            graph.test_reachability_profiles[0].masked_targets,
-            Vec::<FileId>::new()
-        );
-        assert_eq!(
-            graph.test_reachability_profiles[0].reachable_files,
-            vec![FileId(1), FileId(2)]
-        );
-        assert_eq!(
-            graph.test_reachability_profiles[1].reachable_files,
-            vec![FileId(0)]
-        );
-        assert!(!graph.shares_test_reachability_profile(FileId(0), FileId(2)));
-        assert!(graph.shares_test_reachability_profile(FileId(1), FileId(2)));
+        assert!(!graph.test_reachability_index.profile_masks(FileId(2), 0));
+        assert!(graph.test_reachability_index.profile_reaches(FileId(1), 0));
+        assert!(graph.test_reachability_index.profile_reaches(FileId(2), 0));
+        assert!(graph.test_reachability_index.profile_masks(FileId(2), 1));
+        assert!(graph.test_reachability_index.profile_reaches(FileId(0), 1));
+        assert!(!graph.test_reachability_index.shares_profile(
+            FileId(2),
+            FileId(0),
+            ModuleLoadMechanism::EsModule,
+        ));
+        assert!(graph.test_reachability_index.shares_profile(
+            FileId(2),
+            FileId(1),
+            ModuleLoadMechanism::EsModule,
+        ));
     }
 
     #[test]
@@ -563,9 +837,8 @@ mod tests {
             }],
         );
 
-        assert!(graph.test_reachability_profiles.is_empty());
+        assert_eq!(graph.test_reachability_index.profile_count, 0);
         assert!(graph.modules[1].is_test_reachable());
-        assert!(graph.shares_test_reachability_profile(FileId(0), FileId(1)));
     }
 
     #[test]
@@ -584,15 +857,17 @@ mod tests {
         let encoded = postcard::to_allocvec(&graph).expect("encode graph");
         let decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
 
-        assert_eq!(decoded.test_reachability_profiles.len(), 1);
-        assert_eq!(decoded.test_reachability_profiles[0].roots, vec![FileId(0)]);
-        assert_eq!(
-            decoded.test_reachability_profiles[0].masked_targets,
-            vec![FileId(1)]
+        assert_eq!(decoded.test_reachability_index.profile_count, 1);
+        assert!(decoded.test_reachability_index.profile_masks(FileId(1), 0));
+        assert!(
+            decoded
+                .test_reachability_index
+                .profile_reaches(FileId(0), 0)
         );
-        assert_eq!(
-            decoded.test_reachability_profiles[0].reachable_files,
-            vec![FileId(0)]
+        assert!(
+            !decoded
+                .test_reachability_index
+                .profile_reaches(FileId(1), 0)
         );
     }
 

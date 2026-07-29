@@ -34,9 +34,9 @@ pub use store::GraphCacheStore;
 /// classification change replays the old classification verbatim on an
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
-/// Bumped to 10 for issue #2031: cached resolver targets now distinguish bare
-/// CommonJS package edges before cross-tsconfig specifier upgrades.
-pub const GRAPH_CACHE_VERSION: u32 = 10;
+/// Bumped to 11 for issue #2031: cached graphs retain compact root-correlation
+/// profiles plus exact ESM/CommonJS reference and dynamic-pattern mechanisms.
+pub const GRAPH_CACHE_VERSION: u32 = 11;
 
 /// Cached form of a resolved target.
 ///

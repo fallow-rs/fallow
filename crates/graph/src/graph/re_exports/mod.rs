@@ -13,6 +13,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
 
 use fallow_types::discover::FileId;
+use fallow_types::extract::ModuleLoadMechanism;
 
 use crate::resolve::ResolvedModule;
 
@@ -102,7 +103,7 @@ struct ReExportContext<'a> {
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     named_import_origin_index: &'a NamedImportOriginIndex,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
-    existing_refs: &'a mut FxHashSet<FileId>,
+    existing_refs: &'a mut FxHashSet<(FileId, ModuleLoadMechanism)>,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
 }
 
@@ -305,7 +306,7 @@ impl ModuleGraph {
         let safety_cap = self.re_export_transition_safety_cap(re_export_info);
         let mut processed = 0usize;
         let mut plan = ReExportPropagationPlan::new(re_export_info);
-        let mut existing_refs: FxHashSet<FileId> = FxHashSet::default();
+        let mut existing_refs: FxHashSet<(FileId, ModuleLoadMechanism)> = FxHashSet::default();
         let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
         while let Some(entry_idx) = plan.pop_front() {
@@ -362,7 +363,7 @@ impl ModuleGraph {
     }
 
     /// Bound scheduler work by the finite set of exports, synthetic names, and
-    /// reference source modules that monotone propagation can add.
+    /// reference source/mechanism pairs that monotone propagation can add.
     fn re_export_transition_safety_cap(&self, re_export_info: &[ReExportTuple]) -> usize {
         let initial_exports = self
             .modules
@@ -398,7 +399,7 @@ impl ModuleGraph {
             .saturating_mul(named_inputs)
             .saturating_mul(2);
         let max_exports = initial_exports.saturating_add(synthetic_exports);
-        let reference_additions = max_exports.saturating_mul(module_count);
+        let reference_additions = max_exports.saturating_mul(module_count).saturating_mul(2);
         let state_changes = synthetic_exports.saturating_add(reference_additions);
 
         re_export_info
@@ -461,7 +462,7 @@ impl ModuleGraph {
             module_by_id,
         } = input;
         let max_iterations = re_export_info.len().saturating_add(1);
-        let mut existing_refs: FxHashSet<FileId> = FxHashSet::default();
+        let mut existing_refs: FxHashSet<(FileId, ModuleLoadMechanism)> = FxHashSet::default();
         let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
         for _ in 0..max_iterations {

@@ -24,7 +24,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::{ResolvedModule, ResolvedReplacedModuleTarget};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
-use fallow_types::extract::ImportedName;
+use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
 
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
@@ -81,11 +81,11 @@ pub struct ModuleGraph {
     pub runtime_entry_points: FxHashSet<FileId>,
     /// Test entry point `FileId`s.
     pub test_entry_points: FxHashSet<FileId>,
-    /// Distinct test-root mask profiles and their reachable files.
+    /// Compact correlation index for distinct test-root replacement profiles.
     ///
     /// Empty when no test root declares a project-internal replacement. That
     /// preserves the ordinary single-BFS test reachability path.
-    test_reachability_profiles: Vec<TestReachabilityProfile>,
+    test_reachability_index: TestReachabilityIndex,
     /// Reverse index: for each `FileId`, which files import it.
     pub reverse_deps: Vec<Vec<FileId>>,
     /// Precomputed: which modules have namespace imports (import * as ns).
@@ -137,28 +137,123 @@ pub struct ImportedSymbol {
     /// Used to skip type-only edges in circular dependency detection.
     pub is_type_only: bool,
     /// Runtime module mechanism that created this symbol edge.
-    mechanism: ImportMechanism,
+    mechanism: ModuleLoadMechanism,
 }
 
-/// Runtime module mechanism retained for root-aware traversal policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-enum ImportMechanism {
-    EsModule,
-    CommonJsRequire,
+/// Flat bitset index mapping files to the test profiles that reach or mask them.
+///
+/// Each file owns `words_per_file` contiguous words in both arrays. This bounds
+/// storage by `files * ceil(distinct_profiles / 64)` and lets correlation
+/// queries intersect machine words instead of scanning profile file lists.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct TestReachabilityIndex {
+    profile_count: usize,
+    words_per_file: usize,
+    reachable_profiles: Vec<u64>,
+    masked_profiles: Vec<u64>,
 }
 
-impl ImportMechanism {
-    const fn is_commonjs(self) -> bool {
-        matches!(self, Self::CommonJsRequire)
+impl TestReachabilityIndex {
+    fn new(file_capacity: usize, profile_count: usize) -> Self {
+        let words_per_file = profile_count.div_ceil(u64::BITS as usize);
+        let storage_len = file_capacity.saturating_mul(words_per_file);
+        Self {
+            profile_count,
+            words_per_file,
+            reachable_profiles: vec![0; storage_len],
+            masked_profiles: vec![0; storage_len],
+        }
     }
-}
 
-/// Test roots that share one replacement mask and therefore one BFS result.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct TestReachabilityProfile {
-    roots: Vec<FileId>,
-    masked_targets: Vec<FileId>,
-    reachable_files: Vec<FileId>,
+    fn set_reachable(&mut self, file_id: FileId, profile: usize) {
+        let words_per_file = self.words_per_file;
+        Self::set_profile_bit(
+            &mut self.reachable_profiles,
+            words_per_file,
+            file_id,
+            profile,
+        );
+    }
+
+    fn set_masked(&mut self, file_id: FileId, profile: usize) {
+        let words_per_file = self.words_per_file;
+        Self::set_profile_bit(&mut self.masked_profiles, words_per_file, file_id, profile);
+    }
+
+    fn set_profile_bit(
+        storage: &mut [u64],
+        words_per_file: usize,
+        file_id: FileId,
+        profile: usize,
+    ) {
+        if words_per_file == 0 {
+            return;
+        }
+        let Some(file_start) = (file_id.0 as usize).checked_mul(words_per_file) else {
+            return;
+        };
+        let word = profile / u64::BITS as usize;
+        let Some(slot_index) = file_start.checked_add(word) else {
+            return;
+        };
+        let Some(slot) = storage.get_mut(slot_index) else {
+            return;
+        };
+        *slot |= 1_u64 << (profile % u64::BITS as usize);
+    }
+
+    fn profiles_for<'a>(&self, storage: &'a [u64], file_id: FileId) -> Option<&'a [u64]> {
+        let start = (file_id.0 as usize).checked_mul(self.words_per_file)?;
+        let end = start.checked_add(self.words_per_file)?;
+        storage.get(start..end)
+    }
+
+    fn shares_profile(
+        &self,
+        target: FileId,
+        source: FileId,
+        mechanism: ModuleLoadMechanism,
+    ) -> bool {
+        let Some(target_profiles) = self.profiles_for(&self.reachable_profiles, target) else {
+            return false;
+        };
+        let Some(source_profiles) = self.profiles_for(&self.reachable_profiles, source) else {
+            return false;
+        };
+        let Some(masked_profiles) = self.profiles_for(&self.masked_profiles, target) else {
+            return false;
+        };
+
+        target_profiles
+            .iter()
+            .zip(source_profiles)
+            .zip(masked_profiles)
+            .any(|((&target_word, &source_word), &masked_word)| {
+                let shared = target_word & source_word;
+                if matches!(mechanism, ModuleLoadMechanism::CommonJsRequire) {
+                    shared != 0
+                } else {
+                    shared & !masked_word != 0
+                }
+            })
+    }
+
+    #[cfg(test)]
+    fn profile_contains(&self, storage: &[u64], file_id: FileId, profile: usize) -> bool {
+        self.profiles_for(storage, file_id)
+            .and_then(|words| words.get(profile / u64::BITS as usize))
+            .is_some_and(|word| word & (1_u64 << (profile % u64::BITS as usize)) != 0)
+    }
+
+    #[cfg(test)]
+    fn profile_reaches(&self, file_id: FileId, profile: usize) -> bool {
+        self.profile_contains(&self.reachable_profiles, file_id, profile)
+    }
+
+    #[cfg(test)]
+    fn profile_masks(&self, file_id: FileId, profile: usize) -> bool {
+        self.profile_contains(&self.masked_profiles, file_id, profile)
+    }
 }
 
 /// Importer details for one file that directly imports a target module.
@@ -339,28 +434,24 @@ impl ModuleGraph {
             .is_some_and(ModuleNode::is_test_reachable)
     }
 
-    /// Return whether one root-specific test traversal reaches both files.
+    /// Return whether one test-root traversal covers this exact export reference.
     ///
-    /// This is stronger than testing the unioned `is_test_reachable` flags:
-    /// two files reached by different test roots do not correlate. When no
-    /// replacement masks exist, the graph keeps no profiles and the ordinary
-    /// unioned reachability flags are equivalent to the legacy result.
+    /// ESM references require a profile that reaches both the referencing file
+    /// and target without replacing the target. CommonJS references only
+    /// require correlated reachability because Vitest replacement mocks do not
+    /// intercept `require()`. Re-export propagation records ESM mechanism, so a
+    /// CommonJS-loaded barrel cannot bypass a replacement on its ESM source.
     #[must_use]
-    pub fn shares_test_reachability_profile(&self, first: FileId, second: FileId) -> bool {
-        if self.test_reachability_profiles.is_empty() {
-            return self.is_test_reachable(first) && self.is_test_reachable(second);
+    pub fn is_test_reference_covered(&self, target: FileId, reference: &SymbolReference) -> bool {
+        if self.test_reachability_index.profile_count == 0 {
+            return self.is_test_reachable(target) && self.is_test_reachable(reference.from_file);
         }
 
-        self.test_reachability_profiles.iter().any(|profile| {
-            profile
-                .reachable_files
-                .binary_search_by_key(&first.0, |file_id| file_id.0)
-                .is_ok()
-                && profile
-                    .reachable_files
-                    .binary_search_by_key(&second.0, |file_id| file_id.0)
-                    .is_ok()
-        })
+        self.test_reachability_index.shares_profile(
+            target,
+            reference.from_file,
+            reference.mechanism,
+        )
     }
 
     /// Rebuild the `namespace_imported` bitset from the edge set.
