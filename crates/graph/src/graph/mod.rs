@@ -331,6 +331,38 @@ impl ModuleGraph {
         self.edges.len()
     }
 
+    /// Return whether any test-root traversal reaches `file_id`.
+    #[must_use]
+    pub fn is_test_reachable(&self, file_id: FileId) -> bool {
+        self.modules
+            .get(file_id.0 as usize)
+            .is_some_and(ModuleNode::is_test_reachable)
+    }
+
+    /// Return whether one root-specific test traversal reaches both files.
+    ///
+    /// This is stronger than testing the unioned `is_test_reachable` flags:
+    /// two files reached by different test roots do not correlate. When no
+    /// replacement masks exist, the graph keeps no profiles and the ordinary
+    /// unioned reachability flags are equivalent to the legacy result.
+    #[must_use]
+    pub fn shares_test_reachability_profile(&self, first: FileId, second: FileId) -> bool {
+        if self.test_reachability_profiles.is_empty() {
+            return self.is_test_reachable(first) && self.is_test_reachable(second);
+        }
+
+        self.test_reachability_profiles.iter().any(|profile| {
+            profile
+                .reachable_files
+                .binary_search_by_key(&first.0, |file_id| file_id.0)
+                .is_ok()
+                && profile
+                    .reachable_files
+                    .binary_search_by_key(&second.0, |file_id| file_id.0)
+                    .is_ok()
+        })
+    }
+
     /// Rebuild the `namespace_imported` bitset from the edge set.
     ///
     /// `namespace_imported` is `#[serde(skip)]`, so a graph loaded from the

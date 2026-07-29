@@ -512,6 +512,8 @@ mod tests {
             graph.test_reachability_profiles[1].reachable_files,
             vec![FileId(0)]
         );
+        assert!(!graph.shares_test_reachability_profile(FileId(0), FileId(2)));
+        assert!(graph.shares_test_reachability_profile(FileId(1), FileId(2)));
     }
 
     #[test]
@@ -529,6 +531,7 @@ mod tests {
 
         assert!(graph.test_reachability_profiles.is_empty());
         assert!(graph.modules[1].is_test_reachable());
+        assert!(graph.shares_test_reachability_profile(FileId(0), FileId(1)));
     }
 
     #[test]
