@@ -1605,6 +1605,13 @@ pub enum SemanticFact {
     /// A whole-object use of `this.<field>...` tied to its exact enclosing class.
     /// Appended because bitcode encodes enum variants by ordinal.
     ClassThisWholeObjectUse(ClassThisWholeObjectUseFact),
+    /// A module target that an explicitly imported Vitest `vi.mock` factory
+    /// provably replaces without loading the original module.
+    ///
+    /// Appended because bitcode encodes enum variants by ordinal. The ordinary
+    /// dynamic-import fact for the same source remains authoritative for graph
+    /// reachability and unresolved-import diagnostics.
+    ReplacedModuleTarget(ReplacedModuleTargetFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -2205,6 +2212,18 @@ pub struct InstanceExportBindingFact {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DynamicCustomElementRenderFact;
+
+/// Static source target of a proven complete test-time module replacement.
+///
+/// The declaring [`ModuleInfo::file_id`] owns the test-root provenance. The
+/// resolver consumes `source` through its canonical specifier pipeline; this
+/// fact deliberately carries no resolved path or duplicate diagnostic span.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReplacedModuleTargetFact {
+    /// Static module specifier passed to the replacement API.
+    pub source: String,
+}
 
 /// A `this`-rooted member access with exact enclosing-class provenance.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
