@@ -1295,6 +1295,76 @@ export default function Home() {
     }
 
     #[test]
+    fn replaced_module_coverage_matches_across_cold_and_warm_graph_cache() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"mock-cache-parity","main":"src/index.ts","devDependencies":{"vitest":"latest"}}"#,
+        )
+        .expect("write package manifest");
+        std::fs::write(
+            root.join("src/dependency.ts"),
+            "export function dependency() { return 'real'; }\n",
+        )
+        .expect("write dependency");
+        std::fs::write(
+            root.join("src/wrapper.ts"),
+            "import { dependency } from './dependency';\nexport function wrapper() { return dependency(); }\n",
+        )
+        .expect("write wrapper");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export { wrapper } from './wrapper';\n",
+        )
+        .expect("write entry point");
+        std::fs::write(
+            root.join("src/wrapper.test.ts"),
+            r#"
+import { vi } from "vitest";
+vi.mock("./dependency", () => ({ dependency: () => "mock" }));
+import { wrapper } from "./wrapper";
+wrapper();
+"#,
+        )
+        .expect("write test");
+
+        let cold_session = AnalysisSession::load(root, None).expect("cold session loads");
+        let dependency_id = cold_session
+            .files()
+            .iter()
+            .find(|file| file.path == root.join("src/dependency.ts"))
+            .expect("dependency discovered")
+            .id;
+        let cold = cold_session
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("cold analysis succeeds");
+        let cold_exports = crate::module_graph::module_value_exports(
+            cold.graph.as_ref().expect("cold graph retained"),
+        );
+        assert!(
+            fallow_graph::cache::GraphCacheStore::load(&cold_session.config().cache_dir).is_some(),
+            "cold analysis must persist the graph cache"
+        );
+
+        let warm_session = AnalysisSession::load(root, None).expect("warm session loads");
+        let warm = warm_session
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("warm analysis succeeds");
+        let warm_exports = crate::module_graph::module_value_exports(
+            warm.graph.as_ref().expect("warm graph retained"),
+        );
+
+        let dependency = cold_exports
+            .iter()
+            .find(|export| export.file_id == dependency_id && export.name == "dependency")
+            .expect("dependency export retained");
+        assert!(!dependency.test_referenced);
+        assert_eq!(warm_exports, cold_exports);
+    }
+
+    #[test]
     fn session_parse_surfaces_removed_source_with_sparse_file_ids() {
         let project = tempfile::tempdir().expect("project");
         let root = project.path();
