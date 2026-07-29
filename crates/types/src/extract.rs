@@ -1241,9 +1241,9 @@ const _: () = assert!(std::mem::size_of::<FlagUse>() <= 96);
 )]
 #[repr(u8)]
 pub enum ModuleLoadMechanism {
-    /// ECMAScript module loading through `import()` or `import.meta.glob`.
+    /// ECMAScript module loading through imports, re-exports, or import globs.
     EsModule = 0,
-    /// CommonJS module loading through `require.context`.
+    /// CommonJS module loading through `require()` or `require.context`.
     CommonJsRequire = 1,
 }
 
