@@ -89,22 +89,6 @@ fn workspace_package_name<'a>(
     workspace_names.get(package_name.as_str()).copied()
 }
 
-pub(crate) fn resolved_package_usage_name<'a>(
-    target: &'a resolve::ResolveResult,
-    source: &str,
-    workspace_names: &FxHashSet<&'a str>,
-) -> Option<&'a str> {
-    target.package_usage_name().or_else(|| {
-        matches!(
-            target,
-            resolve::ResolveResult::InternalModule(_)
-                | resolve::ResolveResult::CommonJsInternalModule(_)
-        )
-        .then(|| workspace_package_name(source, workspace_names))
-        .flatten()
-    })
-}
-
 fn credit_workspace_package_usage(
     graph: &mut graph::ModuleGraph,
     resolved: &[resolve::ResolvedModule],
@@ -116,19 +100,34 @@ fn credit_workspace_package_usage(
 
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     for module in resolved {
-        for edge in module.all_resolved_source_edges() {
-            if edge.target().package_usage_name().is_none()
-                && let Some(package_name) = resolved_package_usage_name(
-                    edge.target(),
-                    edge.source_specifier(),
-                    &workspace_names,
-                )
+        for import in module.all_resolved_imports() {
+            if matches!(
+                import.target,
+                resolve::ResolveResult::InternalModule(_)
+                    | resolve::ResolveResult::CommonJsInternalModule(_)
+            )
+                && let Some(package_name) =
+                    workspace_package_name(&import.info.source, &workspace_names)
             {
                 record_graph_package_usage(
                     graph,
                     package_name,
                     module.file_id,
-                    edge.is_type_only(),
+                    import.info.is_type_only,
+                );
+            }
+        }
+
+        for re_export in &module.re_exports {
+            if matches!(re_export.target, resolve::ResolveResult::InternalModule(_))
+                && let Some(package_name) =
+                    workspace_package_name(&re_export.info.source, &workspace_names)
+            {
+                record_graph_package_usage(
+                    graph,
+                    package_name,
+                    module.file_id,
+                    re_export.info.is_type_only,
                 );
             }
         }

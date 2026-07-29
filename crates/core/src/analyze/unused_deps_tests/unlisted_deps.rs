@@ -259,7 +259,10 @@ fn undeclared_workspace_commonjs_require_retains_import_site() {
                 span: oxc_span::Span::new(42, 73),
                 source_span: oxc_span::Span::new(64, 76),
             },
-            target: ResolveResult::CommonJsInternalModule(FileId(1)),
+            target: ResolveResult::CommonJsInternalPackageModule {
+                file_id: FileId(1),
+                package_name: "@myorg/utils".to_string(),
+            },
         }],
         ..ResolvedModule::default()
     }];
@@ -268,8 +271,7 @@ fn undeclared_workspace_commonjs_require_retains_import_site() {
         name: "@myorg/utils".to_string(),
         is_internal_dependency: false,
     }];
-    let mut graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
-    crate::credit_workspace_package_usage(&mut graph, &resolved_modules, &workspaces);
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
     let line_offsets_storage = [0, 18, 36];
     let line_offsets = FxHashMap::from_iter([(FileId(0), line_offsets_storage.as_slice())]);

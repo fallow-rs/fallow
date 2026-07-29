@@ -1307,22 +1307,13 @@ fn workspace_dependency_map(
     ws_dep_map
 }
 
-fn import_spans_by_file<'a>(
-    resolved_modules: &'a [ResolvedModule],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
-) -> FxHashMap<FileId, Vec<(&'a str, &'a str, u32)>> {
-    let workspace_names: FxHashSet<&str> = workspaces
-        .iter()
-        .map(|workspace| workspace.name.as_str())
-        .collect();
+fn import_spans_by_file(
+    resolved_modules: &[ResolvedModule],
+) -> FxHashMap<FileId, Vec<(&str, &str, u32)>> {
     let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     for rm in resolved_modules {
         for edge in rm.all_resolved_source_edges() {
-            if let Some(name) = crate::resolved_package_usage_name(
-                edge.target(),
-                edge.source_specifier(),
-                &workspace_names,
-            ) {
+            if let Some(name) = edge.target().package_usage_name() {
                 import_spans_by_file.entry(rm.file_id).or_default().push((
                     name,
                     edge.source_specifier(),
@@ -1435,7 +1426,7 @@ fn build_unlisted_dependency_context_parts<'a>(
     let ws_dep_map = workspace_dependency_map(input.workspaces, input.config);
 
     let plugin_parts = build_unlisted_dependency_plugin_parts(input.plugin_result);
-    let import_spans_by_file = import_spans_by_file(input.resolved_modules, input.workspaces);
+    let import_spans_by_file = import_spans_by_file(input.resolved_modules);
 
     let ignore_deps = input
         .config

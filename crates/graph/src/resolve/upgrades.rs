@@ -42,9 +42,9 @@ pub(super) struct ResolvedReplacementCandidate {
 /// makes the per-file result depend on which thread resolved first (non-deterministic).
 ///
 /// Scans all resolved imports/re-exports to find bare specifiers where ANY file resolved
-/// to `InternalModule`. For those specifiers, upgrades all `NpmPackage` results to
-/// `InternalModule`. This is correct because if any tsconfig context maps a specifier to
-/// a project source file, that source file IS the origin of the package.
+/// to a project-internal module. For those specifiers, upgrades all bare-package results
+/// to internal package results. This preserves both the canonical source destination and
+/// the package identity used by dependency diagnostics.
 ///
 /// Note: if two tsconfigs map the same specifier to different `FileId`s, the first one
 /// encountered (by module order = `FileId` order) wins. This is deterministic but may be
@@ -122,12 +122,25 @@ fn upgrade_bare_target(
     let Some(upgraded_target) = specifier_upgrades.get(source_specifier) else {
         return;
     };
+    let Some(file_id) = upgraded_target.internal_file_id() else {
+        return;
+    };
 
-    let is_commonjs_require = target.is_commonjs_require();
+    let (package_name, is_commonjs_require) = match target {
+        ResolveResult::NpmPackage(package_name) => (package_name.clone(), false),
+        ResolveResult::CommonJsNpmPackage(package_name) => (package_name.clone(), true),
+        _ => return,
+    };
     *target = if is_commonjs_require {
-        upgraded_target.clone().into_commonjs_require()
+        ResolveResult::CommonJsInternalPackageModule {
+            file_id,
+            package_name,
+        }
     } else {
-        upgraded_target.clone().into_es_module()
+        ResolveResult::InternalPackageModule {
+            file_id,
+            package_name,
+        }
     };
 }
 
@@ -249,7 +262,10 @@ mod tests {
         ));
         assert!(matches!(
             resolved[1].resolved_imports[0].target,
-            ResolveResult::InternalModule(FileId(10))
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(10),
+                ref package_name,
+            } if package_name == "preact"
         ));
     }
 
@@ -465,7 +481,10 @@ mod tests {
 
         assert!(matches!(
             resolved[1].resolved_imports[0].target,
-            ResolveResult::CommonJsInternalModule(FileId(10))
+            ResolveResult::CommonJsInternalPackageModule {
+                file_id: FileId(10),
+                ref package_name,
+            } if package_name == "shared-package"
         ));
     }
 
@@ -487,7 +506,10 @@ mod tests {
 
         assert!(matches!(
             resolved[1].resolved_imports[0].target,
-            ResolveResult::InternalModule(FileId(10))
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(10),
+                ref package_name,
+            } if package_name == "shared-package"
         ));
     }
 }

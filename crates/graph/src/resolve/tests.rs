@@ -694,7 +694,7 @@ fn require_imports_empty_list() {
 }
 
 #[test]
-fn specifier_upgrades_npm_to_internal() {
+fn specifier_upgrades_npm_to_internal_with_package_identity() {
     let mut modules = vec![
         make_resolved_module(
             0,
@@ -719,8 +719,15 @@ fn specifier_upgrades_npm_to_internal() {
     apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_imports[0].target,
+        modules[0].resolved_imports[0].target,
         ResolveResult::InternalModule(FileId(5))
+    ));
+    assert!(matches!(
+        &modules[1].resolved_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "preact"
     ));
 }
 
@@ -823,8 +830,11 @@ fn specifier_upgrades_applies_to_dynamic_imports() {
     apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_dynamic_imports[0].target,
-        ResolveResult::InternalModule(FileId(5))
+        &modules[1].resolved_dynamic_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "preact"
     ));
 }
 
@@ -854,8 +864,11 @@ fn specifier_upgrades_applies_to_re_exports() {
     apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].re_exports[0].target,
-        ResolveResult::InternalModule(FileId(5))
+        &modules[1].re_exports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "preact"
     ));
 }
 
@@ -929,8 +942,11 @@ fn specifier_upgrades_first_internal_wins() {
     apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[2].resolved_imports[0].target,
-        ResolveResult::InternalModule(FileId(10))
+        &modules[2].resolved_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(10),
+            package_name,
+        } if package_name == "shared-lib"
     ));
 }
 
@@ -991,8 +1007,11 @@ fn specifier_upgrades_cross_import_and_re_export() {
     apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].re_exports[0].target,
-        ResolveResult::InternalModule(FileId(3))
+        &modules[1].re_exports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(3),
+            package_name,
+        } if package_name == "@myorg/utils"
     ));
 }
 
@@ -1199,8 +1218,11 @@ fn specifier_upgrades_re_export_triggers_import_upgrade() {
     apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_imports[0].target,
-        ResolveResult::InternalModule(FileId(5))
+        &modules[1].resolved_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "@myorg/shared"
     ));
 }
 
@@ -1230,8 +1252,11 @@ fn specifier_upgrades_re_export_triggers_dynamic_import_upgrade() {
     apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_dynamic_imports[0].target,
-        ResolveResult::InternalModule(FileId(7))
+        &modules[1].resolved_dynamic_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(7),
+            package_name,
+        } if package_name == "my-workspace-pkg"
     ));
 }
 
@@ -1448,8 +1473,11 @@ fn specifier_upgrade_preserves_actual_require_mechanism() {
         apply_specifier_upgrades(&mut modules, &mut []);
 
         assert!(matches!(
-            modules[1].resolved_imports[0].target,
-            ResolveResult::CommonJsInternalModule(FileId(2))
+            &modules[1].resolved_imports[0].target,
+            ResolveResult::CommonJsInternalPackageModule {
+                file_id: FileId(2),
+                package_name,
+            } if package_name == "shared-package"
         ));
     });
 }
