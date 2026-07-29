@@ -51,6 +51,16 @@ pub(super) struct ChildResolver<'a> {
     sole_component: FxHashMap<FileId, &'a str>,
 }
 
+fn component_import_target(target: &ResolveResult) -> Option<FileId> {
+    match target {
+        ResolveResult::InternalModule(file_id)
+        | ResolveResult::CommonJsInternalModule(file_id)
+        | ResolveResult::InternalPackageModule { file_id, .. }
+        | ResolveResult::CommonJsInternalPackageModule { file_id, .. } => Some(*file_id),
+        _ => None,
+    }
+}
+
 impl<'a> ChildResolver<'a> {
     /// Build the resolver over every reachable React module. The
     /// `components_per_file` / `sole_component` maps come straight from
@@ -86,14 +96,10 @@ impl<'a> ChildResolver<'a> {
         for (file, resolved) in resolved_by_id {
             let mut map: FxHashMap<&'a str, FileId> = FxHashMap::default();
             for import in &resolved.resolved_imports {
-                if let ResolveResult::InternalModule(target)
-                | ResolveResult::InternalPackageModule {
-                    file_id: target, ..
-                } = &import.target
-                {
+                if let Some(target) = component_import_target(&import.target) {
                     let local = import.info.local_name.as_str();
                     if !local.is_empty() {
-                        map.insert(local, *target);
+                        map.insert(local, target);
                     }
                 }
             }
@@ -165,5 +171,31 @@ impl<'a> ChildResolver<'a> {
         self.import_targets
             .get(&parent_file)
             .is_some_and(|map| map.contains_key(child_name))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::component_import_target;
+    use crate::discover::FileId;
+    use crate::resolve::ResolveResult;
+
+    #[test]
+    fn component_import_target_preserves_commonjs_internal_edges() {
+        assert_eq!(
+            component_import_target(&ResolveResult::CommonJsInternalModule(FileId(7))),
+            Some(FileId(7))
+        );
+        assert_eq!(
+            component_import_target(&ResolveResult::CommonJsInternalPackageModule {
+                file_id: FileId(8),
+                package_name: "@repo/ui".to_string(),
+            }),
+            Some(FileId(8))
+        );
+        assert_eq!(
+            component_import_target(&ResolveResult::SyntheticAutoImport(FileId(9))),
+            None
+        );
     }
 }

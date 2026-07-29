@@ -80,13 +80,29 @@ fn record_graph_package_usage(
 
 fn workspace_package_name<'a>(
     source: &str,
-    workspace_names: &'a FxHashSet<&str>,
+    workspace_names: &FxHashSet<&'a str>,
 ) -> Option<&'a str> {
     if !resolve::is_bare_specifier(source) {
         return None;
     }
     let package_name = resolve::extract_package_name(source);
     workspace_names.get(package_name.as_str()).copied()
+}
+
+pub(crate) fn resolved_package_usage_name<'a>(
+    target: &'a resolve::ResolveResult,
+    source: &str,
+    workspace_names: &FxHashSet<&'a str>,
+) -> Option<&'a str> {
+    target.package_usage_name().or_else(|| {
+        matches!(
+            target,
+            resolve::ResolveResult::InternalModule(_)
+                | resolve::ResolveResult::CommonJsInternalModule(_)
+        )
+        .then(|| workspace_package_name(source, workspace_names))
+        .flatten()
+    })
 }
 
 fn credit_workspace_package_usage(
@@ -100,30 +116,19 @@ fn credit_workspace_package_usage(
 
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     for module in resolved {
-        for import in module.all_resolved_imports() {
-            if matches!(import.target, resolve::ResolveResult::InternalModule(_))
-                && let Some(package_name) =
-                    workspace_package_name(&import.info.source, &workspace_names)
+        for edge in module.all_resolved_source_edges() {
+            if edge.target().package_usage_name().is_none()
+                && let Some(package_name) = resolved_package_usage_name(
+                    edge.target(),
+                    edge.source_specifier(),
+                    &workspace_names,
+                )
             {
                 record_graph_package_usage(
                     graph,
                     package_name,
                     module.file_id,
-                    import.info.is_type_only,
-                );
-            }
-        }
-
-        for re_export in &module.re_exports {
-            if matches!(re_export.target, resolve::ResolveResult::InternalModule(_))
-                && let Some(package_name) =
-                    workspace_package_name(&re_export.info.source, &workspace_names)
-            {
-                record_graph_package_usage(
-                    graph,
-                    package_name,
-                    module.file_id,
-                    re_export.info.is_type_only,
+                    edge.is_type_only(),
                 );
             }
         }
@@ -2572,9 +2577,9 @@ fn num_cpus() -> usize {
 mod tests {
     use super::{
         AnalysisSession, bucket_files_by_workspace, bucket_files_by_workspace_roots,
-        collect_config_search_roots, default_config, format_undeclared_workspace_warning,
-        parse_analysis_modules, plugin_config_hash, resolver_options_hash,
-        warn_undeclared_workspaces,
+        collect_config_search_roots, credit_workspace_package_usage, default_config,
+        format_undeclared_workspace_warning, parse_analysis_modules, plugin_config_hash,
+        resolver_options_hash, warn_undeclared_workspaces,
     };
     use std::path::{Path, PathBuf};
     use std::time::Instant;
@@ -2583,6 +2588,7 @@ mod tests {
         AutoImportKind, AutoImportRule, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
     };
     use fallow_types::discover::{DiscoveredFile, FileId};
+    use fallow_types::extract::{ImportInfo, ImportedName};
 
     fn plugin_result() -> crate::plugins::AggregatedPluginResult {
         let mut result = crate::plugins::AggregatedPluginResult::default();
@@ -2591,6 +2597,39 @@ mod tests {
             .path_aliases
             .push(("@/".to_string(), "src/".to_string()));
         result
+    }
+
+    #[test]
+    fn commonjs_internal_import_credits_workspace_package_usage() {
+        let workspace = fallow_config::WorkspaceInfo {
+            root: PathBuf::from("/repo/packages/shared"),
+            name: "@repo/shared".to_string(),
+            is_internal_dependency: true,
+        };
+        let resolved = vec![crate::resolve::ResolvedModule {
+            file_id: FileId(0),
+            resolved_imports: vec![crate::resolve::ResolvedImport {
+                info: ImportInfo {
+                    source: "@repo/shared".to_string(),
+                    imported_name: ImportedName::Namespace,
+                    local_name: "shared".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 20),
+                    source_span: oxc_span::Span::new(8, 20),
+                },
+                target: crate::resolve::ResolveResult::CommonJsInternalModule(FileId(1)),
+            }],
+            ..crate::resolve::ResolvedModule::default()
+        }];
+        let mut graph = crate::graph::ModuleGraph::build(&[], &[], &[]);
+
+        credit_workspace_package_usage(&mut graph, &resolved, &[workspace]);
+
+        assert_eq!(
+            graph.package_usage.get("@repo/shared"),
+            Some(&vec![FileId(0)])
+        );
     }
 
     #[test]

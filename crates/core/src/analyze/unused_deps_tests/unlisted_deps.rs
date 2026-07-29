@@ -227,6 +227,70 @@ fn undeclared_workspace_package_names_are_reported_as_unlisted() {
 }
 
 #[test]
+fn undeclared_workspace_commonjs_require_retains_import_site() {
+    let source_path = PathBuf::from("/project/src/index.js");
+    let workspace_source_path = PathBuf::from("/project/packages/utils/src/index.ts");
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: source_path.clone(),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: workspace_source_path,
+            size_bytes: 100,
+        },
+    ];
+    let entry_points = vec![EntryPoint {
+        path: source_path.clone(),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: source_path.clone(),
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "@myorg/utils".to_string(),
+                imported_name: ImportedName::Namespace,
+                local_name: "utils".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(42, 73),
+                source_span: oxc_span::Span::new(64, 76),
+            },
+            target: ResolveResult::CommonJsInternalModule(FileId(1)),
+        }],
+        ..ResolvedModule::default()
+    }];
+    let workspaces = vec![WorkspaceInfo {
+        root: PathBuf::from("/project/packages/utils"),
+        name: "@myorg/utils".to_string(),
+        is_internal_dependency: false,
+    }];
+    let mut graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    crate::credit_workspace_package_usage(&mut graph, &resolved_modules, &workspaces);
+
+    let line_offsets_storage = [0, 18, 36];
+    let line_offsets = FxHashMap::from_iter([(FileId(0), line_offsets_storage.as_slice())]);
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &make_pkg(&[], &[], &[]),
+        &test_config(PathBuf::from("/project")),
+        &workspaces,
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert_eq!(unlisted.len(), 1);
+    assert_eq!(unlisted[0].package_name, "@myorg/utils");
+    assert_eq!(unlisted[0].imported_from.len(), 1);
+    assert_eq!(unlisted[0].imported_from[0].path, source_path);
+    assert_eq!(unlisted[0].imported_from[0].line, 3);
+}
+
+#[test]
 fn plugin_virtual_prefixes_not_reported_as_unlisted() {
     let pkg = make_pkg(&[], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
