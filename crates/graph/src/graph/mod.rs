@@ -22,7 +22,7 @@ use std::path::Path;
 use fixedbitset::FixedBitSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::resolve::ResolvedModule;
+use crate::resolve::{ResolvedModule, ResolvedReplacedModuleTarget};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use fallow_types::extract::ImportedName;
 
@@ -81,6 +81,11 @@ pub struct ModuleGraph {
     pub runtime_entry_points: FxHashSet<FileId>,
     /// Test entry point `FileId`s.
     pub test_entry_points: FxHashSet<FileId>,
+    /// Distinct test-root mask profiles and their reachable files.
+    ///
+    /// Empty when no test root declares a project-internal replacement. That
+    /// preserves the ordinary single-BFS test reachability path.
+    test_reachability_profiles: Vec<TestReachabilityProfile>,
     /// Reverse index: for each `FileId`, which files import it.
     pub reverse_deps: Vec<Vec<FileId>>,
     /// Precomputed: which modules have namespace imports (import * as ns).
@@ -140,6 +145,20 @@ pub struct ImportedSymbol {
 enum ImportMechanism {
     EsModule,
     CommonJsRequire,
+}
+
+impl ImportMechanism {
+    const fn is_commonjs(self) -> bool {
+        matches!(self, Self::CommonJsRequire)
+    }
+}
+
+/// Test roots that share one replacement mask and therefore one BFS result.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TestReachabilityProfile {
+    roots: Vec<FileId>,
+    masked_targets: Vec<FileId>,
+    reachable_files: Vec<FileId>,
 }
 
 /// Importer details for one file that directly imports a target module.
@@ -224,6 +243,25 @@ impl ModuleGraph {
         test_entry_points: &[EntryPoint],
         files: &[DiscoveredFile],
     ) -> Self {
+        Self::build_with_reachability_roots_and_replacements(
+            resolved_modules,
+            &[],
+            entry_points,
+            runtime_entry_points,
+            test_entry_points,
+            files,
+        )
+    }
+
+    /// Build the module graph with root-specific test-time module replacements.
+    pub fn build_with_reachability_roots_and_replacements(
+        resolved_modules: &[ResolvedModule],
+        replaced_module_targets: &[ResolvedReplacedModuleTarget],
+        entry_points: &[EntryPoint],
+        runtime_entry_points: &[EntryPoint],
+        test_entry_points: &[EntryPoint],
+        files: &[DiscoveredFile],
+    ) -> Self {
         let _span = tracing::info_span!("build_graph").entered();
 
         let module_count = files.len();
@@ -272,6 +310,7 @@ impl ModuleGraph {
             &entry_point_ids,
             &runtime_entry_point_ids,
             &test_entry_point_ids,
+            replaced_module_targets,
             total_capacity,
         );
 

@@ -34,9 +34,9 @@ pub use store::GraphCacheStore;
 /// classification change replays the old classification verbatim on an
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
-/// Bumped to 8 for issue #2031: the resolver cache now persists the typed
-/// project-level replacement sidecar alongside ordinary resolved modules.
-pub const GRAPH_CACHE_VERSION: u32 = 8;
+/// Bumped to 9 for issue #2031: cached graphs now retain grouped, root-specific
+/// replacement masks and their test reachability results.
+pub const GRAPH_CACHE_VERSION: u32 = 9;
 
 /// Cached form of a resolved target.
 ///

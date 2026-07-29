@@ -1513,8 +1513,9 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
         )
     });
 
-    let mut graph = graph::ModuleGraph::build_with_reachability_roots(
+    let mut graph = graph::ModuleGraph::build_with_reachability_roots_and_replacements(
         &input.project.modules,
+        &input.project.replaced_module_targets,
         &input.entry_points.all,
         &input.entry_points.runtime,
         &input.entry_points.test,

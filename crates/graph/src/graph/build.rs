@@ -407,6 +407,7 @@ impl ModuleGraph {
                 entry_points: entry_point_ids.clone(),
                 runtime_entry_points: runtime_entry_point_ids.clone(),
                 test_entry_points: test_entry_point_ids.clone(),
+                test_reachability_profiles: Vec::new(),
                 reverse_deps,
                 namespace_imported: acc.namespace_imported,
                 re_export_cycles: Vec::new(),
