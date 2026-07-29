@@ -307,8 +307,10 @@ impl<'a> ExternalStylePackageScanner<'a> {
                 }
             }
             ResolveResult::InternalModule(_)
+            | ResolveResult::CommonJsInternalModule(_)
             | ResolveResult::SyntheticAutoImport(_)
-            | ResolveResult::InternalPackageModule { .. } => {}
+            | ResolveResult::InternalPackageModule { .. }
+            | ResolveResult::CommonJsInternalPackageModule { .. } => {}
         }
     }
 
