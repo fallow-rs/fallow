@@ -66,6 +66,18 @@ const staleGeneratedAdapters = (repoRoot, names) => {
     .filter((path) => existsSync(path) && readFileSync(path, "utf8").includes(GENERATED_MARKER));
 };
 
+/// Files a skill ships alongside its SKILL.md, relative to the skill directory.
+/// A skill whose SKILL.md links to `references/x.md` is broken in the adapter
+/// tree unless those files travel with it.
+const companionFiles = (skillDir, prefix = "") =>
+  readdirSync(join(skillDir, prefix), { withFileTypes: true }).flatMap((entry) => {
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      return companionFiles(skillDir, relativePath);
+    }
+    return relativePath === "SKILL.md" ? [] : [relativePath];
+  });
+
 export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = {}) => {
   const skills = canonicalSkills(repoRoot);
   const drifted = [];
@@ -73,13 +85,29 @@ export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = 
     const destination = adapterPath(repoRoot, skill.name);
     const expected = renderAdapter(skill);
     const current = existsSync(destination) ? readFileSync(destination, "utf8") : null;
-    if (current === expected) {
-      continue;
+    if (current !== expected) {
+      drifted.push(relative(repoRoot, destination));
+      if (!check) {
+        mkdirSync(dirname(destination), { recursive: true });
+        writeFileSync(destination, expected);
+      }
     }
-    drifted.push(relative(repoRoot, destination));
-    if (!check) {
-      mkdirSync(dirname(destination), { recursive: true });
-      writeFileSync(destination, expected);
+
+    const sourceDir = dirname(skill.sourcePath);
+    for (const companion of companionFiles(sourceDir)) {
+      const companionSource = readFileSync(join(sourceDir, companion), "utf8");
+      const companionDestination = join(dirname(destination), companion);
+      const companionCurrent = existsSync(companionDestination)
+        ? readFileSync(companionDestination, "utf8")
+        : null;
+      if (companionCurrent === companionSource) {
+        continue;
+      }
+      drifted.push(relative(repoRoot, companionDestination));
+      if (!check) {
+        mkdirSync(dirname(companionDestination), { recursive: true });
+        writeFileSync(companionDestination, companionSource);
+      }
     }
   }
 
