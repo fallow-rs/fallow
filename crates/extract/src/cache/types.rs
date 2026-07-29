@@ -844,34 +844,13 @@ use crate::MemberKind;
 /// extracted as reportable class members. Warm 240 caches can retain those
 /// members and reproduce the old false positives.
 ///
-/// Bumped to 242 for issue #2031: proven Vitest replacement factories append a
-/// typed replacement fact. Warm 241 caches omit that fact
-/// and would continue crediting replaced modules as statically test-covered.
-///
-/// Bumped to 243: Vitest replacement facts now require the `vi.mock` object to
-/// resolve to the direct `vi` import and recognize computed `vi["importActual"]`
-/// as an original-module load. Warm 242 caches can retain false replacement
-/// facts from shadowed bindings or computed original loaders.
-///
-/// Bumped to 244: dynamic import patterns now retain their module load
-/// mechanism. Warm 243 caches cannot distinguish ESM patterns from
-/// `require.context` CommonJS patterns.
-///
-/// Bumped to 245: proven Vitest replacements now abstain whenever
-/// `vi.importActual` escapes through a property read or destructuring, not only
-/// when it is called directly. Warm 244 caches can retain false replacement
-/// facts for aliased original-module loaders.
-///
-/// Bumped to 246: proven Vitest replacements now require a structurally closed
-/// factory whose only callable dependency is the imported `vi.fn`.
-///
-/// Bumped to 247: Vitest replacement facts now reflect the final semantically
-/// proven `vi.mock` or `vi.unmock` operation for each literal target.
-///
-/// Bumped to 248: extraction now preserves every typed Vitest mock/unmock
-/// operation and its source position so resolution can select final state by
-/// canonical module identity. Factory proof also rejects all value dependencies
-/// other than the semantically proven imported `vi`.
+/// Bumped to 248 for issue #2031: extraction now persists ordered,
+/// provenance-checked Vitest mock/unmock operations and module-load mechanisms.
+/// This lets resolution select final replacement state by canonical module
+/// identity without accepting uncertain factories or original-module loaders.
+/// Warm 241 caches lack those contracts. Versions 242 through 247 were used by
+/// published development commits for this change, so the final version remains
+/// 248 rather than reusing a potentially stale intermediate cache version.
 pub(super) const CACHE_VERSION: u32 = 248;
 
 /// Duplication token cache version. Bump when duplicate tokenization,

@@ -34,23 +34,13 @@ pub use store::GraphCacheStore;
 /// classification change replays the old classification verbatim on an
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
-/// Bumped to 11 for issue #2031: cached graphs retain compact root-correlation
-/// profiles plus exact ESM/CommonJS reference and dynamic-pattern mechanisms.
 ///
-/// Bumped to 12: test profile masks use target-sparse rows and profiled
-/// reachability uses the bit-parallel worklist schema.
-///
-/// Bumped to 13: export references now retain interned linked module-load paths
-/// so cached coverage checks include every re-export hop.
-///
-/// Bumped to 14: namespace-derived references retain the exact consumer and
-/// re-export path instead of collapsing onto the ultimate target.
-///
-/// Bumped to 15: Vitest mock and unmock state is selected after specifiers
-/// resolve, using the canonical target file rather than literal source text.
-///
-/// Bumped to 17: legacy reachability omits unused reference provenance, while
-/// profiled reachability persists non-zero interned path identifiers.
+/// Bumped to 17 for issue #2031: cached resolver output retains canonical
+/// test-root replacements and ESM/CommonJS mechanisms, while profiled graphs
+/// retain target-sparse reachability masks plus exact compact reference routes.
+/// Ordinary graphs omit unused provenance. Versions 7 through 16 were used by
+/// published development commits for this change, so the final version remains
+/// 17 rather than reusing a potentially stale intermediate cache version.
 pub const GRAPH_CACHE_VERSION: u32 = 17;
 
 /// Cached form of a resolved target.
