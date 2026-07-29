@@ -407,9 +407,16 @@ pub(crate) struct FinalizedReferencePaths {
 #[derive(Default)]
 pub(crate) struct ReferencePathInterner {
     nodes: Vec<ReferencePathNode>,
+    metadata: Vec<ReferencePathMetadata>,
     ids: FxHashMap<ReferencePathNode, ReferencePathId>,
     route_graphs: Vec<ReferenceRouteGraphSpec>,
     route_graph_ids: FxHashMap<ReferenceRouteGraphSpec, ReferenceRouteGraphId>,
+}
+
+#[derive(Clone, Copy)]
+struct ReferencePathMetadata {
+    depth: usize,
+    hop_target_bounds: Option<(FileId, FileId)>,
 }
 
 impl ReferencePathInterner {
@@ -433,7 +440,12 @@ impl ReferencePathInterner {
         target: FileId,
         mechanism: ModuleLoadMechanism,
     ) -> ReferencePathId {
-        if self.contains_target(parent, target) {
+        let may_contain_target = self
+            .metadata
+            .get(parent.index())
+            .and_then(|metadata| metadata.hop_target_bounds)
+            .is_some_and(|(minimum, maximum)| target.0 >= minimum.0 && target.0 <= maximum.0);
+        if may_contain_target && self.contains_target(parent, target) {
             return parent;
         }
         self.intern(ReferencePathNode::Hop {
@@ -503,7 +515,30 @@ impl ReferencePathInterner {
             return *path;
         }
         let path = ReferencePathId(self.nodes.len() as u32);
+        let parent_metadata = node
+            .parent()
+            .and_then(|parent| self.metadata.get(parent.index()).copied());
+        let depth = parent_metadata.map_or(0, |metadata| metadata.depth + 1);
+        let hop_target_bounds = match node {
+            ReferencePathNode::Hop { target, .. } => Some(
+                parent_metadata
+                    .and_then(|metadata| metadata.hop_target_bounds)
+                    .map_or((target, target), |(minimum, maximum)| {
+                        (
+                            FileId(minimum.0.min(target.0)),
+                            FileId(maximum.0.max(target.0)),
+                        )
+                    }),
+            ),
+            ReferencePathNode::Route { .. } => {
+                parent_metadata.and_then(|metadata| metadata.hop_target_bounds)
+            }
+        };
         self.nodes.push(node);
+        self.metadata.push(ReferencePathMetadata {
+            depth,
+            hop_target_bounds,
+        });
         self.ids.insert(node, path);
         path
     }
@@ -514,18 +549,24 @@ impl ReferencePathInterner {
     /// ID before its children are sorted. This keeps serialized graphs stable
     /// when equivalent imports or re-exports are discovered in another order.
     pub(crate) fn finalize(self, modules: &mut [ModuleNode]) -> FinalizedReferencePaths {
-        let (routes, route_remap) = finalize_route_graphs(&self.route_graphs);
-        let mut depths = Vec::with_capacity(self.nodes.len());
-        let mut max_depth = 0usize;
-        for node in &self.nodes {
-            let depth = node.parent().map_or(0, |parent| depths[parent.index()] + 1);
-            max_depth = max_depth.max(depth);
-            depths.push(depth);
+        if self.nodes.is_empty() && self.route_graphs.is_empty() {
+            return FinalizedReferencePaths {
+                paths: Vec::new(),
+                routes: ReferenceRoutes::default(),
+            };
         }
 
+        let (routes, route_remap) = finalize_route_graphs(&self.route_graphs);
+        let max_depth = self
+            .metadata
+            .iter()
+            .map(|metadata| metadata.depth)
+            .max()
+            .unwrap_or(0);
+
         let mut paths_by_depth = vec![Vec::new(); max_depth.saturating_add(1)];
-        for (old_index, depth) in depths.into_iter().enumerate() {
-            paths_by_depth[depth].push(old_index);
+        for (old_index, metadata) in self.metadata.iter().enumerate() {
+            paths_by_depth[metadata.depth].push(old_index);
         }
 
         let mut remap = vec![ReferencePathId(0); self.nodes.len()];
@@ -776,6 +817,28 @@ mod tests {
             re_exports: Vec::new(),
             flags: 0,
         }
+    }
+
+    #[test]
+    fn reference_path_metadata_tracks_exact_depth_and_hop_bounds() {
+        let mut interner = ReferencePathInterner::default();
+        let root = interner.direct(FileId(10), ModuleLoadMechanism::EsModule);
+        let lower = interner.extend(root, FileId(5), ModuleLoadMechanism::EsModule);
+        let upper = interner.extend(lower, FileId(20), ModuleLoadMechanism::EsModule);
+
+        assert_eq!(interner.metadata[root.index()].depth, 0);
+        assert_eq!(
+            interner.metadata[lower.index()].hop_target_bounds,
+            Some((FileId(5), FileId(10)))
+        );
+        assert_eq!(interner.metadata[upper.index()].depth, 2);
+        assert_eq!(
+            interner.metadata[upper.index()].hop_target_bounds,
+            Some((FileId(5), FileId(20)))
+        );
+
+        let repeated = interner.extend(upper, FileId(10), ModuleLoadMechanism::EsModule);
+        assert_eq!(repeated, upper);
     }
 
     #[test]
