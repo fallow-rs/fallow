@@ -565,7 +565,8 @@ impl ModuleGraph {
             total_capacity,
         );
 
-        let mut reference_paths = ReferencePathInterner::default();
+        let mut reference_paths =
+            ReferencePathInterner::new(test_reachability_plan.requires_reference_provenance());
         graph.populate_references(&module_by_id, &entry_point_ids, &mut reference_paths);
 
         if namespace_features.has_aliases || namespace_features.has_re_exports {
@@ -625,9 +626,13 @@ impl ModuleGraph {
             return self.is_test_reachable(reference.from_file);
         }
 
+        let Some(path) = reference.path else {
+            return false;
+        };
+
         self.test_reachability_index.covers_reference_path(
             reference.from_file,
-            reference.path,
+            path,
             &self.reference_paths,
             &self.reference_routes,
         )
@@ -639,7 +644,7 @@ impl ModuleGraph {
         reference: &SymbolReference,
     ) -> Vec<(FileId, ModuleLoadMechanism)> {
         let mut hops = Vec::new();
-        let mut next = Some(reference.path);
+        let mut next = reference.path;
         while let Some(path_id) = next {
             let Some(node) = self.reference_paths.get(path_id.index()) else {
                 return Vec::new();

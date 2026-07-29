@@ -65,7 +65,7 @@ struct PendingCredit {
     /// into scope; used as `import_span` on the resulting reference.
     import_span: oxc_span::Span,
     /// Exact consumer-to-target path, including every named/star barrel.
-    path: ReferencePathId,
+    path: Option<ReferencePathId>,
 }
 
 /// Phase 2c: credit `export * as Foo from './bar'` member accesses onto `./bar`.
@@ -217,7 +217,7 @@ fn collect_consumer_credits(
 /// imports. `AllExports` credits short-circuit to `mark_all_exports_referenced`
 /// for the whole-object and entry-point cases.
 fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
-    type GroupKey = (usize, FileId, oxc_span::Span, ReferencePathId);
+    type GroupKey = (usize, FileId, oxc_span::Span, Option<ReferencePathId>);
 
     let mut groups: FxHashMap<GroupKey, GroupState> = FxHashMap::default();
     for credit in pending {

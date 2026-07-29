@@ -1489,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn no_profile_coverage_keeps_a_long_reference_path_on_the_fast_path() {
+    fn no_profile_coverage_omits_unused_reference_provenance() {
         const CHAIN_LENGTH: u32 = 128;
 
         let files: Vec<_> = (0..=CHAIN_LENGTH)
@@ -1559,10 +1559,8 @@ mod tests {
         let reference = &graph.modules[CHAIN_LENGTH as usize].exports[0].references[0];
 
         assert_eq!(graph.test_reachability_index.profile_count, 0);
-        assert_eq!(
-            graph.reference_path_hops(reference).len(),
-            CHAIN_LENGTH as usize
-        );
+        assert!(reference.path.is_none());
+        assert!(graph.reference_paths.is_empty());
         assert!(graph.is_test_reference_covered(reference));
     }
 

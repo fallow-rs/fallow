@@ -24,7 +24,7 @@ use super::build::{export_matches, is_css_module_path};
 pub(super) struct ReferenceSite {
     from_file: FileId,
     import_span: oxc_span::Span,
-    path: ReferencePathId,
+    path: Option<ReferencePathId>,
 }
 
 #[derive(Clone, Copy)]
@@ -40,7 +40,7 @@ impl ReferenceSite {
     pub(super) const fn exact(
         from_file: FileId,
         import_span: oxc_span::Span,
-        path: ReferencePathId,
+        path: Option<ReferencePathId>,
     ) -> Self {
         Self {
             from_file,

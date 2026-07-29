@@ -52,7 +52,7 @@ struct PendingCredit {
     /// Span of the consumer's import that brought the aliased export into scope.
     import_span: oxc_span::Span,
     /// Exact consumer-to-target path, including every alias/re-export hop.
-    path: ReferencePathId,
+    path: Option<ReferencePathId>,
 }
 
 /// Propagate cross-package consumer accesses through `NamespaceObjectAlias`
@@ -173,7 +173,7 @@ struct ConsumerCreditInput<'a> {
     import: &'a crate::resolve::ResolvedImport,
     prefix_match: &'a str,
     target_module_idx: usize,
-    path: ReferencePathId,
+    path: Option<ReferencePathId>,
     pending: &'a mut Vec<PendingCredit>,
     reference_paths: &'a mut ReferencePathInterner,
 }
@@ -366,7 +366,7 @@ impl AliasChain {
         Self { states }
     }
 
-    fn collect_credits(&self, ctx: &mut ChainWalkContext<'_>, base_path: ReferencePathId) {
+    fn collect_credits(&self, ctx: &mut ChainWalkContext<'_>, base_path: Option<ReferencePathId>) {
         if self.states.len() == 1 {
             return;
         }
@@ -418,7 +418,7 @@ impl AliasChain {
             }
             let state = &self.states[state_index].key;
             let path = ctx.reference_paths.route(
-                Some(base_path),
+                base_path,
                 graph,
                 root,
                 route_node_by_state[state_index],
@@ -456,7 +456,7 @@ fn collect_chained_re_export_credits(
     barrel_module_idx: usize,
     credited_name: &str,
     accessor_prefix: &str,
-    path: ReferencePathId,
+    path: Option<ReferencePathId>,
 ) {
     AliasChain::build(
         ctx.graph,
@@ -477,7 +477,7 @@ fn collect_chained_re_export_credits(
 /// member exports are stubbed so Phase 4 chain resolution can propagate the
 /// reference to the real defining file.
 fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
-    type GroupKey = (usize, FileId, oxc_span::Span, ReferencePathId);
+    type GroupKey = (usize, FileId, oxc_span::Span, Option<ReferencePathId>);
 
     let mut groups: FxHashMap<GroupKey, Vec<String>> = FxHashMap::default();
     for credit in pending {

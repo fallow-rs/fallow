@@ -102,10 +102,13 @@ impl NamespaceTraversal {
 
 /// One canonical persisted route graph plus the local node for every export
 /// state in `ReachableNamespaceExports`.
-pub(super) struct NamespaceReferenceRoutes {
-    graph: ReferenceRouteGraphId,
-    route_node_by_state: Vec<ReferenceRouteNodeId>,
-    terminal: ReferenceRouteNodeId,
+pub(super) enum NamespaceReferenceRoutes {
+    Untracked,
+    Exact {
+        graph: ReferenceRouteGraphId,
+        route_node_by_state: Vec<ReferenceRouteNodeId>,
+        terminal: ReferenceRouteNodeId,
+    },
 }
 
 impl NamespaceReferenceRoutes {
@@ -116,7 +119,15 @@ impl NamespaceReferenceRoutes {
         export: &ReachableNamespaceExport,
         consumer: &ConsumerImport<'_>,
         reference_paths: &mut ReferencePathInterner,
-    ) -> ReferencePathId {
+    ) -> Option<ReferencePathId> {
+        let Self::Exact {
+            graph,
+            route_node_by_state,
+            terminal,
+        } = self
+        else {
+            return None;
+        };
         let mechanism = if consumer.import.target.is_commonjs_require() {
             ModuleLoadMechanism::CommonJsRequire
         } else {
@@ -124,9 +135,9 @@ impl NamespaceReferenceRoutes {
         };
         reference_paths.route(
             None,
-            self.graph,
-            self.route_node_by_state[export.state_index],
-            self.terminal,
+            *graph,
+            route_node_by_state[export.state_index],
+            *terminal,
             Some(mechanism),
         )
     }
@@ -137,12 +148,20 @@ impl NamespaceReferenceRoutes {
         &self,
         export: &ReachableNamespaceExport,
         reference_paths: &mut ReferencePathInterner,
-    ) -> ReferencePathId {
+    ) -> Option<ReferencePathId> {
+        let Self::Exact {
+            graph,
+            route_node_by_state,
+            terminal,
+        } = self
+        else {
+            return None;
+        };
         reference_paths.route(
             None,
-            self.graph,
-            self.route_node_by_state[export.state_index],
-            self.terminal,
+            *graph,
+            route_node_by_state[export.state_index],
+            *terminal,
             None,
         )
     }
@@ -161,6 +180,10 @@ impl ReachableNamespaceExports {
         final_mechanism: ModuleLoadMechanism,
         reference_paths: &mut ReferencePathInterner,
     ) -> NamespaceReferenceRoutes {
+        if !reference_paths.tracks_provenance() {
+            return NamespaceReferenceRoutes::Untracked;
+        }
+
         let mut canonical_order: Vec<usize> = (0..self.exports.len()).collect();
         canonical_order.sort_unstable_by(|&left, &right| {
             let left_export = &self.exports[left];
@@ -199,7 +222,7 @@ impl ReachableNamespaceExports {
         ));
 
         let graph = reference_paths.intern_route_graph(ReferenceRouteGraphSpec::new(nodes));
-        NamespaceReferenceRoutes {
+        NamespaceReferenceRoutes::Exact {
             graph,
             route_node_by_state,
             terminal,

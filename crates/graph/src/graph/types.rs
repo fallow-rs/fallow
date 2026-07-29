@@ -1,6 +1,7 @@
 //! Shared graph types: module nodes, re-export edges, export symbols, and references.
 
 use std::cmp::Ordering;
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -195,7 +196,10 @@ pub struct SymbolReference {
     /// How the export is referenced.
     pub kind: ReferenceKind,
     /// Interned linked path from `from_file` to the owning export.
-    pub(crate) path: ReferencePathId,
+    ///
+    /// Legacy reachability does not need root-specific provenance and stores
+    /// `None`; profiled reachability always stores an exact path.
+    pub(crate) path: Option<ReferencePathId>,
     /// Byte span of the import statement in the referencing file.
     /// Used by the LSP to locate references for Code Lens navigation.
     #[serde(with = "crate::cache::span_serde")]
@@ -204,7 +208,7 @@ pub struct SymbolReference {
 
 /// Compact identifier for an interned reference path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ReferencePathId(pub(crate) u32);
+pub(crate) struct ReferencePathId(NonZeroU32);
 
 /// One conjunctive step in an interned export-reference route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -404,8 +408,8 @@ pub(crate) struct FinalizedReferencePaths {
 }
 
 /// Build-time interner for shared linked reference paths.
-#[derive(Default)]
 pub(crate) struct ReferencePathInterner {
+    track_provenance: bool,
     nodes: Vec<ReferencePathNode>,
     metadata: Vec<ReferencePathMetadata>,
     ids: FxHashMap<ReferencePathNode, ReferencePathId>,
@@ -419,40 +423,71 @@ struct ReferencePathMetadata {
     hop_target_bounds: Option<(FileId, FileId)>,
 }
 
+impl Default for ReferencePathInterner {
+    fn default() -> Self {
+        Self::new(true)
+    }
+}
+
 impl ReferencePathInterner {
+    pub(crate) fn new(track_provenance: bool) -> Self {
+        Self {
+            track_provenance,
+            nodes: Vec::new(),
+            metadata: Vec::new(),
+            ids: FxHashMap::default(),
+            route_graphs: Vec::new(),
+            route_graph_ids: FxHashMap::default(),
+        }
+    }
+
+    pub(crate) const fn tracks_provenance(&self) -> bool {
+        self.track_provenance
+    }
+
     /// Intern a direct consumer-to-target path.
     pub(crate) fn direct(
         &mut self,
         target: FileId,
         mechanism: ModuleLoadMechanism,
-    ) -> ReferencePathId {
-        self.intern(ReferencePathNode::Hop {
-            parent: None,
-            target,
-            mechanism,
+    ) -> Option<ReferencePathId> {
+        self.track_provenance.then(|| {
+            self.intern(ReferencePathNode::Hop {
+                parent: None,
+                target,
+                mechanism,
+            })
         })
     }
 
     /// Append one typed hop to an existing path.
     pub(crate) fn extend(
         &mut self,
-        parent: ReferencePathId,
+        parent: Option<ReferencePathId>,
         target: FileId,
         mechanism: ModuleLoadMechanism,
-    ) -> ReferencePathId {
+    ) -> Option<ReferencePathId> {
+        if !self.track_provenance {
+            debug_assert!(parent.is_none());
+            return None;
+        }
+        let Some(parent) = parent else {
+            debug_assert!(false, "tracked reference paths require an interned parent");
+            return None;
+        };
         let may_contain_target = self
             .metadata
             .get(parent.index())
             .and_then(|metadata| metadata.hop_target_bounds)
             .is_some_and(|(minimum, maximum)| target.0 >= minimum.0 && target.0 <= maximum.0);
         if may_contain_target && self.contains_target(parent, target) {
-            return parent;
+            return Some(parent);
         }
-        self.intern(ReferencePathNode::Hop {
+        Some(self.intern(ReferencePathNode::Hop {
             parent: Some(parent),
             target,
             mechanism,
-        })
+        }))
     }
 
     /// Intern one compact namespace transition graph.
@@ -460,6 +495,7 @@ impl ReferencePathInterner {
         &mut self,
         graph: ReferenceRouteGraphSpec,
     ) -> ReferenceRouteGraphId {
+        debug_assert!(self.track_provenance);
         if let Some(id) = self.route_graph_ids.get(&graph) {
             return *id;
         }
@@ -477,14 +513,17 @@ impl ReferencePathInterner {
         start: ReferenceRouteNodeId,
         terminal: ReferenceRouteNodeId,
         start_mechanism: Option<ModuleLoadMechanism>,
-    ) -> ReferencePathId {
-        self.intern(ReferencePathNode::Route {
+    ) -> Option<ReferencePathId> {
+        if !self.track_provenance {
+            return None;
+        }
+        Some(self.intern(ReferencePathNode::Route {
             parent,
             graph,
             start,
             terminal,
             start_mechanism,
-        })
+        }))
     }
 
     fn contains_target(&self, mut path: ReferencePathId, target: FileId) -> bool {
@@ -506,15 +545,11 @@ impl ReferencePathInterner {
         }
     }
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "a process cannot allocate more than u32::MAX reference path nodes"
-    )]
     fn intern(&mut self, node: ReferencePathNode) -> ReferencePathId {
         if let Some(path) = self.ids.get(&node) {
             return *path;
         }
-        let path = ReferencePathId(self.nodes.len() as u32);
+        let path = ReferencePathId::from_index(self.nodes.len());
         let parent_metadata = node
             .parent()
             .and_then(|parent| self.metadata.get(parent.index()).copied());
@@ -569,7 +604,7 @@ impl ReferencePathInterner {
             paths_by_depth[metadata.depth].push(old_index);
         }
 
-        let mut remap = vec![ReferencePathId(0); self.nodes.len()];
+        let mut remap = vec![ReferencePathId::from_index(0); self.nodes.len()];
         let mut finalized = Vec::with_capacity(self.nodes.len());
         for mut paths in paths_by_depth {
             paths.sort_unstable_by(|&left, &right| {
@@ -581,7 +616,7 @@ impl ReferencePathInterner {
                 if let ReferencePathNode::Route { graph, .. } = &mut node {
                     *graph = route_remap[graph.0 as usize];
                 }
-                let canonical = ReferencePathId(finalized.len() as u32);
+                let canonical = ReferencePathId::from_index(finalized.len());
                 remap[old_index] = canonical;
                 finalized.push(node);
             }
@@ -592,7 +627,9 @@ impl ReferencePathInterner {
             .flat_map(|module| &mut module.exports)
             .flat_map(|export| &mut export.references)
         {
-            reference.path = remap[reference.path.index()];
+            if let Some(path) = reference.path {
+                reference.path = Some(remap[path.index()]);
+            }
         }
 
         FinalizedReferencePaths {
@@ -714,8 +751,19 @@ fn finalize_route_graphs(
 }
 
 impl ReferencePathId {
+    fn from_index(index: usize) -> Self {
+        let Some(encoded) = u32::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .and_then(NonZeroU32::new)
+        else {
+            panic!("a process cannot allocate more than u32::MAX reference path nodes");
+        };
+        Self(encoded)
+    }
+
     pub(crate) const fn index(self) -> usize {
-        self.0 as usize
+        (self.0.get() - 1) as usize
     }
 }
 
@@ -790,7 +838,7 @@ mod tests {
         assert_eq!(debug_str, "DynamicImport");
     }
 
-    fn module_with_reference_paths(paths: &[ReferencePathId]) -> ModuleNode {
+    fn module_with_reference_paths(paths: &[Option<ReferencePathId>]) -> ModuleNode {
         ModuleNode {
             file_id: FileId(0),
             path: PathBuf::from("/project/source.ts"),
@@ -822,9 +870,15 @@ mod tests {
     #[test]
     fn reference_path_metadata_tracks_exact_depth_and_hop_bounds() {
         let mut interner = ReferencePathInterner::default();
-        let root = interner.direct(FileId(10), ModuleLoadMechanism::EsModule);
-        let lower = interner.extend(root, FileId(5), ModuleLoadMechanism::EsModule);
-        let upper = interner.extend(lower, FileId(20), ModuleLoadMechanism::EsModule);
+        let root = interner
+            .direct(FileId(10), ModuleLoadMechanism::EsModule)
+            .expect("tracked interner must return a path");
+        let lower = interner
+            .extend(Some(root), FileId(5), ModuleLoadMechanism::EsModule)
+            .expect("tracked interner must extend a path");
+        let upper = interner
+            .extend(Some(lower), FileId(20), ModuleLoadMechanism::EsModule)
+            .expect("tracked interner must extend a path");
 
         assert_eq!(interner.metadata[root.index()].depth, 0);
         assert_eq!(
@@ -837,8 +891,8 @@ mod tests {
             Some((FileId(5), FileId(20)))
         );
 
-        let repeated = interner.extend(upper, FileId(10), ModuleLoadMechanism::EsModule);
-        assert_eq!(repeated, upper);
+        let repeated = interner.extend(Some(upper), FileId(10), ModuleLoadMechanism::EsModule);
+        assert_eq!(repeated, Some(upper));
     }
 
     #[test]
@@ -946,7 +1000,7 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(42),
             kind: ReferenceKind::NamedImport,
-            path: ReferencePathId(0),
+            path: Some(ReferencePathId::from_index(0)),
             import_span: oxc_span::Span::new(10, 30),
         };
         assert_eq!(reference.from_file, FileId(42));
@@ -960,7 +1014,7 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(7),
             kind: ReferenceKind::ReExport,
-            path: ReferencePathId(0),
+            path: Some(ReferencePathId::from_index(0)),
             import_span: oxc_span::Span::new(5, 25),
         };
         let copied = reference;
@@ -1086,13 +1140,13 @@ mod tests {
                 SymbolReference {
                     from_file: FileId(1),
                     kind: ReferenceKind::NamedImport,
-                    path: ReferencePathId(0),
+                    path: Some(ReferencePathId::from_index(0)),
                     import_span: oxc_span::Span::new(0, 10),
                 },
                 SymbolReference {
                     from_file: FileId(2),
                     kind: ReferenceKind::ReExport,
-                    path: ReferencePathId(1),
+                    path: Some(ReferencePathId::from_index(1)),
                     import_span: oxc_span::Span::new(5, 15),
                 },
             ],

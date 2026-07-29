@@ -111,7 +111,8 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     let matching_exports_by_name = build_named_export_index(&modules[source_idx]);
 
     let mut changed = false;
-    let mut existing_references: FxHashSet<(FileId, ReferencePathId)> = FxHashSet::default();
+    let mut existing_references: FxHashSet<(FileId, Option<ReferencePathId>)> =
+        FxHashSet::default();
     let source = &mut modules[source_idx];
     for (name, refs) in &refs_by_name {
         let matching_exports: &[usize] = matching_exports_by_name
@@ -358,7 +359,7 @@ struct ApplyStarRefs<'a> {
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     triggering_is_type_only: bool,
     source_has_star_re_exports: bool,
-    existing_references: &'a mut FxHashSet<(FileId, ReferencePathId)>,
+    existing_references: &'a mut FxHashSet<(FileId, Option<ReferencePathId>)>,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
     reference_paths: &'a mut ReferencePathInterner,
 }
@@ -425,7 +426,7 @@ struct ApplyMatchingStarRefs<'a> {
     triggering_is_type_only: bool,
     source_has_star_re_exports: bool,
     matching_exports: &'a [usize],
-    existing_references: &'a mut FxHashSet<(FileId, ReferencePathId)>,
+    existing_references: &'a mut FxHashSet<(FileId, Option<ReferencePathId>)>,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
     reference_paths: &'a mut ReferencePathInterner,
 }
@@ -628,7 +629,7 @@ struct AttachMatchingStarRefs<'a> {
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     triggering_is_type_only: bool,
     exports: &'a MatchingStarExports,
-    existing_references: &'a mut FxHashSet<(FileId, ReferencePathId)>,
+    existing_references: &'a mut FxHashSet<(FileId, Option<ReferencePathId>)>,
     source_id: FileId,
     reference_paths: &'a mut ReferencePathInterner,
 }
@@ -817,7 +818,7 @@ fn attach_star_refs_to_exports(
     source: &mut ModuleNode,
     export_indices: &[usize],
     references: &[SymbolReference],
-    existing_references: &mut FxHashSet<(FileId, ReferencePathId)>,
+    existing_references: &mut FxHashSet<(FileId, Option<ReferencePathId>)>,
 ) -> bool {
     let mut changed = false;
     for export_idx in export_indices {
@@ -991,7 +992,7 @@ pub(in crate::graph) struct NamedReExportPropagation<'a> {
     pub(in crate::graph) source_idx: usize,
     pub(in crate::graph) imported_name: &'a str,
     pub(in crate::graph) exported_name: &'a str,
-    pub(in crate::graph) existing_refs: &'a mut FxHashSet<(FileId, ReferencePathId)>,
+    pub(in crate::graph) existing_refs: &'a mut FxHashSet<(FileId, Option<ReferencePathId>)>,
     pub(in crate::graph) reference_paths: &'a mut ReferencePathInterner,
 }
 
