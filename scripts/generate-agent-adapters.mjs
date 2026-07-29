@@ -69,14 +69,19 @@ const staleGeneratedAdapters = (repoRoot, names) => {
 /// Files a skill ships alongside its SKILL.md, relative to the skill directory.
 /// A skill whose SKILL.md links to `references/x.md` is broken in the adapter
 /// tree unless those files travel with it.
-const companionFiles = (skillDir, prefix = "") =>
-  readdirSync(join(skillDir, prefix), { withFileTypes: true }).flatMap((entry) => {
+const companionFiles = (skillDir, prefix = "") => {
+  const root = join(skillDir, prefix);
+  if (!existsSync(root)) {
+    return [];
+  }
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
       return companionFiles(skillDir, relativePath);
     }
     return relativePath === "SKILL.md" ? [] : [relativePath];
   });
+};
 
 export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = {}) => {
   const skills = canonicalSkills(repoRoot);
@@ -107,6 +112,20 @@ export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = 
       if (!check) {
         mkdirSync(dirname(companionDestination), { recursive: true });
         writeFileSync(companionDestination, companionSource);
+      }
+    }
+
+    // A companion deleted from the source would otherwise linger in the
+    // generated tree forever, since the loop above only visits source files.
+    const expectedCompanions = new Set(companionFiles(sourceDir));
+    for (const orphan of companionFiles(dirname(destination))) {
+      if (expectedCompanions.has(orphan)) {
+        continue;
+      }
+      const orphanPath = join(dirname(destination), orphan);
+      drifted.push(relative(repoRoot, orphanPath));
+      if (!check) {
+        rmSync(orphanPath, { force: true });
       }
     }
   }
