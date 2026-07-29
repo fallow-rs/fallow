@@ -17,9 +17,30 @@ Review changes to fallow's human-readable CLI output. This is the default user-f
 6. **Empty states**: When no issues are found, say something useful (not just silence)
 7. **Error messages**: Must tell the user what went wrong AND what to do about it
 
+## Surface-specific checks
+
+For each human-format diff, walk this list in addition to the generic checks above:
+
+- [ ] **User-facing messages with dynamic counts pluralize the noun**: any `eprintln!` / `println!` / format string that interpolates a count (`"skipped {} files"`, `"{} issues found"`, `"{} clone groups"`) must branch on `count == 1` for singular vs plural. Grep the diff for new format strings containing `{} <noun>s` and trace whether the count can be 1: `git diff origin/main..HEAD | grep -nE '^\+.*"\{\} [a-z]+s'`. The fix pattern is `let noun = if count == 1 { "file" } else { "files" };` then `"{} {noun}"` in the format string. JSON / SARIF / compact / codeclimate output bypasses this because the count is a structured integer, but human / markdown / stderr notes are read by humans and "skipped 1 files" is jarring. Compilation does not catch it; tests rarely catch it because most test fixtures produce 0 or many, and the singular case slips through until a real user runs the binary on a corpus that happens to skip exactly one item.
+
+### Human format audit (Phase 3b)
+
+The real-world corpus is intentionally untracked. Before its first use, follow
+the [benchmark setup](../../BENCHMARKS.md#comparative-benchmarks) and run
+`npm --prefix benchmarks run download-fixtures`.
+
+```bash
+FALLOW_QUIET=1 fallow <command> --root benchmarks/fixtures/real-world/zod 2>/dev/null
+```
+
+Check:
+- [ ] Colors applied correctly (red for bad, green for good, dimmed for context)
+- [ ] Empty state handled (no findings + no scores = clean message)
+- [ ] Non-empty state: sections have headers, items are readable
+
 ## Design system reference
 
-Terminal output follows a fixed design system: three output modes (human, compact, machine) and a closed set of state prefixes. Match the conventions already used by neighbouring commands rather than introducing new colours or prefixes; the palette and prefix set are not extended per feature.
+Use the existing terminal output patterns in `crates/cli/src/report/human/` as the design reference: clear section hierarchy, restrained ANSI color, readable spacing, progressive disclosure, and compatibility with compact and machine-readable modes. There are three output modes (human, compact, machine) and a closed set of state prefixes; neither the palette nor the prefix set is extended per feature.
 
 ## Key files
 

@@ -36,6 +36,10 @@ For each JSON-output diff, walk this list in addition to the generic checks abov
 
 ### JSON format audit (Phase 3a)
 
+The real-world corpus is intentionally untracked. Before its first use, follow
+the [benchmark setup](../../BENCHMARKS.md#comparative-benchmarks) and run
+`npm --prefix benchmarks run download-fixtures`.
+
 ```bash
 FALLOW_QUIET=1 fallow <command> --format json --root benchmarks/fixtures/real-world/zod 2>/dev/null | python3 -c "
 import json, sys
