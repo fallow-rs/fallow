@@ -406,7 +406,7 @@ pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option
     let mut import_actual = ImportActualVisitor { found: false };
     match factory {
         Argument::ArrowFunctionExpression(factory) => {
-            import_actual.visit_arrow_function_expression(factory)
+            import_actual.visit_arrow_function_expression(factory);
         }
         Argument::FunctionExpression(factory) => {
             import_actual.visit_function(factory, ScopeFlags::Function);
