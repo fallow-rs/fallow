@@ -2338,7 +2338,7 @@ fn health_vitest_unmock_restores_coverage_and_crap_credit() {
     assert_eq!(
         coverage["summary"]["covered_files"].as_u64(),
         Some(2),
-        "the final unmock should restore the real dependency path"
+        "the final equivalent-specifier unmock should restore the real dependency path"
     );
     let uncovered_files: Vec<_> = coverage["files"]
         .as_array()
@@ -2389,7 +2389,7 @@ fn health_vitest_unmock_restores_coverage_and_crap_credit() {
         assert_eq!(
             finding["crap"].as_f64(),
             Some(1.0),
-            "the final unmock should retain covered CRAP: {finding:#?}"
+            "the final equivalent-specifier unmock should retain covered CRAP: {finding:#?}"
         );
     }
 }
