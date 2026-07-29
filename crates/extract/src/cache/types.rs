@@ -856,7 +856,12 @@ use crate::MemberKind;
 /// Bumped to 244: dynamic import patterns now retain their module load
 /// mechanism. Warm 243 caches cannot distinguish ESM patterns from
 /// `require.context` CommonJS patterns.
-pub(super) const CACHE_VERSION: u32 = 244;
+///
+/// Bumped to 245: proven Vitest replacements now abstain whenever
+/// `vi.importActual` escapes through a property read or destructuring, not only
+/// when it is called directly. Warm 244 caches can retain false replacement
+/// facts for aliased original-module loaders.
+pub(super) const CACHE_VERSION: u32 = 245;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -391,25 +391,48 @@ pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option
     }
 
     impl<'a> Visit<'a> for ImportActualVisitor {
-        fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-            let loads_actual = match &call.callee {
-                Expression::StaticMemberExpression(member) => {
-                    member.property.name == "importActual"
-                        && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
-                }
-                Expression::ComputedMemberExpression(member) => {
-                    member
-                        .static_property_name()
-                        .is_some_and(|name| name == "importActual")
-                        && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
-                }
-                _ => false,
-            };
-            if loads_actual {
+        fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+            if member.property.name == "importActual"
+                && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+            {
                 self.found = true;
                 return;
             }
-            walk::walk_call_expression(self, call);
+            walk::walk_static_member_expression(self, member);
+        }
+
+        fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+            if member
+                .static_property_name()
+                .is_some_and(|name| name == "importActual")
+                && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+            {
+                self.found = true;
+                return;
+            }
+            walk::walk_computed_member_expression(self, member);
+        }
+
+        fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+            if let (
+                BindingPattern::ObjectPattern(pattern),
+                Some(Expression::Identifier(object)),
+            ) = (&declarator.id, &declarator.init)
+                && object.name == "vi"
+                && pattern
+                    .properties
+                    .iter()
+                    .any(|property| {
+                        property
+                            .key
+                            .static_name()
+                            .is_some_and(|name| name == "importActual")
+                    })
+            {
+                self.found = true;
+                return;
+            }
+            walk::walk_variable_declarator(self, declarator);
         }
     }
 

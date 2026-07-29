@@ -352,6 +352,10 @@ fn vitest_non_replacement_forms_abstain() {
         r#"import { vi } from "vitest"; vi.mock("./partial", (importOriginal) => importOriginal());"#,
         r#"import { vi } from "vitest"; vi.mock("./actual", async () => vi.importActual("./actual"));"#,
         r#"import { vi } from "vitest"; vi.mock("./computed", async () => vi["importActual"]("./computed"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./alias", async () => { const loadActual = vi.importActual; return loadActual("./alias"); });"#,
+        r#"import { vi } from "vitest"; vi.mock("./destructured", async () => { const { importActual: loadActual } = vi; return loadActual("./destructured"); });"#,
+        r#"import { vi } from "vitest"; vi.mock("./call", async () => vi.importActual.call(vi, "./call"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./reflect", async () => Reflect.apply(vi.importActual, vi, ["./reflect"]));"#,
         r#"const vi = localMockApi; vi.mock("./local", () => ({}));"#,
         r#"vi.mock("./global", () => ({}));"#,
     ] {
