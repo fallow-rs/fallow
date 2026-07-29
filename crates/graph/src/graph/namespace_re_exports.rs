@@ -29,16 +29,19 @@
 //! (reachability) so credits attached here participate in reachability and
 //! Phase 4 chain propagation downstream. See issue #324.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
+#[cfg(test)]
+use rustc_hash::FxHashSet;
 
 use super::ModuleGraph;
-use super::namespace_indexes::NamespacePropagationIndexes;
+use super::namespace_indexes::{NamespacePropagationIndexes, ReachableNamespaceExports};
 use super::narrowing::{
-    ReferenceTarget, create_synthetic_exports_for_star_re_exports, mark_all_exports_referenced,
-    mark_member_exports_referenced,
+    ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
+    mark_all_exports_referenced_at_site, mark_member_exports_referenced_at_site,
 };
-use super::types::{ReferenceKind, ReferencePathInterner};
+use super::types::{ReferenceKind, ReferencePathId, ReferencePathInterner};
 use fallow_types::discover::FileId;
+use fallow_types::extract::ModuleLoadMechanism;
 
 /// Either credit a specific member on the target, or credit every export
 /// (whole-object use, or entry-point exposure where the external accesses
@@ -59,6 +62,8 @@ struct PendingCredit {
     /// Span of the consumer's import that brought the re-exported binding
     /// into scope; used as `import_span` on the resulting reference.
     import_span: oxc_span::Span,
+    /// Exact consumer-to-target path, including every named/star barrel.
+    path: ReferencePathId,
 }
 
 /// Phase 2c: credit `export * as Foo from './bar'` member accesses onto `./bar`.
@@ -95,30 +100,37 @@ pub(super) fn propagate_namespace_re_exports(
 
         let reachable = indexes.enumerate_reachable_barrels(*barrel_file_id, exported_name);
 
-        if reachable.iter().any(|(file_id, _)| {
+        for export in reachable.iter().filter(|export| {
             graph
                 .modules
-                .get(file_id.0 as usize)
+                .get(export.file_id.0 as usize)
                 .is_some_and(super::types::ModuleNode::is_entry_point)
         }) {
+            let path = reachable.entry_path(
+                export,
+                *source_file_id,
+                ModuleLoadMechanism::EsModule,
+                reference_paths,
+            );
             pending.push(PendingCredit {
                 target_module_idx,
                 kind: CreditKind::AllExports,
-                consumer_file_id: *barrel_file_id,
+                consumer_file_id: export.file_id,
                 import_span: oxc_span::Span::default(),
+                path,
             });
         }
 
-        collect_consumer_credits(
+        let context = ConsumerCreditContext {
             indexes,
-            *barrel_file_id,
+            seed_barrel_file: *barrel_file_id,
             target_module_idx,
-            &reachable,
-            &mut pending,
-        );
+            final_target: *source_file_id,
+        };
+        collect_consumer_credits(&context, &reachable, &mut pending, reference_paths);
     }
 
-    apply_pending_credits(graph, &pending, reference_paths);
+    apply_pending_credits(graph, &pending);
 }
 
 /// Map a `FileId` to its index in `graph.modules`. Returns `None` if the id
@@ -132,20 +144,36 @@ fn module_index_for_file(graph: &ModuleGraph, file_id: FileId) -> Option<usize> 
 /// For every consumer in `module_by_id` that imports a name reachable from
 /// the seed namespace re-export, collect a `PendingCredit` per
 /// `<local>.<member>` access and per whole-object use.
-fn collect_consumer_credits(
-    indexes: &NamespacePropagationIndexes<'_>,
+struct ConsumerCreditContext<'indexes, 'modules> {
+    indexes: &'indexes NamespacePropagationIndexes<'modules>,
     seed_barrel_file: FileId,
     target_module_idx: usize,
-    reachable: &FxHashSet<(FileId, String)>,
+    final_target: FileId,
+}
+
+fn collect_consumer_credits(
+    context: &ConsumerCreditContext<'_, '_>,
+    reachable: &ReachableNamespaceExports,
     pending: &mut Vec<PendingCredit>,
+    reference_paths: &mut ReferencePathInterner,
 ) {
-    for (import_target, imported_name) in reachable {
-        for indexed in indexes.consumers_for(*import_target, imported_name) {
+    for export in reachable.iter() {
+        for indexed in context
+            .indexes
+            .consumers_for(export.file_id, &export.exported_name)
+        {
             let consumer = indexed.consumer;
             let import = indexed.import;
-            if consumer.file_id == seed_barrel_file {
+            if consumer.file_id == context.seed_barrel_file {
                 continue;
             }
+            let path = reachable.consumer_path(
+                export,
+                indexed,
+                context.final_target,
+                ModuleLoadMechanism::EsModule,
+                reference_paths,
+            );
 
             let consumer_local = import.info.local_name.as_str();
             if consumer_local.is_empty() {
@@ -162,10 +190,11 @@ fn collect_consumer_credits(
                 .any(|n| n == consumer_local);
             if whole_object {
                 pending.push(PendingCredit {
-                    target_module_idx,
+                    target_module_idx: context.target_module_idx,
                     kind: CreditKind::AllExports,
                     consumer_file_id: consumer.file_id,
                     import_span: import.info.span,
+                    path,
                 });
                 continue;
             }
@@ -175,28 +204,25 @@ fn collect_consumer_credits(
                     continue;
                 }
                 pending.push(PendingCredit {
-                    target_module_idx,
+                    target_module_idx: context.target_module_idx,
                     kind: CreditKind::Member(access.member.clone()),
                     consumer_file_id: consumer.file_id,
                     import_span: import.info.span,
+                    path,
                 });
             }
         }
     }
 }
 
-/// Apply the collected credits, grouping by `(target_module_idx, consumer_file_id, import_span)`
-/// so each `(consumer file, namespace target, import site)` runs through the
+/// Apply the collected credits, grouping by the exact reference site so each
+/// `(consumer file, namespace target, import site, path)` runs through the
 /// same `mark_member_exports_referenced` plus `create_synthetic_exports_for_star_re_exports`
 /// pipeline that `narrow_namespace_references` uses for direct namespace
 /// imports. `AllExports` credits short-circuit to `mark_all_exports_referenced`
 /// for the whole-object and entry-point cases.
-fn apply_pending_credits(
-    graph: &mut ModuleGraph,
-    pending: &[PendingCredit],
-    reference_paths: &mut ReferencePathInterner,
-) {
-    type GroupKey = (usize, FileId, oxc_span::Span);
+fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
+    type GroupKey = (usize, FileId, oxc_span::Span, ReferencePathId);
 
     let mut groups: FxHashMap<GroupKey, GroupState> = FxHashMap::default();
     for credit in pending {
@@ -204,6 +230,7 @@ fn apply_pending_credits(
             credit.target_module_idx,
             credit.consumer_file_id,
             credit.import_span,
+            credit.path,
         );
         let entry = groups.entry(key).or_default();
         match &credit.kind {
@@ -219,31 +246,28 @@ fn apply_pending_credits(
         }
     }
 
-    for ((target_module_idx, consumer_file_id, import_span), state) in groups {
+    for ((target_module_idx, consumer_file_id, import_span, path), state) in groups {
         let module = &mut graph.modules[target_module_idx];
-        let target_file = module.file_id;
-        let target = ReferenceTarget {
-            source_id: consumer_file_id,
-            target_id: target_file,
-            import_span,
-            kind: ReferenceKind::NamespaceImport,
-        };
+        let site = ReferenceSite::exact(consumer_file_id, import_span, path);
         if state.whole_object {
-            mark_all_exports_referenced(&mut module.exports, target, reference_paths);
-        } else {
-            let found = mark_member_exports_referenced(
+            mark_all_exports_referenced_at_site(
                 &mut module.exports,
-                target,
-                &state.members,
-                reference_paths,
+                site,
+                ReferenceKind::NamespaceImport,
             );
-            create_synthetic_exports_for_star_re_exports(
+        } else {
+            let found = mark_member_exports_referenced_at_site(
+                &mut module.exports,
+                site,
+                &state.members,
+                ReferenceKind::NamespaceImport,
+            );
+            create_synthetic_exports_for_star_re_exports_at_site(
                 &mut module.exports,
                 &module.re_exports,
-                target,
+                site,
                 &state.members,
                 &found,
-                reference_paths,
             );
         }
     }
@@ -259,7 +283,10 @@ struct GroupState {
 mod tests {
     use super::*;
     use crate::graph::ModuleGraph;
-    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+    use crate::resolve::{
+        ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
+        ResolvedReplacedModuleTarget,
+    };
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
     use fallow_types::extract::{
         ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess, ReExportInfo, VisibilityTag,
@@ -289,6 +316,15 @@ mod tests {
     }
 
     fn named_import_from(source: &str, name: &str, target: FileId) -> ResolvedImport {
+        named_import_with_mechanism(source, name, target, false)
+    }
+
+    fn named_import_with_mechanism(
+        source: &str,
+        name: &str,
+        target: FileId,
+        commonjs: bool,
+    ) -> ResolvedImport {
         ResolvedImport {
             info: ImportInfo {
                 source: source.to_string(),
@@ -299,7 +335,11 @@ mod tests {
                 span: oxc_span::Span::new(0, 10),
                 source_span: oxc_span::Span::default(),
             },
-            target: ResolveResult::InternalModule(target),
+            target: if commonjs {
+                ResolveResult::CommonJsInternalModule(target)
+            } else {
+                ResolveResult::InternalModule(target)
+            },
         }
     }
 
@@ -327,6 +367,117 @@ mod tests {
             },
             target: ResolveResult::InternalModule(target),
         }
+    }
+
+    fn namespace_coverage_graph(commonjs_consumer: bool) -> ModuleGraph {
+        let files = vec![
+            discovered_file(0, "/project/consumer.test.ts", 100),
+            discovered_file(1, "/project/barrel.ts", 50),
+            discovered_file(2, "/project/source.ts", 50),
+            discovered_file(3, "/project/alternate.ts", 50),
+        ];
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![
+                    named_import_with_mechanism("./barrel", "Ns", FileId(1), commonjs_consumer),
+                    ResolvedImport {
+                        info: ImportInfo {
+                            source: "./alternate".to_string(),
+                            imported_name: ImportedName::SideEffect,
+                            local_name: String::new(),
+                            is_type_only: false,
+                            from_style: false,
+                            span: oxc_span::Span::new(20, 30),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(3)),
+                    },
+                ],
+                member_accesses: vec![MemberAccess {
+                    object: "Ns".to_string(),
+                    member: "used".to_string(),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![ns_re_export("./source", "Ns", FileId(2))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![named_export("used")],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./source".to_string(),
+                        imported_name: ImportedName::SideEffect,
+                        local_name: String::new(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(2)),
+                }],
+                ..Default::default()
+            },
+        ];
+        let test_entries = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(1),
+            }],
+            &test_entries,
+            &[],
+            &test_entries,
+            &files,
+        )
+    }
+
+    #[test]
+    fn mocked_namespace_barrel_stays_uncovered_when_target_has_an_alternate_route() {
+        let graph = namespace_coverage_graph(false);
+        let reference = &graph.modules[2].exports[0].references[0];
+
+        assert!(graph.modules[2].is_test_reachable());
+        assert_eq!(
+            graph.reference_path_hops(reference),
+            vec![
+                (FileId(2), ModuleLoadMechanism::EsModule),
+                (FileId(1), ModuleLoadMechanism::EsModule),
+            ]
+        );
+        assert!(!graph.is_test_reference_covered(reference));
+    }
+
+    #[test]
+    fn commonjs_namespace_consumer_retains_its_exact_load_path() {
+        let graph = namespace_coverage_graph(true);
+        let reference = &graph.modules[2].exports[0].references[0];
+
+        assert_eq!(
+            graph.reference_path_hops(reference),
+            vec![
+                (FileId(2), ModuleLoadMechanism::EsModule),
+                (FileId(1), ModuleLoadMechanism::CommonJsRequire),
+            ]
+        );
+        assert!(graph.is_test_reference_covered(reference));
     }
 
     #[test]

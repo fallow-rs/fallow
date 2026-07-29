@@ -21,16 +21,17 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportedName, NamespaceObjectAlias};
+use fallow_types::extract::{ImportedName, ModuleLoadMechanism, NamespaceObjectAlias};
 
 use crate::resolve::ResolvedModule;
 
 use super::ModuleGraph;
-use super::namespace_indexes::NamespacePropagationIndexes;
+use super::namespace_indexes::{NamespacePropagationIndexes, ReachableNamespaceExports};
 use super::narrowing::{
-    ReferenceTarget, create_synthetic_exports_for_star_re_exports, mark_member_exports_referenced,
+    ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
+    mark_member_exports_referenced_at_site,
 };
-use super::types::{ReferenceKind, ReferencePathInterner};
+use super::types::{ReferenceKind, ReferencePathId, ReferencePathInterner};
 
 /// One credit operation collected during the scan and applied after the loop
 /// to keep mutable borrows of `ModuleGraph::modules` localised.
@@ -43,6 +44,8 @@ struct PendingCredit {
     consumer_file_id: FileId,
     /// Span of the consumer's import that brought the aliased export into scope.
     import_span: oxc_span::Span,
+    /// Exact consumer-to-target path, including every alias/re-export hop.
+    path: ReferencePathId,
 }
 
 /// Propagate cross-package consumer accesses through `NamespaceObjectAlias`
@@ -55,14 +58,15 @@ pub(super) fn propagate_cross_package_aliases(
     indexes: &NamespacePropagationIndexes<'_>,
     reference_paths: &mut ReferencePathInterner,
 ) {
-    let pending = collect_pending_credits(graph, module_by_id, indexes);
-    apply_pending_credits(graph, &pending, reference_paths);
+    let pending = collect_pending_credits(graph, module_by_id, indexes, reference_paths);
+    apply_pending_credits(graph, &pending);
 }
 
 fn collect_pending_credits(
     graph: &ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     indexes: &NamespacePropagationIndexes<'_>,
+    reference_paths: &mut ReferencePathInterner,
 ) -> Vec<PendingCredit> {
     let mut pending = Vec::new();
 
@@ -72,10 +76,11 @@ fn collect_pending_credits(
         }
         let alias_file_id = alias_module.file_id;
         for alias in &alias_module.namespace_object_aliases {
-            let Some(namespace_target_id) = resolve_namespace_target(alias_module, alias) else {
+            let Some(namespace_target) = resolve_namespace_target(alias_module, alias) else {
                 continue;
             };
-            let Some(target_module_idx) = module_index_for_file(graph, namespace_target_id) else {
+            let Some(target_module_idx) = module_index_for_file(graph, namespace_target.file_id)
+            else {
                 continue;
             };
             let reachable =
@@ -87,7 +92,9 @@ fn collect_pending_credits(
                 alias,
                 target_module_idx,
                 reachable: &reachable,
+                namespace_target,
                 pending: &mut pending,
+                reference_paths,
             });
         }
     }
@@ -98,10 +105,16 @@ fn collect_pending_credits(
 /// Resolve the file_id of a namespace import on `alias_module` whose local
 /// name matches `alias.namespace_local`. Only `InternalModule` targets count;
 /// external packages cannot have references propagated.
+#[derive(Clone, Copy)]
+struct NamespaceTarget {
+    file_id: FileId,
+    mechanism: ModuleLoadMechanism,
+}
+
 fn resolve_namespace_target(
     alias_module: &ResolvedModule,
     alias: &NamespaceObjectAlias,
-) -> Option<FileId> {
+) -> Option<NamespaceTarget> {
     alias_module.resolved_imports.iter().find_map(|import| {
         if import.info.local_name != alias.namespace_local {
             return None;
@@ -109,7 +122,14 @@ fn resolve_namespace_target(
         if !matches!(import.info.imported_name, ImportedName::Namespace) {
             return None;
         }
-        import.target.internal_file_id()
+        Some(NamespaceTarget {
+            file_id: import.target.internal_file_id()?,
+            mechanism: if import.target.is_commonjs_require() {
+                ModuleLoadMechanism::CommonJsRequire
+            } else {
+                ModuleLoadMechanism::EsModule
+            },
+        })
     })
 }
 
@@ -127,8 +147,10 @@ struct NamespaceCreditInput<'a> {
     alias_file_id: FileId,
     alias: &'a NamespaceObjectAlias,
     target_module_idx: usize,
-    reachable: &'a FxHashSet<(FileId, String)>,
+    reachable: &'a ReachableNamespaceExports,
+    namespace_target: NamespaceTarget,
     pending: &'a mut Vec<PendingCredit>,
+    reference_paths: &'a mut ReferencePathInterner,
 }
 
 struct ConsumerCreditInput<'a> {
@@ -137,7 +159,9 @@ struct ConsumerCreditInput<'a> {
     import: &'a crate::resolve::ResolvedImport,
     prefix_match: &'a str,
     target_module_idx: usize,
+    path: ReferencePathId,
     pending: &'a mut Vec<PendingCredit>,
+    reference_paths: &'a mut ReferencePathInterner,
 }
 
 fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
@@ -148,23 +172,34 @@ fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
         alias,
         target_module_idx,
         reachable,
+        namespace_target,
         pending,
+        reference_paths,
     } = input;
     let prefix_match = format!(".{}", alias.suffix);
-    for (target, imported_name) in reachable {
-        for indexed in indexes.consumers_for(*target, imported_name) {
+    for export in reachable.iter() {
+        for indexed in indexes.consumers_for(export.file_id, &export.exported_name) {
             let consumer = indexed.consumer;
             let import = indexed.import;
             if consumer.file_id == alias_file_id {
                 continue;
             }
+            let path = reachable.consumer_path(
+                export,
+                indexed,
+                namespace_target.file_id,
+                namespace_target.mechanism,
+                reference_paths,
+            );
             collect_credits_for_consumer_import(&mut ConsumerCreditInput {
                 graph,
                 consumer,
                 import,
                 prefix_match: &prefix_match,
                 target_module_idx,
+                path,
                 pending,
+                reference_paths,
             });
         }
     }
@@ -179,7 +214,9 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
     let import = input.import;
     let prefix_match = input.prefix_match;
     let target_module_idx = input.target_module_idx;
+    let path = input.path;
     let pending = &mut *input.pending;
+    let reference_paths = &mut *input.reference_paths;
 
     let consumer_local = import.info.local_name.as_str();
     if consumer_local.is_empty() {
@@ -195,21 +232,24 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
             member: access.member.clone(),
             consumer_file_id: consumer.file_id,
             import_span: import.info.span,
+            path,
         });
         let mut visited: FxHashSet<usize> = FxHashSet::default();
         visited.insert(target_module_idx);
-        let ctx = ChainWalkCtx {
+        let mut ctx = ChainWalkContext {
             graph,
             consumer,
             import_span: import.info.span,
+            pending,
+            reference_paths,
         };
         collect_chained_re_export_credits(
-            &ctx,
+            &mut ctx,
             target_module_idx,
             &access.member,
             &format!("{expected_object}.{}", access.member),
+            path,
             &mut visited,
-            pending,
         );
     }
 }
@@ -217,12 +257,13 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
 /// Invariant context passed through the chain walker: the read-only graph,
 /// the consumer module producing the accesses, and the original import span
 /// to use as the `from` site on every resulting `SymbolReference`. Grouped
-/// into a struct so the recursive helper stays under the workspace's 7-arg
-/// clippy limit.
-struct ChainWalkCtx<'a> {
+/// into a struct so the recursive helper keeps one explicit traversal contract.
+struct ChainWalkContext<'a> {
     graph: &'a ModuleGraph,
     consumer: &'a ResolvedModule,
     import_span: oxc_span::Span,
+    pending: &'a mut Vec<PendingCredit>,
+    reference_paths: &'a mut ReferencePathInterner,
 }
 
 /// Follow `export * as <name> from './source'` chains on the alias target
@@ -232,12 +273,12 @@ struct ChainWalkCtx<'a> {
 /// the re-export's `source_file`. Recurses if the new credit also lands on
 /// another namespace re-export, bounded by `visited` to short-circuit cycles.
 fn collect_chained_re_export_credits(
-    ctx: &ChainWalkCtx<'_>,
+    ctx: &mut ChainWalkContext<'_>,
     barrel_module_idx: usize,
     credited_name: &str,
     accessor_prefix: &str,
+    path: ReferencePathId,
     visited: &mut FxHashSet<usize>,
-    pending: &mut Vec<PendingCredit>,
 ) {
     let Some(barrel) = ctx.graph.modules.get(barrel_module_idx) else {
         return;
@@ -255,25 +296,34 @@ fn collect_chained_re_export_credits(
         if !visited.insert(source_module_idx) {
             continue;
         }
-        for access in &ctx.consumer.member_accesses {
-            if access.object != accessor_prefix {
-                continue;
-            }
-            pending.push(PendingCredit {
+        let source_path =
+            ctx.reference_paths
+                .extend(path, source_file, ModuleLoadMechanism::EsModule);
+        let accessed_members: Vec<String> = ctx
+            .consumer
+            .member_accesses
+            .iter()
+            .filter(|access| access.object == accessor_prefix)
+            .map(|access| access.member.clone())
+            .collect();
+        for member in accessed_members {
+            ctx.pending.push(PendingCredit {
                 target_module_idx: source_module_idx,
-                member: access.member.clone(),
+                member: member.clone(),
                 consumer_file_id: ctx.consumer.file_id,
                 import_span: ctx.import_span,
+                path: source_path,
             });
             collect_chained_re_export_credits(
                 ctx,
                 source_module_idx,
-                &access.member,
-                &format!("{accessor_prefix}.{}", access.member),
+                &member,
+                &format!("{accessor_prefix}.{member}"),
+                source_path,
                 visited,
-                pending,
             );
         }
+        visited.remove(&source_module_idx);
     }
 }
 
@@ -285,12 +335,8 @@ fn collect_chained_re_export_credits(
 /// namespace target is a star barrel (`export * from './bar'`): missing
 /// member exports are stubbed so Phase 4 chain resolution can propagate the
 /// reference to the real defining file.
-fn apply_pending_credits(
-    graph: &mut ModuleGraph,
-    pending: &[PendingCredit],
-    reference_paths: &mut ReferencePathInterner,
-) {
-    type GroupKey = (usize, FileId, oxc_span::Span);
+fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
+    type GroupKey = (usize, FileId, oxc_span::Span, ReferencePathId);
 
     let mut groups: FxHashMap<GroupKey, Vec<String>> = FxHashMap::default();
     for credit in pending {
@@ -299,29 +345,27 @@ fn apply_pending_credits(
                 credit.target_module_idx,
                 credit.consumer_file_id,
                 credit.import_span,
+                credit.path,
             ))
             .or_default()
             .push(credit.member.clone());
     }
 
-    for ((target_module_idx, consumer_file_id, import_span), members) in groups {
+    for ((target_module_idx, consumer_file_id, import_span, path), members) in groups {
         let module = &mut graph.modules[target_module_idx];
-        let target_file = module.file_id;
-        let target = ReferenceTarget {
-            source_id: consumer_file_id,
-            target_id: target_file,
-            import_span,
-            kind: ReferenceKind::NamespaceImport,
-        };
-        let found_members =
-            mark_member_exports_referenced(&mut module.exports, target, &members, reference_paths);
-        create_synthetic_exports_for_star_re_exports(
+        let site = ReferenceSite::exact(consumer_file_id, import_span, path);
+        let found_members = mark_member_exports_referenced_at_site(
+            &mut module.exports,
+            site,
+            &members,
+            ReferenceKind::NamespaceImport,
+        );
+        create_synthetic_exports_for_star_re_exports_at_site(
             &mut module.exports,
             &module.re_exports,
-            target,
+            site,
             &members,
             &found_members,
-            reference_paths,
         );
     }
 }

@@ -8,7 +8,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::ResolvedModule;
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportedName, ModuleLoadMechanism, VisibilityTag};
+#[cfg(test)]
+use fallow_types::extract::ModuleLoadMechanism;
+use fallow_types::extract::{ImportedName, VisibilityTag};
 
 use super::types::{
     ExportSymbol, ReExportEdge, ReferenceKind, ReferencePathId, ReferencePathInterner,
@@ -19,13 +21,14 @@ use super::{ImportedSymbol, ModuleNode};
 use super::build::{export_matches, is_css_module_path};
 
 #[derive(Clone, Copy)]
-struct ReferenceSite {
+pub(super) struct ReferenceSite {
     from_file: FileId,
     import_span: oxc_span::Span,
     path: ReferencePathId,
 }
 
 #[derive(Clone, Copy)]
+#[cfg(test)]
 pub(super) struct ReferenceTarget {
     pub(super) source_id: FileId,
     pub(super) target_id: FileId,
@@ -34,6 +37,19 @@ pub(super) struct ReferenceTarget {
 }
 
 impl ReferenceSite {
+    pub(super) const fn exact(
+        from_file: FileId,
+        import_span: oxc_span::Span,
+        path: ReferencePathId,
+    ) -> Self {
+        Self {
+            from_file,
+            import_span,
+            path,
+        }
+    }
+
+    #[cfg(test)]
     fn esm(target: ReferenceTarget, reference_paths: &mut ReferencePathInterner) -> Self {
         Self {
             from_file: target.source_id,
@@ -87,6 +103,7 @@ fn extract_accessed_members(source_mod: Option<&&ResolvedModule>, local_name: &s
 /// Deduplicates by source and runtime mechanism. A source can retain one ESM
 /// and one CommonJS reference because replacement coverage treats them
 /// differently.
+#[cfg(test)]
 pub(super) fn mark_all_exports_referenced(
     exports: &mut Vec<ExportSymbol>,
     target: ReferenceTarget,
@@ -99,7 +116,7 @@ pub(super) fn mark_all_exports_referenced(
     );
 }
 
-fn mark_all_exports_referenced_at_site(
+pub(super) fn mark_all_exports_referenced_at_site(
     exports: &mut Vec<ExportSymbol>,
     site: ReferenceSite,
     kind: ReferenceKind,
@@ -127,6 +144,7 @@ fn attach_reference(export: &mut ExportSymbol, site: ReferenceSite, kind: Refere
 /// Mark only exports whose names appear in `accessed_members` as referenced.
 ///
 /// Returns the set of member names that were found among the exports.
+#[cfg(test)]
 pub(super) fn mark_member_exports_referenced(
     exports: &mut [ExportSymbol],
     target: ReferenceTarget,
@@ -141,7 +159,7 @@ pub(super) fn mark_member_exports_referenced(
     )
 }
 
-fn mark_member_exports_referenced_at_site(
+pub(super) fn mark_member_exports_referenced_at_site(
     exports: &mut [ExportSymbol],
     site: ReferenceSite,
     accessed_members: &[String],
@@ -165,6 +183,7 @@ fn mark_member_exports_referenced_at_site(
 /// Create synthetic `ExportSymbol` entries for members accessed via namespace import
 /// that were not found among the target's own exports, but the target has `export *`
 /// re-exports that may forward those names.
+#[cfg(test)]
 pub(super) fn create_synthetic_exports_for_star_re_exports(
     exports: &mut Vec<ExportSymbol>,
     re_exports: &[ReExportEdge],
@@ -182,7 +201,7 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
     );
 }
 
-fn create_synthetic_exports_for_star_re_exports_at_site(
+pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
     exports: &mut Vec<ExportSymbol>,
     re_exports: &[ReExportEdge],
     site: ReferenceSite,

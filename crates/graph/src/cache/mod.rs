@@ -42,7 +42,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 13: export references now retain interned linked module-load paths
 /// so cached coverage checks include every re-export hop.
-pub const GRAPH_CACHE_VERSION: u32 = 13;
+///
+/// Bumped to 14: namespace-derived references retain the exact consumer and
+/// re-export path instead of collapsing onto the ultimate target.
+pub const GRAPH_CACHE_VERSION: u32 = 14;
 
 /// Cached form of a resolved target.
 ///
