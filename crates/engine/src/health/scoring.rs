@@ -616,11 +616,7 @@ fn template_inherit_context_from_importers(
         if test_coverage.covers_file(owner_node.file_id) {
             any_reachable = true;
             provenance.get_or_insert_with(|| (*owner_path).clone());
-            let refs = build_test_referenced_exports(
-                owner_node.file_id,
-                &owner_node.exports,
-                test_coverage,
-            );
+            let refs = build_test_referenced_exports(&owner_node.exports, test_coverage);
             combined_refs.extend(refs);
         }
     }
@@ -666,7 +662,6 @@ fn is_template_owner_path(path: &std::path::Path) -> bool {
 /// This is the per-function signal: if an export named "foo" has a reference from
 /// a test-reachable module, the function "foo" is considered directly tested.
 fn build_test_referenced_exports(
-    target_file: crate::discover::FileId,
     exports: &[fallow_graph::graph::ExportSymbol],
     test_coverage: StaticTestCoverage<'_>,
 ) -> rustc_hash::FxHashSet<String> {
@@ -678,7 +673,7 @@ fn build_test_referenced_exports(
         let has_test_ref = export
             .references
             .iter()
-            .any(|reference| test_coverage.covers_reference(target_file, reference));
+            .any(|reference| test_coverage.covers_reference(reference));
         if has_test_ref {
             set.insert(export.name.to_string());
         }
@@ -1559,13 +1554,9 @@ fn compute_file_score_crap(
         CrapCoverageResolution::Istanbul { file_coverage } => {
             compute_istanbul_file_crap(module, file_coverage, is_test_reachable)
         }
-        CrapCoverageResolution::StaticEstimated => compute_static_file_crap(
-            module,
-            node.file_id,
-            &node.exports,
-            test_coverage,
-            is_test_reachable,
-        ),
+        CrapCoverageResolution::StaticEstimated => {
+            compute_static_file_crap(module, &node.exports, test_coverage, is_test_reachable)
+        }
     }
 }
 
@@ -1595,12 +1586,11 @@ fn compute_istanbul_file_crap(
 
 fn compute_static_file_crap(
     module: &crate::source::ModuleInfo,
-    target_file: crate::discover::FileId,
     exports: &[fallow_graph::graph::ExportSymbol],
     test_coverage: StaticTestCoverage<'_>,
     is_test_reachable: bool,
 ) -> FileScoreCrap {
-    let test_refs = build_test_referenced_exports(target_file, exports, test_coverage);
+    let test_refs = build_test_referenced_exports(exports, test_coverage);
     FileScoreCrap::estimated(compute_crap_scores_estimated(
         &module.complexity,
         &test_refs,
@@ -4664,11 +4654,7 @@ mod tests {
     fn build_test_refs_empty() {
         let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
         let graph = fallow_graph::graph::ModuleGraph::build(&[], &[], &[]);
-        let refs = build_test_referenced_exports(
-            crate::discover::FileId(0),
-            &exports,
-            StaticTestCoverage::new(&graph),
-        );
+        let refs = build_test_referenced_exports(&exports, StaticTestCoverage::new(&graph));
         assert!(refs.is_empty());
     }
 
@@ -4676,11 +4662,7 @@ mod tests {
     fn build_test_refs_empty_inputs() {
         let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
         let graph = fallow_graph::graph::ModuleGraph::build(&[], &[], &[]);
-        let refs = build_test_referenced_exports(
-            crate::discover::FileId(0),
-            &exports,
-            StaticTestCoverage::new(&graph),
-        );
+        let refs = build_test_referenced_exports(&exports, StaticTestCoverage::new(&graph));
         assert!(refs.is_empty());
     }
 
