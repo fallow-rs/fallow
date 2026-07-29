@@ -1,10 +1,13 @@
 use std::path::Path;
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{Comment, Program};
+use oxc_ast::{
+    AstKind,
+    ast::{Comment, Program},
+};
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc_span::{SourceType, Span};
 
 use crate::ExportInfo;
 use crate::ModuleInfo;
@@ -17,7 +20,7 @@ use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
 use crate::visitor::{ModuleInfoExtractor, RouteLoadHarvestMode};
 use fallow_types::discover::FileId;
-use fallow_types::extract::{FlagUse, FunctionComplexity, ImportInfo, VisibilityTag};
+use fallow_types::extract::{FlagUse, FunctionComplexity, ImportInfo, ImportedName, VisibilityTag};
 
 struct JsxRetryParse {
     extractor: ModuleInfoExtractor,
@@ -234,6 +237,7 @@ fn build_primary_extractor(
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
     let semantic_usage =
         compute_semantic_usage(program, &extractor.imports, &template_used_imports);
+    extractor.resolve_vitest_replacement_candidates(&semantic_usage.vitest_vi_reference_spans);
     (extractor, semantic_usage)
 }
 
@@ -377,6 +381,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         &extractor.imports,
         &template_used_imports,
     );
+    extractor.resolve_vitest_replacement_candidates(&semantic_usage.vitest_vi_reference_spans);
     let complexity = retry_complexity(
         input.need_complexity,
         &retry_return.program,
@@ -1084,6 +1089,7 @@ pub struct ImportBindingUsage {
 pub struct SemanticUsage {
     pub import_binding_usage: ImportBindingUsage,
     pub auto_import_candidates: Vec<String>,
+    pub(crate) vitest_vi_reference_spans: rustc_hash::FxHashSet<Span>,
 }
 
 pub fn compute_semantic_usage(
@@ -1142,6 +1148,8 @@ pub fn compute_semantic_usage(
     let mut value_referenced_bindings: Vec<String> =
         value_referenced_bindings.into_iter().collect();
     value_referenced_bindings.sort_unstable();
+    let vitest_vi_reference_spans =
+        compute_vitest_vi_reference_spans(&semantic, imports, root_scope);
 
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
@@ -1150,7 +1158,41 @@ pub fn compute_semantic_usage(
             value_referenced: value_referenced_bindings,
         },
         auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
+        vitest_vi_reference_spans,
     }
+}
+
+fn compute_vitest_vi_reference_spans(
+    semantic: &oxc_semantic::Semantic<'_>,
+    imports: &[ImportInfo],
+    root_scope: oxc_semantic::ScopeId,
+) -> rustc_hash::FxHashSet<Span> {
+    let has_direct_vitest_import = imports.iter().any(|import| {
+        import.source == "vitest"
+            && import.local_name == "vi"
+            && !import.is_type_only
+            && matches!(&import.imported_name, ImportedName::Named(name) if name == "vi")
+    });
+    if !has_direct_vitest_import {
+        return rustc_hash::FxHashSet::default();
+    }
+
+    let scoping = semantic.scoping();
+    let Some(symbol_id) = scoping.get_binding(root_scope, oxc_str::Ident::from("vi")) else {
+        return rustc_hash::FxHashSet::default();
+    };
+
+    scoping
+        .get_resolved_references(symbol_id)
+        .filter_map(|reference| {
+            let AstKind::IdentifierReference(identifier) =
+                semantic.nodes().kind(reference.node_id())
+            else {
+                return None;
+            };
+            Some(identifier.span)
+        })
+        .collect()
 }
 
 pub fn compute_auto_import_candidates(program: &Program<'_>) -> Vec<String> {

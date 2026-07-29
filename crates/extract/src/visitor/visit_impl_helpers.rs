@@ -193,18 +193,7 @@ pub(super) fn is_private_member_key(key: &PropertyKey<'_>) -> bool {
 }
 
 pub(super) fn vitest_mock_source(call: &CallExpression<'_>) -> Option<String> {
-    let Expression::StaticMemberExpression(member) = &call.callee else {
-        return None;
-    };
-    if member.property.name != "mock" {
-        return None;
-    }
-    let Expression::Identifier(object) = &member.object else {
-        return None;
-    };
-    if object.name != "vi" {
-        return None;
-    }
+    vitest_mock_object_span(call)?;
 
     call.arguments.first().and_then(|argument| match argument {
         Argument::StringLiteral(value) => Some(value.value.to_string()),
@@ -218,6 +207,23 @@ pub(super) fn vitest_mock_source(call: &CallExpression<'_>) -> Option<String> {
         },
         _ => None,
     })
+}
+
+pub(super) fn vitest_mock_object_span(call: &CallExpression<'_>) -> Option<Span> {
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    if member.property.name != "mock" {
+        return None;
+    }
+    let Expression::Identifier(object) = &member.object else {
+        return None;
+    };
+    if object.name != "vi" {
+        return None;
+    }
+
+    Some(object.span)
 }
 
 pub(super) fn vitest_auto_mock_source(source: &str) -> Option<String> {
@@ -386,10 +392,20 @@ pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option
 
     impl<'a> Visit<'a> for ImportActualVisitor {
         fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-            if let Expression::StaticMemberExpression(member) = &call.callee
-                && member.property.name == "importActual"
-                && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
-            {
+            let loads_actual = match &call.callee {
+                Expression::StaticMemberExpression(member) => {
+                    member.property.name == "importActual"
+                        && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+                }
+                Expression::ComputedMemberExpression(member) => {
+                    member
+                        .static_property_name()
+                        .is_some_and(|name| name == "importActual")
+                        && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+                }
+                _ => false,
+            };
+            if loads_actual {
                 self.found = true;
                 return;
             }

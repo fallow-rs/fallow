@@ -847,7 +847,12 @@ use crate::MemberKind;
 /// Bumped to 242 for issue #2031: proven Vitest replacement factories append a
 /// `SemanticFact::ReplacedModuleTarget`. Warm 241 caches omit that typed fact
 /// and would continue crediting replaced modules as statically test-covered.
-pub(super) const CACHE_VERSION: u32 = 242;
+///
+/// Bumped to 243: Vitest replacement facts now require the `vi.mock` object to
+/// resolve to the direct `vi` import and recognize computed `vi["importActual"]`
+/// as an original-module load. Warm 242 caches can retain false replacement
+/// facts from shadowed bindings or computed original loaders.
+pub(super) const CACHE_VERSION: u32 = 243;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

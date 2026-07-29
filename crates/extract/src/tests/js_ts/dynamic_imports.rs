@@ -262,6 +262,50 @@ fn vitest_replacement_factory_records_typed_target() {
 }
 
 #[test]
+fn vitest_replacement_import_provenance_is_order_independent() {
+    let info = parse_source(
+        r#"
+        vi.mock("./services/api", () => ({ request: vi.fn() }));
+        import { vi } from "vitest";
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+}
+
+#[test]
+fn vitest_replacement_shadowed_bindings_abstain() {
+    for source in [
+        r#"
+        import { vi } from "vitest";
+        function register(vi: { mock: Function }) {
+          vi.mock("./parameter", () => ({}));
+        }
+        "#,
+        r#"
+        import { vi } from "vitest";
+        {
+          const vi = localMockApi;
+          vi.mock("./block", () => ({}));
+        }
+        "#,
+        r#"
+        import { vi } from "vitest";
+        function register() {
+          const vi = localMockApi;
+          vi.mock("./local", () => ({}));
+        }
+        "#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            replaced_module_targets(&info).is_empty(),
+            "a shadowed vi binding must not emit a Vitest replacement: {source}"
+        );
+    }
+}
+
+#[test]
 fn vitest_function_replacement_supports_import_expression_target() {
     let info = parse_source(
         r#"
@@ -282,6 +326,7 @@ fn vitest_non_replacement_forms_abstain() {
         r#"import { vi } from "vitest"; vi.mock("./spy", { spy: true });"#,
         r#"import { vi } from "vitest"; vi.mock("./partial", (importOriginal) => importOriginal());"#,
         r#"import { vi } from "vitest"; vi.mock("./actual", async () => vi.importActual("./actual"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./computed", async () => vi["importActual"]("./computed"));"#,
         r#"const vi = localMockApi; vi.mock("./local", () => ({}));"#,
         r#"vi.mock("./global", () => ({}));"#,
     ] {

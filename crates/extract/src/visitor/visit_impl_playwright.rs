@@ -4,11 +4,11 @@ use oxc_ast::ast::{
 
 use crate::{DynamicImportInfo, ReplacedModuleTargetFact, SemanticFact};
 
-use super::super::{ModuleInfoExtractor, PendingPlaywrightFactory};
+use super::super::{ModuleInfoExtractor, PendingPlaywrightFactory, PendingVitestReplacement};
 use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
-    playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source, vitest_mock_source,
-    vitest_replaced_module_source,
+    playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source,
+    vitest_mock_object_span, vitest_mock_source, vitest_replaced_module_source,
 };
 
 impl ModuleInfoExtractor {
@@ -251,13 +251,33 @@ impl ModuleInfoExtractor {
             });
         }
 
-        if self.is_named_import_from("vi", "vitest", "vi")
-            && let Some(source) = vitest_replaced_module_source(expr)
+        if let Some(source) = vitest_replaced_module_source(expr)
+            && let Some(vi_reference_span) = vitest_mock_object_span(expr)
         {
-            self.semantic_facts.push(SemanticFact::ReplacedModuleTarget(
-                ReplacedModuleTargetFact { source },
-            ));
+            self.pending_vitest_replacements
+                .push(PendingVitestReplacement {
+                    source,
+                    vi_reference_span,
+                });
         }
+    }
+
+    pub(crate) fn resolve_vitest_replacement_candidates(
+        &mut self,
+        vitest_vi_reference_spans: &rustc_hash::FxHashSet<oxc_span::Span>,
+    ) {
+        self.semantic_facts.extend(
+            self.pending_vitest_replacements
+                .drain(..)
+                .filter(|candidate| {
+                    vitest_vi_reference_spans.contains(&candidate.vi_reference_span)
+                })
+                .map(|candidate| {
+                    SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+                        source: candidate.source,
+                    })
+                }),
+        );
     }
 }
 
