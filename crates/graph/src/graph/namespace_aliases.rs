@@ -371,6 +371,20 @@ impl AliasChain {
             return;
         }
 
+        if !ctx.reference_paths.tracks_provenance() {
+            debug_assert!(base_path.is_none());
+            for state in self.states.iter().skip(1).map(|state| &state.key) {
+                ctx.pending.push(PendingCredit {
+                    target_module_idx: state.module_idx,
+                    member: state.credited_name.clone(),
+                    consumer_file_id: ctx.consumer.file_id,
+                    import_span: ctx.import_span,
+                    path: None,
+                });
+            }
+            return;
+        }
+
         let mut canonical_order: Vec<usize> = (0..self.states.len()).collect();
         canonical_order.sort_unstable_by(|&left, &right| {
             let left_state = &self.states[left].key;
@@ -616,5 +630,33 @@ mod tests {
 
         assert_eq!(chain.state_count(), 1 + (LAYERS * 2));
         assert_eq!(chain.transition_count(), 2 + ((LAYERS - 1) * 4));
+    }
+
+    #[test]
+    fn untracked_alias_chain_credits_states_without_interning_routes() {
+        let mut graph = build_namespace_reexport_graph(&[vec![1], vec![]]);
+        let consumer = chain_consumer(1);
+        let chain = AliasChain::build(&graph, &consumer, 0, "N", "API.foo.N");
+        let mut pending = Vec::new();
+        let mut reference_paths = ReferencePathInterner::new(false);
+
+        chain.collect_credits(
+            &mut ChainWalkContext {
+                graph: &graph,
+                consumer: &consumer,
+                import_span: oxc_span::Span::new(3, 9),
+                pending: &mut pending,
+                reference_paths: &mut reference_paths,
+            },
+            None,
+        );
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].target_module_idx, 1);
+        assert_eq!(pending[0].member, "N");
+        assert!(pending[0].path.is_none());
+        let finalized = reference_paths.finalize(&mut graph.modules);
+        assert!(finalized.paths.is_empty());
+        assert!(finalized.routes.graphs.is_empty());
     }
 }
