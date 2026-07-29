@@ -31,7 +31,10 @@ pub use store::GraphCacheStore;
 /// classification change replays the old classification verbatim on an
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
-pub const GRAPH_CACHE_VERSION: u32 = 6;
+/// Bumped to 7 for issue #2031: internal CommonJS resolution results retain
+/// their import mechanism so test-time ESM replacement masks cannot suppress a
+/// genuine `require()` path.
+pub const GRAPH_CACHE_VERSION: u32 = 7;
 
 /// Cached form of a resolved target.
 ///
@@ -44,6 +47,8 @@ pub const GRAPH_CACHE_VERSION: u32 = 6;
 pub enum CachedResolveResult {
     /// Resolved to a file within the project.
     InternalModule(StableFileKey),
+    /// Resolved from CommonJS to a file within the project.
+    CommonJsInternalModule(StableFileKey),
     /// Resolved to a project file through a framework convention auto-import.
     SyntheticAutoImport(StableFileKey),
     /// Resolved to a workspace or self package source file.
@@ -51,6 +56,13 @@ pub enum CachedResolveResult {
         /// Stable source file reached by the package map.
         key: StableFileKey,
         /// Package name that was used in the import specifier.
+        package_name: String,
+    },
+    /// Resolved from CommonJS to workspace or self-package source.
+    CommonJsInternalPackageModule {
+        /// Stable source file reached by the package map.
+        key: StableFileKey,
+        /// Package name used in the require specifier.
         package_name: String,
     },
     /// Resolved to a file outside the project.
@@ -70,6 +82,9 @@ impl CachedResolveResult {
             ResolveResult::InternalModule(file_id) => {
                 Self::InternalModule(key_by_file_id.get(file_id)?.clone())
             }
+            ResolveResult::CommonJsInternalModule(file_id) => {
+                Self::CommonJsInternalModule(key_by_file_id.get(file_id)?.clone())
+            }
             ResolveResult::SyntheticAutoImport(file_id) => {
                 Self::SyntheticAutoImport(key_by_file_id.get(file_id)?.clone())
             }
@@ -77,6 +92,13 @@ impl CachedResolveResult {
                 file_id,
                 package_name,
             } => Self::InternalPackageModule {
+                key: key_by_file_id.get(file_id)?.clone(),
+                package_name: package_name.clone(),
+            },
+            ResolveResult::CommonJsInternalPackageModule {
+                file_id,
+                package_name,
+            } => Self::CommonJsInternalPackageModule {
                 key: key_by_file_id.get(file_id)?.clone(),
                 package_name: package_name.clone(),
             },
@@ -92,11 +114,20 @@ impl CachedResolveResult {
     ) -> Option<ResolveResult> {
         Some(match self {
             Self::InternalModule(key) => ResolveResult::InternalModule(*id_by_key.get(&key)?),
+            Self::CommonJsInternalModule(key) => {
+                ResolveResult::CommonJsInternalModule(*id_by_key.get(&key)?)
+            }
             Self::SyntheticAutoImport(key) => {
                 ResolveResult::SyntheticAutoImport(*id_by_key.get(&key)?)
             }
             Self::InternalPackageModule { key, package_name } => {
                 ResolveResult::InternalPackageModule {
+                    file_id: *id_by_key.get(&key)?,
+                    package_name,
+                }
+            }
+            Self::CommonJsInternalPackageModule { key, package_name } => {
+                ResolveResult::CommonJsInternalPackageModule {
                     file_id: *id_by_key.get(&key)?,
                     package_name,
                 }
@@ -830,6 +861,30 @@ mod tests {
                 file_id: FileId(9),
                 ref package_name,
             } if package_name == "@scope/pkg"
+        ));
+    }
+
+    #[test]
+    fn cached_resolve_result_preserves_commonjs_provenance() {
+        let key = StableFileKey::from_root_relative(
+            Path::new("/project"),
+            Path::new("/project/src/dependency.ts"),
+        );
+        let key_by_file_id = FxHashMap::from_iter([(FileId(3), key.clone())]);
+        let id_by_key = FxHashMap::from_iter([(key, FileId(8))]);
+
+        let cached = CachedResolveResult::from_resolve_result(
+            &ResolveResult::CommonJsInternalModule(FileId(3)),
+            &key_by_file_id,
+        )
+        .expect("CommonJS target should map to a stable key");
+        let restored = cached
+            .into_resolve_result(&id_by_key)
+            .expect("stable key should map to the current FileId");
+
+        assert!(matches!(
+            restored,
+            ResolveResult::CommonJsInternalModule(FileId(8))
         ));
     }
 

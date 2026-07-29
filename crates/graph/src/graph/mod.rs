@@ -131,6 +131,15 @@ pub struct ImportedSymbol {
     /// Whether this import is type-only (`import type { ... }`).
     /// Used to skip type-only edges in circular dependency detection.
     pub is_type_only: bool,
+    /// Runtime module mechanism that created this symbol edge.
+    mechanism: ImportMechanism,
+}
+
+/// Runtime module mechanism retained for root-aware traversal policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum ImportMechanism {
+    EsModule,
+    CommonJsRequire,
 }
 
 /// Importer details for one file that directly imports a target module.

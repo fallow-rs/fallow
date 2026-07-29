@@ -9,7 +9,7 @@ use fallow_types::extract::{ExportName, ImportedName, VisibilityTag};
 use super::narrowing::attach_symbol_reference;
 use super::types::ModuleNode;
 use super::types::{ExportSymbol, ReExportEdge};
-use super::{Edge, ImportedSymbol, ModuleGraph};
+use super::{Edge, ImportMechanism, ImportedSymbol, ModuleGraph};
 
 pub(super) struct PopulateEdgesInput<'a> {
     pub(super) files: &'a [DiscoveredFile],
@@ -93,6 +93,11 @@ fn collect_import_edge(
                 local_name: import.info.local_name.clone(),
                 import_span: import.info.span,
                 is_type_only: import.info.is_type_only,
+                mechanism: if import.target.is_commonjs_require() {
+                    ImportMechanism::CommonJsRequire
+                } else {
+                    ImportMechanism::EsModule
+                },
             });
     }
 }
@@ -125,6 +130,7 @@ fn collect_edges_for_module(
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: re_export.info.is_type_only,
+                    mechanism: ImportMechanism::EsModule,
                 });
         }
     }
@@ -162,6 +168,7 @@ fn collect_edges_for_module(
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: false,
+                    mechanism: ImportMechanism::EsModule,
                 });
         }
     }
@@ -669,6 +676,24 @@ mod tests {
             ImportedName::Named(ref n) if n == "foo"
         ));
         assert!(!acc.namespace_imported.contains(2));
+        assert_eq!(edges[&FileId(2)][0].mechanism, ImportMechanism::EsModule);
+    }
+
+    #[test]
+    fn collect_import_edge_retains_commonjs_mechanism() {
+        let mut acc = make_acc(4);
+        let mut edges: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
+        let import = make_import(
+            ImportedName::Namespace,
+            ResolveResult::CommonJsInternalModule(FileId(2)),
+        );
+
+        collect_import_edge(&import, FileId(0), &mut edges, &mut acc);
+
+        assert_eq!(
+            edges[&FileId(2)][0].mechanism,
+            ImportMechanism::CommonJsRequire
+        );
     }
 
     #[test]

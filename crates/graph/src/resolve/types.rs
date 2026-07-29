@@ -14,6 +14,8 @@ use fallow_types::discover::FileId;
 pub enum ResolveResult {
     /// Resolved to a file within the project.
     InternalModule(FileId),
+    /// Resolved from a CommonJS `require()` to a file within the project.
+    CommonJsInternalModule(FileId),
     /// Resolved to a project file through a framework convention auto-import.
     SyntheticAutoImport(FileId),
     /// Resolved to a workspace or self package source file while preserving
@@ -22,6 +24,13 @@ pub enum ResolveResult {
         /// Internal source file reached by the package map.
         file_id: FileId,
         /// Package name that was used in the import specifier.
+        package_name: String,
+    },
+    /// Resolved from a CommonJS `require()` to workspace or self-package source.
+    CommonJsInternalPackageModule {
+        /// Internal source file reached by the package map.
+        file_id: FileId,
+        /// Package name used in the require specifier.
         package_name: String,
     },
     /// Resolved to a file outside the project (`node_modules`, `.json`, etc.).
@@ -38,8 +47,10 @@ impl ResolveResult {
     pub const fn internal_file_id(&self) -> Option<FileId> {
         match self {
             Self::InternalModule(file_id)
+            | Self::CommonJsInternalModule(file_id)
             | Self::SyntheticAutoImport(file_id)
-            | Self::InternalPackageModule { file_id, .. } => Some(*file_id),
+            | Self::InternalPackageModule { file_id, .. }
+            | Self::CommonJsInternalPackageModule { file_id, .. } => Some(*file_id),
             Self::ExternalFile(_) | Self::NpmPackage(_) | Self::Unresolvable(_) => None,
         }
     }
@@ -50,14 +61,40 @@ impl ResolveResult {
         matches!(self, Self::SyntheticAutoImport(_))
     }
 
+    /// Return whether this internal edge originated from CommonJS `require()`.
+    #[must_use]
+    pub const fn is_commonjs_require(&self) -> bool {
+        matches!(
+            self,
+            Self::CommonJsInternalModule(_) | Self::CommonJsInternalPackageModule { .. }
+        )
+    }
+
+    /// Retain CommonJS provenance on project-internal resolution results.
+    #[must_use]
+    pub fn into_commonjs_require(self) -> Self {
+        match self {
+            Self::InternalModule(file_id) => Self::CommonJsInternalModule(file_id),
+            Self::InternalPackageModule {
+                file_id,
+                package_name,
+            } => Self::CommonJsInternalPackageModule {
+                file_id,
+                package_name,
+            },
+            other => other,
+        }
+    }
+
     /// Return the package name that should receive dependency usage credit.
     #[must_use]
     pub fn package_usage_name(&self) -> Option<&str> {
         match self {
-            Self::InternalPackageModule { package_name, .. } | Self::NpmPackage(package_name) => {
-                Some(package_name)
-            }
+            Self::InternalPackageModule { package_name, .. }
+            | Self::CommonJsInternalPackageModule { package_name, .. }
+            | Self::NpmPackage(package_name) => Some(package_name),
             Self::InternalModule(_)
+            | Self::CommonJsInternalModule(_)
             | Self::SyntheticAutoImport(_)
             | Self::ExternalFile(_)
             | Self::Unresolvable(_) => None,
@@ -463,6 +500,29 @@ mod tests {
         assert!(fallback.get(Path::new("/nonexistent/file.ts")).is_none());
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn commonjs_provenance_wraps_internal_targets_only() {
+        assert!(matches!(
+            ResolveResult::InternalModule(FileId(4)).into_commonjs_require(),
+            ResolveResult::CommonJsInternalModule(FileId(4))
+        ));
+        assert!(matches!(
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(5),
+                package_name: "pkg".to_string(),
+            }
+            .into_commonjs_require(),
+            ResolveResult::CommonJsInternalPackageModule {
+                file_id: FileId(5),
+                package_name,
+            } if package_name == "pkg"
+        ));
+        assert!(matches!(
+            ResolveResult::NpmPackage("pkg".to_string()).into_commonjs_require(),
+            ResolveResult::NpmPackage(package_name) if package_name == "pkg"
+        ));
     }
 }
 
