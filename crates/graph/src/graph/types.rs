@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
+use rustc_hash::FxHashMap;
 
 /// A single module in the graph.
 ///
@@ -192,25 +193,177 @@ pub struct SymbolReference {
     pub from_file: FileId,
     /// How the export is referenced.
     pub kind: ReferenceKind,
-    /// Runtime module mechanism used by the exact reference path.
-    ///
-    /// Re-export propagation records [`ModuleLoadMechanism::EsModule`] because
-    /// the final hop into the owning module is an ESM re-export even when the
-    /// original consumer loaded the barrel through CommonJS.
-    pub mechanism: ModuleLoadMechanism,
+    /// Interned linked path from `from_file` to the owning export.
+    pub(crate) path: ReferencePathId,
     /// Byte span of the import statement in the referencing file.
     /// Used by the LSP to locate references for Code Lens navigation.
     #[serde(with = "crate::cache::span_serde")]
     pub import_span: oxc_span::Span,
 }
 
-impl SymbolReference {
-    /// Carry a consumer reference through an ESM re-export edge.
-    pub(crate) const fn through_re_export(self) -> Self {
-        Self {
-            mechanism: ModuleLoadMechanism::EsModule,
-            ..self
+/// Compact identifier for an interned reference path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReferencePathId(pub(crate) u32);
+
+/// One target hop in an interned linked reference path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReferencePathNode {
+    /// Previous hop, or `None` for the consumer's direct module load.
+    pub(crate) parent: Option<ReferencePathId>,
+    /// Module loaded by this hop.
+    pub(crate) target: FileId,
+    /// Runtime module mechanism used by this hop.
+    pub(crate) mechanism: ModuleLoadMechanism,
+}
+
+/// Build-time interner for shared linked reference paths.
+#[derive(Default)]
+pub(crate) struct ReferencePathInterner {
+    nodes: Vec<ReferencePathNode>,
+    ids: FxHashMap<ReferencePathNode, ReferencePathId>,
+}
+
+impl ReferencePathInterner {
+    /// Intern a direct consumer-to-target path.
+    pub(crate) fn direct(
+        &mut self,
+        target: FileId,
+        mechanism: ModuleLoadMechanism,
+    ) -> ReferencePathId {
+        self.intern(ReferencePathNode {
+            parent: None,
+            target,
+            mechanism,
+        })
+    }
+
+    /// Append one typed hop to an existing path.
+    pub(crate) fn extend(
+        &mut self,
+        parent: ReferencePathId,
+        target: FileId,
+        mechanism: ModuleLoadMechanism,
+    ) -> ReferencePathId {
+        if self.contains_target(parent, target) {
+            return parent;
         }
+        self.intern(ReferencePathNode {
+            parent: Some(parent),
+            target,
+            mechanism,
+        })
+    }
+
+    fn contains_target(&self, mut path: ReferencePathId, target: FileId) -> bool {
+        loop {
+            let Some(node) = self.nodes.get(path.index()) else {
+                return false;
+            };
+            if node.target == target {
+                return true;
+            }
+            let Some(parent) = node.parent else {
+                return false;
+            };
+            path = parent;
+        }
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a process cannot allocate more than u32::MAX reference path nodes"
+    )]
+    fn intern(&mut self, node: ReferencePathNode) -> ReferencePathId {
+        if let Some(path) = self.ids.get(&node) {
+            return *path;
+        }
+        let path = ReferencePathId(self.nodes.len() as u32);
+        self.nodes.push(node);
+        self.ids.insert(node, path);
+        path
+    }
+
+    /// Finalize cache-friendly storage and assign canonical IDs.
+    ///
+    /// Paths are ordered depth-by-depth so every parent already has its final
+    /// ID before its children are sorted. This keeps serialized graphs stable
+    /// when equivalent imports or re-exports are discovered in another order.
+    pub(crate) fn finalize(self, modules: &mut [ModuleNode]) -> Vec<ReferencePathNode> {
+        let mut depths = Vec::with_capacity(self.nodes.len());
+        let mut max_depth = 0usize;
+        for node in &self.nodes {
+            let depth = node.parent.map_or(0, |parent| depths[parent.index()] + 1);
+            max_depth = max_depth.max(depth);
+            depths.push(depth);
+        }
+
+        let mut paths_by_depth = vec![Vec::new(); max_depth.saturating_add(1)];
+        for (old_index, depth) in depths.into_iter().enumerate() {
+            paths_by_depth[depth].push(old_index);
+        }
+
+        let mut remap = vec![ReferencePathId(0); self.nodes.len()];
+        let mut finalized = Vec::with_capacity(self.nodes.len());
+        for mut paths in paths_by_depth {
+            paths.sort_unstable_by_key(|&old_index| {
+                let node = self.nodes[old_index];
+                (
+                    node.parent.map(|parent| remap[parent.index()].0),
+                    node.target.0,
+                    node.mechanism as u8,
+                )
+            });
+            for old_index in paths {
+                let mut node = self.nodes[old_index];
+                node.parent = node.parent.map(|parent| remap[parent.index()]);
+                let canonical = ReferencePathId(finalized.len() as u32);
+                remap[old_index] = canonical;
+                finalized.push(node);
+            }
+        }
+
+        for reference in modules
+            .iter_mut()
+            .flat_map(|module| &mut module.exports)
+            .flat_map(|export| &mut export.references)
+        {
+            reference.path = remap[reference.path.index()];
+        }
+
+        finalized
+    }
+}
+
+impl ReferencePathId {
+    pub(crate) const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// Allocation-free iterator over a linked reference path, from final hop to first.
+#[derive(Clone)]
+pub(crate) struct ReferencePathIter<'a> {
+    nodes: &'a [ReferencePathNode],
+    next: Option<ReferencePathId>,
+}
+
+impl<'a> ReferencePathIter<'a> {
+    pub(crate) const fn new(nodes: &'a [ReferencePathNode], path: ReferencePathId) -> Self {
+        Self {
+            nodes,
+            next: Some(path),
+        }
+    }
+}
+
+impl Iterator for ReferencePathIter<'_> {
+    type Item = (FileId, ModuleLoadMechanism);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let path = self.next?;
+        let node = self.nodes.get(path.index())?;
+        self.next = node.parent;
+        Some((node.target, node.mechanism))
     }
 }
 
@@ -234,7 +387,7 @@ pub enum ReferenceKind {
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 112);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SymbolReference>() == 16);
+const _: () = assert!(std::mem::size_of::<SymbolReference>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ReExportEdge>() == 64);
 #[cfg(all(target_pointer_width = "64", unix))]
@@ -285,12 +438,71 @@ mod tests {
         assert_eq!(debug_str, "DynamicImport");
     }
 
+    fn module_with_reference_paths(paths: &[ReferencePathId]) -> ModuleNode {
+        ModuleNode {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/source.ts"),
+            edge_range: 0..0,
+            exports: vec![ExportSymbol {
+                name: ExportName::Named("value".to_string()),
+                is_type_only: false,
+                is_side_effect_used: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::default(),
+                references: paths
+                    .iter()
+                    .copied()
+                    .map(|path| SymbolReference {
+                        from_file: FileId(0),
+                        kind: ReferenceKind::NamedImport,
+                        path,
+                        import_span: oxc_span::Span::default(),
+                    })
+                    .collect(),
+                members: Vec::new(),
+            }],
+            re_exports: Vec::new(),
+            flags: 0,
+        }
+    }
+
+    #[test]
+    fn finalized_reference_paths_are_independent_of_interning_order() {
+        let mut first = ReferencePathInterner::default();
+        let first_parent = first.direct(FileId(1), ModuleLoadMechanism::EsModule);
+        let first_direct = first.direct(FileId(2), ModuleLoadMechanism::CommonJsRequire);
+        let first_chain = first.extend(first_parent, FileId(3), ModuleLoadMechanism::EsModule);
+        let mut first_modules = vec![module_with_reference_paths(&[first_direct, first_chain])];
+        let first_nodes = first.finalize(&mut first_modules);
+
+        let mut second = ReferencePathInterner::default();
+        let second_direct = second.direct(FileId(2), ModuleLoadMechanism::CommonJsRequire);
+        let second_parent = second.direct(FileId(1), ModuleLoadMechanism::EsModule);
+        let second_chain = second.extend(second_parent, FileId(3), ModuleLoadMechanism::EsModule);
+        let mut second_modules = vec![module_with_reference_paths(&[second_direct, second_chain])];
+        let second_nodes = second.finalize(&mut second_modules);
+
+        assert_eq!(first_nodes, second_nodes);
+        let first_paths: Vec<_> = first_modules[0].exports[0]
+            .references
+            .iter()
+            .map(|reference| reference.path)
+            .collect();
+        let second_paths: Vec<_> = second_modules[0].exports[0]
+            .references
+            .iter()
+            .map(|reference| reference.path)
+            .collect();
+        assert_eq!(first_paths, second_paths);
+    }
+
     #[test]
     fn symbol_reference_construction() {
         let reference = SymbolReference {
             from_file: FileId(42),
             kind: ReferenceKind::NamedImport,
-            mechanism: ModuleLoadMechanism::EsModule,
+            path: ReferencePathId(0),
             import_span: oxc_span::Span::new(10, 30),
         };
         assert_eq!(reference.from_file, FileId(42));
@@ -304,7 +516,7 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(7),
             kind: ReferenceKind::ReExport,
-            mechanism: ModuleLoadMechanism::EsModule,
+            path: ReferencePathId(0),
             import_span: oxc_span::Span::new(5, 25),
         };
         let copied = reference;
@@ -430,13 +642,13 @@ mod tests {
                 SymbolReference {
                     from_file: FileId(1),
                     kind: ReferenceKind::NamedImport,
-                    mechanism: ModuleLoadMechanism::EsModule,
+                    path: ReferencePathId(0),
                     import_span: oxc_span::Span::new(0, 10),
                 },
                 SymbolReference {
                     from_file: FileId(2),
                     kind: ReferenceKind::ReExport,
-                    mechanism: ModuleLoadMechanism::EsModule,
+                    path: ReferencePathId(1),
                     import_span: oxc_span::Span::new(5, 15),
                 },
             ],

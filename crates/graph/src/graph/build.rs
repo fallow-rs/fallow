@@ -7,8 +7,8 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ExportName, ImportedName, ModuleLoadMechanism, VisibilityTag};
 
 use super::narrowing::attach_symbol_reference;
-use super::types::ModuleNode;
 use super::types::{ExportSymbol, ReExportEdge};
+use super::types::{ModuleNode, ReferencePathInterner};
 use super::{Edge, ImportedSymbol, ModuleGraph};
 
 pub(super) struct PopulateEdgesInput<'a> {
@@ -402,6 +402,7 @@ impl ModuleGraph {
                 runtime_entry_points: runtime_entry_point_ids.clone(),
                 test_entry_points: test_entry_point_ids.clone(),
                 test_reachability_index: super::TestReachabilityIndex::default(),
+                reference_paths: Vec::new(),
                 reverse_deps,
                 namespace_imported: acc.namespace_imported,
                 re_export_cycles: Vec::new(),
@@ -419,6 +420,7 @@ impl ModuleGraph {
         &mut self,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
         entry_point_ids: &FxHashSet<FileId>,
+        reference_paths: &mut ReferencePathInterner,
     ) {
         for edge_idx in 0..self.edges.len() {
             let source_id = self.edges[edge_idx].source;
@@ -434,6 +436,7 @@ impl ModuleGraph {
                     sym,
                     module_by_id,
                     entry_point_ids,
+                    reference_paths,
                 );
             }
         }

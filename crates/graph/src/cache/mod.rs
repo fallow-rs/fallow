@@ -39,7 +39,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 12: test profile masks use target-sparse rows and profiled
 /// reachability uses the bit-parallel worklist schema.
-pub const GRAPH_CACHE_VERSION: u32 = 12;
+///
+/// Bumped to 13: export references now retain interned linked module-load paths
+/// so cached coverage checks include every re-export hop.
+pub const GRAPH_CACHE_VERSION: u32 = 13;
 
 /// Cached form of a resolved target.
 ///

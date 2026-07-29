@@ -65,10 +65,7 @@ struct ProfileWorklist {
 }
 
 impl ProfileWorklist {
-    fn new(
-        grouped_roots: &[(Vec<FileId>, Vec<FileId>)],
-        total_capacity: usize,
-    ) -> Self {
+    fn new(grouped_roots: &[(Vec<FileId>, Vec<FileId>)], total_capacity: usize) -> Self {
         let profile_count = grouped_roots.len();
         let index = TestReachabilityIndex::new(total_capacity, profile_count);
         let words_per_file = index.words_per_file;
@@ -128,10 +125,7 @@ impl ProfileWorklist {
         worklist
     }
 
-    fn run(
-        mut self,
-        graph: &ModuleGraph,
-    ) -> (FixedBitSet, TestReachabilityIndex, usize) {
+    fn run(mut self, graph: &ModuleGraph) -> (FixedBitSet, TestReachabilityIndex, usize) {
         let words_per_file = self.index.words_per_file;
         let mut source_delta = vec![0_u64; words_per_file];
 
@@ -145,8 +139,7 @@ impl ProfileWorklist {
             let Some(source_end) = source_start.checked_add(words_per_file) else {
                 continue;
             };
-            let Some(pending_source) =
-                self.pending_profiles.get_mut(source_start..source_end)
+            let Some(pending_source) = self.pending_profiles.get_mut(source_start..source_end)
             else {
                 continue;
             };
@@ -181,8 +174,7 @@ impl ProfileWorklist {
                     let Some(target_slot) = target_start.checked_add(word_index) else {
                         continue;
                     };
-                    let Some(reachable_word) =
-                        self.index.reachable_profiles.get_mut(target_slot)
+                    let Some(reachable_word) = self.index.reachable_profiles.get_mut(target_slot)
                     else {
                         continue;
                     };
@@ -651,6 +643,147 @@ mod tests {
         )
     }
 
+    fn intermediate_import(
+        source: &str,
+        target: FileId,
+        imported_name: ImportedName,
+        commonjs: bool,
+    ) -> ResolvedImport {
+        ResolvedImport {
+            info: ImportInfo {
+                source: source.to_string(),
+                imported_name,
+                local_name: "value".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 10),
+                source_span: oxc_span::Span::default(),
+            },
+            target: if commonjs {
+                ResolveResult::CommonJsInternalModule(target)
+            } else {
+                ResolveResult::InternalModule(target)
+            },
+        }
+    }
+
+    fn intermediate_modules(
+        files: &[DiscoveredFile],
+        commonjs_to_barrel: bool,
+        include_cycle: bool,
+    ) -> Vec<ResolvedModule> {
+        let mut target_re_exports = Vec::new();
+        if include_cycle {
+            target_re_exports.push(ResolvedReExport {
+                info: ReExportInfo {
+                    source: "./barrel".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(20, 30),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            });
+        }
+        vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![
+                    intermediate_import(
+                        "./barrel",
+                        FileId(1),
+                        ImportedName::Named("value".to_string()),
+                        commonjs_to_barrel,
+                    ),
+                    intermediate_import("./alternate", FileId(3), ImportedName::SideEffect, false),
+                ],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![ResolvedReExport {
+                    info: ReExportInfo {
+                        source: "./target".to_string(),
+                        imported_name: "value".to_string(),
+                        exported_name: "value".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
+                    },
+                    target: ResolveResult::InternalModule(FileId(2)),
+                }],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("value".to_string()),
+                    local_name: Some("value".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: Vec::new(),
+                    is_side_effect_used: false,
+                    super_class: None,
+                }],
+                re_exports: target_re_exports,
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                resolved_imports: vec![intermediate_import(
+                    "./target",
+                    FileId(2),
+                    ImportedName::SideEffect,
+                    false,
+                )],
+                ..ResolvedModule::default()
+            },
+        ]
+    }
+
+    fn build_intermediate_replacement_graph(
+        commonjs_to_barrel: bool,
+        include_cycle: bool,
+        mask_final_target: bool,
+    ) -> ModuleGraph {
+        let files: Vec<_> = (0..4)
+            .map(|id| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(format!("/project/file{id}.ts")),
+                size_bytes: 100,
+            })
+            .collect();
+        let modules = intermediate_modules(&files, commonjs_to_barrel, include_cycle);
+        let test_entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let mut replacements = vec![ResolvedReplacedModuleTarget {
+            source_file: FileId(0),
+            target_file: FileId(1),
+        }];
+        if mask_final_target {
+            replacements.push(ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(2),
+            });
+        }
+
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &replacements,
+            &test_entry_points,
+            &[],
+            &test_entry_points,
+            &files,
+        )
+    }
+
     #[test]
     fn entry_point_is_reachable() {
         let graph = build_reachability_graph(1, &[], &[0], &[]);
@@ -806,8 +939,11 @@ mod tests {
 
         assert!(graph.modules[1].is_test_reachable());
         assert!(!graph.modules[2].is_test_reachable());
-        assert_eq!(reference.mechanism, ModuleLoadMechanism::EsModule);
-        assert!(!graph.is_test_reference_covered(FileId(2), reference));
+        assert_eq!(
+            graph.reference_path_hops(reference)[0].1,
+            ModuleLoadMechanism::EsModule
+        );
+        assert!(!graph.is_test_reference_covered(reference));
     }
 
     #[test]
@@ -821,8 +957,11 @@ mod tests {
 
         assert!(graph.modules[1].is_test_reachable());
         assert!(!graph.modules[2].is_test_reachable());
-        assert_eq!(reference.mechanism, ModuleLoadMechanism::EsModule);
-        assert!(!graph.is_test_reference_covered(FileId(2), reference));
+        assert_eq!(
+            graph.reference_path_hops(reference)[0].1,
+            ModuleLoadMechanism::EsModule
+        );
+        assert!(!graph.is_test_reference_covered(reference));
     }
 
     #[test]
@@ -833,14 +972,90 @@ mod tests {
         assert_eq!(references.len(), 2);
         let esm = references
             .iter()
-            .find(|reference| reference.mechanism == ModuleLoadMechanism::EsModule)
+            .find(|reference| {
+                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::EsModule
+            })
             .expect("ESM re-export reference");
         let commonjs = references
             .iter()
-            .find(|reference| reference.mechanism == ModuleLoadMechanism::CommonJsRequire)
+            .find(|reference| {
+                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::CommonJsRequire
+            })
             .expect("direct CommonJS reference");
-        assert!(!graph.is_test_reference_covered(FileId(2), esm));
-        assert!(graph.is_test_reference_covered(FileId(2), commonjs));
+        assert!(!graph.is_test_reference_covered(esm));
+        assert!(graph.is_test_reference_covered(commonjs));
+    }
+
+    #[test]
+    fn mocked_intermediate_barrel_blocks_a_reference_despite_an_alternate_target_route() {
+        let graph = build_intermediate_replacement_graph(false, false, false);
+        let reference = &graph.modules[2].exports[0].references[0];
+        let hops = graph.reference_path_hops(reference);
+
+        assert!(graph.modules[2].is_test_reachable());
+        assert_eq!(
+            hops,
+            vec![
+                (FileId(2), ModuleLoadMechanism::EsModule),
+                (FileId(1), ModuleLoadMechanism::EsModule),
+            ]
+        );
+        assert!(!graph.is_test_reference_covered(reference));
+    }
+
+    #[test]
+    fn mocked_re_export_cycle_member_blocks_the_cyclic_reference_path() {
+        let graph = build_intermediate_replacement_graph(false, true, false);
+        let reference = &graph.modules[2].exports[0].references[0];
+
+        assert!(
+            graph
+                .re_export_cycles
+                .iter()
+                .any(|cycle| cycle.file_ids == vec![FileId(1), FileId(2)])
+        );
+        assert!(graph.modules[2].is_test_reachable());
+        assert!(!graph.is_test_reference_covered(reference));
+    }
+
+    #[test]
+    fn commonjs_barrel_hop_bypasses_only_its_own_replacement() {
+        let graph = build_intermediate_replacement_graph(true, false, false);
+        let reference = &graph.modules[2].exports[0].references[0];
+
+        assert_eq!(
+            graph.reference_path_hops(reference),
+            vec![
+                (FileId(2), ModuleLoadMechanism::EsModule),
+                (FileId(1), ModuleLoadMechanism::CommonJsRequire),
+            ]
+        );
+        assert!(graph.is_test_reference_covered(reference));
+    }
+
+    #[test]
+    fn commonjs_barrel_hop_does_not_bypass_a_replaced_esm_target() {
+        let graph = build_intermediate_replacement_graph(true, false, true);
+        let reference = &graph.modules[2].exports[0].references[0];
+
+        assert!(!graph.is_test_reference_covered(reference));
+    }
+
+    #[test]
+    fn reference_paths_survive_graph_cache_serialization() {
+        let graph = build_intermediate_replacement_graph(false, false, false);
+        let encoded = postcard::to_allocvec(&graph).expect("encode graph");
+        let decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
+        let reference = &decoded.modules[2].exports[0].references[0];
+
+        assert_eq!(
+            decoded.reference_path_hops(reference),
+            vec![
+                (FileId(2), ModuleLoadMechanism::EsModule),
+                (FileId(1), ModuleLoadMechanism::EsModule),
+            ]
+        );
+        assert!(!decoded.is_test_reference_covered(reference));
     }
 
     #[test]
@@ -849,8 +1064,11 @@ mod tests {
         let reference = &graph.modules[1].exports[0].references[0];
 
         assert!(graph.modules[1].is_test_reachable());
-        assert_eq!(reference.mechanism, ModuleLoadMechanism::CommonJsRequire);
-        assert!(graph.is_test_reference_covered(FileId(1), reference));
+        assert_eq!(
+            graph.reference_path_hops(reference)[0].1,
+            ModuleLoadMechanism::CommonJsRequire
+        );
+        assert!(graph.is_test_reference_covered(reference));
     }
 
     #[test]
@@ -865,14 +1083,18 @@ mod tests {
         assert_eq!(references.len(), 2);
         let esm = references
             .iter()
-            .find(|reference| reference.mechanism == ModuleLoadMechanism::EsModule)
+            .find(|reference| {
+                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::EsModule
+            })
             .expect("ESM pattern reference");
         let commonjs = references
             .iter()
-            .find(|reference| reference.mechanism == ModuleLoadMechanism::CommonJsRequire)
+            .find(|reference| {
+                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::CommonJsRequire
+            })
             .expect("CommonJS pattern reference");
-        assert!(!graph.is_test_reference_covered(FileId(1), esm));
-        assert!(graph.is_test_reference_covered(FileId(1), commonjs));
+        assert!(!graph.is_test_reference_covered(esm));
+        assert!(graph.is_test_reference_covered(commonjs));
     }
 
     #[test]
@@ -939,15 +1161,13 @@ mod tests {
         assert!(graph.test_reachability_index.profile_reaches(FileId(2), 0));
         assert!(graph.test_reachability_index.profile_masks(FileId(2), 1));
         assert!(graph.test_reachability_index.profile_reaches(FileId(0), 1));
-        assert!(!graph.test_reachability_index.shares_profile(
-            FileId(2),
+        assert!(!graph.test_reachability_index.covers_path(
             FileId(0),
-            ModuleLoadMechanism::EsModule,
+            &std::iter::once((FileId(2), ModuleLoadMechanism::EsModule)),
         ));
-        assert!(graph.test_reachability_index.shares_profile(
-            FileId(2),
+        assert!(graph.test_reachability_index.covers_path(
             FileId(1),
-            ModuleLoadMechanism::EsModule,
+            &std::iter::once((FileId(2), ModuleLoadMechanism::EsModule)),
         ));
     }
 
@@ -1078,21 +1298,9 @@ mod tests {
                 .test_reachability_index
                 .profile_reaches(FileId(130), 64)
         );
-        assert!(
-            graph
-                .test_reachability_index
-                .profile_masks(FileId(65), 0)
-        );
-        assert!(
-            graph
-                .test_reachability_index
-                .profile_masks(FileId(129), 64)
-        );
-        assert!(
-            !graph
-                .test_reachability_index
-                .profile_reaches(FileId(65), 0)
-        );
+        assert!(graph.test_reachability_index.profile_masks(FileId(65), 0));
+        assert!(graph.test_reachability_index.profile_masks(FileId(129), 64));
+        assert!(!graph.test_reachability_index.profile_reaches(FileId(65), 0));
         assert!(
             !graph
                 .test_reachability_index

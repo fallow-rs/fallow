@@ -12,11 +12,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[cfg(test)]
 use std::cell::{Cell, RefCell};
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ModuleLoadMechanism;
-
 use crate::resolve::ResolvedModule;
+use fallow_types::discover::FileId;
 
+use super::types::{ReferencePathId, ReferencePathInterner};
 use super::{Edge, ModuleGraph};
 
 use propagate::{
@@ -103,8 +102,18 @@ struct ReExportContext<'a> {
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     named_import_origin_index: &'a NamedImportOriginIndex,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
-    existing_refs: &'a mut FxHashSet<(FileId, ModuleLoadMechanism)>,
+    existing_refs: &'a mut FxHashSet<(FileId, ReferencePathId)>,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
+    reference_paths: &'a mut ReferencePathInterner,
+}
+
+struct ReExportFixpointInput<'a> {
+    re_export_info: &'a [ReExportTuple],
+    entry_star_targets: &'a FxHashSet<FileId>,
+    edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
+    named_import_origin_index: &'a NamedImportOriginIndex,
+    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    reference_paths: &'a mut ReferencePathInterner,
 }
 
 #[cfg(test)]
@@ -116,6 +125,7 @@ struct LegacyReExportFullScan<'a> {
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     named_import_origin_index: &'a NamedImportOriginIndex,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    reference_paths: &'a mut ReferencePathInterner,
 }
 
 /// Deterministic scheduler for monotone re-export propagation.
@@ -178,6 +188,7 @@ impl ModuleGraph {
     pub(super) fn resolve_re_export_chains(
         &mut self,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+        reference_paths: &mut ReferencePathInterner,
     ) -> Vec<GraphReExportCycle> {
         let re_export_info = self.collect_re_export_tuples();
 
@@ -196,13 +207,14 @@ impl ModuleGraph {
                 NamedImportOriginIndex::default()
             };
 
-        self.run_re_export_fixpoint(
-            &re_export_info,
-            &entry_star_targets,
-            &edges_by_target,
-            &named_import_origin_index,
+        self.run_re_export_fixpoint(ReExportFixpointInput {
+            re_export_info: &re_export_info,
+            entry_star_targets: &entry_star_targets,
+            edges_by_target: &edges_by_target,
+            named_import_origin_index: &named_import_origin_index,
             module_by_id,
-        );
+            reference_paths,
+        });
 
         cycles
     }
@@ -283,14 +295,15 @@ impl ModuleGraph {
     }
 
     /// Run monotone propagation, revisiting only tuples affected by new state.
-    fn run_re_export_fixpoint(
-        &mut self,
-        re_export_info: &[ReExportTuple],
-        entry_star_targets: &FxHashSet<FileId>,
-        edges_by_target: &FxHashMap<FileId, Vec<usize>>,
-        named_import_origin_index: &NamedImportOriginIndex,
-        module_by_id: &FxHashMap<FileId, &ResolvedModule>,
-    ) {
+    fn run_re_export_fixpoint(&mut self, input: ReExportFixpointInput<'_>) {
+        let ReExportFixpointInput {
+            re_export_info,
+            entry_star_targets,
+            edges_by_target,
+            named_import_origin_index,
+            module_by_id,
+            reference_paths,
+        } = input;
         #[cfg(test)]
         let mut legacy_modules: Option<Vec<super::types::ModuleNode>> = DIFFERENTIAL_CHECK_ENABLED
             .with(|enabled| {
@@ -306,7 +319,7 @@ impl ModuleGraph {
         let safety_cap = self.re_export_transition_safety_cap(re_export_info);
         let mut processed = 0usize;
         let mut plan = ReExportPropagationPlan::new(re_export_info);
-        let mut existing_refs: FxHashSet<(FileId, ModuleLoadMechanism)> = FxHashSet::default();
+        let mut existing_refs: FxHashSet<(FileId, ReferencePathId)> = FxHashSet::default();
         let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
         while let Some(entry_idx) = plan.pop_front() {
@@ -330,6 +343,7 @@ impl ModuleGraph {
                 module_by_id,
                 existing_refs: &mut existing_refs,
                 synthetic_stubs: &mut synthetic_stubs,
+                reference_paths,
             };
 
             let entry = &re_export_info[entry_idx];
@@ -351,6 +365,7 @@ impl ModuleGraph {
                 edges_by_target,
                 named_import_origin_index,
                 module_by_id,
+                reference_paths,
             });
             assert_eq!(
                 serde_json::to_value(legacy_modules)
@@ -363,7 +378,7 @@ impl ModuleGraph {
     }
 
     /// Bound scheduler work by the finite set of exports, synthetic names, and
-    /// reference source/mechanism pairs that monotone propagation can add.
+    /// interned reference paths that monotone propagation can add.
     fn re_export_transition_safety_cap(&self, re_export_info: &[ReExportTuple]) -> usize {
         let initial_exports = self
             .modules
@@ -436,6 +451,7 @@ impl ModuleGraph {
                 entry_star_targets: context.entry_star_targets,
                 triggering_is_type_only: entry.is_type_only,
                 synthetic_stubs: context.synthetic_stubs,
+                reference_paths: context.reference_paths,
             })
         } else {
             propagate_named_re_export(NamedReExportPropagation {
@@ -446,6 +462,7 @@ impl ModuleGraph {
                 imported_name: &entry.imported_name,
                 exported_name: &entry.exported_name,
                 existing_refs: context.existing_refs,
+                reference_paths: context.reference_paths,
             })
         }
     }
@@ -460,9 +477,10 @@ impl ModuleGraph {
             edges_by_target,
             named_import_origin_index,
             module_by_id,
+            reference_paths,
         } = input;
         let max_iterations = re_export_info.len().saturating_add(1);
-        let mut existing_refs: FxHashSet<(FileId, ModuleLoadMechanism)> = FxHashSet::default();
+        let mut existing_refs: FxHashSet<(FileId, ReferencePathId)> = FxHashSet::default();
         let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
         for _ in 0..max_iterations {
@@ -475,6 +493,7 @@ impl ModuleGraph {
                     module_by_id,
                     existing_refs: &mut existing_refs,
                     synthetic_stubs: &mut synthetic_stubs,
+                    reference_paths,
                 };
                 changed |= Self::propagate_re_export_entry(modules, edges, entry, &mut context);
             }

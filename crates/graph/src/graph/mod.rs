@@ -25,6 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::resolve::{ResolvedModule, ResolvedReplacedModuleTarget};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
+use types::{ReferencePathInterner, ReferencePathIter, ReferencePathNode};
 
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
@@ -86,6 +87,8 @@ pub struct ModuleGraph {
     /// Empty when no test root declares a project-internal replacement. That
     /// preserves the ordinary single-BFS test reachability path.
     test_reachability_index: TestReachabilityIndex,
+    /// Flat interned linked paths used by exact export references.
+    reference_paths: Vec<ReferencePathNode>,
     /// Reverse index: for each `FileId`, which files import it.
     pub reverse_deps: Vec<Vec<FileId>>,
     /// Precomputed: which modules have namespace imports (import * as ns).
@@ -196,35 +199,47 @@ impl TestReachabilityIndex {
             .map(|index| self.masked_profiles[index].profiles.as_slice())
     }
 
-    fn shares_profile(
-        &self,
-        target: FileId,
-        source: FileId,
-        mechanism: ModuleLoadMechanism,
-    ) -> bool {
-        let Some(target_profiles) = self.profiles_for(&self.reachable_profiles, target) else {
-            return false;
-        };
+    fn covers_path<I>(&self, source: FileId, hops: &I) -> bool
+    where
+        I: Iterator<Item = (FileId, ModuleLoadMechanism)> + Clone,
+    {
         let Some(source_profiles) = self.profiles_for(&self.reachable_profiles, source) else {
             return false;
         };
-        let masked_profiles = self.masked_profiles_for(target);
 
-        target_profiles
-            .iter()
-            .zip(source_profiles)
-            .enumerate()
-            .any(|(word_index, (&target_word, &source_word))| {
-                let shared = target_word & source_word;
-                if matches!(mechanism, ModuleLoadMechanism::CommonJsRequire) {
-                    return shared != 0;
-                }
-                let masked_word = masked_profiles
+        for (word_index, &source_word) in source_profiles.iter().enumerate() {
+            let mut active_profiles = source_word;
+            if active_profiles == 0 {
+                continue;
+            }
+
+            for (target, mechanism) in (*hops).clone() {
+                let Some(target_word) = self
+                    .profiles_for(&self.reachable_profiles, target)
                     .and_then(|profiles| profiles.get(word_index))
-                    .copied()
-                    .unwrap_or_default();
-                shared & !masked_word != 0
-            })
+                else {
+                    return false;
+                };
+                active_profiles &= target_word;
+                if matches!(mechanism, ModuleLoadMechanism::EsModule)
+                    && let Some(masked_profiles) = self.masked_profiles_for(target)
+                {
+                    let Some(masked_word) = masked_profiles.get(word_index) else {
+                        return false;
+                    };
+                    active_profiles &= !masked_word;
+                }
+                if active_profiles == 0 {
+                    break;
+                }
+            }
+
+            if active_profiles != 0 {
+                return true;
+            }
+        }
+
+        false
     }
 
     #[cfg(test)]
@@ -279,13 +294,19 @@ fn propagate_namespace_references(
     graph: &mut ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     features: build::NamespaceFeatures,
+    reference_paths: &mut ReferencePathInterner,
 ) {
     let indexes = namespace_indexes::NamespacePropagationIndexes::new(graph, module_by_id);
     if features.has_aliases {
-        namespace_aliases::propagate_cross_package_aliases(graph, module_by_id, &indexes);
+        namespace_aliases::propagate_cross_package_aliases(
+            graph,
+            module_by_id,
+            &indexes,
+            reference_paths,
+        );
     }
     if features.has_re_exports {
-        namespace_re_exports::propagate_namespace_re_exports(graph, &indexes);
+        namespace_re_exports::propagate_namespace_re_exports(graph, &indexes, reference_paths);
     }
 }
 
@@ -386,10 +407,16 @@ impl ModuleGraph {
             total_capacity,
         });
 
-        graph.populate_references(&module_by_id, &entry_point_ids);
+        let mut reference_paths = ReferencePathInterner::default();
+        graph.populate_references(&module_by_id, &entry_point_ids, &mut reference_paths);
 
         if namespace_features.has_aliases || namespace_features.has_re_exports {
-            propagate_namespace_references(&mut graph, &module_by_id, namespace_features);
+            propagate_namespace_references(
+                &mut graph,
+                &module_by_id,
+                namespace_features,
+                &mut reference_paths,
+            );
         }
 
         graph.mark_reachable(
@@ -400,7 +427,9 @@ impl ModuleGraph {
             total_capacity,
         );
 
-        graph.re_export_cycles = graph.resolve_re_export_chains(&module_by_id);
+        graph.re_export_cycles =
+            graph.resolve_re_export_chains(&module_by_id, &mut reference_paths);
+        graph.reference_paths = reference_paths.finalize(&mut graph.modules);
 
         graph
     }
@@ -427,22 +456,30 @@ impl ModuleGraph {
 
     /// Return whether one test-root traversal covers this exact export reference.
     ///
-    /// ESM references require a profile that reaches both the referencing file
-    /// and target without replacing the target. CommonJS references only
-    /// require correlated reachability because Vitest replacement mocks do not
-    /// intercept `require()`. Re-export propagation records ESM mechanism, so a
-    /// CommonJS-loaded barrel cannot bypass a replacement on its ESM source.
+    /// Coverage requires one profile that reaches the referencing file and
+    /// every target hop. ESM hops also require that profile not to replace the
+    /// hop target; CommonJS hops remain active because Vitest replacement mocks
+    /// do not intercept `require()`.
     #[must_use]
-    pub fn is_test_reference_covered(&self, target: FileId, reference: &SymbolReference) -> bool {
+    pub fn is_test_reference_covered(&self, reference: &SymbolReference) -> bool {
+        let hops = ReferencePathIter::new(&self.reference_paths, reference.path);
         if self.test_reachability_index.profile_count == 0 {
-            return self.is_test_reachable(target) && self.is_test_reachable(reference.from_file);
+            return self.is_test_reachable(reference.from_file)
+                && hops
+                    .clone()
+                    .all(|(target, _mechanism)| self.is_test_reachable(target));
         }
 
-        self.test_reachability_index.shares_profile(
-            target,
-            reference.from_file,
-            reference.mechanism,
-        )
+        self.test_reachability_index
+            .covers_path(reference.from_file, &hops)
+    }
+
+    #[cfg(test)]
+    fn reference_path_hops(
+        &self,
+        reference: &SymbolReference,
+    ) -> Vec<(FileId, ModuleLoadMechanism)> {
+        ReferencePathIter::new(&self.reference_paths, reference.path).collect()
     }
 
     /// Rebuild the `namespace_imported` bitset from the edge set.

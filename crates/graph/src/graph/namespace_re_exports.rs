@@ -34,10 +34,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::ModuleGraph;
 use super::namespace_indexes::NamespacePropagationIndexes;
 use super::narrowing::{
-    create_synthetic_exports_for_star_re_exports, mark_all_exports_referenced,
+    ReferenceTarget, create_synthetic_exports_for_star_re_exports, mark_all_exports_referenced,
     mark_member_exports_referenced,
 };
-use super::types::ReferenceKind;
+use super::types::{ReferenceKind, ReferencePathInterner};
 use fallow_types::discover::FileId;
 
 /// Either credit a specific member on the target, or credit every export
@@ -65,6 +65,7 @@ struct PendingCredit {
 pub(super) fn propagate_namespace_re_exports(
     graph: &mut ModuleGraph,
     indexes: &NamespacePropagationIndexes<'_>,
+    reference_paths: &mut ReferencePathInterner,
 ) {
     let ns_edges: Vec<(FileId, FileId, String)> = graph
         .modules
@@ -117,7 +118,7 @@ pub(super) fn propagate_namespace_re_exports(
         );
     }
 
-    apply_pending_credits(graph, &pending);
+    apply_pending_credits(graph, &pending, reference_paths);
 }
 
 /// Map a `FileId` to its index in `graph.modules`. Returns `None` if the id
@@ -190,7 +191,11 @@ fn collect_consumer_credits(
 /// pipeline that `narrow_namespace_references` uses for direct namespace
 /// imports. `AllExports` credits short-circuit to `mark_all_exports_referenced`
 /// for the whole-object and entry-point cases.
-fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
+fn apply_pending_credits(
+    graph: &mut ModuleGraph,
+    pending: &[PendingCredit],
+    reference_paths: &mut ReferencePathInterner,
+) {
     type GroupKey = (usize, FileId, oxc_span::Span);
 
     let mut groups: FxHashMap<GroupKey, GroupState> = FxHashMap::default();
@@ -216,28 +221,29 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
 
     for ((target_module_idx, consumer_file_id, import_span), state) in groups {
         let module = &mut graph.modules[target_module_idx];
+        let target_file = module.file_id;
+        let target = ReferenceTarget {
+            source_id: consumer_file_id,
+            target_id: target_file,
+            import_span,
+            kind: ReferenceKind::NamespaceImport,
+        };
         if state.whole_object {
-            mark_all_exports_referenced(
-                &mut module.exports,
-                consumer_file_id,
-                import_span,
-                ReferenceKind::NamespaceImport,
-            );
+            mark_all_exports_referenced(&mut module.exports, target, reference_paths);
         } else {
             let found = mark_member_exports_referenced(
                 &mut module.exports,
-                consumer_file_id,
+                target,
                 &state.members,
-                import_span,
-                ReferenceKind::NamespaceImport,
+                reference_paths,
             );
             create_synthetic_exports_for_star_re_exports(
                 &mut module.exports,
                 &module.re_exports,
-                consumer_file_id,
+                target,
                 &state.members,
                 &found,
-                import_span,
+                reference_paths,
             );
         }
     }

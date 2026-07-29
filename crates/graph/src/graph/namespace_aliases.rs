@@ -28,9 +28,9 @@ use crate::resolve::ResolvedModule;
 use super::ModuleGraph;
 use super::namespace_indexes::NamespacePropagationIndexes;
 use super::narrowing::{
-    create_synthetic_exports_for_star_re_exports, mark_member_exports_referenced,
+    ReferenceTarget, create_synthetic_exports_for_star_re_exports, mark_member_exports_referenced,
 };
-use super::types::ReferenceKind;
+use super::types::{ReferenceKind, ReferencePathInterner};
 
 /// One credit operation collected during the scan and applied after the loop
 /// to keep mutable borrows of `ModuleGraph::modules` localised.
@@ -53,9 +53,10 @@ pub(super) fn propagate_cross_package_aliases(
     graph: &mut ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     indexes: &NamespacePropagationIndexes<'_>,
+    reference_paths: &mut ReferencePathInterner,
 ) {
     let pending = collect_pending_credits(graph, module_by_id, indexes);
-    apply_pending_credits(graph, &pending);
+    apply_pending_credits(graph, &pending, reference_paths);
 }
 
 fn collect_pending_credits(
@@ -284,7 +285,11 @@ fn collect_chained_re_export_credits(
 /// namespace target is a star barrel (`export * from './bar'`): missing
 /// member exports are stubbed so Phase 4 chain resolution can propagate the
 /// reference to the real defining file.
-fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
+fn apply_pending_credits(
+    graph: &mut ModuleGraph,
+    pending: &[PendingCredit],
+    reference_paths: &mut ReferencePathInterner,
+) {
     type GroupKey = (usize, FileId, oxc_span::Span);
 
     let mut groups: FxHashMap<GroupKey, Vec<String>> = FxHashMap::default();
@@ -301,20 +306,22 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
 
     for ((target_module_idx, consumer_file_id, import_span), members) in groups {
         let module = &mut graph.modules[target_module_idx];
-        let found_members = mark_member_exports_referenced(
-            &mut module.exports,
-            consumer_file_id,
-            &members,
+        let target_file = module.file_id;
+        let target = ReferenceTarget {
+            source_id: consumer_file_id,
+            target_id: target_file,
             import_span,
-            ReferenceKind::NamespaceImport,
-        );
+            kind: ReferenceKind::NamespaceImport,
+        };
+        let found_members =
+            mark_member_exports_referenced(&mut module.exports, target, &members, reference_paths);
         create_synthetic_exports_for_star_re_exports(
             &mut module.exports,
             &module.re_exports,
-            consumer_file_id,
+            target,
             &members,
             &found_members,
-            import_span,
+            reference_paths,
         );
     }
 }
