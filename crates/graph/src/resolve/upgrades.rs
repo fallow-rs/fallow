@@ -287,8 +287,11 @@ mod tests {
         apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
-            resolved[1].re_exports[0].target,
-            ResolveResult::InternalModule(FileId(10))
+            &resolved[1].re_exports[0].target,
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(10),
+                package_name,
+            } if package_name == "preact"
         ));
     }
 
@@ -317,8 +320,11 @@ mod tests {
             ResolveResult::InternalModule(FileId(10))
         ));
         assert!(matches!(
-            resolved[1].resolved_imports[1].target,
-            ResolveResult::InternalModule(FileId(10))
+            &resolved[1].resolved_imports[1].target,
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(10),
+                package_name,
+            } if package_name == "preact"
         ));
     }
 
@@ -383,8 +389,11 @@ mod tests {
         apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
-            resolved[1].resolved_dynamic_imports[0].target,
-            ResolveResult::InternalModule(FileId(10))
+            &resolved[1].resolved_dynamic_imports[0].target,
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(10),
+                package_name,
+            } if package_name == "preact"
         ));
     }
 
@@ -435,8 +444,11 @@ mod tests {
         apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
-            resolved[2].resolved_imports[0].target,
-            ResolveResult::InternalModule(FileId(10))
+            &resolved[2].resolved_imports[0].target,
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(10),
+                package_name,
+            } if package_name == "preact"
         ));
     }
 
@@ -458,8 +470,11 @@ mod tests {
         apply_specifier_upgrades(&mut resolved, &mut []);
 
         assert!(matches!(
-            resolved[1].resolved_imports[0].target,
-            ResolveResult::InternalModule(FileId(10))
+            &resolved[1].resolved_imports[0].target,
+            ResolveResult::InternalPackageModule {
+                file_id: FileId(10),
+                package_name,
+            } if package_name == "preact"
         ));
     }
 
