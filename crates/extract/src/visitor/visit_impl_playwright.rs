@@ -2,12 +2,13 @@ use oxc_ast::ast::{
     Argument, CallExpression, Expression, TSInterfaceDeclaration, TSType, TSTypeAliasDeclaration,
 };
 
-use crate::DynamicImportInfo;
+use crate::{DynamicImportInfo, ReplacedModuleTargetFact, SemanticFact};
 
 use super::super::{ModuleInfoExtractor, PendingPlaywrightFactory};
 use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
     playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source, vitest_mock_source,
+    vitest_replaced_module_source,
 };
 
 impl ModuleInfoExtractor {
@@ -225,7 +226,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_vitest_mock_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
+    pub(super) fn record_vitest_mock_imports(&mut self, expr: &CallExpression<'_>) {
         let Some(target_source) = vitest_mock_source(expr) else {
             return;
         };
@@ -248,6 +249,14 @@ impl ModuleInfoExtractor {
                 local_name: Some(String::new()),
                 is_speculative: true,
             });
+        }
+
+        if self.is_named_import_from("vi", "vitest", "vi")
+            && let Some(source) = vitest_replaced_module_source(expr)
+        {
+            self.semantic_facts.push(SemanticFact::ReplacedModuleTarget(
+                ReplacedModuleTargetFact { source },
+            ));
         }
     }
 }

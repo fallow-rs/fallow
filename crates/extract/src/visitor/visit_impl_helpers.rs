@@ -349,6 +349,76 @@ pub(super) fn vi_mock_has_factory(call: &CallExpression<'_>) -> bool {
     call.arguments.get(1).is_some_and(is_factory_arg)
 }
 
+/// Return the target of a Vitest mock whose factory provably replaces the
+/// original module without loading it.
+///
+/// Import provenance is checked by the caller. This helper stays conservative:
+/// factories with parameters can receive `importOriginal`, and a zero-argument
+/// factory can still call `vi.importActual`, so both shapes abstain.
+pub(super) fn vitest_replaced_module_source(call: &CallExpression<'_>) -> Option<String> {
+    fn factory_has_no_parameters(argument: &Argument<'_>) -> Option<bool> {
+        fn expression_has_no_parameters(expression: &Expression<'_>) -> Option<bool> {
+            match expression {
+                Expression::ArrowFunctionExpression(factory) => {
+                    Some(factory.params.items.is_empty())
+                }
+                Expression::FunctionExpression(factory) => Some(factory.params.items.is_empty()),
+                Expression::ParenthesizedExpression(parenthesized) => {
+                    expression_has_no_parameters(&parenthesized.expression)
+                }
+                _ => None,
+            }
+        }
+
+        match argument {
+            Argument::ArrowFunctionExpression(factory) => Some(factory.params.items.is_empty()),
+            Argument::FunctionExpression(factory) => Some(factory.params.items.is_empty()),
+            Argument::ParenthesizedExpression(parenthesized) => {
+                expression_has_no_parameters(&parenthesized.expression)
+            }
+            _ => None,
+        }
+    }
+
+    struct ImportActualVisitor {
+        found: bool,
+    }
+
+    impl<'a> Visit<'a> for ImportActualVisitor {
+        fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+            if let Expression::StaticMemberExpression(member) = &call.callee
+                && member.property.name == "importActual"
+                && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+            {
+                self.found = true;
+                return;
+            }
+            walk::walk_call_expression(self, call);
+        }
+    }
+
+    let target = vitest_mock_source(call)?;
+    let factory = call.arguments.get(1)?;
+    if factory_has_no_parameters(factory) != Some(true) {
+        return None;
+    }
+
+    let mut import_actual = ImportActualVisitor { found: false };
+    match factory {
+        Argument::ArrowFunctionExpression(factory) => {
+            import_actual.visit_arrow_function_expression(factory)
+        }
+        Argument::FunctionExpression(factory) => {
+            import_actual.visit_function(factory, ScopeFlags::Function);
+        }
+        Argument::ParenthesizedExpression(parenthesized) => {
+            import_actual.visit_expression(&parenthesized.expression);
+        }
+        _ => return None,
+    }
+    (!import_actual.found).then_some(target)
+}
+
 /// Whether `callee` is a `useMemo` / `React.useMemo` reference.
 ///
 /// `useMemo(factory)` returns the factory's product directly, so

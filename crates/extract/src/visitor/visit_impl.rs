@@ -2446,7 +2446,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         self.bind_iterable_callback_parameter(expr);
-        self.record_vitest_mock_dynamic_imports(expr);
+        self.record_vitest_mock_imports(expr);
 
         self.try_record_pino_transport_targets(expr);
         self.try_record_node_module_register(expr);

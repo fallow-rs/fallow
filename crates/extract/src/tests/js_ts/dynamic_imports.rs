@@ -1,4 +1,15 @@
 use crate::tests::parse_ts as parse_source;
+use crate::{ModuleInfo, SemanticFact};
+
+fn replaced_module_targets(info: &ModuleInfo) -> Vec<&str> {
+    info.semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::ReplacedModuleTarget(target) => Some(target.source.as_str()),
+            _ => None,
+        })
+        .collect()
+}
 
 #[test]
 fn extracts_template_literal_dynamic_import_pattern() {
@@ -228,6 +239,58 @@ fn vitest_mock_with_options_object_still_synthesizes_auto_mock() {
         .find(|imp| imp.source == "./services/__mocks__/api")
         .expect("auto-mock import should be recorded");
     assert_eq!(auto_mock.local_name, Some(String::new()));
+}
+
+#[test]
+fn vitest_replacement_factory_records_typed_target() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock("./services/api", () => ({ request: vi.fn() }));
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+    assert_eq!(
+        info.dynamic_imports
+            .iter()
+            .map(|import| import.source.as_str())
+            .collect::<Vec<_>>(),
+        vec!["./services/api"],
+        "the ordinary dependency edge remains intact"
+    );
+}
+
+#[test]
+fn vitest_function_replacement_supports_import_expression_target() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock(import("./services/api"), function () {
+          return { request: vi.fn() };
+        });
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+}
+
+#[test]
+fn vitest_non_replacement_forms_abstain() {
+    for source in [
+        r#"import { vi } from "vitest"; vi.mock("./auto");"#,
+        r#"import { vi } from "vitest"; vi.mock("./spy", { spy: true });"#,
+        r#"import { vi } from "vitest"; vi.mock("./partial", (importOriginal) => importOriginal());"#,
+        r#"import { vi } from "vitest"; vi.mock("./actual", async () => vi.importActual("./actual"));"#,
+        r#"const vi = localMockApi; vi.mock("./local", () => ({}));"#,
+        r#"vi.mock("./global", () => ({}));"#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            replaced_module_targets(&info).is_empty(),
+            "ambiguous or original-loading form should abstain: {source}"
+        );
+    }
 }
 
 #[test]
