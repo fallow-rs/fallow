@@ -105,9 +105,8 @@ fn credit_workspace_package_usage(
                 import.target,
                 resolve::ResolveResult::InternalModule(_)
                     | resolve::ResolveResult::CommonJsInternalModule(_)
-            )
-                && let Some(package_name) =
-                    workspace_package_name(&import.info.source, &workspace_names)
+            ) && let Some(package_name) =
+                workspace_package_name(&import.info.source, &workspace_names)
             {
                 record_graph_package_usage(
                     graph,
