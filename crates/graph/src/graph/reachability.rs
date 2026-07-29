@@ -10,6 +10,37 @@ use fallow_types::discover::FileId;
 
 use super::{ModuleGraph, TestReachabilityProfile};
 
+enum TestReachability {
+    NoRoots,
+    Legacy(FixedBitSet),
+    Profiled {
+        reachable: FixedBitSet,
+        profiles: Vec<TestReachabilityProfile>,
+    },
+}
+
+impl TestReachability {
+    fn into_parts(self) -> (Option<FixedBitSet>, Vec<TestReachabilityProfile>) {
+        match self {
+            Self::NoRoots => (None, Vec::new()),
+            Self::Legacy(reachable) => (Some(reachable), Vec::new()),
+            Self::Profiled {
+                reachable,
+                profiles,
+            } => (Some(reachable), profiles),
+        }
+    }
+
+    #[cfg(test)]
+    const fn traversal_count(&self) -> usize {
+        match self {
+            Self::NoRoots => 0,
+            Self::Legacy(_) => 1,
+            Self::Profiled { profiles, .. } => profiles.len(),
+        }
+    }
+}
+
 impl ModuleGraph {
     fn collect_reachable(
         &self,
@@ -69,9 +100,9 @@ impl ModuleGraph {
         test_entry_points: &FxHashSet<FileId>,
         replaced_module_targets: &[ResolvedReplacedModuleTarget],
         total_capacity: usize,
-    ) -> (Option<FixedBitSet>, Vec<TestReachabilityProfile>) {
+    ) -> TestReachability {
         if test_entry_points.is_empty() {
-            return (None, Vec::new());
+            return TestReachability::NoRoots;
         }
 
         let mut targets_by_root: FxHashMap<FileId, Vec<FileId>> = FxHashMap::default();
@@ -91,9 +122,8 @@ impl ModuleGraph {
         }
 
         if targets_by_root.is_empty() {
-            return (
-                Some(self.collect_reachable(test_entry_points, total_capacity)),
-                Vec::new(),
+            return TestReachability::Legacy(
+                self.collect_reachable(test_entry_points, total_capacity),
             );
         }
 
@@ -132,7 +162,10 @@ impl ModuleGraph {
             });
         }
 
-        (Some(all_test_reachable), profiles)
+        TestReachability::Profiled {
+            reachable: all_test_reachable,
+            profiles,
+        }
     }
 
     /// Mark modules reachable from overall, runtime, and test entry points via BFS.
@@ -155,8 +188,9 @@ impl ModuleGraph {
             Some(self.collect_reachable(runtime_entry_points, total_capacity))
         };
 
-        let (test_visited, test_reachability_profiles) =
-            self.collect_test_reachable(test_entry_points, replaced_module_targets, total_capacity);
+        let (test_visited, test_reachability_profiles) = self
+            .collect_test_reachable(test_entry_points, replaced_module_targets, total_capacity)
+            .into_parts();
         self.test_reachability_profiles = test_reachability_profiles;
 
         for (idx, module) in self.modules.iter_mut().enumerate() {
@@ -560,6 +594,45 @@ mod tests {
             decoded.test_reachability_profiles[0].reachable_files,
             vec![FileId(0)]
         );
+    }
+
+    #[test]
+    fn many_unmasked_roots_use_one_test_traversal() {
+        let test_roots: Vec<u32> = (0..512).collect();
+        let graph = build_reachability_graph(512, &[], &[], &test_roots);
+        let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
+
+        let reachability = graph.collect_test_reachable(&root_set, &[], 512);
+
+        assert_eq!(reachability.traversal_count(), 1);
+    }
+
+    #[test]
+    fn many_roots_use_one_traversal_per_distinct_mask() {
+        let test_roots: Vec<u32> = (0..128).collect();
+        let edges: Vec<_> = test_roots
+            .iter()
+            .copied()
+            .map(|root| (root, 128, false))
+            .collect();
+        let replacements: Vec<_> = (0..64)
+            .map(|root| ResolvedReplacedModuleTarget {
+                source_file: FileId(root),
+                target_file: FileId(128),
+            })
+            .collect();
+        let graph = build_reachability_graph_with_replacements(
+            129,
+            &edges,
+            &[],
+            &test_roots,
+            &replacements,
+        );
+        let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
+
+        let reachability = graph.collect_test_reachable(&root_set, &replacements, 129);
+
+        assert_eq!(reachability.traversal_count(), 2);
     }
 
     #[test]
