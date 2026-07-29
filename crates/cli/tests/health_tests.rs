@@ -2182,6 +2182,65 @@ fn health_coverage_gaps_exclude_vitest_replacement_targets() {
 }
 
 #[test]
+fn health_coverage_gaps_keep_targets_reached_by_an_unmasked_test_root() {
+    let output = run_fallow(
+        "health",
+        "issue-2031-mixed-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let coverage = json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    let summary = coverage["summary"]
+        .as_object()
+        .expect("coverage_gaps.summary should be an object");
+    assert_eq!(summary["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        summary["covered_files"].as_u64(),
+        Some(2),
+        "the wrapper and the independently tested dependency should be covered"
+    );
+
+    let file_names: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert!(
+        !file_names
+            .iter()
+            .any(|path| path.ends_with("src/dependency.ts")),
+        "an unmasked root should cover the real dependency: {file_names:?}"
+    );
+
+    let export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item["export_name"].as_str())
+        .collect();
+    assert!(
+        !export_names.contains(&"renderDependency"),
+        "an unmasked reference should cover the dependency export: {export_names:?}"
+    );
+}
+
+#[test]
 fn health_coverage_gaps_config_error_enforces_without_flag() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let config_path = dir.path().join("fallow.json");
