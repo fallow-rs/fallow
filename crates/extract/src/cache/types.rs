@@ -852,7 +852,11 @@ use crate::MemberKind;
 /// resolve to the direct `vi` import and recognize computed `vi["importActual"]`
 /// as an original-module load. Warm 242 caches can retain false replacement
 /// facts from shadowed bindings or computed original loaders.
-pub(super) const CACHE_VERSION: u32 = 243;
+///
+/// Bumped to 244: dynamic import patterns now retain their module load
+/// mechanism. Warm 243 caches cannot distinguish ESM patterns from
+/// `require.context` CommonJS patterns.
+pub(super) const CACHE_VERSION: u32 = 244;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -923,7 +927,7 @@ assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 88);
 assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
-assert_cached_type_size!(CachedDynamicImportPattern, 56);
+assert_cached_type_size!(CachedDynamicImportPattern, 64);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
@@ -1384,4 +1388,6 @@ pub struct CachedDynamicImportPattern {
     pub(crate) span_start: u32,
     /// Byte offset of the span end.
     pub(crate) span_end: u32,
+    /// Runtime mechanism used to load modules matching this pattern.
+    pub(crate) mechanism: crate::ModuleLoadMechanism,
 }

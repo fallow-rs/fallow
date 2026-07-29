@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
-    MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
+    MemberAccess, ModuleLoadMechanism, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
@@ -2351,6 +2351,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                             prefix,
                             suffix,
                             span: expr.span,
+                            mechanism: ModuleLoadMechanism::EsModule,
                         });
                     }
                 }

@@ -9,6 +9,7 @@ impl<'a> ModuleInfoExtractor {
                 prefix,
                 suffix: None,
                 span,
+                mechanism: ModuleLoadMechanism::EsModule,
             });
         }
     }
@@ -64,6 +65,7 @@ impl<'a> ModuleInfoExtractor {
                     prefix,
                     suffix,
                     span: expr.span,
+                    mechanism: ModuleLoadMechanism::CommonJsRequire,
                 });
             }
         }
@@ -189,6 +191,7 @@ impl<'a> ModuleInfoExtractor {
             prefix,
             suffix,
             span,
+            mechanism: ModuleLoadMechanism::EsModule,
         });
     }
 }

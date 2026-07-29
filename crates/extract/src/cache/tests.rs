@@ -3232,11 +3232,13 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
                 prefix: "./components/".to_string(),
                 suffix: Some(".vue".to_string()),
                 span: Span::new(0, 50),
+                mechanism: crate::ModuleLoadMechanism::EsModule,
             },
             crate::DynamicImportPattern {
                 prefix: "./pages/**/".to_string(),
                 suffix: None,
                 span: Span::new(60, 100),
+                mechanism: crate::ModuleLoadMechanism::CommonJsRequire,
             },
         ],
         has_cjs_exports: false,
@@ -3317,8 +3319,16 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
     );
     assert_eq!(restored.dynamic_import_patterns[0].span.start, 0);
     assert_eq!(restored.dynamic_import_patterns[0].span.end, 50);
+    assert_eq!(
+        restored.dynamic_import_patterns[0].mechanism,
+        crate::ModuleLoadMechanism::EsModule
+    );
     assert_eq!(restored.dynamic_import_patterns[1].prefix, "./pages/**/");
     assert!(restored.dynamic_import_patterns[1].suffix.is_none());
+    assert_eq!(
+        restored.dynamic_import_patterns[1].mechanism,
+        crate::ModuleLoadMechanism::CommonJsRequire
+    );
 }
 
 #[test]

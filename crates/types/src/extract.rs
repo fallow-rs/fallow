@@ -1226,6 +1226,27 @@ pub struct FlagUse {
 
 const _: () = assert!(std::mem::size_of::<FlagUse>() <= 96);
 
+/// The runtime mechanism used to load a module.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[repr(u8)]
+pub enum ModuleLoadMechanism {
+    /// ECMAScript module loading through `import()` or `import.meta.glob`.
+    EsModule = 0,
+    /// CommonJS module loading through `require.context`.
+    CommonJsRequire = 1,
+}
+
 /// A dynamic import with a partially resolved pattern.
 #[derive(Debug, Clone)]
 pub struct DynamicImportPattern {
@@ -1235,6 +1256,8 @@ pub struct DynamicImportPattern {
     pub suffix: Option<String>,
     /// Source span in the original file.
     pub span: Span,
+    /// Runtime mechanism used to load modules matching this pattern.
+    pub mechanism: ModuleLoadMechanism,
 }
 
 /// Visibility tag from JSDoc/TSDoc comments that suppresses unused-export detection.
@@ -3149,6 +3172,7 @@ mod tests {
                 prefix: "./pages/".to_string(),
                 suffix: Some(".tsx".to_string()),
                 span: span(),
+                mechanism: ModuleLoadMechanism::EsModule,
             }],
             require_calls: vec![RequireCallInfo {
                 source: "./required".to_string(),

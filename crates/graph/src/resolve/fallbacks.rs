@@ -1114,6 +1114,7 @@ pub(super) fn make_glob_from_pattern(
 mod tests {
     use super::*;
     use crate::resolve::types::{CanonicalizeCache, TsconfigCache};
+    use fallow_types::extract::ModuleLoadMechanism;
     use rustc_hash::FxHashSet;
 
     fn with_package_map_ctx(
@@ -1860,6 +1861,7 @@ mod tests {
             prefix: "./locales/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*");
     }
@@ -1870,6 +1872,7 @@ mod tests {
             prefix: "./locales/".to_string(),
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*.json");
     }
@@ -1880,6 +1883,7 @@ mod tests {
             prefix: "./pages/**/*.tsx".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./pages/**/*.tsx");
     }
@@ -1890,6 +1894,7 @@ mod tests {
             prefix: "./i18n/{en,de,fr}.json".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./i18n/{en,de,fr}.json");
     }
@@ -1900,6 +1905,7 @@ mod tests {
             prefix: String::new(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "*");
     }
@@ -1910,6 +1916,7 @@ mod tests {
             prefix: String::new(),
             suffix: Some(".ts".to_string()),
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "*.ts");
     }
@@ -1920,6 +1927,7 @@ mod tests {
             prefix: "./pages/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./pages/*");
     }
@@ -1930,6 +1938,7 @@ mod tests {
             prefix: "./locales/".to_string(),
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*.json");
     }
@@ -1940,6 +1949,7 @@ mod tests {
             prefix: "./modules/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./modules/*");
     }
@@ -1950,6 +1960,7 @@ mod tests {
             prefix: "./pages/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./pages/*");
     }
@@ -1960,6 +1971,7 @@ mod tests {
             prefix: "./views/".to_string(),
             suffix: Some(".vue".to_string()),
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./views/*.vue");
     }
@@ -1970,6 +1982,7 @@ mod tests {
             prefix: "./components/**/*.vue".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -1984,6 +1997,7 @@ mod tests {
             prefix: "./plugins/{auth,analytics}.ts".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -1998,6 +2012,7 @@ mod tests {
             prefix: "./routes/**/*.{ts,tsx}".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -2012,6 +2027,7 @@ mod tests {
             prefix: "./*.ts".to_string(),
             suffix: Some(".extra".to_string()),
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -2026,6 +2042,7 @@ mod tests {
             prefix: "./".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./*");
     }
@@ -2036,6 +2053,7 @@ mod tests {
             prefix: "./config".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./config*");
     }
@@ -2046,6 +2064,7 @@ mod tests {
             prefix: "../shared/".to_string(),
             suffix: Some(".ts".to_string()),
             span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "../shared/*.ts");
     }

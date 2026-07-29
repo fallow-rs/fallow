@@ -60,10 +60,11 @@ pub use fallow_types::extract::{
     FactoryReturnExport, FactoryReturnObjectPropertyAccessFact, FactoryReturnObjectShapeExport,
     FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
     InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, ParseResult, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
-    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, PublicSignatureTypeReference,
-    ReExportInfo, ReplacedModuleTargetFact, RequireCallInfo, SemanticFact, SourceReadFailure,
-    TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag, compute_line_offsets,
+    ModuleInfo, ModuleLoadMechanism, ParseResult, PlaywrightFixtureAliasFact,
+    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+    PublicSignatureTypeReference, ReExportInfo, ReplacedModuleTargetFact, RequireCallInfo,
+    SemanticFact, SourceReadFailure, TypeMemberTypeEntry, TypedPropertyMemberAccessFact,
+    VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{

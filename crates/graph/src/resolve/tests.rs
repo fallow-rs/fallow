@@ -5,8 +5,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
-    DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ReExportInfo,
-    ReplacedModuleTargetFact, RequireCallInfo, SemanticFact,
+    DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ModuleLoadMechanism,
+    ReExportInfo, ReplacedModuleTargetFact, RequireCallInfo, SemanticFact,
 };
 
 use super::dynamic_imports::{
@@ -1003,6 +1003,7 @@ fn dynamic_patterns_matches_files_in_dir() {
         prefix: "./locales/".into(),
         suffix: Some(".json".into()),
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/locales/en.json"),
@@ -1042,6 +1043,7 @@ fn dynamic_patterns_no_matches_returns_empty() {
         prefix: "./locales/".into(),
         suffix: Some(".json".into()),
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![PathBuf::from("/project/src/utils.ts")];
     let files = vec![DiscoveredFile {
@@ -1076,6 +1078,7 @@ fn dynamic_patterns_glob_prefix_passthrough() {
         prefix: "./**/*.ts".into(),
         suffix: None,
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/utils.ts"),
@@ -1272,6 +1275,7 @@ fn dynamic_patterns_prefix_without_suffix() {
         prefix: "./pages/".into(),
         suffix: None,
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/pages/Home.tsx"),
@@ -1311,6 +1315,7 @@ fn dynamic_patterns_empty_canonical_paths() {
         prefix: "./locales/".into(),
         suffix: Some(".json".into()),
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
 
     let result = resolve_dynamic_patterns(from_dir, &patterns, &[], &[]);

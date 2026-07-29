@@ -1,5 +1,5 @@
 use crate::tests::parse_ts as parse_source;
-use crate::{ModuleInfo, SemanticFact};
+use crate::{ModuleInfo, ModuleLoadMechanism, SemanticFact};
 
 fn replaced_module_targets(info: &ModuleInfo) -> Vec<&str> {
     info.semantic_facts
@@ -20,6 +20,10 @@ fn extracts_template_literal_dynamic_import_pattern() {
         info.dynamic_import_patterns[0].suffix,
         Some(".json".to_string())
     );
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::EsModule
+    );
 }
 
 #[test]
@@ -28,6 +32,10 @@ fn extracts_concat_dynamic_import_pattern() {
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./pages/");
     assert!(info.dynamic_import_patterns[0].suffix.is_none());
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::EsModule
+    );
 }
 
 #[test]
@@ -78,6 +86,10 @@ fn extracts_import_meta_glob_pattern() {
     let info = parse_source("const mods = import.meta.glob('./components/*.tsx');");
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./components/*.tsx");
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::EsModule
+    );
 }
 
 #[test]
@@ -86,6 +98,11 @@ fn extracts_import_meta_glob_array() {
     assert_eq!(info.dynamic_import_patterns.len(), 2);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./pages/*.ts");
     assert_eq!(info.dynamic_import_patterns[1].prefix, "./layouts/*.ts");
+    assert!(
+        info.dynamic_import_patterns
+            .iter()
+            .all(|pattern| pattern.mechanism == ModuleLoadMechanism::EsModule)
+    );
 }
 
 #[test]
@@ -93,6 +110,10 @@ fn extracts_require_context_pattern() {
     let info = parse_source("const ctx = require.context('./icons', false);");
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./icons/");
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::CommonJsRequire
+    );
 }
 
 #[test]
@@ -100,6 +121,10 @@ fn extracts_require_context_recursive() {
     let info = parse_source("const ctx = require.context('./icons', true);");
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./icons/**/");
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::CommonJsRequire
+    );
 }
 
 #[test]

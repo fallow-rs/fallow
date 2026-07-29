@@ -156,6 +156,7 @@ fn cached_dynamic_patterns_to_module(
             prefix: pattern.prefix.clone(),
             suffix: pattern.suffix.clone(),
             span: Span::new(pattern.span_start, pattern.span_end),
+            mechanism: pattern.mechanism,
         })
         .collect()
 }
@@ -361,6 +362,7 @@ fn module_dynamic_patterns_to_cached(
             suffix: pattern.suffix.clone(),
             span_start: pattern.span.start,
             span_end: pattern.span.end,
+            mechanism: pattern.mechanism,
         })
         .collect()
 }
