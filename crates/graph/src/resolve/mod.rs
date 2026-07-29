@@ -33,7 +33,8 @@ pub use path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
 pub use types::{
-    ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport, ResolvedSourceEdge,
+    ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
+    ResolvedReplacedModuleTarget, ResolvedSourceEdge,
 };
 
 use std::path::{Path, PathBuf};
@@ -44,7 +45,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::{AutoImportKind, AutoImportRule};
 use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
+use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo, SemanticFact};
 use oxc_span::Span;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
@@ -140,7 +141,7 @@ impl ResolverSession {
 
 /// Resolve all imports across all modules in parallel.
 #[must_use]
-pub fn resolve_all_imports(input: &ResolveAllImportsInput<'_>) -> Vec<ResolvedModule> {
+pub fn resolve_all_imports(input: &ResolveAllImportsInput<'_>) -> ResolvedProject {
     let session = ResolverSession::new(input);
     resolve_all_imports_with_session(input, &session)
 }
@@ -156,7 +157,7 @@ pub fn resolve_all_imports(input: &ResolveAllImportsInput<'_>) -> Vec<ResolvedMo
 pub fn resolve_all_imports_with_session(
     input: &ResolveAllImportsInput<'_>,
     session: &ResolverSession,
-) -> Vec<ResolvedModule> {
+) -> ResolvedProject {
     let root_is_canonical = session.root_is_canonical;
     let workspace_roots = build_workspace_roots(input.workspaces, &session.canonical_ws_roots);
     let canonical_paths = build_canonical_file_paths(input.files, root_is_canonical);
@@ -198,13 +199,19 @@ pub fn resolve_all_imports_with_session(
         canonicalize_cache: &canonicalize_cache,
     };
 
-    let mut resolved: Vec<ResolvedModule> = input
+    let resolved_outputs: Vec<ResolvedModuleOutput> = input
         .modules
         .par_iter()
         .filter_map(|module| {
             resolve_module_imports(module, &ctx, &file_paths, &canonical_paths, input.files)
         })
         .collect();
+    let mut resolved = Vec::with_capacity(resolved_outputs.len());
+    let mut replaced_module_targets = Vec::new();
+    for output in resolved_outputs {
+        resolved.push(output.module);
+        replaced_module_targets.extend(output.replaced_module_targets);
+    }
 
     apply_specifier_upgrades(&mut resolved);
 
@@ -216,7 +223,14 @@ pub fn resolve_all_imports_with_session(
         &raw_path_to_id,
     );
 
-    resolved
+    replaced_module_targets
+        .sort_unstable_by_key(|target| (target.source_file.0, target.target_file.0));
+    replaced_module_targets.dedup();
+
+    ResolvedProject {
+        modules: resolved,
+        replaced_module_targets,
+    }
 }
 
 fn build_workspace_roots<'a>(
@@ -295,7 +309,7 @@ fn resolve_module_imports(
     file_paths: &[&Path],
     canonical_paths: &[PathBuf],
     files: &[DiscoveredFile],
-) -> Option<ResolvedModule> {
+) -> Option<ResolvedModuleOutput> {
     let Some(file_path) = file_paths.get(module.file_id.0 as usize) else {
         tracing::warn!(
             file_id = module.file_id.0,
@@ -320,7 +334,9 @@ fn resolve_module_imports(
             .unwrap_or(file_path)
     };
 
-    Some(build_resolved_module(ResolvedModuleBuildInput {
+    let replaced_module_targets =
+        resolve_replaced_module_targets(module.file_id, &module.semantic_facts, ctx, file_path);
+    let module = build_resolved_module(ResolvedModuleBuildInput {
         module,
         ctx,
         file_path,
@@ -328,7 +344,42 @@ fn resolve_module_imports(
         canonical_paths,
         files,
         all_imports,
-    }))
+    });
+
+    Some(ResolvedModuleOutput {
+        module,
+        replaced_module_targets,
+    })
+}
+
+struct ResolvedModuleOutput {
+    module: ResolvedModule,
+    replaced_module_targets: Vec<ResolvedReplacedModuleTarget>,
+}
+
+fn resolve_replaced_module_targets(
+    source_file: FileId,
+    semantic_facts: &[SemanticFact],
+    ctx: &ResolveContext<'_>,
+    file_path: &Path,
+) -> Vec<ResolvedReplacedModuleTarget> {
+    let mut targets: Vec<_> = semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::ReplacedModuleTarget(target) = fact else {
+                return None;
+            };
+            let target_file = specifier::resolve_specifier(ctx, file_path, &target.source, false)
+                .internal_file_id()?;
+            Some(ResolvedReplacedModuleTarget {
+                source_file,
+                target_file,
+            })
+        })
+        .collect();
+    targets.sort_unstable_by_key(|target| target.target_file.0);
+    targets.dedup();
+    targets
 }
 
 struct ResolvedModuleBuildInput<'a> {

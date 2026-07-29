@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
     DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ReExportInfo,
-    RequireCallInfo,
+    ReplacedModuleTargetFact, RequireCallInfo, SemanticFact,
 };
 
 use super::dynamic_imports::{
@@ -19,7 +19,10 @@ use super::specifier;
 use super::static_imports::resolve_static_imports;
 use super::types::{CanonicalizeCache, ResolveContext, TsconfigCache};
 use super::upgrades::apply_specifier_upgrades;
-use super::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+use super::{
+    ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
+    resolve_replaced_module_targets,
+};
 
 fn dummy_span() -> Span {
     Span::new(0, 0)
@@ -162,6 +165,71 @@ fn make_resolved_re_export(source: &str, target: ResolveResult) -> ResolvedReExp
         info: make_re_export(source, "x", "x"),
         target,
     }
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn replaced_module_targets_resolve_internal_files_and_abstain_on_missing_targets() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dunce::canonicalize(dir.path()).expect("canonicalize temp dir");
+    let test_file = root.join("wrapper.test.ts");
+    let dependency_file = root.join("dependency.ts");
+    std::fs::write(&test_file, "").expect("write test file");
+    std::fs::write(&dependency_file, "export const value = 1;").expect("write dependency");
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let path_to_id = FxHashMap::from_iter([
+        (test_file.as_path(), FileId(0)),
+        (dependency_file.as_path(), FileId(1)),
+    ]);
+    let raw_path_to_id = path_to_id.clone();
+    let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
+    let canonicalize_cache = CanonicalizeCache::default();
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root: &root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
+        canonicalize_cache: &canonicalize_cache,
+    };
+    let facts = [
+        SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+            source: "./dependency".to_string(),
+        }),
+        SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+            source: "./dependency".to_string(),
+        }),
+        SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+            source: "./missing".to_string(),
+        }),
+    ];
+
+    let targets = resolve_replaced_module_targets(FileId(0), &facts, &ctx, &test_file);
+
+    assert_eq!(
+        targets,
+        vec![super::ResolvedReplacedModuleTarget {
+            source_file: FileId(0),
+            target_file: FileId(1),
+        }]
+    );
 }
 
 #[test]

@@ -274,7 +274,7 @@ impl<'a> ExternalStylePackageScanner<'a> {
             &self.session,
         );
 
-        let Some(resolved_module) = resolved.first() else {
+        let Some(resolved_module) = resolved.modules.first() else {
             return;
         };
         for import in resolved_module.all_resolved_imports() {

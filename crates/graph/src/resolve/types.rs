@@ -102,6 +102,24 @@ impl ResolveResult {
     }
 }
 
+/// Resolver output for one extracted project.
+#[derive(Debug, Default)]
+pub struct ResolvedProject {
+    /// Modules with every ordinary import and re-export resolved.
+    pub modules: Vec<ResolvedModule>,
+    /// Proven test-time replacements whose targets resolve inside the project.
+    pub replaced_module_targets: Vec<ResolvedReplacedModuleTarget>,
+}
+
+/// One project-internal module replacement resolved from its declaring source file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedReplacedModuleTarget {
+    /// File that declares the replacement fact.
+    pub source_file: FileId,
+    /// Project file replaced for this source's test-root traversal.
+    pub target_file: FileId,
+}
+
 /// A resolved import with its target.
 #[derive(Debug, Clone)]
 pub struct ResolvedImport {

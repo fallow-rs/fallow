@@ -66,7 +66,7 @@ impl DeadCodeEntryPoints {
 }
 
 pub struct DeadCodeResolvedModules {
-    pub resolved: Vec<fallow_graph::resolve::ResolvedModule>,
+    pub project: fallow_graph::resolve::ResolvedProject,
     pub elapsed_ms: f64,
 }
 
@@ -138,7 +138,7 @@ pub fn try_load_dead_code_graph_cache(
         |(resolved, graph)| {
             (
                 DeadCodeResolvedModules {
-                    resolved: resolved.resolved,
+                    project: resolved.project,
                     elapsed_ms: resolved.elapsed_ms,
                 },
                 DeadCodeGraphRun {
@@ -156,19 +156,19 @@ pub fn resolve_dead_code_imports(
 ) -> DeadCodeResolvedModules {
     let resolved = fallow_core::resolve_dead_code_imports(&prelude.inner, modules);
     DeadCodeResolvedModules {
-        resolved: resolved.resolved,
+        project: resolved.project,
         elapsed_ms: resolved.elapsed_ms,
     }
 }
 
 pub fn build_dead_code_graph(
     prelude: &DeadCodeBackendPrelude<'_>,
-    resolved: &[fallow_graph::resolve::ResolvedModule],
+    project: &fallow_graph::resolve::ResolvedProject,
     entry_points: &DeadCodeEntryPoints,
     modules: &[ModuleInfo],
 ) -> DeadCodeGraphRun {
     let graph =
-        fallow_core::build_dead_code_graph(&prelude.inner, resolved, &entry_points.inner, modules);
+        fallow_core::build_dead_code_graph(&prelude.inner, project, &entry_points.inner, modules);
     DeadCodeGraphRun {
         graph: RetainedModuleGraph::from(graph.graph),
         elapsed_ms: graph.elapsed_ms,

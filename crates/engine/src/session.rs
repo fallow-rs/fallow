@@ -907,7 +907,7 @@ fn run_engine_owned_dead_code_pipeline(
     let mut detector = core_backend::run_dead_code_detectors(
         &prelude,
         &graph.graph,
-        &resolved.resolved,
+        &resolved.project.modules,
         &modules,
         collect_usages,
         &entry_points,
@@ -958,7 +958,7 @@ fn resolve_or_build_dead_code_graph(
 
     let resolved = core_backend::resolve_dead_code_imports(prelude, modules);
     let graph =
-        core_backend::build_dead_code_graph(prelude, &resolved.resolved, entry_points, modules);
+        core_backend::build_dead_code_graph(prelude, &resolved.project, entry_points, modules);
     (resolved, graph)
 }
 
