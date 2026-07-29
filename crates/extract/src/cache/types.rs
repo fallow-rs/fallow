@@ -845,7 +845,7 @@ use crate::MemberKind;
 /// members and reproduce the old false positives.
 ///
 /// Bumped to 242 for issue #2031: proven Vitest replacement factories append a
-/// `SemanticFact::ReplacedModuleTarget`. Warm 241 caches omit that typed fact
+/// typed replacement fact. Warm 241 caches omit that fact
 /// and would continue crediting replaced modules as statically test-covered.
 ///
 /// Bumped to 243: Vitest replacement facts now require the `vi.mock` object to
@@ -866,8 +866,13 @@ use crate::MemberKind;
 /// factory whose only callable dependency is the imported `vi.fn`.
 ///
 /// Bumped to 247: Vitest replacement facts now reflect the final semantically
-/// proven `vi.mock` or `vi.unmock` operation for each target.
-pub(super) const CACHE_VERSION: u32 = 247;
+/// proven `vi.mock` or `vi.unmock` operation for each literal target.
+///
+/// Bumped to 248: extraction now preserves every typed Vitest mock/unmock
+/// operation and its source position so resolution can select final state by
+/// canonical module identity. Factory proof also rejects all value dependencies
+/// other than the semantically proven imported `vi`.
+pub(super) const CACHE_VERSION: u32 = 248;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -2,9 +2,14 @@ use oxc_ast::ast::{
     Argument, CallExpression, Expression, TSInterfaceDeclaration, TSType, TSTypeAliasDeclaration,
 };
 
-use crate::{DynamicImportInfo, ReplacedModuleTargetFact, SemanticFact};
+use crate::{
+    DynamicImportInfo, SemanticFact, VitestModuleMockAction, VitestModuleMockOperationFact,
+};
 
-use super::super::{ModuleInfoExtractor, PendingPlaywrightFactory, PendingVitestReplacement};
+use super::super::{
+    ModuleInfoExtractor, PendingPlaywrightFactory, PendingVitestMockOperation,
+    PendingVitestMockProof,
+};
 use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
     playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source,
@@ -253,14 +258,18 @@ impl ModuleInfoExtractor {
         }
 
         if let Some(vi_reference_span) = vitest_mock_object_span(expr) {
-            let factory_vi_reference_spans = vitest_replacement_candidate(expr)
-                .map(|candidate| candidate.factory_vi_reference_spans);
-            self.pending_vitest_replacements
-                .push(PendingVitestReplacement {
+            let proof = vitest_replacement_candidate(expr).map_or(
+                PendingVitestMockProof::UnprovenMock,
+                |candidate| PendingVitestMockProof::ClosedFactory {
+                    vi_reference_spans: candidate.factory_vi_reference_spans,
+                },
+            );
+            self.pending_vitest_mock_operations
+                .push(PendingVitestMockOperation {
                     source: target_source,
                     vi_reference_span,
                     call_start: expr.span.start,
-                    factory_vi_reference_spans,
+                    proof,
                 });
         }
     }
@@ -269,54 +278,46 @@ impl ModuleInfoExtractor {
         if let Some(source) = vitest_unmock_source(expr)
             && let Some(vi_reference_span) = vitest_unmock_object_span(expr)
         {
-            self.pending_vitest_replacements
-                .push(PendingVitestReplacement {
+            self.pending_vitest_mock_operations
+                .push(PendingVitestMockOperation {
                     source,
                     vi_reference_span,
                     call_start: expr.span.start,
-                    factory_vi_reference_spans: None,
+                    proof: PendingVitestMockProof::Unmock,
                 });
         }
     }
 
-    pub(crate) fn resolve_vitest_replacement_candidates(
+    pub(crate) fn resolve_vitest_mock_operations(
         &mut self,
         vitest_vi_reference_spans: &rustc_hash::FxHashSet<oxc_span::Span>,
     ) {
         let mut operations: Vec<_> = self
-            .pending_vitest_replacements
+            .pending_vitest_mock_operations
             .drain(..)
             .filter(|operation| vitest_vi_reference_spans.contains(&operation.vi_reference_span))
             .collect();
         operations.sort_unstable_by_key(|operation| operation.call_start);
 
-        let mut final_operations = rustc_hash::FxHashMap::default();
-        for operation in operations {
-            final_operations.insert(operation.source.clone(), operation);
-        }
-
-        let mut replacements: Vec<_> = final_operations
-            .into_values()
-            .filter(|operation| {
-                operation
-                    .factory_vi_reference_spans
-                    .as_ref()
-                    .is_some_and(|spans| {
-                        spans
-                            .iter()
-                            .all(|span| vitest_vi_reference_spans.contains(span))
-                    })
-            })
-            .collect();
-        replacements.sort_unstable_by(|left, right| {
-            left.call_start
-                .cmp(&right.call_start)
-                .then_with(|| left.source.cmp(&right.source))
-        });
         self.semantic_facts
-            .extend(replacements.into_iter().map(|operation| {
-                SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+            .extend(operations.into_iter().map(|operation| {
+                let action = match operation.proof {
+                    PendingVitestMockProof::ClosedFactory { vi_reference_spans } => {
+                        VitestModuleMockAction::Mock {
+                            factory_replaces_original: vi_reference_spans
+                                .iter()
+                                .all(|span| vitest_vi_reference_spans.contains(span)),
+                        }
+                    }
+                    PendingVitestMockProof::UnprovenMock => VitestModuleMockAction::Mock {
+                        factory_replaces_original: false,
+                    },
+                    PendingVitestMockProof::Unmock => VitestModuleMockAction::Unmock,
+                };
+                SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
                     source: operation.source,
+                    call_start: operation.call_start,
+                    action,
                 })
             }));
     }

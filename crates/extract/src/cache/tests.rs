@@ -1149,8 +1149,12 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 class_local_name: "Service".to_string(),
                 object: "this.client".to_string(),
             }),
-            SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+            SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
                 source: "./dependency".to_string(),
+                call_start: 42,
+                action: VitestModuleMockAction::Mock {
+                    factory_replaces_original: true,
+                },
             }),
         ]
         .into(),
@@ -1300,8 +1304,12 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 class_local_name: "Service".to_string(),
                 object: "this.client".to_string(),
             }),
-            SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
+            SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
                 source: "./dependency".to_string(),
+                call_start: 42,
+                action: VitestModuleMockAction::Mock {
+                    factory_replaces_original: true,
+                },
             }),
         ][..]
     );
@@ -4362,9 +4370,11 @@ fn warm_cache_load_matches_cold_parse() {
     assert!(
         warm_module.semantic_facts.iter().any(|fact| matches!(
             fact,
-            SemanticFact::ReplacedModuleTarget(target) if target.source == "./dependency"
+            SemanticFact::VitestModuleMockOperation(operation)
+                if operation.source == "./dependency"
+                    && operation.action.replaces_original()
         )),
-        "warm cache should retain the proven replacement target"
+        "warm cache should retain the proven replacement operation"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

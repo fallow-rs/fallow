@@ -55,7 +55,7 @@ use require_imports::resolve_require_imports;
 use specifier::create_resolver;
 use static_imports::resolve_static_imports;
 use types::{PackageManifestInfo, ResolveContext};
-use upgrades::{ResolvedReplacementCandidate, apply_specifier_upgrades};
+use upgrades::{ResolvedVitestMockOperation, apply_specifier_upgrades};
 
 /// Inputs used to resolve imports for a complete extracted project.
 pub struct ResolveAllImportsInput<'a> {
@@ -207,13 +207,13 @@ pub fn resolve_all_imports_with_session(
         })
         .collect();
     let mut resolved = Vec::with_capacity(resolved_outputs.len());
-    let mut replacement_candidates = Vec::new();
+    let mut vitest_mock_operations = Vec::new();
     for output in resolved_outputs {
         resolved.push(output.module);
-        replacement_candidates.extend(output.replacement_candidates);
+        vitest_mock_operations.extend(output.vitest_mock_operations);
     }
 
-    apply_specifier_upgrades(&mut resolved, &mut replacement_candidates);
+    apply_specifier_upgrades(&mut resolved, &mut vitest_mock_operations);
 
     synthesize_auto_import_edges(
         &mut resolved,
@@ -223,18 +223,7 @@ pub fn resolve_all_imports_with_session(
         &raw_path_to_id,
     );
 
-    let mut replaced_module_targets: Vec<_> = replacement_candidates
-        .into_iter()
-        .filter_map(|candidate| {
-            Some(ResolvedReplacedModuleTarget {
-                source_file: candidate.source_file,
-                target_file: candidate.target.internal_file_id()?,
-            })
-        })
-        .collect();
-    replaced_module_targets
-        .sort_unstable_by_key(|target| (target.source_file.0, target.target_file.0));
-    replaced_module_targets.dedup();
+    let replaced_module_targets = final_replaced_module_targets(vitest_mock_operations);
 
     ResolvedProject {
         modules: resolved,
@@ -343,8 +332,8 @@ fn resolve_module_imports(
             .unwrap_or(file_path)
     };
 
-    let replacement_candidates =
-        resolve_replacement_candidates(module.file_id, &module.semantic_facts, ctx, file_path);
+    let vitest_mock_operations =
+        resolve_vitest_mock_operations(module.file_id, &module.semantic_facts, ctx, file_path);
     let module = build_resolved_module(ResolvedModuleBuildInput {
         module,
         ctx,
@@ -357,37 +346,76 @@ fn resolve_module_imports(
 
     Some(ResolvedModuleOutput {
         module,
-        replacement_candidates,
+        vitest_mock_operations,
     })
 }
 
 struct ResolvedModuleOutput {
     module: ResolvedModule,
-    replacement_candidates: Vec<ResolvedReplacementCandidate>,
+    vitest_mock_operations: Vec<ResolvedVitestMockOperation>,
 }
 
-fn resolve_replacement_candidates(
+fn resolve_vitest_mock_operations(
     source_file: FileId,
     semantic_facts: &[SemanticFact],
     ctx: &ResolveContext<'_>,
     file_path: &Path,
-) -> Vec<ResolvedReplacementCandidate> {
-    let mut candidates: Vec<_> = semantic_facts
+) -> Vec<ResolvedVitestMockOperation> {
+    let mut operations: Vec<_> = semantic_facts
         .iter()
         .filter_map(|fact| {
-            let SemanticFact::ReplacedModuleTarget(target) = fact else {
+            let SemanticFact::VitestModuleMockOperation(operation) = fact else {
                 return None;
             };
-            Some(ResolvedReplacementCandidate {
+            Some(ResolvedVitestMockOperation {
                 source_file,
-                source_specifier: target.source.clone(),
-                target: specifier::resolve_specifier(ctx, file_path, &target.source, false),
+                source_specifier: operation.source.clone(),
+                call_start: operation.call_start,
+                action: operation.action,
+                target: specifier::resolve_specifier(ctx, file_path, &operation.source, false),
             })
         })
         .collect();
-    candidates.sort_unstable_by(|left, right| left.source_specifier.cmp(&right.source_specifier));
-    candidates.dedup_by(|left, right| left.source_specifier == right.source_specifier);
-    candidates
+    operations.sort_unstable_by(|left, right| {
+        left.call_start
+            .cmp(&right.call_start)
+            .then_with(|| left.source_specifier.cmp(&right.source_specifier))
+    });
+    operations
+}
+
+fn final_replaced_module_targets(
+    mut operations: Vec<ResolvedVitestMockOperation>,
+) -> Vec<ResolvedReplacedModuleTarget> {
+    operations.sort_unstable_by(|left, right| {
+        left.source_file
+            .0
+            .cmp(&right.source_file.0)
+            .then_with(|| left.call_start.cmp(&right.call_start))
+            .then_with(|| left.source_specifier.cmp(&right.source_specifier))
+    });
+
+    let mut final_operations = FxHashMap::default();
+    for operation in operations {
+        let Some(target_file) = operation.target.internal_file_id() else {
+            continue;
+        };
+        final_operations.insert((operation.source_file, target_file), operation.action);
+    }
+
+    let mut targets: Vec<_> = final_operations
+        .into_iter()
+        .filter_map(|((source_file, target_file), action)| {
+            action
+                .replaces_original()
+                .then_some(ResolvedReplacedModuleTarget {
+                    source_file,
+                    target_file,
+                })
+        })
+        .collect();
+    targets.sort_unstable_by_key(|target| (target.source_file.0, target.target_file.0));
+    targets
 }
 
 struct ResolvedModuleBuildInput<'a> {

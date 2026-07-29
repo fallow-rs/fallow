@@ -419,12 +419,13 @@ impl<'a> Visit<'a> for VitestFactoryProofVisitor {
             return;
         }
 
-        self.vi_reference_spans.push(object.span);
         walk::walk_call_expression(self, call);
     }
 
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-        if identifier.name == "arguments" {
+        if identifier.name == "vi" {
+            self.vi_reference_spans.push(identifier.span);
+        } else {
             self.unsafe_escape = true;
         }
     }
@@ -486,8 +487,9 @@ impl<'a> Visit<'a> for VitestFactoryProofVisitor {
 ///
 /// Import provenance is checked by the caller. This helper stays conservative:
 /// factories with parameters can receive `importOriginal`; zero-argument
-/// factories abstain when they use `arguments`, construct values, dynamically
-/// import code, invoke an unproven helper, or call an original-module loader.
+/// factories abstain when they depend on any value other than the imported
+/// `vi`, construct values, dynamically import code, invoke an unproven helper,
+/// or call an original-module loader.
 pub(super) fn vitest_replacement_candidate(
     call: &CallExpression<'_>,
 ) -> Option<VitestReplacementCandidate> {

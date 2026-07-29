@@ -22,14 +22,18 @@ use super::ResolvedModule;
 use super::path_info::is_bare_specifier;
 use super::types::ResolveResult;
 
-/// A replacement fact retaining enough resolution state for the global
-/// cross-tsconfig bare-specifier upgrade.
+/// A Vitest mock operation retaining enough resolution state for the global
+/// cross-tsconfig bare-specifier upgrade and canonical final-state selection.
 #[derive(Debug)]
-pub(super) struct ResolvedReplacementCandidate {
-    /// File that declared this replacement.
+pub(super) struct ResolvedVitestMockOperation {
+    /// File that declared this operation.
     pub(super) source_file: FileId,
-    /// Literal module specifier from the replacement call.
+    /// Literal module specifier from the mock API call.
     pub(super) source_specifier: String,
+    /// Source-order position of the call within `source_file`.
+    pub(super) call_start: u32,
+    /// Typed mock or unmock action.
+    pub(super) action: fallow_types::extract::VitestModuleMockAction,
     /// Per-file resolution result before the global upgrade.
     pub(super) target: ResolveResult,
 }
@@ -51,7 +55,7 @@ pub(super) struct ResolvedReplacementCandidate {
 /// imprecise for that edge case , both files get connected regardless.
 pub(super) fn apply_specifier_upgrades(
     resolved: &mut [ResolvedModule],
-    replacements: &mut [ResolvedReplacementCandidate],
+    mock_operations: &mut [ResolvedVitestMockOperation],
 ) {
     let mut specifier_upgrades: FxHashMap<String, ResolveResult> = FxHashMap::default();
     for module in resolved.iter() {
@@ -75,13 +79,13 @@ pub(super) fn apply_specifier_upgrades(
         }
     }
 
-    for replacement in replacements.iter() {
-        if is_bare_specifier(&replacement.source_specifier)
-            && replacement.target.internal_file_id().is_some()
+    for operation in mock_operations.iter() {
+        if is_bare_specifier(&operation.source_specifier)
+            && operation.target.internal_file_id().is_some()
         {
             specifier_upgrades
-                .entry(replacement.source_specifier.clone())
-                .or_insert_with(|| replacement.target.clone().into_es_module());
+                .entry(operation.source_specifier.clone())
+                .or_insert_with(|| operation.target.clone().into_es_module());
         }
     }
 
@@ -102,10 +106,10 @@ pub(super) fn apply_specifier_upgrades(
         }
     }
 
-    for replacement in replacements {
+    for operation in mock_operations {
         upgrade_bare_target(
-            &replacement.source_specifier,
-            &mut replacement.target,
+            &operation.source_specifier,
+            &mut operation.target,
             &specifier_upgrades,
         );
     }

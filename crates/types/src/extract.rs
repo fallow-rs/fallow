@@ -1628,13 +1628,13 @@ pub enum SemanticFact {
     /// A whole-object use of `this.<field>...` tied to its exact enclosing class.
     /// Appended because bitcode encodes enum variants by ordinal.
     ClassThisWholeObjectUse(ClassThisWholeObjectUseFact),
-    /// A module target that an explicitly imported Vitest `vi.mock` factory
-    /// provably replaces without loading the original module.
+    /// An ordered Vitest module-mock operation with direct imported-`vi`
+    /// provenance.
     ///
     /// Appended because bitcode encodes enum variants by ordinal. The ordinary
     /// dynamic-import fact for the same source remains authoritative for graph
     /// reachability and unresolved-import diagnostics.
-    ReplacedModuleTarget(ReplacedModuleTargetFact),
+    VitestModuleMockOperation(VitestModuleMockOperationFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -2236,16 +2236,48 @@ pub struct InstanceExportBindingFact {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DynamicCustomElementRenderFact;
 
-/// Static source target of a proven complete test-time module replacement.
+/// The action performed by a Vitest module-mock operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum VitestModuleMockAction {
+    /// Register a mock. `factory_replaces_original` is true only when the
+    /// factory is structurally closed and cannot load the original module.
+    Mock {
+        /// Whether the factory provably replaces the original module.
+        factory_replaces_original: bool,
+    },
+    /// Remove a registered mock and restore the original module.
+    Unmock,
+}
+
+impl VitestModuleMockAction {
+    /// Whether this operation registers a proven complete replacement.
+    #[must_use]
+    pub const fn replaces_original(self) -> bool {
+        matches!(
+            self,
+            Self::Mock {
+                factory_replaces_original: true
+            }
+        )
+    }
+}
+
+/// Ordered Vitest module-mock operation with a static source target.
 ///
 /// The declaring [`ModuleInfo::file_id`] owns the test-root provenance. The
 /// resolver consumes `source` through its canonical specifier pipeline; this
 /// fact deliberately carries no resolved path or duplicate diagnostic span.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ReplacedModuleTargetFact {
-    /// Static module specifier passed to the replacement API.
+pub struct VitestModuleMockOperationFact {
+    /// Static module specifier passed to `vi.mock` or `vi.unmock`.
     pub source: String,
+    /// Source-order position of the call within the declaring module.
+    pub call_start: u32,
+    /// Typed mock or unmock action.
+    pub action: VitestModuleMockAction,
 }
 
 /// A `this`-rooted member access with exact enclosing-class provenance.

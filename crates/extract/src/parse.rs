@@ -237,7 +237,7 @@ fn build_primary_extractor(
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
     let semantic_usage =
         compute_semantic_usage(program, &extractor.imports, &template_used_imports);
-    extractor.resolve_vitest_replacement_candidates(&semantic_usage.vitest_vi_reference_spans);
+    extractor.resolve_vitest_mock_operations(&semantic_usage.vitest_vi_reference_spans);
     (extractor, semantic_usage)
 }
 
@@ -381,7 +381,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         &extractor.imports,
         &template_used_imports,
     );
-    extractor.resolve_vitest_replacement_candidates(&semantic_usage.vitest_vi_reference_spans);
+    extractor.resolve_vitest_mock_operations(&semantic_usage.vitest_vi_reference_spans);
     let complexity = retry_complexity(
         input.need_complexity,
         &retry_return.program,

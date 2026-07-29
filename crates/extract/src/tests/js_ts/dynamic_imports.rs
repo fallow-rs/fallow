@@ -1,11 +1,27 @@
 use crate::tests::parse_ts as parse_source;
-use crate::{ModuleInfo, ModuleLoadMechanism, SemanticFact};
+use crate::{ModuleInfo, ModuleLoadMechanism, SemanticFact, VitestModuleMockAction};
 
 fn replaced_module_targets(info: &ModuleInfo) -> Vec<&str> {
     info.semantic_facts
         .iter()
         .filter_map(|fact| match fact {
-            SemanticFact::ReplacedModuleTarget(target) => Some(target.source.as_str()),
+            SemanticFact::VitestModuleMockOperation(operation)
+                if operation.action.replaces_original() =>
+            {
+                Some(operation.source.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn vitest_mock_actions(info: &ModuleInfo) -> Vec<(&str, VitestModuleMockAction)> {
+    info.semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::VitestModuleMockOperation(operation) => {
+                Some((operation.source.as_str(), operation.action))
+            }
             _ => None,
         })
         .collect()
@@ -359,6 +375,7 @@ fn vitest_non_replacement_forms_abstain() {
         r#"import { vi } from "vitest"; vi.mock("./arguments", function () { return arguments[0](); });"#,
         r#"import { vi } from "vitest"; const loadOriginal = () => vi.importActual("./helper"); vi.mock("./helper", async () => loadOriginal());"#,
         r#"import { vi } from "vitest"; import { loadOriginal } from "./loader"; vi.mock("./external-helper", async () => loadOriginal());"#,
+        r#"import { vi } from "vitest"; const actual = await vi.importActual("./preloaded"); vi.mock("./preloaded", () => actual);"#,
         r#"import { vi } from "vitest"; vi.mock("./dynamic", async () => import("./dynamic"));"#,
         r#"import { vi } from "vitest"; vi.mock("./constructed", () => new Replacement());"#,
         r#"import { vi } from "vitest"; const localVi = vi; vi.mock("./local-vi", () => ({ request: localVi.fn() }));"#,
@@ -374,27 +391,33 @@ fn vitest_non_replacement_forms_abstain() {
 }
 
 #[test]
-fn vitest_replacement_uses_final_mock_operation_per_target() {
-    for source in [
-        r#"import { vi } from "vitest"; vi.mock("./dep", () => ({})); vi.unmock("./dep");"#,
-        r#"import { vi } from "vitest"; vi.mock("./dep", () => ({})); vi.mock("./dep", importOriginal => importOriginal());"#,
-        r#"import { vi } from "vitest"; vi.mock("./dep", () => ({})); vi.mock("./dep", async () => loadOriginal());"#,
-    ] {
-        let info = parse_source(source);
-        assert!(
-            replaced_module_targets(&info).is_empty(),
-            "a final non-replacement operation must clear earlier proof: {source}"
-        );
-    }
-
+fn vitest_mock_operations_preserve_typed_source_order() {
     let info = parse_source(
         r#"
         import { vi } from "vitest";
-        vi.unmock("./dep");
         vi.mock("./dep", () => ({ request: vi.fn() }));
+        vi.unmock("./dep.ts");
+        vi.mock("./dep", importOriginal => importOriginal());
         "#,
     );
-    assert_eq!(replaced_module_targets(&info), vec!["./dep"]);
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![
+            (
+                "./dep",
+                VitestModuleMockAction::Mock {
+                    factory_replaces_original: true,
+                },
+            ),
+            ("./dep.ts", VitestModuleMockAction::Unmock),
+            (
+                "./dep",
+                VitestModuleMockAction::Mock {
+                    factory_replaces_original: false,
+                },
+            ),
+        ]
+    );
 }
 
 #[test]

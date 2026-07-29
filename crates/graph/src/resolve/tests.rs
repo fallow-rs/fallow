@@ -6,7 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
     DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ModuleLoadMechanism,
-    ReExportInfo, ReplacedModuleTargetFact, RequireCallInfo, SemanticFact,
+    ReExportInfo, RequireCallInfo, SemanticFact, VitestModuleMockAction,
+    VitestModuleMockOperationFact,
 };
 
 use super::dynamic_imports::{
@@ -20,7 +21,8 @@ use super::static_imports::resolve_static_imports;
 use super::types::{CanonicalizeCache, ResolveContext, TsconfigCache};
 use super::upgrades::apply_specifier_upgrades;
 use super::{
-    ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport, resolve_replacement_candidates,
+    ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport, final_replaced_module_targets,
+    resolve_vitest_mock_operations,
 };
 
 fn dummy_span() -> Span {
@@ -92,6 +94,28 @@ fn make_re_export(source: &str, imported: &str, exported: &str) -> ReExportInfo 
         is_type_only: false,
         span: oxc_span::Span::default(),
     }
+}
+
+fn vitest_mock_fact(
+    source: &str,
+    call_start: u32,
+    factory_replaces_original: bool,
+) -> SemanticFact {
+    SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
+        source: source.to_string(),
+        call_start,
+        action: VitestModuleMockAction::Mock {
+            factory_replaces_original,
+        },
+    })
+}
+
+fn vitest_unmock_fact(source: &str, call_start: u32) -> SemanticFact {
+    SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
+        source: source.to_string(),
+        call_start,
+        action: VitestModuleMockAction::Unmock,
+    })
 }
 
 fn make_dynamic(
@@ -168,13 +192,18 @@ fn make_resolved_re_export(source: &str, target: ResolveResult) -> ResolvedReExp
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn replaced_module_targets_resolve_internal_files_and_abstain_on_missing_targets() {
+fn vitest_mock_operations_resolve_canonical_targets_and_abstain_on_missing() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dunce::canonicalize(dir.path()).expect("canonicalize temp dir");
     let test_file = root.join("wrapper.test.ts");
     let dependency_file = root.join("dependency.ts");
     std::fs::write(&test_file, "").expect("write test file");
     std::fs::write(&dependency_file, "export const value = 1;").expect("write dependency");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["*"]}}}"#,
+    )
+    .expect("write tsconfig");
 
     let resolver = specifier::create_resolver(&[], &[]);
     let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
@@ -209,28 +238,13 @@ fn replaced_module_targets_resolve_internal_files_and_abstain_on_missing_targets
         canonicalize_cache: &canonicalize_cache,
     };
     let facts = [
-        SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
-            source: "./dependency".to_string(),
-        }),
-        SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
-            source: "./dependency".to_string(),
-        }),
-        SemanticFact::ReplacedModuleTarget(ReplacedModuleTargetFact {
-            source: "./missing".to_string(),
-        }),
+        vitest_mock_fact("./dependency", 10, true),
+        vitest_mock_fact("./missing", 20, true),
     ];
 
-    let mut candidates = resolve_replacement_candidates(FileId(0), &facts, &ctx, &test_file);
-    apply_specifier_upgrades(&mut [], &mut candidates);
-    let targets: Vec<_> = candidates
-        .into_iter()
-        .filter_map(|candidate| {
-            Some(super::ResolvedReplacedModuleTarget {
-                source_file: candidate.source_file,
-                target_file: candidate.target.internal_file_id()?,
-            })
-        })
-        .collect();
+    let mut operations = resolve_vitest_mock_operations(FileId(0), &facts, &ctx, &test_file);
+    apply_specifier_upgrades(&mut [], &mut operations);
+    let targets = final_replaced_module_targets(operations);
 
     assert_eq!(
         targets,
@@ -238,6 +252,23 @@ fn replaced_module_targets_resolve_internal_files_and_abstain_on_missing_targets
             source_file: FileId(0),
             target_file: FileId(1),
         }]
+    );
+    let facts = [
+        vitest_mock_fact("@/dependency", 10, true),
+        vitest_unmock_fact("./dependency.ts", 20),
+    ];
+
+    let mut operations = resolve_vitest_mock_operations(FileId(0), &facts, &ctx, &test_file);
+    assert!(
+        operations
+            .iter()
+            .all(|operation| operation.target.internal_file_id() == Some(FileId(1))),
+        "alias and explicit-extension spellings should resolve to one canonical target: {operations:?}"
+    );
+    apply_specifier_upgrades(&mut [], &mut operations);
+    assert!(
+        final_replaced_module_targets(operations).is_empty(),
+        "the final unmock must clear an equivalent aliased mock target"
     );
 }
 
@@ -320,22 +351,18 @@ fn cross_tsconfig_bare_alias_upgrades_replacement_target() {
         ResolveResult::InternalModule(FileId(2))
     ));
 
-    let mut candidates = resolve_replacement_candidates(
+    let mut operations = resolve_vitest_mock_operations(
         FileId(1),
-        &[SemanticFact::ReplacedModuleTarget(
-            ReplacedModuleTargetFact {
-                source: "shared-alias".to_string(),
-            },
-        )],
+        &[vitest_mock_fact("shared-alias", 10, true)],
         &ctx,
         &test_file,
     );
-    assert!(matches!(candidates[0].target, ResolveResult::NpmPackage(_)));
+    assert!(matches!(operations[0].target, ResolveResult::NpmPackage(_)));
 
     let mut modules = vec![make_resolved_module(0, donor_imports, vec![], vec![])];
-    apply_specifier_upgrades(&mut modules, &mut candidates);
+    apply_specifier_upgrades(&mut modules, &mut operations);
 
-    assert_eq!(candidates[0].target.internal_file_id(), Some(FileId(2)));
+    assert_eq!(operations[0].target.internal_file_id(), Some(FileId(2)));
 }
 
 #[test]

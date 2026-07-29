@@ -45,7 +45,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 14: namespace-derived references retain the exact consumer and
 /// re-export path instead of collapsing onto the ultimate target.
-pub const GRAPH_CACHE_VERSION: u32 = 14;
+///
+/// Bumped to 15: Vitest mock and unmock state is selected after specifiers
+/// resolve, using the canonical target file rather than literal source text.
+pub const GRAPH_CACHE_VERSION: u32 = 15;
 
 /// Cached form of a resolved target.
 ///
