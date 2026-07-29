@@ -2312,6 +2312,89 @@ fn health_crap_estimation_excludes_vitest_replacement_targets() {
 }
 
 #[test]
+fn health_vitest_unmock_restores_coverage_and_crap_credit() {
+    let coverage_output = run_fallow(
+        "health",
+        "issue-2031-unmocked-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        coverage_output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        coverage_output.stderr
+    );
+
+    let coverage_json = parse_json(&coverage_output);
+    let coverage = coverage_json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    assert_eq!(coverage["summary"]["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        coverage["summary"]["covered_files"].as_u64(),
+        Some(2),
+        "the final unmock should restore the real dependency path"
+    );
+    let uncovered_files: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert_eq!(
+        uncovered_files,
+        vec!["src/entry.ts"],
+        "only the runtime-only entry should remain uncovered"
+    );
+
+    let crap_output = run_fallow(
+        "health",
+        "issue-2031-unmocked-test-reachability",
+        &[
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        crap_output.code, 1,
+        "the low CRAP threshold should surface covered findings: {}",
+        crap_output.stderr
+    );
+    let crap_json = parse_json(&crap_output);
+    let findings = crap_json["findings"].as_array().expect("findings array");
+    for (path, name) in [
+        ("src/dependency.ts", "renderDependency"),
+        ("src/wrapper.ts", "renderWrapper"),
+    ] {
+        let finding = findings
+            .iter()
+            .find(|finding| {
+                finding["name"] == name
+                    && finding["path"]
+                        .as_str()
+                        .is_some_and(|candidate| candidate.replace('\\', "/") == path)
+            })
+            .unwrap_or_else(|| panic!("expected {path}:{name} finding, got: {findings:#?}"));
+        assert_eq!(finding["coverage_source"], "estimated");
+        assert_eq!(
+            finding["crap"].as_f64(),
+            Some(1.0),
+            "the final unmock should retain covered CRAP: {finding:#?}"
+        );
+    }
+}
+
+#[test]
 fn health_coverage_gaps_keep_targets_reached_by_an_unmasked_test_root() {
     let output = run_fallow(
         "health",
