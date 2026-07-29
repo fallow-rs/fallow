@@ -2,6 +2,8 @@ use crate::{discover::FileId, source::ModuleInfo, suppress};
 use fallow_graph::graph::{ModuleGraph, ModuleNode};
 use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
 
+use crate::module_graph::StaticTestCoverage;
+
 pub struct CoverageGapData {
     pub report: CoverageGaps,
     pub runtime_paths: Vec<std::path::PathBuf>,
@@ -49,7 +51,7 @@ fn module_is_coverage_suppressed(module: Option<&ModuleInfo>) -> bool {
 /// reference and not already flagged unused) to `exports`.
 fn collect_untested_exports(
     exports: &mut Vec<UntestedExport>,
-    graph: &ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     node: &ModuleNode,
     module: &ModuleInfo,
     path: &std::path::Path,
@@ -63,12 +65,10 @@ fn collect_untested_exports(
             continue;
         }
 
-        let has_test_dependency = export.references.iter().any(|reference| {
-            graph
-                .modules
-                .get(reference.from_file.0 as usize)
-                .is_some_and(|module| module.is_test_reachable())
-        });
+        let has_test_dependency = export
+            .references
+            .iter()
+            .any(|reference| test_coverage.covers_reference(node.file_id, reference.from_file));
         if has_test_dependency {
             continue;
         }
@@ -96,6 +96,7 @@ struct CoverageGapScan {
 /// Walk runtime-reachable modules, collecting untested files and exports.
 fn scan_runtime_files(
     graph: &ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     file_paths: &rustc_hash::FxHashMap<FileId, &std::path::PathBuf>,
     module_by_id: &rustc_hash::FxHashMap<FileId, &ModuleInfo>,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
@@ -129,7 +130,7 @@ fn scan_runtime_files(
         scan.runtime_paths.push((*path).clone());
 
         scan.runtime_files += 1;
-        if node.is_test_reachable() {
+        if test_coverage.covers_file(node.file_id) {
             scan.covered_files += 1;
         } else {
             scan.files.push(UntestedFile {
@@ -142,7 +143,14 @@ fn scan_runtime_files(
             continue;
         };
 
-        collect_untested_exports(&mut scan.exports, graph, node, module, path, unused_exports);
+        collect_untested_exports(
+            &mut scan.exports,
+            test_coverage,
+            node,
+            module,
+            path,
+            unused_exports,
+        );
     }
 
     scan
@@ -194,11 +202,18 @@ fn build_coverage_gap_data(scan: CoverageGapScan, root: &std::path::Path) -> Cov
 
 pub(super) fn compute_coverage_gaps(
     graph: &ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     file_paths: &rustc_hash::FxHashMap<FileId, &std::path::PathBuf>,
     module_by_id: &rustc_hash::FxHashMap<FileId, &ModuleInfo>,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
     root: &std::path::Path,
 ) -> CoverageGapData {
-    let scan = scan_runtime_files(graph, file_paths, module_by_id, unused_exports);
+    let scan = scan_runtime_files(
+        graph,
+        test_coverage,
+        file_paths,
+        module_by_id,
+        unused_exports,
+    );
     build_coverage_gap_data(scan, root)
 }

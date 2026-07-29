@@ -1,5 +1,7 @@
 use fallow_output::{DirectCallerEvidence, DirectCallerSymbolEvidence, FileHealthScore};
 
+use crate::module_graph::StaticTestCoverage;
+
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
 
@@ -532,13 +534,14 @@ pub(super) struct TemplateInheritContext {
 /// scoring loop falls through to the existing path unchanged.
 fn build_template_inherit_contexts(
     graph: &fallow_graph::graph::ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext> {
     let mut out = rustc_hash::FxHashMap::default();
     for node in &graph.modules {
         if let Some(context) =
-            template_inherit_context_for_node(node, graph, module_by_id, file_paths)
+            template_inherit_context_for_node(node, graph, test_coverage, module_by_id, file_paths)
         {
             out.insert(node.file_id, context);
         }
@@ -549,6 +552,7 @@ fn build_template_inherit_contexts(
 fn template_inherit_context_for_node(
     node: &fallow_graph::graph::ModuleNode,
     graph: &fallow_graph::graph::ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<TemplateInheritContext> {
@@ -556,7 +560,13 @@ fn template_inherit_context_for_node(
         return None;
     }
     let importers = graph.reverse_deps.get(node.file_id.0 as usize)?;
-    template_inherit_context_from_importers(importers, graph, module_by_id, file_paths)
+    template_inherit_context_from_importers(
+        importers,
+        graph,
+        test_coverage,
+        module_by_id,
+        file_paths,
+    )
 }
 
 fn is_template_inherit_candidate(
@@ -585,6 +595,7 @@ fn is_template_inherit_candidate(
 fn template_inherit_context_from_importers(
     importers: &[crate::discover::FileId],
     graph: &fallow_graph::graph::ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<TemplateInheritContext> {
@@ -602,10 +613,14 @@ fn template_inherit_context_from_importers(
         if first_owner.is_none() {
             first_owner = Some((*owner_path).clone());
         }
-        if owner_node.is_test_reachable() {
+        if test_coverage.covers_file(owner_node.file_id) {
             any_reachable = true;
             provenance.get_or_insert_with(|| (*owner_path).clone());
-            let refs = build_test_referenced_exports(&owner_node.exports, &graph.modules);
+            let refs = build_test_referenced_exports(
+                owner_node.file_id,
+                &owner_node.exports,
+                test_coverage,
+            );
             combined_refs.extend(refs);
         }
     }
@@ -651,19 +666,19 @@ fn is_template_owner_path(path: &std::path::Path) -> bool {
 /// This is the per-function signal: if an export named "foo" has a reference from
 /// a test-reachable module, the function "foo" is considered directly tested.
 fn build_test_referenced_exports(
+    target_file: crate::discover::FileId,
     exports: &[fallow_graph::graph::ExportSymbol],
-    graph_modules: &[fallow_graph::graph::ModuleNode],
+    test_coverage: StaticTestCoverage<'_>,
 ) -> rustc_hash::FxHashSet<String> {
     let mut set = rustc_hash::FxHashSet::default();
     for export in exports {
         if export.is_type_only {
             continue;
         }
-        let has_test_ref = export.references.iter().any(|reference| {
-            graph_modules
-                .get(reference.from_file.0 as usize)
-                .is_some_and(fallow_graph::graph::ModuleNode::is_test_reachable)
-        });
+        let has_test_ref = export
+            .references
+            .iter()
+            .any(|reference| test_coverage.covers_reference(target_file, reference.from_file));
         if has_test_ref {
             set.insert(export.name.to_string());
         }
@@ -1158,6 +1173,7 @@ pub(super) fn compute_file_scores(
     root: &std::path::Path,
 ) -> Result<FileScoreOutput, String> {
     let retained_graph = analysis_output.graph.ok_or("graph not available")?;
+    let test_coverage = retained_graph.static_test_coverage();
     let graph = retained_graph.as_graph();
     let results = &analysis_output.results;
 
@@ -1178,14 +1194,16 @@ pub(super) fn compute_file_scores(
     let FileScoreCoverageSetup {
         module_by_id,
         coverage,
-    } = prepare_file_score_coverage_setup(modules, file_paths, results, graph, root);
+    } = prepare_file_score_coverage_setup(modules, file_paths, results, graph, test_coverage, root);
 
-    let template_inherit = build_template_inherit_contexts(graph, &module_by_id, file_paths);
+    let template_inherit =
+        build_template_inherit_contexts(graph, test_coverage, &module_by_id, file_paths);
 
     let mut acc = accumulate_file_scores(
         unused_export_names,
         &FileScoreLoopCtx {
             graph,
+            test_coverage,
             file_paths,
             module_by_id: &module_by_id,
             unused_files: &unused_files,
@@ -1219,6 +1237,7 @@ pub(super) fn compute_file_scores(
 /// Read-only inputs threaded into the per-node file-score loop.
 struct FileScoreLoopCtx<'a> {
     graph: &'a fallow_graph::graph::ModuleGraph,
+    test_coverage: StaticTestCoverage<'a>,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     module_by_id: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a crate::source::ModuleInfo>,
     unused_files: &'a rustc_hash::FxHashSet<&'a std::path::Path>,
@@ -1324,7 +1343,7 @@ fn compute_one_file_score(
     let crap = compute_file_score_crap(
         node,
         ctx.module_by_id.get(&node.file_id).copied(),
-        ctx.graph,
+        ctx.test_coverage,
         ctx.template_inherit.get(&node.file_id),
         ctx.istanbul_coverage,
         &path_owned,
@@ -1518,7 +1537,7 @@ impl FileScoreCrap {
 fn compute_file_score_crap(
     node: &fallow_graph::graph::ModuleNode,
     module: Option<&crate::source::ModuleInfo>,
-    graph: &fallow_graph::graph::ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     template_inherit: Option<&TemplateInheritContext>,
     istanbul_coverage: Option<&IstanbulCoverage>,
     path: &std::path::Path,
@@ -1531,7 +1550,7 @@ fn compute_file_score_crap(
         &module.suppressions,
         fallow_types::suppress::IssueKind::CoverageGaps,
     );
-    let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
+    let is_test_reachable = test_coverage.covers_file(node.file_id) || is_coverage_suppressed;
     let resolution = resolve_crap_coverage(template_inherit, istanbul_coverage, path);
     match resolution {
         CrapCoverageResolution::TemplateInherited(inherit_ctx) => {
@@ -1540,9 +1559,13 @@ fn compute_file_score_crap(
         CrapCoverageResolution::Istanbul { file_coverage } => {
             compute_istanbul_file_crap(module, file_coverage, is_test_reachable)
         }
-        CrapCoverageResolution::StaticEstimated => {
-            compute_static_file_crap(module, &node.exports, &graph.modules, is_test_reachable)
-        }
+        CrapCoverageResolution::StaticEstimated => compute_static_file_crap(
+            module,
+            node.file_id,
+            &node.exports,
+            test_coverage,
+            is_test_reachable,
+        ),
     }
 }
 
@@ -1572,11 +1595,12 @@ fn compute_istanbul_file_crap(
 
 fn compute_static_file_crap(
     module: &crate::source::ModuleInfo,
+    target_file: crate::discover::FileId,
     exports: &[fallow_graph::graph::ExportSymbol],
-    graph_modules: &[fallow_graph::graph::ModuleNode],
+    test_coverage: StaticTestCoverage<'_>,
     is_test_reachable: bool,
 ) -> FileScoreCrap {
-    let test_refs = build_test_referenced_exports(exports, graph_modules);
+    let test_refs = build_test_referenced_exports(target_file, exports, test_coverage);
     FileScoreCrap::estimated(compute_crap_scores_estimated(
         &module.complexity,
         &test_refs,
@@ -1605,6 +1629,7 @@ fn prepare_file_score_coverage_setup<'a>(
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
     results: &crate::results::AnalysisResults,
     graph: &fallow_graph::graph::ModuleGraph,
+    test_coverage: StaticTestCoverage<'_>,
     root: &std::path::Path,
 ) -> FileScoreCoverageSetup<'a> {
     let module_by_id: rustc_hash::FxHashMap<_, _> =
@@ -1619,7 +1644,14 @@ fn prepare_file_score_coverage_setup<'a>(
             )
         })
         .collect();
-    let coverage = compute_coverage_gaps(graph, file_paths, &module_by_id, &unused_exports, root);
+    let coverage = compute_coverage_gaps(
+        graph,
+        test_coverage,
+        file_paths,
+        &module_by_id,
+        &unused_exports,
+        root,
+    );
     FileScoreCoverageSetup {
         module_by_id,
         coverage,
@@ -4631,16 +4663,24 @@ mod tests {
     #[test]
     fn build_test_refs_empty() {
         let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
-        let modules: Vec<fallow_graph::graph::ModuleNode> = vec![];
-        let refs = build_test_referenced_exports(&exports, &modules);
+        let graph = fallow_graph::graph::ModuleGraph::build(&[], &[], &[]);
+        let refs = build_test_referenced_exports(
+            crate::discover::FileId(0),
+            &exports,
+            StaticTestCoverage::new(&graph),
+        );
         assert!(refs.is_empty());
     }
 
     #[test]
     fn build_test_refs_empty_inputs() {
         let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
-        let modules: Vec<fallow_graph::graph::ModuleNode> = vec![];
-        let refs = build_test_referenced_exports(&exports, &modules);
+        let graph = fallow_graph::graph::ModuleGraph::build(&[], &[], &[]);
+        let refs = build_test_referenced_exports(
+            crate::discover::FileId(0),
+            &exports,
+            StaticTestCoverage::new(&graph),
+        );
         assert!(refs.is_empty());
     }
 
