@@ -462,14 +462,11 @@ impl ModuleGraph {
     /// do not intercept `require()`.
     #[must_use]
     pub fn is_test_reference_covered(&self, reference: &SymbolReference) -> bool {
-        let hops = ReferencePathIter::new(&self.reference_paths, reference.path);
         if self.test_reachability_index.profile_count == 0 {
-            return self.is_test_reachable(reference.from_file)
-                && hops
-                    .clone()
-                    .all(|(target, _mechanism)| self.is_test_reachable(target));
+            return self.is_test_reachable(reference.from_file);
         }
 
+        let hops = ReferencePathIter::new(&self.reference_paths, reference.path);
         self.test_reachability_index
             .covers_path(reference.from_file, &hops)
     }

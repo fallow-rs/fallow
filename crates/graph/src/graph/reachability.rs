@@ -18,7 +18,7 @@ enum TestReachability {
         reachable: FixedBitSet,
         index: TestReachabilityIndex,
         #[cfg(test)]
-        worklist_pops: usize,
+        dirty_word_pops: usize,
     },
 }
 
@@ -42,9 +42,11 @@ impl TestReachability {
     }
 
     #[cfg(test)]
-    const fn worklist_pop_count(&self) -> usize {
+    const fn dirty_word_pop_count(&self) -> usize {
         match self {
-            Self::Profiled { worklist_pops, .. } => *worklist_pops,
+            Self::Profiled {
+                dirty_word_pops, ..
+            } => *dirty_word_pops,
             Self::NoRoots | Self::Legacy(_) => 0,
         }
     }
@@ -60,8 +62,8 @@ struct ProfileWorklist {
     all_reachable: FixedBitSet,
     pending_profiles: Vec<u64>,
     queued: FixedBitSet,
-    queue: VecDeque<FileId>,
-    worklist_pops: usize,
+    queue: VecDeque<(FileId, usize)>,
+    dirty_word_pops: usize,
 }
 
 impl ProfileWorklist {
@@ -87,9 +89,9 @@ impl ProfileWorklist {
             masked_profiles,
             all_reachable: FixedBitSet::with_capacity(total_capacity),
             pending_profiles,
-            queued: FixedBitSet::with_capacity(total_capacity),
+            queued: FixedBitSet::with_capacity(total_capacity.saturating_mul(words_per_file)),
             queue: VecDeque::new(),
-            worklist_pops: 0,
+            dirty_word_pops: 0,
         };
 
         for (profile, (_, roots)) in grouped_roots.iter().enumerate() {
@@ -115,9 +117,9 @@ impl ProfileWorklist {
                 *reachable_word |= profile_bit;
                 worklist.pending_profiles[slot] |= profile_bit;
                 worklist.all_reachable.insert(root_index);
-                if !worklist.queued.contains(root_index) {
-                    worklist.queued.insert(root_index);
-                    worklist.queue.push_back(root);
+                if !worklist.queued.contains(slot) {
+                    worklist.queued.insert(slot);
+                    worklist.queue.push_back((root, word_index));
                 }
             }
         }
@@ -127,24 +129,25 @@ impl ProfileWorklist {
 
     fn run(mut self, graph: &ModuleGraph) -> (FixedBitSet, TestReachabilityIndex, usize) {
         let words_per_file = self.index.words_per_file;
-        let mut source_delta = vec![0_u64; words_per_file];
 
-        while let Some(file_id) = self.queue.pop_front() {
-            self.worklist_pops += 1;
+        while let Some((file_id, word_index)) = self.queue.pop_front() {
+            self.dirty_word_pops += 1;
             let file_index = file_id.0 as usize;
-            self.queued.remove(file_index);
-            let Some(source_start) = file_index.checked_mul(words_per_file) else {
-                continue;
-            };
-            let Some(source_end) = source_start.checked_add(words_per_file) else {
-                continue;
-            };
-            let Some(pending_source) = self.pending_profiles.get_mut(source_start..source_end)
+            let Some(source_slot) = file_index
+                .checked_mul(words_per_file)
+                .and_then(|start| start.checked_add(word_index))
             else {
                 continue;
             };
-            source_delta.copy_from_slice(pending_source);
-            pending_source.fill(0);
+            self.queued.remove(source_slot);
+            let Some(source_delta) = self.pending_profiles.get_mut(source_slot) else {
+                continue;
+            };
+            let delta_word = *source_delta;
+            *source_delta = 0;
+            if delta_word == 0 {
+                continue;
+            }
 
             let Some(module) = graph.modules.get(file_index) else {
                 continue;
@@ -154,7 +157,10 @@ impl ProfileWorklist {
                 if target_idx >= self.all_reachable.len() {
                     continue;
                 }
-                let Some(target_start) = target_idx.checked_mul(words_per_file) else {
+                let Some(target_slot) = target_idx
+                    .checked_mul(words_per_file)
+                    .and_then(|start| start.checked_add(word_index))
+                else {
                     continue;
                 };
                 let edge_is_esm_only = edge.symbols.iter().all(|symbol| {
@@ -166,39 +172,30 @@ impl ProfileWorklist {
                     None
                 };
 
-                let mut target_changed = false;
-                for (word_index, &delta_word) in source_delta.iter().enumerate() {
-                    let propagated = edge_mask
-                        .and_then(|mask| mask.get(word_index))
-                        .map_or(delta_word, |mask_word| delta_word & !mask_word);
-                    let Some(target_slot) = target_start.checked_add(word_index) else {
-                        continue;
-                    };
-                    let Some(reachable_word) = self.index.reachable_profiles.get_mut(target_slot)
-                    else {
-                        continue;
-                    };
-                    let new_profiles = propagated & !*reachable_word;
-                    if new_profiles == 0 {
-                        continue;
-                    }
-                    *reachable_word |= new_profiles;
-                    self.pending_profiles[target_slot] |= new_profiles;
-                    target_changed = true;
+                let propagated = edge_mask
+                    .and_then(|mask| mask.get(word_index))
+                    .map_or(delta_word, |mask_word| delta_word & !mask_word);
+                let Some(reachable_word) = self.index.reachable_profiles.get_mut(target_slot)
+                else {
+                    continue;
+                };
+                let new_profiles = propagated & !*reachable_word;
+                if new_profiles == 0 {
+                    continue;
                 }
+                *reachable_word |= new_profiles;
+                self.pending_profiles[target_slot] |= new_profiles;
 
-                if target_changed {
-                    self.all_reachable.insert(target_idx);
-                    if !self.queued.contains(target_idx) {
-                        self.queued.insert(target_idx);
-                        self.queue.push_back(edge.target);
-                    }
+                self.all_reachable.insert(target_idx);
+                if !self.queued.contains(target_slot) {
+                    self.queued.insert(target_slot);
+                    self.queue.push_back((edge.target, word_index));
                 }
             }
         }
 
         self.index.set_sparse_masks(self.masked_profiles);
-        (self.all_reachable, self.index, self.worklist_pops)
+        (self.all_reachable, self.index, self.dirty_word_pops)
     }
 }
 
@@ -293,16 +290,16 @@ impl ModuleGraph {
             roots.dedup();
         }
 
-        let (reachable, index, worklist_pops) =
+        let (reachable, index, dirty_word_pops) =
             self.collect_profiled_reachable(&grouped_roots, total_capacity);
         #[cfg(not(test))]
-        let _ = worklist_pops;
+        let _ = dirty_word_pops;
 
         TestReachability::Profiled {
             reachable,
             index,
             #[cfg(test)]
-            worklist_pops,
+            dirty_word_pops,
         }
     }
 
@@ -1255,7 +1252,7 @@ mod tests {
         let reachability = graph.collect_test_reachable(&root_set, &replacements, 129);
 
         assert_eq!(reachability.traversal_count(), 1);
-        assert_eq!(reachability.worklist_pop_count(), 129);
+        assert_eq!(reachability.dirty_word_pop_count(), 129);
     }
 
     #[test]
@@ -1284,7 +1281,7 @@ mod tests {
         let reachability = graph.collect_test_reachable(&root_set, &replacements, 131);
 
         assert_eq!(reachability.traversal_count(), 1);
-        assert_eq!(reachability.worklist_pop_count(), 66);
+        assert_eq!(reachability.dirty_word_pop_count(), 67);
         assert_eq!(graph.test_reachability_index.profile_count, 65);
         assert_eq!(graph.test_reachability_index.words_per_file, 2);
         assert_eq!(graph.test_reachability_index.masked_profiles.len(), 65);
@@ -1322,6 +1319,140 @@ mod tests {
                 .test_reachability_index
                 .profile_masks(FileId(129), 64)
         );
+    }
+
+    #[test]
+    fn staggered_profile_words_propagate_without_clean_word_scans() {
+        const PROFILE_COUNT: u32 = 65;
+        const MASK_START: u32 = PROFILE_COUNT;
+        const FANOUT_START: u32 = MASK_START + PROFILE_COUNT;
+        const FANOUT_COUNT: u32 = 8;
+
+        let test_roots: Vec<u32> = (0..PROFILE_COUNT).collect();
+        let mut edges = Vec::new();
+        for root in 1..PROFILE_COUNT {
+            edges.push((root, root - 1, false));
+        }
+        for target in FANOUT_START..FANOUT_START + FANOUT_COUNT {
+            edges.push((0, target, false));
+        }
+        let replacements: Vec<_> = test_roots
+            .iter()
+            .copied()
+            .map(|root| ResolvedReplacedModuleTarget {
+                source_file: FileId(root),
+                target_file: FileId(MASK_START + root),
+            })
+            .collect();
+        let file_count = (FANOUT_START + FANOUT_COUNT) as usize;
+        let graph = build_reachability_graph_with_replacements(
+            file_count,
+            &edges,
+            &[],
+            &test_roots,
+            &replacements,
+        );
+        let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
+
+        let reachability = graph.collect_test_reachable(&root_set, &replacements, file_count);
+
+        assert_eq!(graph.test_reachability_index.words_per_file, 2);
+        let expected_dirty_word_pops =
+            (PROFILE_COUNT * (PROFILE_COUNT + 1) / 2 + FANOUT_COUNT * PROFILE_COUNT) as usize;
+        assert_eq!(
+            reachability.dirty_word_pop_count(),
+            expected_dirty_word_pops
+        );
+        for target in FANOUT_START..FANOUT_START + FANOUT_COUNT {
+            assert!(
+                graph
+                    .test_reachability_index
+                    .profile_reaches(FileId(target), 0)
+            );
+            assert!(
+                graph
+                    .test_reachability_index
+                    .profile_reaches(FileId(target), 64)
+            );
+        }
+    }
+
+    #[test]
+    fn no_profile_coverage_keeps_a_long_reference_path_on_the_fast_path() {
+        const CHAIN_LENGTH: u32 = 128;
+
+        let files: Vec<_> = (0..=CHAIN_LENGTH)
+            .map(|id| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(format!("/project/file{id}.ts")),
+                size_bytes: 100,
+            })
+            .collect();
+        let mut modules = Vec::with_capacity(files.len());
+        modules.push(ResolvedModule {
+            file_id: FileId(0),
+            path: files[0].path.clone(),
+            resolved_imports: vec![intermediate_import(
+                "./file1",
+                FileId(1),
+                ImportedName::Named("value".to_string()),
+                false,
+            )],
+            ..ResolvedModule::default()
+        });
+        for id in 1..CHAIN_LENGTH {
+            modules.push(ResolvedModule {
+                file_id: FileId(id),
+                path: files[id as usize].path.clone(),
+                re_exports: vec![ResolvedReExport {
+                    info: ReExportInfo {
+                        source: format!("./file{}", id + 1),
+                        imported_name: "value".to_string(),
+                        exported_name: "value".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
+                    },
+                    target: ResolveResult::InternalModule(FileId(id + 1)),
+                }],
+                ..ResolvedModule::default()
+            });
+        }
+        modules.push(ResolvedModule {
+            file_id: FileId(CHAIN_LENGTH),
+            path: files[CHAIN_LENGTH as usize].path.clone(),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("value".to_string()),
+                local_name: Some("value".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::new(0, 20),
+                members: Vec::new(),
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..ResolvedModule::default()
+        });
+        let test_entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let graph = ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &[],
+            &test_entry_points,
+            &[],
+            &test_entry_points,
+            &files,
+        );
+        let reference = &graph.modules[CHAIN_LENGTH as usize].exports[0].references[0];
+
+        assert_eq!(graph.test_reachability_index.profile_count, 0);
+        assert_eq!(
+            graph.reference_path_hops(reference).len(),
+            CHAIN_LENGTH as usize
+        );
+        assert!(graph.is_test_reference_covered(reference));
     }
 
     #[test]
