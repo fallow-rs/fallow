@@ -83,9 +83,9 @@ fn has_reachable_export_reference(file_id: FileId, graph: &ModuleGraph) -> bool 
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use crate::extract::{ExportName, VisibilityTag};
-    use crate::graph::{ExportSymbol, ModuleGraph, ReferenceKind, SymbolReference};
-    use crate::resolve::ResolvedModule;
+    use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use crate::graph::ModuleGraph;
+    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use crate::suppress::Suppression;
     use oxc_span::Span;
     use rustc_hash::{FxHashMap, FxHashSet};
@@ -143,6 +143,65 @@ mod tests {
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test file counts are trivially small"
+    )]
+    fn build_graph_with_reference(file_specs: &[(&str, bool)], from: u32) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = file_specs
+            .iter()
+            .enumerate()
+            .map(|(index, (path, _))| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(path),
+                size_bytes: 0,
+            })
+            .collect();
+        let entry_points: Vec<EntryPoint> = file_specs
+            .iter()
+            .filter(|(_, is_entry)| *is_entry)
+            .map(|(path, _)| EntryPoint {
+                path: PathBuf::from(path),
+                source: EntryPointSource::ManualEntry,
+            })
+            .collect();
+        let mut resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|file| ResolvedModule {
+                file_id: file.id,
+                path: file.path.clone(),
+                ..Default::default()
+            })
+            .collect();
+        resolved_modules[1].exports.push(ExportInfo {
+            name: ExportName::Named("helper".to_string()),
+            local_name: None,
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: Span::new(0, 10),
+            members: vec![],
+            super_class: None,
+        });
+        resolved_modules[from as usize]
+            .resolved_imports
+            .push(ResolvedImport {
+                info: ImportInfo {
+                    source: "./helper".to_string(),
+                    imported_name: ImportedName::Named("helper".to_string()),
+                    local_name: "helper".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: Span::new(0, 10),
+                    source_span: Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            });
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
     #[test]
     fn has_reachable_importer_out_of_bounds_file_id() {
         let graph = build_graph(&[("/src/entry.ts", true)]);
@@ -167,27 +226,14 @@ mod tests {
 
     #[test]
     fn has_reachable_export_reference_ignores_unreachable_references() {
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/helper.ts", false),
-            ("/src/setup.ts", false),
-        ]);
-
-        graph.modules[1].exports = vec![ExportSymbol {
-            name: ExportName::Named("helper".to_string()),
-            is_type_only: false,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::None,
-            expected_unused_reason: None,
-            span: Span::new(0, 10),
-            references: vec![SymbolReference {
-                from_file: FileId(2),
-                kind: ReferenceKind::NamedImport,
-                mechanism: fallow_types::extract::ModuleLoadMechanism::EsModule,
-                import_span: Span::new(0, 10),
-            }],
-            members: vec![],
-        }];
+        let graph = build_graph_with_reference(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/helper.ts", false),
+                ("/src/setup.ts", false),
+            ],
+            2,
+        );
 
         assert!(
             !has_reachable_export_reference(FileId(1), &graph),
@@ -197,23 +243,8 @@ mod tests {
 
     #[test]
     fn has_reachable_export_reference_detects_reachable_references() {
-        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/helper.ts", false)]);
-
-        graph.modules[1].exports = vec![ExportSymbol {
-            name: ExportName::Named("helper".to_string()),
-            is_type_only: false,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::None,
-            expected_unused_reason: None,
-            span: Span::new(0, 10),
-            references: vec![SymbolReference {
-                from_file: FileId(0),
-                kind: ReferenceKind::NamedImport,
-                mechanism: fallow_types::extract::ModuleLoadMechanism::EsModule,
-                import_span: Span::new(0, 10),
-            }],
-            members: vec![],
-        }];
+        let graph =
+            build_graph_with_reference(&[("/src/entry.ts", true), ("/src/helper.ts", false)], 0);
 
         assert!(
             has_reachable_export_reference(FileId(1), &graph),
