@@ -559,6 +559,12 @@ impl ModuleGraph {
             total_capacity,
         });
 
+        let test_reachability_plan = reachability::TestReachabilityPlan::new(
+            &test_entry_point_ids,
+            replaced_module_targets,
+            total_capacity,
+        );
+
         let mut reference_paths = ReferencePathInterner::default();
         graph.populate_references(&module_by_id, &entry_point_ids, &mut reference_paths);
 
@@ -574,8 +580,7 @@ impl ModuleGraph {
         graph.mark_reachable(
             &entry_point_ids,
             &runtime_entry_point_ids,
-            &test_entry_point_ids,
-            replaced_module_targets,
+            test_reachability_plan,
             total_capacity,
         );
 
