@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Tsconfig aliases in Sass imports now resolve partial files after alias
+  expansion.** Imports such as `@use "@/styles/tokens"`, where `@/*` maps to
+  `src/*`, now probe `_tokens.scss`, `_tokens.sass`, and Sass directory-index
+  conventions at the expanded path. This also applies to style imports
+  extracted from SFCs, while JavaScript and TypeScript imports keep their
+  existing resolution behavior. (Closes
+  [#2075](https://github.com/fallow-rs/fallow/issues/2075).)
+
 - **A saved duplication baseline keeps matching after unrelated line shifts.**
   Baselines stored `path:start-end` pairs per clone group, so inserting a line
   above a clone made every instance in that group look new and the accepted

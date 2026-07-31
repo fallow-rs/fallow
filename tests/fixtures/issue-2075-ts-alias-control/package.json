@@ -1,0 +1,6 @@
+{
+  "name": "issue-2075-ts-alias-control",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/main.ts"
+}

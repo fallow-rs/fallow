@@ -1,6 +1,72 @@
 use super::common::{create_config, fixture_path};
 
 #[test]
+fn issue_2075_sass_partials_resolve_after_tsconfig_alias_expansion() {
+    let root = fixture_path("issue-2075-sass-alias-partial");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "all aliased Sass partials and controls should resolve: {:?}",
+        results.unresolved_imports
+    );
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|issue| issue.file.path.file_name())
+        .filter_map(|name| name.to_str())
+        .map(ToString::to_string)
+        .collect();
+    assert!(
+        !unused_file_names.contains(&"_tokens.scss".to_string()),
+        "the aliased SCSS partial should be reachable: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"_sfc-tokens.scss".to_string()),
+        "the partial imported from an SFC style block should be reachable: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"_sass-tokens.sass".to_string()),
+        "the aliased indented-Sass partial should be reachable: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"_index.scss".to_string()),
+        "the aliased Sass directory partial should be reachable: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"_precedence.scss".to_string()),
+        "SCSS partial candidates should be probed before the next extension: {unused_file_names:?}"
+    );
+    assert!(
+        unused_file_names.contains(&"precedence.sass".to_string()),
+        "the lower-precedence direct Sass candidate should remain unreachable: {unused_file_names:?}"
+    );
+}
+
+#[test]
+fn issue_2075_ts_imports_do_not_use_sass_partial_alias_fallback() {
+    let root = fixture_path("issue-2075-ts-alias-control");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results
+            .unresolved_imports
+            .iter()
+            .any(|issue| issue.import.specifier == "@/styles/tokens"),
+        "a JS/TS-context alias must not gain Sass partial resolution"
+    );
+    assert!(
+        results.unused_files.iter().any(|issue| {
+            issue.file.path.file_name().and_then(|name| name.to_str()) == Some("_tokens.scss")
+        }),
+        "the Sass partial must remain unreachable from a JS/TS-context alias"
+    );
+}
+
+#[test]
 fn scss_partial_files_resolved_via_underscore_convention() {
     let root = fixture_path("scss-partial-project");
     let config = create_config(root);

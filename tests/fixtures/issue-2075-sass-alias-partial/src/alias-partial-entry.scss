@@ -1,0 +1,9 @@
+@use "@/styles/tokens";
+@use "@/styles/components";
+@use "@/styles/precedence";
+
+.alias-partial {
+  color: tokens.$color;
+  background: components.$background;
+  border-color: precedence.$color;
+}
