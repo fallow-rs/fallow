@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Parallel inline-review jobs can be isolated with a stable review id.** Set `FALLOW_REVIEW_ID` (or GitHub Action `review-id`) to a 1-64 character identifier so GitHub and GitLab reconciliation only deduplicates and resolves comments from that review scope. Unscoped jobs continue to see only unscoped comments. (Refs [#2076](https://github.com/fallow-rs/fallow/issues/2076).)
+
 - **`--baseline-mode identity` gates health baselines on finding identity.**
   The default count baseline matches per file and category, so a new hotspot
   that replaced an old hotspot in the same file consumed the existing allowance

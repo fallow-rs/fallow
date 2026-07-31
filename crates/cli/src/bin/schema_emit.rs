@@ -54,14 +54,14 @@ use fallow_output::{
     InspectSectionStatus, InspectSymbolIdentity, InspectTargetDescriptor, LargeFunctionEntry,
     OwnershipMetrics, RecommendationCategory, RefactoringTarget, RefactoringTargetFinding,
     RejectedJudgment, ResolutionEvent, ReviewBriefSchemaVersion, ReviewCheckConclusion,
-    ReviewComment, ReviewDirection, ReviewEffort, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
-    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider,
-    ReviewReconcileOutput, ReviewReconcileSchema, RiskClass, RiskProfile, RuntimeCoverageReport,
-    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
-    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
-    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
-    SecuritySeverityCounts, SecuritySummary, SecuritySurvivor, SecuritySurvivorsOutput,
-    SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    ReviewComment, ReviewDirection, ReviewEffort, ReviewEnvelopeEvent, ReviewEnvelopeSchema,
+    ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewProvider, ReviewReconcileOutput,
+    ReviewReconcileSchema, RiskClass, RiskProfile, RuntimeCoverageReport, SecurityBlindSpotFile,
+    SecurityBlindSpotGroup, SecurityBlindSpotsOutput, SecurityBlindSpotsSchemaVersion,
+    SecurityBlindSpotsSummary, SecurityGateVerdict, SecurityReachabilityCounts,
+    SecurityRuntimeStateCounts, SecuritySchemaVersion, SecuritySeverityCounts, SecuritySummary,
+    SecuritySurvivor, SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion,
+    SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
     SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
     SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
     StandardReviewBriefOutput as ReviewBriefOutput, StandardWalkthroughGuide as WalkthroughGuide,
@@ -901,7 +901,7 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<CodeClimateSeverity>();
     let _ = generator.subschema_for::<CodeClimateLocation>();
     let _ = generator.subschema_for::<CodeClimateLines>();
-    let _ = generator.subschema_for::<ReviewEnvelopeOutput>();
+    let _ = generator.subschema_for::<ReviewEnvelopeWireOutput<'static>>();
     let _ = generator.subschema_for::<ReviewEnvelopeSummary>();
     let _ = generator.subschema_for::<ReviewEnvelopeEvent>();
     let _ = generator.subschema_for::<ReviewComment>();
@@ -910,7 +910,6 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<GitLabReviewComment>();
     let _ = generator.subschema_for::<GitLabReviewPosition>();
     let _ = generator.subschema_for::<GitLabReviewPositionType>();
-    let _ = generator.subschema_for::<ReviewEnvelopeMeta>();
     let _ = generator.subschema_for::<ReviewEnvelopeSchema>();
     let _ = generator.subschema_for::<ReviewProvider>();
     let _ = generator.subschema_for::<ReviewCheckConclusion>();

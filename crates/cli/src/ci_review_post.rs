@@ -12,7 +12,7 @@ use crate::error::emit_error_with_style;
 use super::{
     ApplyResult, CiProvider, PlannedReconcile, ReconcileOptions, apply_provider_reconcile,
     emit_ci_command_json, github_post_json, github_token, gitlab_post_json, load_provider_state,
-    read_envelope, require_target, url_encode_path_segment,
+    read_envelope, require_target, url_encode_path_segment, validate_envelope_review_scope,
 };
 
 #[derive(Clone, Copy)]
@@ -58,11 +58,16 @@ pub(super) fn post_review(
         Ok(value) => value,
         Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
+    let review_id = match validate_envelope_review_scope(&envelope) {
+        Ok(review_id) => review_id,
+        Err(error) => return emit_error_with_style(&error, 2, output, json_style),
+    };
     let opts = ReconcileOptions {
         repo: input.repo,
         project_id: input.project_id,
         api_url: input.api_url,
         dry_run: input.dry_run,
+        review_id: review_id.as_ref(),
     };
     let provider_state = match load_provider_state(input.provider, input.target, opts) {
         Ok(state) => state,

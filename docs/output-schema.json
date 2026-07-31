@@ -7601,6 +7601,16 @@
               "type": "null"
             }
           ]
+        },
+        "review_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReviewId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -21247,6 +21257,13 @@
         }
       ],
       "description": "Confidence of exact-symbol impact analysis after known dynamic gaps."
+    },
+    "ReviewId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "Stable identifier used to isolate independent review integrations on the\nsame pull or merge request."
     }
   }
 }

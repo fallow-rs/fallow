@@ -3,6 +3,93 @@
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
+/// Prefix for the exact review-scope marker appended to generated bodies.
+pub const REVIEW_ID_MARKER_PREFIX: &str = "<!-- fallow-review-id: ";
+
+const REVIEW_ID_MARKER_SUFFIX: &str = " -->";
+
+/// Stable identifier used to isolate independent review integrations on the
+/// same pull or merge request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(transparent)]
+pub struct ReviewId(
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(min = 1, max = 64), regex(pattern = r"^[A-Za-z0-9._-]+$"))
+    )]
+    String,
+);
+
+impl ReviewId {
+    /// Parse and validate a review identifier.
+    pub fn parse(value: impl Into<String>) -> Result<Self, String> {
+        let value = value.into();
+        if value.is_empty() || value.len() > 64 {
+            return Err("review id must contain between 1 and 64 bytes".to_owned());
+        }
+        if !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(
+                "review id may contain only ASCII letters, digits, '.', '_' and '-'".to_owned(),
+            );
+        }
+        Ok(Self(value))
+    }
+
+    /// Return the validated identifier.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Render the exact review-scope marker line.
+#[must_use]
+pub fn review_id_marker(review_id: &ReviewId) -> String {
+    format!(
+        "{REVIEW_ID_MARKER_PREFIX}{}{REVIEW_ID_MARKER_SUFFIX}",
+        review_id.as_str()
+    )
+}
+
+/// Parse the sole canonical review-scope marker from a rendered body.
+pub fn parse_review_id_marker(body: &str) -> Result<Option<ReviewId>, String> {
+    let mut found = None;
+    for line in body.lines() {
+        if !line.contains("fallow-review-id") {
+            continue;
+        }
+        let value = line
+            .strip_prefix(REVIEW_ID_MARKER_PREFIX)
+            .and_then(|line| line.strip_suffix(REVIEW_ID_MARKER_SUFFIX))
+            .ok_or_else(|| "malformed fallow review-id marker".to_owned())?;
+        let review_id = ReviewId::parse(value.to_owned())
+            .map_err(|error| format!("invalid fallow review-id marker: {error}"))?;
+        if found.replace(review_id).is_some() {
+            return Err("duplicate fallow review-id marker".to_owned());
+        }
+    }
+    Ok(found)
+}
+
+/// Require a body marker to match the expected review scope exactly.
+pub fn validate_review_body_scope(body: &str, review_id: Option<&ReviewId>) -> Result<(), String> {
+    let body_review_id = parse_review_id_marker(body)?;
+    if body_review_id.as_ref() != review_id {
+        return Err("review body marker does not match meta.review_id".to_owned());
+    }
+    Ok(())
+}
+
+/// Whether a rendered body belongs to the expected review scope.
+#[must_use]
+pub fn body_matches_review_id(body: &str, review_id: Option<&ReviewId>) -> bool {
+    validate_review_body_scope(body, review_id).is_ok()
+}
+
 /// Envelope emitted by `fallow --format review-github` / `review-gitlab`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -22,6 +109,45 @@ pub struct ReviewEnvelopeOutput {
     #[serde(default = "default_marker_regex_flags")]
     pub marker_regex_flags: String,
     pub meta: ReviewEnvelopeMeta,
+}
+
+/// Envelope emitted by `fallow --format review-github` / `review-gitlab`.
+#[doc(hidden)]
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename = "ReviewEnvelopeOutput"))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow --format review-github / review-gitlab")
+)]
+pub struct ReviewEnvelopeWireOutput<'a> {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    event: Option<ReviewEnvelopeEvent>,
+    body: &'a str,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(default = "ReviewEnvelopeSummary::empty_default")
+    )]
+    summary: &'a ReviewEnvelopeSummary,
+    comments: &'a [ReviewComment],
+    #[serde(default = "default_marker_regex")]
+    marker_regex: &'a str,
+    #[serde(default = "default_marker_regex_flags")]
+    marker_regex_flags: &'a str,
+    meta: ReviewEnvelopeWireMeta<'a>,
+}
+
+/// `meta` block inside [`ReviewEnvelopeOutput`].
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename = "ReviewEnvelopeMeta"))]
+struct ReviewEnvelopeWireMeta<'a> {
+    schema: ReviewEnvelopeSchema,
+    provider: ReviewProvider,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    check_conclusion: Option<ReviewCheckConclusion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_id: Option<&'a ReviewId>,
 }
 
 fn serialize_review_contract_json_output<T: Serialize>(
@@ -46,6 +172,47 @@ pub fn serialize_review_envelope_json_output(
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     serialize_review_contract_json_output(output, "review-envelope", mode, analysis_run_id)
+}
+
+/// Serialize a scoped review envelope through the canonical derived wire type.
+pub fn serialize_scoped_review_envelope_json_output(
+    output: &ReviewEnvelopeOutput,
+    review_id: &ReviewId,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    validate_review_envelope_scope(output, Some(review_id))?;
+    let wire = ReviewEnvelopeWireOutput {
+        event: output.event,
+        body: &output.body,
+        summary: &output.summary,
+        comments: &output.comments,
+        marker_regex: &output.marker_regex,
+        marker_regex_flags: &output.marker_regex_flags,
+        meta: ReviewEnvelopeWireMeta {
+            schema: output.meta.schema,
+            provider: output.meta.provider,
+            check_conclusion: output.meta.check_conclusion,
+            review_id: Some(review_id),
+        },
+    };
+    serialize_review_contract_json_output(wire, "review-envelope", mode, analysis_run_id)
+        .map_err(|error| error.to_string())
+}
+
+fn validate_review_envelope_scope(
+    output: &ReviewEnvelopeOutput,
+    review_id: Option<&ReviewId>,
+) -> Result<(), String> {
+    validate_review_body_scope(&output.body, review_id)?;
+    for comment in &output.comments {
+        let body = match comment {
+            ReviewComment::GitHub(comment) => &comment.body,
+            ReviewComment::GitLab(comment) => &comment.body,
+        };
+        validate_review_body_scope(body, review_id)?;
+    }
+    Ok(())
 }
 
 /// Default for [`ReviewEnvelopeOutput::marker_regex`].
@@ -285,11 +452,10 @@ pub enum ReviewReconcileSchema {
 mod tests {
     use super::*;
 
-    #[test]
-    fn review_envelope_json_output_uses_output_owned_root_contract() {
-        let output = ReviewEnvelopeOutput {
+    fn legacy_review_envelope(body: &str) -> ReviewEnvelopeOutput {
+        ReviewEnvelopeOutput {
             event: None,
-            body: "body".to_string(),
+            body: body.to_owned(),
             summary: ReviewEnvelopeSummary::default(),
             comments: Vec::new(),
             marker_regex: default_marker_regex(),
@@ -299,7 +465,12 @@ mod tests {
                 provider: ReviewProvider::Github,
                 check_conclusion: None,
             },
-        };
+        }
+    }
+
+    #[test]
+    fn review_envelope_json_output_uses_output_owned_root_contract() {
+        let output = legacy_review_envelope("body");
 
         let value = serialize_review_envelope_json_output(
             output,
@@ -310,6 +481,57 @@ mod tests {
 
         assert_eq!(value["kind"], "review-envelope");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-review");
+    }
+
+    #[test]
+    fn legacy_serializer_is_byte_shape_equal_to_the_public_dto() {
+        let output = legacy_review_envelope("body");
+        let mut expected =
+            serde_json::to_value(&output).expect("legacy review envelope should serialize");
+        crate::apply_root_kind(&mut expected, "review-envelope", RootEnvelopeMode::Tagged);
+        let actual = serialize_review_envelope_json_output(output, RootEnvelopeMode::Tagged, None)
+            .expect("review envelope should serialize");
+
+        assert_eq!(
+            serde_json::to_vec(&actual).expect("actual review envelope should encode"),
+            serde_json::to_vec(&expected).expect("expected review envelope should encode")
+        );
+        assert!(actual["meta"].get("review_id").is_none());
+    }
+
+    #[test]
+    fn scoped_serializer_adds_only_typed_review_id_to_legacy_shape() {
+        let review_id = ReviewId::parse("frontend").expect("review id should be valid");
+        let output = legacy_review_envelope("body\n<!-- fallow-review-id: frontend -->");
+        let value = serialize_scoped_review_envelope_json_output(
+            &output,
+            &review_id,
+            RootEnvelopeMode::Tagged,
+            None,
+        )
+        .expect("scoped review envelope should serialize");
+
+        assert_eq!(value["meta"]["review_id"], "frontend");
+        assert_eq!(value["meta"]["provider"], "github");
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    fn canonical_wire_schema_has_one_optional_typed_review_id() {
+        let schema = serde_json::to_value(schemars::schema_for!(ReviewEnvelopeWireOutput<'static>))
+            .expect("review envelope schema should serialize");
+        let meta = &schema["$defs"]["ReviewEnvelopeMeta"];
+        let required = schema["required"]
+            .as_array()
+            .expect("review envelope schema should list required fields");
+
+        assert!(!required.iter().any(|field| field == "summary"));
+        assert!(meta["properties"]["review_id"].is_object());
+        assert!(
+            !meta["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|field| field == "review_id"))
+        );
     }
 
     #[test]
@@ -347,5 +569,19 @@ mod tests {
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-reconcile"
         );
+    }
+
+    #[test]
+    fn review_id_accepts_only_the_schema_character_set_and_length() {
+        assert_eq!(
+            ReviewId::parse("frontend.review-1")
+                .expect("review id should be valid")
+                .as_str(),
+            "frontend.review-1"
+        );
+        assert!(ReviewId::parse("").is_err());
+        assert!(ReviewId::parse("has space").is_err());
+        assert!(ReviewId::parse("é").is_err());
+        assert!(ReviewId::parse("a".repeat(65)).is_err());
     }
 }

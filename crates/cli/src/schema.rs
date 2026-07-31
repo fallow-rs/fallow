@@ -605,6 +605,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
     ),
     (
+        "FALLOW_REVIEW_ID",
+        "Stable 1-64 character identifier that isolates inline comments when multiple review jobs target the same PR/MR.",
+    ),
+    (
         "FALLOW_SUMMARY_SCOPE",
         "Summary scope for pr-comment-github/pr-comment-gitlab: all (default) keeps project-level dependency/catalog/override findings outside the diff filter; diff applies the diff filter to them too. Inline review comments are unaffected.",
     ),

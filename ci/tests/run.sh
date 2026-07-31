@@ -1066,6 +1066,7 @@ assert_contains "$(cat "$CI_YAML")" 'unset FALLOW_TYPE_AWARE_PROJECTS FALLOW_TYP
 assert_contains "$(cat "$CI_YAML")" 'Type-aware completeness gate failed' "GitLab preserves semantic completeness failures from valid JSON"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW" "has FALLOW_REVIEW variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW_GUIDANCE" "has FALLOW_REVIEW_GUIDANCE variable"
+assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW_ID" "has FALLOW_REVIEW_ID variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_MAX_COMMENTS" "has FALLOW_MAX_COMMENTS variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_COMMENT" "has FALLOW_COMMENT variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_SUMMARY_SCOPE" "has FALLOW_SUMMARY_SCOPE variable"
