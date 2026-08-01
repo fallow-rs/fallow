@@ -209,7 +209,7 @@ pub fn parse_override_key(key: &str) -> Option<ParsedOverrideKey> {
 /// Split a `pkg@selector` segment into `(package_name, Option<selector>)`.
 /// Handles scoped packages (`@scope/name@<2`) by skipping the leading `@`.
 /// Returns `None` when the package name is empty.
-fn split_pkg_and_selector(segment: &str) -> Option<(String, Option<String>)> {
+pub fn split_pkg_and_selector(segment: &str) -> Option<(String, Option<String>)> {
     let trimmed = segment.trim();
     if trimmed.is_empty() {
         return None;

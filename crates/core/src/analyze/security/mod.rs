@@ -7,9 +7,19 @@
 //! 1. The cone reaches a module that reads a non-public env secret
 //!    (`category: None`, the original finding).
 //! 2. The cone reaches a SERVER-ONLY module (`category: Some("server-only-import")`):
-//!    a module carrying `"use server"`, importing the `server-only` poison
-//!    package, or importing a server-only Next.js / Node API (see the shared
-//!    `is_server_only_module` predicate in `analyze::server_only`).
+//!    a module importing the `server-only` poison package or a server-only
+//!    Next.js / Node API (see the shared `imports_server_only_code` predicate in
+//!    `analyze::server_only`). A `"use server"` directive is deliberately NOT a
+//!    server-only marker here: a Server Action module imported from a
+//!    `"use client"` file is the framework's sanctioned mutation pattern (the
+//!    bundler swaps the import for an action reference), so only its server-only
+//!    IMPORTS count, and those still surface through re-export chains. The sink
+//!    predicate is MODULE-LEVEL: it does not tell action exports apart from
+//!    value exports, so a `"use server"` module that imports server-only code
+//!    is still reported even when every export is an async action (the shape
+//!    the bundler exonerates). The remediation text carries the deciding
+//!    question (does a non-action export leak the import into the client
+//!    bundle) because fallow has no export-shape signal to gate on.
 //!
 //! fallow emits the structural import-hop trace; it does not prove the path is
 //! exploitable.
@@ -198,18 +208,19 @@ fn compute_secret_source_set(
     sources
 }
 
-/// Set of file ids whose module is a SERVER-ONLY sink: it carries a `"use server"`
-/// directive, imports a server-only package, or imports a server-only named API
-/// from `next/headers`. Delegates to the shared
-/// [`is_server_only_module`](super::server_only::is_server_only_module) predicate
-/// so the server-only definition is identical to the
-/// `mixed_client_server_barrel` detector's.
+/// Set of file ids whose module is a SERVER-ONLY sink: it imports a server-only
+/// package or a server-only named API from `next/headers`. Delegates to the
+/// shared
+/// [`imports_server_only_code`](super::server_only::imports_server_only_code)
+/// predicate. A bare `"use server"` directive does NOT qualify: a Server Action
+/// module is meant to be imported by client components, so only its server-only
+/// imports make it a sink.
 fn compute_server_only_source_set(
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
 ) -> FxHashSet<FileId> {
     let mut server_only: FxHashSet<FileId> = FxHashSet::default();
     for (&file_id, module) in modules_by_id {
-        if super::server_only::is_server_only_module(module) {
+        if super::server_only::imports_server_only_code(module) {
             server_only.insert(file_id);
         }
     }
@@ -428,8 +439,8 @@ fn emit_direct_client_file_leaks(
     }
 
     // Direct server-only case: the client file itself IS a server-only sink
-    // (carries "use server", imports a server-only package, or imports a
-    // server-only next/headers API). The most direct server-only leak; no
+    // (imports a server-only package or a server-only next/headers
+    // API). The most direct server-only leak; no
     // import hop needed. The transitive server-only emit below is gated so a
     // file that is both a direct AND a transitive sink is flagged once.
     if scan.server_only_sources.contains(&client_id) {
@@ -585,8 +596,8 @@ fn build_leak_finding(
 }
 
 /// Build a finding for the SERVER-ONLY sink: a `"use client"` file whose
-/// transitive static-import cone reaches a server-only module (one carrying
-/// `"use server"` or importing a server-only package). Same rule, same suppress
+/// transitive static-import cone reaches a server-only module (one importing a
+/// server-only package or API). Same rule, same suppress
 /// kind, same `SecurityFinding` shape as the secret leak; distinguished by
 /// `category: Some("server-only-import")` so consumers can tell the two apart.
 /// The terminal trace hop carries the `Sink` role (the server-only module is the
@@ -613,12 +624,15 @@ fn build_server_only_finding(
     // the absolute path here would leak it past relativization and make output
     // environment-dependent.
     let evidence = "This \"use client\" file transitively imports a SERVER-ONLY module \
-         (it carries a \"use server\" directive or imports server-only code such as \
-         server-only, next/headers, next/server, or node:fs / node:child_process; see the \
-         sink hop in the trace). Candidate for verification: confirm whether this server-only \
-         code is meant to run on the client. If it is pulled in only through \
-         next/dynamic(..., { ssr: false }), it is the sanctioned client-only escape hatch and \
-         is a false positive."
+         (it imports server-only code such as server-only, next/headers, next/server, or \
+         node:fs / node:child_process; see the sink hop in the trace). Candidate for \
+         verification: confirm whether this server-only code is meant to run on the client. \
+         If it is pulled in only through next/dynamic(..., { ssr: false }), it is the \
+         sanctioned client-only escape hatch and is a false positive. If the sink is a \
+         Server Action module, decide by export shape: only a non-action export (a \
+         top-level const, a re-export, or a default value) carries the server-only \
+         import into the client bundle; if every export is an async action, the bundler \
+         replaces the import with an action reference and it is a false positive."
         .to_owned();
 
     let candidate = client_leak_candidate(
@@ -688,17 +702,17 @@ fn build_direct_finding(
 }
 
 /// Build a finding for the direct SERVER-ONLY case: a `"use client"` file that is
-/// itself a server-only sink (carries `"use server"`, imports a server-only
-/// package, or imports a server-only `next/headers` API). No import hop is needed,
+/// itself a server-only sink (imports a server-only package or a server-only
+/// `next/headers` API). No import hop is needed,
 /// so the trace is a single self-hop on the client file, which is both the client
 /// boundary and the server-only sink. Mirrors [`build_direct_finding`] for the
 /// secret case; distinguished by `category: Some("server-only-import")`.
 fn build_direct_server_only_finding(graph: &ModuleGraph, client_id: FileId) -> SecurityFinding {
     let path = graph.modules[client_id.0 as usize].path.clone();
     let evidence = "This \"use client\" file directly imports SERVER-ONLY code \
-         (it carries a \"use server\" directive or imports server-only code such as \
-         server-only, next/headers, next/server, or node:fs / node:child_process). Candidate \
-         for verification: confirm whether this server-only code is meant to run on the client."
+         (server-only code such as server-only, next/headers, next/server, or \
+         node:fs / node:child_process). Candidate for verification: confirm whether this \
+         server-only code is meant to run on the client."
         .to_owned();
     let candidate =
         client_leak_candidate(path.clone(), 1, 0, Some(SERVER_ONLY_CATEGORY.to_owned()));

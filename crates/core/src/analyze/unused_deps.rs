@@ -1291,18 +1291,31 @@ fn workspace_dependency_map(
     workspaces: &[fallow_config::WorkspaceInfo],
     config: &ResolvedConfig,
 ) -> Vec<(PathBuf, FxHashSet<String>)> {
+    let ambient_workspace_names: FxHashSet<String> = workspaces
+        .iter()
+        .filter(|ws| fallow_config::dir_has_deno_json(&ws.root))
+        .map(|ws| ws.name.clone())
+        .collect();
+
     let mut ws_dep_map = Vec::new();
     for ws in workspaces {
         let ws_pkg_path = ws.root.join("package.json");
-        if is_package_json_ignored(&ws_pkg_path, config) {
+        if ws_pkg_path.is_file() && is_package_json_ignored(&ws_pkg_path, config) {
             continue;
         }
-        if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) {
-            let mut ws_deps: FxHashSet<String> =
-                ws_pkg.all_dependency_names().into_iter().collect();
-            ws_deps.insert(ws.name.clone());
-            ws_dep_map.push((ws.root.clone(), ws_deps));
+
+        let Ok(Some((_name, ws_pkg, _deps))) =
+            fallow_config::load_member_package_manifest(&ws.root)
+        else {
+            continue;
+        };
+
+        let mut ws_deps: FxHashSet<String> = ws_pkg.all_dependency_names().into_iter().collect();
+        ws_deps.insert(ws.name.clone());
+        if fallow_config::dir_has_deno_json(&ws.root) {
+            ws_deps.extend(ambient_workspace_names.iter().cloned());
         }
+        ws_dep_map.push((ws.root.clone(), ws_deps));
     }
     ws_dep_map
 }
@@ -1421,6 +1434,19 @@ fn build_unlisted_dependency_context_parts<'a>(
     let mut all_deps: FxHashSet<String> = input.pkg.all_dependency_names().into_iter().collect();
     if let Some(root_name) = &input.pkg.name {
         all_deps.insert(root_name.clone());
+    }
+
+    // Deno workspaces expose member packages without package.json dependency
+    // entries. Treat discovered workspace names as listed at the root too so
+    // files outside a member directory do not false-positive as unlisted.
+    if fallow_config::dir_has_deno_json(&input.config.root) {
+        all_deps.extend(
+            input
+                .workspaces
+                .iter()
+                .filter(|ws| fallow_config::dir_has_deno_json(&ws.root))
+                .map(|ws| ws.name.clone()),
+        );
     }
 
     let ws_dep_map = workspace_dependency_map(input.workspaces, input.config);

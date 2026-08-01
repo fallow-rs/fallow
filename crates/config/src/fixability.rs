@@ -85,6 +85,13 @@ fn has_workspace_marker(dir: &Path) -> bool {
             return true;
         }
     }
+    if crate::workspace::load_root_deno_workspace_patterns(dir)
+        .ok()
+        .flatten()
+        .is_some_and(|(_path, patterns)| !patterns.is_empty())
+    {
+        return true;
+    }
     let pkg_path = dir.join("package.json");
     if !pkg_path.exists() {
         return false;
