@@ -74,9 +74,11 @@ pub fn is_server_only_module(module: &ModuleInfo) -> bool {
 /// a Node server runtime module, `next/server`, or a named server-only API from
 /// `next/headers`. Deliberately excludes the `"use server"` directive: a Server
 /// Action module is MEANT to be imported by client components, so the directive
-/// alone is not a server-only signal for the client/server-leak rule. A
-/// `"use server"` module that also imports one of these packages still matches
-/// (a non-action export can leak that import into the client bundle).
+/// alone is not a server-only signal for the client/server-leak rule. The
+/// predicate is module-level and does not inspect export shape: a `"use server"`
+/// module that also imports one of these packages still matches even when every
+/// export is an async action, because only a non-action export can leak the
+/// import into the client bundle and fallow cannot tell the two apart here.
 #[must_use]
 pub fn imports_server_only_code(module: &ModuleInfo) -> bool {
     module.imports.iter().any(|import| {

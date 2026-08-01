@@ -462,9 +462,11 @@ fn server_action_import_is_not_a_server_only_sink() {
 
 #[test]
 fn use_server_module_importing_node_fs_is_still_a_sink() {
-    // Issue #2074 control: a "use server" module that ALSO imports node:fs and
-    // exposes it through a non-action export stays a server-only sink; the
-    // directive does not shield the server-only import.
+    // Issue #2074 control: a "use server" module that ALSO imports node:fs
+    // stays a server-only sink. The sink predicate is module-level (no
+    // action-vs-value export distinction), so the server-only import alone
+    // keeps the module a sink; the fixture's non-action export is the leak
+    // shape that makes such a report real.
     let results = analyze_with_security();
     assert_eq!(
         server_only_findings_on(&results, "src/fs-action-client.tsx"),
@@ -493,6 +495,12 @@ fn use_server_module_importing_node_fs_is_still_a_sink() {
     assert!(
         !finding.evidence.contains("use server"),
         "the evidence must not name \"use server\" as a server-only marker: {}",
+        finding.evidence
+    );
+    assert!(
+        finding.evidence.contains("non-action export"),
+        "the evidence must carry the export-shape triage question for Server Action \
+         sinks: {}",
         finding.evidence
     );
 }

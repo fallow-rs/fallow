@@ -48,9 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"use server"` module now becomes a sink only through what it imports:
   reaching `server-only`, `next/headers`, `next/server`, or Node server
   modules such as `node:fs` / `node:child_process` (directly or through
-  re-export chains) is still reported, including from a `"use server"` file
-  that leaks such an import through a non-action export. The evidence and
-  SARIF rule text no longer name `"use server"` as a server-only marker.
+  re-export chains) is still reported, including from a `"use server"` file.
+  The sink predicate stays module-level: it does not tell action exports apart
+  from value exports, so a `"use server"` module that imports server-only code
+  is still reported even when every export is an async action. For that shape
+  the evidence, human remediation hint, and SARIF rule text now carry the
+  deciding question: only a non-action export (a top-level const, a re-export,
+  or a default value) carries the server-only import into the client bundle,
+  and a module whose exports are all async actions is a false positive. The
+  texts no longer name `"use server"` as a server-only marker.
   (Closes [#2074](https://github.com/fallow-rs/fallow/issues/2074).)
 
 - **Tests that mock a module no longer count as statically covering the real

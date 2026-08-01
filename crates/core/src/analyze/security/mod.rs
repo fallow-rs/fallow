@@ -13,7 +13,13 @@
 //!    server-only marker here: a Server Action module imported from a
 //!    `"use client"` file is the framework's sanctioned mutation pattern (the
 //!    bundler swaps the import for an action reference), so only its server-only
-//!    IMPORTS count, and those still surface through re-export chains.
+//!    IMPORTS count, and those still surface through re-export chains. The sink
+//!    predicate is MODULE-LEVEL: it does not tell action exports apart from
+//!    value exports, so a `"use server"` module that imports server-only code
+//!    is still reported even when every export is an async action (the shape
+//!    the bundler exonerates). The remediation text carries the deciding
+//!    question (does a non-action export leak the import into the client
+//!    bundle) because fallow has no export-shape signal to gate on.
 //!
 //! fallow emits the structural import-hop trace; it does not prove the path is
 //! exploitable.
@@ -622,7 +628,11 @@ fn build_server_only_finding(
          node:fs / node:child_process; see the sink hop in the trace). Candidate for \
          verification: confirm whether this server-only code is meant to run on the client. \
          If it is pulled in only through next/dynamic(..., { ssr: false }), it is the \
-         sanctioned client-only escape hatch and is a false positive."
+         sanctioned client-only escape hatch and is a false positive. If the sink is a \
+         Server Action module, decide by export shape: only a non-action export (a \
+         top-level const, a re-export, or a default value) carries the server-only \
+         import into the client bundle; if every export is an async action, the bundler \
+         replaces the import with an action reference and it is a false positive."
         .to_owned();
 
     let candidate = client_leak_candidate(
