@@ -97,6 +97,7 @@ pub struct ResolverSession {
     extensions: Vec<String>,
     condition_names: Vec<String>,
     package_manifests: Vec<PackageManifestInfo>,
+    has_deno_import_maps: bool,
     canonical_ws_roots: Vec<PathBuf>,
     root_is_canonical: bool,
 }
@@ -117,6 +118,9 @@ impl ResolverSession {
             .map(|ws| dunce::canonicalize(&ws.root).unwrap_or_else(|_| ws.root.clone()))
             .collect();
         let package_manifests = build_package_manifests(input, &canonical_ws_roots);
+        let has_deno_import_maps = package_manifests
+            .iter()
+            .any(|manifest| !manifest.deno_import_map.is_empty());
         let root_is_canonical = dunce::canonicalize(input.root).is_ok_and(|c| c == input.root);
 
         let extensions = build_extensions(input.active_plugins);
@@ -133,6 +137,7 @@ impl ResolverSession {
             extensions,
             condition_names,
             package_manifests,
+            has_deno_import_maps,
             canonical_ws_roots,
             root_is_canonical,
         }
@@ -188,6 +193,7 @@ pub fn resolve_all_imports_with_session(
         raw_path_to_id: &raw_path_to_id,
         workspace_roots: &workspace_roots,
         package_manifests: &session.package_manifests,
+        has_deno_import_maps: session.has_deno_import_maps,
         condition_names: &session.condition_names,
         path_aliases: input.path_aliases,
         scss_include_paths: input.scss_include_paths,

@@ -1473,8 +1473,12 @@ pub(super) fn resolve_specifier(
 ) -> ResolveResult {
     // Deno import maps rewrite matching specifiers within the nearest package
     // scope. Mapped targets may be external schemes or config-relative paths.
-    let mapped = nearest_package_manifest(ctx.package_manifests, from_file)
-        .and_then(|manifest| apply_import_map(&manifest.deno_import_map, specifier));
+    let mapped = if ctx.has_deno_import_maps {
+        nearest_package_manifest(ctx.package_manifests, from_file)
+            .and_then(|manifest| apply_import_map(&manifest.deno_import_map, specifier))
+    } else {
+        None
+    };
     let after_import_map = mapped
         .as_ref()
         .map_or(specifier, |(mapped, _base)| mapped.as_str());
@@ -2062,6 +2066,7 @@ mod tests {
             raw_path_to_id: &raw_path_to_id,
             workspace_roots: &workspace_roots,
             package_manifests: &package_manifests,
+            has_deno_import_maps: false,
             condition_names: &condition_names,
             path_aliases: &[],
             scss_include_paths: &[],

@@ -354,6 +354,9 @@ pub(super) struct ResolveContext<'a> {
     pub workspace_roots: &'a FxHashMap<&'a str, &'a Path>,
     /// Package manifests for the root package and workspace packages.
     pub package_manifests: &'a [PackageManifestInfo],
+    /// Whether any package scope declared a Deno import map; false skips map
+    /// lookup per import.
+    pub has_deno_import_maps: bool,
     /// Ordered package condition names matching the resolver configuration.
     pub condition_names: &'a [String],
     /// Plugin-provided path aliases (prefix, replacement).
