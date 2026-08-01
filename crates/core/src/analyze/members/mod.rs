@@ -1236,6 +1236,7 @@ fn propagate_common_member_accesses(
     propagate_playwright_fixture_accesses(
         input.graph,
         input.resolved_modules,
+        input.modules,
         indexes,
         accessed_members,
     );

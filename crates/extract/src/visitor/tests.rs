@@ -3984,6 +3984,69 @@ fn playwright_fixture_type_alias_records_nested_type_bindings() {
 }
 
 #[test]
+fn playwright_fixture_indexed_access_type_records_encoded_binding() {
+    // Issue #2070: `assert: TaskAsserterFactory["taskAsserter"]` encodes the
+    // indexed access as a single type-name string for the analyze-layer hop.
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+            import { TaskAsserterFactory } from './task-asserter-factory';
+
+            type Fixtures = {
+                tasks: {
+                    assert: TaskAsserterFactory['taskAsserter'];
+                };
+            };
+
+            export const test = base.extend<Fixtures>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_definition_fact(
+            &info,
+            "test",
+            "tasks.assert",
+            "TaskAsserterFactory[\"taskAsserter\"]"
+        ),
+        "indexed-access fixture type should emit the encoded definition fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_fixture_indexed_access_non_literal_index_abstains() {
+    // A computed / non-literal index cannot be resolved conservatively, so no
+    // binding is recorded for the fixture path.
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+            import { TaskAsserterFactory } from './task-asserter-factory';
+
+            type Fixtures = {
+                tasks: {
+                    assert: TaskAsserterFactory[keyof TaskAsserterFactory];
+                };
+            };
+
+            export const test = base.extend<Fixtures>({});
+        ",
+    );
+
+    assert!(
+        !info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::PlaywrightFixtureDefinition(access)
+                    if access.fixture_name == "tasks.assert"
+            )
+        }),
+        "a non-literal indexed access must not record a fixture binding, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn playwright_nested_fixture_destructure_records_dotted_path_uses() {
     let info = parse(
         r"

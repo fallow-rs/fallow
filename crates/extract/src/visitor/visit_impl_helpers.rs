@@ -1277,6 +1277,9 @@ fn collect_fixture_type_binding_from_member(
         );
     } else if let Some(type_name) = extract_type_annotation_name(type_annotation) {
         bindings.push((next_path, type_name));
+    } else if let Some(encoded) = fixture_indexed_access_type_name(&type_annotation.type_annotation)
+    {
+        bindings.push((next_path, encoded));
     } else {
         collect_fixture_type_bindings_from_type(
             &type_annotation.type_annotation,
@@ -1285,6 +1288,40 @@ fn collect_fixture_type_binding_from_member(
             bindings,
         );
     }
+}
+
+/// Encode a fixture property typed by a literal-string indexed access over a
+/// named type (`assert: TaskAsserterFactory["taskAsserter"]`, issue #2070) as
+/// the single string `TaskAsserterFactory["taskAsserter"]`. The encoding rides
+/// the existing `(fixture_path, type_name)` binding plumbing unchanged; the
+/// analyze layer detects the `["..."]` suffix and resolves the index through
+/// the class's instance bindings to the getter's return-type class.
+/// Conservative by construction: only a bare, non-generic identifier object
+/// type with a plain string-literal index is encoded (no computed keys, no
+/// qualified names, no nested indexed accesses), anything else abstains.
+fn fixture_indexed_access_type_name(ty: &TSType<'_>) -> Option<String> {
+    let TSType::TSIndexedAccessType(indexed) = ty else {
+        return None;
+    };
+    let TSType::TSTypeReference(object_ref) = &indexed.object_type else {
+        return None;
+    };
+    if object_ref.type_arguments.is_some() {
+        return None;
+    }
+    let TSTypeName::IdentifierReference(object) = &object_ref.type_name else {
+        return None;
+    };
+    let TSType::TSLiteralType(literal) = &indexed.index_type else {
+        return None;
+    };
+    let TSLiteral::StringLiteral(index) = &literal.literal else {
+        return None;
+    };
+    if index.value.is_empty() || index.value.contains('"') {
+        return None;
+    }
+    Some(format!("{}[\"{}\"]", object.name, index.value))
 }
 
 fn fixture_type_reference_name(ty: &TSType<'_>) -> Option<(String, Span)> {
