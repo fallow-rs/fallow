@@ -1,4 +1,5 @@
-//! Detection of unused and misconfigured pnpm dependency-override entries.
+//! Detection of unused and misconfigured pnpm and npm dependency-override
+//! entries.
 //!
 //! pnpm supports forcing transitive dependency versions through two
 //! equivalent locations:
@@ -6,12 +7,19 @@
 //! - `overrides:` top-level in `pnpm-workspace.yaml` (pnpm 9+, canonical)
 //! - `pnpm.overrides` in the root `package.json` (legacy form, still supported)
 //!
+//! npm supports the same mechanism through a top-level `overrides` object in
+//! the root `package.json`, with nesting instead of `parent>child` keys. The
+//! npm parser flattens nested objects into the shared entry shape, so all
+//! three sources run through one analysis path. yarn `resolutions` and bun
+//! overrides are out of scope.
+//!
 //! Two findings are emitted:
 //!
 //! 1. **`unused-dependency-overrides`**: an override whose target package is
-//!    absent from both workspace `package.json` dep sections and
-//!    `pnpm-lock.yaml`. Overrides targeting resolved transitive packages are
-//!    treated as used because CVE-fix pins often exist only in the lockfile.
+//!    absent from both workspace `package.json` dep sections and the
+//!    lockfile (`pnpm-lock.yaml` or `package-lock.json`). Overrides targeting
+//!    resolved transitive packages are treated as used because CVE-fix pins
+//!    often exist only in the lockfile.
 //!
 //! 2. **`misconfigured-dependency-overrides`**: an override whose key cannot
 //!    be parsed or whose value is empty. `pnpm install` refuses to honor
@@ -31,7 +39,8 @@
 use fallow_config::{
     CompiledIgnoreDependencyOverrideRule, PackageJson, PnpmOverrideData, ResolvedConfig,
     WorkspaceInfo, override_misconfig_reason as parser_misconfig_reason,
-    parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
+    parse_npm_package_json_overrides, parse_pnpm_package_json_overrides,
+    parse_pnpm_workspace_overrides,
 };
 use fallow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, MisconfiguredDependencyOverride,
@@ -41,6 +50,8 @@ use rustc_hash::FxHashSet;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 const PNPM_LOCK_FILE: &str = "pnpm-lock.yaml";
+const NPM_LOCK_FILE: &str = "package-lock.json";
+const NODE_MODULES_SEGMENT: &str = "node_modules/";
 const ROOT_PACKAGE_JSON: &str = "package.json";
 const SOURCE_LABEL_YAML: &str = "pnpm-workspace.yaml";
 const SOURCE_LABEL_JSON: &str = "package.json";
@@ -62,12 +73,18 @@ pub struct PnpmOverrideState {
     /// Entries from `<root>/package.json`'s `pnpm.overrides` map. Empty when
     /// the file is missing, has no pnpm.overrides section, or fails to parse.
     package_json_data: PnpmOverrideData,
+    /// Flattened entries from `<root>/package.json`'s top-level npm
+    /// `overrides` object. Empty when the file is missing, has no overrides
+    /// section, or fails to parse.
+    npm_package_json_data: PnpmOverrideData,
     /// Every package name that appears in `dependencies` / `devDependencies` /
     /// `peerDependencies` / `optionalDependencies` of any workspace
     /// `package.json` (root + members).
     declared_packages: FxHashSet<String>,
-    /// Every package name found in `pnpm-lock.yaml` package/snapshot keys or
-    /// dependency sections. Includes transitive dependencies resolved by pnpm.
+    /// Every package name found in `pnpm-lock.yaml` package/snapshot keys,
+    /// `package-lock.json` package paths, or dependency sections of either
+    /// lockfile. Includes transitive dependencies resolved by the package
+    /// manager.
     lockfile_packages: FxHashSet<String>,
 }
 
@@ -87,13 +104,20 @@ pub fn gather_pnpm_override_state(
         .unwrap_or_default();
 
     let root_pkg_path = config.root.join(ROOT_PACKAGE_JSON);
-    let package_json_data = std::fs::read_to_string(&root_pkg_path)
-        .ok()
+    let root_pkg_source = std::fs::read_to_string(&root_pkg_path).ok();
+    let package_json_data = root_pkg_source
         .as_deref()
         .map(parse_pnpm_package_json_overrides)
         .unwrap_or_default();
+    let npm_package_json_data = root_pkg_source
+        .as_deref()
+        .map(parse_npm_package_json_overrides)
+        .unwrap_or_default();
 
-    if workspace_yaml_data.entries.is_empty() && package_json_data.entries.is_empty() {
+    if workspace_yaml_data.entries.is_empty()
+        && package_json_data.entries.is_empty()
+        && npm_package_json_data.entries.is_empty()
+    {
         return None;
     }
 
@@ -103,6 +127,7 @@ pub fn gather_pnpm_override_state(
     Some(PnpmOverrideState {
         workspace_yaml_data,
         package_json_data,
+        npm_package_json_data,
         declared_packages,
         lockfile_packages,
     })
@@ -146,16 +171,71 @@ fn collect_declared_packages(
     set
 }
 
-/// Parse `pnpm-lock.yaml` and collect package names from resolved package keys
-/// plus dependency maps. Malformed or missing lockfiles degrade to an empty
-/// set, preserving the package.json-only fallback for projects without pnpm.
+/// Parse `pnpm-lock.yaml` and `package-lock.json` and collect package names
+/// from resolved package keys plus dependency maps. Malformed or missing
+/// lockfiles degrade to an empty set, preserving the package.json-only
+/// fallback for projects without a lockfile.
 fn collect_lockfile_packages(config: &ResolvedConfig) -> FxHashSet<String> {
-    let lock_path = config.root.join(PNPM_LOCK_FILE);
-    let Ok(raw_source) = std::fs::read_to_string(lock_path) else {
+    let mut packages = FxHashSet::default();
+
+    if let Ok(raw_source) = std::fs::read_to_string(config.root.join(PNPM_LOCK_FILE)) {
+        packages.extend(collect_pnpm_lock_packages(&raw_source));
+    }
+    if let Ok(raw_source) = std::fs::read_to_string(config.root.join(NPM_LOCK_FILE)) {
+        packages.extend(collect_npm_lock_packages(&raw_source));
+    }
+
+    packages
+}
+
+/// Collect package names from `package-lock.json`. Lockfile v2/v3 keys the
+/// `packages` map by installation path (`node_modules/<name>`, possibly
+/// nested); the name is the segment after the last `node_modules/`. Entries
+/// without a `node_modules/` segment (the `""` root and workspace member
+/// paths) carry no resolved package name. Legacy v1 dependency trees and
+/// per-entry dependency maps are covered by the recursive dependency-map walk.
+fn collect_npm_lock_packages(source: &str) -> FxHashSet<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(source) else {
         return FxHashSet::default();
     };
 
-    collect_pnpm_lock_packages(&raw_source)
+    let mut packages = FxHashSet::default();
+    if let Some(mapping) = value.get("packages").and_then(serde_json::Value::as_object) {
+        for key in mapping.keys() {
+            if let Some(idx) = key.rfind(NODE_MODULES_SEGMENT) {
+                let name = &key[idx + NODE_MODULES_SEGMENT.len()..];
+                if !name.is_empty() {
+                    packages.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    collect_json_dependency_map_names(&value, &mut packages);
+    packages
+}
+
+fn collect_json_dependency_map_names(value: &serde_json::Value, packages: &mut FxHashSet<String>) {
+    match value {
+        serde_json::Value::Object(mapping) => {
+            for (key, child) in mapping {
+                if LOCKFILE_DEPENDENCY_SECTIONS.contains(&key.as_str())
+                    && let Some(dependencies) = child.as_object()
+                {
+                    for package_name in dependencies.keys() {
+                        packages.insert(package_name.clone());
+                    }
+                }
+                collect_json_dependency_map_names(child, packages);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_dependency_map_names(item, packages);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_pnpm_lock_packages(source: &str) -> FxHashSet<String> {
@@ -267,6 +347,15 @@ pub fn find_unused_dependency_overrides(
         ignore_rules: &config.compiled_ignore_dependency_overrides,
         findings: &mut findings,
     });
+    collect_unused_from_source(&mut UnusedOverrideSourceInput {
+        data: &state.npm_package_json_data,
+        source: DependencyOverrideSource::PnpmPackageJson,
+        source_path: &json_path,
+        declared: &state.declared_packages,
+        resolved: &state.lockfile_packages,
+        ignore_rules: &config.compiled_ignore_dependency_overrides,
+        findings: &mut findings,
+    });
     findings
 }
 
@@ -289,6 +378,11 @@ fn collect_unused_from_source(input: &mut UnusedOverrideSourceInput<'_>) {
             continue;
         };
         if !fallow_config::is_valid_override_value(value) {
+            continue;
+        }
+        // `$package` values reference the version of a dependency declared at
+        // the root; resolution is indirect, so credit rather than report.
+        if value.starts_with('$') {
             continue;
         }
 
@@ -354,6 +448,13 @@ pub fn find_misconfigured_dependency_overrides(
     );
     collect_misconfigured_from_source(
         &state.package_json_data,
+        DependencyOverrideSource::PnpmPackageJson,
+        &json_path,
+        &config.compiled_ignore_dependency_overrides,
+        &mut findings,
+    );
+    collect_misconfigured_from_source(
+        &state.npm_package_json_data,
         DependencyOverrideSource::PnpmPackageJson,
         &json_path,
         &config.compiled_ignore_dependency_overrides,

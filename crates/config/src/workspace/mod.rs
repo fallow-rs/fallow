@@ -1,4 +1,5 @@
 mod diagnostics;
+mod npm_overrides;
 mod package_json;
 mod parsers;
 mod pnpm_catalog;
@@ -17,6 +18,7 @@ pub use diagnostics::{
     workspace_diagnostics_for,
 };
 use diagnostics::{emit_diagnostics, is_skip_listed_dir};
+pub use npm_overrides::parse_npm_package_json_overrides;
 pub use package_json::{NapiConfig, PackageJson};
 pub use parsers::parse_tsconfig_root_dir;
 use parsers::{

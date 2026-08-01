@@ -285,6 +285,8 @@ mod issue_1301_bun_catalog;
 mod issue_1648_unused_prop_ignore_pattern;
 #[path = "integration_test/issue_195_non_source_entry_points.rs"]
 mod issue_195_non_source_entry_points;
+#[path = "integration_test/issue_2069_npm_overrides.rs"]
+mod issue_2069_npm_overrides;
 #[path = "integration_test/issue_317_namespace_barrel_ignore_exports.rs"]
 mod issue_317_namespace_barrel_ignore_exports;
 #[path = "integration_test/issue_329_pnpm_catalog.rs"]

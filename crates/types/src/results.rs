@@ -368,18 +368,20 @@ pub struct AnalysisResults {
     /// `add-catalog-entry` / `update-catalog-reference` primary at position 0.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<UnresolvedCatalogReferenceFinding>,
-    /// Entries in pnpm-workspace.yaml's overrides: section, or package.json's
-    /// pnpm.overrides block, whose target package is not declared by any
-    /// workspace package and is not present in pnpm-lock.yaml. Default severity
+    /// Entries in pnpm-workspace.yaml's overrides: section, package.json's
+    /// pnpm.overrides block, or package.json's top-level npm overrides object,
+    /// whose target package is not declared by any workspace package and is
+    /// not present in pnpm-lock.yaml or package-lock.json. Default severity
     /// is warn because projects without a readable lockfile fall back to
     /// manifest-only checks; the hint field flags those conservative cases.
     /// Wrapped in [`UnusedDependencyOverrideFinding`].
     #[serde(default)]
     pub unused_dependency_overrides: Vec<UnusedDependencyOverrideFinding>,
-    /// pnpm.overrides entries whose key or value does not parse as a valid
-    /// override spec (empty key, empty value, malformed selector, unbalanced
-    /// parent matcher). pnpm install will reject these. Default severity is
-    /// error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
+    /// pnpm.overrides or npm overrides entries whose key or value does not
+    /// parse as a valid override spec (empty key, empty value, malformed
+    /// selector, unbalanced parent matcher). The package manager will reject
+    /// these at install time. Default severity is error. Wrapped in
+    /// [`MisconfiguredDependencyOverrideFinding`].
     #[serde(default)]
     pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverrideFinding>,
     /// `"use client"` files that export a Next.js server-only / route-segment
@@ -3105,7 +3107,8 @@ pub enum DependencyOverrideSource {
     /// Top-level `overrides:` key in `pnpm-workspace.yaml`.
     #[serde(rename = "pnpm-workspace.yaml")]
     PnpmWorkspaceYaml,
-    /// `pnpm.overrides` in a root `package.json`.
+    /// `pnpm.overrides` or the top-level npm `overrides` object in a root
+    /// `package.json`.
     #[serde(rename = "package.json")]
     PnpmPackageJson,
 }
@@ -3129,10 +3132,11 @@ impl std::fmt::Display for DependencyOverrideSource {
 }
 
 /// An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in
-/// `package.json`) whose target package is not declared in any workspace
-/// `package.json` and is not present in `pnpm-lock.yaml`. Projects without a
-/// readable lockfile fall back to package manifest checks; the `hint` field
-/// flags that conservative mode.
+/// `package.json`), or in npm's top-level `overrides` object in
+/// `package.json`, whose target package is not declared in any workspace
+/// `package.json` and is not present in `pnpm-lock.yaml` or
+/// `package-lock.json`. Projects without a readable lockfile fall back to
+/// package manifest checks; the `hint` field flags that conservative mode.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependencyOverride {

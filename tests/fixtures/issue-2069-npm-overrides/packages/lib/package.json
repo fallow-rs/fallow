@@ -1,0 +1,8 @@
+{
+  "name": "lib",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@types/react": "^18.2.0"
+  }
+}
