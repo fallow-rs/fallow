@@ -112,18 +112,172 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &str) {
 }
 
 fn write_envelope(fingerprints: &[&str]) -> tempfile::TempDir {
+    write_envelope_with_review_id(fingerprints, None)
+}
+
+fn write_envelope_with_review_id(
+    fingerprints: &[&str],
+    review_id: Option<&str>,
+) -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
+    let scope_marker = review_id
+        .map(|review_id| format!("\n<!-- fallow-review-id: {review_id} -->"))
+        .unwrap_or_default();
     let comments = fingerprints
         .iter()
-        .map(|fingerprint| serde_json::json!({ "fingerprint": fingerprint }))
+        .map(|fingerprint| {
+            serde_json::json!({
+                "fingerprint": fingerprint,
+                "body": format!("<!-- fallow-fingerprint: {fingerprint} -->{scope_marker}"),
+            })
+        })
         .collect::<Vec<_>>();
-    let envelope = serde_json::json!({ "comments": comments });
+    let mut envelope = serde_json::json!({
+        "body": format!("<!-- fallow-review -->{scope_marker}"),
+        "comments": comments,
+    });
+    if let Some(review_id) = review_id {
+        envelope["meta"] = serde_json::json!({ "review_id": review_id });
+    }
     std::fs::write(
         dir.path().join("review.json"),
         serde_json::to_vec(&envelope).expect("serialize envelope"),
     )
     .expect("write envelope");
     dir
+}
+
+fn write_raw_envelope(envelope: &serde_json::Value) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("review.json"),
+        serde_json::to_vec(envelope).expect("serialize envelope"),
+    )
+    .expect("write envelope");
+    dir
+}
+
+#[test]
+fn reconcile_rejects_scope_downgrade_and_cross_scope_before_provider_lookup() {
+    for comment_body in ["finding", "finding\n<!-- fallow-review-id: backend -->"] {
+        let envelope = write_raw_envelope(&serde_json::json!({
+            "body": "summary\n<!-- fallow-review-id: frontend -->",
+            "comments": [{"fingerprint":"same", "body":comment_body}],
+            "meta": {"review_id":"frontend"}
+        }));
+        let output = run_reconcile(
+            &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
+            "http://127.0.0.1:9",
+            &envelope,
+        );
+
+        assert_eq!(output.code, 2);
+        let rendered = format!("{}{}", output.stdout, output.stderr);
+        assert!(rendered.contains("comments[0].body scope"));
+        assert!(!rendered.contains("GitHub request failed"));
+    }
+}
+
+#[test]
+fn post_review_rejects_scope_downgrade_and_cross_scope_before_provider_lookup() {
+    for comment_body in ["finding", "finding\n<!-- fallow-review-id: backend -->"] {
+        let envelope = write_raw_envelope(&serde_json::json!({
+            "body": "summary\n<!-- fallow-review-id: frontend -->",
+            "comments": [{"fingerprint":"same", "body":comment_body}],
+            "meta": {"review_id":"frontend"}
+        }));
+        let output = Command::new(fallow_bin())
+            .args(["--format", "json", "--quiet", "ci", "post-review"])
+            .args(["--provider", "github", "--pr", "7", "--repo", "owner/repo"])
+            .args(["--api-url", "http://127.0.0.1:9"])
+            .arg("--envelope")
+            .arg(envelope.path().join("review.json"))
+            .env("GH_TOKEN", "test-token")
+            .output()
+            .expect("run fallow");
+
+        assert_eq!(output.status.code(), Some(2));
+        let rendered = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(rendered.contains("comments[0].body scope"));
+        assert!(!rendered.contains("GitHub request failed"));
+    }
+}
+
+#[test]
+fn github_provider_state_isolates_identical_fingerprints_and_reports_scoped_stale() {
+    let envelope = write_envelope_with_review_id(&["same"], Some("frontend"));
+    let (api_url, server) = serve(vec![
+        github_comments(
+            r#"[
+                {"id":1,"body":"<!-- fallow-fingerprint: same -->\n<!-- fallow-review-id: backend -->"},
+                {"id":2,"body":"<!-- fallow-fingerprint: same -->\n<!-- fallow-review-id: frontend -->"},
+                {"id":3,"body":"<!-- fallow-fingerprint: stale -->\n<!-- fallow-review-id: frontend -->"}
+            ]"#,
+        ),
+        github_threads_empty(),
+    ]);
+
+    let output = run_reconcile(
+        &[
+            "--provider",
+            "github",
+            "--pr",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--dry-run",
+        ],
+        &api_url,
+        &envelope,
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["existing_fingerprints"], 2);
+    assert_eq!(json["new_fingerprints"], 0);
+    assert_eq!(json["stale"], serde_json::json!(["stale"]));
+    assert_eq!(server.join().expect("server thread").len(), 2);
+}
+
+#[test]
+fn gitlab_provider_state_keeps_unscoped_review_separate_from_scoped_twin() {
+    let envelope = write_envelope(&["same"]);
+    let discussions = r#"[
+        {"id":"scoped","notes":[{"body":"<!-- fallow-fingerprint: same -->\n<!-- fallow-review-id: frontend -->"}]},
+        {"id":"unscoped","notes":[{"body":"<!-- fallow-fingerprint: same -->"}]},
+        {"id":"stale","notes":[{"body":"<!-- fallow-fingerprint: stale -->"}]}
+    ]"#;
+    let (api_url, server) = serve(vec![MockResponse {
+        method: "GET",
+        path_contains: "/projects/123/merge_requests/9/discussions?per_page=100&page=1",
+        status: 200,
+        body: discussions,
+    }]);
+
+    let output = run_reconcile(
+        &[
+            "--provider",
+            "gitlab",
+            "--mr",
+            "9",
+            "--project-id",
+            "123",
+            "--dry-run",
+        ],
+        &api_url,
+        &envelope,
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["existing_fingerprints"], 2);
+    assert_eq!(json["new_fingerprints"], 0);
+    assert_eq!(json["stale"], serde_json::json!(["stale"]));
+    assert_eq!(server.join().expect("server thread").len(), 1);
 }
 
 fn run_reconcile(

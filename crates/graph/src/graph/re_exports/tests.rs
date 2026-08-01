@@ -2611,6 +2611,7 @@ fn named_only_chain_safety_cap_excludes_synthetic_export_states() {
     let expected = re_export_info.len().saturating_add(
         initial_exports
             .saturating_mul(graph.modules.len())
+            .saturating_mul(2)
             .saturating_mul(re_export_info.len()),
     );
 

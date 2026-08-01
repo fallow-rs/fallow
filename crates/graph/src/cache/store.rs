@@ -12,7 +12,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::{CachedResolvedModule, GRAPH_CACHE_VERSION, GraphCacheManifest};
+use super::{CachedResolvedProject, GRAPH_CACHE_VERSION, GraphCacheManifest};
 use crate::graph::ModuleGraph;
 
 /// Filename of the persisted graph cache inside the cache directory.
@@ -29,10 +29,10 @@ pub struct GraphCacheStore {
     /// The previously-built graph. Its `namespace_imported` bitset is
     /// `#[serde(skip)]`, so the loader reconstructs it from the edge set.
     pub graph: ModuleGraph,
-    /// Resolver outputs aligned with the cached graph. Exact manifest hits use
-    /// these alongside the graph; stable-key resolver hits remap them and
-    /// rebuild the graph with current `FileId`s.
-    pub resolved_modules: Vec<CachedResolvedModule>,
+    /// Resolver output aligned with the cached graph. Exact manifest hits use
+    /// it alongside the graph; stable-key resolver hits remap it and rebuild
+    /// the graph with current `FileId`s.
+    pub resolved_project: CachedResolvedProject,
 }
 
 impl GraphCacheStore {

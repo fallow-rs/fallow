@@ -80,7 +80,7 @@ fn record_graph_package_usage(
 
 fn workspace_package_name<'a>(
     source: &str,
-    workspace_names: &'a FxHashSet<&str>,
+    workspace_names: &FxHashSet<&'a str>,
 ) -> Option<&'a str> {
     if !resolve::is_bare_specifier(source) {
         return None;
@@ -101,9 +101,12 @@ fn credit_workspace_package_usage(
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     for module in resolved {
         for import in module.all_resolved_imports() {
-            if matches!(import.target, resolve::ResolveResult::InternalModule(_))
-                && let Some(package_name) =
-                    workspace_package_name(&import.info.source, &workspace_names)
+            if matches!(
+                import.target,
+                resolve::ResolveResult::InternalModule(_)
+                    | resolve::ResolveResult::CommonJsInternalModule(_)
+            ) && let Some(package_name) =
+                workspace_package_name(&import.info.source, &workspace_names)
             {
                 record_graph_package_usage(
                     graph,
@@ -606,30 +609,29 @@ impl<'a> AnalysisSession<'a> {
         };
 
         let entry_points = discover_analysis_entry_points(&shared);
-        let (resolved, graph) = if let Some(hit) =
-            try_load_analysis_graph_cache(&shared, &entry_points, &modules)
-        {
-            (
-                TimedResolvedModules {
-                    resolved: hit.resolved,
-                    elapsed_ms: 0.0,
-                },
-                TimedGraph {
-                    graph: hit.graph,
-                    elapsed_ms: hit.elapsed_ms,
-                },
-            )
-        } else {
-            let resolved = resolve_analysis_imports_timed(&shared, &modules);
-            let graph =
-                build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, &modules);
-            (resolved, graph)
-        };
+        let (resolved, graph) =
+            if let Some(hit) = try_load_analysis_graph_cache(&shared, &entry_points, &modules) {
+                (
+                    TimedResolvedModules {
+                        project: hit.project,
+                        elapsed_ms: 0.0,
+                    },
+                    TimedGraph {
+                        graph: hit.graph,
+                        elapsed_ms: hit.elapsed_ms,
+                    },
+                )
+            } else {
+                let resolved = resolve_analysis_imports_timed(&shared, &modules);
+                let graph =
+                    build_analysis_graph_timed(&shared, &resolved.project, &entry_points, &modules);
+                (resolved, graph)
+            };
         release_resolution_payloads(&mut modules);
         let analysis = analyze_dead_code_timed(
             &shared,
             &graph.graph,
-            &resolved.resolved,
+            &resolved.project.modules,
             &modules,
             collect_usages,
             entry_points.summary,
@@ -826,7 +828,7 @@ impl DeadCodeEntryPoints {
 /// Import-resolution result for an engine-owned dead-code pipeline.
 #[doc(hidden)]
 pub struct DeadCodeResolvedModules {
-    pub resolved: Vec<resolve::ResolvedModule>,
+    pub project: resolve::ResolvedProject,
     pub elapsed_ms: f64,
 }
 
@@ -900,7 +902,7 @@ pub fn try_load_dead_code_graph_cache(
     try_load_analysis_graph_cache(&shared, &entry_points.inner, modules).map(|hit| {
         (
             DeadCodeResolvedModules {
-                resolved: hit.resolved,
+                project: hit.project,
                 elapsed_ms: 0.0,
             },
             DeadCodeGraphRun {
@@ -920,7 +922,7 @@ pub fn resolve_dead_code_imports(
     let shared = prelude.shared_input();
     let resolved = resolve_analysis_imports_timed(&shared, modules);
     DeadCodeResolvedModules {
-        resolved: resolved.resolved,
+        project: resolved.project,
         elapsed_ms: resolved.elapsed_ms,
     }
 }
@@ -929,12 +931,12 @@ pub fn resolve_dead_code_imports(
 #[must_use]
 pub fn build_dead_code_graph(
     prelude: &DeadCodeBackendPrelude<'_>,
-    resolved: &[resolve::ResolvedModule],
+    project: &resolve::ResolvedProject,
     entry_points: &DeadCodeEntryPoints,
     modules: &[extract::ModuleInfo],
 ) -> DeadCodeGraphRun {
     let shared = prelude.shared_input();
-    let graph = build_analysis_graph_timed(&shared, resolved, &entry_points.inner, modules);
+    let graph = build_analysis_graph_timed(&shared, project, &entry_points.inner, modules);
     DeadCodeGraphRun {
         graph: graph.graph,
         elapsed_ms: graph.elapsed_ms,
@@ -1044,7 +1046,7 @@ struct TimedEntryPoints {
 }
 
 struct TimedResolvedModules {
-    resolved: Vec<resolve::ResolvedModule>,
+    project: resolve::ResolvedProject,
     elapsed_ms: f64,
 }
 
@@ -1055,7 +1057,7 @@ struct TimedGraph {
 
 struct GraphCacheHit {
     graph: graph::ModuleGraph,
-    resolved: Vec<resolve::ResolvedModule>,
+    project: resolve::ResolvedProject,
     elapsed_ms: f64,
 }
 
@@ -1115,17 +1117,17 @@ fn try_load_analysis_graph_cache(
     );
     let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir)?;
     if store.manifest.matches_inputs(&current) {
-        let resolved = graph_cache::restore_resolved_modules(
+        let project = graph_cache::restore_resolved_project(
             &input.config.root,
             modules,
             input.files,
-            &store.resolved_modules,
+            &store.resolved_project,
         )?;
         tracing::debug!("Graph cache hit: skipping import resolution and graph build");
 
         return Some(GraphCacheHit {
             graph: store.graph,
-            resolved,
+            project,
             elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
         });
     }
@@ -1134,18 +1136,18 @@ fn try_load_analysis_graph_cache(
         return None;
     }
 
-    let resolved = graph_cache::restore_resolved_modules(
+    let project = graph_cache::restore_resolved_project(
         &input.config.root,
         modules,
         input.files,
-        &store.resolved_modules,
+        &store.resolved_project,
     )?;
     tracing::debug!("Graph resolver cache hit: skipping import resolution and rebuilding graph");
-    let graph = build_analysis_graph_timed(input, &resolved, entry_points, modules);
+    let graph = build_analysis_graph_timed(input, &project, entry_points, modules);
 
     Some(GraphCacheHit {
         graph: graph.graph,
-        resolved,
+        project,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
     })
 }
@@ -1156,7 +1158,7 @@ fn resolve_analysis_imports_timed(
 ) -> TimedResolvedModules {
     let t = Instant::now();
     input.progress.set_stage("resolving imports...");
-    let resolved = resolve_analysis_imports(
+    let project = resolve_analysis_imports(
         modules,
         input.files,
         input.workspaces,
@@ -1164,14 +1166,14 @@ fn resolve_analysis_imports_timed(
         input.config,
     );
     TimedResolvedModules {
-        resolved,
+        project,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
     }
 }
 
 fn build_analysis_graph_timed(
     input: &AnalysisCoreSharedInput<'_>,
-    resolved: &[resolve::ResolvedModule],
+    project: &resolve::ResolvedProject,
     entry_points: &TimedEntryPoints,
     modules: &[extract::ModuleInfo],
 ) -> TimedGraph {
@@ -1180,7 +1182,7 @@ fn build_analysis_graph_timed(
     let graph = build_analysis_graph(&BuildAnalysisGraphInput {
         config: input.config,
         plugin_result: input.plugin_result,
-        resolved,
+        project,
         entry_points: &entry_points.entry_points,
         files: input.files,
         modules,
@@ -1470,8 +1472,8 @@ fn resolve_analysis_imports(
     workspaces: &[fallow_config::WorkspaceInfo],
     plugin_result: &plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
-) -> Vec<resolve::ResolvedModule> {
-    let mut resolved = resolve::resolve_all_imports(&resolve::ResolveAllImportsInput {
+) -> resolve::ResolvedProject {
+    let mut project = resolve::resolve_all_imports(&resolve::ResolveAllImportsInput {
         modules,
         files,
         workspaces,
@@ -1484,18 +1486,18 @@ fn resolve_analysis_imports(
         extra_conditions: &config.resolve.conditions,
     });
     external_style_usage::augment_external_style_package_usage(
-        &mut resolved,
+        &mut project.modules,
         config,
         workspaces,
         plugin_result,
     );
-    resolved
+    project
 }
 
 struct BuildAnalysisGraphInput<'a> {
     config: &'a ResolvedConfig,
     plugin_result: &'a plugins::AggregatedPluginResult,
-    resolved: &'a [resolve::ResolvedModule],
+    project: &'a resolve::ResolvedProject,
     entry_points: &'a discover::CategorizedEntryPoints,
     files: &'a [discover::DiscoveredFile],
     modules: &'a [extract::ModuleInfo],
@@ -1520,19 +1522,20 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
         )
     });
 
-    let mut graph = graph::ModuleGraph::build_with_reachability_roots(
-        input.resolved,
+    let mut graph = graph::ModuleGraph::build_with_reachability_roots_and_replacements(
+        &input.project.modules,
+        &input.project.replaced_module_targets,
         &input.entry_points.all,
         &input.entry_points.runtime,
         &input.entry_points.test,
         input.files,
     );
     credit_package_path_references(&mut graph, input.modules);
-    credit_workspace_package_usage(&mut graph, input.resolved, input.workspaces);
+    credit_workspace_package_usage(&mut graph, &input.project.modules, input.workspaces);
 
     if let Some(manifest) = current_manifest {
-        let Some(resolved_modules) =
-            graph_cache::cache_resolved_modules(&input.config.root, input.files, input.resolved)
+        let Some(resolved_project) =
+            graph_cache::cache_resolved_project(&input.config.root, input.files, input.project)
         else {
             return graph;
         };
@@ -1540,7 +1543,7 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
             version: graph_cache::GRAPH_CACHE_VERSION,
             manifest,
             graph,
-            resolved_modules,
+            resolved_project,
         };
         store.save(&input.config.cache_dir);
         // `save` borrows the store, so the freshly built graph is moved back out
@@ -2576,9 +2579,9 @@ fn num_cpus() -> usize {
 mod tests {
     use super::{
         AnalysisSession, bucket_files_by_workspace, bucket_files_by_workspace_roots,
-        collect_config_search_roots, default_config, format_undeclared_workspace_warning,
-        parse_analysis_modules, plugin_config_hash, resolver_options_hash,
-        warn_undeclared_workspaces,
+        collect_config_search_roots, credit_workspace_package_usage, default_config,
+        format_undeclared_workspace_warning, parse_analysis_modules, plugin_config_hash,
+        resolver_options_hash, warn_undeclared_workspaces,
     };
     use std::path::{Path, PathBuf};
     use std::time::Instant;
@@ -2587,6 +2590,7 @@ mod tests {
         AutoImportKind, AutoImportRule, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
     };
     use fallow_types::discover::{DiscoveredFile, FileId};
+    use fallow_types::extract::{ImportInfo, ImportedName};
 
     fn plugin_result() -> crate::plugins::AggregatedPluginResult {
         let mut result = crate::plugins::AggregatedPluginResult::default();
@@ -2595,6 +2599,39 @@ mod tests {
             .path_aliases
             .push(("@/".to_string(), "src/".to_string()));
         result
+    }
+
+    #[test]
+    fn commonjs_internal_import_credits_workspace_package_usage() {
+        let workspace = fallow_config::WorkspaceInfo {
+            root: PathBuf::from("/repo/packages/shared"),
+            name: "@repo/shared".to_string(),
+            is_internal_dependency: true,
+        };
+        let resolved = vec![crate::resolve::ResolvedModule {
+            file_id: FileId(0),
+            resolved_imports: vec![crate::resolve::ResolvedImport {
+                info: ImportInfo {
+                    source: "@repo/shared".to_string(),
+                    imported_name: ImportedName::Namespace,
+                    local_name: "shared".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 20),
+                    source_span: oxc_span::Span::new(8, 20),
+                },
+                target: crate::resolve::ResolveResult::CommonJsInternalModule(FileId(1)),
+            }],
+            ..crate::resolve::ResolvedModule::default()
+        }];
+        let mut graph = crate::graph::ModuleGraph::build(&[], &[], &[]);
+
+        credit_workspace_package_usage(&mut graph, &resolved, &[workspace]);
+
+        assert_eq!(
+            graph.package_usage.get("@repo/shared"),
+            Some(&vec![FileId(0)])
+        );
     }
 
     #[test]

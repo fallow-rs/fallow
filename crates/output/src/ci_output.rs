@@ -7,8 +7,8 @@ use crate::{
     CodeClimateIssue, CodeClimateSeverity, DiffIndex, GitHubReviewComment, GitHubReviewSide,
     GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType, ReviewCheckConclusion,
     ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
-    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, default_marker_regex,
-    default_marker_regex_flags,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewId, ReviewProvider, default_marker_regex,
+    default_marker_regex_flags, review_id_marker,
 };
 use serde_json::Value;
 
@@ -364,29 +364,48 @@ pub fn escape_md(value: &str) -> String {
 /// Render a provider-specific review envelope from typed CI issues.
 #[must_use]
 pub fn render_review_envelope(input: &ReviewEnvelopeRenderInput<'_>) -> ReviewEnvelopeRenderResult {
+    render_review_envelope_with_id(input, None)
+}
+
+/// Render a review envelope whose bodies carry the supplied review scope.
+#[must_use]
+pub fn render_scoped_review_envelope(
+    input: &ReviewEnvelopeRenderInput<'_>,
+    review_id: &ReviewId,
+) -> ReviewEnvelopeRenderResult {
+    render_review_envelope_with_id(input, Some(review_id))
+}
+
+fn render_review_envelope_with_id(
+    input: &ReviewEnvelopeRenderInput<'_>,
+    review_id: Option<&ReviewId>,
+) -> ReviewEnvelopeRenderResult {
     let grouped = group_review_issues_by_path_line(input.issues, input.max_comments);
 
     let comments: Vec<ReviewComment> = grouped
         .groups
         .iter()
         .map(|group| {
-            render_review_comment_for_group(&ReviewCommentRenderInput {
-                provider: input.provider,
-                group,
-                gitlab_diff_refs: input.gitlab_diff_refs,
-                diff_index: input.diff_index,
-                path_prefix: input.path_prefix,
-                include_guidance: input.include_guidance,
-                suggestion_block: input.suggestion_block,
-                guidance_block: input.guidance_block,
-            })
+            render_review_comment_for_group_with_id(
+                &ReviewCommentRenderInput {
+                    provider: input.provider,
+                    group,
+                    gitlab_diff_refs: input.gitlab_diff_refs,
+                    diff_index: input.diff_index,
+                    path_prefix: input.path_prefix,
+                    include_guidance: input.include_guidance,
+                    suggestion_block: input.suggestion_block,
+                    guidance_block: input.guidance_block,
+                },
+                review_id,
+            )
         })
         .collect();
 
     let summary_text =
         review_summary_text(input.command, input.provider, comments.len(), input.issues);
     let summary_fp = summary_fingerprint(&summary_text);
-    let summary_marker = format!("\n\n{MARKER_PREFIX_V2}{summary_fp}{MARKER_SUFFIX_V2}");
+    let summary_marker = review_markers(&summary_fp, review_id);
     let body = format!("{summary_text}{summary_marker}");
     let summary = ReviewEnvelopeSummary {
         body: body.clone(),
@@ -504,6 +523,13 @@ pub struct ReviewCommentRenderInput<'a, 'group> {
 /// Render one comment from a group of issues sharing the same `(path, line)`.
 #[must_use]
 pub fn render_review_comment_for_group(input: &ReviewCommentRenderInput<'_, '_>) -> ReviewComment {
+    render_review_comment_for_group_with_id(input, None)
+}
+
+fn render_review_comment_for_group_with_id(
+    input: &ReviewCommentRenderInput<'_, '_>,
+    review_id: Option<&ReviewId>,
+) -> ReviewComment {
     assert!(
         !input.group.is_empty(),
         "group_review_issues_by_path_line never yields empty"
@@ -517,7 +543,7 @@ pub fn render_review_comment_for_group(input: &ReviewCommentRenderInput<'_, '_>)
     };
 
     let content = build_merged_comment_content(input);
-    let marker_line = format!("\n\n{MARKER_PREFIX_V2}{fingerprint}{MARKER_SUFFIX_V2}");
+    let marker_line = review_markers(&fingerprint, review_id);
     let (body, truncated) = cap_body_with_marker(&content, &marker_line);
 
     build_review_comment(ReviewCommentInput {
@@ -696,6 +722,14 @@ fn build_review_envelope_output(
                 check_conclusion: None,
             },
         },
+    }
+}
+
+fn review_markers(fingerprint: &str, review_id: Option<&ReviewId>) -> String {
+    let fingerprint = format!("\n\n{MARKER_PREFIX_V2}{fingerprint}{MARKER_SUFFIX_V2}");
+    match review_id {
+        Some(review_id) => format!("{fingerprint}\n{}", review_id_marker(review_id)),
+        None => fingerprint,
     }
 }
 

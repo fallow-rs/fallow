@@ -1,4 +1,31 @@
 use crate::tests::parse_ts as parse_source;
+use crate::{ModuleInfo, ModuleLoadMechanism, SemanticFact, VitestModuleMockAction};
+
+fn replaced_module_targets(info: &ModuleInfo) -> Vec<&str> {
+    info.semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::VitestModuleMockOperation(operation)
+                if operation.action.replaces_original() =>
+            {
+                Some(operation.source.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn vitest_mock_actions(info: &ModuleInfo) -> Vec<(&str, VitestModuleMockAction)> {
+    info.semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::VitestModuleMockOperation(operation) => {
+                Some((operation.source.as_str(), operation.action))
+            }
+            _ => None,
+        })
+        .collect()
+}
 
 #[test]
 fn extracts_template_literal_dynamic_import_pattern() {
@@ -9,6 +36,10 @@ fn extracts_template_literal_dynamic_import_pattern() {
         info.dynamic_import_patterns[0].suffix,
         Some(".json".to_string())
     );
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::EsModule
+    );
 }
 
 #[test]
@@ -17,6 +48,10 @@ fn extracts_concat_dynamic_import_pattern() {
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./pages/");
     assert!(info.dynamic_import_patterns[0].suffix.is_none());
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::EsModule
+    );
 }
 
 #[test]
@@ -67,6 +102,10 @@ fn extracts_import_meta_glob_pattern() {
     let info = parse_source("const mods = import.meta.glob('./components/*.tsx');");
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./components/*.tsx");
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::EsModule
+    );
 }
 
 #[test]
@@ -75,6 +114,11 @@ fn extracts_import_meta_glob_array() {
     assert_eq!(info.dynamic_import_patterns.len(), 2);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./pages/*.ts");
     assert_eq!(info.dynamic_import_patterns[1].prefix, "./layouts/*.ts");
+    assert!(
+        info.dynamic_import_patterns
+            .iter()
+            .all(|pattern| pattern.mechanism == ModuleLoadMechanism::EsModule)
+    );
 }
 
 #[test]
@@ -82,6 +126,10 @@ fn extracts_require_context_pattern() {
     let info = parse_source("const ctx = require.context('./icons', false);");
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./icons/");
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::CommonJsRequire
+    );
 }
 
 #[test]
@@ -89,6 +137,10 @@ fn extracts_require_context_recursive() {
     let info = parse_source("const ctx = require.context('./icons', true);");
     assert_eq!(info.dynamic_import_patterns.len(), 1);
     assert_eq!(info.dynamic_import_patterns[0].prefix, "./icons/**/");
+    assert_eq!(
+        info.dynamic_import_patterns[0].mechanism,
+        ModuleLoadMechanism::CommonJsRequire
+    );
 }
 
 #[test]
@@ -228,6 +280,159 @@ fn vitest_mock_with_options_object_still_synthesizes_auto_mock() {
         .find(|imp| imp.source == "./services/__mocks__/api")
         .expect("auto-mock import should be recorded");
     assert_eq!(auto_mock.local_name, Some(String::new()));
+}
+
+#[test]
+fn vitest_replacement_factory_records_typed_target() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock("./services/api", () => ({ request: vi.fn() }));
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+    assert_eq!(
+        info.dynamic_imports
+            .iter()
+            .map(|import| import.source.as_str())
+            .collect::<Vec<_>>(),
+        vec!["./services/api"],
+        "the ordinary dependency edge remains intact"
+    );
+}
+
+#[test]
+fn vitest_replacement_import_provenance_is_order_independent() {
+    let info = parse_source(
+        r#"
+        vi.mock("./services/api", () => ({ request: vi.fn() }));
+        import { vi } from "vitest";
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+}
+
+#[test]
+fn vitest_replacement_shadowed_bindings_abstain() {
+    for source in [
+        r#"
+        import { vi } from "vitest";
+        function register(vi: { mock: Function }) {
+          vi.mock("./parameter", () => ({}));
+        }
+        "#,
+        r#"
+        import { vi } from "vitest";
+        {
+          const vi = localMockApi;
+          vi.mock("./block", () => ({}));
+        }
+        "#,
+        r#"
+        import { vi } from "vitest";
+        function register() {
+          const vi = localMockApi;
+          vi.mock("./local", () => ({}));
+        }
+        "#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            replaced_module_targets(&info).is_empty(),
+            "a shadowed vi binding must not emit a Vitest replacement: {source}"
+        );
+    }
+}
+
+#[test]
+fn vitest_function_replacement_supports_import_expression_target() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock(import("./services/api"), function () {
+          return { request: vi.fn() };
+        });
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+}
+
+#[test]
+fn vitest_non_replacement_forms_abstain() {
+    for source in [
+        r#"import { vi } from "vitest"; vi.mock("./auto");"#,
+        r#"import { vi } from "vitest"; vi.mock("./spy", { spy: true });"#,
+        r#"import { vi } from "vitest"; vi.mock("./partial", (importOriginal) => importOriginal());"#,
+        r#"import { vi } from "vitest"; vi.mock("./actual", async () => vi.importActual("./actual"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./computed", async () => vi["importActual"]("./computed"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./alias", async () => { const loadActual = vi.importActual; return loadActual("./alias"); });"#,
+        r#"import { vi } from "vitest"; vi.mock("./destructured", async () => { const { importActual: loadActual } = vi; return loadActual("./destructured"); });"#,
+        r#"import { vi } from "vitest"; vi.mock("./call", async () => vi.importActual.call(vi, "./call"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./reflect", async () => Reflect.apply(vi.importActual, vi, ["./reflect"]));"#,
+        r#"import { vi } from "vitest"; vi.mock("./arguments", function () { return arguments[0](); });"#,
+        r#"import { vi } from "vitest"; const loadOriginal = () => vi.importActual("./helper"); vi.mock("./helper", async () => loadOriginal());"#,
+        r#"import { vi } from "vitest"; import { loadOriginal } from "./loader"; vi.mock("./external-helper", async () => loadOriginal());"#,
+        r#"import { vi } from "vitest"; const actual = await vi.importActual("./preloaded"); vi.mock("./preloaded", () => actual);"#,
+        r#"import { vi } from "vitest"; vi.mock("./dynamic", async () => import("./dynamic"));"#,
+        r#"import { vi } from "vitest"; vi.mock("./constructed", () => new Replacement());"#,
+        r#"import { vi } from "vitest"; const localVi = vi; vi.mock("./local-vi", () => ({ request: localVi.fn() }));"#,
+        r#"const vi = localMockApi; vi.mock("./local", () => ({}));"#,
+        r#"vi.mock("./global", () => ({}));"#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            replaced_module_targets(&info).is_empty(),
+            "ambiguous or original-loading form should abstain: {source}"
+        );
+    }
+}
+
+#[test]
+fn vitest_mock_operations_preserve_typed_source_order() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock("./dep", () => ({ request: vi.fn() }));
+        vi.unmock("./dep.ts");
+        vi.mock("./dep", importOriginal => importOriginal());
+        "#,
+    );
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![
+            (
+                "./dep",
+                VitestModuleMockAction::Mock {
+                    factory_replaces_original: true,
+                },
+            ),
+            ("./dep.ts", VitestModuleMockAction::Unmock),
+            (
+                "./dep",
+                VitestModuleMockAction::Mock {
+                    factory_replaces_original: false,
+                },
+            ),
+        ]
+    );
+}
+
+#[test]
+fn shadowed_vitest_operations_do_not_change_imported_vi_state() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock("./dep", () => ({}));
+        function configure(vi) {
+          vi.unmock("./dep");
+        }
+        "#,
+    );
+
+    assert_eq!(replaced_module_targets(&info), vec!["./dep"]);
 }
 
 #[test]

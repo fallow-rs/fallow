@@ -913,6 +913,86 @@ fn health_angular_template_crap_inherits_from_component_ts() {
 }
 
 #[test]
+fn health_angular_template_inheritance_respects_mocked_component() {
+    let dir = tempdir().unwrap();
+    let fixture = fixture_path("angular-template-complexity");
+    copy_dir_recursive(&fixture, dir.path());
+
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{
+            "name": "mocked-angular-template-inheritance",
+            "main": "src/main.ts",
+            "dependencies": {
+                "@angular/core": "^19.0.0",
+                "@angular/platform-browser": "^19.0.0"
+            },
+            "devDependencies": {
+                "vitest": "^3.2.4"
+            }
+        }"#,
+    );
+    write_file(
+        &dir.path().join("src/permissions-wrapper.ts"),
+        "import { PermissionsComponent } from './permissions.component';\n\
+         export const permissionsType = (): unknown => PermissionsComponent;\n",
+    );
+    write_file(
+        &dir.path().join("src/permissions-wrapper.test.ts"),
+        "import { expect, it, vi } from 'vitest';\n\
+         import { permissionsType } from './permissions-wrapper';\n\
+         vi.mock('./permissions.component', () => ({ PermissionsComponent: class {} }));\n\
+         it('uses the replacement', () => {\n  \
+           expect(permissionsType()).toBeDefined();\n\
+         });\n",
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "30",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let template = findings
+        .iter()
+        .find(|finding| {
+            finding["name"] == "<template>"
+                && finding["path"]
+                    .as_str()
+                    .is_some_and(|path| path.ends_with("permissions.component.html"))
+        })
+        .unwrap_or_else(|| panic!("expected <template> finding, got: {findings:#?}"));
+
+    assert_eq!(
+        template["coverage_source"], "estimated_component_inherited",
+        "the template should retain its component-owned coverage contract: {template:#?}"
+    );
+    assert_eq!(
+        template["coverage_tier"], "none",
+        "a test root that replaces the owning component must not cover its template: {template:#?}"
+    );
+    assert!(
+        template["inherited_from"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("permissions.component.ts")),
+        "template coverage provenance must still identify the owning component: {template:#?}"
+    );
+}
+
+#[test]
 fn health_angular_template_inherit_rejects_non_component_owner() {
     let dir = tempdir().unwrap();
     write_file(
@@ -2109,6 +2189,307 @@ fn health_coverage_gaps_flag_reports_runtime_gaps() {
     assert!(
         !export_names.contains(&"indirectlyCovered"),
         "exports already reported as dead code should be excluded from coverage gaps: {export_names:?}"
+    );
+}
+
+#[test]
+fn health_coverage_gaps_exclude_vitest_replacement_targets() {
+    let output = run_fallow(
+        "health",
+        "issue-2031-mocked-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let coverage = json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    let summary = coverage["summary"]
+        .as_object()
+        .expect("coverage_gaps.summary should be an object");
+    assert_eq!(summary["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        summary["covered_files"].as_u64(),
+        Some(1),
+        "only the real wrapper executes through the test root"
+    );
+
+    let file_names: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert!(
+        file_names
+            .iter()
+            .any(|path| path.ends_with("src/dependency.ts")),
+        "the replaced dependency should remain an untested runtime file: {file_names:?}"
+    );
+    assert!(
+        !file_names
+            .iter()
+            .any(|path| path.ends_with("src/wrapper.ts")),
+        "the wrapper itself should remain test-covered: {file_names:?}"
+    );
+
+    let export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item["export_name"].as_str())
+        .collect();
+    assert!(
+        export_names.contains(&"renderDependency"),
+        "the replacement must not cover the real dependency export: {export_names:?}"
+    );
+    assert!(
+        !export_names.contains(&"renderWrapper"),
+        "the directly tested wrapper export should remain covered: {export_names:?}"
+    );
+}
+
+#[test]
+fn health_crap_estimation_excludes_vitest_replacement_targets() {
+    let output = run_fallow(
+        "health",
+        "issue-2031-mocked-test-reachability",
+        &[
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "the low CRAP threshold should surface findings: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let crap_for = |path: &str, name: &str| {
+        findings
+            .iter()
+            .find(|finding| {
+                finding["name"] == name
+                    && finding["path"]
+                        .as_str()
+                        .is_some_and(|candidate| candidate.replace('\\', "/") == path)
+            })
+            .unwrap_or_else(|| panic!("expected {path}:{name} finding, got: {findings:#?}"))
+    };
+    let dependency = crap_for("src/dependency.ts", "renderDependency");
+    let wrapper = crap_for("src/wrapper.ts", "renderWrapper");
+
+    assert_eq!(dependency["coverage_source"], "estimated");
+    assert_eq!(
+        dependency["crap"].as_f64(),
+        Some(2.0),
+        "the replacement must not lower the real dependency's estimated CRAP: {dependency:#?}"
+    );
+    assert_eq!(wrapper["coverage_source"], "estimated");
+    assert_eq!(
+        wrapper["crap"].as_f64(),
+        Some(1.0),
+        "the directly exercised wrapper should retain covered CRAP: {wrapper:#?}"
+    );
+}
+
+#[test]
+fn health_vitest_unmock_restores_coverage_and_crap_credit() {
+    let coverage_output = run_fallow(
+        "health",
+        "issue-2031-unmocked-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        coverage_output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        coverage_output.stderr
+    );
+
+    let coverage_json = parse_json(&coverage_output);
+    let coverage = coverage_json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    assert_eq!(coverage["summary"]["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        coverage["summary"]["covered_files"].as_u64(),
+        Some(2),
+        "the final equivalent-specifier unmock should restore the real dependency path"
+    );
+    let uncovered_files: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert_eq!(
+        uncovered_files,
+        vec!["src/entry.ts"],
+        "only the runtime-only entry should remain uncovered"
+    );
+
+    let crap_output = run_fallow(
+        "health",
+        "issue-2031-unmocked-test-reachability",
+        &[
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        crap_output.code, 1,
+        "the low CRAP threshold should surface covered findings: {}",
+        crap_output.stderr
+    );
+    let crap_json = parse_json(&crap_output);
+    let findings = crap_json["findings"].as_array().expect("findings array");
+    for (path, name) in [
+        ("src/dependency.ts", "renderDependency"),
+        ("src/wrapper.ts", "renderWrapper"),
+    ] {
+        let finding = findings
+            .iter()
+            .find(|finding| {
+                finding["name"] == name
+                    && finding["path"]
+                        .as_str()
+                        .is_some_and(|candidate| candidate.replace('\\', "/") == path)
+            })
+            .unwrap_or_else(|| panic!("expected {path}:{name} finding, got: {findings:#?}"));
+        assert_eq!(finding["coverage_source"], "estimated");
+        assert_eq!(
+            finding["crap"].as_f64(),
+            Some(1.0),
+            "the final equivalent-specifier unmock should retain covered CRAP: {finding:#?}"
+        );
+    }
+}
+
+#[test]
+fn health_coverage_gaps_keep_targets_reached_by_an_unmasked_test_root() {
+    let output = run_fallow(
+        "health",
+        "issue-2031-mixed-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let coverage = json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    let summary = coverage["summary"]
+        .as_object()
+        .expect("coverage_gaps.summary should be an object");
+    assert_eq!(summary["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        summary["covered_files"].as_u64(),
+        Some(2),
+        "the wrapper and the independently tested dependency should be covered"
+    );
+
+    let file_names: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert!(
+        !file_names
+            .iter()
+            .any(|path| path.ends_with("src/dependency.ts")),
+        "an unmasked root should cover the real dependency: {file_names:?}"
+    );
+
+    let export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item["export_name"].as_str())
+        .collect();
+    assert!(
+        !export_names.contains(&"renderDependency"),
+        "an unmasked reference should cover the dependency export: {export_names:?}"
+    );
+}
+
+#[test]
+fn health_crap_estimation_accepts_an_unmasked_test_root() {
+    let output = run_fallow(
+        "health",
+        "issue-2031-mixed-test-reachability",
+        &[
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "the low CRAP threshold should surface findings: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let dependency = findings
+        .iter()
+        .find(|finding| {
+            finding["name"] == "renderDependency"
+                && finding["path"]
+                    .as_str()
+                    .is_some_and(|path| path.replace('\\', "/") == "src/dependency.ts")
+        })
+        .unwrap_or_else(|| panic!("expected dependency CRAP finding, got: {findings:#?}"));
+
+    assert_eq!(dependency["coverage_source"], "estimated");
+    assert_eq!(
+        dependency["crap"].as_f64(),
+        Some(1.0),
+        "an independent unmasked test root should restore covered CRAP: {dependency:#?}"
     );
 }
 

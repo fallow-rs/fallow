@@ -94,6 +94,7 @@ variables:
   FALLOW_COMMENT: "false"       # Post results as MR summary comment
   FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions
   FALLOW_REVIEW_GUIDANCE: "false" # Add collapsed "What to do" guidance to inline review discussions
+  FALLOW_REVIEW_ID: ""       # Stable scope for parallel review jobs targeting the same MR
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
   FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments + items in the sticky details table
   FALLOW_COMMENT_ID: ""         # Sticky-comment marker id; auto-suffixed with the workspace name when scoped to one workspace and unset

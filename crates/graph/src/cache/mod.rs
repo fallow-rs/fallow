@@ -12,7 +12,10 @@ use fallow_types::extract::{ImportInfo, ReExportInfo};
 use fallow_types::source_fingerprint::SourceFingerprint;
 use oxc_span::Span;
 
-use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+use crate::resolve::{
+    ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
+    ResolvedReplacedModuleTarget,
+};
 
 mod store;
 
@@ -31,7 +34,14 @@ pub use store::GraphCacheStore;
 /// classification change replays the old classification verbatim on an
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
-pub const GRAPH_CACHE_VERSION: u32 = 6;
+///
+/// Bumped to 17 for issue #2031: cached resolver output retains canonical
+/// test-root replacements and ESM/CommonJS mechanisms, while profiled graphs
+/// retain target-sparse reachability masks plus exact compact reference routes.
+/// Ordinary graphs omit unused provenance. Versions 7 through 16 were used by
+/// published development commits for this change, so the final version remains
+/// 17 rather than reusing a potentially stale intermediate cache version.
+pub const GRAPH_CACHE_VERSION: u32 = 17;
 
 /// Cached form of a resolved target.
 ///
@@ -44,6 +54,8 @@ pub const GRAPH_CACHE_VERSION: u32 = 6;
 pub enum CachedResolveResult {
     /// Resolved to a file within the project.
     InternalModule(StableFileKey),
+    /// Resolved from CommonJS to a file within the project.
+    CommonJsInternalModule(StableFileKey),
     /// Resolved to a project file through a framework convention auto-import.
     SyntheticAutoImport(StableFileKey),
     /// Resolved to a workspace or self package source file.
@@ -53,10 +65,19 @@ pub enum CachedResolveResult {
         /// Package name that was used in the import specifier.
         package_name: String,
     },
+    /// Resolved from CommonJS to workspace or self-package source.
+    CommonJsInternalPackageModule {
+        /// Stable source file reached by the package map.
+        key: StableFileKey,
+        /// Package name used in the require specifier.
+        package_name: String,
+    },
     /// Resolved to a file outside the project.
     ExternalFile(PathBuf),
     /// Bare specifier.
     NpmPackage(String),
+    /// Bare specifier referenced through CommonJS `require()`.
+    CommonJsNpmPackage(String),
     /// Could not resolve.
     Unresolvable(String),
 }
@@ -70,6 +91,9 @@ impl CachedResolveResult {
             ResolveResult::InternalModule(file_id) => {
                 Self::InternalModule(key_by_file_id.get(file_id)?.clone())
             }
+            ResolveResult::CommonJsInternalModule(file_id) => {
+                Self::CommonJsInternalModule(key_by_file_id.get(file_id)?.clone())
+            }
             ResolveResult::SyntheticAutoImport(file_id) => {
                 Self::SyntheticAutoImport(key_by_file_id.get(file_id)?.clone())
             }
@@ -80,8 +104,18 @@ impl CachedResolveResult {
                 key: key_by_file_id.get(file_id)?.clone(),
                 package_name: package_name.clone(),
             },
+            ResolveResult::CommonJsInternalPackageModule {
+                file_id,
+                package_name,
+            } => Self::CommonJsInternalPackageModule {
+                key: key_by_file_id.get(file_id)?.clone(),
+                package_name: package_name.clone(),
+            },
             ResolveResult::ExternalFile(path) => Self::ExternalFile(path.clone()),
             ResolveResult::NpmPackage(package_name) => Self::NpmPackage(package_name.clone()),
+            ResolveResult::CommonJsNpmPackage(package_name) => {
+                Self::CommonJsNpmPackage(package_name.clone())
+            }
             ResolveResult::Unresolvable(specifier) => Self::Unresolvable(specifier.clone()),
         })
     }
@@ -92,6 +126,9 @@ impl CachedResolveResult {
     ) -> Option<ResolveResult> {
         Some(match self {
             Self::InternalModule(key) => ResolveResult::InternalModule(*id_by_key.get(&key)?),
+            Self::CommonJsInternalModule(key) => {
+                ResolveResult::CommonJsInternalModule(*id_by_key.get(&key)?)
+            }
             Self::SyntheticAutoImport(key) => {
                 ResolveResult::SyntheticAutoImport(*id_by_key.get(&key)?)
             }
@@ -101,8 +138,17 @@ impl CachedResolveResult {
                     package_name,
                 }
             }
+            Self::CommonJsInternalPackageModule { key, package_name } => {
+                ResolveResult::CommonJsInternalPackageModule {
+                    file_id: *id_by_key.get(&key)?,
+                    package_name,
+                }
+            }
             Self::ExternalFile(path) => ResolveResult::ExternalFile(path),
             Self::NpmPackage(package_name) => ResolveResult::NpmPackage(package_name),
+            Self::CommonJsNpmPackage(package_name) => {
+                ResolveResult::CommonJsNpmPackage(package_name)
+            }
             Self::Unresolvable(specifier) => ResolveResult::Unresolvable(specifier),
         })
     }
@@ -307,41 +353,102 @@ impl CachedResolvedModule {
     }
 }
 
-/// Convert resolved modules into the compact graph-cache resolver payload.
-#[must_use]
-pub fn cache_resolved_modules(
-    root: &Path,
-    files: &[DiscoveredFile],
-    resolved: &[ResolvedModule],
-) -> Option<Vec<CachedResolvedModule>> {
-    let key_by_file_id = stable_key_by_file_id(root, files);
-    resolved
-        .iter()
-        .map(|module| CachedResolvedModule::from_resolved(module, &key_by_file_id))
-        .collect()
+/// Stable-key cache form of one resolved project-internal replacement.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct CachedResolvedReplacedModuleTarget {
+    source_key: StableFileKey,
+    target_key: StableFileKey,
 }
 
-/// Restore resolved modules from cached resolver payloads and current parsed modules.
+impl CachedResolvedReplacedModuleTarget {
+    fn from_resolved(
+        target: ResolvedReplacedModuleTarget,
+        key_by_file_id: &rustc_hash::FxHashMap<FileId, StableFileKey>,
+    ) -> Option<Self> {
+        Some(Self {
+            source_key: key_by_file_id.get(&target.source_file)?.clone(),
+            target_key: key_by_file_id.get(&target.target_file)?.clone(),
+        })
+    }
+
+    fn into_resolved(
+        self,
+        id_by_key: &rustc_hash::FxHashMap<StableFileKey, FileId>,
+    ) -> Option<ResolvedReplacedModuleTarget> {
+        Some(ResolvedReplacedModuleTarget {
+            source_file: *id_by_key.get(&self.source_key)?,
+            target_file: *id_by_key.get(&self.target_key)?,
+        })
+    }
+}
+
+/// Cache-friendly mirror of the complete resolver output.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedResolvedProject {
+    modules: Vec<CachedResolvedModule>,
+    replaced_module_targets: Vec<CachedResolvedReplacedModuleTarget>,
+}
+
+/// Convert a resolved project into the compact graph-cache resolver payload.
+#[must_use]
+pub fn cache_resolved_project(
+    root: &Path,
+    files: &[DiscoveredFile],
+    resolved: &ResolvedProject,
+) -> Option<CachedResolvedProject> {
+    let key_by_file_id = stable_key_by_file_id(root, files);
+    let modules = resolved
+        .modules
+        .iter()
+        .map(|module| CachedResolvedModule::from_resolved(module, &key_by_file_id))
+        .collect::<Option<Vec<_>>>()?;
+    let replaced_module_targets = resolved
+        .replaced_module_targets
+        .iter()
+        .copied()
+        .map(|target| CachedResolvedReplacedModuleTarget::from_resolved(target, &key_by_file_id))
+        .collect::<Option<Vec<_>>>()?;
+    Some(CachedResolvedProject {
+        modules,
+        replaced_module_targets,
+    })
+}
+
+/// Restore a resolved project from cached resolver payloads and current parsed modules.
 ///
 /// Returns `None` if the payload no longer aligns with the current parse result.
 /// A normal graph-cache manifest hit should keep these aligned; this extra check
 /// keeps corrupt or hand-edited cache files on the safe miss path.
 #[must_use]
-pub fn restore_resolved_modules(
+pub fn restore_resolved_project(
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
     files: &[DiscoveredFile],
-    cached: &[CachedResolvedModule],
-) -> Option<Vec<ResolvedModule>> {
-    if modules.len() != cached.len() {
+    cached: &CachedResolvedProject,
+) -> Option<ResolvedProject> {
+    if modules.len() != cached.modules.len() {
         return None;
     }
 
     let mut indexes = RestoreResolvedModuleIndexes::new(root, modules, files);
-    cached
+    let resolved_modules = cached
+        .modules
         .iter()
         .map(|entry| restore_cached_resolved_module(entry, &mut indexes))
-        .collect()
+        .collect::<Option<Vec<_>>>()?;
+    let mut replaced_module_targets = cached
+        .replaced_module_targets
+        .iter()
+        .cloned()
+        .map(|target| target.into_resolved(&indexes.file_ids))
+        .collect::<Option<Vec<_>>>()?;
+    replaced_module_targets
+        .sort_unstable_by_key(|target| (target.source_file.0, target.target_file.0));
+    replaced_module_targets.dedup();
+    Some(ResolvedProject {
+        modules: resolved_modules,
+        replaced_module_targets,
+    })
 }
 
 struct RestoreResolvedModuleIndexes<'a> {
@@ -834,7 +941,49 @@ mod tests {
     }
 
     #[test]
-    fn cache_resolved_modules_rejects_unknown_internal_targets() {
+    fn cached_resolve_result_preserves_commonjs_provenance() {
+        let key = StableFileKey::from_root_relative(
+            Path::new("/project"),
+            Path::new("/project/src/dependency.ts"),
+        );
+        let key_by_file_id = FxHashMap::from_iter([(FileId(3), key.clone())]);
+        let id_by_key = FxHashMap::from_iter([(key, FileId(8))]);
+
+        let cached = CachedResolveResult::from_resolve_result(
+            &ResolveResult::CommonJsInternalModule(FileId(3)),
+            &key_by_file_id,
+        )
+        .expect("CommonJS target should map to a stable key");
+        let restored = cached
+            .into_resolve_result(&id_by_key)
+            .expect("stable key should map to the current FileId");
+
+        assert!(matches!(
+            restored,
+            ResolveResult::CommonJsInternalModule(FileId(8))
+        ));
+    }
+
+    #[test]
+    fn cached_resolve_result_preserves_commonjs_bare_package_provenance() {
+        let cached = CachedResolveResult::from_resolve_result(
+            &ResolveResult::CommonJsNpmPackage("shared-package".to_string()),
+            &FxHashMap::default(),
+        )
+        .expect("bare CommonJS package should not need a stable file key");
+        let restored = cached
+            .into_resolve_result(&FxHashMap::default())
+            .expect("bare CommonJS package should restore without a file map");
+
+        assert!(matches!(
+            restored,
+            ResolveResult::CommonJsNpmPackage(package_name)
+                if package_name == "shared-package"
+        ));
+    }
+
+    #[test]
+    fn cache_resolved_project_rejects_unknown_internal_targets() {
         let files = vec![file(0, "/project/src/a.ts")];
         let module = ResolvedModule {
             file_id: FileId(0),
@@ -845,8 +994,67 @@ mod tests {
             }],
             ..ResolvedModule::default()
         };
+        let project = ResolvedProject {
+            modules: vec![module],
+            replaced_module_targets: Vec::new(),
+        };
 
-        let cached = cache_resolved_modules(Path::new("/project"), &files, &[module]);
+        let cached = cache_resolved_project(Path::new("/project"), &files, &project);
+
+        assert!(cached.is_none());
+    }
+
+    #[test]
+    fn cached_replaced_target_remaps_both_file_ids_by_stable_key() {
+        let source_key = StableFileKey::from_root_relative(
+            Path::new("/project"),
+            Path::new("/project/src/example.test.ts"),
+        );
+        let target_key = StableFileKey::from_root_relative(
+            Path::new("/project"),
+            Path::new("/project/src/dependency.ts"),
+        );
+        let key_by_file_id = FxHashMap::from_iter([
+            (FileId(2), source_key.clone()),
+            (FileId(3), target_key.clone()),
+        ]);
+        let id_by_key = FxHashMap::from_iter([(source_key, FileId(8)), (target_key, FileId(9))]);
+        let resolved = ResolvedReplacedModuleTarget {
+            source_file: FileId(2),
+            target_file: FileId(3),
+        };
+
+        let cached = CachedResolvedReplacedModuleTarget::from_resolved(resolved, &key_by_file_id)
+            .expect("both file ids should map to stable keys");
+        let restored = cached
+            .into_resolved(&id_by_key)
+            .expect("both stable keys should map to current file ids");
+
+        assert_eq!(
+            restored,
+            ResolvedReplacedModuleTarget {
+                source_file: FileId(8),
+                target_file: FileId(9),
+            }
+        );
+    }
+
+    #[test]
+    fn cache_resolved_project_rejects_unknown_replacement_targets() {
+        let files = vec![file(0, "/project/src/example.test.ts")];
+        let project = ResolvedProject {
+            modules: vec![ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/example.test.ts"),
+                ..ResolvedModule::default()
+            }],
+            replaced_module_targets: vec![ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(1),
+            }],
+        };
+
+        let cached = cache_resolved_project(Path::new("/project"), &files, &project);
 
         assert!(cached.is_none());
     }

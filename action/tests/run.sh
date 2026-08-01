@@ -1964,6 +1964,8 @@ assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh chec
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
 assert_contains "$(cat "$DIR/../../action.yml")" "review-guidance:" "action.yml exposes review-guidance input"
 assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_REVIEW_GUIDANCE: \${{ inputs.review-guidance }}" "action.yml maps review-guidance to env"
+assert_contains "$(cat "$DIR/../../action.yml")" "review-id:" "action.yml exposes review-id input"
+assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_REVIEW_ID: \${{ inputs.review-id }}" "action.yml maps review-id to env"
 assert_contains "$(cat "$DIR/../../action.yml")" "summary-scope:" "action.yml exposes summary-scope input"
 assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_SUMMARY_SCOPE: \${{ inputs.summary-scope }}" "action.yml maps summary-scope to comment env"
 assert_contains "$(cat "$DIR/../../action.yml")" "comment-layout:" "action.yml exposes comment-layout input"

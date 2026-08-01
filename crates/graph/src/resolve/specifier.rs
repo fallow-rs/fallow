@@ -665,7 +665,12 @@ fn try_nearest_tsconfig_path_alias(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
+    from_style: bool,
 ) -> Option<ResolveResult> {
+    let style_context = from_style
+        || from_file
+            .extension()
+            .is_some_and(|extension| extension == "scss" || extension == "sass");
     let chain = local_tsconfig_chain(ctx, from_file);
     for tsconfig_path in &chain {
         let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
@@ -675,7 +680,9 @@ fn try_nearest_tsconfig_path_alias(
             .get("compilerOptions")
             .and_then(|compiler_options| compiler_options.get("paths"))
             .is_some();
-        if let Some(result) = try_tsconfig_paths_from_config(ctx, tsconfig_path, &json, specifier) {
+        if let Some(result) =
+            try_tsconfig_paths_from_config(ctx, tsconfig_path, &json, specifier, style_context)
+        {
             return Some(result);
         }
         if has_paths {
@@ -691,7 +698,7 @@ fn try_nearest_tsconfig_path_alias(
             .and_then(|compiler_options| compiler_options.get("baseUrl"))
             .is_some();
         if let Some(result) =
-            try_tsconfig_base_url_from_config(ctx, tsconfig_path, &json, specifier)
+            try_tsconfig_base_url_from_config(ctx, tsconfig_path, &json, specifier, style_context)
         {
             return Some(result);
         }
@@ -707,6 +714,7 @@ fn try_tsconfig_paths_from_config(
     tsconfig_path: &Path,
     json: &Value,
     specifier: &str,
+    style_context: bool,
 ) -> Option<ResolveResult> {
     let compiler_options = json.get("compilerOptions")?;
     let paths = compiler_options.get("paths")?.as_object()?;
@@ -751,7 +759,7 @@ fn try_tsconfig_paths_from_config(
             } else {
                 base_dir.join(target_path)
             };
-            if let Some(result) = try_tsconfig_alias_target(ctx, &absolute) {
+            if let Some(result) = try_tsconfig_alias_target(ctx, &absolute, style_context) {
                 return Some(result);
             }
         }
@@ -771,6 +779,7 @@ fn try_tsconfig_base_url_from_config(
     tsconfig_path: &Path,
     json: &Value,
     specifier: &str,
+    style_context: bool,
 ) -> Option<ResolveResult> {
     if specifier.starts_with('.') || Path::new(specifier).is_absolute() {
         return None;
@@ -784,10 +793,14 @@ fn try_tsconfig_base_url_from_config(
     } else {
         tsconfig_dir.join(base_url)
     };
-    try_tsconfig_alias_target(ctx, &base_dir.join(specifier))
+    try_tsconfig_alias_target(ctx, &base_dir.join(specifier), style_context)
 }
 
-fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<ResolveResult> {
+fn try_tsconfig_alias_target(
+    ctx: &ResolveContext<'_>,
+    target: &Path,
+    style_context: bool,
+) -> Option<ResolveResult> {
     if let Some(result) = resolve_tsconfig_alias_candidate(ctx, target) {
         return Some(result);
     }
@@ -796,7 +809,11 @@ fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<
         return Some(result);
     }
 
-    if let Some(result) = try_tsconfig_alias_directory(ctx, target) {
+    if style_context && let Some(result) = try_tsconfig_alias_sass_target(ctx, target) {
+        return Some(result);
+    }
+
+    if let Some(result) = try_tsconfig_alias_directory(ctx, target, style_context) {
         return Some(result);
     }
 
@@ -822,6 +839,70 @@ fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<
     None
 }
 
+/// Probe Sass's extension, partial, and directory-index conventions against an
+/// already-expanded tsconfig alias target.
+///
+/// This must only be called for stylesheet edges. JavaScript and TypeScript
+/// imports may use the same alias text, but `_name.scss` is not a valid module
+/// candidate in those contexts.
+fn try_tsconfig_alias_sass_target(
+    ctx: &ResolveContext<'_>,
+    target: &Path,
+) -> Option<ResolveResult> {
+    let style_extension = target
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "css" | "scss" | "sass"));
+
+    let filename = target.file_name()?.to_str()?;
+    let partial =
+        (!filename.starts_with('_')).then(|| target.with_file_name(format!("_{filename}")));
+
+    if style_extension {
+        if let Some(partial) = partial
+            && let Some(result) = resolve_tsconfig_alias_candidate(ctx, &partial)
+        {
+            return Some(result);
+        }
+        return None;
+    }
+
+    // Match the established Sass fallback order: exhaust direct, partial, and
+    // directory-index candidates for one extension before trying the next.
+    for extension in [".scss", ".sass"] {
+        if let Some(result) =
+            resolve_tsconfig_alias_candidate(ctx, &with_appended_extension(target, extension))
+        {
+            return Some(result);
+        }
+        if let Some(partial) = &partial
+            && let Some(result) =
+                resolve_tsconfig_alias_candidate(ctx, &with_appended_extension(partial, extension))
+        {
+            return Some(result);
+        }
+        for index in ["_index", "index"] {
+            if let Some(result) = resolve_tsconfig_alias_candidate(
+                ctx,
+                &with_appended_extension(&target.join(index), extension),
+            ) {
+                return Some(result);
+            }
+        }
+    }
+
+    for candidate in [
+        with_appended_extension(target, ".css"),
+        target.join("index.css"),
+    ] {
+        if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &candidate) {
+            return Some(result);
+        }
+    }
+
+    None
+}
+
 fn should_probe_extensions(ctx: &ResolveContext<'_>, target: &Path) -> bool {
     target
         .extension()
@@ -839,14 +920,19 @@ fn with_appended_extension(path: &Path, extension: &str) -> PathBuf {
     PathBuf::from(value)
 }
 
-fn try_tsconfig_alias_directory(ctx: &ResolveContext<'_>, target: &Path) -> Option<ResolveResult> {
+fn try_tsconfig_alias_directory(
+    ctx: &ResolveContext<'_>,
+    target: &Path,
+    style_context: bool,
+) -> Option<ResolveResult> {
     if !target.is_dir() {
         return None;
     }
     if let Some(package_json) = read_json_file(&target.join("package.json")) {
         for field in ["module", "main"] {
             if let Some(entry) = package_json.get(field).and_then(Value::as_str)
-                && let Some(result) = try_tsconfig_alias_target(ctx, &target.join(entry))
+                && let Some(result) =
+                    try_tsconfig_alias_target(ctx, &target.join(entry), style_context)
             {
                 return Some(result);
             }
@@ -1532,7 +1618,8 @@ fn resolve_resolved_specifier(
             return result;
         }
         if (flags.is_bare || flags.is_alias || flags.matches_plugin_alias)
-            && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
+            && let Some(result) =
+                try_nearest_tsconfig_path_alias(ctx, from_file, specifier, from_style)
         {
             return result;
         }
@@ -1653,7 +1740,7 @@ fn try_failed_primary_fallbacks(
     }
 
     if (used_tsconfig_fallback || can_try_nearest_alias)
-        && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
+        && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier, from_style)
     {
         return Some(result);
     }
@@ -1756,7 +1843,7 @@ fn try_tsconfig_root_dirs(
             };
             for candidate_root in &roots {
                 let candidate = candidate_root.join(relative_dir).join(specifier);
-                if let Some(result) = try_tsconfig_alias_target(ctx, &candidate) {
+                if let Some(result) = try_tsconfig_alias_target(ctx, &candidate, false) {
                     return Some(result);
                 }
             }

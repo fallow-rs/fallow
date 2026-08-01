@@ -1,0 +1,9 @@
+{
+  "name": "issue-2075-sass-alias-partial",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "vue": "3.0.0"
+  }
+}

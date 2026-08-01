@@ -748,6 +748,11 @@ export type ReviewProvider = ("github" | "gitlab")
  */
 export type ReviewCheckConclusion = ("success" | "neutral" | "failure")
 /**
+ * Stable identifier used to isolate independent review integrations on the
+ * same pull or merge request.
+ */
+export type ReviewId = string
+/**
  * Schema-version discriminator for the review reconcile envelope.
  */
 export type ReviewReconcileSchema = "fallow-review-reconcile/v1"
@@ -8613,6 +8618,7 @@ export interface ReviewEnvelopeMeta {
 schema: ReviewEnvelopeSchema
 provider: ReviewProvider
 check_conclusion?: (ReviewCheckConclusion | null)
+review_id?: (ReviewId | null)
 }
 /**
  * Envelope emitted by `fallow ci reconcile-review --format json`. Used by

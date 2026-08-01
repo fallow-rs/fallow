@@ -244,6 +244,21 @@ struct LitCustomElementCandidate {
 }
 
 #[derive(Debug, Clone)]
+pub(super) struct PendingVitestMockOperation {
+    source: String,
+    vi_reference_span: Span,
+    call_start: u32,
+    proof: PendingVitestMockProof,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum PendingVitestMockProof {
+    ClosedFactory { vi_reference_spans: Vec<Span> },
+    UnprovenMock,
+    Unmock,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct InlineTemplateFinding {
     pub(crate) template_source: String,
     pub(crate) decorator_start: u32,
@@ -260,6 +275,7 @@ pub(crate) struct ModuleInfoExtractor {
     package_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
+    pending_vitest_mock_operations: Vec<PendingVitestMockOperation>,
     pub(crate) whole_object_uses: Vec<String>,
     has_cjs_exports: bool,
     has_angular_component_template_url: bool,

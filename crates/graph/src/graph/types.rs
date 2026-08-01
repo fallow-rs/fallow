@@ -1,10 +1,13 @@
 //! Shared graph types: module nodes, re-export edges, export symbols, and references.
 
+use std::cmp::Ordering;
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::path::PathBuf;
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ExportName, VisibilityTag};
+use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
+use rustc_hash::FxHashMap;
 
 /// A single module in the graph.
 ///
@@ -192,10 +195,576 @@ pub struct SymbolReference {
     pub from_file: FileId,
     /// How the export is referenced.
     pub kind: ReferenceKind,
+    /// Interned linked path from `from_file` to the owning export.
+    ///
+    /// Legacy reachability does not need root-specific provenance and stores
+    /// `None`; profiled reachability always stores an exact path.
+    pub(crate) path: Option<ReferencePathId>,
     /// Byte span of the import statement in the referencing file.
     /// Used by the LSP to locate references for Code Lens navigation.
     #[serde(with = "crate::cache::span_serde")]
     pub import_span: oxc_span::Span,
+}
+
+/// Compact identifier for an interned reference path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReferencePathId(NonZeroU32);
+
+/// One conjunctive step in an interned export-reference route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) enum ReferencePathNode {
+    /// One ordinary module-load hop.
+    Hop {
+        /// Previous conjunctive step, or `None` for a direct load.
+        parent: Option<ReferencePathId>,
+        /// Module loaded by this hop.
+        target: FileId,
+        /// Runtime mechanism used by this hop.
+        mechanism: ModuleLoadMechanism,
+    },
+    /// One existential traversal through a compact namespace transition graph.
+    Route {
+        /// Previous conjunctive step, used when a namespace route is followed
+        /// by another namespace segment.
+        parent: Option<ReferencePathId>,
+        /// Canonical transition graph containing `start` and `terminal`.
+        graph: ReferenceRouteGraphId,
+        /// Local graph node where traversal begins.
+        start: ReferenceRouteNodeId,
+        /// Local graph node that must be reachable.
+        terminal: ReferenceRouteNodeId,
+        /// Mechanism used by the consumer to load `start`. `None` means the
+        /// reference source already owns the start module (entry points and
+        /// concatenated route segments).
+        start_mechanism: Option<ModuleLoadMechanism>,
+    },
+}
+
+impl ReferencePathNode {
+    pub(crate) const fn parent(self) -> Option<ReferencePathId> {
+        match self {
+            Self::Hop { parent, .. } | Self::Route { parent, .. } => parent,
+        }
+    }
+
+    fn remap_parent(&mut self, remap: &[ReferencePathId]) {
+        match self {
+            Self::Hop { parent, .. } | Self::Route { parent, .. } => {
+                *parent = parent.map(|path| remap[path.index()]);
+            }
+        }
+    }
+}
+
+/// Build-time identifier for one compact namespace transition graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReferenceRouteGraphId(pub(crate) u32);
+
+/// Node identifier local to one namespace transition graph.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub(crate) struct ReferenceRouteNodeId(pub(crate) u32);
+
+/// One canonical node in a build-time namespace transition graph.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ReferenceRouteNodeSpec {
+    target: FileId,
+    mechanism: ModuleLoadMechanism,
+    successors: Vec<ReferenceRouteNodeId>,
+}
+
+impl ReferenceRouteNodeSpec {
+    pub(crate) fn new(
+        target: FileId,
+        mechanism: ModuleLoadMechanism,
+        mut successors: Vec<ReferenceRouteNodeId>,
+    ) -> Self {
+        successors.sort_unstable_by_key(|successor| successor.0);
+        successors.dedup();
+        Self {
+            target,
+            mechanism,
+            successors,
+        }
+    }
+}
+
+/// Canonical build-time representation of one namespace transition graph.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ReferenceRouteGraphSpec {
+    nodes: Vec<ReferenceRouteNodeSpec>,
+}
+
+impl ReferenceRouteGraphSpec {
+    pub(crate) fn new(nodes: Vec<ReferenceRouteNodeSpec>) -> Self {
+        debug_assert!(nodes.iter().all(|node| {
+            node.successors
+                .iter()
+                .all(|successor| successor.0 < nodes.len() as u32)
+        }));
+        Self { nodes }
+    }
+}
+
+/// Persisted range for one canonical namespace transition graph.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReferenceRouteGraph {
+    pub(crate) nodes: Range<u32>,
+}
+
+/// One persisted namespace transition node.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReferenceRouteNode {
+    pub(crate) target: FileId,
+    pub(crate) mechanism: ModuleLoadMechanism,
+    pub(crate) successors: Range<u32>,
+}
+
+/// Cache-friendly persisted namespace transition graphs.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReferenceRoutes {
+    pub(crate) graphs: Vec<ReferenceRouteGraph>,
+    pub(crate) nodes: Vec<ReferenceRouteNode>,
+    pub(crate) edges: Vec<ReferenceRouteNodeId>,
+}
+
+impl ReferenceRoutes {
+    #[cfg(test)]
+    pub(crate) fn canonical_hops(
+        &self,
+        graph_id: ReferenceRouteGraphId,
+        start: ReferenceRouteNodeId,
+        terminal: ReferenceRouteNodeId,
+        start_mechanism: Option<ModuleLoadMechanism>,
+    ) -> Vec<(FileId, ModuleLoadMechanism)> {
+        let Some(graph) = self.graphs.get(graph_id.0 as usize) else {
+            return Vec::new();
+        };
+        let node_count = graph.nodes.end.saturating_sub(graph.nodes.start) as usize;
+        let start_index = start.0 as usize;
+        let terminal_index = terminal.0 as usize;
+        if start_index >= node_count || terminal_index >= node_count {
+            return Vec::new();
+        }
+
+        let mut predecessor = vec![None; node_count];
+        let mut visited = vec![false; node_count];
+        let mut queue = std::collections::VecDeque::from([start_index]);
+        visited[start_index] = true;
+        while let Some(local_index) = queue.pop_front() {
+            if local_index == terminal_index {
+                break;
+            }
+            let Some(node) = self.nodes.get(graph.nodes.start as usize + local_index) else {
+                return Vec::new();
+            };
+            let Some(successors) = self
+                .edges
+                .get(node.successors.start as usize..node.successors.end as usize)
+            else {
+                return Vec::new();
+            };
+            for successor in successors {
+                let successor_index = successor.0 as usize;
+                if successor_index >= node_count || visited[successor_index] {
+                    continue;
+                }
+                visited[successor_index] = true;
+                predecessor[successor_index] = Some(local_index);
+                queue.push_back(successor_index);
+            }
+        }
+        if !visited[terminal_index] {
+            return Vec::new();
+        }
+
+        let mut hops = Vec::new();
+        let mut current = terminal_index;
+        loop {
+            let node = &self.nodes[graph.nodes.start as usize + current];
+            if current != start_index {
+                hops.push((node.target, node.mechanism));
+            } else {
+                if let Some(mechanism) = start_mechanism {
+                    hops.push((node.target, mechanism));
+                }
+                break;
+            }
+            let Some(parent) = predecessor[current] else {
+                return Vec::new();
+            };
+            current = parent;
+        }
+        hops
+    }
+}
+
+/// Finalized linear paths plus compact namespace transition graphs.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct FinalizedReferencePaths {
+    pub(crate) paths: Vec<ReferencePathNode>,
+    pub(crate) routes: ReferenceRoutes,
+}
+
+/// Build-time interner for shared linked reference paths.
+pub(crate) struct ReferencePathInterner {
+    track_provenance: bool,
+    nodes: Vec<ReferencePathNode>,
+    metadata: Vec<ReferencePathMetadata>,
+    ids: FxHashMap<ReferencePathNode, ReferencePathId>,
+    route_graphs: Vec<ReferenceRouteGraphSpec>,
+    route_graph_ids: FxHashMap<ReferenceRouteGraphSpec, ReferenceRouteGraphId>,
+}
+
+#[derive(Clone, Copy)]
+struct ReferencePathMetadata {
+    depth: usize,
+    hop_target_bounds: Option<(FileId, FileId)>,
+}
+
+impl Default for ReferencePathInterner {
+    fn default() -> Self {
+        Self::new(true)
+    }
+}
+
+impl ReferencePathInterner {
+    pub(crate) fn new(track_provenance: bool) -> Self {
+        Self {
+            track_provenance,
+            nodes: Vec::new(),
+            metadata: Vec::new(),
+            ids: FxHashMap::default(),
+            route_graphs: Vec::new(),
+            route_graph_ids: FxHashMap::default(),
+        }
+    }
+
+    pub(crate) const fn tracks_provenance(&self) -> bool {
+        self.track_provenance
+    }
+
+    /// Intern a direct consumer-to-target path.
+    pub(crate) fn direct(
+        &mut self,
+        target: FileId,
+        mechanism: ModuleLoadMechanism,
+    ) -> Option<ReferencePathId> {
+        self.track_provenance.then(|| {
+            self.intern(ReferencePathNode::Hop {
+                parent: None,
+                target,
+                mechanism,
+            })
+        })
+    }
+
+    /// Append one typed hop to an existing path.
+    pub(crate) fn extend(
+        &mut self,
+        parent: Option<ReferencePathId>,
+        target: FileId,
+        mechanism: ModuleLoadMechanism,
+    ) -> Option<ReferencePathId> {
+        if !self.track_provenance {
+            debug_assert!(parent.is_none());
+            return None;
+        }
+        let Some(parent) = parent else {
+            debug_assert!(false, "tracked reference paths require an interned parent");
+            return None;
+        };
+        let may_contain_target = self
+            .metadata
+            .get(parent.index())
+            .and_then(|metadata| metadata.hop_target_bounds)
+            .is_some_and(|(minimum, maximum)| target.0 >= minimum.0 && target.0 <= maximum.0);
+        if may_contain_target && self.contains_target(parent, target) {
+            return Some(parent);
+        }
+        Some(self.intern(ReferencePathNode::Hop {
+            parent: Some(parent),
+            target,
+            mechanism,
+        }))
+    }
+
+    /// Intern one compact namespace transition graph.
+    pub(crate) fn intern_route_graph(
+        &mut self,
+        graph: ReferenceRouteGraphSpec,
+    ) -> ReferenceRouteGraphId {
+        debug_assert!(self.track_provenance);
+        if let Some(id) = self.route_graph_ids.get(&graph) {
+            return *id;
+        }
+        let id = ReferenceRouteGraphId(self.route_graphs.len() as u32);
+        self.route_graphs.push(graph.clone());
+        self.route_graph_ids.insert(graph, id);
+        id
+    }
+
+    /// Intern one existential traversal through a compact route graph.
+    pub(crate) fn route(
+        &mut self,
+        parent: Option<ReferencePathId>,
+        graph: ReferenceRouteGraphId,
+        start: ReferenceRouteNodeId,
+        terminal: ReferenceRouteNodeId,
+        start_mechanism: Option<ModuleLoadMechanism>,
+    ) -> Option<ReferencePathId> {
+        if !self.track_provenance {
+            return None;
+        }
+        Some(self.intern(ReferencePathNode::Route {
+            parent,
+            graph,
+            start,
+            terminal,
+            start_mechanism,
+        }))
+    }
+
+    fn contains_target(&self, mut path: ReferencePathId, target: FileId) -> bool {
+        loop {
+            let Some(node) = self.nodes.get(path.index()) else {
+                return false;
+            };
+            if let ReferencePathNode::Hop {
+                target: hop_target, ..
+            } = node
+                && *hop_target == target
+            {
+                return true;
+            }
+            let Some(parent) = node.parent() else {
+                return false;
+            };
+            path = parent;
+        }
+    }
+
+    fn intern(&mut self, node: ReferencePathNode) -> ReferencePathId {
+        if let Some(path) = self.ids.get(&node) {
+            return *path;
+        }
+        let path = ReferencePathId::from_index(self.nodes.len());
+        let parent_metadata = node
+            .parent()
+            .and_then(|parent| self.metadata.get(parent.index()).copied());
+        let depth = parent_metadata.map_or(0, |metadata| metadata.depth + 1);
+        let hop_target_bounds = match node {
+            ReferencePathNode::Hop { target, .. } => Some(
+                parent_metadata
+                    .and_then(|metadata| metadata.hop_target_bounds)
+                    .map_or((target, target), |(minimum, maximum)| {
+                        (
+                            FileId(minimum.0.min(target.0)),
+                            FileId(maximum.0.max(target.0)),
+                        )
+                    }),
+            ),
+            ReferencePathNode::Route { .. } => {
+                parent_metadata.and_then(|metadata| metadata.hop_target_bounds)
+            }
+        };
+        self.nodes.push(node);
+        self.metadata.push(ReferencePathMetadata {
+            depth,
+            hop_target_bounds,
+        });
+        self.ids.insert(node, path);
+        path
+    }
+
+    /// Finalize cache-friendly storage and assign canonical IDs.
+    ///
+    /// Paths are ordered depth-by-depth so every parent already has its final
+    /// ID before its children are sorted. This keeps serialized graphs stable
+    /// when equivalent imports or re-exports are discovered in another order.
+    pub(crate) fn finalize(self, modules: &mut [ModuleNode]) -> FinalizedReferencePaths {
+        if self.nodes.is_empty() && self.route_graphs.is_empty() {
+            return FinalizedReferencePaths {
+                paths: Vec::new(),
+                routes: ReferenceRoutes::default(),
+            };
+        }
+
+        let (routes, route_remap) = finalize_route_graphs(&self.route_graphs);
+        let max_depth = self
+            .metadata
+            .iter()
+            .map(|metadata| metadata.depth)
+            .max()
+            .unwrap_or(0);
+
+        let mut paths_by_depth = vec![Vec::new(); max_depth.saturating_add(1)];
+        for (old_index, metadata) in self.metadata.iter().enumerate() {
+            paths_by_depth[metadata.depth].push(old_index);
+        }
+
+        let mut remap = vec![ReferencePathId::from_index(0); self.nodes.len()];
+        let mut finalized = Vec::with_capacity(self.nodes.len());
+        for mut paths in paths_by_depth {
+            paths.sort_unstable_by(|&left, &right| {
+                compare_path_nodes(self.nodes[left], self.nodes[right], &remap, &route_remap)
+            });
+            for old_index in paths {
+                let mut node = self.nodes[old_index];
+                node.remap_parent(&remap);
+                if let ReferencePathNode::Route { graph, .. } = &mut node {
+                    *graph = route_remap[graph.0 as usize];
+                }
+                let canonical = ReferencePathId::from_index(finalized.len());
+                remap[old_index] = canonical;
+                finalized.push(node);
+            }
+        }
+
+        for reference in modules
+            .iter_mut()
+            .flat_map(|module| &mut module.exports)
+            .flat_map(|export| &mut export.references)
+        {
+            if let Some(path) = reference.path {
+                reference.path = Some(remap[path.index()]);
+            }
+        }
+
+        FinalizedReferencePaths {
+            paths: finalized,
+            routes,
+        }
+    }
+}
+
+fn compare_path_nodes(
+    left: ReferencePathNode,
+    right: ReferencePathNode,
+    path_remap: &[ReferencePathId],
+    route_remap: &[ReferenceRouteGraphId],
+) -> Ordering {
+    let left_parent = left.parent().map(|parent| path_remap[parent.index()].0);
+    let right_parent = right.parent().map(|parent| path_remap[parent.index()].0);
+    left_parent
+        .cmp(&right_parent)
+        .then_with(|| match (left, right) {
+            (
+                ReferencePathNode::Hop {
+                    target: left_target,
+                    mechanism: left_mechanism,
+                    ..
+                },
+                ReferencePathNode::Hop {
+                    target: right_target,
+                    mechanism: right_mechanism,
+                    ..
+                },
+            ) => {
+                (left_target.0, left_mechanism as u8).cmp(&(right_target.0, right_mechanism as u8))
+            }
+            (ReferencePathNode::Hop { .. }, ReferencePathNode::Route { .. }) => Ordering::Less,
+            (ReferencePathNode::Route { .. }, ReferencePathNode::Hop { .. }) => Ordering::Greater,
+            (
+                ReferencePathNode::Route {
+                    graph: left_graph,
+                    start: left_start,
+                    terminal: left_terminal,
+                    start_mechanism: left_mechanism,
+                    ..
+                },
+                ReferencePathNode::Route {
+                    graph: right_graph,
+                    start: right_start,
+                    terminal: right_terminal,
+                    start_mechanism: right_mechanism,
+                    ..
+                },
+            ) => (
+                route_remap[left_graph.0 as usize].0,
+                left_start.0,
+                left_terminal.0,
+                left_mechanism.map(|mechanism| mechanism as u8),
+            )
+                .cmp(&(
+                    route_remap[right_graph.0 as usize].0,
+                    right_start.0,
+                    right_terminal.0,
+                    right_mechanism.map(|mechanism| mechanism as u8),
+                )),
+        })
+}
+
+fn compare_route_graph_specs(
+    left: &ReferenceRouteGraphSpec,
+    right: &ReferenceRouteGraphSpec,
+) -> Ordering {
+    left.nodes.len().cmp(&right.nodes.len()).then_with(|| {
+        left.nodes
+            .iter()
+            .zip(&right.nodes)
+            .find_map(|(left_node, right_node)| {
+                let ordering = (
+                    left_node.target.0,
+                    left_node.mechanism as u8,
+                    &left_node.successors,
+                )
+                    .cmp(&(
+                        right_node.target.0,
+                        right_node.mechanism as u8,
+                        &right_node.successors,
+                    ));
+                (ordering != Ordering::Equal).then_some(ordering)
+            })
+            .unwrap_or(Ordering::Equal)
+    })
+}
+
+fn finalize_route_graphs(
+    graphs: &[ReferenceRouteGraphSpec],
+) -> (ReferenceRoutes, Vec<ReferenceRouteGraphId>) {
+    let mut order: Vec<usize> = (0..graphs.len()).collect();
+    order
+        .sort_unstable_by(|&left, &right| compare_route_graph_specs(&graphs[left], &graphs[right]));
+
+    let mut remap = vec![ReferenceRouteGraphId(0); graphs.len()];
+    let mut finalized = ReferenceRoutes::default();
+    for old_index in order {
+        let graph_id = ReferenceRouteGraphId(finalized.graphs.len() as u32);
+        remap[old_index] = graph_id;
+        let node_start = finalized.nodes.len() as u32;
+        for node in &graphs[old_index].nodes {
+            let edge_start = finalized.edges.len() as u32;
+            finalized.edges.extend_from_slice(&node.successors);
+            finalized.nodes.push(ReferenceRouteNode {
+                target: node.target,
+                mechanism: node.mechanism,
+                successors: edge_start..finalized.edges.len() as u32,
+            });
+        }
+        finalized.graphs.push(ReferenceRouteGraph {
+            nodes: node_start..finalized.nodes.len() as u32,
+        });
+    }
+    (finalized, remap)
+}
+
+impl ReferencePathId {
+    fn from_index(index: usize) -> Self {
+        let Some(encoded) = u32::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .and_then(NonZeroU32::new)
+        else {
+            panic!("a process cannot allocate more than u32::MAX reference path nodes");
+        };
+        Self(encoded)
+    }
+
+    pub(crate) const fn index(self) -> usize {
+        (self.0.get() - 1) as usize
+    }
 }
 
 /// How an export is referenced.
@@ -218,7 +787,7 @@ pub enum ReferenceKind {
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 112);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SymbolReference>() == 16);
+const _: () = assert!(std::mem::size_of::<SymbolReference>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ReExportEdge>() == 64);
 #[cfg(all(target_pointer_width = "64", unix))]
@@ -269,11 +838,169 @@ mod tests {
         assert_eq!(debug_str, "DynamicImport");
     }
 
+    fn module_with_reference_paths(paths: &[Option<ReferencePathId>]) -> ModuleNode {
+        ModuleNode {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/source.ts"),
+            edge_range: 0..0,
+            exports: vec![ExportSymbol {
+                name: ExportName::Named("value".to_string()),
+                is_type_only: false,
+                is_side_effect_used: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::default(),
+                references: paths
+                    .iter()
+                    .copied()
+                    .map(|path| SymbolReference {
+                        from_file: FileId(0),
+                        kind: ReferenceKind::NamedImport,
+                        path,
+                        import_span: oxc_span::Span::default(),
+                    })
+                    .collect(),
+                members: Vec::new(),
+            }],
+            re_exports: Vec::new(),
+            flags: 0,
+        }
+    }
+
+    #[test]
+    fn reference_path_metadata_tracks_exact_depth_and_hop_bounds() {
+        let mut interner = ReferencePathInterner::default();
+        let root = interner
+            .direct(FileId(10), ModuleLoadMechanism::EsModule)
+            .expect("tracked interner must return a path");
+        let lower = interner
+            .extend(Some(root), FileId(5), ModuleLoadMechanism::EsModule)
+            .expect("tracked interner must extend a path");
+        let upper = interner
+            .extend(Some(lower), FileId(20), ModuleLoadMechanism::EsModule)
+            .expect("tracked interner must extend a path");
+
+        assert_eq!(interner.metadata[root.index()].depth, 0);
+        assert_eq!(
+            interner.metadata[lower.index()].hop_target_bounds,
+            Some((FileId(5), FileId(10)))
+        );
+        assert_eq!(interner.metadata[upper.index()].depth, 2);
+        assert_eq!(
+            interner.metadata[upper.index()].hop_target_bounds,
+            Some((FileId(5), FileId(20)))
+        );
+
+        let repeated = interner.extend(Some(upper), FileId(10), ModuleLoadMechanism::EsModule);
+        assert_eq!(repeated, Some(upper));
+    }
+
+    #[test]
+    fn finalized_reference_paths_are_independent_of_interning_order() {
+        let mut first = ReferencePathInterner::default();
+        let first_parent = first.direct(FileId(1), ModuleLoadMechanism::EsModule);
+        let first_direct = first.direct(FileId(2), ModuleLoadMechanism::CommonJsRequire);
+        let first_chain = first.extend(first_parent, FileId(3), ModuleLoadMechanism::EsModule);
+        let mut first_modules = vec![module_with_reference_paths(&[first_direct, first_chain])];
+        let first_nodes = first.finalize(&mut first_modules);
+
+        let mut second = ReferencePathInterner::default();
+        let second_direct = second.direct(FileId(2), ModuleLoadMechanism::CommonJsRequire);
+        let second_parent = second.direct(FileId(1), ModuleLoadMechanism::EsModule);
+        let second_chain = second.extend(second_parent, FileId(3), ModuleLoadMechanism::EsModule);
+        let mut second_modules = vec![module_with_reference_paths(&[second_direct, second_chain])];
+        let second_nodes = second.finalize(&mut second_modules);
+
+        assert_eq!(first_nodes, second_nodes);
+        let first_paths: Vec<_> = first_modules[0].exports[0]
+            .references
+            .iter()
+            .map(|reference| reference.path)
+            .collect();
+        let second_paths: Vec<_> = second_modules[0].exports[0]
+            .references
+            .iter()
+            .map(|reference| reference.path)
+            .collect();
+        assert_eq!(first_paths, second_paths);
+    }
+
+    fn two_hop_route(first: FileId, second: FileId) -> ReferenceRouteGraphSpec {
+        ReferenceRouteGraphSpec::new(vec![
+            ReferenceRouteNodeSpec::new(
+                first,
+                ModuleLoadMechanism::EsModule,
+                vec![ReferenceRouteNodeId(1)],
+            ),
+            ReferenceRouteNodeSpec::new(second, ModuleLoadMechanism::EsModule, Vec::new()),
+        ])
+    }
+
+    #[test]
+    fn finalized_reference_routes_are_independent_of_interning_order() {
+        let route_a = two_hop_route(FileId(1), FileId(2));
+        let route_b = two_hop_route(FileId(3), FileId(4));
+
+        let mut first = ReferencePathInterner::default();
+        let first_a = first.intern_route_graph(route_a.clone());
+        let first_b = first.intern_route_graph(route_b.clone());
+        let first_b_path = first.route(
+            None,
+            first_b,
+            ReferenceRouteNodeId(0),
+            ReferenceRouteNodeId(1),
+            Some(ModuleLoadMechanism::CommonJsRequire),
+        );
+        let first_a_path = first.route(
+            None,
+            first_a,
+            ReferenceRouteNodeId(0),
+            ReferenceRouteNodeId(1),
+            Some(ModuleLoadMechanism::EsModule),
+        );
+        let mut first_modules = vec![module_with_reference_paths(&[first_b_path, first_a_path])];
+        let first_paths = first.finalize(&mut first_modules);
+
+        let mut second = ReferencePathInterner::default();
+        let second_b = second.intern_route_graph(route_b);
+        let second_a = second.intern_route_graph(route_a);
+        let second_b_path = second.route(
+            None,
+            second_b,
+            ReferenceRouteNodeId(0),
+            ReferenceRouteNodeId(1),
+            Some(ModuleLoadMechanism::CommonJsRequire),
+        );
+        let second_a_path = second.route(
+            None,
+            second_a,
+            ReferenceRouteNodeId(0),
+            ReferenceRouteNodeId(1),
+            Some(ModuleLoadMechanism::EsModule),
+        );
+        let mut second_modules = vec![module_with_reference_paths(&[second_b_path, second_a_path])];
+        let second_paths = second.finalize(&mut second_modules);
+
+        assert_eq!(first_paths, second_paths);
+        let first_reference_paths: Vec<_> = first_modules[0].exports[0]
+            .references
+            .iter()
+            .map(|reference| reference.path)
+            .collect();
+        let second_reference_paths: Vec<_> = second_modules[0].exports[0]
+            .references
+            .iter()
+            .map(|reference| reference.path)
+            .collect();
+        assert_eq!(first_reference_paths, second_reference_paths);
+    }
+
     #[test]
     fn symbol_reference_construction() {
         let reference = SymbolReference {
             from_file: FileId(42),
             kind: ReferenceKind::NamedImport,
+            path: Some(ReferencePathId::from_index(0)),
             import_span: oxc_span::Span::new(10, 30),
         };
         assert_eq!(reference.from_file, FileId(42));
@@ -287,6 +1014,7 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(7),
             kind: ReferenceKind::ReExport,
+            path: Some(ReferencePathId::from_index(0)),
             import_span: oxc_span::Span::new(5, 25),
         };
         let copied = reference;
@@ -412,11 +1140,13 @@ mod tests {
                 SymbolReference {
                     from_file: FileId(1),
                     kind: ReferenceKind::NamedImport,
+                    path: Some(ReferencePathId::from_index(0)),
                     import_span: oxc_span::Span::new(0, 10),
                 },
                 SymbolReference {
                     from_file: FileId(2),
                     kind: ReferenceKind::ReExport,
+                    path: Some(ReferencePathId::from_index(1)),
                     import_span: oxc_span::Span::new(5, 15),
                 },
             ],

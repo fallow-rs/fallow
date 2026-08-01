@@ -359,7 +359,7 @@ fn resolve_css_in_js_import_targets(
         extra_conditions: &config.resolve.conditions,
     };
     let mut targets = ResolvedCssInJsImportTargets::default();
-    for resolved in fallow_graph::resolve::resolve_all_imports(&input) {
+    for resolved in fallow_graph::resolve::resolve_all_imports(&input).modules {
         for import in resolved.resolved_imports {
             let Some(file_id) = import.target.internal_file_id() else {
                 continue;

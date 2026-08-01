@@ -7,7 +7,7 @@ use super::diff_filter::DiffIndex;
 use crate::report::emit_json;
 use fallow_output::{
     CiIssue, CiProvider as Provider, ReviewEnvelopeOutput, ReviewEnvelopeRenderInput,
-    ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs,
+    ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs, ReviewId,
     issues_from_codeclimate_issues,
 };
 
@@ -22,6 +22,7 @@ pub fn render_review_envelope(
         provider,
         issues,
         super::diff_filter::shared_diff_index(),
+        None,
     )
 }
 
@@ -35,6 +36,7 @@ fn render_review_envelope_with_diff(
     provider: Provider,
     issues: &[CiIssue],
     diff_index: Option<&DiffIndex>,
+    review_id: Option<&ReviewId>,
 ) -> ReviewEnvelopeOutput {
     let max = std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
@@ -45,7 +47,7 @@ fn render_review_envelope_with_diff(
         .flatten();
     let include_guidance = review_guidance_enabled();
 
-    let rendered = fallow_output::render_review_envelope(&ReviewEnvelopeRenderInput {
+    let input = ReviewEnvelopeRenderInput {
         command,
         provider,
         issues,
@@ -56,7 +58,11 @@ fn render_review_envelope_with_diff(
         include_guidance,
         suggestion_block: &super::suggestion::suggestion_block,
         guidance_block: &review_guidance_block,
-    });
+    };
+    let rendered = match review_id {
+        Some(review_id) => fallow_output::render_scoped_review_envelope(&input, review_id),
+        None => fallow_output::render_review_envelope(&input),
+    };
     note_review_truncation(rendered.truncation);
     rendered.envelope
 }
@@ -105,23 +111,58 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues(
 }
 
 #[must_use]
-#[expect(
-    clippy::expect_used,
-    reason = "review envelope contains only infallibly serializable fields"
-)]
 fn print_review_envelope_from_ci_issues(
     command: &str,
     provider: Provider,
     issues: &[CiIssue],
 ) -> ExitCode {
-    let envelope = render_review_envelope(command, provider, issues);
-    let value = fallow_output::serialize_review_envelope_json_output(
-        envelope,
-        crate::output_runtime::current_root_envelope_mode(),
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    )
-    .expect("ReviewEnvelopeOutput serializes infallibly");
+    let review_id = match review_id_from_env() {
+        Ok(review_id) => review_id,
+        Err(error) => {
+            eprintln!("Error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let envelope = render_review_envelope_with_diff(
+        command,
+        provider,
+        issues,
+        super::diff_filter::shared_diff_index(),
+        review_id.as_ref(),
+    );
+    let mode = crate::output_runtime::current_root_envelope_mode();
+    let analysis_run_id = crate::output_runtime::telemetry_analysis_run_id();
+    let value = match review_id.as_ref() {
+        Some(review_id) => fallow_output::serialize_scoped_review_envelope_json_output(
+            &envelope,
+            review_id,
+            mode,
+            analysis_run_id.as_deref(),
+        ),
+        None => fallow_output::serialize_review_envelope_json_output(
+            envelope,
+            mode,
+            analysis_run_id.as_deref(),
+        )
+        .map_err(|error| error.to_string()),
+    };
+    let value = match value {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("Error: failed to serialize review envelope: {error}");
+            return ExitCode::from(2);
+        }
+    };
     emit_json(&value, "review envelope")
+}
+
+fn review_id_from_env() -> Result<Option<ReviewId>, String> {
+    let Some(value) = env_nonempty("FALLOW_REVIEW_ID") else {
+        return Ok(None);
+    };
+    ReviewId::parse(value)
+        .map(Some)
+        .map_err(|error| format!("invalid FALLOW_REVIEW_ID: {error}"))
 }
 
 fn gitlab_diff_refs_from_env() -> Option<GitlabDiffRefs> {
@@ -234,6 +275,46 @@ mod tests {
             line,
             fingerprint: fp.into(),
         }
+    }
+
+    #[test]
+    fn scoped_renderer_uses_typed_meta_and_exact_markers() {
+        let issue = issue(
+            "fallow/unused-file",
+            "minor",
+            "src/a.ts",
+            1,
+            "abcdef0123456789",
+        );
+        let review_id = ReviewId::parse("frontend").unwrap();
+        let envelope = render_review_envelope_with_diff(
+            "check",
+            Provider::Github,
+            &[issue],
+            None,
+            Some(&review_id),
+        );
+        let envelope = fallow_output::serialize_scoped_review_envelope_json_output(
+            &envelope,
+            &review_id,
+            crate::output_runtime::current_root_envelope_mode(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(envelope["meta"]["review_id"], "frontend");
+        assert!(
+            envelope["body"]
+                .as_str()
+                .unwrap()
+                .ends_with("<!-- fallow-review-id: frontend -->")
+        );
+        assert!(
+            envelope["comments"][0]["body"]
+                .as_str()
+                .unwrap()
+                .ends_with("<!-- fallow-review-id: frontend -->")
+        );
     }
 
     #[test]
@@ -559,6 +640,7 @@ rename to src/new.ts
             Provider::Gitlab,
             &[issue],
             Some(&diff_index),
+            None,
         ));
         let position = &envelope["comments"][0]["position"];
         assert_eq!(position["old_path"], "src/old.ts");
@@ -572,6 +654,7 @@ rename to src/new.ts
             "check",
             Provider::Gitlab,
             &[issue],
+            None,
             None,
         ));
         let position = &envelope["comments"][0]["position"];

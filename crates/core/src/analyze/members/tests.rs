@@ -2,10 +2,10 @@ use super::*;
 use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use crate::extract::{
     ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, VisibilityTag,
+    ModuleInfo, ReExportInfo, VisibilityTag,
 };
-use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
-use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+use crate::graph::ModuleGraph;
+use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use fallow_types::extract::{
     ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
@@ -14,6 +14,8 @@ use fallow_types::extract::{
     SemanticFact,
 };
 use oxc_span::Span;
+use std::cell::OnceCell;
+use std::ops::Deref;
 use std::path::PathBuf;
 
 #[expect(
@@ -55,7 +57,7 @@ fn find_unused_members(
     clippy::cast_possible_truncation,
     reason = "test file counts are trivially small"
 )]
-fn build_graph(file_specs: &[(&str, bool)]) -> ModuleGraph {
+fn build_graph(file_specs: &[(&str, bool)]) -> TestGraphFixture {
     let files: Vec<DiscoveredFile> = file_specs
         .iter()
         .enumerate()
@@ -84,7 +86,67 @@ fn build_graph(file_specs: &[(&str, bool)]) -> ModuleGraph {
         })
         .collect();
 
-    ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    TestGraphFixture {
+        files,
+        entry_points,
+        resolved_modules,
+        forced_reachable: FxHashSet::default(),
+        graph: OnceCell::new(),
+    }
+}
+
+struct TestGraphFixture {
+    files: Vec<DiscoveredFile>,
+    entry_points: Vec<EntryPoint>,
+    resolved_modules: Vec<ResolvedModule>,
+    forced_reachable: FxHashSet<FileId>,
+    graph: OnceCell<ModuleGraph>,
+}
+
+impl TestGraphFixture {
+    fn assert_configuring(&self) {
+        assert!(
+            self.graph.get().is_none(),
+            "fixture inputs must be complete before graph construction"
+        );
+    }
+
+    fn set_reachable(&mut self, file_id: u32) {
+        self.assert_configuring();
+        self.forced_reachable.insert(FileId(file_id));
+    }
+
+    fn set_re_exports(&mut self, file_id: usize, re_exports: Vec<crate::graph::ReExportEdge>) {
+        self.assert_configuring();
+        self.resolved_modules[file_id].re_exports = re_exports
+            .into_iter()
+            .map(|re_export| ResolvedReExport {
+                info: ReExportInfo {
+                    source: format!("./fixture-{}", re_export.source_file.0),
+                    imported_name: re_export.imported_name,
+                    exported_name: re_export.exported_name,
+                    is_type_only: re_export.is_type_only,
+                    span: re_export.span,
+                },
+                target: ResolveResult::InternalModule(re_export.source_file),
+            })
+            .collect();
+    }
+}
+
+impl Deref for TestGraphFixture {
+    type Target = ModuleGraph;
+
+    fn deref(&self) -> &Self::Target {
+        self.graph.get_or_init(|| {
+            let mut graph =
+                ModuleGraph::build(&self.resolved_modules, &self.entry_points, &self.files);
+            for file_id in &self.forced_reachable {
+                graph.modules[file_id.0 as usize].set_reachable(true);
+            }
+            graph
+        })
+    }
 }
 
 fn make_member(name: &str, kind: MemberKind) -> MemberInfo {
@@ -128,29 +190,55 @@ fn make_resolved_import(source: &str, imported: &str, local: &str, target: u32) 
     }
 }
 
+struct TestExport {
+    info: ExportInfo,
+    ref_from: Option<FileId>,
+}
+
+fn export_name_str(name: &ExportName) -> &str {
+    match name {
+        ExportName::Named(name) => name,
+        ExportName::Default => "default",
+    }
+}
+
 fn make_export_with_members(
     name: &str,
     members: Vec<MemberInfo>,
     ref_from: Option<u32>,
-) -> ExportSymbol {
-    let references = ref_from
-        .map(|from| {
-            vec![SymbolReference {
-                from_file: FileId(from),
-                kind: crate::graph::ReferenceKind::NamedImport,
-                import_span: Span::new(0, 10),
-            }]
-        })
-        .unwrap_or_default();
-    ExportSymbol {
-        name: ExportName::Named(name.to_string()),
-        is_type_only: false,
-        is_side_effect_used: false,
-        visibility: VisibilityTag::None,
-        expected_unused_reason: None,
-        span: Span::new(0, 10),
-        references,
-        members,
+) -> TestExport {
+    TestExport {
+        ref_from: ref_from.map(FileId),
+        info: ExportInfo {
+            name: ExportName::Named(name.to_string()),
+            local_name: None,
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: Span::new(0, 10),
+            members,
+            super_class: None,
+        },
+    }
+}
+
+/// Add canonical resolver inputs before the fixture builds its graph.
+fn set_exports(graph: &mut TestGraphFixture, target: usize, exports: &[TestExport]) {
+    graph.assert_configuring();
+    graph.resolved_modules[target].exports =
+        exports.iter().map(|export| export.info.clone()).collect();
+    for export in exports {
+        if let Some(from_file) = export.ref_from {
+            graph.resolved_modules[from_file.0 as usize]
+                .resolved_imports
+                .push(make_resolved_import(
+                    &format!("./fixture-{target}"),
+                    export_name_str(&export.info.name),
+                    export_name_str(&export.info.name),
+                    target as u32,
+                ));
+        }
     }
 }
 
@@ -161,14 +249,22 @@ fn typed_playwright_fixture_use_fact_credits_fixture_member() {
         ("/src/fixtures.ts", false),
         ("/src/admin-page.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members("test", vec![], Some(0))];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export_with_members(
-        "AdminPage",
-        vec![make_member("assertGreeting", MemberKind::ClassMethod)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members("test", vec![], Some(0))],
+    );
+    graph.set_reachable(2);
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "AdminPage",
+            vec![make_member("assertGreeting", MemberKind::ClassMethod)],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -238,16 +334,28 @@ fn typed_playwright_fixture_alias_fact_expands_fixture_targets() {
         ("/src/wrapped-fixtures.ts", false),
         ("/src/admin-page.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members("testPrimary", vec![], Some(2))];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export_with_members("mergedTest", vec![], Some(0))];
-    graph.modules[3].set_reachable(true);
-    graph.modules[3].exports = vec![make_export_with_members(
-        "AdminPage",
-        vec![make_member("assertGreeting", MemberKind::ClassMethod)],
-        Some(1),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members("testPrimary", vec![], Some(2))],
+    );
+    graph.set_reachable(2);
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members("mergedTest", vec![], Some(0))],
+    );
+    graph.set_reachable(3);
+    set_exports(
+        &mut graph,
+        3,
+        &[make_export_with_members(
+            "AdminPage",
+            vec![make_member("assertGreeting", MemberKind::ClassMethod)],
+            Some(1),
+        )],
+    );
 
     let resolved_modules = vec![
         ResolvedModule {
@@ -333,16 +441,28 @@ fn typed_playwright_fixture_type_fact_expands_nested_fixture_targets() {
         ("/src/pages.ts", false),
         ("/src/admin-page.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members("test", vec![], Some(0))];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export_with_members("Pages", vec![], Some(0))];
-    graph.modules[3].set_reachable(true);
-    graph.modules[3].exports = vec![make_export_with_members(
-        "AdminPage",
-        vec![make_member("assertGreeting", MemberKind::ClassMethod)],
-        Some(2),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members("test", vec![], Some(0))],
+    );
+    graph.set_reachable(2);
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members("Pages", vec![], Some(0))],
+    );
+    graph.set_reachable(3);
+    set_exports(
+        &mut graph,
+        3,
+        &[make_export_with_members(
+            "AdminPage",
+            vec![make_member("assertGreeting", MemberKind::ClassMethod)],
+            Some(2),
+        )],
+    );
 
     let resolved_modules = vec![
         ResolvedModule {
@@ -411,11 +531,23 @@ fn typed_instance_export_binding_fact_builds_target_map() {
         ("/src/service.ts", false),
         ("/src/stale-service.ts", false),
     ]);
-    graph.modules[0].exports = vec![make_export_with_members("service", vec![], Some(0))];
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members("Service", vec![], Some(0))];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export_with_members("StaleService", vec![], Some(0))];
+    set_exports(
+        &mut graph,
+        0,
+        &[make_export_with_members("service", vec![], Some(0))],
+    );
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members("Service", vec![], Some(0))],
+    );
+    graph.set_reachable(2);
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members("StaleService", vec![], Some(0))],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -447,15 +579,19 @@ fn typed_instance_export_binding_fact_builds_target_map() {
 #[test]
 fn typed_factory_call_fact_credits_class_member() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/my-class.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "MyClass",
-        vec![
-            make_factory_member("getInstance"),
-            make_member("getData", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "MyClass",
+            vec![
+                make_factory_member("getInstance"),
+                make_member("getData", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let class_export = ExportInfo {
         name: ExportName::Named("MyClass".to_string()),
@@ -518,17 +654,21 @@ fn typed_factory_call_fact_credits_class_member() {
 #[test]
 fn typed_fluent_chain_fact_credits_class_member() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/event-builder.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "EventBuilder",
-        vec![
-            make_factory_member("create"),
-            make_self_member("setProcessId"),
-            make_self_member("setSubject"),
-            make_member("build", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "EventBuilder",
+            vec![
+                make_factory_member("create"),
+                make_self_member("setProcessId"),
+                make_self_member("setSubject"),
+                make_member("build", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let class_export = ExportInfo {
         name: ExportName::Named("EventBuilder".to_string()),
@@ -594,16 +734,20 @@ fn typed_fluent_chain_fact_credits_class_member() {
 #[test]
 fn typed_fluent_chain_new_fact_credits_class_member() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/option-builder.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "OptionBuilder",
-        vec![
-            make_self_member("addDefault"),
-            make_self_member("addFromCli"),
-            make_member("build", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "OptionBuilder",
+            vec![
+                make_self_member("addDefault"),
+                make_self_member("addFromCli"),
+                make_member("build", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let class_export = ExportInfo {
         name: ExportName::Named("OptionBuilder".to_string()),
@@ -778,15 +922,19 @@ fn unused_members_empty_graph() {
 #[test]
 fn unused_enum_member_detected() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![
-            make_member("Active", MemberKind::EnumMember),
-            make_member("Inactive", MemberKind::EnumMember),
-        ],
-        Some(0), // referenced from entry
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0), // referenced from entry
+        )],
+    );
 
     let (enum_members, class_members) = find_unused_members(
         &graph,
@@ -810,15 +958,19 @@ fn unused_enum_member_detected() {
 #[test]
 fn accessed_enum_member_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![
-            make_member("Active", MemberKind::EnumMember),
-            make_member("Inactive", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -862,31 +1014,42 @@ fn accessed_enum_member_via_re_export_not_flagged() {
         ("/lib/index.ts", true),
         ("/lib/types.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[2].set_reachable(true);
+    graph.set_reachable(1);
+    graph.set_reachable(2);
 
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![],
-        Some(0), // referenced from consumer
-    )];
-    graph.modules[1].re_exports = vec![crate::graph::ReExportEdge {
-        source_file: FileId(2),
-        imported_name: "Status".to_string(),
-        exported_name: "Status".to_string(),
-        is_type_only: false,
-        span: Span::default(),
-    }];
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![],
+            Some(0), // referenced from consumer
+        )],
+    );
+    graph.set_re_exports(
+        1,
+        vec![crate::graph::ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "Status".to_string(),
+            exported_name: "Status".to_string(),
+            is_type_only: false,
+            span: Span::default(),
+        }],
+    );
 
-    graph.modules[2].exports = vec![make_export_with_members(
-        "Status",
-        vec![
-            make_member("Active", MemberKind::EnumMember),
-            make_member("Inactive", MemberKind::EnumMember),
-            make_member("Archived", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+                make_member("Archived", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -938,26 +1101,37 @@ fn accessed_class_static_member_via_re_export_not_flagged() {
         ("/lib/index.ts", true),
         ("/lib/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[2].set_reachable(true);
+    graph.set_reachable(1);
+    graph.set_reachable(2);
 
-    graph.modules[1].exports = vec![make_export_with_members("StringUtils", vec![], Some(0))];
-    graph.modules[1].re_exports = vec![crate::graph::ReExportEdge {
-        source_file: FileId(2),
-        imported_name: "StringUtils".to_string(),
-        exported_name: "StringUtils".to_string(),
-        is_type_only: false,
-        span: Span::default(),
-    }];
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members("StringUtils", vec![], Some(0))],
+    );
+    graph.set_re_exports(
+        1,
+        vec![crate::graph::ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "StringUtils".to_string(),
+            exported_name: "StringUtils".to_string(),
+            is_type_only: false,
+            span: Span::default(),
+        }],
+    );
 
-    graph.modules[2].exports = vec![make_export_with_members(
-        "StringUtils",
-        vec![
-            make_member("toUpper", MemberKind::ClassMethod),
-            make_member("toLower", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "StringUtils",
+            vec![
+                make_member("toUpper", MemberKind::ClassMethod),
+                make_member("toLower", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -1002,26 +1176,37 @@ fn accessed_member_via_renamed_re_export_not_flagged() {
         ("/lib/index.ts", true),
         ("/lib/types.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[2].set_reachable(true);
+    graph.set_reachable(1);
+    graph.set_reachable(2);
 
-    graph.modules[1].exports = vec![make_export_with_members("Renamed", vec![], Some(0))];
-    graph.modules[1].re_exports = vec![crate::graph::ReExportEdge {
-        source_file: FileId(2),
-        imported_name: "Original".to_string(),
-        exported_name: "Renamed".to_string(),
-        is_type_only: false,
-        span: Span::default(),
-    }];
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members("Renamed", vec![], Some(0))],
+    );
+    graph.set_re_exports(
+        1,
+        vec![crate::graph::ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "Original".to_string(),
+            exported_name: "Renamed".to_string(),
+            is_type_only: false,
+            span: Span::default(),
+        }],
+    );
 
-    graph.modules[2].exports = vec![make_export_with_members(
-        "Original",
-        vec![
-            make_member("A", MemberKind::EnumMember),
-            make_member("B", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "Original",
+            vec![
+                make_member("A", MemberKind::EnumMember),
+                make_member("B", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -1067,25 +1252,32 @@ fn accessed_member_via_star_re_export_not_flagged() {
         ("/lib/index.ts", true),
         ("/lib/types.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[2].set_reachable(true);
+    graph.set_reachable(1);
+    graph.set_reachable(2);
 
-    graph.modules[1].re_exports = vec![crate::graph::ReExportEdge {
-        source_file: FileId(2),
-        imported_name: "*".to_string(),
-        exported_name: "*".to_string(),
-        is_type_only: false,
-        span: Span::default(),
-    }];
+    graph.set_re_exports(
+        1,
+        vec![crate::graph::ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "*".to_string(),
+            exported_name: "*".to_string(),
+            is_type_only: false,
+            span: Span::default(),
+        }],
+    );
 
-    graph.modules[2].exports = vec![make_export_with_members(
-        "Status",
-        vec![
-            make_member("Active", MemberKind::EnumMember),
-            make_member("Inactive", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -1126,15 +1318,19 @@ fn accessed_member_via_star_re_export_not_flagged() {
 #[test]
 fn whole_object_use_skips_all_members() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![
-            make_member("Active", MemberKind::EnumMember),
-            make_member("Inactive", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -1171,20 +1367,24 @@ fn whole_object_use_skips_all_members() {
 #[test]
 fn decorated_class_member_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/entity.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "User",
-        vec![MemberInfo {
-            name: "name".to_string(),
-            kind: MemberKind::ClassProperty,
-            span: Span::new(10, 20),
-            has_decorator: true, // @Column() etc.
-            decorator_names: vec!["Column".to_string()],
-            is_instance_returning_static: false,
-            is_self_returning: false,
-        }],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "User",
+            vec![MemberInfo {
+                name: "name".to_string(),
+                kind: MemberKind::ClassProperty,
+                span: Span::new(10, 20),
+                has_decorator: true, // @Column() etc.
+                decorator_names: vec!["Column".to_string()],
+                is_instance_returning_static: false,
+                is_self_returning: false,
+            }],
+            Some(0),
+        )],
+    );
 
     let (_, class_members) = find_unused_members(
         &graph,
@@ -1229,16 +1429,20 @@ fn ignore_decorator_set_dotted_record_seen_distinct_from_bare() {
 #[test]
 fn react_lifecycle_method_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/component.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "MyComponent",
-        vec![
-            make_member("render", MemberKind::ClassMethod),
-            make_member("componentDidMount", MemberKind::ClassMethod),
-            make_member("customMethod", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "MyComponent",
+            vec![
+                make_member("render", MemberKind::ClassMethod),
+                make_member("componentDidMount", MemberKind::ClassMethod),
+                make_member("customMethod", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let (_, class_members) = find_unused_members(
         &graph,
@@ -1256,16 +1460,20 @@ fn react_lifecycle_method_not_flagged() {
 #[test]
 fn angular_lifecycle_method_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/component.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "AppComponent",
-        vec![
-            make_member("ngOnInit", MemberKind::ClassMethod),
-            make_member("ngOnDestroy", MemberKind::ClassMethod),
-            make_member("myHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "AppComponent",
+            vec![
+                make_member("ngOnInit", MemberKind::ClassMethod),
+                make_member("ngOnDestroy", MemberKind::ClassMethod),
+                make_member("myHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let (_, class_members) = find_unused_members(
         &graph,
@@ -1283,16 +1491,20 @@ fn angular_lifecycle_method_not_flagged() {
 #[test]
 fn user_class_member_allowlist_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/renderer.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "MyRendererComponent",
-        vec![
-            make_member("agInit", MemberKind::ClassMethod),
-            make_member("refresh", MemberKind::ClassMethod),
-            make_member("customHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "MyRendererComponent",
+            vec![
+                make_member("agInit", MemberKind::ClassMethod),
+                make_member("refresh", MemberKind::ClassMethod),
+                make_member("customHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let allowlist = vec![
         UsedClassMemberRule::from("agInit"),
@@ -1319,17 +1531,21 @@ fn user_class_member_allowlist_not_flagged() {
 #[test]
 fn user_class_member_allowlist_globs_match_member_names() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/listener.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "GrammarListener",
-        vec![
-            make_member("enterRule", MemberKind::ClassMethod),
-            make_member("exitRule", MemberKind::ClassMethod),
-            make_member("onNodeEvent", MemberKind::ClassMethod),
-            make_member("customHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "GrammarListener",
+            vec![
+                make_member("enterRule", MemberKind::ClassMethod),
+                make_member("exitRule", MemberKind::ClassMethod),
+                make_member("onNodeEvent", MemberKind::ClassMethod),
+                make_member("customHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let allowlist = vec![
         UsedClassMemberRule::from("enter*"),
@@ -1371,12 +1587,16 @@ fn member_glob_patterns_track_whether_they_matched() {
 #[test]
 fn user_class_member_allowlist_does_not_affect_enums() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/status.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![make_member("refresh", MemberKind::EnumMember)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![make_member("refresh", MemberKind::EnumMember)],
+            Some(0),
+        )],
+    );
 
     let allowlist = vec![UsedClassMemberRule::from("refresh")];
 
@@ -1396,15 +1616,19 @@ fn user_class_member_allowlist_does_not_affect_enums() {
 #[test]
 fn scoped_allowlist_matches_implements_only() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/renderer.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "MyRendererComponent",
-        vec![
-            make_member("refresh", MemberKind::ClassMethod),
-            make_member("customHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "MyRendererComponent",
+            vec![
+                make_member("refresh", MemberKind::ClassMethod),
+                make_member("customHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let modules = vec![make_module_with_class_heritage(
         1,
@@ -1439,22 +1663,30 @@ fn scoped_allowlist_globs_match_only_matching_heritage() {
         ("/src/listener.ts", false),
         ("/src/unrelated.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "GrammarListener",
-        vec![
-            make_member("enterRule", MemberKind::ClassMethod),
-            make_member("exitRule", MemberKind::ClassMethod),
-            make_member("customHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export_with_members(
-        "DashboardComponent",
-        vec![make_member("enterRule", MemberKind::ClassMethod)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "GrammarListener",
+            vec![
+                make_member("enterRule", MemberKind::ClassMethod),
+                make_member("exitRule", MemberKind::ClassMethod),
+                make_member("customHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
+    graph.set_reachable(2);
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "DashboardComponent",
+            vec![make_member("enterRule", MemberKind::ClassMethod)],
+            Some(0),
+        )],
+    );
 
     let modules = vec![make_module_with_class_heritage(
         1,
@@ -1508,15 +1740,19 @@ fn scoped_allowlist_globs_match_only_matching_heritage() {
 #[test]
 fn scoped_allowlist_matches_extends_only() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/command.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "GenerateReport",
-        vec![
-            make_member("execute", MemberKind::ClassMethod),
-            make_member("customHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "GenerateReport",
+            vec![
+                make_member("execute", MemberKind::ClassMethod),
+                make_member("customHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let modules = vec![make_module_with_class_heritage(
         1,
@@ -1584,15 +1820,19 @@ fn is_native_error_base_name_recognizes_native_errors() {
 #[test]
 fn error_subclass_name_member_not_flagged_but_other_members_are() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/errors.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "DomainError",
-        vec![
-            make_member("name", MemberKind::ClassProperty),
-            make_member("unusedHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "DomainError",
+            vec![
+                make_member("name", MemberKind::ClassProperty),
+                make_member("unusedHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let modules = vec![make_module_with_class_heritage(
         1,
@@ -1618,12 +1858,16 @@ fn error_subclass_name_member_not_flagged_but_other_members_are() {
 #[test]
 fn ordinary_class_name_member_still_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/person.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Person",
-        vec![make_member("name", MemberKind::ClassProperty)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Person",
+            vec![make_member("name", MemberKind::ClassProperty)],
+            Some(0),
+        )],
+    );
 
     let modules = vec![make_module_with_class_heritage(1, "Person", None, &[])];
 
@@ -1644,19 +1888,23 @@ fn ordinary_class_name_member_still_flagged() {
 #[test]
 fn transitive_error_subclass_name_member_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/errors.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![
-        make_export_with_members(
-            "DomainError",
-            vec![make_member("name", MemberKind::ClassProperty)],
-            Some(0),
-        ),
-        make_export_with_members(
-            "ApiError",
-            vec![make_member("name", MemberKind::ClassProperty)],
-            Some(0),
-        ),
-    ];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[
+            make_export_with_members(
+                "DomainError",
+                vec![make_member("name", MemberKind::ClassProperty)],
+                Some(0),
+            ),
+            make_export_with_members(
+                "ApiError",
+                vec![make_member("name", MemberKind::ClassProperty)],
+                Some(0),
+            ),
+        ],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(1),
@@ -1699,15 +1947,19 @@ fn transitive_error_subclass_name_member_not_flagged() {
 #[test]
 fn this_member_access_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/service.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Service",
-        vec![
-            make_member("label", MemberKind::ClassProperty),
-            make_member("unused_prop", MemberKind::ClassProperty),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Service",
+            vec![
+                make_member("label", MemberKind::ClassProperty),
+                make_member("unused_prop", MemberKind::ClassProperty),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(1), // same file as the service
@@ -1735,12 +1987,16 @@ fn this_member_access_not_flagged() {
 #[test]
 fn unreferenced_export_skips_member_analysis() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![make_member("Active", MemberKind::EnumMember)],
-        None, // no references
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![make_member("Active", MemberKind::EnumMember)],
+            None, // no references
+        )],
+    );
 
     let (enum_members, _) = find_unused_members(
         &graph,
@@ -1756,12 +2012,20 @@ fn unreferenced_export_skips_member_analysis() {
 
 #[test]
 fn unreachable_module_skips_member_analysis() {
-    let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/dead.ts", false)]);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "DeadEnum",
-        vec![make_member("X", MemberKind::EnumMember)],
-        Some(0),
-    )];
+    let mut graph = build_graph(&[
+        ("/src/entry.ts", true),
+        ("/src/dead.ts", false),
+        ("/src/unreachable-consumer.ts", false),
+    ]);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "DeadEnum",
+            vec![make_member("X", MemberKind::EnumMember)],
+            Some(2),
+        )],
+    );
 
     let (enum_members, class_members) = find_unused_members(
         &graph,
@@ -1779,11 +2043,15 @@ fn unreachable_module_skips_member_analysis() {
 #[test]
 fn entry_point_module_skips_member_analysis() {
     let mut graph = build_graph(&[("/src/entry.ts", true)]);
-    graph.modules[0].exports = vec![make_export_with_members(
-        "EntryEnum",
-        vec![make_member("X", MemberKind::EnumMember)],
-        None,
-    )];
+    set_exports(
+        &mut graph,
+        0,
+        &[make_export_with_members(
+            "EntryEnum",
+            vec![make_member("X", MemberKind::EnumMember)],
+            None,
+        )],
+    );
 
     let (enum_members, class_members) = find_unused_members(
         &graph,
@@ -1801,12 +2069,16 @@ fn entry_point_module_skips_member_analysis() {
 #[test]
 fn enum_member_kind_routed_to_enum_results() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![make_member("Active", MemberKind::EnumMember)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![make_member("Active", MemberKind::EnumMember)],
+            Some(0),
+        )],
+    );
 
     let (enum_members, class_members) = find_unused_members(
         &graph,
@@ -1825,15 +2097,19 @@ fn enum_member_kind_routed_to_enum_results() {
 #[test]
 fn class_member_kind_routed_to_class_results() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/class.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "MyClass",
-        vec![
-            make_member("myMethod", MemberKind::ClassMethod),
-            make_member("myProp", MemberKind::ClassProperty),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "MyClass",
+            vec![
+                make_member("myMethod", MemberKind::ClassMethod),
+                make_member("myProp", MemberKind::ClassProperty),
+            ],
+            Some(0),
+        )],
+    );
 
     let (enum_members, class_members) = find_unused_members(
         &graph,
@@ -1861,15 +2137,19 @@ fn class_member_kind_routed_to_class_results() {
 #[test]
 fn instance_member_access_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/service.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "MyService",
-        vec![
-            make_member("greet", MemberKind::ClassMethod),
-            make_member("unusedMethod", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "MyService",
+            vec![
+                make_member("greet", MemberKind::ClassMethod),
+                make_member("unusedMethod", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -1909,15 +2189,19 @@ fn instance_member_access_not_flagged() {
 #[test]
 fn this_access_does_not_skip_enum_members() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Direction",
-        vec![
-            make_member("Up", MemberKind::EnumMember),
-            make_member("Down", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Direction",
+            vec![
+                make_member("Up", MemberKind::EnumMember),
+                make_member("Down", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(1),
@@ -1944,19 +2228,23 @@ fn this_access_does_not_skip_enum_members() {
 #[test]
 fn mixed_enum_and_class_in_same_module() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/mixed.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![
-        make_export_with_members(
-            "Status",
-            vec![make_member("Active", MemberKind::EnumMember)],
-            Some(0),
-        ),
-        make_export_with_members(
-            "Service",
-            vec![make_member("doWork", MemberKind::ClassMethod)],
-            Some(0),
-        ),
-    ];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[
+            make_export_with_members(
+                "Status",
+                vec![make_member("Active", MemberKind::EnumMember)],
+                Some(0),
+            ),
+            make_export_with_members(
+                "Service",
+                vec![make_member("doWork", MemberKind::ClassMethod)],
+                Some(0),
+            ),
+        ],
+    );
 
     let (enum_members, class_members) = find_unused_members(
         &graph,
@@ -1976,15 +2264,19 @@ fn mixed_enum_and_class_in_same_module() {
 #[test]
 fn local_name_mapped_to_imported_name() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![
-            make_member("Active", MemberKind::EnumMember),
-            make_member("Inactive", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -2024,15 +2316,19 @@ fn local_name_mapped_to_imported_name() {
 #[test]
 fn default_import_maps_to_default_export() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "default",
-        vec![
-            make_member("X", MemberKind::EnumMember),
-            make_member("Y", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "default",
+            vec![
+                make_member("X", MemberKind::EnumMember),
+                make_member("Y", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -2074,12 +2370,16 @@ fn suppressed_enum_member_not_flagged() {
     use crate::suppress::{IssueKind, Suppression};
 
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![make_member("Active", MemberKind::EnumMember)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![make_member("Active", MemberKind::EnumMember)],
+            Some(0),
+        )],
+    );
 
     let supps = vec![Suppression::issue(1, 0, IssueKind::UnusedEnumMember)];
     let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
@@ -2106,12 +2406,16 @@ fn suppressed_class_member_not_flagged() {
     use crate::suppress::{IssueKind, Suppression};
 
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/service.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Service",
-        vec![make_member("doWork", MemberKind::ClassMethod)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Service",
+            vec![make_member("doWork", MemberKind::ClassMethod)],
+            Some(0),
+        )],
+    );
 
     let supps = vec![Suppression::issue(1, 0, IssueKind::UnusedClassMember)];
     let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
@@ -2136,15 +2440,19 @@ fn suppressed_class_member_not_flagged() {
 #[test]
 fn whole_object_use_via_aliased_import() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Status",
-        vec![
-            make_member("A", MemberKind::EnumMember),
-            make_member("B", MemberKind::EnumMember),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Status",
+            vec![
+                make_member("A", MemberKind::EnumMember),
+                make_member("B", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -2183,15 +2491,19 @@ fn whole_object_use_via_aliased_import() {
 #[test]
 fn this_field_chained_access_not_flagged() {
     let mut graph = build_graph(&[("/src/main.ts", true), ("/src/service.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "MyService",
-        vec![
-            make_member("doWork", MemberKind::ClassMethod),
-            make_member("unusedMethod", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "MyService",
+            vec![
+                make_member("doWork", MemberKind::ClassMethod),
+                make_member("unusedMethod", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -2240,24 +2552,32 @@ fn interface_member_usage_propagates_to_implementers() {
         ("/src/fixed-size-strategy.ts", false),
         ("/src/scroll-viewport.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[2].set_reachable(true);
-    graph.modules[3].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "VirtualScrollStrategy",
-        vec![],
-        Some(3),
-    )];
-    graph.modules[2].exports = vec![make_export_with_members(
-        "FixedSizeScrollStrategy",
-        vec![
-            make_member("attached", MemberKind::ClassProperty),
-            make_member("attach", MemberKind::ClassMethod),
-            make_member("detach", MemberKind::ClassMethod),
-            make_member("unusedHelper", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    graph.set_reachable(2);
+    graph.set_reachable(3);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "VirtualScrollStrategy",
+            vec![],
+            Some(3),
+        )],
+    );
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "FixedSizeScrollStrategy",
+            vec![
+                make_member("attached", MemberKind::ClassProperty),
+                make_member("attach", MemberKind::ClassMethod),
+                make_member("detach", MemberKind::ClassMethod),
+                make_member("unusedHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let modules = vec![make_module_with_class_heritage(
         2,
@@ -2364,23 +2684,39 @@ fn same_named_interfaces_do_not_share_member_usage() {
         ("/src/two-impl.ts", false),
         ("/src/consumer.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[2].set_reachable(true);
-    graph.modules[3].set_reachable(true);
-    graph.modules[4].set_reachable(true);
-    graph.modules[5].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members("Strategy", vec![], Some(5))];
-    graph.modules[2].exports = vec![make_export_with_members("Strategy", vec![], Some(0))];
-    graph.modules[3].exports = vec![make_export_with_members(
-        "OneStrategy",
-        vec![make_member("attach", MemberKind::ClassMethod)],
-        Some(0),
-    )];
-    graph.modules[4].exports = vec![make_export_with_members(
-        "TwoStrategy",
-        vec![make_member("attach", MemberKind::ClassMethod)],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    graph.set_reachable(2);
+    graph.set_reachable(3);
+    graph.set_reachable(4);
+    graph.set_reachable(5);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members("Strategy", vec![], Some(5))],
+    );
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members("Strategy", vec![], Some(0))],
+    );
+    set_exports(
+        &mut graph,
+        3,
+        &[make_export_with_members(
+            "OneStrategy",
+            vec![make_member("attach", MemberKind::ClassMethod)],
+            Some(0),
+        )],
+    );
+    set_exports(
+        &mut graph,
+        4,
+        &[make_export_with_members(
+            "TwoStrategy",
+            vec![make_member("attach", MemberKind::ClassMethod)],
+            Some(0),
+        )],
+    );
 
     let modules = vec![
         make_module_with_class_heritage(3, "OneStrategy", None, &["Strategy"]),
@@ -2477,24 +2813,32 @@ fn same_named_exports_do_not_share_member_usage() {
         ("/src/one.ts", false),
         ("/src/two.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[2].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "Widget",
-        vec![
-            make_member("refresh", MemberKind::ClassMethod),
-            make_member("unusedOne", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
-    graph.modules[2].exports = vec![make_export_with_members(
-        "Widget",
-        vec![
-            make_member("refresh", MemberKind::ClassMethod),
-            make_member("unusedTwo", MemberKind::ClassMethod),
-        ],
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    graph.set_reachable(2);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Widget",
+            vec![
+                make_member("refresh", MemberKind::ClassMethod),
+                make_member("unusedOne", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "Widget",
+            vec![
+                make_member("refresh", MemberKind::ClassMethod),
+                make_member("unusedTwo", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )],
+    );
 
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -2569,12 +2913,16 @@ fn same_named_exports_do_not_share_member_usage() {
 #[test]
 fn export_with_no_members_skipped() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export_with_members(
-        "helper",
-        vec![], // no members
-        Some(0),
-    )];
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "helper",
+            vec![], // no members
+            Some(0),
+        )],
+    );
 
     let (enum_members, class_members) = find_unused_members(
         &graph,

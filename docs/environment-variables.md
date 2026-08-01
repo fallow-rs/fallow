@@ -88,6 +88,7 @@ discover these without parsing this page.
 | `FALLOW_PR_COMMENT_LAYOUT` | Sticky PR comment layout: `default`, `compact`, `gate-only`, or `details`. Useful when teams prefer provider-native checks and want less Markdown in the PR conversation. | `default` | `FALLOW_PR_COMMENT_LAYOUT=gate-only` |
 | `FALLOW_CONSOLIDATED_STATUS` | When `fallow ci post-check-run --split-gates` is used, truthy values add one aggregate `Fallow` check alongside the per-gate checks. | unset (off) | `FALLOW_CONSOLIDATED_STATUS=1` |
 | `FALLOW_REVIEW_GUIDANCE` | Set to a truthy value (`1`/`true`/`yes`/`on`) to append collapsed guidance blocks to `review-github`/`review-gitlab` inline comment bodies. | unset (off) | `FALLOW_REVIEW_GUIDANCE=true` |
+| `FALLOW_REVIEW_ID` | Stable identifier used to isolate inline comments when multiple Fallow review jobs target the same PR/MR. Accepts 1-64 ASCII letters, digits, dots, underscores, or hyphens. | unset (unscoped) | `FALLOW_REVIEW_ID=frontend` |
 | `FALLOW_BOT_LOGIN` | Bot or token username treated as fallow's own when reconciling existing PR/MR comments in `review-github`/`review-gitlab`. Required when posting with a personal access token. | unset | `FALLOW_BOT_LOGIN=fallow-bot` |
 
 ## Agent / MCP

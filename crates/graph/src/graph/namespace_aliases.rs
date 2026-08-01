@@ -18,19 +18,27 @@
 //! (reachability) so any reference attached here participates in reachability
 //! and re-export chain propagation downstream.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
+
+use rustc_hash::FxHashMap;
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportedName, NamespaceObjectAlias};
+use fallow_types::extract::{ImportedName, ModuleLoadMechanism, NamespaceObjectAlias};
 
 use crate::resolve::ResolvedModule;
 
 use super::ModuleGraph;
-use super::namespace_indexes::NamespacePropagationIndexes;
-use super::narrowing::{
-    create_synthetic_exports_for_star_re_exports, mark_member_exports_referenced,
+use super::namespace_indexes::{
+    NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
 };
-use super::types::ReferenceKind;
+use super::narrowing::{
+    ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
+    mark_member_exports_referenced_at_site,
+};
+use super::types::{
+    ReferenceKind, ReferencePathId, ReferencePathInterner, ReferenceRouteGraphSpec,
+    ReferenceRouteNodeId, ReferenceRouteNodeSpec,
+};
 
 /// One credit operation collected during the scan and applied after the loop
 /// to keep mutable borrows of `ModuleGraph::modules` localised.
@@ -43,6 +51,8 @@ struct PendingCredit {
     consumer_file_id: FileId,
     /// Span of the consumer's import that brought the aliased export into scope.
     import_span: oxc_span::Span,
+    /// Exact consumer-to-target path, including every alias/re-export hop.
+    path: Option<ReferencePathId>,
 }
 
 /// Propagate cross-package consumer accesses through `NamespaceObjectAlias`
@@ -53,8 +63,9 @@ pub(super) fn propagate_cross_package_aliases(
     graph: &mut ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     indexes: &NamespacePropagationIndexes<'_>,
+    reference_paths: &mut ReferencePathInterner,
 ) {
-    let pending = collect_pending_credits(graph, module_by_id, indexes);
+    let pending = collect_pending_credits(graph, module_by_id, indexes, reference_paths);
     apply_pending_credits(graph, &pending);
 }
 
@@ -62,23 +73,32 @@ fn collect_pending_credits(
     graph: &ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     indexes: &NamespacePropagationIndexes<'_>,
+    reference_paths: &mut ReferencePathInterner,
 ) -> Vec<PendingCredit> {
     let mut pending = Vec::new();
 
-    for alias_module in module_by_id.values() {
+    let mut alias_modules: Vec<_> = module_by_id.values().copied().collect();
+    alias_modules.sort_unstable_by_key(|module| module.file_id.0);
+    for alias_module in alias_modules {
         if alias_module.namespace_object_aliases.is_empty() {
             continue;
         }
         let alias_file_id = alias_module.file_id;
         for alias in &alias_module.namespace_object_aliases {
-            let Some(namespace_target_id) = resolve_namespace_target(alias_module, alias) else {
+            let Some(namespace_target) = resolve_namespace_target(alias_module, alias) else {
                 continue;
             };
-            let Some(target_module_idx) = module_index_for_file(graph, namespace_target_id) else {
+            let Some(target_module_idx) = module_index_for_file(graph, namespace_target.file_id)
+            else {
                 continue;
             };
             let reachable =
                 indexes.enumerate_reachable_barrels(alias_file_id, &alias.via_export_name);
+            let routes = reachable.intern_routes(
+                namespace_target.file_id,
+                namespace_target.mechanism,
+                reference_paths,
+            );
             collect_credits_for_alias(NamespaceCreditInput {
                 graph,
                 indexes,
@@ -86,7 +106,9 @@ fn collect_pending_credits(
                 alias,
                 target_module_idx,
                 reachable: &reachable,
+                routes: &routes,
                 pending: &mut pending,
+                reference_paths,
             });
         }
     }
@@ -97,10 +119,16 @@ fn collect_pending_credits(
 /// Resolve the file_id of a namespace import on `alias_module` whose local
 /// name matches `alias.namespace_local`. Only `InternalModule` targets count;
 /// external packages cannot have references propagated.
+#[derive(Clone, Copy)]
+struct NamespaceTarget {
+    file_id: FileId,
+    mechanism: ModuleLoadMechanism,
+}
+
 fn resolve_namespace_target(
     alias_module: &ResolvedModule,
     alias: &NamespaceObjectAlias,
-) -> Option<FileId> {
+) -> Option<NamespaceTarget> {
     alias_module.resolved_imports.iter().find_map(|import| {
         if import.info.local_name != alias.namespace_local {
             return None;
@@ -108,7 +136,14 @@ fn resolve_namespace_target(
         if !matches!(import.info.imported_name, ImportedName::Namespace) {
             return None;
         }
-        import.target.internal_file_id()
+        Some(NamespaceTarget {
+            file_id: import.target.internal_file_id()?,
+            mechanism: if import.target.is_commonjs_require() {
+                ModuleLoadMechanism::CommonJsRequire
+            } else {
+                ModuleLoadMechanism::EsModule
+            },
+        })
     })
 }
 
@@ -126,8 +161,10 @@ struct NamespaceCreditInput<'a> {
     alias_file_id: FileId,
     alias: &'a NamespaceObjectAlias,
     target_module_idx: usize,
-    reachable: &'a FxHashSet<(FileId, String)>,
+    reachable: &'a ReachableNamespaceExports,
+    routes: &'a NamespaceReferenceRoutes,
     pending: &'a mut Vec<PendingCredit>,
+    reference_paths: &'a mut ReferencePathInterner,
 }
 
 struct ConsumerCreditInput<'a> {
@@ -136,7 +173,9 @@ struct ConsumerCreditInput<'a> {
     import: &'a crate::resolve::ResolvedImport,
     prefix_match: &'a str,
     target_module_idx: usize,
+    path: Option<ReferencePathId>,
     pending: &'a mut Vec<PendingCredit>,
+    reference_paths: &'a mut ReferencePathInterner,
 }
 
 fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
@@ -147,23 +186,28 @@ fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
         alias,
         target_module_idx,
         reachable,
+        routes,
         pending,
+        reference_paths,
     } = input;
     let prefix_match = format!(".{}", alias.suffix);
-    for (target, imported_name) in reachable {
-        for indexed in indexes.consumers_for(*target, imported_name) {
+    for export in reachable.iter() {
+        for indexed in indexes.consumers_for(export.file_id, &export.exported_name) {
             let consumer = indexed.consumer;
             let import = indexed.import;
             if consumer.file_id == alias_file_id {
                 continue;
             }
+            let path = routes.consumer_path(export, indexed, reference_paths);
             collect_credits_for_consumer_import(&mut ConsumerCreditInput {
                 graph,
                 consumer,
                 import,
                 prefix_match: &prefix_match,
                 target_module_idx,
+                path,
                 pending,
+                reference_paths,
             });
         }
     }
@@ -178,7 +222,9 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
     let import = input.import;
     let prefix_match = input.prefix_match;
     let target_module_idx = input.target_module_idx;
+    let path = input.path;
     let pending = &mut *input.pending;
+    let reference_paths = &mut *input.reference_paths;
 
     let consumer_local = import.info.local_name.as_str();
     if consumer_local.is_empty() {
@@ -194,21 +240,21 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
             member: access.member.clone(),
             consumer_file_id: consumer.file_id,
             import_span: import.info.span,
+            path,
         });
-        let mut visited: FxHashSet<usize> = FxHashSet::default();
-        visited.insert(target_module_idx);
-        let ctx = ChainWalkCtx {
+        let mut ctx = ChainWalkContext {
             graph,
             consumer,
             import_span: import.info.span,
+            pending,
+            reference_paths,
         };
         collect_chained_re_export_credits(
-            &ctx,
+            &mut ctx,
             target_module_idx,
             &access.member,
             &format!("{expected_object}.{}", access.member),
-            &mut visited,
-            pending,
+            path,
         );
     }
 }
@@ -216,12 +262,201 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
 /// Invariant context passed through the chain walker: the read-only graph,
 /// the consumer module producing the accesses, and the original import span
 /// to use as the `from` site on every resulting `SymbolReference`. Grouped
-/// into a struct so the recursive helper stays under the workspace's 7-arg
-/// clippy limit.
-struct ChainWalkCtx<'a> {
+/// into a struct so the recursive helper keeps one explicit traversal contract.
+struct ChainWalkContext<'a> {
     graph: &'a ModuleGraph,
     consumer: &'a ResolvedModule,
     import_span: oxc_span::Span,
+    pending: &'a mut Vec<PendingCredit>,
+    reference_paths: &'a mut ReferencePathInterner,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct AliasChainStateKey {
+    module_idx: usize,
+    credited_name: String,
+    accessor_prefix: String,
+}
+
+struct AliasChainState {
+    key: AliasChainStateKey,
+    successors: Vec<usize>,
+}
+
+struct AliasChain {
+    states: Vec<AliasChainState>,
+}
+
+impl AliasChain {
+    fn build(
+        graph: &ModuleGraph,
+        consumer: &ResolvedModule,
+        target_module_idx: usize,
+        credited_name: &str,
+        accessor_prefix: &str,
+    ) -> Self {
+        let root = AliasChainStateKey {
+            module_idx: target_module_idx,
+            credited_name: credited_name.to_string(),
+            accessor_prefix: accessor_prefix.to_string(),
+        };
+        let mut states = vec![AliasChainState {
+            key: root.clone(),
+            successors: Vec::new(),
+        }];
+        let mut state_by_key = FxHashMap::from_iter([(root, 0)]);
+        let mut frontier = VecDeque::from([0]);
+
+        while let Some(state_index) = frontier.pop_front() {
+            let state = &states[state_index].key;
+            let Some(barrel) = graph.modules.get(state.module_idx) else {
+                continue;
+            };
+            let mut chained_targets: Vec<FileId> = barrel
+                .re_exports
+                .iter()
+                .filter(|edge| {
+                    edge.imported_name == "*" && edge.exported_name == state.credited_name
+                })
+                .map(|edge| edge.source_file)
+                .collect();
+            chained_targets.sort_unstable_by_key(|file_id| file_id.0);
+            chained_targets.dedup();
+
+            let mut accessed_members: Vec<String> = consumer
+                .member_accesses
+                .iter()
+                .filter(|access| access.object == state.accessor_prefix)
+                .map(|access| access.member.clone())
+                .collect();
+            accessed_members.sort_unstable();
+            accessed_members.dedup();
+
+            let accessor_prefix = state.accessor_prefix.clone();
+            for source_file in chained_targets {
+                let Some(source_module_idx) = module_index_for_file(graph, source_file) else {
+                    continue;
+                };
+                for member in &accessed_members {
+                    let key = AliasChainStateKey {
+                        module_idx: source_module_idx,
+                        credited_name: member.clone(),
+                        accessor_prefix: format!("{accessor_prefix}.{member}"),
+                    };
+                    let successor = if let Some(index) = state_by_key.get(&key) {
+                        *index
+                    } else {
+                        let index = states.len();
+                        states.push(AliasChainState {
+                            key: key.clone(),
+                            successors: Vec::new(),
+                        });
+                        state_by_key.insert(key, index);
+                        frontier.push_back(index);
+                        index
+                    };
+                    states[state_index].successors.push(successor);
+                }
+            }
+        }
+        for state in &mut states {
+            state.successors.sort_unstable();
+            state.successors.dedup();
+        }
+        Self { states }
+    }
+
+    fn collect_credits(&self, ctx: &mut ChainWalkContext<'_>, base_path: Option<ReferencePathId>) {
+        if self.states.len() == 1 {
+            return;
+        }
+
+        if !ctx.reference_paths.tracks_provenance() {
+            debug_assert!(base_path.is_none());
+            for state in self.states.iter().skip(1).map(|state| &state.key) {
+                ctx.pending.push(PendingCredit {
+                    target_module_idx: state.module_idx,
+                    member: state.credited_name.clone(),
+                    consumer_file_id: ctx.consumer.file_id,
+                    import_span: ctx.import_span,
+                    path: None,
+                });
+            }
+            return;
+        }
+
+        let mut canonical_order: Vec<usize> = (0..self.states.len()).collect();
+        canonical_order.sort_unstable_by(|&left, &right| {
+            let left_state = &self.states[left].key;
+            let right_state = &self.states[right].key;
+            (
+                ctx.graph.modules[left_state.module_idx].file_id.0,
+                left_state.credited_name.as_str(),
+                left_state.accessor_prefix.as_str(),
+            )
+                .cmp(&(
+                    ctx.graph.modules[right_state.module_idx].file_id.0,
+                    right_state.credited_name.as_str(),
+                    right_state.accessor_prefix.as_str(),
+                ))
+        });
+
+        let mut route_node_by_state = vec![ReferenceRouteNodeId(0); self.states.len()];
+        for (route_index, state_index) in canonical_order.iter().copied().enumerate() {
+            route_node_by_state[state_index] = ReferenceRouteNodeId(route_index as u32);
+        }
+
+        let nodes = canonical_order
+            .iter()
+            .map(|&state_index| {
+                let state = &self.states[state_index];
+                ReferenceRouteNodeSpec::new(
+                    ctx.graph.modules[state.key.module_idx].file_id,
+                    ModuleLoadMechanism::EsModule,
+                    state
+                        .successors
+                        .iter()
+                        .map(|&successor| route_node_by_state[successor])
+                        .collect(),
+                )
+            })
+            .collect();
+        let graph = ctx
+            .reference_paths
+            .intern_route_graph(ReferenceRouteGraphSpec::new(nodes));
+        let root = route_node_by_state[0];
+
+        for state_index in canonical_order {
+            if state_index == 0 {
+                continue;
+            }
+            let state = &self.states[state_index].key;
+            let path = ctx.reference_paths.route(
+                base_path,
+                graph,
+                root,
+                route_node_by_state[state_index],
+                None,
+            );
+            ctx.pending.push(PendingCredit {
+                target_module_idx: state.module_idx,
+                member: state.credited_name.clone(),
+                consumer_file_id: ctx.consumer.file_id,
+                import_span: ctx.import_span,
+                path,
+            });
+        }
+    }
+
+    #[cfg(test)]
+    fn state_count(&self) -> usize {
+        self.states.len()
+    }
+
+    #[cfg(test)]
+    fn transition_count(&self) -> usize {
+        self.states.iter().map(|state| state.successors.len()).sum()
+    }
 }
 
 /// Follow `export * as <name> from './source'` chains on the alias target
@@ -231,49 +466,20 @@ struct ChainWalkCtx<'a> {
 /// the re-export's `source_file`. Recurses if the new credit also lands on
 /// another namespace re-export, bounded by `visited` to short-circuit cycles.
 fn collect_chained_re_export_credits(
-    ctx: &ChainWalkCtx<'_>,
+    ctx: &mut ChainWalkContext<'_>,
     barrel_module_idx: usize,
     credited_name: &str,
     accessor_prefix: &str,
-    visited: &mut FxHashSet<usize>,
-    pending: &mut Vec<PendingCredit>,
+    path: Option<ReferencePathId>,
 ) {
-    let Some(barrel) = ctx.graph.modules.get(barrel_module_idx) else {
-        return;
-    };
-    let chained_targets: Vec<FileId> = barrel
-        .re_exports
-        .iter()
-        .filter(|edge| edge.imported_name == "*" && edge.exported_name == credited_name)
-        .map(|edge| edge.source_file)
-        .collect();
-    for source_file in chained_targets {
-        let Some(source_module_idx) = module_index_for_file(ctx.graph, source_file) else {
-            continue;
-        };
-        if !visited.insert(source_module_idx) {
-            continue;
-        }
-        for access in &ctx.consumer.member_accesses {
-            if access.object != accessor_prefix {
-                continue;
-            }
-            pending.push(PendingCredit {
-                target_module_idx: source_module_idx,
-                member: access.member.clone(),
-                consumer_file_id: ctx.consumer.file_id,
-                import_span: ctx.import_span,
-            });
-            collect_chained_re_export_credits(
-                ctx,
-                source_module_idx,
-                &access.member,
-                &format!("{accessor_prefix}.{}", access.member),
-                visited,
-                pending,
-            );
-        }
-    }
+    AliasChain::build(
+        ctx.graph,
+        ctx.consumer,
+        barrel_module_idx,
+        credited_name,
+        accessor_prefix,
+    )
+    .collect_credits(ctx, path);
 }
 
 /// Apply collected credits, grouping by `(target_module_idx, consumer, import_span)`
@@ -285,7 +491,7 @@ fn collect_chained_re_export_credits(
 /// member exports are stubbed so Phase 4 chain resolution can propagate the
 /// reference to the real defining file.
 fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
-    type GroupKey = (usize, FileId, oxc_span::Span);
+    type GroupKey = (usize, FileId, oxc_span::Span, Option<ReferencePathId>);
 
     let mut groups: FxHashMap<GroupKey, Vec<String>> = FxHashMap::default();
     for credit in pending {
@@ -294,27 +500,163 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
                 credit.target_module_idx,
                 credit.consumer_file_id,
                 credit.import_span,
+                credit.path,
             ))
             .or_default()
             .push(credit.member.clone());
     }
 
-    for ((target_module_idx, consumer_file_id, import_span), members) in groups {
+    for ((target_module_idx, consumer_file_id, import_span, path), members) in groups {
         let module = &mut graph.modules[target_module_idx];
-        let found_members = mark_member_exports_referenced(
+        let site = ReferenceSite::exact(consumer_file_id, import_span, path);
+        let found_members = mark_member_exports_referenced_at_site(
             &mut module.exports,
-            consumer_file_id,
+            site,
             &members,
-            import_span,
             ReferenceKind::NamespaceImport,
         );
-        create_synthetic_exports_for_star_re_exports(
+        create_synthetic_exports_for_star_re_exports_at_site(
             &mut module.exports,
             &module.re_exports,
-            consumer_file_id,
+            site,
             &members,
             &found_members,
-            import_span,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::PathBuf;
+
+    use crate::resolve::{ResolveResult, ResolvedModule, ResolvedReExport};
+    use fallow_types::discover::DiscoveredFile;
+    use fallow_types::extract::{MemberAccess, ReExportInfo};
+
+    fn build_namespace_reexport_graph(adjacency: &[Vec<u32>]) -> ModuleGraph {
+        let files: Vec<_> = adjacency
+            .iter()
+            .enumerate()
+            .map(|(index, _)| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(format!("/project/module-{index}.ts")),
+                size_bytes: 10,
+            })
+            .collect();
+        let modules: Vec<_> = adjacency
+            .iter()
+            .enumerate()
+            .map(|(index, targets)| ResolvedModule {
+                file_id: FileId(index as u32),
+                path: files[index].path.clone(),
+                re_exports: targets
+                    .iter()
+                    .map(|&target| ResolvedReExport {
+                        info: ReExportInfo {
+                            source: format!("./module-{target}"),
+                            imported_name: "*".to_string(),
+                            exported_name: "N".to_string(),
+                            is_type_only: false,
+                            span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(target)),
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .collect();
+        ModuleGraph::build(&modules, &[], &files)
+    }
+
+    fn chain_consumer(depth: usize) -> ResolvedModule {
+        let mut object = "API.foo.N".to_string();
+        let mut member_accesses = Vec::with_capacity(depth);
+        for _ in 0..depth {
+            member_accesses.push(MemberAccess {
+                object: object.clone(),
+                member: "N".to_string(),
+            });
+            object.push_str(".N");
+        }
+        ResolvedModule {
+            file_id: FileId(u32::MAX),
+            member_accesses,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn dense_alias_cycle_is_bounded_by_member_states() {
+        const MODULES: usize = 10;
+        const DEPTH: usize = 8;
+        let adjacency: Vec<Vec<u32>> = (0..MODULES)
+            .map(|source| {
+                (0..MODULES)
+                    .filter(|&target| target != source)
+                    .map(|target| target as u32)
+                    .collect()
+            })
+            .collect();
+        let graph = build_namespace_reexport_graph(&adjacency);
+        let consumer = chain_consumer(DEPTH);
+
+        let chain = AliasChain::build(&graph, &consumer, 0, "N", "API.foo.N");
+
+        assert!(chain.state_count() <= 1 + (MODULES * DEPTH));
+        assert!(chain.transition_count() <= MODULES * (MODULES - 1) * DEPTH);
+    }
+
+    #[test]
+    fn repeated_alias_diamonds_grow_by_states_and_edges_not_paths() {
+        const LAYERS: usize = 24;
+        let module_count = 1 + (LAYERS * 2);
+        let mut adjacency = vec![Vec::new(); module_count];
+        let mut previous = vec![0_usize];
+        let mut next_module = 1_usize;
+        for _ in 0..LAYERS {
+            let next = vec![next_module, next_module + 1];
+            next_module += 2;
+            for source in &previous {
+                adjacency[*source].extend(next.iter().map(|target| *target as u32));
+            }
+            previous = next;
+        }
+        let graph = build_namespace_reexport_graph(&adjacency);
+        let consumer = chain_consumer(LAYERS);
+
+        let chain = AliasChain::build(&graph, &consumer, 0, "N", "API.foo.N");
+
+        assert_eq!(chain.state_count(), 1 + (LAYERS * 2));
+        assert_eq!(chain.transition_count(), 2 + ((LAYERS - 1) * 4));
+    }
+
+    #[test]
+    fn untracked_alias_chain_credits_states_without_interning_routes() {
+        let mut graph = build_namespace_reexport_graph(&[vec![1], vec![]]);
+        let consumer = chain_consumer(1);
+        let chain = AliasChain::build(&graph, &consumer, 0, "N", "API.foo.N");
+        let mut pending = Vec::new();
+        let mut reference_paths = ReferencePathInterner::new(false);
+
+        chain.collect_credits(
+            &mut ChainWalkContext {
+                graph: &graph,
+                consumer: &consumer,
+                import_span: oxc_span::Span::new(3, 9),
+                pending: &mut pending,
+                reference_paths: &mut reference_paths,
+            },
+            None,
+        );
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].target_module_idx, 1);
+        assert_eq!(pending[0].member, "N");
+        assert!(pending[0].path.is_none());
+        let finalized = reference_paths.finalize(&mut graph.modules);
+        assert!(finalized.paths.is_empty());
+        assert!(finalized.routes.graphs.is_empty());
     }
 }

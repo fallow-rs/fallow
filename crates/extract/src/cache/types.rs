@@ -843,7 +843,15 @@ use crate::MemberKind;
 /// Bumped to 241: ECMAScript `#private` methods and properties are no longer
 /// extracted as reportable class members. Warm 240 caches can retain those
 /// members and reproduce the old false positives.
-pub(super) const CACHE_VERSION: u32 = 241;
+///
+/// Bumped to 248 for issue #2031: extraction now persists ordered,
+/// provenance-checked Vitest mock/unmock operations and module-load mechanisms.
+/// This lets resolution select final replacement state by canonical module
+/// identity without accepting uncertain factories or original-module loaders.
+/// Warm 241 caches lack those contracts. Versions 242 through 247 were used by
+/// published development commits for this change, so the final version remains
+/// 248 rather than reusing a potentially stale intermediate cache version.
+pub(super) const CACHE_VERSION: u32 = 248;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -914,7 +922,7 @@ assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 88);
 assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
-assert_cached_type_size!(CachedDynamicImportPattern, 56);
+assert_cached_type_size!(CachedDynamicImportPattern, 64);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
@@ -1375,4 +1383,6 @@ pub struct CachedDynamicImportPattern {
     pub(crate) span_start: u32,
     /// Byte offset of the span end.
     pub(crate) span_end: u32,
+    /// Runtime mechanism used to load modules matching this pattern.
+    pub(crate) mechanism: crate::ModuleLoadMechanism,
 }

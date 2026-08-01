@@ -99,6 +99,10 @@ inputs:
     description: 'Append collapsed "What to do" guidance blocks to inline review comments. Requires review-comments: true.'
     required: false
     default: 'false'
+  review-id:
+    description: 'Isolate inline comments when multiple Fallow review jobs target the same pull request. Use a stable identifier of 1-64 ASCII letters, digits, dots, underscores, or hyphens.'
+    required: false
+    default: ''
   max-annotations:
     description: 'Maximum number of inline annotations to emit (default: 50). On the native path the action applies this cap to the rendered stream (GitHub itself displays at most 10 annotations per type per step).'
     required: false
@@ -554,6 +558,7 @@ runs:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         FALLOW_ROOT: ${{ inputs.root }}
         FALLOW_REVIEW_GUIDANCE: ${{ inputs.review-guidance }}
+        FALLOW_REVIEW_ID: ${{ inputs.review-id }}
         MAX_COMMENTS: ${{ inputs.max-comments || inputs.max-annotations }}
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}

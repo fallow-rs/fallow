@@ -2,12 +2,19 @@ use oxc_ast::ast::{
     Argument, CallExpression, Expression, TSInterfaceDeclaration, TSType, TSTypeAliasDeclaration,
 };
 
-use crate::DynamicImportInfo;
+use crate::{
+    DynamicImportInfo, SemanticFact, VitestModuleMockAction, VitestModuleMockOperationFact,
+};
 
-use super::super::{ModuleInfoExtractor, PendingPlaywrightFactory};
+use super::super::{
+    ModuleInfoExtractor, PendingPlaywrightFactory, PendingVitestMockOperation,
+    PendingVitestMockProof,
+};
 use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
-    playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source, vitest_mock_source,
+    playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source,
+    vitest_mock_object_span, vitest_mock_source, vitest_replacement_candidate,
+    vitest_unmock_object_span, vitest_unmock_source,
 };
 
 impl ModuleInfoExtractor {
@@ -225,7 +232,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_vitest_mock_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
+    pub(super) fn record_vitest_mock_imports(&mut self, expr: &CallExpression<'_>) {
         let Some(target_source) = vitest_mock_source(expr) else {
             return;
         };
@@ -249,6 +256,70 @@ impl ModuleInfoExtractor {
                 is_speculative: true,
             });
         }
+
+        if let Some(vi_reference_span) = vitest_mock_object_span(expr) {
+            let proof = vitest_replacement_candidate(expr).map_or(
+                PendingVitestMockProof::UnprovenMock,
+                |candidate| PendingVitestMockProof::ClosedFactory {
+                    vi_reference_spans: candidate.factory_vi_reference_spans,
+                },
+            );
+            self.pending_vitest_mock_operations
+                .push(PendingVitestMockOperation {
+                    source: target_source,
+                    vi_reference_span,
+                    call_start: expr.span.start,
+                    proof,
+                });
+        }
+    }
+
+    pub(super) fn record_vitest_unmock(&mut self, expr: &CallExpression<'_>) {
+        if let Some(source) = vitest_unmock_source(expr)
+            && let Some(vi_reference_span) = vitest_unmock_object_span(expr)
+        {
+            self.pending_vitest_mock_operations
+                .push(PendingVitestMockOperation {
+                    source,
+                    vi_reference_span,
+                    call_start: expr.span.start,
+                    proof: PendingVitestMockProof::Unmock,
+                });
+        }
+    }
+
+    pub(crate) fn resolve_vitest_mock_operations(
+        &mut self,
+        vitest_vi_reference_spans: &rustc_hash::FxHashSet<oxc_span::Span>,
+    ) {
+        let mut operations: Vec<_> = self
+            .pending_vitest_mock_operations
+            .drain(..)
+            .filter(|operation| vitest_vi_reference_spans.contains(&operation.vi_reference_span))
+            .collect();
+        operations.sort_unstable_by_key(|operation| operation.call_start);
+
+        self.semantic_facts
+            .extend(operations.into_iter().map(|operation| {
+                let action = match operation.proof {
+                    PendingVitestMockProof::ClosedFactory { vi_reference_spans } => {
+                        VitestModuleMockAction::Mock {
+                            factory_replaces_original: vi_reference_spans
+                                .iter()
+                                .all(|span| vitest_vi_reference_spans.contains(span)),
+                        }
+                    }
+                    PendingVitestMockProof::UnprovenMock => VitestModuleMockAction::Mock {
+                        factory_replaces_original: false,
+                    },
+                    PendingVitestMockProof::Unmock => VitestModuleMockAction::Unmock,
+                };
+                SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
+                    source: operation.source,
+                    call_start: operation.call_start,
+                    action,
+                })
+            }));
     }
 }
 

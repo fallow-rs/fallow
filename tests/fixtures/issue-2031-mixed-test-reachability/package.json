@@ -1,0 +1,9 @@
+{
+  "name": "issue-2031-mixed-test-reachability",
+  "private": true,
+  "type": "module",
+  "main": "src/entry.ts",
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

@@ -1149,6 +1149,13 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 class_local_name: "Service".to_string(),
                 object: "this.client".to_string(),
             }),
+            SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
+                source: "./dependency".to_string(),
+                call_start: 42,
+                action: VitestModuleMockAction::Mock {
+                    factory_replaces_original: true,
+                },
+            }),
         ]
         .into(),
         whole_object_uses: Box::default(),
@@ -1296,6 +1303,13 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::ClassThisWholeObjectUse(ClassThisWholeObjectUseFact {
                 class_local_name: "Service".to_string(),
                 object: "this.client".to_string(),
+            }),
+            SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
+                source: "./dependency".to_string(),
+                call_start: 42,
+                action: VitestModuleMockAction::Mock {
+                    factory_replaces_original: true,
+                },
             }),
         ][..]
     );
@@ -3226,11 +3240,13 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
                 prefix: "./components/".to_string(),
                 suffix: Some(".vue".to_string()),
                 span: Span::new(0, 50),
+                mechanism: crate::ModuleLoadMechanism::EsModule,
             },
             crate::DynamicImportPattern {
                 prefix: "./pages/**/".to_string(),
                 suffix: None,
                 span: Span::new(60, 100),
+                mechanism: crate::ModuleLoadMechanism::CommonJsRequire,
             },
         ],
         has_cjs_exports: false,
@@ -3311,8 +3327,16 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
     );
     assert_eq!(restored.dynamic_import_patterns[0].span.start, 0);
     assert_eq!(restored.dynamic_import_patterns[0].span.end, 50);
+    assert_eq!(
+        restored.dynamic_import_patterns[0].mechanism,
+        crate::ModuleLoadMechanism::EsModule
+    );
     assert_eq!(restored.dynamic_import_patterns[1].prefix, "./pages/**/");
     assert!(restored.dynamic_import_patterns[1].suffix.is_none());
+    assert_eq!(
+        restored.dynamic_import_patterns[1].mechanism,
+        crate::ModuleLoadMechanism::CommonJsRequire
+    );
 }
 
 #[test]
@@ -4294,7 +4318,9 @@ fn warm_cache_load_matches_cold_parse() {
     let dir = test_cache_dir("warm_equals_cold");
     let path = Path::new("src/warm.tsx");
     let source = "import { useEffect } from 'react';\n\
+         import { vi } from 'vitest';\n\
          import type { Props } from './types';\n\
+         vi.mock('./dependency', () => ({ dependency: vi.fn() }));\n\
          export const App = ({ name }: Props) => {\n\
            useEffect(() => {}, [name]);\n\
            return <Child id={name} />;\n\
@@ -4339,6 +4365,16 @@ fn warm_cache_load_matches_cold_parse() {
     assert_eq!(
         warm_module.render_edges.len(),
         cold_module.render_edges.len()
+    );
+    assert_eq!(warm_module.semantic_facts, cold_module.semantic_facts);
+    assert!(
+        warm_module.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::VitestModuleMockOperation(operation)
+                if operation.source == "./dependency"
+                    && operation.action.replaces_original()
+        )),
+        "warm cache should retain the proven replacement operation"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

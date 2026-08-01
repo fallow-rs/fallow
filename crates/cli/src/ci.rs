@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
+use fallow_output::ReviewId;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -217,6 +218,7 @@ fn run_reconcile_review(
             project_id: project_id.as_deref(),
             api_url: api_url.as_deref(),
             dry_run,
+            review_id: None,
         },
         output,
         json_style,
@@ -374,6 +376,7 @@ struct ReconcileOptions<'a> {
     project_id: Option<&'a str>,
     api_url: Option<&'a str>,
     dry_run: bool,
+    review_id: Option<&'a ReviewId>,
 }
 
 fn reconcile_review(
@@ -389,6 +392,14 @@ fn reconcile_review(
         Err(e) => {
             return emit_error_with_style(&e, 2, output, json_style);
         }
+    };
+    let review_id = match validate_envelope_review_scope(&envelope) {
+        Ok(review_id) => review_id,
+        Err(error) => return emit_error_with_style(&error, 2, output, json_style),
+    };
+    let opts = ReconcileOptions {
+        review_id: review_id.as_ref(),
+        ..opts
     };
     let current = envelope_fingerprints(&envelope);
     let state = match load_provider_state(provider, target, opts) {
@@ -511,6 +522,45 @@ fn read_envelope(path: &Path) -> Result<Value, String> {
         .map_err(|e| format!("failed to read review envelope '{}': {e}", path.display()))?;
     serde_json::from_str(&data)
         .map_err(|e| format!("failed to parse review envelope '{}': {e}", path.display()))
+}
+
+fn review_id_from_envelope(value: &Value) -> Result<Option<ReviewId>, String> {
+    let Some(review_id) = value.pointer("/meta/review_id") else {
+        return Ok(None);
+    };
+    if review_id.is_null() {
+        return Ok(None);
+    }
+    let review_id = review_id
+        .as_str()
+        .ok_or_else(|| "review envelope meta.review_id must be a string".to_owned())?;
+    ReviewId::parse(review_id.to_owned())
+        .map(Some)
+        .map_err(|error| format!("invalid review envelope meta.review_id: {error}"))
+}
+
+fn validate_envelope_review_scope(value: &Value) -> Result<Option<ReviewId>, String> {
+    let review_id = review_id_from_envelope(value)?;
+    let body = value
+        .get("body")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review envelope body must be a string".to_owned())?;
+    fallow_output::validate_review_body_scope(body, review_id.as_ref())
+        .map_err(|error| format!("invalid review envelope body scope: {error}"))?;
+    let comments = value
+        .get("comments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "review envelope comments must be an array".to_owned())?;
+    for (index, comment) in comments.iter().enumerate() {
+        let body = comment
+            .get("body")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("review envelope comments[{index}].body must be a string"))?;
+        fallow_output::validate_review_body_scope(body, review_id.as_ref()).map_err(|error| {
+            format!("invalid review envelope comments[{index}].body scope: {error}")
+        })?;
+    }
+    Ok(review_id)
 }
 
 fn envelope_comments_len(value: &Value) -> usize {
@@ -660,7 +710,7 @@ fn load_github_state(
             break;
         }
         for comment in comments {
-            record_github_review_comment(&mut state, comment);
+            record_github_review_comment(&mut state, comment, opts.review_id);
         }
         if comments.len() < 100 {
             break;
@@ -676,13 +726,22 @@ fn load_github_state(
             token: &token,
             api,
         },
+        opts.review_id,
     )?;
     Ok(state)
 }
 
-fn record_github_review_comment(state: &mut ProviderState, comment: &Value) {
+fn record_github_review_comment(
+    state: &mut ProviderState,
+    comment: &Value,
+    review_id: Option<&ReviewId>,
+) {
     let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-    if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+    let is_root = comment.get("in_reply_to_id").is_none_or(Value::is_null);
+    if is_root
+        && fallow_output::body_matches_review_id(body, review_id)
+        && let Some(fingerprint) = extract_fallow_fingerprint(body)
+    {
         state.fingerprints.insert(fingerprint.clone());
         if let Some(id) = comment.get("id").and_then(Value::as_u64) {
             state
@@ -692,7 +751,8 @@ fn record_github_review_comment(state: &mut ProviderState, comment: &Value) {
                 .push(id);
         }
     }
-    if is_github_bot_comment(comment)
+    if fallow_output::body_matches_review_id(body, review_id)
+        && is_github_bot_comment(comment)
         && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
     {
         state.github_resolved_markers.insert(fingerprint);
@@ -720,6 +780,7 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
 fn load_github_review_threads(
     state: &mut ProviderState,
     conn: GithubConnection<'_>,
+    review_id: Option<&ReviewId>,
 ) -> Result<(), String> {
     let GithubConnection {
         agent,
@@ -756,7 +817,7 @@ fn load_github_review_threads(
             .and_then(Value::as_array)
             .ok_or_else(|| "GitHub reviewThreads response did not contain nodes".to_owned())?;
         for thread in threads {
-            collect_github_thread_fingerprints(state, thread);
+            collect_github_thread_fingerprints(state, thread, review_id);
         }
         let page_info = value
             .pointer("/data/repository/pullRequest/reviewThreads/pageInfo")
@@ -778,7 +839,11 @@ fn load_github_review_threads(
 
 /// Record fallow fingerprints found in an unresolved GitHub review thread's
 /// comment bodies, mapping each to the thread id for later resolution.
-fn collect_github_thread_fingerprints(state: &mut ProviderState, thread: &Value) {
+fn collect_github_thread_fingerprints(
+    state: &mut ProviderState,
+    thread: &Value,
+    review_id: Option<&ReviewId>,
+) {
     if thread
         .get("isResolved")
         .and_then(Value::as_bool)
@@ -789,21 +854,23 @@ fn collect_github_thread_fingerprints(state: &mut ProviderState, thread: &Value)
     let Some(thread_id) = thread.get("id").and_then(Value::as_str) else {
         return;
     };
-    let comments = thread
+    let root = thread
         .pointer("/comments/nodes")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten();
-    for comment in comments {
-        let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-        if let Some(fingerprint) = extract_fallow_fingerprint(body) {
-            state.fingerprints.insert(fingerprint.clone());
-            state
-                .github_threads_by_fingerprint
-                .entry(fingerprint)
-                .or_default()
-                .push(thread_id.to_owned());
-        }
+        .and_then(|comments| comments.first());
+    let Some(root) = root else {
+        return;
+    };
+    let body = root.get("body").and_then(Value::as_str).unwrap_or("");
+    if fallow_output::body_matches_review_id(body, review_id)
+        && let Some(fingerprint) = extract_fallow_fingerprint(body)
+    {
+        state.fingerprints.insert(fingerprint.clone());
+        state
+            .github_threads_by_fingerprint
+            .entry(fingerprint)
+            .or_default()
+            .push(thread_id.to_owned());
     }
 }
 
@@ -841,7 +908,7 @@ fn apply_github_reconcile(
     let sha = std::env::var("GITHUB_SHA")
         .ok()
         .or_else(|| std::env::var("PR_HEAD_SHA").ok());
-    let operations = stage_github_operations(plan, sha.as_deref());
+    let operations = stage_github_operations(plan, sha.as_deref(), opts.review_id);
 
     if let Err(failure) = preflight_github_operations(&operations, &agent, &repo, &token, api) {
         result.record_failure(
@@ -944,6 +1011,7 @@ impl GithubApplyOperation {
 fn stage_github_operations(
     plan: &PlannedReconcile<'_>,
     sha: Option<&str>,
+    review_id: Option<&ReviewId>,
 ) -> Vec<GithubApplyOperation> {
     let mut operations = Vec::new();
     for fingerprint in &plan.plan.stale {
@@ -958,7 +1026,7 @@ fn stage_github_operations(
                 .into_iter()
                 .flatten()
             {
-                let body = resolved_body(fingerprint, sha);
+                let body = resolved_body(fingerprint, sha, review_id);
                 operations.push(GithubApplyOperation::Reply {
                     fingerprint: fingerprint.clone(),
                     comment_id: *comment_id,
@@ -1142,7 +1210,7 @@ fn load_gitlab_state(
             break;
         }
         for discussion in discussions {
-            collect_gitlab_discussion_fingerprints(&mut state, discussion);
+            collect_gitlab_discussion_fingerprints(&mut state, discussion, opts.review_id);
         }
         if discussions.len() < 100 {
             break;
@@ -1153,18 +1221,24 @@ fn load_gitlab_state(
 
 /// Record fallow fingerprints and resolved markers found in a GitLab
 /// discussion's note bodies, mapping each fingerprint to the discussion id.
-fn collect_gitlab_discussion_fingerprints(state: &mut ProviderState, discussion: &Value) {
+fn collect_gitlab_discussion_fingerprints(
+    state: &mut ProviderState,
+    discussion: &Value,
+    review_id: Option<&ReviewId>,
+) {
     let Some(discussion_id) = discussion.get("id").and_then(Value::as_str) else {
         return;
     };
     let notes = discussion
         .get("notes")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten();
-    for note in notes {
-        let body = note.get("body").and_then(Value::as_str).unwrap_or("");
-        if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if let Some(root) = notes.first() {
+        let body = root.get("body").and_then(Value::as_str).unwrap_or("");
+        if fallow_output::body_matches_review_id(body, review_id)
+            && let Some(fingerprint) = extract_fallow_fingerprint(body)
+        {
             state.fingerprints.insert(fingerprint.clone());
             state
                 .gitlab_discussions_by_fingerprint
@@ -1172,7 +1246,11 @@ fn collect_gitlab_discussion_fingerprints(state: &mut ProviderState, discussion:
                 .or_default()
                 .push(discussion_id.to_owned());
         }
-        if is_gitlab_bot_note(note)
+    }
+    for note in notes {
+        let body = note.get("body").and_then(Value::as_str).unwrap_or("");
+        if fallow_output::body_matches_review_id(body, review_id)
+            && is_gitlab_bot_note(note)
             && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
         {
             state.gitlab_resolved_markers.insert(fingerprint);
@@ -1213,7 +1291,7 @@ fn apply_gitlab_reconcile(
     };
     let sha = std::env::var("CI_COMMIT_SHA").ok();
     let encoded_project = url_encode_path_segment(&project_id);
-    let operations = stage_gitlab_operations(plan, sha.as_deref());
+    let operations = stage_gitlab_operations(plan, sha.as_deref(), opts.review_id);
 
     if let Err(failure) =
         preflight_gitlab_operations(&operations, &agent, &encoded_project, mr, &token, &api)
@@ -1318,6 +1396,7 @@ impl GitlabApplyOperation {
 fn stage_gitlab_operations(
     plan: &PlannedReconcile<'_>,
     sha: Option<&str>,
+    review_id: Option<&ReviewId>,
 ) -> Vec<GitlabApplyOperation> {
     let mut operations = Vec::new();
     for fingerprint in &plan.plan.stale {
@@ -1332,7 +1411,7 @@ fn stage_gitlab_operations(
             .flatten()
         {
             if !already_resolved {
-                let body = resolved_body(fingerprint, sha);
+                let body = resolved_body(fingerprint, sha, review_id);
                 operations.push(GitlabApplyOperation::Note {
                     fingerprint: fingerprint.clone(),
                     discussion_id: discussion_id.clone(),
@@ -1764,14 +1843,19 @@ fn resolved_marker_key(fingerprint: &str, sha: Option<&str>) -> String {
     }
 }
 
-fn resolved_body(fingerprint: &str, sha: Option<&str>) -> String {
+fn resolved_body(fingerprint: &str, sha: Option<&str>, review_id: Option<&ReviewId>) -> String {
     let marker = resolved_marker_key(fingerprint, sha);
-    match sha.and_then(|value| value.get(..7)) {
+    let mut body = match sha.and_then(|value| value.get(..7)) {
         Some(short) => {
             format!("Resolved in `{short}`.\n\n<!-- fallow-resolved-fingerprint: {marker} -->")
         }
         None => format!("Resolved.\n\n<!-- fallow-resolved-fingerprint: {marker} -->"),
+    };
+    if let Some(review_id) = review_id {
+        body.push('\n');
+        body.push_str(&fallow_output::review_id_marker(review_id));
     }
+    body
 }
 
 #[expect(
@@ -1906,7 +1990,7 @@ mod tests {
             state: &state,
         };
 
-        let operations = stage_github_operations(&planned, Some("abcdef123456"));
+        let operations = stage_github_operations(&planned, Some("abcdef123456"), None);
 
         assert_eq!(operations.len(), 1);
         let GithubApplyOperation::ResolveThread {
@@ -1935,7 +2019,7 @@ mod tests {
             state: &state,
         };
 
-        let operations = stage_gitlab_operations(&planned, Some("1234567890"));
+        let operations = stage_gitlab_operations(&planned, Some("1234567890"), None);
 
         assert_eq!(operations.len(), 2);
         let GitlabApplyOperation::Note {
@@ -2111,7 +2195,7 @@ mod tests {
 
     #[test]
     fn resolved_body_includes_short_sha_and_per_sha_marker() {
-        let body = resolved_body("abc", Some("1234567890"));
+        let body = resolved_body("abc", Some("1234567890"), None);
         assert!(body.contains("`1234567`"));
         assert!(body.contains("fallow-resolved-fingerprint: abc@1234567"));
     }
@@ -2373,7 +2457,7 @@ mod tests {
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread);
+        collect_github_thread_fingerprints(&mut state, &thread, None);
         assert!(state.fingerprints.is_empty());
         assert!(state.github_threads_by_fingerprint.is_empty());
     }
@@ -2387,7 +2471,7 @@ mod tests {
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread);
+        collect_github_thread_fingerprints(&mut state, &thread, None);
         assert!(state.fingerprints.is_empty());
     }
 
@@ -2401,7 +2485,7 @@ mod tests {
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread);
+        collect_github_thread_fingerprints(&mut state, &thread, None);
         assert!(state.fingerprints.contains("fp-active"));
         assert_eq!(
             state.github_threads_by_fingerprint.get("fp-active"),
@@ -2419,7 +2503,7 @@ mod tests {
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread);
+        collect_github_thread_fingerprints(&mut state, &thread, None);
         assert!(state.fingerprints.is_empty());
     }
 
@@ -2433,7 +2517,7 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
         assert!(state.fingerprints.is_empty());
     }
 
@@ -2446,7 +2530,7 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
         assert!(state.fingerprints.contains("fp-gitlab"));
         assert_eq!(
             state.gitlab_discussions_by_fingerprint.get("fp-gitlab"),
@@ -2466,7 +2550,7 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
         assert!(state.gitlab_resolved_markers.contains("fp-resolved"));
     }
 
@@ -2483,7 +2567,7 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
         assert!(!state.gitlab_resolved_markers.contains("fp-human"));
     }
 
@@ -2497,7 +2581,7 @@ mod tests {
             plan,
             state: &state,
         };
-        assert!(stage_github_operations(&planned, Some("abc1234567")).is_empty());
+        assert!(stage_github_operations(&planned, Some("abc1234567"), None).is_empty());
     }
 
     #[test]
@@ -2517,7 +2601,7 @@ mod tests {
             plan,
             state: &state,
         };
-        let ops = stage_github_operations(&planned, Some("aaabbbccc"));
+        let ops = stage_github_operations(&planned, Some("aaabbbccc"), None);
         assert_eq!(ops.len(), 2, "expected reply + thread ops");
         let has_reply = ops.iter().any(
             |op| matches!(op, GithubApplyOperation::Reply { comment_id, .. } if *comment_id == 55),
@@ -2549,7 +2633,7 @@ mod tests {
             plan,
             state: &state,
         };
-        let ops = stage_github_operations(&planned, None);
+        let ops = stage_github_operations(&planned, None, None);
         let has_reply = ops
             .iter()
             .any(|op| matches!(op, GithubApplyOperation::Reply { .. }));
@@ -2573,7 +2657,7 @@ mod tests {
             plan,
             state: &state,
         };
-        let ops = stage_github_operations(&planned, None);
+        let ops = stage_github_operations(&planned, None, None);
         let GithubApplyOperation::Reply { body, .. } = &ops[0] else {
             panic!("expected Reply op");
         };
@@ -2594,7 +2678,7 @@ mod tests {
             plan,
             state: &state,
         };
-        assert!(stage_gitlab_operations(&planned, Some("sha123")).is_empty());
+        assert!(stage_gitlab_operations(&planned, Some("sha123"), None).is_empty());
     }
 
     #[test]
@@ -2614,7 +2698,7 @@ mod tests {
             plan,
             state: &state,
         };
-        let ops = stage_gitlab_operations(&planned, Some("abc12345678"));
+        let ops = stage_gitlab_operations(&planned, Some("abc12345678"), None);
         assert_eq!(
             ops.len(),
             1,
@@ -2643,7 +2727,7 @@ mod tests {
             plan,
             state: &state,
         };
-        let ops = stage_gitlab_operations(&planned, None);
+        let ops = stage_gitlab_operations(&planned, None, None);
         assert_eq!(ops.len(), 1);
         assert!(
             matches!(&ops[0], GitlabApplyOperation::ResolveDiscussion { .. }),
@@ -2665,7 +2749,7 @@ mod tests {
             plan,
             state: &state,
         };
-        let ops = stage_gitlab_operations(&planned, None);
+        let ops = stage_gitlab_operations(&planned, None, None);
         assert_eq!(ops.len(), 2);
         let GitlabApplyOperation::Note { body, .. } = &ops[0] else {
             panic!("expected Note op first");
@@ -2692,7 +2776,7 @@ mod tests {
 
     #[test]
     fn resolved_body_without_sha_omits_backtick_and_uses_bare_marker() {
-        let body = resolved_body("fp-x", None);
+        let body = resolved_body("fp-x", None, None);
         assert!(!body.contains('`'), "no backtick when sha is None");
         assert!(body.contains("fallow-resolved-fingerprint: fp-x"));
     }
@@ -2937,5 +3021,146 @@ mod tests {
     fn compute_retry_wait_uses_retry_after_when_within_bounds() {
         let headers = headers_with_retry_after("30");
         assert_eq!(compute_retry_wait(&headers, 2, "GitHub"), 30);
+    }
+
+    #[test]
+    fn github_identical_fingerprints_are_isolated_by_review_id() {
+        let frontend = ReviewId::parse("frontend").unwrap();
+        let backend = ReviewId::parse("backend").unwrap();
+        let frontend_comment = serde_json::json!({
+            "id": 1,
+            "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->"
+        });
+        let backend_comment = serde_json::json!({
+            "id": 2,
+            "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: backend -->"
+        });
+        let mut state = ProviderState::default();
+
+        record_github_review_comment(&mut state, &frontend_comment, Some(&frontend));
+        record_github_review_comment(&mut state, &backend_comment, Some(&frontend));
+
+        assert_eq!(
+            state.github_comments_by_fingerprint["abcdef0123456789"],
+            vec![1]
+        );
+        assert!(fallow_output::body_matches_review_id(
+            frontend_comment["body"].as_str().unwrap(),
+            Some(&frontend)
+        ));
+        assert!(!fallow_output::body_matches_review_id(
+            frontend_comment["body"].as_str().unwrap(),
+            Some(&backend)
+        ));
+    }
+
+    #[test]
+    fn github_unscoped_review_ignores_scoped_and_non_root_comments() {
+        let scoped = serde_json::json!({
+            "id": 1,
+            "body": "<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->"
+        });
+        let reply = serde_json::json!({
+            "id": 2,
+            "in_reply_to_id": 1,
+            "body": "<!-- fallow-fingerprint:v2: fedcba9876543210 -->"
+        });
+        let mut state = ProviderState::default();
+
+        record_github_review_comment(&mut state, &scoped, None);
+        record_github_review_comment(&mut state, &reply, None);
+
+        assert!(state.fingerprints.is_empty());
+    }
+
+    #[test]
+    fn gitlab_identical_fingerprints_and_resolution_replies_are_scoped() {
+        let frontend = ReviewId::parse("frontend").unwrap();
+        let discussion = serde_json::json!({
+            "id": "discussion-1",
+            "notes": [
+                {
+                    "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->"
+                },
+                {
+                    "body": "Resolved.\n<!-- fallow-resolved-fingerprint: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->",
+                    "system": true
+                }
+            ]
+        });
+        let mut scoped = ProviderState::default();
+        let mut unscoped = ProviderState::default();
+
+        collect_gitlab_discussion_fingerprints(&mut scoped, &discussion, Some(&frontend));
+        collect_gitlab_discussion_fingerprints(&mut unscoped, &discussion, None);
+
+        assert!(scoped.fingerprints.contains("abcdef0123456789"));
+        assert!(scoped.gitlab_resolved_markers.contains("abcdef0123456789"));
+        assert!(unscoped.fingerprints.is_empty());
+        assert!(unscoped.gitlab_resolved_markers.is_empty());
+    }
+
+    #[test]
+    fn resolution_body_retains_exact_review_marker() {
+        let review_id = ReviewId::parse("frontend.check").unwrap();
+        let body = resolved_body("abcdef0123456789", Some("1234567890"), Some(&review_id));
+
+        assert!(body.ends_with("<!-- fallow-review-id: frontend.check -->"));
+        assert!(fallow_output::body_matches_review_id(
+            &body,
+            Some(&review_id)
+        ));
+    }
+
+    #[test]
+    fn malformed_or_duplicate_review_markers_fail_closed() {
+        assert!(
+            fallow_output::parse_review_id_marker("<!-- fallow-review-id: bad value -->").is_err()
+        );
+        assert!(
+            fallow_output::parse_review_id_marker("<!-- fallow-review-id : frontend -->").is_err()
+        );
+        assert!(
+            fallow_output::parse_review_id_marker("<!-- fallow-review-id frontend -->").is_err()
+        );
+        assert!(!fallow_output::body_matches_review_id(
+            "<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id : frontend -->",
+            None
+        ));
+        assert!(
+            fallow_output::parse_review_id_marker(
+                "<!-- fallow-review-id: first -->\n<!-- fallow-review-id: second -->"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn envelope_scope_preflight_rejects_missing_unexpected_malformed_and_duplicate_markers() {
+        let cases = [
+            serde_json::json!({
+                "body": "<!-- fallow-review-id: frontend -->",
+                "comments": [{"body": "finding"}],
+                "meta": {"review_id": "frontend"}
+            }),
+            serde_json::json!({
+                "body": "<!-- fallow-review-id: frontend -->",
+                "comments": []
+            }),
+            serde_json::json!({
+                "body": "<!-- fallow-review-id : frontend -->",
+                "comments": [],
+                "meta": {"review_id": "frontend"}
+            }),
+            serde_json::json!({
+                "body": "<!-- fallow-review-id: frontend -->\n<!-- fallow-review-id: frontend -->",
+                "comments": [],
+                "meta": {"review_id": "frontend"}
+            }),
+        ];
+
+        for envelope in cases {
+            assert!(validate_envelope_review_scope(&envelope).is_err());
+        }
     }
 }

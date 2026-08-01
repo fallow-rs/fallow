@@ -28,7 +28,9 @@ pub fn augment_external_style_package_usage(
         let existing_packages: FxHashSet<String> = module
             .all_resolved_imports()
             .filter_map(|import| match &import.target {
-                ResolveResult::NpmPackage(name) => Some(name.clone()),
+                ResolveResult::NpmPackage(name) | ResolveResult::CommonJsNpmPackage(name) => {
+                    Some(name.clone())
+                }
                 _ => None,
             })
             .collect();
@@ -274,7 +276,7 @@ impl<'a> ExternalStylePackageScanner<'a> {
             &self.session,
         );
 
-        let Some(resolved_module) = resolved.first() else {
+        let Some(resolved_module) = resolved.modules.first() else {
             return;
         };
         for import in resolved_module.all_resolved_imports() {
@@ -291,7 +293,7 @@ impl<'a> ExternalStylePackageScanner<'a> {
         packages: &mut FxHashSet<String>,
     ) {
         match &import.target {
-            ResolveResult::NpmPackage(name) => {
+            ResolveResult::NpmPackage(name) | ResolveResult::CommonJsNpmPackage(name) => {
                 packages.insert(name.clone());
             }
             ResolveResult::ExternalFile(child) => {
@@ -307,8 +309,10 @@ impl<'a> ExternalStylePackageScanner<'a> {
                 }
             }
             ResolveResult::InternalModule(_)
+            | ResolveResult::CommonJsInternalModule(_)
             | ResolveResult::SyntheticAutoImport(_)
-            | ResolveResult::InternalPackageModule { .. } => {}
+            | ResolveResult::InternalPackageModule { .. }
+            | ResolveResult::CommonJsInternalPackageModule { .. } => {}
         }
     }
 

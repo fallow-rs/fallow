@@ -115,7 +115,8 @@ pub use ci_output::{
     composite_fingerprint, escape_md, github_check_conclusion, group_review_issues_by_path_line,
     is_project_level_rule, issues_from_codeclimate, issues_from_codeclimate_issues,
     render_pr_comment, render_review_comment_for_group, render_review_envelope,
-    review_label_from_codeclimate, summary_fingerprint, summary_label,
+    render_scoped_review_envelope, review_label_from_codeclimate, summary_fingerprint,
+    summary_label,
 };
 pub use codeclimate::{
     CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueInput, CodeClimateIssueKind,
@@ -279,11 +280,14 @@ pub use report_contract::{
 };
 pub use review_envelopes::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, MARKER_REGEX_FLAGS_V2, MARKER_REGEX_V2, ReviewCheckConclusion,
-    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
-    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
-    ReviewReconcileSchema, default_marker_regex, default_marker_regex_flags, is_false,
-    serialize_review_envelope_json_output, serialize_review_reconcile_json_output,
+    GitLabReviewPositionType, MARKER_REGEX_FLAGS_V2, MARKER_REGEX_V2, REVIEW_ID_MARKER_PREFIX,
+    ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
+    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewEnvelopeWireOutput,
+    ReviewId, ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema, body_matches_review_id,
+    default_marker_regex, default_marker_regex_flags, is_false, parse_review_id_marker,
+    review_id_marker, serialize_review_envelope_json_output,
+    serialize_review_reconcile_json_output, serialize_scoped_review_envelope_json_output,
+    validate_review_body_scope,
 };
 pub use root_envelopes::{
     AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,

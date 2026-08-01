@@ -79,3 +79,13 @@ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"
 
 Then run the full repository verification from
 [quality gates](quality-gates.md).
+
+## Changing this contract
+
+The publication order described here is mirrored by maintainer-side release
+runbooks that this repository cannot see or gate. Whenever the job graph, the
+dispatch inputs, the asset-bundle name, the final gate job, or the ownership of
+a verification step changes, treat those runbooks as companions that must be
+resynchronized in the same pass. A runbook left on the previous order does not
+fail loudly: it can push a tag that no longer triggers anything and publish an
+immutable release with no assets.

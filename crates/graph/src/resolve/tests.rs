@@ -5,8 +5,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
-    DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ReExportInfo,
-    RequireCallInfo,
+    DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ModuleLoadMechanism,
+    ReExportInfo, RequireCallInfo, SemanticFact, VitestModuleMockAction,
+    VitestModuleMockOperationFact,
 };
 
 use super::dynamic_imports::{
@@ -21,6 +22,7 @@ use super::types::{CanonicalizeCache, ResolveContext, TsconfigCache};
 use super::upgrades::apply_specifier_upgrades;
 use super::{
     ResolveAllImportsInput, ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
+    final_replaced_module_targets, resolve_vitest_mock_operations,
 };
 
 fn dummy_span() -> Span {
@@ -94,6 +96,28 @@ fn make_re_export(source: &str, imported: &str, exported: &str) -> ReExportInfo 
     }
 }
 
+fn vitest_mock_fact(
+    source: &str,
+    call_start: u32,
+    factory_replaces_original: bool,
+) -> SemanticFact {
+    SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
+        source: source.to_string(),
+        call_start,
+        action: VitestModuleMockAction::Mock {
+            factory_replaces_original,
+        },
+    })
+}
+
+fn vitest_unmock_fact(source: &str, call_start: u32) -> SemanticFact {
+    SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
+        source: source.to_string(),
+        call_start,
+        action: VitestModuleMockAction::Unmock,
+    })
+}
+
 fn make_dynamic(
     source: &str,
     destructured: Vec<&str>,
@@ -164,6 +188,181 @@ fn make_resolved_re_export(source: &str, target: ResolveResult) -> ResolvedReExp
         info: make_re_export(source, "x", "x"),
         target,
     }
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn vitest_mock_operations_resolve_canonical_targets_and_abstain_on_missing() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dunce::canonicalize(dir.path()).expect("canonicalize temp dir");
+    let test_file = root.join("wrapper.test.ts");
+    let dependency_file = root.join("dependency.ts");
+    std::fs::write(&test_file, "").expect("write test file");
+    std::fs::write(&dependency_file, "export const value = 1;").expect("write dependency");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["*"]}}}"#,
+    )
+    .expect("write tsconfig");
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let path_to_id = FxHashMap::from_iter([
+        (test_file.as_path(), FileId(0)),
+        (dependency_file.as_path(), FileId(1)),
+    ]);
+    let raw_path_to_id = path_to_id.clone();
+    let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
+    let canonicalize_cache = CanonicalizeCache::default();
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root: &root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
+        canonicalize_cache: &canonicalize_cache,
+    };
+    let facts = [
+        vitest_mock_fact("./dependency", 10, true),
+        vitest_mock_fact("./missing", 20, true),
+    ];
+
+    let mut operations = resolve_vitest_mock_operations(FileId(0), &facts, &ctx, &test_file);
+    apply_specifier_upgrades(&mut [], &mut operations);
+    let targets = final_replaced_module_targets(operations);
+
+    assert_eq!(
+        targets,
+        vec![super::ResolvedReplacedModuleTarget {
+            source_file: FileId(0),
+            target_file: FileId(1),
+        }]
+    );
+    let facts = [
+        vitest_mock_fact("@/dependency", 10, true),
+        vitest_unmock_fact("./dependency.ts", 20),
+    ];
+
+    let mut operations = resolve_vitest_mock_operations(FileId(0), &facts, &ctx, &test_file);
+    assert!(
+        operations
+            .iter()
+            .all(|operation| operation.target.internal_file_id() == Some(FileId(1))),
+        "alias and explicit-extension spellings should resolve to one canonical target: {operations:?}"
+    );
+    apply_specifier_upgrades(&mut [], &mut operations);
+    assert!(
+        final_replaced_module_targets(operations).is_empty(),
+        "the final unmock must clear an equivalent aliased mock target"
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn cross_tsconfig_bare_alias_upgrades_replacement_target() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dunce::canonicalize(dir.path()).expect("canonicalize temp dir");
+    let aliased_dir = root.join("packages/app");
+    let aliased_source = aliased_dir.join("src/source.ts");
+    let test_file = root.join("tests/example.test.ts");
+    let dependency_file = root.join("shared/dependency.ts");
+    std::fs::create_dir_all(aliased_source.parent().expect("source parent"))
+        .expect("create aliased source dir");
+    std::fs::create_dir_all(test_file.parent().expect("test parent"))
+        .expect("create test source dir");
+    std::fs::create_dir_all(dependency_file.parent().expect("dependency parent"))
+        .expect("create dependency dir");
+    std::fs::write(
+        aliased_dir.join("tsconfig.json"),
+        r#"{
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "shared-alias": ["../../shared/dependency.ts"]
+                }
+            }
+        }"#,
+    )
+    .expect("write tsconfig");
+    std::fs::write(&aliased_source, "").expect("write aliased source");
+    std::fs::write(&test_file, "").expect("write test source");
+    std::fs::write(&dependency_file, "export const value = 1;").expect("write dependency");
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let path_to_id = FxHashMap::from_iter([
+        (aliased_source.as_path(), FileId(0)),
+        (test_file.as_path(), FileId(1)),
+        (dependency_file.as_path(), FileId(2)),
+    ]);
+    let raw_path_to_id = path_to_id.clone();
+    let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
+    let canonicalize_cache = CanonicalizeCache::default();
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root: &root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
+        canonicalize_cache: &canonicalize_cache,
+    };
+
+    let donor_imports = resolve_static_imports(
+        &ctx,
+        &aliased_source,
+        &[make_import(
+            "shared-alias",
+            ImportedName::Named("value".to_string()),
+            "value",
+        )],
+    );
+    assert!(matches!(
+        donor_imports[0].target,
+        ResolveResult::InternalModule(FileId(2))
+    ));
+
+    let mut operations = resolve_vitest_mock_operations(
+        FileId(1),
+        &[vitest_mock_fact("shared-alias", 10, true)],
+        &ctx,
+        &test_file,
+    );
+    assert!(matches!(operations[0].target, ResolveResult::NpmPackage(_)));
+
+    let mut modules = vec![make_resolved_module(0, donor_imports, vec![], vec![])];
+    apply_specifier_upgrades(&mut modules, &mut operations);
+
+    assert_eq!(operations[0].target.internal_file_id(), Some(FileId(2)));
 }
 
 #[test]
@@ -522,7 +721,7 @@ fn require_imports_empty_list() {
 }
 
 #[test]
-fn specifier_upgrades_npm_to_internal() {
+fn specifier_upgrades_npm_to_internal_with_package_identity() {
     let mut modules = vec![
         make_resolved_module(
             0,
@@ -544,11 +743,18 @@ fn specifier_upgrades_npm_to_internal() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_imports[0].target,
+        modules[0].resolved_imports[0].target,
         ResolveResult::InternalModule(FileId(5))
+    ));
+    assert!(matches!(
+        &modules[1].resolved_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "preact"
     ));
 }
 
@@ -575,7 +781,7 @@ fn specifier_upgrades_noop_when_no_internal() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[0].resolved_imports[0].target,
@@ -590,7 +796,7 @@ fn specifier_upgrades_noop_when_no_internal() {
 #[test]
 fn specifier_upgrades_empty_modules() {
     let mut modules: Vec<ResolvedModule> = vec![];
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
     assert!(modules.is_empty());
 }
 
@@ -617,7 +823,7 @@ fn specifier_upgrades_skips_relative_specifiers() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -648,11 +854,14 @@ fn specifier_upgrades_applies_to_dynamic_imports() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_dynamic_imports[0].target,
-        ResolveResult::InternalModule(FileId(5))
+        &modules[1].resolved_dynamic_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "preact"
     ));
 }
 
@@ -679,11 +888,14 @@ fn specifier_upgrades_applies_to_re_exports() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].re_exports[0].target,
-        ResolveResult::InternalModule(FileId(5))
+        &modules[1].re_exports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "preact"
     ));
 }
 
@@ -710,7 +922,7 @@ fn specifier_upgrades_does_not_downgrade_internal() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[0].resolved_imports[0].target,
@@ -754,11 +966,14 @@ fn specifier_upgrades_first_internal_wins() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[2].resolved_imports[0].target,
-        ResolveResult::InternalModule(FileId(10))
+        &modules[2].resolved_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(10),
+            package_name,
+        } if package_name == "shared-lib"
     ));
 }
 
@@ -785,7 +1000,7 @@ fn specifier_upgrades_does_not_touch_unresolvable() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -816,11 +1031,14 @@ fn specifier_upgrades_cross_import_and_re_export() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].re_exports[0].target,
-        ResolveResult::InternalModule(FileId(3))
+        &modules[1].re_exports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(3),
+            package_name,
+        } if package_name == "@myorg/utils"
     ));
 }
 
@@ -831,6 +1049,7 @@ fn dynamic_patterns_matches_files_in_dir() {
         prefix: "./locales/".into(),
         suffix: Some(".json".into()),
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/locales/en.json"),
@@ -870,6 +1089,7 @@ fn dynamic_patterns_no_matches_returns_empty() {
         prefix: "./locales/".into(),
         suffix: Some(".json".into()),
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![PathBuf::from("/project/src/utils.ts")];
     let files = vec![DiscoveredFile {
@@ -904,6 +1124,7 @@ fn dynamic_patterns_glob_prefix_passthrough() {
         prefix: "./**/*.ts".into(),
         suffix: None,
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/utils.ts"),
@@ -960,7 +1181,7 @@ fn static_import_bare_specifier_becomes_npm_package() {
 }
 
 #[test]
-fn require_bare_specifier_becomes_npm_package() {
+fn require_bare_specifier_retains_commonjs_provenance() {
     with_empty_ctx(|ctx| {
         let req = make_require("express", vec![], Some("express"));
         let file = Path::new("/project/src/app.js");
@@ -969,7 +1190,7 @@ fn require_bare_specifier_becomes_npm_package() {
         assert_eq!(result.len(), 1);
         assert!(matches!(
             result[0].target,
-            ResolveResult::NpmPackage(ref pkg) if pkg == "express"
+            ResolveResult::CommonJsNpmPackage(ref pkg) if pkg == "express"
         ));
     });
 }
@@ -1021,11 +1242,14 @@ fn specifier_upgrades_re_export_triggers_import_upgrade() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_imports[0].target,
-        ResolveResult::InternalModule(FileId(5))
+        &modules[1].resolved_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(5),
+            package_name,
+        } if package_name == "@myorg/shared"
     ));
 }
 
@@ -1052,11 +1276,14 @@ fn specifier_upgrades_re_export_triggers_dynamic_import_upgrade() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
-        modules[1].resolved_dynamic_imports[0].target,
-        ResolveResult::InternalModule(FileId(7))
+        &modules[1].resolved_dynamic_imports[0].target,
+        ResolveResult::InternalPackageModule {
+            file_id: FileId(7),
+            package_name,
+        } if package_name == "my-workspace-pkg"
     ));
 }
 
@@ -1085,7 +1312,7 @@ fn specifier_upgrades_does_not_upgrade_external_file() {
         ),
     ];
 
-    apply_specifier_upgrades(&mut modules);
+    apply_specifier_upgrades(&mut modules, &mut []);
 
     assert!(matches!(
         modules[1].resolved_imports[0].target,
@@ -1100,6 +1327,7 @@ fn dynamic_patterns_prefix_without_suffix() {
         prefix: "./pages/".into(),
         suffix: None,
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/pages/Home.tsx"),
@@ -1139,6 +1367,7 @@ fn dynamic_patterns_empty_canonical_paths() {
         prefix: "./locales/".into(),
         suffix: Some(".json".into()),
         span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
     }];
 
     let result = resolve_dynamic_patterns(from_dir, &patterns, &[], &[]);
@@ -1240,6 +1469,43 @@ fn dynamic_import_preserves_source_span() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].info.span.start, 42);
         assert_eq!(result[0].info.span.end, 84);
+    });
+}
+
+#[test]
+fn specifier_upgrade_preserves_actual_require_mechanism() {
+    with_empty_ctx(|ctx| {
+        let require_imports = resolve_single_require(
+            ctx,
+            Path::new("/project/src/consumer.js"),
+            &make_require("shared-package", vec![], Some("shared")),
+        );
+        assert!(matches!(
+            require_imports[0].target,
+            ResolveResult::CommonJsNpmPackage(_)
+        ));
+
+        let mut modules = vec![
+            make_resolved_module(
+                0,
+                vec![make_resolved_import(
+                    "shared-package",
+                    ResolveResult::InternalModule(FileId(2)),
+                )],
+                vec![],
+                vec![],
+            ),
+            make_resolved_module(1, require_imports, vec![], vec![]),
+        ];
+        apply_specifier_upgrades(&mut modules, &mut []);
+
+        assert!(matches!(
+            &modules[1].resolved_imports[0].target,
+            ResolveResult::CommonJsInternalPackageModule {
+                file_id: FileId(2),
+                package_name,
+            } if package_name == "shared-package"
+        ));
     });
 }
 
