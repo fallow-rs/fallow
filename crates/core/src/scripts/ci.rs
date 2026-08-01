@@ -117,6 +117,8 @@ fn extract_ci_signals(
 /// - YAML list items in script blocks: `  - npx tool --flag`
 /// - GitHub Actions run fields: `  run: command`
 /// - Block scalar run blocks: `  run: |` or `  run: >` followed by indented lines
+/// - Plain multi-line scalars: `  run: command` whose continuation lines are
+///   indented past the `run` key column and fold into the same command
 fn extract_ci_commands(content: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut multiline_run = MultilineRunState::default();
@@ -134,9 +136,10 @@ fn extract_ci_commands(content: &str) -> Vec<String> {
 
         if let Some(rest) = yaml_run_value(trimmed) {
             if is_multiline_run_marker(rest) {
-                multiline_run.start(line);
+                multiline_run.start(run_key_column(line, trimmed), false);
             } else if !rest.is_empty() {
                 commands.push(rest.to_string());
+                multiline_run.start(run_key_column(line, trimmed), true);
             }
             continue;
         }
@@ -151,16 +154,32 @@ fn extract_ci_commands(content: &str) -> Vec<String> {
 struct MultilineRunState {
     active: bool,
     indent: usize,
+    folding: bool,
 }
 
 impl MultilineRunState {
-    fn start(&mut self, line: &str) {
+    /// Anchor at the `run` key column so sibling step keys (`env:`, `with:`),
+    /// which sit at the same column, terminate the scalar instead of being
+    /// swallowed as continuation lines. `folding` marks a plain scalar whose
+    /// continuations fold into the already-pushed command.
+    fn start(&mut self, key_column: usize, folding: bool) {
         self.active = true;
-        self.indent = line.len() - line.trim_start().len();
+        self.indent = key_column;
+        self.folding = folding;
     }
 
     fn stop(&mut self) {
         self.active = false;
+        self.folding = false;
+    }
+}
+
+/// Column of the `run` key itself, past any leading `- ` list indicator.
+fn run_key_column(line: &str, trimmed: &str) -> usize {
+    let base = line.len() - line.trim_start().len();
+    match trimmed.strip_prefix("- ") {
+        Some(rest) => base + 2 + (rest.len() - rest.trim_start().len()),
+        None => base,
     }
 }
 
@@ -180,7 +199,14 @@ fn push_multiline_run_command(
 
     let indent = line.len() - line.trim_start().len();
     if indent > state.indent && !trimmed.is_empty() {
-        commands.push(trimmed.to_string());
+        if state.folding {
+            if let Some(last) = commands.last_mut() {
+                last.push(' ');
+                last.push_str(trimmed);
+            }
+        } else {
+            commands.push(trimmed.to_string());
+        }
         return true;
     }
 
@@ -346,6 +372,76 @@ jobs:
         assert!(commands.contains(&"npm ci".to_string()));
         assert!(commands.contains(&"npx @cyclonedx/cyclonedx-npm --output sbom.json".to_string()));
         assert!(commands.contains(&"npm run build".to_string()));
+    }
+
+    /// The shape of GitHub's own code-scanning/eslint.yml starter workflow: a
+    /// plain (unquoted) scalar whose continuation lines are indented past the
+    /// `run` key column and fold into one command (issue #2016).
+    #[test]
+    fn github_actions_plain_multiline_run_folds_continuations() {
+        let content = r"
+jobs:
+  eslint:
+    steps:
+      - name: Run ESLint
+        run: npx eslint .
+          --config .eslintrc.js
+          --ext .js,.jsx,.ts,.tsx
+        continue-on-error: true
+";
+        let commands = extract_ci_commands(content);
+        assert!(
+            commands.contains(
+                &"npx eslint . --config .eslintrc.js --ext .js,.jsx,.ts,.tsx".to_string()
+            ),
+            "continuation lines must fold into the run command, got: {commands:?}"
+        );
+        assert!(
+            !commands.iter().any(|c| c.contains("continue-on-error")),
+            "sibling step keys must not be swallowed as continuations, got: {commands:?}"
+        );
+    }
+
+    /// Sibling keys sit at the `run` key column, so key-column anchoring must
+    /// terminate a plain scalar there; their path-looking values must not flow
+    /// into entry_files where they could hide genuinely unused files.
+    #[test]
+    fn plain_run_sibling_key_values_do_not_leak_into_entry_files() {
+        let content = r"
+jobs:
+  build:
+    steps:
+      - run: npx eslint .
+          --max-warnings 0
+        env:
+          CONFIG_PATH: scripts/config.ts
+";
+        let commands = extract_ci_commands(content);
+        assert!(commands.contains(&"npx eslint . --max-warnings 0".to_string()));
+        assert!(!commands.iter().any(|c| c.contains("CONFIG_PATH")));
+
+        let analysis = analyze_content(content);
+        assert!(
+            !analysis.entry_files.iter().any(|f| f.contains("config.ts")),
+            "env values must not seed entry files, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// End-to-end coverage for folded block scalars, beyond the marker
+    /// predicate test: commands inside `run: >-` must reach package analysis.
+    #[test]
+    fn folded_run_block_commands_analyzed() {
+        let content = r"
+jobs:
+  sbom:
+    steps:
+      - run: >-
+          npx @cyclonedx/cyclonedx-npm
+          --output-file sbom.json
+";
+        let analysis = analyze_content(content);
+        assert!(analysis.used_packages.contains("@cyclonedx/cyclonedx-npm"));
     }
 
     #[test]

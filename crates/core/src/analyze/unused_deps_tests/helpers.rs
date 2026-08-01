@@ -30,6 +30,7 @@ pub(super) use super::super::{
     collect_unused_for_category, find_dev_dependencies_in_production, find_import_location,
     find_test_only_dependencies, find_type_only_dependencies, find_unresolved_imports,
     find_unused_dependencies, is_package_listed_for_file, should_skip_dependency,
+    workspace_dependency_map,
 };
 
 #[expect(

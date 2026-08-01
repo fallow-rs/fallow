@@ -1,0 +1,7 @@
+{
+  "name": "@scope/lib",
+  "exports": {
+    ".": "./mod.ts",
+    "./public": "./public.ts",
+  },
+}

@@ -469,7 +469,7 @@ fn add_workspace_public_api_entry_points(
     canonical_project_root: &std::path::Path,
 ) {
     for workspace in workspaces {
-        let Ok(pkg) = PackageJson::load(&workspace.root.join("package.json")) else {
+        let Some(pkg) = fallow_config::load_dir_package_json(&workspace.root) else {
             continue;
         };
         add_package_public_api_entry_points(
@@ -739,7 +739,7 @@ fn collect_declared_dependency_names(
         if ws.root == config.root {
             continue; // already covered by root_pkg
         }
-        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
             deps.extend(pkg.all_dependency_names());
         }
     }
@@ -767,8 +767,7 @@ fn build_dead_code_run_context<'a>(
         .map(|m| (m.file_id, m.line_offsets.as_slice()))
         .collect();
 
-    let pkg_path = config.root.join("package.json");
-    let pkg = PackageJson::load(&pkg_path).ok();
+    let pkg = fallow_config::load_dir_package_json(&config.root);
     let public_api_entry_points =
         public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
     let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);

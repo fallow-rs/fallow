@@ -464,6 +464,16 @@ pub(super) struct PackageManifestInfo {
     pub name: Option<String>,
     /// Parsed package.json fields.
     pub package_json: fallow_config::PackageJson,
+    /// Effective Deno import map for this package scope.
+    pub deno_import_map: Vec<DenoImportMapEntry>,
+}
+
+/// One effective Deno import-map entry with the directory that declared it.
+#[derive(Debug, Clone)]
+pub(super) struct DenoImportMapEntry {
+    pub key: String,
+    pub target: String,
+    pub declaring_dir: PathBuf,
 }
 
 /// Thread-safe lazy canonical path index, built on first access.

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{PackageJson, ResolvedConfig, WorkspaceInfo};
+use fallow_config::{ResolvedConfig, WorkspaceInfo};
 
 use crate::{
     discover::{DiscoveredFile, EntryPoint},
@@ -19,7 +19,7 @@ pub enum ListInventoryError {
 /// Collect active plugins from the root package and every workspace package.
 ///
 /// Missing package manifests are ignored, matching the historical list-command
-/// behavior.
+/// behavior. Deno members are loaded via `deno.json` the same way analysis does.
 ///
 /// # Errors
 ///
@@ -35,16 +35,10 @@ pub fn collect_active_plugins(
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     let registry = PluginRegistry::new(config.external_plugins.clone());
-    let mut result = run_package_plugins(&registry, &root.join("package.json"), root, &file_paths)?
-        .unwrap_or_default();
+    let mut result = run_package_plugins(&registry, root, &file_paths)?.unwrap_or_default();
 
     for workspace in workspaces {
-        let Some(workspace_result) = run_package_plugins(
-            &registry,
-            &workspace.root.join("package.json"),
-            &workspace.root,
-            &file_paths,
-        )?
+        let Some(workspace_result) = run_package_plugins(&registry, &workspace.root, &file_paths)?
         else {
             continue;
         };
@@ -82,15 +76,14 @@ pub fn collect_entry_points(
 
 fn run_package_plugins(
     registry: &PluginRegistry,
-    package_path: &Path,
-    root: &Path,
+    package_root: &Path,
     file_paths: &[PathBuf],
 ) -> Result<Option<AggregatedPluginResult>, ListInventoryError> {
-    let Ok(package) = PackageJson::load(package_path) else {
+    let Some(package) = fallow_config::load_dir_package_json(package_root) else {
         return Ok(None);
     };
     registry
-        .try_run(&package, root, file_paths)
+        .try_run(&package, package_root, file_paths)
         .map(Some)
         .map_err(ListInventoryError::PluginRegex)
 }
