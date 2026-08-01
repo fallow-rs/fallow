@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deno workspaces accept the object form of the `workspace` key.** A root
+  `deno.json` using `"workspace": {"members": [...]}` now discovers its members
+  the same way the bare array form does, instead of failing analysis as a
+  malformed root manifest.
+
 - **Parallel inline-review jobs can be isolated with a stable review id.** Set `FALLOW_REVIEW_ID` (or GitHub Action `review-id`) to a 1-64 character identifier so GitHub and GitLab reconciliation only deduplicates and resolves comments from that review scope. Unscoped jobs continue to see only unscoped comments. As part of this isolation, all runs, including unscoped ones, now read finding fingerprints only from the root comment of each GitHub review thread and from the first note of each GitLab discussion. A fingerprint that only appears in a reply is no longer treated as an existing comment, so the next run posts a fresh comment for that finding instead of deduplicating against the reply. Comments posted by fallow itself always carry the fingerprint in the root comment, so typical existing reviews are unaffected; resolution replies are still recognized anywhere in a thread. (Refs [#2076](https://github.com/fallow-rs/fallow/issues/2076).)
 
 - **`--baseline-mode identity` gates health baselines on finding identity.**
@@ -38,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#1991](https://github.com/fallow-rs/fallow/issues/1991).)
 
 ### Fixed
+
+- **Every command now fails explicitly on a malformed root manifest.** Commands
+  built on the shared analysis session (`list`, `dupes`, `security`, `watch`,
+  `viz`, `inspect`, `flags`, suppressions, and rule-pack tests) previously
+  continued with zero workspaces when the root `package.json` or `deno.json`
+  could not be parsed, while `dead-code` exited with an error. All commands now
+  exit 2 with the same malformed-root message, so a broken manifest can no
+  longer produce silently empty results.
 
 - **Tests that mock a module no longer count as statically covering the real
   module.** A test root with a proven `vi.mock` replacement executes the mock,
