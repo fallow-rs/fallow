@@ -60,7 +60,7 @@ inputs:
     description: 'Save current results as a baseline file'
     required: false
   version:
-    description: 'Fallow version override. When omitted, the action uses the project package.json fallow dependency spec if present, otherwise latest. The action ref (uses: fallow-rs/fallow@...) and this CLI version are independent; see https://docs.fallow.tools/integrations/ci for the resolution order. Pin a current fallow version so Ed25519 + SHA-256 binary verification can run.'
+    description: 'Fallow version override. When omitted, the action uses the project package.json fallow dependency spec if present, otherwise latest. The action ref (uses: fallow-rs/fallow@...) and this CLI version are independent; see the README CI section (https://github.com/fallow-rs/fallow#ci) for the resolution order. Pin a current fallow version so Ed25519 + SHA-256 binary verification can run.'
     required: false
     default: ''
   args:

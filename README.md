@@ -251,12 +251,17 @@ GitHub Actions:
   with:
     fetch-depth: 0
 - uses: fallow-rs/fallow@v3 # Action wrapper major (or pin a SHA)
-  with:
-    # optional: omit to use the fallow version from package.json
-    version: 3.10.0
 ```
 
-The Action ref and the fallow CLI version are independent. `uses: fallow-rs/fallow@v3` selects the Action wrapper code, not the scanner. The CLI version the Action installs resolves in this order: the `version` input, then the `fallow` dependency spec in the project's `package.json`, then `latest`. The recommended setup pins the Action major (or a SHA for supply-chain pinning) and omits `version`, so CI runs the same fallow version the project already pins in `package.json` and CLI upgrades never require touching the workflow. A major Action bump (`@v2` to `@v3`) can still be needed when the wrapper's inputs or behavior change.
+The Action ref and the fallow CLI version are independent. `uses: fallow-rs/fallow@v3` selects the Action wrapper code, not the scanner. The CLI version the Action installs resolves in this order: the `version` input, then the `fallow` dependency spec found in the project's `package.json` (checked across `dependencies`, `devDependencies`, `optionalDependencies`, and `peerDependencies`, first match wins), then `latest`. The recommended setup above pins the Action major (or a SHA for supply-chain pinning) and omits `version`, so CI follows the project's own `package.json` pin and CLI upgrades never require touching the workflow. Note that the spec is installed as written: an exact pin (`1.2.3`) gives CI the same scanner as local runs, while a range (`^1.2.3`, the npm default) is resolved fresh in CI and can install a newer version than the one in the local lockfile. A major Action bump (`@v2` to `@v3`) can still be needed when the wrapper's inputs or behavior change.
+
+To force a specific CLI version regardless of `package.json`, set the `version` input:
+
+```yaml
+- uses: fallow-rs/fallow@v3
+  with:
+    version: <fallow version> # exact version, e.g. 1.2.3
+```
 
 When `comment: true` or `review-comments: true` is enabled, grant the job the
 permissions needed for branded feedback:
