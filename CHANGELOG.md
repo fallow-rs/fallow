@@ -101,6 +101,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`0`) still means "no limit". (Closes
   [#2009](https://github.com/fallow-rs/fallow/issues/2009).)
 
+### Documentation
+
+- **The README and the Action's `version` input now state that the Action ref
+  and the fallow CLI version are independent.** `uses: fallow-rs/fallow@v3`
+  selects the Action wrapper code, not the scanner, and the installed CLI
+  resolves from the `version` input, then the project's `package.json` `fallow`
+  dependency, then `latest`. The README CI example now pins the Action major
+  while letting the CLI come from the project pin, so patch and minor CLI
+  upgrades no longer suggest a lockstep Action bump. Thanks
+  [@hckhanh](https://github.com/hckhanh) for the report. (Closes
+  [#2079](https://github.com/fallow-rs/fallow/issues/2079).)
+
 ## [3.10.0] - 2026-07-27
 
 ### Changed
