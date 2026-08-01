@@ -42,13 +42,15 @@ fn display_relative(root: &Path, path: &Path) -> String {
 /// Workspace-discovery failures that prevent analysis from proceeding.
 ///
 /// Returned only by `discover_workspaces_with_diagnostics` (in the parent
-/// module) when the root `package.json` itself is malformed: without a
-/// parseable root, no workspace patterns can be collected, and analysis
-/// output would be fiction. The CLI surfaces this as exit 2.
+/// module) when a root package manifest itself is malformed: without a
+/// parseable root, no workspace patterns can be collected, and analysis output
+/// would be fiction. The CLI surfaces this as exit 2.
 #[derive(Debug, Clone)]
 pub enum WorkspaceLoadError {
     /// The project root's `package.json` exists but failed to parse.
     MalformedRootPackageJson { path: PathBuf, error: String },
+    /// The project root's `deno.json` or `deno.jsonc` exists but failed to parse.
+    MalformedRootDenoConfig { path: PathBuf, error: String },
 }
 
 impl std::fmt::Display for WorkspaceLoadError {
@@ -57,6 +59,12 @@ impl std::fmt::Display for WorkspaceLoadError {
             Self::MalformedRootPackageJson { path, error } => write!(
                 f,
                 "root package.json at '{}' is not valid JSON ({error}). \
+                 Fix the syntax before re-running fallow.",
+                path.display()
+            ),
+            Self::MalformedRootDenoConfig { path, error } => write!(
+                f,
+                "root Deno config at '{}' is not valid JSONC ({error}). \
                  Fix the syntax before re-running fallow.",
                 path.display()
             ),

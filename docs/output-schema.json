@@ -630,14 +630,14 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml or package-lock.json. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror. Wrapped in [`MisconfiguredDependencyOverrideFinding`]."
+          "description": "pnpm.overrides or npm overrides entries whose key or value does not\nparse as a valid override spec (empty key, empty value, malformed\nselector, unbalanced parent matcher). The package manager will reject\nthese at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
         },
         "invalid_client_exports": {
           "type": "array",
@@ -1105,14 +1105,14 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml or package-lock.json. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror. Wrapped in [`MisconfiguredDependencyOverrideFinding`]."
+          "description": "pnpm.overrides or npm overrides entries whose key or value does not\nparse as a valid override spec (empty key, empty value, malformed\nselector, unbalanced parent matcher). The package manager will reject\nthese at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
         },
         "invalid_client_exports": {
           "type": "array",
@@ -4813,7 +4813,7 @@
         "path",
         "line"
       ],
-      "description": "An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in\n`package.json`) whose target package is not declared in any workspace\n`package.json` and is not present in `pnpm-lock.yaml`. Projects without a\nreadable lockfile fall back to package manifest checks; the `hint` field\nflags that conservative mode."
+      "description": "An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in\n`package.json`), or in npm's top-level `overrides` object in\n`package.json`, whose target package is not declared in any workspace\n`package.json` and is not present in `pnpm-lock.yaml` or\n`package-lock.json`. Projects without a readable lockfile fall back to\npackage manifest checks; the `hint` field flags that conservative mode."
     },
     "MisconfiguredDependencyOverride": {
       "type": "object",
@@ -6012,14 +6012,14 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml or package-lock.json. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror. Wrapped in [`MisconfiguredDependencyOverrideFinding`]."
+          "description": "pnpm.overrides or npm overrides entries whose key or value does not\nparse as a valid override spec (empty key, empty value, malformed\nselector, unbalanced parent matcher). The package manager will reject\nthese at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
         },
         "invalid_client_exports": {
           "type": "array",
@@ -6289,7 +6289,7 @@
         {
           "type": "string",
           "const": "package.json",
-          "description": "`pnpm.overrides` in a root `package.json`."
+          "description": "`pnpm.overrides` or the top-level npm `overrides` object in a root\n`package.json`."
         }
       ],
       "description": "Where an override entry was declared. Serialized as the filename label\n(`\"pnpm-workspace.yaml\"` or `\"package.json\"`) so the value in JSON output\nmatches the value users write in `ignoreDependencyOverrides[].source`."

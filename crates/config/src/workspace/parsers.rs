@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::PackageJson;
+use super::deno_json::{dir_has_package_manifest, load_member_package_manifest};
 use super::diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, is_ignored_workspace_dir, is_skip_listed_dir,
 };
@@ -290,7 +290,7 @@ fn collect_globbed_workspace_dir(path: PathBuf, ctx: &mut GlobbedWorkspaceContex
     if path.components().any(|c| c.as_os_str() == "node_modules") {
         return;
     }
-    if path.join("package.json").exists() {
+    if dir_has_package_manifest(&path) {
         if let Some(cp) = dunce::canonicalize(&path)
             .ok()
             .filter(|cp| cp.starts_with(ctx.canonical_root))
@@ -315,9 +315,9 @@ fn collect_globbed_workspace_dir(path: PathBuf, ctx: &mut GlobbedWorkspaceContex
         // discovered, but nudge the user toward the glob the package manager
         // itself would need.
         tracing::debug!(
-            "workspace glob '{raw_pattern}' matched '{}' which has no package.json; \
+            "workspace glob '{raw_pattern}' matched '{}' which has no package.json/deno.json; \
              recovered {} nested package(s) one level down. Consider '{raw_pattern}/*' \
-             so npm/pnpm/yarn resolve them as workspace members too.",
+             so package managers resolve them as workspace members too.",
             path.display(),
             recovered.len()
         );
@@ -378,10 +378,9 @@ fn recover_nested_packages(
         if is_ignored_workspace_dir(relative, ignore_patterns) {
             continue;
         }
-        let pkg_path = child.join("package.json");
         // Gate on a real, named package so fixtures / build output / mock
         // manifests under the grouping directory are not registered.
-        let Ok(pkg) = PackageJson::load(&pkg_path) else {
+        let Ok(Some((_name, pkg, _deps))) = load_member_package_manifest(&child) else {
             continue;
         };
         if pkg.name.is_none() {
@@ -504,7 +503,7 @@ fn walk_workspace_dirs(raw_pattern: &str, dir: &Path, input: &mut WorkspaceDirWa
             continue;
         }
         if input.matcher.matches_path(&path) {
-            if path.join("package.json").exists() {
+            if dir_has_package_manifest(&path) {
                 if let Ok(cp) = dunce::canonicalize(&path)
                     && cp.starts_with(input.canonical_root)
                 {

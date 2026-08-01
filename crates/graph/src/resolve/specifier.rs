@@ -9,18 +9,18 @@ use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 use serde_json::Value;
 
 use super::fallbacks::{
-    extract_package_name_from_node_modules_path, try_css_extension_fallback,
-    try_package_imports_fallback, try_path_alias_fallback, try_pnpm_workspace_fallback,
-    try_relative_package_root_source_fallback, try_scss_include_path_fallback,
-    try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
-    try_workspace_package_fallback,
+    extract_package_name_from_node_modules_path, lookup_internal_file_id, nearest_package_manifest,
+    try_css_extension_fallback, try_package_imports_fallback, try_path_alias_fallback,
+    try_pnpm_workspace_fallback, try_relative_package_root_source_fallback,
+    try_scss_include_path_fallback, try_scss_node_modules_fallback, try_scss_partial_fallback,
+    try_source_fallback, try_workspace_package_fallback,
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
     normalize_npm_specifier,
 };
 use super::react_native::{build_condition_names, build_extensions};
-use super::types::{ResolveContext, ResolveResult};
+use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
 
 /// Create an `oxc_resolver` instance with standard configuration.
 ///
@@ -1471,8 +1471,16 @@ pub(super) fn resolve_specifier(
     specifier: &str,
     from_style: bool,
 ) -> ResolveResult {
+    // Deno import maps rewrite matching specifiers within the nearest package
+    // scope. Mapped targets may be external schemes or config-relative paths.
+    let mapped = nearest_package_manifest(ctx.package_manifests, from_file)
+        .and_then(|manifest| apply_import_map(&manifest.deno_import_map, specifier));
+    let after_import_map = mapped
+        .as_ref()
+        .map_or(specifier, |(mapped, _base)| mapped.as_str());
+
     let normalized;
-    let specifier = match normalize_resolve_specifier(specifier) {
+    let specifier = match normalize_resolve_specifier(after_import_map) {
         SpecifierNormalization::External(result) => return result,
         SpecifierNormalization::Resolvable(spec) => {
             normalized = spec;
@@ -1480,12 +1488,51 @@ pub(super) fn resolve_specifier(
         }
     };
 
+    if let Some((_mapped, base)) = mapped
+        && (specifier.starts_with("./") || specifier.starts_with("../"))
+    {
+        return try_import_map_relative(ctx, base, specifier)
+            .unwrap_or_else(|| ResolveResult::Unresolvable(specifier.to_string()));
+    }
+
     if let Some(result) = try_pre_file_resolution_fallbacks(ctx, from_file, specifier, from_style) {
         return result;
     }
 
     let flags = FailedSpecifierFlags::new(ctx, specifier);
     resolve_file_or_failed(ctx, from_file, specifier, from_style, flags)
+}
+
+/// Apply exact or longest slash-prefix matching across an effective import map.
+fn apply_import_map<'a>(
+    import_map: &'a [DenoImportMapEntry],
+    specifier: &str,
+) -> Option<(String, &'a Path)> {
+    if let Some(entry) = import_map.iter().find(|entry| entry.key == specifier) {
+        return Some((entry.target.clone(), &entry.declaring_dir));
+    }
+
+    import_map
+        .iter()
+        .filter(|entry| entry.key.ends_with('/') && specifier.starts_with(&entry.key))
+        .max_by_key(|entry| entry.key.len())
+        .map(|entry| {
+            (
+                format!("{}{}", entry.target, &specifier[entry.key.len()..]),
+                entry.declaring_dir.as_path(),
+            )
+        })
+}
+
+/// Resolve a relative import-map target from its declaring config directory.
+fn try_import_map_relative(
+    ctx: &ResolveContext<'_>,
+    declaring_dir: &Path,
+    relative: &str,
+) -> Option<ResolveResult> {
+    let config_file = declaring_dir.join("__fallow_import_map_resolve__");
+    let resolved = ctx.resolver.resolve_file(&config_file, relative).ok()?;
+    lookup_internal_file_id(ctx, resolved.path()).map(ResolveResult::InternalModule)
 }
 
 fn try_pre_file_resolution_fallbacks(

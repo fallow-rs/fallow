@@ -54,7 +54,7 @@ use react_native::{build_condition_names, build_extensions, synthesize_platform_
 use require_imports::resolve_require_imports;
 use specifier::create_resolver;
 use static_imports::resolve_static_imports;
-use types::{PackageManifestInfo, ResolveContext};
+use types::{DenoImportMapEntry, PackageManifestInfo, ResolveContext};
 use upgrades::{ResolvedVitestMockOperation, apply_specifier_upgrades};
 
 /// Inputs used to resolve imports for a complete extracted project.
@@ -257,32 +257,77 @@ fn build_canonical_file_paths(files: &[DiscoveredFile], root_is_canonical: bool)
 
 /// Load the root package manifest plus each workspace manifest into the
 /// `PackageManifestInfo` list used for `exports` / `imports` resolution.
+///
+/// Manifests come from `package.json` when present, otherwise `deno.json` /
+/// `deno.jsonc` (`name` + `exports`), so pure Deno workspaces resolve without
+/// npm bridge files.
 fn build_package_manifests(
     input: &ResolveAllImportsInput<'_>,
     canonical_ws_roots: &[PathBuf],
 ) -> Vec<PackageManifestInfo> {
     let root_canonical =
         dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
+    let root_import_map = merge_deno_import_maps(&[], input.root);
     let mut package_manifests = Vec::new();
-    if let Ok(package_json) = fallow_config::PackageJson::load(&input.root.join("package.json")) {
+    if let Ok(Some((_name, package_json, _deps))) =
+        fallow_config::load_member_package_manifest(input.root)
+    {
         package_manifests.push(PackageManifestInfo {
             root: input.root.to_path_buf(),
             canonical_root: root_canonical,
             name: package_json.name.clone(),
             package_json,
+            deno_import_map: root_import_map.clone(),
         });
     }
     for (ws, canonical_root) in input.workspaces.iter().zip(canonical_ws_roots.iter()) {
-        if let Ok(package_json) = fallow_config::PackageJson::load(&ws.root.join("package.json")) {
+        if let Ok(Some((_name, package_json, _deps))) =
+            fallow_config::load_member_package_manifest(&ws.root)
+        {
             package_manifests.push(PackageManifestInfo {
                 root: ws.root.clone(),
                 canonical_root: canonical_root.clone(),
                 name: package_json.name.clone().or_else(|| Some(ws.name.clone())),
                 package_json,
+                deno_import_map: merge_deno_import_maps(&root_import_map, &ws.root),
             });
         }
     }
     package_manifests
+}
+
+/// Merge inherited and package-local Deno import maps once per resolver
+/// session. Equal local keys replace inherited keys while retaining the
+/// declaring directory needed for relative target resolution.
+fn merge_deno_import_maps(
+    inherited: &[DenoImportMapEntry],
+    package_root: &Path,
+) -> Vec<DenoImportMapEntry> {
+    let mut entries: FxHashMap<String, DenoImportMapEntry> = inherited
+        .iter()
+        .cloned()
+        .map(|entry| (entry.key.clone(), entry))
+        .collect();
+
+    if let Ok(Some((config_path, local_entries))) =
+        fallow_config::load_deno_import_map(package_root)
+    {
+        let declaring_dir = config_path.parent().unwrap_or(package_root).to_path_buf();
+        for (key, target) in local_entries {
+            entries.insert(
+                key.clone(),
+                DenoImportMapEntry {
+                    key,
+                    target,
+                    declaring_dir: declaring_dir.clone(),
+                },
+            );
+        }
+    }
+
+    let mut entries: Vec<_> = entries.into_values().collect();
+    entries.sort_by(|a, b| a.key.cmp(&b.key));
+    entries
 }
 
 /// Build the path-to-`FileId` index, keyed by canonical paths when the root is

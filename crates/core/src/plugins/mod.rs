@@ -18,6 +18,7 @@ use regex::Regex;
 const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
     "ava",
     "bun",
+    "deno",
     "cucumber",
     "cypress",
     "jest",
@@ -1228,6 +1229,7 @@ mod cspell;
 mod cucumber;
 mod cypress;
 mod danger;
+mod deno;
 mod dependency_cruiser;
 mod docusaurus;
 mod drizzle;
@@ -1644,13 +1646,15 @@ mod tests {
 
     #[test]
     fn all_builtin_plugins_have_activation_signals() {
-        const PACKAGE_JSON_METADATA_PLUGINS: &[&str] = &["napi-rs"];
+        // Plugins activated from package metadata or filesystem sentinels rather
+        // than dependency enablers (napi binary name; deno.json presence).
+        const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] = &["napi-rs", "deno"];
         let plugins = registry::builtin::create_builtin_plugins();
         for p in &plugins {
             assert!(
                 !p.enablers().is_empty()
                     || !p.script_enablers().is_empty()
-                    || PACKAGE_JSON_METADATA_PLUGINS.contains(&p.name()),
+                    || NON_DEPENDENCY_ACTIVATED_PLUGINS.contains(&p.name()),
                 "plugin '{}' has no activation signal",
                 p.name()
             );
@@ -1735,6 +1739,7 @@ mod tests {
     fn test_plugins_have_test_entry_patterns() {
         let test_plugins: Vec<&dyn Plugin> = vec![
             &bun::BunPlugin,
+            &deno::DenoPlugin,
             &jest::JestPlugin,
             &vitest::VitestPlugin,
             &mocha::MochaPlugin,
