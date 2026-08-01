@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CI scanning keeps the continuation lines of plain multi-line `run:`
+  scalars.** A GitHub Actions step such as `run: npx eslint .` followed by
+  indented continuation lines, the shape of GitHub's own ESLint starter
+  workflow, dropped every continuation, so flags and file arguments on those
+  lines never reached dependency and entry-file analysis. Continuations now
+  fold into the same command, anchored at the `run` key column so sibling step
+  keys like `env:` and `with:` still terminate the scalar and their values do
+  not leak into entry files. (Closes
+  [#2016](https://github.com/fallow-rs/fallow/issues/2016).)
+
 - **Tests that mock a module no longer count as statically covering the real
   module.** A test root with a proven `vi.mock` replacement executes the mock,
   yet the replaced module and everything reached only through it were still
