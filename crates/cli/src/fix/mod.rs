@@ -24,7 +24,8 @@ fn run_analyze(
     output: OutputFormat,
     quiet: bool,
 ) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+        .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
     let output_struct = session
         .analyze_dead_code_with_artifacts(false, false)
         .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;

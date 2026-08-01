@@ -48,7 +48,10 @@ pub fn run_suppressions(opts: &SuppressionsOptions<'_>) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
+    let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
+        Ok(session) => session,
+        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+    };
     // The dead-code execute path is what populates `active_suppressions` and
     // `stale_suppressions`; presence capture is uniform across all suppression
     // kinds (complexity and code-duplication markers included).

@@ -75,7 +75,10 @@ pub fn run_viz(opts: &VizOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let session = AnalysisSession::from_resolved_config(config);
+    let session = match AnalysisSession::from_resolved_config(config) {
+        Ok(session) => session,
+        Err(e) => return emit_error(&format!("Analysis error: {e}"), 2, OutputFormat::Human),
+    };
     let duplicates_config = session.config().duplicates.clone();
     let artifacts = match session.analyze_project_with_artifacts(
         &duplicates_config,

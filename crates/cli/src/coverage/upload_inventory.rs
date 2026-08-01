@@ -268,7 +268,8 @@ fn prepare_inventory_upload(
     enforce_clean_worktree(args, root)?;
 
     let config = load_resolved_config_with_options(root, allow_remote_extends)?;
-    let session = AnalysisSession::from_resolved_config(config.clone());
+    let session = AnalysisSession::from_resolved_config(config.clone())
+        .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let exclude_matcher = compile_exclude_matcher(&args.exclude_paths)?;
     let functions = collect_inventory(&session, &exclude_matcher, path_prefix.as_deref());
     let churn_by_path = collect_churn(&config, path_prefix.as_deref());
@@ -1300,7 +1301,7 @@ mod tests {
     fn collect_inventory_applies_path_prefix_and_excludes() {
         let project = project_with_one_function();
         let config = load_resolved_config(project.path()).unwrap();
-        let session = AnalysisSession::from_resolved_config(config);
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
         let include_all = compile_exclude_matcher(&[]).unwrap();
 
         let functions = collect_inventory(&session, &include_all, Some("/app"));
@@ -1713,7 +1714,7 @@ mod tests {
         // regression in the source_hash join surfaces as a missing metric.
         let project = project_with_branchy_function();
         let config = load_resolved_config(project.path()).unwrap();
-        let session = AnalysisSession::from_resolved_config(config);
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
         let include_all = compile_exclude_matcher(&[]).unwrap();
         let functions = collect_inventory(&session, &include_all, None);
         let branchy = functions
@@ -1800,7 +1801,7 @@ mod tests {
         assert!(entry.trend.is_some(), "trend present");
         // The prefixed inventory path and the churn key must use the same shape.
         let include_all = compile_exclude_matcher(&[]).unwrap();
-        let session = AnalysisSession::from_resolved_config(config);
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
         let functions = collect_inventory(&session, &include_all, Some("/app"));
         let a_fn = functions
             .iter()
@@ -1828,7 +1829,7 @@ mod tests {
     fn request_serializes_v2_version_and_churn_when_present() {
         let repo = git_repo_with_history();
         let config = load_resolved_config(repo.path()).unwrap();
-        let session = AnalysisSession::from_resolved_config(config.clone());
+        let session = AnalysisSession::from_resolved_config(config.clone()).expect("session");
         let include_all = compile_exclude_matcher(&[]).unwrap();
         let functions = collect_inventory(&session, &include_all, None);
         let churn_by_path = collect_churn(&config, None);
@@ -2063,7 +2064,7 @@ mod tests {
         .expect("write importer");
 
         let config = load_resolved_config(root).expect("config loads");
-        let session = AnalysisSession::from_resolved_config(config);
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
         let function = InventoryFunction::from_entry(
             "src/callee.ts",
             "src/callee.ts",

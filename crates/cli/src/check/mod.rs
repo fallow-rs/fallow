@@ -469,7 +469,8 @@ fn run_check_analysis(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
 ) -> Result<CheckAnalysisData, ExitCode> {
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+        .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))?;
 
     if opts.retain_modules_for_health {
         return session

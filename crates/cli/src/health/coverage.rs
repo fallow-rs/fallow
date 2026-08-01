@@ -3336,7 +3336,8 @@ mod tests {
 
         let session = fallow_engine::session::AnalysisSession::from_resolved_config(
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
-        );
+        )
+        .expect("session");
         let parsed = session.parsed_parts(true);
         let files = parsed.files;
         let modules = parsed.modules;
@@ -3469,7 +3470,8 @@ mod tests {
 
         let session = fallow_engine::session::AnalysisSession::from_resolved_config(
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
-        );
+        )
+        .expect("session");
         let parsed = session.parsed_parts(true);
         let files = parsed.files;
         let modules = parsed.modules;

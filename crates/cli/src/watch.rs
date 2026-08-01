@@ -300,7 +300,14 @@ fn print_waiting(opts: &WatchOptions<'_>) {
 
 fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let session =
+        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
+            Ok(session) => session,
+            Err(e) => {
+                eprintln!("Analysis error: {e}");
+                return ExitCode::from(2);
+            }
+        };
     let mut analysis =
         match session.analyze_dead_code_with_artifacts(false, config.type_aware.enabled) {
             Ok(analysis) => analysis,

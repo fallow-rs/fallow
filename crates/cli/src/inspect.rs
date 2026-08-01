@@ -309,7 +309,16 @@ fn collect_semantic_evidence(
             warnings: Vec::new(),
         };
     }
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let session =
+        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
+            Ok(session) => session,
+            Err(error) => {
+                return semantic_error_sections(
+                    &format!("analysis failed: {error}"),
+                    Some(config.type_aware.require.into()),
+                );
+            }
+        };
     let analysis = match session.analyze_dead_code_with_artifacts(false, true) {
         Ok(analysis) => analysis,
         Err(error) => {

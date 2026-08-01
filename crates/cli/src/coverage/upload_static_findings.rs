@@ -170,7 +170,7 @@ fn run_inner(
     let config = upload_common::load_resolved_config_with_options(root, allow_remote_extends)
         .map_err(UploadError::Validation)?;
     let results = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-        .analyze_dead_code_with_artifacts(false, false)
+        .and_then(|session| session.analyze_dead_code_with_artifacts(false, false))
         .map(|analysis| analysis.results)
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let findings = collect_findings(&config, &results);

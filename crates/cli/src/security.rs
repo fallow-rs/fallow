@@ -1128,7 +1128,8 @@ fn analyze_security_candidates(
     opts: &SecurityOptions<'_>,
     config: &fallow_config::ResolvedConfig,
 ) -> Result<SecurityAnalysisState, ExitCode> {
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+        .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output))?;
 
     if opts.runtime_coverage.is_none() {
         return session
@@ -4252,6 +4253,7 @@ mod tests {
         config.rules.security_sink = Severity::Warn;
 
         let analysis = fallow_engine::session::AnalysisSession::from_resolved_config(config)
+            .expect("fixture session")
             .analyze_dead_code_with_artifacts(false, false)
             .expect("fixture analyzes");
         let finding = analysis

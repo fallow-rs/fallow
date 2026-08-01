@@ -449,7 +449,7 @@ mod tests {
             true,
             None,
         );
-        let session = AnalysisSession::from_resolved_config(config);
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
 
         assert!(
             session
@@ -649,7 +649,7 @@ mod tests {
         let config = config_for_project(temp.path(), None)
             .expect("config")
             .config;
-        let session = AnalysisSession::from_resolved_config(config);
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
         let artifacts = session
             .analyze_dead_code_with_artifacts(true, true)
             .expect("analysis succeeds");
@@ -1015,7 +1015,7 @@ mod tests {
         let config = config_for_project(temp.path(), None)
             .expect("config")
             .config;
-        let session = AnalysisSession::from_resolved_config(config);
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
         let artifacts = session
             .analyze_dead_code_with_artifacts(false, true)
             .expect("analysis succeeds");

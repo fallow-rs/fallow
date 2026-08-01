@@ -23,7 +23,7 @@ pub fn run(args: &TestArgs, ctx: &RulePackContext<'_>) -> ExitCode {
 
     let analysis =
         match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-            .analyze_dead_code()
+            .and_then(|session| session.analyze_dead_code())
         {
             Ok(analysis) => analysis,
             Err(error) => return crate::error::emit_error(error.message(), 2, ctx.output),

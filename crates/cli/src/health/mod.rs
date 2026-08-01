@@ -267,7 +267,8 @@ pub fn execute_health_with_config(
     config_ms: f64,
 ) -> Result<HealthResult, ExitCode> {
     let t = Instant::now();
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config)
+        .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))?;
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
     let parts = session.parsed_parts_uncached(true);
     let pre_computed_analysis =

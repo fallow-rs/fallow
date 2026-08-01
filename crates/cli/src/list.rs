@@ -92,7 +92,10 @@ fn collect_list_data(
     let need_plugin_result = opts.plugins || opts.entry_points || show_all;
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
     let session = if need_files || need_plugin_result {
-        Some(fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()))
+        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
+            Ok(session) => Some(session),
+            Err(err) => return Err(crate::error::emit_error(err.message(), 2, opts.output)),
+        }
     } else {
         None
     };

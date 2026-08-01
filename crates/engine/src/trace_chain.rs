@@ -23,7 +23,7 @@ pub fn trace_symbol_chain(
     config: &ResolvedConfig,
     query: SymbolChainQuery<'_>,
 ) -> EngineResult<Option<SymbolChainTrace>> {
-    let session = AnalysisSession::from_resolved_config(config.clone());
+    let session = AnalysisSession::from_resolved_config(config.clone())?;
     trace_symbol_chain_with_session(&session, query)
 }
 

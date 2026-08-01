@@ -349,7 +349,17 @@ fn execute_dupes_inner(
         ),
         None => {
             let session =
-                fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+                match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+                {
+                    Ok(session) => session,
+                    Err(err) => {
+                        return Err(emit_error(
+                            &format!("Analysis error: {err}"),
+                            2,
+                            opts.output,
+                        ));
+                    }
+                };
             run_duplication_analysis_with_session(
                 opts,
                 &session,

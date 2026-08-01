@@ -35,7 +35,10 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
+    let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
+        Ok(session) => session,
+        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+    };
     let analysis = fallow_engine::flags::analyze_feature_flags_with_session(&session);
     if analysis.files_scanned == 0 {
         return emit_error("no files discovered", 2, opts.output);

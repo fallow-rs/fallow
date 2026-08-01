@@ -176,7 +176,7 @@ pub fn config_for_project_analysis(
     })
 }
 
-fn collect_workspace_metadata(
+pub(crate) fn collect_workspace_metadata(
     config: &ResolvedConfig,
 ) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64)> {
     let start = std::time::Instant::now();

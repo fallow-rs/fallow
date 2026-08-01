@@ -192,15 +192,21 @@ impl AnalysisSession {
 
     /// Build a session from a resolved config when the caller already owns
     /// command-specific config loading.
-    #[must_use]
-    pub fn from_resolved_config(config: ResolvedConfig) -> Self {
-        Self::from_config(ProjectConfig {
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when root manifest loading fails during
+    /// workspace discovery, matching `ProjectConfig::load`.
+    pub fn from_resolved_config(config: ResolvedConfig) -> EngineResult<Self> {
+        let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
+            crate::project_config::collect_workspace_metadata(&config)?;
+        Ok(Self::from_config(ProjectConfig {
             config,
             path: None,
-            workspaces: Vec::new(),
-            workspace_diagnostics: Vec::new(),
-            workspace_discovery_ms: None,
-        })
+            workspaces,
+            workspace_diagnostics,
+            workspace_discovery_ms: Some(workspace_discovery_ms),
+        }))
     }
 
     /// Resolved project root.
@@ -980,7 +986,13 @@ pub(crate) fn analyze_dead_code_with_parse_result_from_config(
     config: &ResolvedConfig,
     modules: &[ModuleInfo],
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    let discovery = crate::discover::prepare_analysis_discovery(config);
+    let (workspaces, _diagnostics, workspaces_ms) =
+        crate::project_config::collect_workspace_metadata(config)?;
+    let discovery = crate::discover::prepare_analysis_discovery_with_workspaces(
+        config,
+        &workspaces,
+        workspaces_ms,
+    );
     run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
         config,
         discovery: &discovery,
