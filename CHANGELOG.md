@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Importing a Server Action from a client component is no longer flagged as
+  a server-only import.** The `server-only-import` category of the
+  `client-server-leak` rule treated a `"use server"` directive as a server-only
+  marker, so every Server Action call site in a Next.js App Router project was
+  reported as a leak even though the bundler replaces that import with an
+  action reference and the action body never enters the client bundle. A
+  `"use server"` module now becomes a sink only through what it imports:
+  reaching `server-only`, `next/headers`, `next/server`, or Node server
+  modules such as `node:fs` / `node:child_process` (directly or through
+  re-export chains) is still reported, including from a `"use server"` file
+  that leaks such an import through a non-action export. The evidence and
+  SARIF rule text no longer name `"use server"` as a server-only marker.
+  (Closes [#2074](https://github.com/fallow-rs/fallow/issues/2074).)
+
 - **Tests that mock a module no longer count as statically covering the real
   module.** A test root with a proven `vi.mock` replacement executes the mock,
   yet the replaced module and everything reached only through it were still

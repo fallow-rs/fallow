@@ -2614,8 +2614,8 @@ fn sarif_rule_def_server_only_leak(rule_id: &str) -> serde_json::Value {
         "shortDescription": { "text": "Client imports server-only code candidate (unverified)" },
         "fullDescription": { "text":
             "Unverified candidate, requires verification: a \"use client\" file \
-             transitively imports a server-only module (one carrying a \"use server\" \
-             directive or importing server-only code such as server-only, next/headers, \
+             transitively imports a server-only module (one importing server-only \
+             code such as server-only, next/headers, \
              next/server, or node:fs / node:child_process). fallow does not prove this \
              code runs on the client; a module pulled in only through \
              next/dynamic(..., { ssr: false }) is a false positive." },
