@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Parallel inline-review jobs can be isolated with a stable review id.** Set `FALLOW_REVIEW_ID` (or GitHub Action `review-id`) to a 1-64 character identifier so GitHub and GitLab reconciliation only deduplicates and resolves comments from that review scope. Unscoped jobs continue to see only unscoped comments. (Refs [#2076](https://github.com/fallow-rs/fallow/issues/2076).)
+- **Parallel inline-review jobs can be isolated with a stable review id.** Set `FALLOW_REVIEW_ID` (or GitHub Action `review-id`) to a 1-64 character identifier so GitHub and GitLab reconciliation only deduplicates and resolves comments from that review scope. Unscoped jobs continue to see only unscoped comments. As part of this isolation, all runs, including unscoped ones, now read finding fingerprints only from the root comment of each GitHub review thread and from the first note of each GitLab discussion. A fingerprint that only appears in a reply is no longer treated as an existing comment, so the next run posts a fresh comment for that finding instead of deduplicating against the reply. Comments posted by fallow itself always carry the fingerprint in the root comment, so typical existing reviews are unaffected; resolution replies are still recognized anywhere in a thread. (Refs [#2076](https://github.com/fallow-rs/fallow/issues/2076).)
 
 - **`--baseline-mode identity` gates health baselines on finding identity.**
   The default count baseline matches per file and category, so a new hotspot
@@ -38,6 +38,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#1991](https://github.com/fallow-rs/fallow/issues/1991).)
 
 ### Fixed
+
+- **Tests that mock a module no longer count as statically covering the real
+  module.** A test root with a proven `vi.mock` replacement executes the mock,
+  yet the replaced module and everything reached only through it were still
+  credited as test-covered, hiding coverage gaps and lowering estimated CRAP.
+  Modules reached only through such mocked imports are now reported as
+  uncovered; a final `vi.unmock` restores the real path, another test root
+  without the mock still provides coverage, and CommonJS `require` paths remain
+  covered. Expect health results to shift on upgrade: files and exports that
+  were only covered through mocked imports surface as new coverage gaps, health
+  scores and estimated CRAP move accordingly, and a health baseline saved
+  before the upgrade does not suppress these findings, so
+  `--baseline ... --fail-on-issues` runs can start failing until the baseline
+  is refreshed. Uncertain factories, aliased or dynamic mock targets,
+  `vi.importActual`, and `jest.mock` are unaffected and keep their previous
+  coverage. (Closes
+  [#2031](https://github.com/fallow-rs/fallow/issues/2031).)
 
 - **Tsconfig aliases in Sass imports now resolve partial files after alias
   expansion.** Imports such as `@use "@/styles/tokens"`, where `@/*` maps to
