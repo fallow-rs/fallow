@@ -419,6 +419,7 @@ fn matches_negation(root: &Path, dir: &Path, negation_matchers: &[globset::GlobM
 
 /// Load a matched directory's package manifest (`package.json` or `deno.json`)
 /// and push a workspace, or a malformed-package diagnostic on parse failure.
+/// A manifest removed after glob expansion is treated as a stale match.
 fn register_matched_workspace(
     root: &Path,
     dir: PathBuf,
@@ -436,18 +437,7 @@ fn register_matched_workspace(
                 dep_names,
             ));
         }
-        Ok(None) => {
-            // Glob expander should only yield dirs with a manifest; keep a
-            // diagnostic if recovery paths hand us an empty directory.
-            let diag = WorkspaceDiagnostic::new(
-                root,
-                dir,
-                WorkspaceDiagnosticKind::MalformedPackageJson {
-                    error: "workspace member has no package.json or deno.json".to_string(),
-                },
-            );
-            diagnostics.push(diag);
-        }
+        Ok(None) => {}
         Err(error) => {
             let diag = WorkspaceDiagnostic::new(
                 root,
