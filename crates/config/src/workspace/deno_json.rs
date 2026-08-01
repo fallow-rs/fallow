@@ -1,0 +1,299 @@
+//! Deno `deno.json` / `deno.jsonc` parsing for workspace discovery and package manifests.
+//!
+//! Deno monorepos declare members via root `workspace` and package identity via
+//! member `name` + `exports`. Import maps live in root (and optionally member)
+//! `imports`. Fallow consumes these the same way it consumes npm `package.json`
+//! workspaces + exports, so Deno projects do not need bridge manifests.
+
+use std::path::{Path, PathBuf};
+
+use rustc_hash::FxHashMap;
+use serde::Deserialize;
+
+use super::package_json::PackageJson;
+
+/// Candidate Deno config filenames, in preference order.
+const DENO_JSON_NAMES: &[&str] = &["deno.json", "deno.jsonc"];
+
+/// Parsed Deno config fields fallow needs for discovery and resolution.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DenoJson {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    exports: Option<serde_json::Value>,
+    /// Workspace member globs (`["./apps/*", "./packages/*"]`).
+    #[serde(default)]
+    workspace: Option<Vec<String>>,
+    /// Import map entries (`"@std/assert" → "jsr:@std/assert@1"`).
+    #[serde(default)]
+    imports: Option<FxHashMap<String, String>>,
+}
+
+impl DenoJson {
+    /// Load `deno.json` or `deno.jsonc` from an explicit path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the file cannot be read or parsed.
+    fn load(path: &Path) -> Result<Self, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        let content = content.trim_start_matches('\u{FEFF}');
+        crate::jsonc::parse_to_value(content)
+            .map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+    }
+
+    /// Load the first existing Deno config in `dir` (`deno.json`, then `deno.jsonc`).
+    fn load_from_dir(dir: &Path) -> Result<Option<(PathBuf, Self)>, (PathBuf, String)> {
+        for name in DENO_JSON_NAMES {
+            let path = dir.join(name);
+            if path.is_file() {
+                let deno = Self::load(&path).map_err(|error| (path.clone(), error))?;
+                return Ok(Some((path, deno)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Workspace glob patterns from the root Deno config.
+    #[must_use]
+    fn workspace_patterns(&self) -> Vec<String> {
+        self.workspace.clone().unwrap_or_default()
+    }
+
+    /// Import map as sorted `(specifier, target)` pairs for stable hashing.
+    #[must_use]
+    fn import_map_entries(&self) -> Vec<(String, String)> {
+        let Some(imports) = &self.imports else {
+            return Vec::new();
+        };
+        let mut entries: Vec<(String, String)> = imports
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries
+    }
+
+    /// Project a Deno package config into the `PackageJson` shape used by the
+    /// resolver (`name` + `exports` only).
+    #[must_use]
+    fn to_package_json(&self) -> PackageJson {
+        PackageJson {
+            name: self.name.clone(),
+            exports: self.exports.clone(),
+            ..PackageJson::default()
+        }
+    }
+}
+
+/// Whether `dir` has a Deno package/workspace config file.
+#[must_use]
+pub fn dir_has_deno_json(dir: &Path) -> bool {
+    DENO_JSON_NAMES.iter().any(|name| dir.join(name).is_file())
+}
+
+/// Whether `dir` has either an npm or Deno package manifest.
+#[must_use]
+pub fn dir_has_package_manifest(dir: &Path) -> bool {
+    dir.join("package.json").is_file() || dir_has_deno_json(dir)
+}
+
+/// Load package identity for a workspace member directory.
+///
+/// Prefers `package.json` when present (npm / bridge layouts), while still
+/// validating a colocated Deno config. Falls back to `deno.json` / `deno.jsonc`
+/// so pure Deno packages resolve without bridges.
+///
+/// Returns `(name, package_json_view, dependency_names)`.
+///
+/// # Errors
+///
+/// Returns an error when a present manifest fails to parse.
+pub fn load_member_package_manifest(
+    dir: &Path,
+) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
+    let pkg_path = dir.join("package.json");
+    if pkg_path.is_file() {
+        let pkg = PackageJson::load(&pkg_path)?;
+        DenoJson::load_from_dir(dir).map_err(|(_path, error)| error)?;
+        let deps = pkg.all_dependency_names();
+        let name = pkg.name.clone().unwrap_or_else(|| dir_name_fallback(dir));
+        return Ok(Some((name, pkg, deps)));
+    }
+
+    match DenoJson::load_from_dir(dir).map_err(|(_path, error)| error)? {
+        Some((_path, deno)) => {
+            let pkg = deno.to_package_json();
+            let name = pkg.name.clone().unwrap_or_else(|| dir_name_fallback(dir));
+            Ok(Some((name, pkg, Vec::new())))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Load a directory's package manifest as [`PackageJson`], preferring
+/// `package.json` and falling back to `deno.json` / `deno.jsonc`.
+#[must_use]
+pub fn load_dir_package_json(dir: &Path) -> Option<PackageJson> {
+    load_member_package_manifest(dir)
+        .ok()
+        .flatten()
+        .map(|(_name, pkg, _deps)| pkg)
+}
+
+/// Load sorted Deno import-map entries and their declaring config path.
+///
+/// # Errors
+///
+/// Returns the chosen config path and parse error when a present config is
+/// malformed.
+#[expect(
+    clippy::type_complexity,
+    reason = "tuple projection keeps the full Deno config model private"
+)]
+pub fn load_deno_import_map(
+    dir: &Path,
+) -> Result<Option<(PathBuf, Vec<(String, String)>)>, (PathBuf, String)> {
+    Ok(DenoJson::load_from_dir(dir)?.map(|(path, deno)| (path, deno.import_map_entries())))
+}
+
+/// Load root Deno workspace patterns and their declaring config path.
+///
+/// # Errors
+///
+/// Returns the chosen config path and parse error when a present config is
+/// malformed.
+#[expect(
+    clippy::type_complexity,
+    reason = "tuple projection keeps the full Deno config model private"
+)]
+pub fn load_root_deno_workspace_patterns(
+    root: &Path,
+) -> Result<Option<(PathBuf, Vec<String>)>, (PathBuf, String)> {
+    Ok(DenoJson::load_from_dir(root)?.map(|(path, deno)| (path, deno.workspace_patterns())))
+}
+
+/// Whether the project has a root Deno config and should not warn about a
+/// missing `node_modules` directory.
+#[must_use]
+pub fn is_deno_without_node_modules(root: &Path) -> bool {
+    dir_has_deno_json(root) && !root.join("package.json").is_file()
+}
+
+fn dir_name_fallback(dir: &Path) -> String {
+    dir.file_name().map_or_else(
+        || dir.to_string_lossy().into_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_workspace_and_imports() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{
+              "workspace": ["./apps/*", "./packages/*"],
+              "imports": {
+                "@std/assert": "jsr:@std/assert@1",
+                "@std/": "jsr:@std/"
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let (path, deno) = DenoJson::load_from_dir(dir.path()).unwrap().unwrap();
+        assert!(path.ends_with("deno.json"));
+        assert_eq!(
+            deno.workspace_patterns(),
+            vec!["./apps/*".to_string(), "./packages/*".to_string()]
+        );
+        let map = deno.import_map_entries();
+        assert!(
+            map.iter()
+                .any(|(k, v)| k == "@std/assert" && v == "jsr:@std/assert@1")
+        );
+    }
+
+    #[test]
+    fn parses_member_name_and_exports() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{
+              "name": "@fallow/core",
+              "exports": {
+                ".": "./mod.ts",
+                "./result": "./result.ts"
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let (_name, pkg, deps) = load_member_package_manifest(dir.path()).unwrap().unwrap();
+        assert_eq!(pkg.name.as_deref(), Some("@fallow/core"));
+        assert!(pkg.exports.is_some());
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn prefers_package_json_over_deno_json() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"name":"from-npm"}"#).unwrap();
+        std::fs::write(dir.path().join("deno.json"), r#"{"name":"from-deno"}"#).unwrap();
+
+        let (name, _, _) = load_member_package_manifest(dir.path()).unwrap().unwrap();
+        assert_eq!(name, "from-npm");
+    }
+
+    #[test]
+    fn import_map_loader_preserves_path_and_sort_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{"imports":{"z":"./z.ts","a":"./a.ts"}}"#,
+        )
+        .unwrap();
+
+        let (path, entries) = load_deno_import_map(dir.path()).unwrap().unwrap();
+        assert!(path.ends_with("deno.json"));
+        assert_eq!(
+            entries,
+            vec![
+                ("a".to_string(), "./a.ts".to_string()),
+                ("z".to_string(), "./z.ts".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn deno_without_node_modules_requires_no_package_json() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("deno.json"), "{}").unwrap();
+        assert!(is_deno_without_node_modules(dir.path()));
+
+        std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+        assert!(!is_deno_without_node_modules(dir.path()));
+    }
+
+    #[test]
+    fn accepts_jsonc_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("deno.jsonc"),
+            r#"{
+              // root workspace
+              "workspace": ["./packages/*"],
+            }"#,
+        )
+        .unwrap();
+        let deno = DenoJson::load_from_dir(dir.path()).unwrap().unwrap().1;
+        assert_eq!(deno.workspace_patterns(), vec!["./packages/*".to_string()]);
+    }
+}

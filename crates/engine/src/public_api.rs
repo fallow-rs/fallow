@@ -54,7 +54,7 @@ pub fn public_export_keys_for_graph(
     workspaces: &[WorkspaceInfo],
     root: &Path,
 ) -> FxHashSet<String> {
-    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let root_pkg = fallow_config::load_dir_package_json(&config.root);
     let public_entries =
         public_api_package_entry_points(graph, config, root_pkg.as_ref(), workspaces);
     graph.public_export_keys(&public_entries, root)
@@ -68,7 +68,7 @@ pub fn public_api_entry_paths_for_graph(
     config: &ResolvedConfig,
     workspaces: &[WorkspaceInfo],
 ) -> Vec<PathBuf> {
-    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let root_pkg = fallow_config::load_dir_package_json(&config.root);
     let public_entries =
         public_api_package_entry_points(graph, config, root_pkg.as_ref(), workspaces);
     let mut paths = public_entries
@@ -123,7 +123,7 @@ fn add_workspace_public_api_entry_points(
     canonical_project_root: &Path,
 ) {
     for workspace in workspaces {
-        let Ok(pkg) = PackageJson::load(&workspace.root.join("package.json")) else {
+        let Some(pkg) = fallow_config::load_dir_package_json(&workspace.root) else {
             continue;
         };
         add_package_public_api_entry_points(

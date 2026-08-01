@@ -1,3 +1,4 @@
+mod deno_json;
 mod diagnostics;
 mod package_json;
 mod parsers;
@@ -9,6 +10,11 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub use deno_json::{
+    dir_has_deno_json, dir_has_package_manifest, is_deno_without_node_modules,
+    load_deno_import_map, load_dir_package_json, load_member_package_manifest,
+    load_root_deno_workspace_patterns,
+};
 #[cfg(test)]
 pub use diagnostics::capture_workspace_warnings;
 pub use diagnostics::{
@@ -46,12 +52,13 @@ pub struct WorkspaceConfig {
     pub patterns: Vec<String>,
 }
 
-/// Discovered workspace info from package.json, pnpm-workspace.yaml, or tsconfig.json references.
+/// Discovered workspace info from package.json, deno.json, pnpm-workspace.yaml,
+/// or tsconfig.json references.
 #[derive(Debug, Clone)]
 pub struct WorkspaceInfo {
     /// Workspace root path.
     pub root: PathBuf,
-    /// Package name from package.json.
+    /// Package name from package.json or deno.json.
     pub name: String,
     /// Whether this workspace is depended on by other workspaces.
     pub is_internal_dependency: bool,
@@ -62,7 +69,8 @@ pub struct WorkspaceInfo {
 /// Sources (additive, deduplicated by canonical path):
 /// 1. `package.json` `workspaces` field
 /// 2. `pnpm-workspace.yaml` `packages` field
-/// 3. `tsconfig.json` `references` field (TypeScript project references)
+/// 3. `deno.json` / `deno.jsonc` `workspace` field
+/// 4. `tsconfig.json` `references` field (TypeScript project references)
 ///
 /// Back-compat wrapper: drops any diagnostics and silently treats a malformed
 /// root `package.json` as "no workspaces". New callers should use
@@ -282,7 +290,7 @@ fn check_undeclared(
     ignore_patterns: &globset::GlobSet,
     undeclared: &mut Vec<WorkspaceDiagnostic>,
 ) {
-    if !dir.join("package.json").exists() {
+    if !dir_has_package_manifest(dir) {
         return;
     }
     let canonical = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
@@ -296,6 +304,8 @@ fn check_undeclared(
     let relative_str = relative.to_string_lossy().replace('\\', "/");
     if ignore_patterns.is_match(relative_str.as_str())
         || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
+        || ignore_patterns.is_match(format!("{relative_str}/deno.json").as_str())
+        || ignore_patterns.is_match(format!("{relative_str}/deno.jsonc").as_str())
     {
         return;
     }
@@ -306,7 +316,8 @@ fn check_undeclared(
     ));
 }
 
-/// Collect glob patterns from `package.json` `workspaces` field and `pnpm-workspace.yaml`.
+/// Collect glob patterns from `package.json` `workspaces`, `pnpm-workspace.yaml`,
+/// and Deno `deno.json` / `deno.jsonc` `workspace`.
 fn collect_workspace_patterns(root: &Path) -> Result<Vec<String>, WorkspaceLoadError> {
     let mut patterns = Vec::new();
 
@@ -328,6 +339,12 @@ fn collect_workspace_patterns(root: &Path) -> Result<Vec<String>, WorkspaceLoadE
         && let Ok(content) = std::fs::read_to_string(&pnpm_workspace)
     {
         patterns.extend(parse_pnpm_workspace_yaml(&content));
+    }
+
+    if let Some((_path, deno_patterns)) = load_root_deno_workspace_patterns(root)
+        .map_err(|(path, error)| WorkspaceLoadError::MalformedRootDenoConfig { path, error })?
+    {
+        patterns.extend(deno_patterns);
     }
 
     Ok(patterns)
@@ -400,19 +417,16 @@ fn matches_negation(root: &Path, dir: &Path, negation_matchers: &[globset::GlobM
         .any(|m| m.is_match(relative_str.as_ref()))
 }
 
-/// Load a matched directory's `package.json` and push a workspace, or a
-/// malformed-package diagnostic on parse failure.
+/// Load a matched directory's package manifest (`package.json` or `deno.json`)
+/// and push a workspace, or a malformed-package diagnostic on parse failure.
 fn register_matched_workspace(
     root: &Path,
     dir: PathBuf,
     workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) {
-    let ws_pkg_path = dir.join("package.json");
-    match PackageJson::load(&ws_pkg_path) {
-        Ok(pkg) => {
-            let dep_names = pkg.all_dependency_names();
-            let name = pkg.name.unwrap_or_else(|| dir_name(&dir));
+    match load_member_package_manifest(&dir) {
+        Ok(Some((name, _pkg, dep_names))) => {
             workspaces.push((
                 WorkspaceInfo {
                     root: dir,
@@ -421,6 +435,18 @@ fn register_matched_workspace(
                 },
                 dep_names,
             ));
+        }
+        Ok(None) => {
+            // Glob expander should only yield dirs with a manifest; keep a
+            // diagnostic if recovery paths hand us an empty directory.
+            let diag = WorkspaceDiagnostic::new(
+                root,
+                dir,
+                WorkspaceDiagnosticKind::MalformedPackageJson {
+                    error: "workspace member has no package.json or deno.json".to_string(),
+                },
+            );
+            diagnostics.push(diag);
         }
         Err(error) => {
             let diag = WorkspaceDiagnostic::new(
@@ -482,17 +508,9 @@ fn load_tsconfig_workspace_package(
     dir: &Path,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> (String, Vec<String>) {
-    let ws_pkg_path = dir.join("package.json");
-    if !ws_pkg_path.exists() {
-        return (dir_name(dir), Vec::new());
-    }
-
-    match PackageJson::load(&ws_pkg_path) {
-        Ok(pkg) => {
-            let deps = pkg.all_dependency_names();
-            let name = pkg.name.unwrap_or_else(|| dir_name(dir));
-            (name, deps)
-        }
+    match load_member_package_manifest(dir) {
+        Ok(Some((name, _pkg, deps))) => (name, deps),
+        Ok(None) => (dir_name(dir), Vec::new()),
         Err(error) => {
             let diag = WorkspaceDiagnostic::new(
                 root,
@@ -558,21 +576,14 @@ fn collect_shallow_workspace_candidate(
     canonical_root: &Path,
     workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
 ) {
-    let pkg_path = dir.join("package.json");
-    if !pkg_path.exists() {
-        return;
-    }
-
     let canonical_dir = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     if canonical_dir == *canonical_root || !canonical_dir.starts_with(canonical_root) {
         return;
     }
 
-    let Ok(pkg) = PackageJson::load(&pkg_path) else {
+    let Ok(Some((name, _pkg, dep_names))) = load_member_package_manifest(dir) else {
         return;
     };
-    let dep_names = pkg.all_dependency_names();
-    let name = pkg.name.unwrap_or_else(|| dir_name(dir));
 
     workspaces.push((
         WorkspaceInfo {
@@ -606,6 +617,7 @@ fn mark_internal_dependencies(workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>
         .iter()
         .flat_map(|(_, deps)| deps.iter().cloned())
         .collect();
+
     for (ws, _) in &mut *workspaces {
         ws.is_internal_dependency = all_dep_names.contains(&ws.name);
     }
@@ -1318,6 +1330,35 @@ mod tests {
     }
 
     #[test]
+    fn malformed_bridge_deno_config_emits_recoverable_member_diagnostic() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_good = dir.path().join("packages/good");
+        let pkg_bad = dir.path().join("packages/bad");
+        std::fs::create_dir_all(&pkg_good).unwrap();
+        std::fs::create_dir_all(&pkg_bad).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_good.join("package.json"), r#"{"name": "good"}"#).unwrap();
+        std::fs::write(pkg_bad.join("package.json"), r#"{"name": "bad"}"#).unwrap();
+        std::fs::write(pkg_bad.join("deno.jsonc"), "{ imports: [ }").unwrap();
+
+        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let (workspaces, diagnostics) = result.expect("root package.json is valid");
+
+        assert_eq!(workspaces.len(), 1, "valid sibling should still discover");
+        assert_eq!(workspaces[0].name, "good");
+        assert_eq!(diagnostics.len(), 1);
+        assert!(matches!(
+            diagnostics[0].kind,
+            WorkspaceDiagnosticKind::MalformedPackageJson { .. }
+        ));
+        assert!(diagnostics[0].message.contains("deno.jsonc"));
+    }
+
+    #[test]
     fn multiple_malformed_workspace_package_jsons_all_diagnosed() {
         let dir = tempfile::tempdir().expect("create temp dir");
         for name in ["a", "b", "c"] {
@@ -1358,7 +1399,7 @@ mod tests {
                 assert!(path.ends_with("package.json"));
                 assert!(!error.is_empty(), "underlying parse error is preserved");
             }
-            Ok(_) => panic!("expected MalformedRootPackageJson"),
+            other => panic!("expected MalformedRootPackageJson, got {other:?}"),
         }
     }
 
@@ -1529,5 +1570,93 @@ mod tests {
             workspaces.is_empty(),
             "back-compat wrapper returns empty on root-malformed: {workspaces:?}"
         );
+    }
+
+    #[test]
+    fn discovers_deno_workspace_members_without_package_json() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let core = dir.path().join("packages").join("core");
+        let app = dir.path().join("apps").join("desktop");
+        std::fs::create_dir_all(&core).unwrap();
+        std::fs::create_dir_all(&app).unwrap();
+
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{
+              "workspace": ["./apps/*", "./packages/*"],
+              "imports": { "@std/assert": "jsr:@std/assert@1" }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            core.join("deno.json"),
+            r#"{
+              "name": "@fallow/core",
+              "exports": { ".": "./mod.ts", "./result": "./result.ts" }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("deno.json"),
+            r#"{ "name": "@fallow/desktop", "exports": { ".": "./main.ts" } }"#,
+        )
+        .unwrap();
+
+        let workspaces = discover_workspaces(dir.path());
+        let mut names: Vec<_> = workspaces.iter().map(|w| w.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["@fallow/core", "@fallow/desktop"]);
+        assert!(
+            workspaces
+                .iter()
+                .all(|w| !w.root.join("package.json").exists())
+        );
+        assert!(
+            workspaces.iter().all(|w| !w.is_internal_dependency),
+            "Deno packages need dependency evidence before inventory marks them internal"
+        );
+    }
+
+    #[test]
+    fn malformed_root_deno_config_returns_load_error() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(dir.path().join("deno.jsonc"), "{ workspace: [ }").unwrap();
+
+        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+
+        match result {
+            Err(WorkspaceLoadError::MalformedRootDenoConfig { path, error }) => {
+                assert!(path.ends_with("deno.jsonc"));
+                assert!(!error.is_empty(), "underlying parse error is preserved");
+            }
+            other => panic!("expected MalformedRootDenoConfig, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deno_and_npm_workspace_patterns_are_additive() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let a = dir.path().join("packages").join("a");
+        let b = dir.path().join("packages").join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/a"]}"#,
+        )
+        .unwrap();
+        std::fs::write(a.join("package.json"), r#"{"name": "a"}"#).unwrap();
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{"workspace": ["./packages/b"]}"#,
+        )
+        .unwrap();
+        std::fs::write(b.join("deno.json"), r#"{"name": "b"}"#).unwrap();
+
+        let workspaces = discover_workspaces(dir.path());
+        let mut names: Vec<_> = workspaces.iter().map(|w| w.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["a", "b"]);
     }
 }

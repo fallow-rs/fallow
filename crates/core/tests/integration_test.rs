@@ -29,6 +29,8 @@ mod caching;
 mod css_in_js_styled;
 #[path = "integration_test/css_modules.rs"]
 mod css_modules;
+#[path = "integration_test/deno_workspace.rs"]
+mod deno_workspace;
 #[path = "integration_test/dependencies.rs"]
 mod dependencies;
 #[path = "integration_test/duplicate_prop_shape.rs"]

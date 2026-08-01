@@ -9,7 +9,7 @@ use super::super::{
     commit_and_tag_version::CommitAndTagVersionPlugin, commitizen::CommitizenPlugin,
     commitlint::CommitlintPlugin, content_collections::ContentCollectionsPlugin,
     contentlayer::ContentlayerPlugin, convex::ConvexPlugin, cspell::CspellPlugin,
-    cucumber::CucumberPlugin, cypress::CypressPlugin, danger::DangerPlugin,
+    cucumber::CucumberPlugin, cypress::CypressPlugin, danger::DangerPlugin, deno::DenoPlugin,
     dependency_cruiser::DependencyCruiserPlugin, docusaurus::DocusaurusPlugin,
     drizzle::DrizzlePlugin, electron::ElectronPlugin, ember::EmberPlugin, eslint::EslintPlugin,
     expo::ExpoPlugin, expo_router::ExpoRouterPlugin, firebase::FirebasePlugin,
@@ -210,5 +210,6 @@ fn add_tooling_and_infra_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         VarlockPlugin,
         PnpmPlugin,
         BunPlugin,
+        DenoPlugin,
     );
 }

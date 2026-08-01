@@ -47,7 +47,7 @@ use std::time::Instant;
 
 use errors::FallowError;
 use fallow_config::{
-    EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces,
+    EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces_with_diagnostics,
     find_undeclared_workspaces_with_ignores,
 };
 use fallow_types::trace::PipelineTimings;
@@ -402,6 +402,9 @@ fn warn_missing_node_modules(config: &ResolvedConfig) {
     if config.root.join("node_modules").is_dir() {
         return;
     }
+    if fallow_config::is_deno_without_node_modules(&config.root) {
+        return;
+    }
 
     tracing::warn!(
         "node_modules directory not found. Run `npm install` / `pnpm install` first for accurate results."
@@ -410,9 +413,12 @@ fn warn_missing_node_modules(config: &ResolvedConfig) {
 
 fn discover_analysis_workspaces(
     config: &ResolvedConfig,
-) -> (Vec<fallow_config::WorkspaceInfo>, f64) {
+) -> Result<(Vec<fallow_config::WorkspaceInfo>, f64), FallowError> {
     let t = Instant::now();
-    let workspaces = discover_workspaces(&config.root);
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
+            .map_err(|error| FallowError::config(error.to_string()))?;
+    fallow_config::stash_workspace_diagnostics(&config.root, diagnostics);
     let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
     if !workspaces.is_empty() {
         tracing::info!(count = workspaces.len(), "workspaces discovered");
@@ -425,7 +431,7 @@ fn discover_analysis_workspaces(
         config.quiet,
     );
 
-    (workspaces, workspaces_ms)
+    Ok((workspaces, workspaces_ms))
 }
 
 /// Owned products of the shared pipeline prelude: progress reporter, project
@@ -516,7 +522,7 @@ pub(crate) struct AnalysisSession<'a> {
 }
 
 impl<'a> AnalysisSession<'a> {
-    fn new(config: &'a ResolvedConfig) -> Self {
+    fn new(config: &'a ResolvedConfig) -> Result<Self, FallowError> {
         let pipeline_start = Instant::now();
         let AnalysisSetup {
             progress,
@@ -525,9 +531,9 @@ impl<'a> AnalysisSession<'a> {
             config_candidates,
             discover_ms,
             workspaces_ms,
-        } = run_analysis_setup(config);
+        } = run_analysis_setup(config)?;
 
-        Self {
+        Ok(Self {
             config,
             pipeline_start,
             progress,
@@ -536,7 +542,7 @@ impl<'a> AnalysisSession<'a> {
             config_candidates,
             discover_ms,
             workspaces_ms,
-        }
+        })
     }
 
     fn files(&self) -> &[discover::DiscoveredFile] {
@@ -679,11 +685,11 @@ impl<'a> AnalysisSession<'a> {
 
 /// Run the shared prelude: progress setup, node_modules check, workspace and
 /// root-package discovery, hidden-dir scoping, and file discovery.
-fn run_analysis_setup(config: &ResolvedConfig) -> AnalysisSetup {
+fn run_analysis_setup(config: &ResolvedConfig) -> Result<AnalysisSetup, FallowError> {
     let progress = new_analysis_progress(config);
     warn_missing_node_modules(config);
 
-    let (workspaces_vec, workspaces_ms) = discover_analysis_workspaces(config);
+    let (workspaces_vec, workspaces_ms) = discover_analysis_workspaces(config)?;
     let root_pkg = load_root_package_json(config);
     let discovery_hidden_dir_scopes =
         discover::collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
@@ -696,14 +702,14 @@ fn run_analysis_setup(config: &ResolvedConfig) -> AnalysisSetup {
 
     let project = project::ProjectState::new(discovered_files, workspaces_vec);
 
-    AnalysisSetup {
+    Ok(AnalysisSetup {
         progress,
         project,
         root_pkg,
         config_candidates,
         discover_ms,
         workspaces_ms,
-    }
+    })
 }
 
 /// Borrowed inputs for plugin detection and script analysis.
@@ -1230,7 +1236,7 @@ fn analyze_full(
     retain_modules: bool,
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
-    AnalysisSession::new(config).run_full(retain, collect_usages, need_complexity, retain_modules)
+    AnalysisSession::new(config)?.run_full(retain, collect_usages, need_complexity, retain_modules)
 }
 
 fn full_analysis_pipeline_profile(
@@ -1775,7 +1781,7 @@ fn trace_pipeline_profile(profile: &PipelineProfile) {
 /// Populates the plugin result with script-used packages and config file
 /// entry patterns. Also scans CI config files for binary invocations.
 fn load_root_package_json(config: &ResolvedConfig) -> Option<PackageJson> {
-    PackageJson::load(&config.root.join("package.json")).ok()
+    fallow_config::load_dir_package_json(&config.root)
 }
 
 fn load_workspace_packages(
@@ -1784,9 +1790,7 @@ fn load_workspace_packages(
     workspaces
         .iter()
         .filter_map(|ws| {
-            PackageJson::load(&ws.root.join("package.json"))
-                .ok()
-                .map(|pkg| (ws.clone(), pkg))
+            fallow_config::load_dir_package_json(&ws.root).map(|pkg| (ws.clone(), pkg))
         })
         .collect()
 }
@@ -2710,7 +2714,7 @@ mod tests {
         write_session_fixture(dir.path());
         let config = session_config(dir.path());
 
-        let session = AnalysisSession::new(&config);
+        let session = AnalysisSession::new(&config).expect("session setup should succeed");
 
         assert!(
             session
@@ -2771,7 +2775,7 @@ mod tests {
         write_session_fixture(dir.path());
         let config = session_config(dir.path());
 
-        let session = AnalysisSession::new(&config);
+        let session = AnalysisSession::new(&config).expect("session setup should succeed");
         let parsed = session.parse_modules(false);
 
         assert!(

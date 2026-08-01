@@ -19,7 +19,9 @@ use super::specifier;
 use super::static_imports::resolve_static_imports;
 use super::types::{CanonicalizeCache, ResolveContext, TsconfigCache};
 use super::upgrades::apply_specifier_upgrades;
-use super::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+use super::{
+    ResolveAllImportsInput, ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
+};
 
 fn dummy_span() -> Span {
     Span::new(0, 0)
@@ -2040,4 +2042,165 @@ fn bare_at_alias_does_not_swallow_scoped_npm_packages() {
         matches!(result_alias, ResolveResult::Unresolvable(_)),
         "'@/foo' should enter the alias branch and return Unresolvable; got {result_alias:?}"
     );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "single resolver fixture keeps scoped import-map assertions together"
+)]
+fn deno_import_maps_follow_nearest_package_scope_and_declaring_base() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    let member = root.join("packages/member");
+    std::fs::create_dir_all(member.join("src")).unwrap();
+    std::fs::create_dir_all(member.join("member_shared")).unwrap();
+    std::fs::create_dir_all(root.join("root_deep")).unwrap();
+
+    std::fs::write(root.join("package.json"), r#"{"name":"root"}"#).unwrap();
+    std::fs::write(
+        root.join("deno.json"),
+        r#"{
+          "imports": {
+            "exact": "./root_exact.ts",
+            "shared/": "./root_shared/",
+            "shared/deep/": "./root_deep/",
+            "std": "jsr:@std/assert@1",
+            "chalk": "npm:chalk@5"
+          }
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(member.join("package.json"), r#"{"name":"member"}"#).unwrap();
+    std::fs::write(
+        member.join("deno.json"),
+        r#"{
+          "imports": {
+            "member": "./src/member.ts",
+            "missing": "./wrong.ts",
+            "shared/": "./member_shared/"
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let root_exact = root.join("root_exact.ts");
+    let root_deep = root.join("root_deep/value.ts");
+    let member_exact = member.join("src/member.ts");
+    let member_override = member.join("member_shared/value.ts");
+    let importer_relative_collision = member.join("src/wrong.ts");
+    for path in [
+        &root_exact,
+        &root_deep,
+        &member_exact,
+        &member_override,
+        &importer_relative_collision,
+    ] {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, "export const value = 1;").unwrap();
+    }
+
+    let workspaces = vec![fallow_config::WorkspaceInfo {
+        root: member.clone(),
+        name: "member".to_string(),
+        is_internal_dependency: false,
+    }];
+    let input = ResolveAllImportsInput {
+        modules: &[],
+        files: &[],
+        workspaces: &workspaces,
+        active_plugins: &[],
+        path_aliases: &[],
+        auto_imports: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root,
+        extra_conditions: &[],
+    };
+    let canonical_ws_roots = vec![dunce::canonicalize(&member).unwrap()];
+    let package_manifests = super::build_package_manifests(&input, &canonical_ws_roots);
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let mut raw_path_to_id = FxHashMap::default();
+    raw_path_to_id.insert(root_exact.as_path(), FileId(1));
+    raw_path_to_id.insert(root_deep.as_path(), FileId(2));
+    raw_path_to_id.insert(member_exact.as_path(), FileId(3));
+    raw_path_to_id.insert(member_override.as_path(), FileId(4));
+    raw_path_to_id.insert(importer_relative_collision.as_path(), FileId(5));
+    let canonical_targets = [
+        &root_exact,
+        &root_deep,
+        &member_exact,
+        &member_override,
+        &importer_relative_collision,
+    ]
+    .map(|path| dunce::canonicalize(path).unwrap());
+    let path_to_id: FxHashMap<&Path, FileId> = canonical_targets
+        .iter()
+        .enumerate()
+        .map(|(index, path)| (path.as_path(), FileId(index as u32 + 1)))
+        .collect();
+    let workspace_roots = FxHashMap::default();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
+    let canonicalize_cache = CanonicalizeCache::default();
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
+        canonicalize_cache: &canonicalize_cache,
+    };
+
+    let root_importer = root.join("app.ts");
+    let member_importer = member.join("src/app.ts");
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &root_importer, "exact", false),
+        ResolveResult::InternalModule(FileId(1))
+    ));
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &member_importer, "exact", false),
+        ResolveResult::InternalModule(FileId(1))
+    ));
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &member_importer, "member", false),
+        ResolveResult::InternalModule(FileId(3))
+    ));
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &member_importer, "shared/value.ts", false),
+        ResolveResult::InternalModule(FileId(4))
+    ));
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &member_importer, "shared/deep/value.ts", false),
+        ResolveResult::InternalModule(FileId(2))
+    ));
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &member_importer, "missing", false),
+        ResolveResult::Unresolvable(ref target) if target == "./wrong.ts"
+    ));
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &member_importer, "std", false),
+        ResolveResult::ExternalFile(ref path) if path == Path::new("jsr:@std/assert@1")
+    ));
+    assert!(matches!(
+        specifier::resolve_specifier(&ctx, &member_importer, "chalk", false),
+        ResolveResult::NpmPackage(ref name) if name == "chalk"
+    ));
 }

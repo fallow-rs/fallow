@@ -688,7 +688,7 @@ fn package_import_source_subpath(
     }
 }
 
-fn nearest_package_manifest<'a>(
+pub(super) fn nearest_package_manifest<'a>(
     manifests: &'a [PackageManifestInfo],
     from_file: &Path,
 ) -> Option<&'a PackageManifestInfo> {
@@ -825,7 +825,10 @@ fn safe_relative_package_source_path(source: &str) -> Option<&Path> {
     }
 }
 
-fn lookup_internal_file_id(ctx: &ResolveContext<'_>, candidate: &Path) -> Option<FileId> {
+pub(super) fn lookup_internal_file_id(
+    ctx: &ResolveContext<'_>,
+    candidate: &Path,
+) -> Option<FileId> {
     if let Some(&file_id) = ctx.raw_path_to_id.get(candidate) {
         return Some(file_id);
     }
@@ -1128,6 +1131,7 @@ mod tests {
             canonical_root: root,
             name: name.map(str::to_string),
             package_json,
+            deno_import_map: Vec::new(),
         };
         let manifests = [manifest];
         let mut raw_path_to_id = FxHashMap::default();
@@ -2507,6 +2511,7 @@ mod tests {
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         let result = package_import_source_subpath(&manifest, "#my-pkg/utils");
         assert_eq!(
@@ -2525,6 +2530,7 @@ mod tests {
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         let result = package_import_source_subpath(&manifest, "#utils");
         assert_eq!(
@@ -2543,6 +2549,7 @@ mod tests {
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         // "#" strips to "", which is_empty is true, so returns None.
         let result = package_import_source_subpath(&manifest, "#");
@@ -2560,6 +2567,7 @@ mod tests {
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         let result = package_import_source_subpath(&manifest, "no-hash");
         assert_eq!(result, None, "specifier without '#' should return None");
@@ -2573,6 +2581,7 @@ mod tests {
             canonical_root: PathBuf::from("/project"),
             name: None,
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         let result = package_import_source_subpath(&manifest, "#internal/helper");
         assert_eq!(
@@ -2593,12 +2602,14 @@ mod tests {
             canonical_root: root1,
             name: Some("root".to_string()),
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         let m2 = PackageManifestInfo {
             root: root2.clone(),
             canonical_root: root2,
             name: Some("@myorg/ui".to_string()),
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         let manifests = [m1, m2];
         let from_file = Path::new("/project/packages/ui/src/index.ts");
@@ -2618,6 +2629,7 @@ mod tests {
             canonical_root: root,
             name: Some("@myorg/ui".to_string()),
             package_json: fallow_config::PackageJson::default(),
+            deno_import_map: Vec::new(),
         };
         let manifests = [m];
         // File is outside the manifest root.

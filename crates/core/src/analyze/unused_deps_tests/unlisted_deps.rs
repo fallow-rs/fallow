@@ -1,6 +1,52 @@
 use super::helpers::*;
 
 #[test]
+fn deno_ambient_workspace_names_do_not_leak_into_npm_members() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let deno_root = dir.path().join("packages/deno-lib");
+    let npm_root = dir.path().join("packages/npm-app");
+    std::fs::create_dir_all(&deno_root).unwrap();
+    std::fs::create_dir_all(&npm_root).unwrap();
+    std::fs::write(dir.path().join("deno.json"), "{}").unwrap();
+    std::fs::write(deno_root.join("deno.json"), r#"{"name":"@scope/deno-lib"}"#).unwrap();
+    std::fs::write(
+        npm_root.join("package.json"),
+        r#"{"name":"@scope/npm-app"}"#,
+    )
+    .unwrap();
+
+    let workspaces = vec![
+        WorkspaceInfo {
+            root: deno_root.clone(),
+            name: "@scope/deno-lib".to_string(),
+            is_internal_dependency: false,
+        },
+        WorkspaceInfo {
+            root: npm_root.clone(),
+            name: "@scope/npm-app".to_string(),
+            is_internal_dependency: false,
+        },
+    ];
+    let config = test_config(dir.path().to_path_buf());
+    let dependency_map = workspace_dependency_map(&workspaces, &config);
+    let deno_deps = dependency_map
+        .iter()
+        .find(|(root, _)| root == &deno_root)
+        .map(|(_, deps)| deps)
+        .unwrap();
+    let npm_deps = dependency_map
+        .iter()
+        .find(|(root, _)| root == &npm_root)
+        .map(|(_, deps)| deps)
+        .unwrap();
+
+    assert!(deno_deps.contains("@scope/deno-lib"));
+    assert!(!deno_deps.contains("@scope/npm-app"));
+    assert!(npm_deps.contains("@scope/npm-app"));
+    assert!(!npm_deps.contains("@scope/deno-lib"));
+}
+
+#[test]
 fn unlisted_dep_detected_when_not_in_package_json() {
     let (graph, resolved_modules) = build_graph_with_npm_imports(&[("axios", false)]);
     let pkg = make_pkg(&["react"], &[], &[]); // axios is NOT listed

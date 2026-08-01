@@ -657,8 +657,7 @@ pub fn discover_entry_points_with_warnings(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
 ) -> EntryPointDiscovery {
-    let pkg_path = config.root.join("package.json");
-    let root_pkg = PackageJson::load(&pkg_path).ok();
+    let root_pkg = fallow_config::load_dir_package_json(&config.root);
     discover_entry_points_with_warnings_impl(config, files, root_pkg.as_ref(), true)
 }
 
@@ -721,11 +720,7 @@ fn collect_nested_package_entries(
     canonical_root: &Path,
     skipped_entries: &mut FxHashMap<String, usize>,
 ) {
-    let pkg_path = pkg_dir.join("package.json");
-    if !pkg_path.exists() {
-        return;
-    }
-    let Ok(pkg) = PackageJson::load(&pkg_path) else {
+    let Some(pkg) = fallow_config::load_dir_package_json(pkg_dir) else {
         return;
     };
     for entry_path in pkg.entry_points() {
@@ -859,8 +854,7 @@ pub fn discover_workspace_entry_points_with_warnings(
     _config: &ResolvedConfig,
     all_files: &[DiscoveredFile],
 ) -> EntryPointDiscovery {
-    let pkg_path = ws_root.join("package.json");
-    let pkg = PackageJson::load(&pkg_path).ok();
+    let pkg = fallow_config::load_dir_package_json(ws_root);
     discover_workspace_entry_points_with_warnings_impl(ws_root, all_files, pkg.as_ref())
 }
 

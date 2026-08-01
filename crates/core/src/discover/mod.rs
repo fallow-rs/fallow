@@ -48,7 +48,7 @@ pub fn collect_plugin_hidden_dir_scopes(
     }
 
     for ws in workspaces {
-        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
             push_plugin_hidden_dir_scope(&mut scopes, &registry, &pkg, &ws.root);
         }
     }
@@ -83,7 +83,7 @@ pub(crate) fn collect_hidden_dir_scopes(
     }
 
     for ws in workspaces {
-        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
             push_plugin_hidden_dir_scope(&mut scopes, &registry, &pkg, &ws.root);
             if let Some(scope) = build_script_scope(&pkg, &ws.root) {
                 scopes.push(scope);
@@ -117,7 +117,7 @@ fn push_plugin_hidden_dir_scope(
 /// every command.
 #[must_use]
 pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
-    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let root_pkg = fallow_config::load_dir_package_json(&config.root);
     let workspaces = fallow_config::discover_workspaces(&config.root);
     let scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces);
     discover_files_with_additional_hidden_dirs(config, &scopes)
@@ -200,7 +200,7 @@ pub fn collect_script_hidden_dir_scopes(
         scopes.push(scope);
     }
     for ws in workspaces {
-        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json"))
+        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root)
             && let Some(scope) = build_script_scope(&pkg, &ws.root)
         {
             scopes.push(scope);

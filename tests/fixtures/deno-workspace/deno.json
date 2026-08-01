@@ -1,0 +1,7 @@
+{
+  "workspace": ["./packages/*"],
+  "imports": {
+    "lib": "@scope/lib",
+    "shared": "./shared.ts"
+  }
+}

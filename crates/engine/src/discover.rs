@@ -256,7 +256,7 @@ pub(crate) fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDis
         config.quiet,
     );
 
-    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let root_pkg = fallow_config::load_dir_package_json(&config.root);
     let hidden_dir_scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces);
 
     let discover_start = Instant::now();
@@ -292,7 +292,7 @@ pub(crate) fn prepare_analysis_discovery_with_workspaces(
         tracing::info!(count = workspaces.len(), "workspaces discovered");
     }
 
-    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let root_pkg = fallow_config::load_dir_package_json(&config.root);
     let hidden_dir_scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), workspaces);
 
     let discover_start = Instant::now();
@@ -312,6 +312,9 @@ pub(crate) fn prepare_analysis_discovery_with_workspaces(
 
 fn warn_missing_node_modules(config: &ResolvedConfig) {
     if config.root.join("node_modules").is_dir() {
+        return;
+    }
+    if fallow_config::is_deno_without_node_modules(&config.root) {
         return;
     }
 
@@ -435,7 +438,7 @@ pub fn collect_plugin_hidden_dir_scopes(
     }
 
     for ws in workspaces {
-        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
             push_plugin_hidden_dir_scope(&mut scopes, &registry, &pkg, &ws.root);
         }
     }
@@ -472,7 +475,7 @@ pub(crate) fn collect_hidden_dir_scopes(
     }
 
     for ws in workspaces {
-        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
             push_plugin_hidden_dir_scope(&mut scopes, &registry, &pkg, &ws.root);
             push_script_hidden_dir_scope(&mut scopes, &pkg, &ws.root);
         }
