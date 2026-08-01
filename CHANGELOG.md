@@ -39,6 +39,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **React Native platform-extension siblings are no longer reported as unused
+  files.** With the `react-native` or `expo` plugin active, an import such as
+  `./UserMenu` resolved only to the first platform variant in Metro's
+  extension order (for example `UserMenu.ios.tsx`), so the base `UserMenu.tsx`
+  and other platform siblings surfaced as unused files even though Metro loads
+  them on other platforms. A specifier that resolves into a platform family
+  now credits every member (`.ios`, `.android`, `.native`, `.web`, and the
+  base file) across static imports, dynamic imports, `require` calls, and
+  re-exports, and the imported names stay credited on each member's exports.
+  Imports that explicitly name a platform variant, such as `./UserMenu.ios`,
+  keep their single edge, and unrelated orphan files are still reported.
+  (Closes [#2073](https://github.com/fallow-rs/fallow/issues/2073).)
+
 - **Tests that mock a module no longer count as statically covering the real
   module.** A test root with a proven `vi.mock` replacement executes the mock,
   yet the replaced module and everything reached only through it were still

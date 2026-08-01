@@ -499,10 +499,141 @@ export const app = Button;
         "React Native platform alias target should stay reachable: {unused_files:?}"
     );
     assert!(
-        unused_files
+        !unused_files
             .iter()
             .any(|path| path.ends_with("src/components/Button.ts")),
-        "React Native platform target should win over the generic target: {unused_files:?}"
+        "the base file of a platform-extension family is Metro's fallback on other platforms and must stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn react_native_platform_extension_family_credits_all_variants() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "react-native-platform-family",
+            "private": true,
+            "main": "src/index.ts",
+            "dependencies": {
+                "react-native": "0.80.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { UserMenu } from "./components/UserMenu";
+export const app = UserMenu;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/UserMenu.tsx"),
+        "export const UserMenu = 'default';\n",
+    )
+    .expect("base variant");
+    std::fs::write(
+        root.join("src/components/UserMenu.ios.tsx"),
+        "export const UserMenu = 'ios';\n",
+    )
+    .expect("ios variant");
+    std::fs::write(
+        root.join("src/components/Orphan.tsx"),
+        "export const Orphan = 'unreferenced';\n",
+    )
+    .expect("orphan control");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/UserMenu.ios.tsx")),
+        "the platform variant Metro selects must stay reachable: {unused_files:?}"
+    );
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/UserMenu.tsx")),
+        "the base file of a platform-extension family must stay reachable: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/Orphan.tsx")),
+        "unrelated orphan files must still be reported: {unused_files:?}"
+    );
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+    assert!(
+        !unused_export_names.contains(&"UserMenu"),
+        "the imported name must be credited on every family member: {unused_export_names:?}"
+    );
+}
+
+#[test]
+fn react_native_explicit_platform_specifier_keeps_single_edge() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "react-native-explicit-platform",
+            "private": true,
+            "main": "src/index.ts",
+            "dependencies": {
+                "react-native": "0.80.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { UserMenu } from "./components/UserMenu.ios";
+export const app = UserMenu;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/UserMenu.tsx"),
+        "export const UserMenu = 'default';\n",
+    )
+    .expect("base variant");
+    std::fs::write(
+        root.join("src/components/UserMenu.ios.tsx"),
+        "export const UserMenu = 'ios';\n",
+    )
+    .expect("ios variant");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/UserMenu.tsx")),
+        "an import that explicitly names a platform variant must not credit the family: {unused_files:?}"
     );
 }
 
