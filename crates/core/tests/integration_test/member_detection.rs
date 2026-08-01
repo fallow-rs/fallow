@@ -308,6 +308,31 @@ fn playwright_nested_fixture_pom_methods_are_credited_from_tests() {
 }
 
 #[test]
+fn playwright_indexed_access_getter_fixture_credits_target_class_members() {
+    // Issue #2070: a fixture typed `Factory["getter"]` (indexed access over a
+    // class getter) must credit members called on it against the getter's
+    // return-type class.
+    let root = fixture_path("issue-2070-playwright-indexed-access-getter");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"TaskAsserter.hasTaskForReference".to_string()),
+        "TaskAsserter.hasTaskForReference should be credited through the indexed-access fixture type, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"TaskAsserter.unusedAsserterOnly".to_string()),
+        "genuinely unused members on the same class should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn playwright_helper_function_fixture_pom_methods_are_credited() {
     let root = fixture_path("issue-491-playwright-fixture-helper-function");
     let config = create_config(root);

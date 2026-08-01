@@ -1,12 +1,231 @@
 //! React Native and Expo platform extension support.
 
-use super::types::RN_PLATFORM_PREFIXES;
+use std::path::Path;
+
+use rustc_hash::FxHashMap;
+
+use super::types::{RN_PLATFORM_PREFIXES, ResolveResult, ResolvedImport, ResolvedModule};
+use fallow_types::discover::{DiscoveredFile, FileId};
+use fallow_types::extract::{ImportInfo, ImportedName};
 
 /// Check if React Native or Expo plugins are active.
 fn has_react_native_plugin(active_plugins: &[String]) -> bool {
     active_plugins
         .iter()
         .any(|p| p == "react-native" || p == "expo")
+}
+
+/// Source extensions that participate in Metro platform-extension resolution.
+const RN_SOURCE_EXTS: &[&str] = &[".ts", ".tsx", ".js", ".jsx"];
+
+/// Split a file or specifier basename into its stem and a Metro source
+/// extension, when one is present.
+fn split_source_ext(name: &str) -> (&str, Option<&str>) {
+    for ext in RN_SOURCE_EXTS {
+        if let Some(stem) = name.strip_suffix(ext) {
+            return (stem, Some(ext));
+        }
+    }
+    (name, None)
+}
+
+/// Strip a trailing platform segment (`.ios`, `.android`, ...) from a stem.
+/// Returns the family base stem and whether a platform segment was present.
+fn strip_platform_segment(stem: &str) -> (&str, bool) {
+    for platform in RN_PLATFORM_PREFIXES {
+        if let Some(base) = stem.strip_suffix(platform) {
+            return (base, true);
+        }
+    }
+    (stem, false)
+}
+
+/// Whether an import specifier explicitly names a platform variant
+/// (e.g. `./UserMenu.ios` or `./UserMenu.ios.tsx`), in which case the author
+/// targeted one variant and the family must not be credited as a whole.
+fn specifier_names_platform_variant(specifier: &str) -> bool {
+    let basename = specifier.rsplit('/').next().unwrap_or(specifier);
+    let (stem, _) = split_source_ext(basename);
+    strip_platform_segment(stem).1
+}
+
+/// Metro platform-extension families among the discovered files, keyed by the
+/// member [`FileId`]. A family is every file in one directory sharing a base
+/// stem across `<stem>.<platform><ext>` and `<stem><ext>`, and only counts
+/// when at least one platform variant exists alongside another member.
+struct PlatformFamilies {
+    family_of: FxHashMap<FileId, usize>,
+    members: Vec<Vec<FileId>>,
+}
+
+impl PlatformFamilies {
+    fn build(files: &[DiscoveredFile]) -> Self {
+        let mut grouped: FxHashMap<(&Path, &str), Vec<(FileId, bool)>> = FxHashMap::default();
+        for file in files {
+            let Some(name) = file.path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let (stem, ext) = split_source_ext(name);
+            if ext.is_none() {
+                continue;
+            }
+            let (base, is_platform) = strip_platform_segment(stem);
+            if base.is_empty() {
+                continue;
+            }
+            let Some(parent) = file.path.parent() else {
+                continue;
+            };
+            grouped
+                .entry((parent, base))
+                .or_default()
+                .push((file.id, is_platform));
+        }
+
+        let mut family_of = FxHashMap::default();
+        let mut members = Vec::new();
+        for group in grouped.into_values() {
+            if group.len() < 2 || !group.iter().any(|(_, is_platform)| *is_platform) {
+                continue;
+            }
+            let mut ids: Vec<FileId> = group.into_iter().map(|(id, _)| id).collect();
+            ids.sort_unstable_by_key(|id| id.0);
+            let index = members.len();
+            for id in &ids {
+                family_of.insert(*id, index);
+            }
+            members.push(ids);
+        }
+        Self { family_of, members }
+    }
+
+    fn siblings(&self, target: FileId) -> Option<&[FileId]> {
+        self.family_of
+            .get(&target)
+            .map(|index| self.members[*index].as_slice())
+    }
+}
+
+/// Rebuild a project-internal [`ResolveResult`] against a sibling file,
+/// preserving the original edge kind and package attribution.
+fn retarget(result: &ResolveResult, sibling: FileId) -> Option<ResolveResult> {
+    match result {
+        ResolveResult::InternalModule(_) => Some(ResolveResult::InternalModule(sibling)),
+        ResolveResult::CommonJsInternalModule(_) => {
+            Some(ResolveResult::CommonJsInternalModule(sibling))
+        }
+        ResolveResult::SyntheticAutoImport(_) => Some(ResolveResult::SyntheticAutoImport(sibling)),
+        ResolveResult::InternalPackageModule { package_name, .. } => {
+            Some(ResolveResult::InternalPackageModule {
+                file_id: sibling,
+                package_name: package_name.clone(),
+            })
+        }
+        ResolveResult::CommonJsInternalPackageModule { package_name, .. } => {
+            Some(ResolveResult::CommonJsInternalPackageModule {
+                file_id: sibling,
+                package_name: package_name.clone(),
+            })
+        }
+        ResolveResult::ExternalFile(_)
+        | ResolveResult::NpmPackage(_)
+        | ResolveResult::CommonJsNpmPackage(_)
+        | ResolveResult::Unresolvable(_) => None,
+    }
+}
+
+/// Expand `imports` with sibling edges for every platform-extension family
+/// member, appending the extra edges to `extra`.
+fn expand_family_imports(
+    imports: &[ResolvedImport],
+    families: &PlatformFamilies,
+    extra: &mut Vec<ResolvedImport>,
+) {
+    for import in imports {
+        if specifier_names_platform_variant(&import.info.source) {
+            continue;
+        }
+        let Some(target) = import.target.internal_file_id() else {
+            continue;
+        };
+        let Some(siblings) = families.siblings(target) else {
+            continue;
+        };
+        for sibling in siblings {
+            if *sibling == target {
+                continue;
+            }
+            if let Some(retargeted) = retarget(&import.target, *sibling) {
+                extra.push(ResolvedImport {
+                    info: import.info.clone(),
+                    target: retargeted,
+                });
+            }
+        }
+    }
+}
+
+/// Credit whole Metro platform-extension families when the RN/Expo plugin is
+/// active.
+///
+/// Metro resolves `./UserMenu` to `UserMenu.ios.tsx` on iOS and to
+/// `UserMenu.tsx` (or `.android.tsx`, `.native.tsx`, ...) elsewhere, so a
+/// specifier that resolved to one family member reaches every member at
+/// runtime. The resolver picks a single winner per platform-extension order;
+/// this pass appends edges to the remaining family members so none are
+/// reported as unused files and their matching exports stay credited. Imports
+/// that explicitly name a platform variant keep their single edge.
+pub(super) fn synthesize_platform_family_edges(
+    resolved: &mut [ResolvedModule],
+    files: &[DiscoveredFile],
+    active_plugins: &[String],
+) {
+    if !has_react_native_plugin(active_plugins) {
+        return;
+    }
+    let families = PlatformFamilies::build(files);
+    if families.members.is_empty() {
+        return;
+    }
+
+    for module in resolved.iter_mut() {
+        let mut extra = Vec::new();
+        expand_family_imports(&module.resolved_imports, &families, &mut extra);
+        expand_family_imports(&module.resolved_dynamic_imports, &families, &mut extra);
+
+        for re_export in &module.re_exports {
+            if specifier_names_platform_variant(&re_export.info.source) {
+                continue;
+            }
+            let Some(target) = re_export.target.internal_file_id() else {
+                continue;
+            };
+            let Some(siblings) = families.siblings(target) else {
+                continue;
+            };
+            for sibling in siblings {
+                if *sibling == target {
+                    continue;
+                }
+                // Re-export propagation keeps its single resolved source; a
+                // side-effect edge is enough to keep the sibling reachable.
+                extra.push(ResolvedImport {
+                    info: ImportInfo {
+                        source: re_export.info.source.clone(),
+                        imported_name: ImportedName::SideEffect,
+                        local_name: String::new(),
+                        is_type_only: re_export.info.is_type_only,
+                        from_style: false,
+                        span: oxc_span::Span::default(),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(*sibling),
+                });
+            }
+        }
+
+        module.resolved_imports.extend(extra);
+    }
 }
 
 /// Build the resolver extension list, optionally prepending React Native platform
@@ -180,6 +399,62 @@ mod tests {
         assert_eq!(
             names[0], "development",
             "user-supplied entry keeps its position"
+        );
+    }
+
+    #[test]
+    fn test_specifier_names_platform_variant() {
+        assert!(specifier_names_platform_variant("./UserMenu.ios"));
+        assert!(specifier_names_platform_variant("./UserMenu.android.tsx"));
+        assert!(specifier_names_platform_variant("../deep/UserMenu.native"));
+        assert!(!specifier_names_platform_variant("./UserMenu"));
+        assert!(!specifier_names_platform_variant("./UserMenu.tsx"));
+        assert!(!specifier_names_platform_variant("./ios/UserMenu"));
+    }
+
+    fn discovered(id: u32, path: &str) -> DiscoveredFile {
+        DiscoveredFile {
+            id: FileId(id),
+            path: std::path::PathBuf::from(path),
+            size_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn test_platform_families_group_base_and_variants() {
+        let files = vec![
+            discovered(0, "src/UserMenu.tsx"),
+            discovered(1, "src/UserMenu.ios.tsx"),
+            discovered(2, "src/UserMenu.android.tsx"),
+            discovered(3, "src/Other.tsx"),
+            discovered(4, "src/nested/UserMenu.tsx"),
+        ];
+        let families = PlatformFamilies::build(&files);
+
+        assert_eq!(families.members.len(), 1);
+        assert_eq!(
+            families.siblings(FileId(0)),
+            Some([FileId(0), FileId(1), FileId(2)].as_slice())
+        );
+        assert_eq!(families.siblings(FileId(1)), families.siblings(FileId(0)));
+        assert_eq!(families.siblings(FileId(3)), None);
+        assert_eq!(
+            families.siblings(FileId(4)),
+            None,
+            "same stem in a different directory is not part of the family"
+        );
+    }
+
+    #[test]
+    fn test_platform_families_require_a_platform_variant() {
+        let files = vec![
+            discovered(0, "src/Button.ts"),
+            discovered(1, "src/Button.tsx"),
+        ];
+        let families = PlatformFamilies::build(&files);
+        assert!(
+            families.members.is_empty(),
+            "same-stem files without a platform variant are not a Metro family"
         );
     }
 

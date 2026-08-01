@@ -851,7 +851,12 @@ use crate::MemberKind;
 /// Warm 241 caches lack those contracts. Versions 242 through 247 were used by
 /// published development commits for this change, so the final version remains
 /// 248 rather than reusing a potentially stale intermediate cache version.
-pub(super) const CACHE_VERSION: u32 = 248;
+///
+/// Bumped to 249 for issue #2070: Playwright fixture type extraction now
+/// encodes literal-string indexed-access fixture types
+/// (`Factory["getter"]`) as bindings. Warm 248 caches lack those facts and
+/// keep the getter-typed fixture's target class members uncredited.
+pub(super) const CACHE_VERSION: u32 = 249;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -1,0 +1,6 @@
+{
+  "name": "issue-2070-playwright-indexed-access-getter",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

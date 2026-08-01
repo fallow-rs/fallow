@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same way the bare array form does, instead of failing analysis as a
   malformed root manifest.
 
+- **npm dependency overrides are now checked for unused and misconfigured entries.** The top-level `overrides` object in a root `package.json` (npm's equivalent of `pnpm.overrides`) runs through the same unused-dependency-override and misconfigured-dependency-override analysis as pnpm overrides. Nested override objects are flattened into `parent>child` entries and credited when the outermost parent is declared, the npm `"."` self-pin key targets its enclosing parent, and `"$package"` reference values are credited rather than reported because their resolution is indirect. Resolved packages in `package-lock.json` now also credit override targets, so pins that only exist for transitive dependencies stay green. yarn `resolutions` and bun overrides remain out of scope. (Closes [#2069](https://github.com/fallow-rs/fallow/issues/2069).)
+
 - **Parallel inline-review jobs can be isolated with a stable review id.** Set `FALLOW_REVIEW_ID` (or GitHub Action `review-id`) to a 1-64 character identifier so GitHub and GitLab reconciliation only deduplicates and resolves comments from that review scope. Unscoped jobs continue to see only unscoped comments. As part of this isolation, all runs, including unscoped ones, now read finding fingerprints only from the root comment of each GitHub review thread and from the first note of each GitLab discussion. A fingerprint that only appears in a reply is no longer treated as an existing comment, so the next run posts a fresh comment for that finding instead of deduplicating against the reply. Comments posted by fallow itself always carry the fingerprint in the root comment, so typical existing reviews are unaffected; resolution replies are still recognized anywhere in a thread. (Refs [#2076](https://github.com/fallow-rs/fallow/issues/2076).)
 
 - **`--baseline-mode identity` gates health baselines on finding identity.**
@@ -51,6 +53,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could not be parsed, while `dead-code` exited with an error. All commands now
   exit 2 with the same malformed-root message, so a broken manifest can no
   longer produce silently empty results.
+
+- **Playwright fixtures typed with an indexed access over a class getter no
+  longer produce `unused-class-members` false positives.** A fixture whose
+  declared type is `Factory["getter"]` (for example
+  `assert: TaskAsserterFactory["taskAsserter"]`) now resolves through the
+  factory's public getter to the getter's declared return-type class, so
+  members called on the fixture in tests are credited to that class.
+  Resolution is conservative: only literal string indices over a plain named
+  type participate, the index must match a public instance binding on the
+  resolved class, and the terminal type must resolve to a class with members;
+  computed keys and other shapes abstain, and genuinely unused members on the
+  same class are still reported. Warm caches are invalidated once to pick up
+  the new extraction data. (Closes
+  [#2070](https://github.com/fallow-rs/fallow/issues/2070).)
+
+- **React Native platform-extension siblings are no longer reported as unused
+  files.** With the `react-native` or `expo` plugin active, an import such as
+  `./UserMenu` resolved only to the first platform variant in Metro's
+  extension order (for example `UserMenu.ios.tsx`), so the base `UserMenu.tsx`
+  and other platform siblings surfaced as unused files even though Metro loads
+  them on other platforms. A specifier that resolves into a platform family
+  now credits every member (`.ios`, `.android`, `.native`, `.web`, and the
+  base file) across static imports, dynamic imports, `require` calls, and
+  re-exports, and the imported names stay credited on each member's exports.
+  Imports that explicitly name a platform variant, such as `./UserMenu.ios`,
+  keep their single edge, and unrelated orphan files are still reported.
+  (Closes [#2073](https://github.com/fallow-rs/fallow/issues/2073).)
+
+- **CI scanning keeps the continuation lines of plain multi-line `run:`
+  scalars.** A GitHub Actions step such as `run: npx eslint .` followed by
+  indented continuation lines, the shape of GitHub's own ESLint starter
+  workflow, dropped every continuation, so flags and file arguments on those
+  lines never reached dependency and entry-file analysis. Continuations now
+  fold into the same command, anchored at the `run` key column so sibling step
+  keys like `env:` and `with:` still terminate the scalar and their values do
+  not leak into entry files. (Closes
+  [#2016](https://github.com/fallow-rs/fallow/issues/2016).)
+
+- **Importing a Server Action from a client component is no longer flagged as
+  a server-only import.** The `server-only-import` category of the
+  `client-server-leak` rule treated a `"use server"` directive as a server-only
+  marker, so every Server Action call site in a Next.js App Router project was
+  reported as a leak even though the bundler replaces that import with an
+  action reference and the action body never enters the client bundle. A
+  `"use server"` module now becomes a sink only through what it imports:
+  reaching `server-only`, `next/headers`, `next/server`, or Node server
+  modules such as `node:fs` / `node:child_process` (directly or through
+  re-export chains) is still reported, including from a `"use server"` file.
+  The sink predicate stays module-level: it does not tell action exports apart
+  from value exports, so a `"use server"` module that imports server-only code
+  is still reported even when every export is an async action. For that shape
+  the evidence, human remediation hint, and SARIF rule text now carry the
+  deciding question: only a non-action export (a top-level const, a re-export,
+  or a default value) carries the server-only import into the client bundle,
+  and a module whose exports are all async actions is a false positive. The
+  texts no longer name `"use server"` as a server-only marker.
+  (Closes [#2074](https://github.com/fallow-rs/fallow/issues/2074).)
 
 - **Tests that mock a module no longer count as statically covering the real
   module.** A test root with a proven `vi.mock` replacement executes the mock,
@@ -113,6 +172,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented; runs that set no threshold are unaffected, since the default
   (`0`) still means "no limit". (Closes
   [#2009](https://github.com/fallow-rs/fallow/issues/2009).)
+
+### Documentation
+
+- **The README and the Action's `version` input now state that the Action ref
+  and the fallow CLI version are independent.** `uses: fallow-rs/fallow@v3`
+  selects the Action wrapper code, not the scanner, and the installed CLI
+  resolves from the `version` input, then the project's `package.json` `fallow`
+  dependency, then `latest`. The README CI example now pins the Action major
+  while letting the CLI come from the project pin, so patch and minor CLI
+  upgrades no longer suggest a lockstep Action bump. Thanks
+  [@hckhanh](https://github.com/hckhanh) for the report. (Closes
+  [#2079](https://github.com/fallow-rs/fallow/issues/2079).)
 
 ## [3.10.0] - 2026-07-27
 

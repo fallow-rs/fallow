@@ -7,10 +7,15 @@
 //! client" or any package-name guess is NOT here, because there is no clean
 //! syntactic sink for it.
 //!
-//! This single predicate is shared between the `security` client/server-leak
-//! detector and the `mixed_client_server_barrel` detector so the server-only
-//! definition (the [`SERVER_ONLY_PACKAGES`] list, `next/headers` named-import
-//! handling, and the `"use server"` directive check) never drifts.
+//! The import-based half ([`imports_server_only_code`]) is shared between the
+//! `security` client/server-leak detector and the `mixed_client_server_barrel`
+//! detector so the server-only definition (the [`SERVER_ONLY_PACKAGES`] list
+//! and `next/headers` named-import handling) never drifts. The `"use server"`
+//! directive is NOT a server-only marker for the security detector: a
+//! `"use server"` module imported from a `"use client"` file is the sanctioned
+//! Server Action pattern (the bundler replaces the import with an action
+//! reference; the body never enters the client bundle), so only
+//! [`is_server_only_module`] (used by the barrel detector) includes it.
 
 use fallow_types::extract::{ImportedName, ModuleInfo};
 
@@ -55,14 +60,29 @@ const NEXT_HEADERS_SERVER_NAMES: &[&str] = &["cookies", "headers", "draftMode"];
 /// `"use server"` directive, an import of a known server-only package, or a
 /// named server-only API from `next/headers`. The package check matches the
 /// import specifier directly, so `node:fs` and bare `fs` both count.
+///
+/// Includes the directive check, so it is the right predicate for the barrel
+/// detector; the security client/server-leak detector uses
+/// [`imports_server_only_code`] instead (a `"use server"` import from a client
+/// is the sanctioned Server Action boundary, not a leak).
 #[must_use]
 pub fn is_server_only_module(module: &ModuleInfo) -> bool {
-    // 1. A "use server" directive (Server Actions / server-only module).
-    if module.directives.iter().any(|d| d == USE_SERVER) {
-        return true;
-    }
+    module.directives.iter().any(|d| d == USE_SERVER) || imports_server_only_code(module)
+}
+
+/// Whether a module IMPORTS server-only code: the `server-only` poison package,
+/// a Node server runtime module, `next/server`, or a named server-only API from
+/// `next/headers`. Deliberately excludes the `"use server"` directive: a Server
+/// Action module is MEANT to be imported by client components, so the directive
+/// alone is not a server-only signal for the client/server-leak rule. The
+/// predicate is module-level and does not inspect export shape: a `"use server"`
+/// module that also imports one of these packages still matches even when every
+/// export is an async action, because only a non-action export can leak the
+/// import into the client bundle and fallow cannot tell the two apart here.
+#[must_use]
+pub fn imports_server_only_code(module: &ModuleInfo) -> bool {
     module.imports.iter().any(|import| {
-        // 2/3. An import of the `server-only` poison package, a Node server
+        // An import of the `server-only` poison package, a Node server
         // runtime module, or `next/server`. The specifier is matched directly
         // so both the `node:` and bare forms count.
         if SERVER_ONLY_PACKAGES.contains(&import.source.as_str()) {
@@ -194,6 +214,20 @@ mod tests {
         let mut module = empty_module();
         module.directives.push(USE_SERVER.to_string());
         assert!(is_server_only_module(&module));
+    }
+
+    #[test]
+    fn use_server_directive_alone_does_not_import_server_only_code() {
+        let mut module = empty_module();
+        module.directives.push(USE_SERVER.to_string());
+        assert!(!imports_server_only_code(&module));
+    }
+
+    #[test]
+    fn use_server_module_importing_node_fs_still_imports_server_only_code() {
+        let mut module = module_with_import("node:fs", ImportedName::Named("readFile".to_string()));
+        module.directives.push(USE_SERVER.to_string());
+        assert!(imports_server_only_code(&module));
     }
 
     #[test]

@@ -2323,7 +2323,11 @@ fn push_human_next_step(out: &mut String, finding: &SecurityFinding) {
         out.push_str(
             "    Next: check whether this server-only code is meant to run on the client. \
              If it is pulled in only through next/dynamic(..., { ssr: false }), type-only, \
-             or removed at build time, mark it as a false positive.\n",
+             or removed at build time, mark it as a false positive. If the sink is a \
+             \"use server\" Server Action module, decide by export shape: only a \
+             non-action export (a top-level const, a re-export, or a default value) \
+             carries the server-only import into the client bundle; if every export is \
+             an async action, mark it as a false positive.\n",
         );
     } else if matches!(finding.kind, SecurityFindingKind::ClientServerLeak) {
         out.push_str(
@@ -2615,11 +2619,15 @@ fn sarif_rule_def_server_only_leak(rule_id: &str) -> serde_json::Value {
         "shortDescription": { "text": "Client imports server-only code candidate (unverified)" },
         "fullDescription": { "text":
             "Unverified candidate, requires verification: a \"use client\" file \
-             transitively imports a server-only module (one carrying a \"use server\" \
-             directive or importing server-only code such as server-only, next/headers, \
+             transitively imports a server-only module (one importing server-only \
+             code such as server-only, next/headers, \
              next/server, or node:fs / node:child_process). fallow does not prove this \
              code runs on the client; a module pulled in only through \
-             next/dynamic(..., { ssr: false }) is a false positive." },
+             next/dynamic(..., { ssr: false }) is a false positive. For a \"use server\" \
+             Server Action module the deciding question is export shape: only a \
+             non-action export (a top-level const, a re-export, or a default value) \
+             carries the server-only import into the client bundle; a module whose \
+             exports are all async actions is a false positive." },
         "help": {
             "text": security_help_text(title),
             "markdown": security_help_markdown(title)

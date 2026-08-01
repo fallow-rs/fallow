@@ -276,12 +276,14 @@ fn exactly_ten_findings_reported() {
     // (transitive import.meta.env), and vite-direct-client.tsx (direct
     // import.meta.env). Plus FIVE server-only-import findings: server-only-client.tsx
     // -> headers-util (next/headers cookies, transitive); direct-fs-client.tsx
-    // (direct node:fs); use-server-client.tsx -> use-server-mod ("use server");
+    // (direct node:fs); fs-action-client.tsx -> fs-action-mod ("use server"
+    // module that imports node:fs);
     // server-only-pkg-client.tsx -> server-only-pkg-mod (server-only package);
     // child-process-client.tsx -> child-process-mod (node:child_process).
     // public-client / vite-public-client / plain / dyn-client /
     // conditional-client / suppressed-client / shared-util-client (plain util,
     // no sink) / ssr-false-client (server reached only via next/dynamic ssr:false)
+    // / save-button (Server Action import, the sanctioned boundary)
     // must NOT produce findings.
     let results = analyze_with_security();
     assert_eq!(
@@ -435,14 +437,42 @@ fn direct_server_only_import_in_client_file_is_reported_once() {
 }
 
 #[test]
-fn use_server_directive_module_is_a_server_only_sink() {
-    // Fix 5: a "use client" file whose cone reaches a "use server"-directive
-    // module reports a server-only-import finding.
+fn server_action_import_is_not_a_server_only_sink() {
+    // Issue #2074: a "use client" file importing a "use server" Server Action
+    // module (with no server-only imports) is the framework's sanctioned
+    // mutation pattern, NOT a leak. No finding of any category may anchor on
+    // the client, and the action module must not appear as a sink anywhere.
+    let results = analyze_with_security();
+    assert!(
+        !anchored_on(&results, "src/save-button.tsx"),
+        "a client importing a Server Action must not be flagged"
+    );
+    assert!(
+        !results.security_findings.iter().any(|f| {
+            f.trace.iter().any(|h| {
+                h.path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .ends_with("src/actions/save.ts")
+            })
+        }),
+        "the Server Action module must not appear in any trace"
+    );
+}
+
+#[test]
+fn use_server_module_importing_node_fs_is_still_a_sink() {
+    // Issue #2074 control: a "use server" module that ALSO imports node:fs
+    // stays a server-only sink. The sink predicate is module-level (no
+    // action-vs-value export distinction), so the server-only import alone
+    // keeps the module a sink; the fixture's non-action export is the leak
+    // shape that makes such a report real.
     let results = analyze_with_security();
     assert_eq!(
-        server_only_findings_on(&results, "src/use-server-client.tsx"),
+        server_only_findings_on(&results, "src/fs-action-client.tsx"),
         1,
-        "a client reaching a \"use server\" module must report one server-only-import finding"
+        "a client reaching a \"use server\" module that imports node:fs must report one \
+         server-only-import finding"
     );
     let finding = results
         .security_findings
@@ -451,16 +481,27 @@ fn use_server_directive_module_is_a_server_only_sink() {
             f.path
                 .to_string_lossy()
                 .replace('\\', "/")
-                .ends_with("src/use-server-client.tsx")
+                .ends_with("src/fs-action-client.tsx")
         })
-        .expect("use-server-client.tsx should be flagged");
+        .expect("fs-action-client.tsx should be flagged");
     let last = finding.trace.last().expect("trace must have hops");
     assert!(matches!(last.role, TraceHopRole::Sink));
     assert!(
         last.path
             .to_string_lossy()
             .replace('\\', "/")
-            .ends_with("src/use-server-mod.ts")
+            .ends_with("src/fs-action-mod.ts")
+    );
+    assert!(
+        !finding.evidence.contains("use server"),
+        "the evidence must not name \"use server\" as a server-only marker: {}",
+        finding.evidence
+    );
+    assert!(
+        finding.evidence.contains("non-action export"),
+        "the evidence must carry the export-shape triage question for Server Action \
+         sinks: {}",
+        finding.evidence
     );
 }
 

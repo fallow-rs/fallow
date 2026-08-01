@@ -50,7 +50,7 @@ use oxc_span::Span;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
-use react_native::{build_condition_names, build_extensions};
+use react_native::{build_condition_names, build_extensions, synthesize_platform_family_edges};
 use require_imports::resolve_require_imports;
 use specifier::create_resolver;
 use static_imports::resolve_static_imports;
@@ -220,6 +220,8 @@ pub fn resolve_all_imports_with_session(
     }
 
     apply_specifier_upgrades(&mut resolved, &mut vitest_mock_operations);
+
+    synthesize_platform_family_edges(&mut resolved, input.files, input.active_plugins);
 
     synthesize_auto_import_edges(
         &mut resolved,

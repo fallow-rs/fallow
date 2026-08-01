@@ -242,6 +242,24 @@ fn set_exports(graph: &mut TestGraphFixture, target: usize, exports: &[TestExpor
     }
 }
 
+/// Run the Playwright fixture pass over `resolved_modules` (no `ModuleInfo`
+/// list, so no indexed-access getter hops) and return the credited members.
+fn run_playwright_fixture_pass(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+) -> FxHashMap<ExportKey, FxHashSet<String>> {
+    let mut accessed_members = FxHashMap::default();
+    let indexes = MemberPassIndexes::build(resolved_modules);
+    propagate_playwright_fixture_accesses(
+        graph,
+        resolved_modules,
+        &[],
+        &indexes,
+        &mut accessed_members,
+    );
+    accessed_members
+}
+
 #[test]
 fn typed_playwright_fixture_use_fact_credits_fixture_member() {
     let mut graph = build_graph(&[
@@ -311,14 +329,7 @@ fn typed_playwright_fixture_use_fact_credits_fixture_member() {
         ..Default::default()
     }];
 
-    let mut accessed_members = FxHashMap::default();
-    let indexes = MemberPassIndexes::build(&resolved_modules);
-    propagate_playwright_fixture_accesses(
-        &graph,
-        &resolved_modules,
-        &indexes,
-        &mut accessed_members,
-    );
+    let accessed_members = run_playwright_fixture_pass(&graph, &resolved_modules);
 
     let credited = accessed_members
         .get(&ExportKey::new(FileId(2), "AdminPage"))
@@ -418,14 +429,7 @@ fn typed_playwright_fixture_alias_fact_expands_fixture_targets() {
         },
     ];
 
-    let mut accessed_members = FxHashMap::default();
-    let indexes = MemberPassIndexes::build(&resolved_modules);
-    propagate_playwright_fixture_accesses(
-        &graph,
-        &resolved_modules,
-        &indexes,
-        &mut accessed_members,
-    );
+    let accessed_members = run_playwright_fixture_pass(&graph, &resolved_modules);
 
     let credited = accessed_members
         .get(&ExportKey::new(FileId(3), "AdminPage"))
@@ -509,14 +513,7 @@ fn typed_playwright_fixture_type_fact_expands_nested_fixture_targets() {
         },
     ];
 
-    let mut accessed_members = FxHashMap::default();
-    let indexes = MemberPassIndexes::build(&resolved_modules);
-    propagate_playwright_fixture_accesses(
-        &graph,
-        &resolved_modules,
-        &indexes,
-        &mut accessed_members,
-    );
+    let accessed_members = run_playwright_fixture_pass(&graph, &resolved_modules);
 
     let credited = accessed_members
         .get(&ExportKey::new(FileId(3), "AdminPage"))

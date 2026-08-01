@@ -1,0 +1,22 @@
+{
+  "name": "issue-2069-npm-overrides",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "overrides": {
+    "sanitize-html": ">=2.17.4",
+    "axios": "^1.6.0",
+    "@types/react@<18": "18.0.0",
+    "react": {
+      "react-dom": "^17.0.2"
+    },
+    "@scope/legacy-parent": {
+      "@scope/legacy-child": "^1.0.0"
+    },
+    "typescript": "$typescript",
+    "": "^1.0.0",
+    "react@<18": ""
+  }
+}
