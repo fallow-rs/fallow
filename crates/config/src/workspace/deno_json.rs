@@ -24,10 +24,21 @@ struct DenoJson {
     exports: Option<serde_json::Value>,
     /// Workspace member globs (`["./apps/*", "./packages/*"]`).
     #[serde(default)]
-    workspace: Option<Vec<String>>,
+    workspace: Option<DenoWorkspace>,
     /// Import map entries (`"@std/assert" → "jsr:@std/assert@1"`).
     #[serde(default)]
     imports: Option<FxHashMap<String, String>>,
+}
+
+/// Deno `workspace` accepts a bare member array or `{ "members": [...] }`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum DenoWorkspace {
+    Members(Vec<String>),
+    Detailed {
+        #[serde(default)]
+        members: Vec<String>,
+    },
 }
 
 impl DenoJson {
@@ -59,7 +70,12 @@ impl DenoJson {
     /// Workspace glob patterns from the root Deno config.
     #[must_use]
     fn workspace_patterns(&self) -> Vec<String> {
-        self.workspace.clone().unwrap_or_default()
+        match &self.workspace {
+            Some(DenoWorkspace::Members(members)) | Some(DenoWorkspace::Detailed { members }) => {
+                members.clone()
+            }
+            None => Vec::new(),
+        }
     }
 
     /// Import map as sorted `(specifier, target)` pairs for stable hashing.
@@ -219,6 +235,27 @@ mod tests {
             map.iter()
                 .any(|(k, v)| k == "@std/assert" && v == "jsr:@std/assert@1")
         );
+    }
+
+    #[test]
+    fn parses_workspace_object_members_form() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{"workspace":{"members":["./packages/*"]}}"#,
+        )
+        .unwrap();
+
+        let deno = DenoJson::load_from_dir(dir.path()).unwrap().unwrap().1;
+        assert_eq!(deno.workspace_patterns(), vec!["./packages/*".to_string()]);
+    }
+
+    #[test]
+    fn rejects_invalid_workspace_value() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("deno.json"), r#"{"workspace":5}"#).unwrap();
+
+        assert!(DenoJson::load_from_dir(dir.path()).is_err());
     }
 
     #[test]
