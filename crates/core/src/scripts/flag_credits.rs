@@ -313,8 +313,12 @@ fn prefixed_package(value: &str, prefix: &str) -> Option<String> {
 ///
 /// A subpath specifier credits the owning package: `dotenv/config` credits
 /// `dotenv`, `@scope/pkg/register` credits `@scope/pkg`. Relative and absolute
-/// paths credit nothing, and an unscoped first segment ending in a script
-/// extension is a file, not a package.
+/// paths credit nothing, an unscoped single segment ending in a script
+/// extension is a file, and an unscoped multi-segment value whose last segment
+/// ends in a script extension abstains: tools like mocha resolve an existing
+/// relative file such as `test/setup.js` before treating the value as a
+/// module, and `test`, `config`, and `tools` are all real npm package names,
+/// so crediting the first segment would silently delete genuine findings.
 fn verbatim_package(value: &str) -> Option<String> {
     if value.starts_with(['.', '/', '\\']) {
         return None;
@@ -325,10 +329,16 @@ fn verbatim_package(value: &str) -> Option<String> {
         let name = parts.next().filter(|s| !s.is_empty())?;
         return Some(format!("@{scope}/{name}"));
     }
-    let first = value.split('/').next()?;
+    let mut segments = value.split('/');
+    let first = segments.next()?;
     if first.is_empty()
         || first.contains('\\')
         || SCRIPT_EXTENSIONS.iter().any(|ext| first.ends_with(ext))
+    {
+        return None;
+    }
+    if let Some(last) = segments.next_back()
+        && SCRIPT_EXTENSIONS.iter().any(|ext| last.ends_with(ext))
     {
         return None;
     }
@@ -483,6 +493,19 @@ mod tests {
         assert!(credits("node", "-r ./setup.js").is_empty());
         assert!(credits("node", "-r setup.js").is_empty());
         assert!(credits("node", "--loader /abs/loader.mjs").is_empty());
+    }
+
+    /// mocha path-resolves an existing relative file before treating the value
+    /// as a module, so `test/setup.js` must not credit the `test` package.
+    #[test]
+    fn directory_relative_script_paths_credit_nothing() {
+        assert!(credits("mocha", "--require test/setup.js").is_empty());
+        assert!(credits("node", "-r config/env.js").is_empty());
+        assert!(credits("node", "-r scripts/register.js").is_empty());
+        assert!(credits("mocha", "--require tools/mocha-setup.cjs").is_empty());
+        // A package subpath whose file has a script extension abstains too;
+        // missing a credit is the safe direction, inventing one is not.
+        assert!(credits("node", "-r pkg/dist/index.js").is_empty());
     }
 
     #[test]
