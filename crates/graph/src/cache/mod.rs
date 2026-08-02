@@ -41,7 +41,13 @@ pub use store::GraphCacheStore;
 /// Ordinary graphs omit unused provenance. Versions 7 through 16 were used by
 /// published development commits for this change, so the final version remains
 /// 17 rather than reusing a potentially stale intermediate cache version.
-pub const GRAPH_CACHE_VERSION: u32 = 17;
+///
+/// Bumped to 18 for issue #2084 (PR #2096): profiled test-reachability masking
+/// now falls back to the legacy fail-open classification when a graph would
+/// need more than the mask-profile cap, so caches written by the unbounded
+/// profiling code must not replay their old profiled results on large
+/// monorepos where the cap now engages.
+pub const GRAPH_CACHE_VERSION: u32 = 18;
 
 /// Cached form of a resolved target.
 ///

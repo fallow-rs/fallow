@@ -14,7 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   analysis now falls back to the coarse test-reachability pass instead of
   letting index storage and propagation cost grow without bound. The fallback
   is fail-open (mocked modules stay test-reachable, matching pre-profile
-  behavior) and logs a warning so the degradation is visible. (Closes
+  behavior) and logs a warning so the degradation is visible. The persisted
+  graph cache version is bumped so warm caches written before this change are
+  rebuilt under the new semantics instead of replaying stale profiled results.
+  (Closes
   [#2084](https://github.com/fallow-rs/fallow/issues/2084).)
 
 ## [3.11.0] - 2026-08-02
