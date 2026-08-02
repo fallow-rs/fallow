@@ -46,6 +46,7 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> AuditKeySn
     AuditKeySnapshot {
         type_aware_identity: None,
         type_aware_gap_signature: Vec::new(),
+        syntactic_dead_code: None,
         dead_code: cached.dead_code.into_iter().collect(),
         health: cached.health.into_iter().collect(),
         styling: cached.styling.into_iter().collect(),

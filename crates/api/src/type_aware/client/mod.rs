@@ -1377,14 +1377,32 @@ const fn namespace_name(namespace: SemanticNamespace) -> &'static str {
 fn protocol_path(root: &Path, path: &Path) -> Result<PathBuf, TypeAwareError> {
     let root = dunce::simplified(root);
     let path = dunce::simplified(path);
+    let canonical: Option<(PathBuf, PathBuf)>;
     let relative = if path.is_absolute() {
-        path.strip_prefix(root).map_err(|_| {
-            TypeAwareError::from(format!(
-                "type-aware path {} is outside project root {}",
-                path.display(),
-                root.display()
-            ))
-        })?
+        match path.strip_prefix(root) {
+            Ok(relative) => relative,
+            Err(_) => {
+                // Symlinked prefixes (macOS temp dirs live in /var, a symlink
+                // to /private/var) make one side canonical and the other not.
+                // Canonicalize both sides before concluding the path escapes
+                // the project root.
+                canonical = dunce::canonicalize(path)
+                    .ok()
+                    .zip(dunce::canonicalize(root).ok());
+                canonical
+                    .as_ref()
+                    .and_then(|(canonical_path, canonical_root)| {
+                        canonical_path.strip_prefix(canonical_root).ok()
+                    })
+                    .ok_or_else(|| {
+                        TypeAwareError::from(format!(
+                            "type-aware path {} is outside project root {}",
+                            path.display(),
+                            root.display()
+                        ))
+                    })?
+            }
+        }
     } else {
         path
     };
@@ -2449,6 +2467,35 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn protocol_path_resolves_symlinked_root_prefixes() {
+        // Mirrors macOS temp dirs, where /var is a symlink to /private/var:
+        // the sidecar reports paths through the symlink while the canonical
+        // project root uses the target (or vice versa). Neither direction may
+        // be treated as outside the project root.
+        let temp = tempdir().expect("temp dir");
+        let real_root = temp.path().join("real");
+        fs::create_dir_all(real_root.join("src")).expect("real root");
+        fs::write(real_root.join("src/app.ts"), "export const a = 1;\n").expect("file");
+        let link_root = temp.path().join("link");
+        std::os::unix::fs::symlink(&real_root, &link_root).expect("symlink");
+
+        let via_link = protocol_path(&real_root, &link_root.join("src/app.ts"))
+            .expect("symlinked path inside the real root should resolve");
+        assert_eq!(via_link, PathBuf::from("src/app.ts"));
+
+        let via_real = protocol_path(&link_root, &real_root.join("src/app.ts"))
+            .expect("real path inside the symlinked root should resolve");
+        assert_eq!(via_real, PathBuf::from("src/app.ts"));
+
+        let outside = temp.path().join("elsewhere.ts");
+        fs::write(&outside, "export const b = 2;\n").expect("outside file");
+        let error = protocol_path(&real_root, &outside)
+            .expect_err("paths genuinely outside the root must still fail");
+        assert!(error.to_string().contains("outside project root"));
+    }
 
     fn symbol() -> SemanticSymbol {
         SemanticSymbol {

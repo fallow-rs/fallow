@@ -212,6 +212,20 @@ its TypeScript runtime. CI integrations install the matching optional package.
 Baseline and regression comparisons include semantic mode identity so a
 syntactic run is never silently compared with a type-aware run.
 
+`fallow audit --gate new-only` compares base and head under one semantic
+identity when both sides resolve the same one. When they cannot be compared
+(changed tsconfigs between base and head, a sidecar available on only one
+side, or differing incomplete-query omissions), the audit does not fail.
+It falls back to the identity-independent syntactic key sets captured before
+refinement on each side and prints a warning naming the cause. Type-aware
+refinement still applies to head findings; findings that exist only because of
+semantic evidence stay advisory for that run, and a genuinely new syntactic
+finding still gates. To keep the audit gate fully syntactic while
+`typeAware.enabled` stays on for cleanup commands, set `audit.typeAware: false`
+in config. The global `--no-type-aware` flag forces any single run syntactic;
+precedence is CLI flags, then `FALLOW_TYPE_AWARE`, then `audit.typeAware`, then
+`typeAware.enabled`.
+
 When no semantic query is needed, the companion is not started.
 `_meta.type_aware.executed` is `false`, companion provenance is omitted, and the
 deferred analysis identity avoids inventing a concrete TypeScript project hash.

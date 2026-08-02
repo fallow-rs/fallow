@@ -491,6 +491,16 @@
       ]
     },
     {
+      "name": "--no-type-aware",
+      "type": "bool",
+      "required": false,
+      "description": "Disable TypeScript semantic analysis even when `typeAware.enabled` or `FALLOW_TYPE_AWARE` opts in, keeping this run fully syntactic",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--type-aware-project",
       "type": "string",
       "required": false,

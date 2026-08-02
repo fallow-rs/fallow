@@ -334,8 +334,14 @@ pub struct CheckOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
     pub include_dupes: bool,
-    /// Run opt-in TypeScript semantic refinement for supported dead-code findings.
-    pub type_aware: bool,
+    /// CLI override for the opt-in TypeScript semantic refinement:
+    /// `Some(true)` for `--type-aware`, `Some(false)` for `--no-type-aware`,
+    /// `None` when neither flag was passed (environment and config decide).
+    pub type_aware: Option<bool>,
+    /// Command-scoped config override (for example `audit.typeAware`), applied
+    /// below the CLI flags and the `FALLOW_TYPE_AWARE` environment variable but
+    /// above the top-level `typeAware.enabled` opt-in.
+    pub type_aware_config_override: Option<bool>,
     /// Explicit TypeScript project configs used by the semantic refinement.
     pub type_aware_projects: &'a [std::path::PathBuf],
     /// CLI completeness override. Config and environment are resolved later.
@@ -383,6 +389,12 @@ pub struct CheckResult {
     pub type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
     /// Bounded non-fatal diagnostics from the semantic backend.
     pub type_aware_warnings: Vec<String>,
+    /// Pre-refinement dead-code audit keys captured immediately before the
+    /// type-aware pass mutated `results`. `None` when type-aware analysis was
+    /// not enabled. The audit gate uses this identity-independent set to fall
+    /// back to syntactic attribution when base and head semantic identities
+    /// cannot be compared.
+    pub syntactic_dead_code_keys: Option<rustc_hash::FxHashSet<String>>,
     /// Impact closure for the review brief: the transitive
     /// affected-but-not-in-diff set plus coordination gaps. Populated by the
     /// audit brief path from the retained graph against the changed-file set;
@@ -544,6 +556,7 @@ fn apply_type_aware_overrides(
     apply_type_aware_overrides_from(
         opts.output,
         opts.type_aware,
+        opts.type_aware_config_override,
         opts.type_aware_projects,
         opts.type_aware_require,
         config,
@@ -552,7 +565,8 @@ fn apply_type_aware_overrides(
 
 pub fn apply_type_aware_overrides_from(
     output: fallow_config::OutputFormat,
-    enabled: bool,
+    enabled: Option<bool>,
+    config_override: Option<bool>,
     projects: &[std::path::PathBuf],
     require: Option<fallow_config::TypeAwareRequire>,
     config: &mut ResolvedConfig,
@@ -568,11 +582,12 @@ pub fn apply_type_aware_overrides_from(
             ));
         }
     };
-    config.type_aware.enabled = if enabled {
-        true
-    } else {
-        env_enabled.unwrap_or(config.type_aware.enabled)
-    };
+    // First match wins: CLI flag, environment, command-scoped config override
+    // (audit.typeAware), then the top-level typeAware.enabled opt-in.
+    config.type_aware.enabled = enabled
+        .or(env_enabled)
+        .or(config_override)
+        .unwrap_or(config.type_aware.enabled);
 
     if !projects.is_empty() {
         config.type_aware.projects = projects
@@ -851,6 +866,7 @@ struct CheckCompletionInput<'a> {
     baseline_matched: Option<(usize, usize)>,
     type_aware: Option<fallow_api::TypeAwareOutcome>,
     type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
+    syntactic_dead_code_keys: Option<rustc_hash::FxHashSet<String>>,
 }
 
 fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
@@ -863,6 +879,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_matched,
         type_aware,
         type_coupling,
+        syntactic_dead_code_keys,
     } = input;
     let CheckAnalysisData {
         results,
@@ -930,6 +947,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         type_aware_meta,
         type_coupling,
         type_aware_warnings,
+        syntactic_dead_code_keys,
         impact_closure: None,
         public_api_keys: None,
         partition_order: None,
@@ -995,6 +1013,14 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     apply_rules_and_filters(opts, &config, &mut data.results);
 
+    // Capture the pre-refinement dead-code keys so the audit gate can fall
+    // back to identity-independent syntactic attribution when base and head
+    // semantic identities differ. Must run after scope/rule filters and before
+    // the refinement below mutates `data.results`.
+    let syntactic_dead_code_keys = config
+        .type_aware
+        .enabled
+        .then(|| fallow_api::audit_keys::dead_code_keys(&data.results, &config.root));
     let (type_aware, type_coupling) = if config.type_aware.enabled {
         let include_symbol_use = if opts.filters.any_active() {
             opts.filters.unused_exports
@@ -1068,6 +1094,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         baseline_matched,
         type_aware,
         type_coupling,
+        syntactic_dead_code_keys,
     }))
 }
 
@@ -1542,6 +1569,57 @@ mod tests {
     use fallow_types::output_dead_code::*;
     use fallow_types::results::*;
     use std::path::PathBuf;
+
+    fn resolved_config(type_aware_enabled: bool) -> ResolvedConfig {
+        let config: fallow_config::FallowConfig = serde_json::from_value(serde_json::json!({
+            "typeAware": { "enabled": type_aware_enabled }
+        }))
+        .expect("config");
+        config.resolve(
+            PathBuf::from("/repo"),
+            fallow_config::OutputFormat::Json,
+            1,
+            false,
+            true,
+            None,
+        )
+    }
+
+    /// First match wins: CLI flag, then command-scoped config override, then
+    /// the top-level `typeAware.enabled` opt-in. The environment layer is not
+    /// exercised here because env vars are process-global across tests.
+    #[test]
+    fn type_aware_override_precedence_is_cli_then_scoped_config_then_config() {
+        let cases: [(Option<bool>, Option<bool>, bool, bool); 6] = [
+            // --no-type-aware beats every config layer.
+            (Some(false), Some(true), true, false),
+            // --type-aware beats a scoped opt-out.
+            (Some(true), Some(false), false, true),
+            // audit.typeAware=false keeps audit syntactic under typeAware.enabled=true.
+            (None, Some(false), true, false),
+            // audit.typeAware=true opts audit in alone.
+            (None, Some(true), false, true),
+            // Unset layers inherit typeAware.enabled.
+            (None, None, true, true),
+            (None, None, false, false),
+        ];
+        for (cli, scoped, config_enabled, expected) in cases {
+            let mut config = resolved_config(config_enabled);
+            apply_type_aware_overrides_from(
+                fallow_config::OutputFormat::Json,
+                cli,
+                scoped,
+                &[],
+                None,
+                &mut config,
+            )
+            .expect("overrides should apply");
+            assert_eq!(
+                config.type_aware.enabled, expected,
+                "cli={cli:?} scoped={scoped:?} config={config_enabled}"
+            );
+        }
+    }
 
     fn no_filters() -> IssueFilters {
         IssueFilters {

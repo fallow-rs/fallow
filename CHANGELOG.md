@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`typeAware.enabled` now works with `fallow audit --gate new-only` instead
+  of failing the gate.** When base and head cannot be compared under one
+  semantic identity (changed tsconfigs, a sidecar available on only one side,
+  or differing incomplete-query omissions), the audit no longer exits 2 with
+  "semantic analysis identities differ". It falls back to syntactic attribution
+  for the base/head diff with a warning naming the cause: type-aware refinement
+  still applies to head findings, semantic-only findings stay advisory for that
+  run, and a genuinely new syntactic finding still fails the gate. For teams
+  that want the audit gate fully syntactic while type-aware stays on for
+  cleanup commands, the new `audit.typeAware: false` config field scopes the
+  opt-out to audit, and the new global `--no-type-aware` flag forces any single
+  run syntactic (CLI flags win over `FALLOW_TYPE_AWARE`, which wins over
+  `audit.typeAware`, which wins over `typeAware.enabled`). On macOS, type-aware
+  paths reported through symlinked temp roots (`/var` versus `/private/var`)
+  are canonicalized before the project-root containment check, so they no
+  longer abort the audit as "outside project root". (Closes
+  [#2092](https://github.com/fallow-rs/fallow/issues/2092).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added
