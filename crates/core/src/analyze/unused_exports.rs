@@ -1475,6 +1475,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(span_start, span_end),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }
     }
@@ -1605,6 +1606,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(10, 20),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         graph.modules[2].set_reachable(true);
@@ -1616,6 +1618,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(10, 20),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         let suppressions = SuppressionContext::empty();
@@ -2073,6 +2076,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 10),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         };
 
@@ -2386,6 +2390,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(span_start, span_end),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }
     }
@@ -2472,6 +2477,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(10, 20),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         let config = test_config();
@@ -3148,6 +3154,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(10, 30),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         let config = test_config();
@@ -3182,6 +3189,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(10, 30),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         let config = test_config();
@@ -3216,6 +3224,7 @@ mod tests {
             expected_unused_reason: None,
             span: Span::new(10, 30),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         let config = test_config();

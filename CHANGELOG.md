@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Per-reference memory is back to its pre-3.11 size for projects without
+  replacement mocks.** The reference provenance introduced for mock-aware
+  test reachability now lives in a per-export side table that is only
+  populated when a `vi.mock`-style replacement exists, restoring the compact
+  16-byte symbol reference for every other project in RAM and in the graph
+  cache. Masked-reachability behavior is unchanged, and the graph cache
+  version is bumped so older caches are rebuilt. (Closes
+  [#2083](https://github.com/fallow-rs/fallow/issues/2083).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added

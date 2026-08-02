@@ -3202,6 +3202,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: Span::new(10, 30),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             }];
 

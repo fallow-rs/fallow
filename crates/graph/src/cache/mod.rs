@@ -41,7 +41,11 @@ pub use store::GraphCacheStore;
 /// Ordinary graphs omit unused provenance. Versions 7 through 16 were used by
 /// published development commits for this change, so the final version remains
 /// 17 rather than reusing a potentially stale intermediate cache version.
-pub const GRAPH_CACHE_VERSION: u32 = 17;
+///
+/// Bumped to 18 for issue #2083: reference provenance moved out of
+/// `SymbolReference` into the per-export `reference_paths` side table, changing
+/// the persisted layout of every export's reference list.
+pub const GRAPH_CACHE_VERSION: u32 = 18;
 
 /// Cached form of a resolved target.
 ///
