@@ -2030,9 +2030,13 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         base_sha: "abc123".to_string(),
     };
     let snapshot = AuditKeySnapshot {
-        type_aware_identity: None,
-        type_aware_gap_signature: Vec::new(),
-        syntactic_dead_code: None,
+        type_aware_identity: Some(identity_with_hash("hash-roundtrip")),
+        type_aware_gap_signature: vec!["SymbolUse:None:".to_string()],
+        syntactic_dead_code: Some(
+            ["syn:a".to_string(), "syn:b".to_string()]
+                .into_iter()
+                .collect(),
+        ),
         dead_code: ["dead:a".to_string(), "dead:b".to_string()]
             .into_iter()
             .collect(),
@@ -2046,13 +2050,23 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         public_api: std::iter::once("src/index.ts::foo".to_string()).collect(),
     };
 
-    let cached = cached_from_snapshot(&key, &snapshot);
+    let cached = cached_from_snapshot(&key, &snapshot).expect("snapshot should serialize");
     assert_eq!(cached.version, AUDIT_BASE_SNAPSHOT_CACHE_VERSION);
     assert_eq!(cached.key_hash, key.hash);
     assert_eq!(cached.base_sha, key.base_sha);
     assert_eq!(cached.dead_code, vec!["dead:a", "dead:b"]);
+    assert_eq!(
+        cached.syntactic_dead_code,
+        Some(vec!["syn:a".to_string(), "syn:b".to_string()])
+    );
 
-    let decoded = snapshot_from_cached(cached);
+    let decoded = snapshot_from_cached(cached).expect("cached snapshot should decode");
+    assert_eq!(decoded.type_aware_identity, snapshot.type_aware_identity);
+    assert_eq!(
+        decoded.type_aware_gap_signature,
+        snapshot.type_aware_gap_signature
+    );
+    assert_eq!(decoded.syntactic_dead_code, snapshot.syntactic_dead_code);
     assert_eq!(decoded.dead_code, snapshot.dead_code);
     assert_eq!(decoded.health, snapshot.health);
     assert_eq!(decoded.styling, snapshot.styling);
@@ -2210,6 +2224,9 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
         key_hash: key.hash,
         base_sha: "other".to_string(),
+        type_aware_identity: None,
+        type_aware_gap_signature: Vec::new(),
+        syntactic_dead_code: None,
         dead_code: vec!["dead:a".to_string()],
         health: vec![],
         styling: vec![],

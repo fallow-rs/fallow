@@ -3961,3 +3961,111 @@ fn audit_new_only_degrades_to_syntactic_attribution_on_type_aware_identity_misma
         "pre-existing export should stay inherited: {unused_exports:#?}"
     );
 }
+
+/// Negative control for the audit base-snapshot cache under type-aware
+/// analysis (enabled via config, not a CLI flag): the same audit run twice
+/// must behave identically. The second run hits the cached base snapshot,
+/// which persists the base's semantic identity and pre-refinement syntactic
+/// keys, so identities that genuinely match keep matching from cache and the
+/// gate never spuriously degrades to syntactic attribution.
+#[test]
+fn audit_type_aware_base_snapshot_cache_preserves_identity_comparison() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "audit-type-aware-cache", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions": {"strict": true}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"typeAware": {"enabled": true}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './utils';\nused();\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unusedBase = () => 0;\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    git(dir, &["checkout", "-b", "feature"]);
+
+    // Only existing files change: no tsconfig edit and no new file, so base
+    // and head resolve the same semantic identity (the project's root file
+    // set is part of it). A genuinely new unused export in an existing file
+    // keeps the new-only gate failing on both runs so attribution stays
+    // observable.
+    fs::write(
+        dir.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unusedBase = () => 0;\nexport const unusedNew = () => 2;\n",
+    )
+    .unwrap();
+    commit_all(dir, "add new unused export to an existing file");
+
+    let args = [
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    let cold = common::run_fallow_raw_with_type_aware_sidecar(&args);
+    let warm = common::run_fallow_raw_with_type_aware_sidecar(&args);
+
+    for (label, output) in [("cold", &cold), ("warm", &warm)] {
+        assert_eq!(
+            output.code, 1,
+            "{label} run must fail the new-only gate on the new unused export only. stdout: {}\nstderr: {}",
+            output.stdout, output.stderr
+        );
+        let json = parse_json(output);
+        let warnings: Vec<String> = json["_meta"]["type_aware"]["warnings"]
+            .as_array()
+            .map(|warnings| {
+                warnings
+                    .iter()
+                    .filter_map(|warning| warning.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            !warnings
+                .iter()
+                .any(|warning| warning.contains("syntactic attribution")),
+            "{label} run must not degrade: matching identities must keep the \
+type-aware comparison, including from the base-snapshot cache. warnings: {warnings:#?}"
+        );
+        let unused_exports = json["dead_code"]["unused_exports"]
+            .as_array()
+            .expect("dead_code.unused_exports should be an array");
+        assert!(
+            unused_exports
+                .iter()
+                .any(|finding| finding["export_name"] == "unusedNew"
+                    && finding["introduced"] == true),
+            "{label} run should attribute the new export as introduced: {unused_exports:#?}"
+        );
+        assert!(
+            unused_exports
+                .iter()
+                .any(|finding| finding["export_name"] == "unusedBase"
+                    && finding["introduced"] == false),
+            "{label} run should keep the pre-existing export inherited: {unused_exports:#?}"
+        );
+    }
+}

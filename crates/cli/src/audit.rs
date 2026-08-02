@@ -1213,9 +1213,11 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
     );
     if let Some(reason) = type_aware_degrade {
         let warning = format!(
-            "audit compared base and head with syntactic attribution because {reason}; \
-type-aware refinement still applies to head findings, and semantic-only findings \
-stay out of the new-only gate for this run"
+            "audit compared base and head with syntactic attribution because {reason} \
+(usually a tsconfig change between base and head, or the sidecar being unavailable \
+on the base side); type-aware refinement still applies to head findings, and \
+semantic-only findings stay out of the new-only gate for this run; set \
+audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
         );
         if matches!(opts.output, fallow_config::OutputFormat::Human) && !opts.quiet {
             eprintln!(

@@ -13,7 +13,7 @@ use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 5;
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 6;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {
@@ -27,6 +27,18 @@ pub(super) struct CachedAuditKeySnapshot {
     pub(super) cli_version: String,
     pub(super) key_hash: u64,
     pub(super) base_sha: String,
+    /// JSON-serialized `SemanticAnalysisIdentity` of the base pass, `None`
+    /// when the base ran without type-aware analysis. Persisted so a warm
+    /// cache hit still compares base and head identities instead of treating
+    /// every cached type-aware base as identity-less (which would spuriously
+    /// degrade the new-only gate to syntactic attribution).
+    pub(super) type_aware_identity: Option<String>,
+    pub(super) type_aware_gap_signature: Vec<String>,
+    /// Pre-refinement syntactic dead-code keys of the base pass, `None` when
+    /// the base ran without type-aware analysis (then `dead_code` is already
+    /// syntactic). Persisted so the degraded attribution path compares true
+    /// syntactic sets on both sides even on a warm cache.
+    pub(super) syntactic_dead_code: Option<Vec<String>>,
     pub(super) dead_code: Vec<String>,
     pub(super) health: Vec<String>,
     pub(super) styling: Vec<String>,
@@ -42,11 +54,21 @@ pub(super) fn sorted_keys(keys: &FxHashSet<String>) -> Vec<String> {
     keys
 }
 
-pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> AuditKeySnapshot {
-    AuditKeySnapshot {
-        type_aware_identity: None,
-        type_aware_gap_signature: Vec::new(),
-        syntactic_dead_code: None,
+/// Rehydrate an in-memory snapshot from its cached form. Returns `None` when
+/// the persisted type-aware identity no longer deserializes (treated as a
+/// cache miss so a stale payload can never masquerade as an identity-less
+/// base).
+pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<AuditKeySnapshot> {
+    let type_aware_identity = match cached.type_aware_identity {
+        Some(json) => Some(serde_json::from_str(&json).ok()?),
+        None => None,
+    };
+    Some(AuditKeySnapshot {
+        type_aware_identity,
+        type_aware_gap_signature: cached.type_aware_gap_signature,
+        syntactic_dead_code: cached
+            .syntactic_dead_code
+            .map(|keys| keys.into_iter().collect()),
         dead_code: cached.dead_code.into_iter().collect(),
         health: cached.health.into_iter().collect(),
         styling: cached.styling.into_iter().collect(),
@@ -54,18 +76,29 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> AuditKeySn
         boundary_edges: cached.boundary_edges.into_iter().collect(),
         cycles: cached.cycles.into_iter().collect(),
         public_api: cached.public_api.into_iter().collect(),
-    }
+    })
 }
 
+/// Build the cached form of a base snapshot. Returns `None` when the
+/// type-aware identity cannot be serialized; the caller then skips the save so
+/// a warm cache can never resurrect an identity-less base for a type-aware
+/// run.
 pub(super) fn cached_from_snapshot(
     key: &AuditBaseSnapshotCacheKey,
     snapshot: &AuditKeySnapshot,
-) -> CachedAuditKeySnapshot {
-    CachedAuditKeySnapshot {
+) -> Option<CachedAuditKeySnapshot> {
+    let type_aware_identity = match snapshot.type_aware_identity.as_ref() {
+        Some(identity) => Some(serde_json::to_string(identity).ok()?),
+        None => None,
+    };
+    Some(CachedAuditKeySnapshot {
         version: AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
         key_hash: key.hash,
         base_sha: key.base_sha.clone(),
+        type_aware_identity,
+        type_aware_gap_signature: snapshot.type_aware_gap_signature.clone(),
+        syntactic_dead_code: snapshot.syntactic_dead_code.as_ref().map(sorted_keys),
         dead_code: sorted_keys(&snapshot.dead_code),
         health: sorted_keys(&snapshot.health),
         styling: sorted_keys(&snapshot.styling),
@@ -73,7 +106,7 @@ pub(super) fn cached_from_snapshot(
         boundary_edges: sorted_keys(&snapshot.boundary_edges),
         cycles: sorted_keys(&snapshot.cycles),
         public_api: sorted_keys(&snapshot.public_api),
-    }
+    })
 }
 
 pub(super) fn audit_base_snapshot_cache_dir(cache_dir: &Path) -> PathBuf {
@@ -115,7 +148,7 @@ pub(super) fn load_cached_base_snapshot(
     {
         return None;
     }
-    Some(snapshot_from_cached(cached))
+    snapshot_from_cached(cached)
 }
 
 pub(super) fn save_cached_base_snapshot(
@@ -123,11 +156,14 @@ pub(super) fn save_cached_base_snapshot(
     key: &AuditBaseSnapshotCacheKey,
     snapshot: &AuditKeySnapshot,
 ) {
+    let Some(cached) = cached_from_snapshot(key, snapshot) else {
+        return;
+    };
     let dir = audit_base_snapshot_cache_dir(opts.cache_dir);
     if ensure_audit_base_snapshot_cache_dir(&dir).is_err() {
         return;
     }
-    let data = bitcode::encode(&cached_from_snapshot(key, snapshot));
+    let data = bitcode::encode(&cached);
     let Ok(mut tmp) = tempfile::NamedTempFile::new_in(&dir) else {
         return;
     };

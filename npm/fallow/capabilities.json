@@ -5938,6 +5938,7 @@
     "FALLOW_EXTENDS_TIMEOUT_SECS": "Timeout in seconds for fetching https:// configs referenced via the extends field (default 5).",
     "FALLOW_COVERAGE": "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this.",
     "FALLOW_MAX_FILE_SIZE": "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
+    "FALLOW_TYPE_AWARE": "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled.",
     "FALLOW_AUDIT_BASE": "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
     "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
     "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
