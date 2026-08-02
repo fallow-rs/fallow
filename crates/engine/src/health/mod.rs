@@ -390,6 +390,12 @@ pub struct HealthExecutionOptions<'a> {
     /// identity save writes count and identity buckets, a count save writes
     /// count buckets only.
     pub baseline_mode: crate::baseline::HealthBaselineMode,
+    /// Whether `baseline_mode` was requested explicitly rather than defaulted.
+    /// A defaulted count save refuses to overwrite a baseline that carries
+    /// identity buckets, because dropping them breaks later identity-mode
+    /// comparisons; an explicit count request is treated as intent to
+    /// downgrade.
+    pub baseline_mode_explicit: bool,
     pub complexity: bool,
     pub file_scores: bool,
     pub coverage_gaps: bool,
@@ -689,6 +695,7 @@ mod tests {
             baseline: Some(Path::new(".fallow/health-baseline.json")),
             save_baseline: None,
             baseline_mode: crate::baseline::HealthBaselineMode::Count,
+            baseline_mode_explicit: false,
             complexity: true,
             file_scores: true,
             coverage_gaps: false,
@@ -793,6 +800,7 @@ mod tests {
                 baseline: None,
                 save_baseline: None,
                 baseline_mode: crate::baseline::HealthBaselineMode::Count,
+                baseline_mode_explicit: false,
                 complexity: true,
                 file_scores: false,
                 coverage_gaps: false,

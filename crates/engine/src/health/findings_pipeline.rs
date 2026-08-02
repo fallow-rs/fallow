@@ -285,6 +285,7 @@ pub(super) fn save_health_baseline_if_requested(
             config_root: &config.root,
             quiet: opts.quiet,
             mode: opts.baseline_mode,
+            mode_explicit: opts.baseline_mode_explicit,
         })?;
     }
     Ok(())

@@ -17,6 +17,43 @@ pub(super) struct HealthBaselineSaveInput<'a> {
     pub(super) config_root: &'a std::path::Path,
     pub(super) quiet: bool,
     pub(super) mode: HealthBaselineMode,
+    pub(super) mode_explicit: bool,
+}
+
+/// Refuse a defaulted count save over a baseline that carries identity
+/// buckets: the count save would silently drop them, and the loss only
+/// surfaces later, when an identity-mode comparison on another machine
+/// rejects the file. An explicit `--baseline-mode count` expresses intent
+/// to downgrade and is honored. An unreadable or unparsable existing file
+/// is not a guard condition; the save proceeds and overwrites it.
+fn check_identity_overwrite(
+    save_path: &std::path::Path,
+    mode: HealthBaselineMode,
+    mode_explicit: bool,
+) -> Result<(), HealthError> {
+    if mode != HealthBaselineMode::Count || mode_explicit {
+        return Ok(());
+    }
+    let Ok(existing_json) = std::fs::read_to_string(save_path) else {
+        return Ok(());
+    };
+    let Ok(existing) = serde_json::from_str::<HealthBaselineData>(&existing_json) else {
+        return Ok(());
+    };
+    if existing.lacks_identity_data() {
+        return Ok(());
+    }
+    Err(HealthError::message(
+        format!(
+            "refusing to overwrite health baseline {}: it carries per-function \
+             identities (saved with --baseline-mode identity), and this count-mode \
+             save would drop them, breaking later --baseline-mode identity runs. \
+             Re-save with --baseline-mode identity to keep them, or pass \
+             --baseline-mode count explicitly to downgrade the baseline",
+            save_path.display()
+        ),
+        2,
+    ))
 }
 
 /// Save health baseline to disk.
@@ -29,7 +66,9 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
         config_root,
         quiet,
         mode,
+        mode_explicit,
     } = *input;
+    check_identity_overwrite(save_path, mode, mode_explicit)?;
     let baseline = HealthBaselineData::from_findings(
         findings,
         runtime_coverage_findings,
