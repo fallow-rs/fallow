@@ -2741,6 +2741,17 @@
         },
         "severity_moderate_count": {
           "type": "integer"
+        },
+        "baseline_staleness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthBaselineStaleness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Baseline staleness data, present only when a baseline was loaded."
         }
       },
       "required": [
@@ -21264,6 +21275,34 @@
       "maxLength": 64,
       "pattern": "^[A-Za-z0-9._-]+$",
       "description": "Stable identifier used to isolate independent review integrations on the\nsame pull or merge request."
+    },
+    "HealthBaselineStaleness": {
+      "type": "object",
+      "properties": {
+        "baseline_entries": {
+          "type": "integer",
+          "description": "Total finding entries carried by the loaded baseline."
+        },
+        "matched_entries": {
+          "type": "integer",
+          "description": "Entries that matched a current finding in the active baseline mode."
+        },
+        "stale_entries": {
+          "type": "integer",
+          "description": "Entries that matched no current finding on this run."
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "True when the stale fraction crossed the warning threshold, so\nmachine consumers do not have to reimplement it."
+        }
+      },
+      "required": [
+        "baseline_entries",
+        "matched_entries",
+        "stale_entries",
+        "stale"
+      ],
+      "description": "Staleness of a loaded health baseline.\n\nReports how many saved baseline entries still matched a current finding on\nthis run, so consumers can see a rotting baseline before it degrades to\nzero overlap. Present in the summary only when a baseline was loaded."
     }
   }
 }

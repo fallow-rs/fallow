@@ -1704,11 +1704,22 @@ pub enum HealthBaselineMode {
     /// Match per file and finding category. Resilient to renames and line
     /// shifts, but a replacement hotspot consumes the allowance of the hotspot
     /// it replaced.
+    ///
+    /// Count buckets do not survive file moves: the bucket key is the path and
+    /// the payload is category tallies alone, so a bucket whose file moved has
+    /// no surviving identity component to re-match on. Guessing a new path
+    /// from count shapes could silently transfer allowance between unrelated
+    /// files, so no move tolerance is attempted in this mode.
     #[default]
     Count,
     /// Match per function identity (path plus function name) and finding
     /// category. A hotspot that replaces another hotspot in the same file is
     /// reported, while line shifts and in-place edits stay suppressed.
+    ///
+    /// Identity buckets tolerate file moves conservatively: a bucket whose
+    /// path no longer exists on disk follows its function name to a new path
+    /// when exactly one unclaimed current bucket carries that name. See
+    /// [`moved_identity_bucket_remaps`].
     Identity,
 }
 
@@ -1829,7 +1840,15 @@ impl HealthBaselineData {
         let baseline_counts = self.counts_for(mode);
         if !baseline_counts.is_empty() {
             let current_counts = health_finding_counts(findings, root, mode);
-            health_overlap_entry_count(&current_counts, baseline_counts)
+            let remapped = (mode == HealthBaselineMode::Identity)
+                .then(|| {
+                    identity_counts_with_move_tolerance(baseline_counts, &current_counts, root)
+                })
+                .flatten();
+            health_overlap_entry_count(
+                &current_counts,
+                remapped.as_ref().unwrap_or(baseline_counts),
+            )
         } else {
             let baseline_keys: FxHashSet<&str> = self.findings.iter().map(String::as_str).collect();
             findings
@@ -1875,6 +1894,98 @@ fn health_bucket_key(
         HealthBaselineMode::Count => path,
         HealthBaselineMode::Identity => format!("{path}\0{}", finding.name),
     }
+}
+
+/// Placeholder name for functions without a resolvable name; two anonymous
+/// functions sharing it is not evidence of identity, so move tolerance skips
+/// such buckets entirely.
+const ANONYMOUS_FUNCTION_NAME: &str = "<anonymous>";
+
+fn identity_bucket_parts(key: &str) -> Option<(&str, &str)> {
+    key.split_once('\0')
+}
+
+/// Conservative file-move tolerance for identity baseline buckets.
+///
+/// A baseline bucket follows its function to a new path only when every one of
+/// these holds:
+///
+/// - the bucket matched no current bucket at its saved path,
+/// - the saved path no longer exists on disk under the project root, so the
+///   file was moved or deleted rather than merely fixed,
+/// - exactly one current bucket carries the same function name at a path the
+///   baseline does not already cover,
+/// - no other retired baseline bucket claims that same candidate.
+///
+/// The function name is the only identity component that survives a move, so
+/// anything more permissive would risk transferring allowance between
+/// unrelated functions. Anonymous placeholders never match. The result is
+/// deterministic: both maps iterate in `BTreeMap` order and the
+/// exactly-one rules make the outcome independent of iteration order.
+fn moved_identity_bucket_remaps(
+    baseline_counts: &HealthFindingCountMap,
+    current_counts: &HealthFindingCountMap,
+    root: &Path,
+) -> Vec<(String, String)> {
+    let mut candidates_by_name: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
+    for key in current_counts.keys() {
+        if baseline_counts.contains_key(key) {
+            continue;
+        }
+        if let Some((_, name)) = identity_bucket_parts(key)
+            && name != ANONYMOUS_FUNCTION_NAME
+        {
+            candidates_by_name.entry(name).or_default().push(key);
+        }
+    }
+
+    let mut proposals: Vec<(&str, &str)> = Vec::new();
+    let mut claims: FxHashMap<&str, usize> = FxHashMap::default();
+    for key in baseline_counts.keys() {
+        if current_counts.contains_key(key.as_str()) {
+            continue;
+        }
+        let Some((path, name)) = identity_bucket_parts(key) else {
+            continue;
+        };
+        if name == ANONYMOUS_FUNCTION_NAME || root.join(path).exists() {
+            continue;
+        }
+        if let Some(candidates) = candidates_by_name.get(name)
+            && let [only_candidate] = candidates.as_slice()
+        {
+            proposals.push((key.as_str(), only_candidate));
+            *claims.entry(only_candidate).or_default() += 1;
+        }
+    }
+
+    proposals
+        .into_iter()
+        .filter(|(_, candidate)| claims.get(candidate) == Some(&1))
+        .map(|(old, new)| (old.to_string(), new.to_string()))
+        .collect()
+}
+
+/// Baseline identity counts with retired buckets re-keyed to moved files.
+///
+/// Returns `None` when no bucket qualifies, so callers can keep borrowing the
+/// original map.
+fn identity_counts_with_move_tolerance(
+    baseline_counts: &HealthFindingCountMap,
+    current_counts: &HealthFindingCountMap,
+    root: &Path,
+) -> Option<HealthFindingCountMap> {
+    let remaps = moved_identity_bucket_remaps(baseline_counts, current_counts, root);
+    if remaps.is_empty() {
+        return None;
+    }
+    let mut remapped = baseline_counts.clone();
+    for (old_key, new_key) in remaps {
+        if let Some(entry) = remapped.remove(&old_key) {
+            remapped.insert(new_key, entry);
+        }
+    }
+    Some(remapped)
 }
 
 fn health_finding_counts(
@@ -2072,7 +2183,13 @@ pub(crate) fn filter_new_health_findings(
     let baseline_counts = baseline.counts_for(mode);
     if !baseline_counts.is_empty() {
         let current_counts = health_finding_counts(&findings, root, mode);
-        let overflow_categories = health_overflow_categories(&current_counts, baseline_counts);
+        let remapped = (mode == HealthBaselineMode::Identity)
+            .then(|| identity_counts_with_move_tolerance(baseline_counts, &current_counts, root))
+            .flatten();
+        let overflow_categories = health_overflow_categories(
+            &current_counts,
+            remapped.as_ref().unwrap_or(baseline_counts),
+        );
         findings.retain(|finding| {
             let bucket = health_bucket_key(finding, root, mode);
             overflow_categories.get(&bucket).is_some_and(|categories| {
@@ -3229,6 +3346,125 @@ mod tests {
             !identity.finding_counts.is_empty(),
             "an identity baseline stays readable in count mode"
         );
+    }
+
+    fn moved_finding(root: &Path, path: &str, name: &str) -> fallow_output::ComplexityViolation {
+        let mut finding = make_health_finding(root, name, 42);
+        finding.path = root.join(path);
+        finding
+    }
+
+    #[test]
+    fn health_identity_baseline_follows_file_move() {
+        let root = PathBuf::from("/project");
+        let baseline =
+            identity_baseline(&[make_health_finding(&root, "parseExpression", 42)], &root);
+        let moved = vec![moved_finding(
+            &root,
+            "src/parser/utils.ts",
+            "parseExpression",
+        )];
+
+        assert_eq!(
+            baseline.overlap_entry_count(&moved, &root, HealthBaselineMode::Identity),
+            1,
+            "a followed move counts as matched, not stale"
+        );
+        let filtered = super::filter_new_health_findings(
+            moved,
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn health_identity_move_is_not_followed_when_candidates_are_ambiguous() {
+        let root = PathBuf::from("/project");
+        let baseline =
+            identity_baseline(&[make_health_finding(&root, "parseExpression", 42)], &root);
+        let filtered = super::filter_new_health_findings(
+            vec![
+                moved_finding(&root, "src/a.ts", "parseExpression"),
+                moved_finding(&root, "src/b.ts", "parseExpression"),
+            ],
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn health_identity_move_is_not_followed_when_candidate_is_claimed_twice() {
+        let root = PathBuf::from("/project");
+        let baseline = identity_baseline(
+            &[
+                moved_finding(&root, "src/a.ts", "parseExpression"),
+                moved_finding(&root, "src/b.ts", "parseExpression"),
+            ],
+            &root,
+        );
+        let filtered = super::filter_new_health_findings(
+            vec![moved_finding(&root, "src/c.ts", "parseExpression")],
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn health_identity_move_is_not_followed_when_old_path_still_exists() {
+        // The manifest dir makes the saved path a file that really exists, so
+        // the function was fixed or deleted in place rather than moved.
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let baseline = identity_baseline(
+            &[moved_finding(&root, "src/baseline.rs", "parseExpression")],
+            &root,
+        );
+        let filtered = super::filter_new_health_findings(
+            vec![moved_finding(&root, "src/moved.ts", "parseExpression")],
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn health_identity_move_is_not_followed_for_anonymous_functions() {
+        let root = PathBuf::from("/project");
+        let baseline = identity_baseline(&[make_health_finding(&root, "<anonymous>", 42)], &root);
+        let filtered = super::filter_new_health_findings(
+            vec![moved_finding(&root, "src/moved.ts", "<anonymous>")],
+            &baseline,
+            &root,
+            HealthBaselineMode::Identity,
+        );
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn health_count_baseline_does_not_follow_file_moves() {
+        let root = PathBuf::from("/project");
+        let baseline = HealthBaselineData::from_findings(
+            &[make_health_finding(&root, "parseExpression", 42)],
+            &[],
+            &[],
+            &root,
+        );
+        let filtered = filter_new_health_findings(
+            vec![moved_finding(
+                &root,
+                "src/parser/utils.ts",
+                "parseExpression",
+            )],
+            &baseline,
+            &root,
+        );
+        assert_eq!(filtered.len(), 1);
     }
 
     #[test]

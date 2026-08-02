@@ -637,6 +637,25 @@ pub struct LargeFunctionEntry {
     pub line_count: u32,
 }
 
+/// Staleness of a loaded health baseline.
+///
+/// Reports how many saved baseline entries still matched a current finding on
+/// this run, so consumers can see a rotting baseline before it degrades to
+/// zero overlap. Present in the summary only when a baseline was loaded.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HealthBaselineStaleness {
+    /// Total finding entries carried by the loaded baseline.
+    pub baseline_entries: usize,
+    /// Entries that matched a current finding in the active baseline mode.
+    pub matched_entries: usize,
+    /// Entries that matched no current finding on this run.
+    pub stale_entries: usize,
+    /// True when the stale fraction crossed the warning threshold, so
+    /// machine consumers do not have to reimplement it.
+    pub stale: bool,
+}
+
 /// Summary statistics for the health report.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -668,6 +687,9 @@ pub struct HealthSummary {
     pub severity_critical_count: usize,
     pub severity_high_count: usize,
     pub severity_moderate_count: usize,
+    /// Baseline staleness data, present only when a baseline was loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_staleness: Option<HealthBaselineStaleness>,
 }
 
 impl Default for HealthSummary {
@@ -689,6 +711,7 @@ impl Default for HealthSummary {
             severity_critical_count: 0,
             severity_high_count: 0,
             severity_moderate_count: 0,
+            baseline_staleness: None,
         }
     }
 }

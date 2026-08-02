@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A partially stale health baseline now says so instead of rotting
+  silently.** When a quarter or more of a loaded baseline's entries match no
+  current finding, human output prints a warning naming how many of the saved
+  entries went stale and how to re-save, instead of only warning at zero
+  overlap. JSON output gains a `summary.baseline_staleness` object
+  (`baseline_entries`, `matched_entries`, `stale_entries`, `stale`) whenever a
+  baseline is loaded, so CI can watch a baseline degrade without parsing
+  stderr. Exit codes are unchanged. (Closes
+  [#2065](https://github.com/fallow-rs/fallow/issues/2065).)
+
+### Fixed
+
+- **Identity-mode health baselines now survive file moves.** A baseline
+  entry whose saved path no longer exists on disk follows its function name to
+  the new path when exactly one unclaimed current finding carries that name,
+  so moving or renaming a file no longer reports every finding it carried as
+  new. The match is deliberately conservative: ambiguous candidates, anonymous
+  functions, and files that still exist at their saved path are never
+  remapped, and count-mode baselines are unchanged because a per-file count
+  bucket has no identity component left to re-match once its path is gone.
+  (Closes [#2066](https://github.com/fallow-rs/fallow/issues/2066).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added

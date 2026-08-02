@@ -5328,6 +5328,36 @@ istanbul_total?: (number | null)
 severity_critical_count: number
 severity_high_count: number
 severity_moderate_count: number
+/**
+ * Baseline staleness data, present only when a baseline was loaded.
+ */
+baseline_staleness?: (HealthBaselineStaleness | null)
+}
+/**
+ * Staleness of a loaded health baseline.
+ *
+ * Reports how many saved baseline entries still matched a current finding on
+ * this run, so consumers can see a rotting baseline before it degrades to
+ * zero overlap. Present in the summary only when a baseline was loaded.
+ */
+export interface HealthBaselineStaleness {
+/**
+ * Total finding entries carried by the loaded baseline.
+ */
+baseline_entries: number
+/**
+ * Entries that matched a current finding in the active baseline mode.
+ */
+matched_entries: number
+/**
+ * Entries that matched no current finding on this run.
+ */
+stale_entries: number
+/**
+ * True when the stale fraction crossed the warning threshold, so
+ * machine consumers do not have to reimplement it.
+ */
+stale: boolean
 }
 /**
  * Report entry describing whether a threshold override is active, stale, or
