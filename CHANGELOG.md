@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CLI flag values that name packages by convention now credit the
+  dependency.** The eslint `--format` shorthand from
+  [#2006](https://github.com/fallow-rs/fallow/issues/2006) is now one row in
+  an embedded convention catalogue that also covers eslint `--plugin`, jest
+  `--testEnvironment` / `--runner` / `--reporters` / `--preset`, preload and
+  loader flags on node, tsx and ts-node (`-r`, `--require`, `--loader`,
+  `--experimental-loader`, `--import`, including subpaths like
+  `dotenv/config`), mocha `--reporter` and `--require`, prettier `--plugin`,
+  stylelint `--custom-syntax` and postcss `--use`. A package used only through
+  such a flag in a script or CI command is no longer reported as an unused
+  dependency; built-in values, paths and unlisted flags keep abstaining, and a
+  malformed catalogue row fails the parse loudly. (Closes
+  [#2019](https://github.com/fallow-rs/fallow/issues/2019).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added

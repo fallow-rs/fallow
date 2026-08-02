@@ -10,6 +10,7 @@
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
 pub mod ci;
+mod flag_credits;
 mod resolve;
 mod shell;
 
@@ -938,7 +939,7 @@ fn parse_command_segment(
 
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
     let (file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
-    let flag_packages = flag_referenced_packages(&binary, &tokens[idx + 1..]);
+    let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     Some(SegmentOutcome::Command(ScriptCommand {
         binary,
@@ -956,86 +957,6 @@ fn forwarded_arguments(segment: &str, from_token: usize) -> String {
         .skip(from_token)
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Packages a CLI names through a flag value rather than a positional argument.
-///
-/// eslint expands `--format gha` to the `eslint-formatter-gha` package using a
-/// documented shorthand, so a formatter invoked only from a CI command has no
-/// import, no config entry, and no binary invocation anywhere in the project and
-/// is reported as an unused dependency (issue #2006).
-///
-/// The synthesized name only ever exempts an already-declared dependency from
-/// the unused scan; it is not consulted by unlisted-dependency detection, so an
-/// undeclared formatter cannot turn into a new finding. That is also why the
-/// bundled formatter names are not filtered out: eslint resolves the npm package
-/// before falling back to its bundled one, so a declared `eslint-formatter-json`
-/// really is loaded, and an undeclared one credits nothing either way.
-fn flag_referenced_packages(binary: &str, args: &[&str]) -> Vec<String> {
-    if binary != "eslint" {
-        return Vec::new();
-    }
-
-    let mut packages = Vec::new();
-    let mut idx = 0;
-    while idx < args.len() {
-        let token = args[idx];
-        // Everything past `--` belongs to another program.
-        if token == "--" {
-            break;
-        }
-        let value = if let Some(value) = token
-            .strip_prefix("--format=")
-            .or_else(|| token.strip_prefix("-f="))
-        {
-            idx += 1;
-            value
-        } else if matches!(token, "--format" | "-f") {
-            idx += 2;
-            let Some(value) = args.get(idx - 1) else {
-                break;
-            };
-            value
-        } else {
-            idx += 1;
-            continue;
-        };
-
-        if let Some(package) = eslint_formatter_package(strip_surrounding_quotes(value)) {
-            packages.push(package);
-        }
-    }
-    packages
-}
-
-/// Resolve an eslint `--format` value to the package eslint would load.
-///
-/// Mirrors eslint's own `normalizePackageName(name, "eslint-formatter")`: a value
-/// starting with `@` is always a package, never a path, so `@scope/sarif` becomes
-/// `@scope/eslint-formatter-sarif` and an already-qualified name passes through.
-/// Only an unscoped value carrying a path separator or extension is a file path.
-fn eslint_formatter_package(value: &str) -> Option<String> {
-    if value.is_empty() || value.starts_with('-') {
-        return None;
-    }
-
-    if let Some(scoped) = value.strip_prefix('@') {
-        let mut parts = scoped.splitn(2, '/');
-        let scope = parts.next().filter(|s| !s.is_empty())?;
-        return Some(match parts.next().filter(|s| !s.is_empty()) {
-            None => format!("@{scope}/eslint-formatter"),
-            Some(name) if name.starts_with("eslint-formatter") => format!("@{scope}/{name}"),
-            Some(name) => format!("@{scope}/eslint-formatter-{name}"),
-        });
-    }
-
-    if value.contains(['/', '\\', '.']) {
-        return None;
-    }
-    if value.starts_with("eslint-formatter-") {
-        return Some(value.to_string());
-    }
-    Some(format!("eslint-formatter-{value}"))
 }
 
 /// Extract a config file path from a `--config` or `-c` flag.
@@ -1168,11 +1089,6 @@ mod tests {
         packages.iter().map(|pkg| (*pkg).to_string()).collect()
     }
 
-    fn formatter_packages(command: &str) -> Vec<String> {
-        let tokens: Vec<&str> = command.split_whitespace().collect();
-        flag_referenced_packages("eslint", &tokens)
-    }
-
     /// Analyze a CI-style command against a project whose package.json declares
     /// `scripts` and every package in `declared`.
     fn analyze_ci_command(
@@ -1192,69 +1108,6 @@ mod tests {
             &package_set(declared),
             &ScriptCatalog::from_scripts(&scripts),
         )
-    }
-
-    #[test]
-    fn bare_formatter_shorthand_expands() {
-        assert_eq!(
-            formatter_packages("--format gha"),
-            vec!["eslint-formatter-gha"]
-        );
-        assert_eq!(formatter_packages("-f gha"), vec!["eslint-formatter-gha"]);
-        assert_eq!(
-            formatter_packages("--format=gha"),
-            vec!["eslint-formatter-gha"]
-        );
-    }
-
-    /// GitHub's own code-scanning starter workflow passes exactly this value.
-    #[test]
-    fn scoped_formatter_is_credited_verbatim() {
-        assert_eq!(
-            formatter_packages("--format @microsoft/eslint-formatter-sarif"),
-            vec!["@microsoft/eslint-formatter-sarif"]
-        );
-    }
-
-    #[test]
-    fn scoped_shorthand_formatter_expands() {
-        assert_eq!(
-            formatter_packages("--format @microsoft/sarif"),
-            vec!["@microsoft/eslint-formatter-sarif"]
-        );
-        assert_eq!(
-            formatter_packages("--format @scope"),
-            vec!["@scope/eslint-formatter"]
-        );
-    }
-
-    #[test]
-    fn already_prefixed_formatter_is_not_double_prefixed() {
-        assert_eq!(
-            formatter_packages("--format eslint-formatter-gha"),
-            vec!["eslint-formatter-gha"]
-        );
-    }
-
-    #[test]
-    fn unscoped_path_formatter_is_skipped() {
-        assert!(formatter_packages("--format ./tools/fmt.js").is_empty());
-        assert!(formatter_packages("--format node_modules/x/index.js").is_empty());
-    }
-
-    #[test]
-    fn tokens_after_double_dash_are_not_scanned() {
-        assert!(formatter_packages("--fix -- --format gha").is_empty());
-    }
-
-    #[test]
-    fn flag_value_starting_with_dash_credits_nothing() {
-        assert!(formatter_packages("--format --fix").is_empty());
-    }
-
-    #[test]
-    fn non_eslint_binary_credits_nothing() {
-        assert!(flag_referenced_packages("prettier", &["--format", "gha"]).is_empty());
     }
 
     #[test]

@@ -214,6 +214,24 @@ notes = "optional, human context only"
 - Do **not** turn this into "credit every optional peer of a used package". Vite alone declares twelve optional peers, so that rule would silently exempt all of them and hide genuinely unused dependencies. Every row needs a specific, config-observable reason the package is loaded.
 - Run `cargo test -p fallow-core config_value_credits` to validate the catalogue (it checks the TOML parses, rejects unknown surfaces and fields, empty values or credits, and duplicate rows).
 
+## Crediting a dependency named by a CLI flag value
+
+Some CLIs load an npm package because a flag value names it: `eslint --format gha` loads `eslint-formatter-gha`, `mocha --reporter mochawesome` loads `mochawesome`, `node -r dotenv/config` loads `dotenv`. Those conventions live in a third data-driven catalogue at `crates/core/data/cli_flag_credits.toml`, next to the other two and parsed the same way (embedded via `include_str!`, no regeneration step):
+
+```toml
+[[flag-credit]]
+binaries = ["mocha"]
+flags = ["--reporter", "-R"]
+resolution = "verbatim"
+builtins = ["spec", "dot", "json"]
+notes = "optional, human context only"
+```
+
+- `resolution` says how the tool maps the value to a package: `prefixed` (eslint's `normalizePackageName` expansion with the entry's `prefix`), `prefixed-then-bare` (jest-resolve tries the prefixed name and then the plain one, so both are credited), or `verbatim` (the value is the package, optionally with a subpath such as `dotenv/config`). The set is closed; a new resolution algorithm means a new enum variant in `crates/core/src/scripts/flag_credits.rs` in the same change.
+- `builtins` lists values the tool resolves internally; they credit nothing. List them whenever built-in names collide with real npm packages (mocha's `json`, `markdown` and `list` reporters do).
+- Do **not** add a generic "any bare token matching a declared dependency" rule. A wrong credit produces no signal anywhere, it just makes a real finding vanish, and values like `--platform node` and `--env production` collide with real package names. Every row needs a documented, tool-specific loading convention.
+- Run `cargo test -p fallow-core flag_credits` to validate the catalogue (it checks the TOML parses, rejects unknown resolutions and fields, malformed flags, prefix-contract violations, and duplicate `(binary, flag)` rows).
+
 ## Editing the JSON output contract
 
 Fallow's JSON output schema lives in `docs/output-schema.json` (JSON Schema draft-07) and is consumed by downstream tools (VS Code extension TypeScript codegen, GitHub Action jq scripts, AI agents using AJV validation).
