@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Test-reachability profiles are capped to keep huge monorepos fast.** When
+  test-root mock replacements produce more than 1024 distinct mask profiles,
+  analysis now falls back to the coarse test-reachability pass instead of
+  letting index storage and propagation cost grow without bound. The fallback
+  is fail-open (mocked modules stay test-reachable, matching pre-profile
+  behavior) and logs a warning so the degradation is visible. (Closes
+  [#2084](https://github.com/fallow-rs/fallow/issues/2084).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added

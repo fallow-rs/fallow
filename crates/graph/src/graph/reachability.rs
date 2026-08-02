@@ -11,6 +11,19 @@ use fallow_types::extract::ModuleLoadMechanism;
 
 use super::{ModuleGraph, TestReachabilityIndex};
 
+/// Upper bound on distinct replacement-mask profiles before profiled
+/// reachability falls back to the legacy coarse bitset pass.
+///
+/// Follows the `re_export_transition_safety_cap` precedent of bounding an
+/// otherwise unbounded blowup. `TestReachabilityIndex` storage is
+/// O(files * profile_count / 64) u64 words and worklist propagation touches
+/// every profile word per edge visit, so at 1024 profiles each file costs 16
+/// words (128 bytes): about 12 MiB of index for a 100k-file monorepo. Beyond
+/// that the memory and propagation cost outweigh the masking precision, and
+/// the legacy pass is a safe over-approximation (fail-open, pre-#2068
+/// behavior).
+const PROFILE_COUNT_SAFETY_CAP: usize = 1024;
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct TestReachabilityProfile {
     masked_targets: Vec<FileId>,
@@ -63,6 +76,19 @@ impl<'roots> TestReachabilityPlan<'roots> {
         for &root in test_entry_points {
             let mask = targets_by_root.remove(&root).unwrap_or_default();
             roots_by_mask.entry(mask).or_default().push(root);
+        }
+
+        if roots_by_mask.len() > PROFILE_COUNT_SAFETY_CAP {
+            tracing::warn!(
+                profile_count = roots_by_mask.len(),
+                safety_cap = PROFILE_COUNT_SAFETY_CAP,
+                "Test-reachability profile count exceeded its safety cap; \
+                 falling back to coarse test reachability without replacement \
+                 masking. Mocked modules stay test-reachable (fail-open)."
+            );
+            return Self::Legacy {
+                roots: test_entry_points,
+            };
         }
 
         let mut profiles: Vec<_> = roots_by_mask
@@ -1308,6 +1334,86 @@ mod tests {
                 },
             ]
         );
+    }
+
+    type UniqueMaskInputs = (
+        Vec<u32>,
+        Vec<(u32, u32, bool)>,
+        Vec<ResolvedReplacedModuleTarget>,
+    );
+
+    /// Build roots 0..count, each importing and mocking a unique target at
+    /// count + root, so every root lands in its own mask profile.
+    fn unique_mask_graph_inputs(count: u32) -> UniqueMaskInputs {
+        let test_roots: Vec<u32> = (0..count).collect();
+        let mut edges = Vec::with_capacity(test_roots.len());
+        let mut replacements = Vec::with_capacity(test_roots.len());
+        for &root in &test_roots {
+            let masked_target = count + root;
+            edges.push((root, masked_target, false));
+            replacements.push(ResolvedReplacedModuleTarget {
+                source_file: FileId(root),
+                target_file: FileId(masked_target),
+            });
+        }
+        (test_roots, edges, replacements)
+    }
+
+    #[test]
+    fn profile_count_at_the_safety_cap_keeps_profiled_masking() {
+        let count = u32::try_from(super::PROFILE_COUNT_SAFETY_CAP).expect("cap fits in u32");
+        let total = count as usize * 2;
+        let (test_roots, edges, replacements) = unique_mask_graph_inputs(count);
+        let graph = build_reachability_graph_with_replacements(
+            total,
+            &edges,
+            &[],
+            &test_roots,
+            &replacements,
+        );
+
+        assert_eq!(
+            graph.test_reachability_index.profile_count,
+            super::PROFILE_COUNT_SAFETY_CAP
+        );
+        // Profiles sort by mask, so profile 0 belongs to root 0 whose unique
+        // target is FileId(count).
+        assert!(
+            graph
+                .test_reachability_index
+                .profile_masks(FileId(count), 0)
+        );
+        assert!(graph.modules[0].is_test_reachable());
+        // Masking still applies under the cap: the mocked target is only
+        // imported by the root that replaces it, so it stays unreachable.
+        assert!(!graph.modules[count as usize].is_test_reachable());
+    }
+
+    #[test]
+    fn profile_count_above_the_safety_cap_falls_back_to_coarse_reachability() {
+        let count = u32::try_from(super::PROFILE_COUNT_SAFETY_CAP * 4).expect("cap fits in u32");
+        let total = count as usize * 2;
+        let (test_roots, edges, replacements) = unique_mask_graph_inputs(count);
+        let graph = build_reachability_graph_with_replacements(
+            total,
+            &edges,
+            &[],
+            &test_roots,
+            &replacements,
+        );
+        let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
+
+        let plan = TestReachabilityPlan::new(&root_set, &replacements, total);
+        assert!(matches!(&plan, TestReachabilityPlan::Legacy { .. }));
+        assert!(!plan.requires_reference_provenance());
+
+        // Fail-open: no profiles survive, and mocked targets stay
+        // test-reachable exactly as the pre-profile coarse pass reported them.
+        assert_eq!(graph.test_reachability_index.profile_count, 0);
+        for &root in &test_roots {
+            assert!(graph.modules[root as usize].is_test_reachable());
+            assert!(graph.modules[(count + root) as usize].is_test_reachable());
+        }
     }
 
     #[test]
