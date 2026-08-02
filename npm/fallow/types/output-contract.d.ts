@@ -5336,17 +5336,20 @@ baseline_staleness?: (HealthBaselineStaleness | null)
 /**
  * Staleness of a loaded health baseline.
  *
- * Reports how many saved baseline entries still matched a current finding on
- * this run, so consumers can see a rotting baseline before it degrades to
- * zero overlap. Present in the summary only when a baseline was loaded.
+ * Reports how many saved complexity and CRAP finding entries still matched a
+ * current finding on this run, so consumers can see a rotting baseline before
+ * it degrades to zero overlap. Runtime-coverage suppressions and refactoring
+ * target keys carried by the same baseline are not counted here. Present in
+ * the summary only when a baseline was loaded.
  */
 export interface HealthBaselineStaleness {
 /**
- * Total finding entries carried by the loaded baseline.
+ * Complexity and CRAP finding entries carried by the loaded baseline.
  */
 baseline_entries: number
 /**
- * Entries that matched a current finding in the active baseline mode.
+ * Entries that matched a current finding in the active baseline mode,
+ * including entries matched through a followed file move.
  */
 matched_entries: number
 /**
@@ -5354,8 +5357,22 @@ matched_entries: number
  */
 stale_entries: number
 /**
- * True when the stale fraction crossed the warning threshold, so
- * machine consumers do not have to reimplement it.
+ * Entries that matched only by following a file move in identity mode.
+ * Always zero in count mode.
+ */
+moved_entries: number
+/**
+ * True when this run analyzed a subset of the project (changed-file,
+ * diff, or workspace scoping), so the baseline was compared against a
+ * narrowed finding set and staleness cannot be judged. `stale` is always
+ * false on scoped runs.
+ */
+change_scoped: boolean
+/**
+ * True exactly when the run was not change-scoped, at least one current
+ * finding existed before baseline filtering, and `stale_entries` reached
+ * a quarter of `baseline_entries`. Mirrors the human warning so machine
+ * consumers do not have to reimplement the threshold.
  */
 stale: boolean
 }

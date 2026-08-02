@@ -21281,28 +21281,38 @@
       "properties": {
         "baseline_entries": {
           "type": "integer",
-          "description": "Total finding entries carried by the loaded baseline."
+          "description": "Complexity and CRAP finding entries carried by the loaded baseline."
         },
         "matched_entries": {
           "type": "integer",
-          "description": "Entries that matched a current finding in the active baseline mode."
+          "description": "Entries that matched a current finding in the active baseline mode,\nincluding entries matched through a followed file move."
         },
         "stale_entries": {
           "type": "integer",
           "description": "Entries that matched no current finding on this run."
         },
+        "moved_entries": {
+          "type": "integer",
+          "description": "Entries that matched only by following a file move in identity mode.\nAlways zero in count mode."
+        },
+        "change_scoped": {
+          "type": "boolean",
+          "description": "True when this run analyzed a subset of the project (changed-file,\ndiff, or workspace scoping), so the baseline was compared against a\nnarrowed finding set and staleness cannot be judged. `stale` is always\nfalse on scoped runs."
+        },
         "stale": {
           "type": "boolean",
-          "description": "True when the stale fraction crossed the warning threshold, so\nmachine consumers do not have to reimplement it."
+          "description": "True exactly when the run was not change-scoped, at least one current\nfinding existed before baseline filtering, and `stale_entries` reached\na quarter of `baseline_entries`. Mirrors the human warning so machine\nconsumers do not have to reimplement the threshold."
         }
       },
       "required": [
         "baseline_entries",
         "matched_entries",
         "stale_entries",
+        "moved_entries",
+        "change_scoped",
         "stale"
       ],
-      "description": "Staleness of a loaded health baseline.\n\nReports how many saved baseline entries still matched a current finding on\nthis run, so consumers can see a rotting baseline before it degrades to\nzero overlap. Present in the summary only when a baseline was loaded."
+      "description": "Staleness of a loaded health baseline.\n\nReports how many saved complexity and CRAP finding entries still matched a\ncurrent finding on this run, so consumers can see a rotting baseline before\nit degrades to zero overlap. Runtime-coverage suppressions and refactoring\ntarget keys carried by the same baseline are not counted here. Present in\nthe summary only when a baseline was loaded."
     }
   }
 }

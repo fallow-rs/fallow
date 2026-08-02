@@ -1831,34 +1831,57 @@ impl HealthBaselineData {
         }
     }
 
-    pub(crate) fn overlap_entry_count(
+    pub(crate) fn overlap_entries(
         &self,
         findings: &[fallow_output::ComplexityViolation],
         root: &Path,
         mode: HealthBaselineMode,
-    ) -> usize {
+    ) -> HealthBaselineOverlap {
         let baseline_counts = self.counts_for(mode);
         if !baseline_counts.is_empty() {
             let current_counts = health_finding_counts(findings, root, mode);
+            let direct = health_overlap_entry_count(&current_counts, baseline_counts);
             let remapped = (mode == HealthBaselineMode::Identity)
                 .then(|| {
                     identity_counts_with_move_tolerance(baseline_counts, &current_counts, root)
                 })
                 .flatten();
-            health_overlap_entry_count(
-                &current_counts,
-                remapped.as_ref().unwrap_or(baseline_counts),
-            )
+            match remapped {
+                Some(remapped_counts) => {
+                    let matched = health_overlap_entry_count(&current_counts, &remapped_counts);
+                    HealthBaselineOverlap {
+                        matched_entries: matched,
+                        moved_entries: matched.saturating_sub(direct),
+                    }
+                }
+                None => HealthBaselineOverlap {
+                    matched_entries: direct,
+                    moved_entries: 0,
+                },
+            }
         } else {
             let baseline_keys: FxHashSet<&str> = self.findings.iter().map(String::as_str).collect();
-            findings
-                .iter()
-                .filter(|finding| {
-                    baseline_keys.contains(health_finding_key(finding, root).as_str())
-                })
-                .count()
+            HealthBaselineOverlap {
+                matched_entries: findings
+                    .iter()
+                    .filter(|finding| {
+                        baseline_keys.contains(health_finding_key(finding, root).as_str())
+                    })
+                    .count(),
+                moved_entries: 0,
+            }
         }
     }
+}
+
+/// Baseline entry overlap for one run, split so followed file moves stay
+/// observable in output rather than silently absorbed into the match count.
+pub(crate) struct HealthBaselineOverlap {
+    /// Entries that matched a current finding, including via followed moves.
+    pub(crate) matched_entries: usize,
+    /// Entries that matched only because a retired identity bucket was
+    /// re-keyed to a moved file.
+    pub(crate) moved_entries: usize,
 }
 
 /// Generate a stable key for a refactoring target: `relative_path:category`.
@@ -3226,7 +3249,7 @@ mod tests {
             &[],
             &root,
         );
-        let overlap = baseline.overlap_entry_count(
+        let overlap = baseline.overlap_entries(
             &[
                 make_health_finding(&root, "parseExpression", 42),
                 make_health_finding(&root, "newFunction", 100),
@@ -3234,7 +3257,8 @@ mod tests {
             &root,
             HealthBaselineMode::Count,
         );
-        assert_eq!(overlap, 1);
+        assert_eq!(overlap.matched_entries, 1);
+        assert_eq!(overlap.moved_entries, 0);
     }
 
     /// Baseline saved the way `--baseline-mode identity` saves it.
@@ -3365,10 +3389,14 @@ mod tests {
             "parseExpression",
         )];
 
+        let overlap = baseline.overlap_entries(&moved, &root, HealthBaselineMode::Identity);
         assert_eq!(
-            baseline.overlap_entry_count(&moved, &root, HealthBaselineMode::Identity),
-            1,
+            overlap.matched_entries, 1,
             "a followed move counts as matched, not stale"
+        );
+        assert_eq!(
+            overlap.moved_entries, 1,
+            "the followed move stays observable as a moved entry"
         );
         let filtered = super::filter_new_health_findings(
             moved,

@@ -639,20 +639,33 @@ pub struct LargeFunctionEntry {
 
 /// Staleness of a loaded health baseline.
 ///
-/// Reports how many saved baseline entries still matched a current finding on
-/// this run, so consumers can see a rotting baseline before it degrades to
-/// zero overlap. Present in the summary only when a baseline was loaded.
+/// Reports how many saved complexity and CRAP finding entries still matched a
+/// current finding on this run, so consumers can see a rotting baseline before
+/// it degrades to zero overlap. Runtime-coverage suppressions and refactoring
+/// target keys carried by the same baseline are not counted here. Present in
+/// the summary only when a baseline was loaded.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthBaselineStaleness {
-    /// Total finding entries carried by the loaded baseline.
+    /// Complexity and CRAP finding entries carried by the loaded baseline.
     pub baseline_entries: usize,
-    /// Entries that matched a current finding in the active baseline mode.
+    /// Entries that matched a current finding in the active baseline mode,
+    /// including entries matched through a followed file move.
     pub matched_entries: usize,
     /// Entries that matched no current finding on this run.
     pub stale_entries: usize,
-    /// True when the stale fraction crossed the warning threshold, so
-    /// machine consumers do not have to reimplement it.
+    /// Entries that matched only by following a file move in identity mode.
+    /// Always zero in count mode.
+    pub moved_entries: usize,
+    /// True when this run analyzed a subset of the project (changed-file,
+    /// diff, or workspace scoping), so the baseline was compared against a
+    /// narrowed finding set and staleness cannot be judged. `stale` is always
+    /// false on scoped runs.
+    pub change_scoped: bool,
+    /// True exactly when the run was not change-scoped, at least one current
+    /// finding existed before baseline filtering, and `stale_entries` reached
+    /// a quarter of `baseline_entries`. Mirrors the human warning so machine
+    /// consumers do not have to reimplement the threshold.
     pub stale: bool,
 }
 

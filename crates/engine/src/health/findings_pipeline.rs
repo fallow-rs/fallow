@@ -101,6 +101,7 @@ pub(super) fn prepare_health_findings(
         input.config,
         &mut collected.findings,
         input.diff_index,
+        is_change_scoped(&input),
     )?;
     threshold_state_tracker.record_no_match_entries(
         &threshold_resolver,
@@ -218,6 +219,12 @@ fn should_emit_no_match_threshold_overrides(
         && diff_index.is_none()
 }
 
+/// True when this run analyzes a subset of the project, so a loaded full-repo
+/// baseline would look stale for reasons that have nothing to do with rot.
+fn is_change_scoped(input: &HealthFindingsInput<'_>) -> bool {
+    input.diff_index.is_some() || input.changed_files.is_some() || input.ws_roots.is_some()
+}
+
 struct HealthFindingFinalizeResult {
     total_above_threshold: usize,
     sev_critical: usize,
@@ -232,6 +239,7 @@ fn finalize_health_findings(
     config: &ResolvedConfig,
     findings: &mut Vec<ComplexityViolation>,
     diff_index: Option<&fallow_output::DiffIndex>,
+    change_scoped: bool,
 ) -> Result<HealthFindingFinalizeResult, HealthError> {
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
@@ -240,7 +248,7 @@ fn finalize_health_findings(
     let total_above_threshold = findings.len();
     let (sev_critical, sev_high, sev_moderate) = count_finding_severities(findings);
     let (loaded_baseline, baseline_staleness) =
-        apply_health_baseline_and_top(opts, config, findings)?;
+        apply_health_baseline_and_top(opts, config, findings, change_scoped)?;
     Ok(HealthFindingFinalizeResult {
         total_above_threshold,
         sev_critical,
@@ -272,6 +280,7 @@ fn apply_health_baseline_and_top(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     findings: &mut Vec<ComplexityViolation>,
+    change_scoped: bool,
 ) -> Result<LoadedBaselineParts, HealthError> {
     let (loaded_baseline, baseline_staleness) = if let Some(load_path) = opts.baseline {
         let loaded = load_health_baseline(
@@ -280,6 +289,7 @@ fn apply_health_baseline_and_top(
             &config.root,
             opts.quiet,
             opts.baseline_mode,
+            change_scoped,
         )?;
         (Some(loaded.data), Some(loaded.staleness))
     } else {
