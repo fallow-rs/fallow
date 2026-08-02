@@ -68,6 +68,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the new extraction data. (Closes
   [#2070](https://github.com/fallow-rs/fallow/issues/2070).)
 
+- **Playwright fixtures typed with an indexed access over a class getter no
+  longer produce `unused-class-members` false positives.** A fixture whose
+  declared type is `Factory["getter"]` (for example
+  `assert: TaskAsserterFactory["taskAsserter"]`) now resolves through the
+  factory's public getter to the getter's declared return-type class, so
+  members called on the fixture in tests are credited to that class.
+  Resolution is conservative: only literal string indices over a plain named
+  type participate, the index must match a public instance binding on the
+  resolved class, and the terminal type must resolve to a class with members;
+  computed keys and other shapes abstain, and genuinely unused members on the
+  same class are still reported. Warm caches are invalidated once to pick up
+  the new extraction data. (Closes
+  [#2070](https://github.com/fallow-rs/fallow/issues/2070).)
+
 - **React Native platform-extension siblings are no longer reported as unused
   files.** With the `react-native` or `expo` plugin active, an import such as
   `./UserMenu` resolved only to the first platform variant in Metro's
@@ -2109,8 +2123,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fallow Impact history now lives in your user config dir, not in each repo.** Enabling Impact (or recording a run) no longer creates a `.fallow/` directory or edits the repo's `.gitignore`; the per-project store moved to `<config-dir>/fallow/impact/<key>.json` (the same base as `telemetry.json`: `~/Library/Application Support/fallow/` on macOS, `$XDG_CONFIG_HOME/fallow/` on Linux, `%APPDATA%\fallow\` on Windows). The store is keyed by repo identity (`git rev-parse --git-common-dir`), so running `fallow impact` from any subdirectory or any git worktree of a repo resolves to one shared history, and nothing is ever written into the working tree. Per-finding attribution baselines are namespaced per worktree internally, so concurrent worktrees of one repo no longer prune each other's baseline. An existing in-repo `.fallow/impact.json` is imported once on first run (the old file is left untouched); a multi-package monorepo with several subdir stores imports whichever subdir runs first. After that one-time import the in-repo file is no longer read, so running an OLDER fallow binary on the same repo after upgrading writes to the legacy file and does not feed the new user store (a transient mixed-version condition). Impact is now also explicitly forced off in CI (previously it was only off because a fresh CI checkout had no store file), so a user-global default cannot start recording on a CI runner.
 
-- **CSS Module class extraction now uses a real CSS parser.** Standard `.module.css` class names are read from a parsed CSS syntax tree instead of a stack of regular expressions, removing a class of edge-case bugs around cascade layers, `@scope`, and CSS Modules `:global()` / `:local()` selectors. Output is unchanged on existing projects; warm caches re-parse CSS Module files once after upgrading. (Refs [#550](https://github.com/fallow-rs/fallow/issues/550).)
-
 ### Added
 
 - **`fallow impact default on|off` turns Impact on once for every project.** A single user-global opt-in (stored at `<config-dir>/fallow/impact.json`) so new projects record without re-enabling each one; a per-project `fallow impact enable` / `disable` always wins over the default. The `fallow impact --format json` report and the `impact` MCP tool gain an `enabled_source` field (`project` / `user` / `default`) explaining why tracking is on, and pair with `explicit_decision` so an agent can tell a never-asked project (offer to enable) from one you deliberately disabled (stay quiet).
@@ -3805,8 +3817,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`production: true` no longer excludes Angular `app.config.ts`** -- the `**/*.config.*` production exclude pattern was too broad, matching Angular's `src/app/app.config.ts` (a runtime application file) and breaking the entire import chain. Narrowed to `*.config.*` (root-anchored) with `literal_separator(true)` so nested config files in `src/` are preserved. Also added `app.config.ts` and `app.config.server.ts` to the Angular plugin's `always_used` list as defense-in-depth. ([#111](https://github.com/fallow-rs/fallow/issues/111))
-- **Health test no longer fails with global git signing config** -- isolated temp repo git operations from global config (`GIT_CONFIG_GLOBAL=/dev/null`) to prevent commit signing requirements from breaking the `--changed-since` integration test.
-
 ## [2.30.0] - 2026-04-12
 
 ### Added
@@ -4140,8 +4150,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.18.2] - 2026-04-07
 
 ### Fixed
-
-- **npm publish CI** -- pinned `npm@10` in the release workflow to avoid `promise-retry` module error on Node 22 runners that broke npm package publishing.
 
 ## [2.18.1] - 2026-04-07
 
@@ -4695,9 +4703,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.1.0] - 2026-03-25
 
 ### Added
-
-- **GitLab CI template** (`ci/gitlab-ci.yml`) , includable template with full feature parity to the GitHub Action: Code Quality reports (CodeClimate format) for inline MR annotations, MR comment summaries, incremental caching, and all fallow commands/options via `FALLOW_*` variables
-- **GitHub Action: test workflow** , CI validation for SARIF, JSON, dupes, fix, zero-issues, and PR comment scenarios
 
 ### Fixed
 
