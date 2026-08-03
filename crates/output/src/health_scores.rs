@@ -69,6 +69,11 @@ pub struct HealthScorePenalties {
     pub unused_deps: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circular_deps: Option<f64>,
+    /// Penalty for oversized functions, computed against fixed calibration
+    /// (very-high-risk bin edge at 60 LOC). Deliberately independent of
+    /// `health.maxUnitSize`, which filters the large-functions findings list
+    /// only; raising that threshold empties the list without moving this
+    /// penalty. `health.ignore` removes files from the score entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_size: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

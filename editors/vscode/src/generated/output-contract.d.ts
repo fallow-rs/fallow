@@ -5650,6 +5650,13 @@ maintainability?: (number | null)
 hotspots?: (number | null)
 unused_deps?: (number | null)
 circular_deps?: (number | null)
+/**
+ * Penalty for oversized functions, computed against fixed calibration
+ * (very-high-risk bin edge at 60 LOC). Deliberately independent of
+ * `health.maxUnitSize`, which filters the large-functions findings list
+ * only; raising that threshold empties the list without moving this
+ * penalty. `health.ignore` removes files from the score entirely.
+ */
 unit_size?: (number | null)
 coupling?: (number | null)
 duplication?: (number | null)

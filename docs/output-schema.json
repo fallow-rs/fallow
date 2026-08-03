@@ -3568,7 +3568,8 @@
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Penalty for oversized functions, computed against fixed calibration\n(very-high-risk bin edge at 60 LOC). Deliberately independent of\n`health.maxUnitSize`, which filters the large-functions findings list\nonly; raising that threshold empties the list without moving this\npenalty. `health.ignore` removes files from the score entirely."
         },
         "coupling": {
           "type": [

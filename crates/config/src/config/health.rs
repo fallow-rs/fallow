@@ -119,12 +119,15 @@ impl Default for OwnershipConfig {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct HealthConfig {
     /// Maximum allowed cyclomatic complexity per function (default: 20).
-    /// Functions exceeding this threshold are reported.
+    /// Functions exceeding this threshold are reported. Governs findings
+    /// only; the health score's complexity penalties use fixed calibration
+    /// (use `health.ignore` to remove a file from the score).
     #[serde(default = "default_max_cyclomatic")]
     pub max_cyclomatic: u16,
 
     /// Maximum allowed cognitive complexity per function (default: 15).
-    /// Functions exceeding this threshold are reported.
+    /// Functions exceeding this threshold are reported. Governs findings
+    /// only, never the health score.
     #[serde(default = "default_max_cognitive")]
     pub max_cognitive: u16,
 
@@ -133,7 +136,8 @@ pub struct HealthConfig {
     /// coverage: high complexity plus low coverage produces a high CRAP
     /// score. Functions meeting or exceeding this threshold are reported.
     /// Use `--coverage` with Istanbul data for accurate per-function CRAP;
-    /// otherwise fallow estimates coverage from the module graph.
+    /// otherwise fallow estimates coverage from the module graph. Governs
+    /// findings only, never the health score.
     #[serde(default = "default_max_crap")]
     pub max_crap: f64,
 
@@ -150,8 +154,10 @@ pub struct HealthConfig {
     /// test files (where a `describe()` block spans hundreds of lines) without
     /// disabling complexity checks on those files. This filters the reported
     /// large-functions list only; the descriptive unit-size profile and the
-    /// health score still reflect raw sizes (use `health.ignore` to remove a
-    /// file from the score entirely).
+    /// health score still reflect raw sizes against fixed calibration (the
+    /// `unit_size` penalty keeps its `>60` LOC very-high-risk edge so grades
+    /// stay comparable across projects; use `health.ignore` to remove a file
+    /// from the score entirely).
     #[serde(default = "default_max_unit_size")]
     pub max_unit_size: u32,
 

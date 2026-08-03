@@ -336,6 +336,11 @@ mod tests {
 mod windows_tests {
     use super::*;
 
+    /// Generous ceiling for PowerShell fixture startup on loaded CI runners;
+    /// the 10ms completion poll keeps the happy path fast (issue #2112).
+    const FIXTURE_COMPLETION_TIMEOUT: Duration = Duration::from_mins(2);
+    const PROCESS_EXIT_WAIT: Duration = Duration::from_mins(1);
+
     struct ProcessCleanup(u32);
 
     impl Drop for ProcessCleanup {
@@ -363,17 +368,22 @@ mod windows_tests {
     }
 
     fn wait_for_process_exit(pid: u32) -> bool {
-        for _ in 0..200 {
+        let deadline = Instant::now() + PROCESS_EXIT_WAIT;
+        loop {
             if !process_exists(pid) {
                 return true;
             }
-            thread::sleep(Duration::from_millis(10));
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(25));
         }
-        false
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "spawns real subprocesses, unsupported under Miri")]
     fn completed_success_cleans_descendant_process_tree() {
+        let _serial = crate::test_support::PROCESS_TREE_TEST_LOCK.blocking_lock();
         let temp = tempfile::tempdir().expect("temp directory");
         let descendant_pid_path = temp.path().join("descendant.pid");
         let script_path = temp.path().join("process-tree-fixture.ps1");
@@ -381,7 +391,7 @@ mod windows_tests {
 param(
     [Parameter(Mandatory = $true)][string]$DescendantPidPath
 )
-$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru
+$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 600' -PassThru
 $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
 [Console]::Out.Write('{}')
 ";
@@ -401,7 +411,7 @@ $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
             "powershell.exe",
             "test",
             &args,
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + FIXTURE_COMPLETION_TIMEOUT,
             1024,
         )
         .expect("completed subprocess should preserve successful output");

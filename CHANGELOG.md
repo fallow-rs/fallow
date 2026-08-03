@@ -31,6 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The config schema now states that the four health `max*` thresholds never
+  move `health_score`.** Raising `health.maxUnitSize` (or `maxCyclomatic`,
+  `maxCognitive`, `maxCrap`) filters findings only, while the score's
+  penalties keep fixed calibration so grades stay comparable across projects;
+  the previous section text ("raise thresholds to relax which functions are
+  flagged") invited the inference that the score would follow. The schema
+  descriptions for the section, the three complexity thresholds, and the
+  `penalties.unit_size` output field now spell out the decoupling and point at
+  `health.ignore` as the lever that does remove files from the score, and a
+  regression test locks the byte-identical-score contract for a raised global
+  `maxUnitSize`. (Closes
+  [#2116](https://github.com/fallow-rs/fallow/issues/2116).)
+
 - **`fallow type-aware status` no longer reports a wrapper-wired sidecar as
   `environment-override`.** The npm launcher, the Node-API loader, and the
   GitHub Action resolve a version-matched `fallow-type-aware` themselves and

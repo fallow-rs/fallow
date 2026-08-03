@@ -141,7 +141,7 @@
       }
     },
     "health": {
-      "description": "Sets complexity and health thresholds for `fallow health` (also applied in combined `fallow` and `fallow audit`): `maxCyclomatic` (20), `maxCognitive` (15), `maxCrap` (30.0, findings at or above this are reported), `crapRefactorBand` (5, cyclomatic band below `maxCyclomatic` where a secondary refactor action is added), `maxUnitSize` (max function lines before a large-function finding, 60), `coverage`/`coverageRoot` (Istanbul coverage path and path-prefix strip for accurate CRAP), `ignore` globs (remove files from findings AND the health score), `thresholdOverrides` (per-file/per-function ceilings via `files`/`functions`/`maxCyclomatic`/`maxCognitive`/`maxCrap`/`maxUnitSize`/`reason`), `ownership` (`botPatterns` and `emailMode` for `--ownership`), and `suggestInlineSuppression` (true, emit `suppress-line` action hints in JSON). Raise thresholds to relax which functions are flagged, wire `coverage` for real CRAP scores, or exempt generated/test files via `ignore` (drops them from the score too) or `thresholdOverrides` (keeps them visible under a higher ceiling).",
+      "description": "Sets complexity and health thresholds for `fallow health` (also applied in combined `fallow` and `fallow audit`): `maxCyclomatic` (20), `maxCognitive` (15), `maxCrap` (30.0, findings at or above this are reported), `crapRefactorBand` (5, cyclomatic band below `maxCyclomatic` where a secondary refactor action is added), `maxUnitSize` (max function lines before a large-function finding, 60), `coverage`/`coverageRoot` (Istanbul coverage path and path-prefix strip for accurate CRAP), `ignore` globs (remove files from findings AND the health score), `thresholdOverrides` (per-file/per-function ceilings via `files`/`functions`/`maxCyclomatic`/`maxCognitive`/`maxCrap`/`maxUnitSize`/`reason`), `ownership` (`botPatterns` and `emailMode` for `--ownership`), and `suggestInlineSuppression` (true, emit `suppress-line` action hints in JSON). Raise thresholds to relax which functions are flagged, wire `coverage` for real CRAP scores, or exempt generated/test files via `ignore` (drops them from the score too) or `thresholdOverrides` (keeps them visible under a higher ceiling). The four `max*` thresholds govern findings only and never move `health_score`: its penalties use fixed calibration so grades stay comparable across projects, and `ignore` is the lever that removes files from the score.",
       "$ref": "#/$defs/HealthConfig",
       "default": {
         "maxCyclomatic": 20,
@@ -935,7 +935,7 @@
       "type": "object",
       "properties": {
         "maxCyclomatic": {
-          "description": "Maximum allowed cyclomatic complexity per function (default: 20).\nFunctions exceeding this threshold are reported.",
+          "description": "Maximum allowed cyclomatic complexity per function (default: 20).\nFunctions exceeding this threshold are reported. Governs findings\nonly; the health score's complexity penalties use fixed calibration\n(use `health.ignore` to remove a file from the score).",
           "type": "integer",
           "format": "uint16",
           "minimum": 0,
@@ -943,7 +943,7 @@
           "default": 20
         },
         "maxCognitive": {
-          "description": "Maximum allowed cognitive complexity per function (default: 15).\nFunctions exceeding this threshold are reported.",
+          "description": "Maximum allowed cognitive complexity per function (default: 15).\nFunctions exceeding this threshold are reported. Governs findings\nonly, never the health score.",
           "type": "integer",
           "format": "uint16",
           "minimum": 0,
@@ -951,7 +951,7 @@
           "default": 15
         },
         "maxCrap": {
-          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph.",
+          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph. Governs\nfindings only, never the health score.",
           "type": "number",
           "format": "double",
           "default": 30.0
@@ -965,7 +965,7 @@
           "default": 5
         },
         "maxUnitSize": {
-          "description": "Maximum function length in lines of code before it is reported as an\noversized \"large function\" (default: 60). Raise it globally, or per file\nvia `thresholdOverrides[].maxUnitSize`, to relax the bar for generated or\ntest files (where a `describe()` block spans hundreds of lines) without\ndisabling complexity checks on those files. This filters the reported\nlarge-functions list only; the descriptive unit-size profile and the\nhealth score still reflect raw sizes (use `health.ignore` to remove a\nfile from the score entirely).",
+          "description": "Maximum function length in lines of code before it is reported as an\noversized \"large function\" (default: 60). Raise it globally, or per file\nvia `thresholdOverrides[].maxUnitSize`, to relax the bar for generated or\ntest files (where a `describe()` block spans hundreds of lines) without\ndisabling complexity checks on those files. This filters the reported\nlarge-functions list only; the descriptive unit-size profile and the\nhealth score still reflect raw sizes against fixed calibration (the\n`unit_size` penalty keeps its `>60` LOC very-high-risk edge so grades\nstay comparable across projects; use `health.ignore` to remove a file\nfrom the score entirely).",
           "type": "integer",
           "format": "uint32",
           "minimum": 0,
