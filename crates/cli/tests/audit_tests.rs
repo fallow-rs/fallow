@@ -4189,6 +4189,94 @@ fn audit_new_only_degrades_to_syntactic_attribution_on_type_aware_identity_misma
     );
 }
 
+/// Regression test for #2102: with `typeAware.enabled`, a diff that only adds
+/// a new zero-export file must keep type-aware attribution. The base pass
+/// needs no semantic queries (its project-config hash stays deferred) while
+/// the head pass runs at least one query (concrete hash); those identities
+/// are compatible by design, so the audit must not degrade to syntactic
+/// attribution or warn.
+#[test]
+fn audit_type_aware_new_file_keeps_type_aware_attribution() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "audit-type-aware-new-file", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions": {"strict": true}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"typeAware": {"enabled": true}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './utils';\nused();\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/utils.ts"), "export const used = () => 42;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    git(dir, &["checkout", "-b", "feature"]);
+
+    // The diff only adds a zero-export file; its contents do not matter.
+    fs::write(dir.join("src/newfile.ts"), "const x = 1;\nvoid x;\n").unwrap();
+    commit_all(dir, "add zero-export file");
+
+    let output = common::run_fallow_raw_with_type_aware_sidecar(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_ne!(
+        output.code, 2,
+        "compatible identities must not fail the audit. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    let warnings: Vec<String> = json["_meta"]["type_aware"]["warnings"]
+        .as_array()
+        .map(|warnings| {
+            warnings
+                .iter()
+                .filter_map(|warning| warning.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.contains("syntactic attribution")),
+        "a deferred base identity is compatible with a concrete head identity \
+and must keep the type-aware comparison: {warnings:#?}"
+    );
+    assert!(
+        json["_meta"]["type_aware"]["identity"].is_object(),
+        "head should report its semantic analysis identity"
+    );
+    let unused_files = json["dead_code"]["unused_files"]
+        .as_array()
+        .expect("dead_code.unused_files should be an array");
+    assert!(
+        unused_files
+            .iter()
+            .any(|finding| finding["path"] == "src/newfile.ts" && finding["introduced"] == true),
+        "the new file should be attributed as introduced: {unused_files:#?}"
+    );
+}
+
 /// Negative control for the audit base-snapshot cache under type-aware
 /// analysis (enabled via config, not a CLI flag): the same audit run twice
 /// must behave identically. The second run hits the cached base snapshot,
@@ -4229,11 +4317,10 @@ fn audit_type_aware_base_snapshot_cache_preserves_identity_comparison() {
     commit_all(dir, "initial");
     git(dir, &["checkout", "-b", "feature"]);
 
-    // Only existing files change: no tsconfig edit and no new file, so base
-    // and head resolve the same semantic identity (the project's root file
-    // set is part of it). A genuinely new unused export in an existing file
-    // keeps the new-only gate failing on both runs so attribution stays
-    // observable.
+    // Only existing files change: no tsconfig edit, so base and head resolve
+    // the same semantic identity. A genuinely new unused export in an
+    // existing file keeps the new-only gate failing on both runs so
+    // attribution stays observable.
     fs::write(
         dir.join("src/utils.ts"),
         "export const used = () => 42;\nexport const unusedBase = () => 0;\nexport const unusedNew = () => 2;\n",

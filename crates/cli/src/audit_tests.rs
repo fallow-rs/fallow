@@ -1972,23 +1972,56 @@ fn degrade_reason_absent_for_fully_syntactic_comparison() {
     assert_eq!(type_aware_attribution_degrade_reason(None, None), None);
 }
 
+/// Regression test for #2102: a side without a semantic identity made no
+/// semantic claims (it legitimately ran no semantic queries), so the other
+/// side's identity cannot conflict with it and the comparison must not
+/// degrade.
 #[test]
-fn degrade_reason_when_only_one_side_has_type_aware_identity() {
+fn degrade_reason_absent_when_only_one_side_has_type_aware_identity() {
     let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
-    assert!(type_aware_attribution_degrade_reason(Some(&base), None).is_some());
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), None),
+        None
+    );
 
     let base = empty_snapshot_with_type_aware(None, Vec::new());
     let head = meta_with_identity(identity_with_hash("hash-a"));
-    assert!(type_aware_attribution_degrade_reason(Some(&base), Some(&head)).is_some());
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
+        None
+    );
+}
+
+/// Regression test for #2102: the deferred project-config hash (a side that
+/// needed no semantic queries) is compatible with any concrete hash, so a
+/// diff that adds a file (deferred base, concrete head) must not degrade.
+#[test]
+fn degrade_reason_absent_for_deferred_vs_concrete_project_config_hash() {
+    let deferred = identity_with_hash(fallow_types::semantic::DEFERRED_PROJECT_CONFIG_HASH);
+    let concrete = identity_with_hash("sha256:concrete");
+
+    let base = empty_snapshot_with_type_aware(Some(deferred.clone()), Vec::new());
+    let head = meta_with_identity(concrete.clone());
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
+        None
+    );
+
+    let base = empty_snapshot_with_type_aware(Some(concrete), Vec::new());
+    let head = meta_with_identity(deferred);
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
+        None
+    );
 }
 
 #[test]
-fn degrade_reason_when_semantic_identities_differ() {
+fn degrade_reason_when_semantic_identities_are_incompatible() {
     let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
     let head = meta_with_identity(identity_with_hash("hash-b"));
     assert_eq!(
         type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
-        Some("their semantic analysis identities differ")
+        Some("their semantic analysis identities are incompatible")
     );
 }
 

@@ -157,13 +157,16 @@ const configDocumentClosure = (root, configFileName, seen = new Set()) => {
   };
 };
 
+// The hash deliberately excludes the project's root file listing: base and
+// head of a diff naturally differ in file membership (added or deleted
+// files), and semantic evidence stays comparable as long as the
+// configuration that produced it is the same. Configuration changes are
+// covered by the compiler options and the config document closure
+// (https://github.com/fallow-rs/fallow/issues/2102).
 const effectiveProjectConfigHash = (root, project) => {
   const effective = {
     config: configPath(root, project),
     compiler_options: normalizedConfigValue(root, project.compilerOptions),
-    root_files: project.rootFiles
-      .map((fileName) => normalizedConfigValue(root, fileName))
-      .toSorted(compareText),
     config_document: configDocumentClosure(root, project.configFileName),
   };
   return `sha256:${createHash("sha256").update(JSON.stringify(effective)).digest("hex")}`;

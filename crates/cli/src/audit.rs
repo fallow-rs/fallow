@@ -392,22 +392,27 @@ fn snapshot_from_results(
 /// When a reason is returned the audit does not fail; it falls back to the
 /// identity-independent syntactic key sets captured before refinement on each
 /// side, so `--gate new-only` keeps working with `typeAware.enabled` set even
-/// when base and head resolve different semantic identities (changed
-/// tsconfigs, one-sided sidecar availability, differing omissions).
+/// when base and head resolve incompatible semantic identities (changed
+/// tsconfigs or differing omissions). Compatibility is decided by
+/// `SemanticAnalysisIdentity::incompatible_fields`, not raw equality: the
+/// deferred project-config hash and a fully absent identity both mean a side
+/// ran no semantic queries, which is compatible with any concrete identity
+/// on the other side (#2102).
 fn type_aware_attribution_degrade_reason(
     base: Option<&AuditKeySnapshot>,
     head: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) -> Option<&'static str> {
     let base = base?;
     let base_identity = base.type_aware_identity.as_ref();
-    if base_identity.is_some() != head.is_some() {
-        return Some("only one side produced a semantic analysis identity");
-    }
-    if let (Some(base_identity), Some(head_identity)) =
-        (base_identity, head.and_then(|meta| meta.identity.as_ref()))
-        && base_identity != head_identity
+    let head_identity = head.and_then(|meta| meta.identity.as_ref());
+    // Compatibility, not equality: `incompatible_fields` treats the deferred
+    // project-config hash (a side that ran no semantic queries) as compatible
+    // with any concrete hash, and a side with no identity at all made no
+    // semantic claims, so nothing can conflict (#2102).
+    if let (Some(base_identity), Some(head_identity)) = (base_identity, head_identity)
+        && !base_identity.incompatible_fields(head_identity).is_empty()
     {
-        return Some("their semantic analysis identities differ");
+        return Some("their semantic analysis identities are incompatible");
     }
     if let Some(head) = head
         && base.type_aware_gap_signature != type_aware_gap_signature(head)
@@ -1294,8 +1299,8 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
     if let Some(reason) = type_aware_degrade {
         let warning = format!(
             "audit compared base and head with syntactic attribution because {reason} \
-(usually a tsconfig change between base and head, or the sidecar being unavailable \
-on the base side); type-aware refinement still applies to head findings, and \
+(usually a tsconfig or compiler-options change between base and head); \
+type-aware refinement still applies to head findings, and \
 semantic-only findings stay out of the new-only gate for this run; set \
 audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
         );

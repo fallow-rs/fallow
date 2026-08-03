@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow audit` with `typeAware.enabled` no longer degrades to syntactic
+  attribution on every diff that adds or removes a file.** The type-aware
+  comparison now decides base/head identity compatibility with
+  `incompatible_fields()` instead of raw equality: the deferred project-config
+  hash of a side that ran no semantic queries is compatible with any concrete
+  hash, a side that produced no semantic identity at all made no semantic
+  claims and no longer forces the fallback, and the semantic project-config
+  hash no longer includes the project's root file listing (base and head of a
+  diff naturally differ in file membership). The same compatibility check
+  applies to warm runs that rehydrate the cached base snapshot. Genuinely
+  incompatible identities, such as a tsconfig or compiler-options change
+  between base and head, still degrade with the existing warning. (Closes
+  [#2102](https://github.com/fallow-rs/fallow/issues/2102).)
+
 - **`fallow audit` attribution is now rename-aware.** New-vs-inherited
   attribution follows git rename detection when joining head findings against
   the base snapshot, so a pure `git mv` (a route rename, a directory

@@ -29,9 +29,11 @@ pub(super) struct CachedAuditKeySnapshot {
     pub(super) base_sha: String,
     /// JSON-serialized `SemanticAnalysisIdentity` of the base pass, `None`
     /// when the base ran without type-aware analysis. Persisted so a warm
-    /// cache hit still compares base and head identities instead of treating
-    /// every cached type-aware base as identity-less (which would spuriously
-    /// degrade the new-only gate to syntactic attribution).
+    /// cache hit still runs the identity compatibility check
+    /// (`incompatible_fields`, not raw equality; see #2102) against the head
+    /// identity: a genuinely incompatible cached base must keep degrading the
+    /// new-only gate to syntactic attribution, and an identity-less cached
+    /// base must not be mistaken for one that made semantic claims.
     pub(super) type_aware_identity: Option<String>,
     pub(super) type_aware_gap_signature: Vec<String>,
     /// Pre-refinement syntactic dead-code keys of the base pass, `None` when
