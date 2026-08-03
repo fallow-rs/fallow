@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fallow audit` attribution is now rename-aware.** New-vs-inherited
+  attribution follows git rename detection when joining head findings against
+  the base snapshot, so a pure `git mv` (a route rename, a directory
+  restructure) no longer reports every pre-existing complexity, duplication,
+  dead-code, or styling finding on the moved files as introduced and no
+  longer flips `--gate new-only` from pass to fail. Renames with content
+  changes only relocate the baseline: debt a changeset genuinely adds to a
+  moved file still attributes as introduced and still gates. (Closes
+  [#2093](https://github.com/fallow-rs/fallow/issues/2093).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added

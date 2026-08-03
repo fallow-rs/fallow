@@ -205,6 +205,107 @@ pub fn try_get_changed_files_with_toplevel(
     Ok(files)
 }
 
+/// A file rename detected between a git ref's merge base and the working
+/// tree, with absolute paths joined onto the git toplevel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedFile {
+    /// Absolute pre-rename path (exists in the base tree).
+    pub from: PathBuf,
+    /// Absolute post-rename path (exists in the current tree).
+    pub to: PathBuf,
+}
+
+/// Detect renamed files between a git ref's merge base and the current tree.
+///
+/// Covers the committed range (`<ref>...HEAD`) plus renames staged against
+/// `HEAD`, mirroring the tracked scope of [`try_get_changed_files_with_toplevel`].
+/// A rename committed as `a -> b` and then staged as `b -> c` is composed into
+/// one `a -> c` entry. Copies are intentionally not reported: a copy leaves
+/// the original in place, so findings on the copy are genuinely new.
+///
+/// # Errors
+///
+/// Returns an error when git cannot resolve the ref or repository state.
+pub fn try_get_renamed_files(
+    root: &Path,
+    git_ref: &str,
+) -> Result<Vec<RenamedFile>, ChangedFilesError> {
+    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    let toplevel = resolve_git_toplevel(root)?;
+    let mut renames = collect_git_rename_pairs(
+        root,
+        &toplevel,
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--end-of-options",
+            &format!("{git_ref}...HEAD"),
+        ],
+    )?;
+    let staged = collect_git_rename_pairs(
+        root,
+        &toplevel,
+        &["diff", "--name-status", "-z", "--find-renames", "HEAD"],
+    )?;
+    for pair in staged {
+        if let Some(chained) = renames.iter_mut().find(|rename| rename.to == pair.from) {
+            chained.to = pair.to;
+        } else {
+            renames.push(pair);
+        }
+    }
+    Ok(renames)
+}
+
+/// Run a `--name-status -z` diff and collect its `R` (rename) pairs.
+///
+/// The `-z` stream alternates status and path fields separated by NUL; rename
+/// and copy statuses (`R<score>` / `C<score>`) carry two path fields (old then
+/// new), every other status carries one.
+fn collect_git_rename_pairs(
+    cwd: &Path,
+    toplevel: &Path,
+    args: &[&str],
+) -> Result<Vec<RenamedFile>, ChangedFilesError> {
+    let output = spawn_output(&mut git_command(cwd, args))
+        .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(changed_files_error_from_output(&output));
+    }
+
+    let mut fields = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty());
+    let mut renames = Vec::new();
+    while let Some(status) = fields.next() {
+        let Some(first_path) = fields.next() else {
+            break;
+        };
+        match status.first() {
+            Some(b'R') => {
+                let Some(second_path) = fields.next() else {
+                    break;
+                };
+                renames.push(RenamedFile {
+                    from: toplevel.join(git_path_from_bytes(first_path)),
+                    to: toplevel.join(git_path_from_bytes(second_path)),
+                });
+            }
+            // Copies also carry two path fields but are conservatively treated
+            // as new files, so only the extra field is consumed.
+            Some(b'C') => {
+                let _ = fields.next();
+            }
+            _ => {}
+        }
+    }
+    Ok(renames)
+}
+
 /// Return the raw git diff from a ref's merge base through the working tree.
 ///
 /// The result includes committed, staged, unstaged, and untracked changes so it

@@ -3852,3 +3852,230 @@ fn w2_walkthrough_viewed_file_collapses_into_cleared_only() {
         "the viewed file shows only under Cleared. cleared section: {cleared_section}"
     );
 }
+
+/// Build a repo whose `src/old/` directory carries one over-threshold complex
+/// function, one unused export, and a cross-file duplicate pair, all committed
+/// on `main`. Returns the fixture guard; callers branch and rename.
+fn create_rename_attribution_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src/old")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "rename-audit-test", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+
+    // Cyclomatic complexity 26 against the default threshold of 20.
+    let mut complex_fn =
+        String::from("export function complexFn(x: number): number {\n  let out = 0;\n");
+    for n in 0..25 {
+        use std::fmt::Write as _;
+        writeln!(complex_fn, "  if (x > {n}) {{ out += {n}; }}").unwrap();
+    }
+    complex_fn
+        .push_str("  return out;\n}\n\nexport const unusedHelper = () => 'nobody imports me';\n");
+    fs::write(dir.join("src/old/impl.ts"), &complex_fn).unwrap();
+
+    let duplicate = "export function sharedBlock(x: number): number {\n\
+          const a = x + 1;\n\
+          const b = a * 2;\n\
+          const c = b - 3;\n\
+          const d = c * c;\n\
+          const e = d + a;\n\
+          const f = e - b;\n\
+          const g = f + c;\n\
+          const h = g * d;\n\
+          const i = h - e;\n\
+          return a + b + c + d + e + f + g + h + i;\n\
+        }\n";
+    fs::write(dir.join("src/old/dupA.ts"), duplicate).unwrap();
+    fs::write(dir.join("src/old/dupB.ts"), duplicate).unwrap();
+
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { complexFn } from './old/impl';\ncomplexFn(1);\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    // Pin LF so the base worktree checkout matches head bytes on Windows
+    // runners; clone fingerprints hash the raw fragment text.
+    git(dir, &["config", "core.autocrlf", "false"]);
+    commit_all(dir, "initial");
+    git(dir, &["checkout", "-b", "restructure"]);
+    tmp
+}
+
+/// Rename `src/old` to `src/renamed` with `git mv` and repoint the importer.
+/// The moved files themselves stay byte-identical (R100).
+fn rename_old_directory(dir: &Path) {
+    git(dir, &["mv", "src/old", "src/renamed"]);
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { complexFn } from './renamed/impl';\ncomplexFn(1);\n",
+    )
+    .unwrap();
+}
+
+fn run_rename_audit(dir: &Path) -> common::CommandOutput {
+    run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "new-only",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+        "--dupes-mode",
+        "strict",
+        "--dupes-min-tokens",
+        "10",
+        "--dupes-min-lines",
+        "3",
+    ])
+}
+
+#[test]
+fn audit_new_only_inherits_findings_across_pure_rename() {
+    let tmp = create_rename_attribution_fixture();
+    let dir = tmp.path();
+    rename_old_directory(dir);
+    commit_all(dir, "git mv src/old src/renamed");
+
+    let output = run_rename_audit(dir);
+
+    assert_eq!(
+        output.code, 0,
+        "a pure git mv must not flip new-only from pass to fail. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+    let attribution = &json["attribution"];
+    assert_eq!(
+        attribution["complexity_introduced"].as_u64(),
+        Some(0),
+        "pre-existing complexity on a moved file is inherited: {attribution:#?}"
+    );
+    assert!(
+        attribution["complexity_inherited"]
+            .as_u64()
+            .is_some_and(|count| count >= 1),
+        "the moved over-threshold function stays visible as inherited: {attribution:#?}"
+    );
+    assert_eq!(
+        attribution["dead_code_introduced"].as_u64(),
+        Some(0),
+        "pre-existing dead code on moved files is inherited: {attribution:#?}"
+    );
+    assert!(
+        attribution["dead_code_inherited"]
+            .as_u64()
+            .is_some_and(|count| count >= 1),
+        "the moved unused export stays visible as inherited: {attribution:#?}"
+    );
+    assert_eq!(
+        attribution["duplication_introduced"].as_u64(),
+        Some(0),
+        "pre-existing duplication between moved files is inherited: {attribution:#?}"
+    );
+    assert!(
+        attribution["duplication_inherited"]
+            .as_u64()
+            .is_some_and(|count| count >= 1),
+        "the moved clone group stays visible as inherited: {attribution:#?}"
+    );
+}
+
+#[test]
+fn audit_new_only_still_gates_new_finding_in_renamed_file() {
+    let tmp = create_rename_attribution_fixture();
+    let dir = tmp.path();
+    rename_old_directory(dir);
+
+    // Append a genuinely NEW over-threshold function to the moved file. The
+    // rename map must only relocate the baseline, not suppress new debt.
+    let mut new_fn = fs::read_to_string(dir.join("src/renamed/impl.ts")).unwrap();
+    new_fn.push_str("\nexport function freshlyComplex(y: number): number {\n  let out = 0;\n");
+    for n in 0..25 {
+        use std::fmt::Write as _;
+        writeln!(new_fn, "  if (y < {n}) {{ out -= {n}; }}").unwrap();
+    }
+    new_fn.push_str("  return out;\n}\n");
+    fs::write(dir.join("src/renamed/impl.ts"), &new_fn).unwrap();
+    commit_all(dir, "rename plus new complexity");
+
+    let output = run_rename_audit(dir);
+
+    assert_eq!(
+        output.code, 1,
+        "new debt added in a renamed file must still gate. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    let attribution = &json["attribution"];
+    assert!(
+        attribution["complexity_introduced"]
+            .as_u64()
+            .is_some_and(|count| count >= 1),
+        "the new function attributes as introduced: {attribution:#?}"
+    );
+    assert!(
+        attribution["complexity_inherited"]
+            .as_u64()
+            .is_some_and(|count| count >= 1),
+        "the pre-existing function still attributes as inherited: {attribution:#?}"
+    );
+}
+
+#[test]
+fn audit_new_only_inherits_pre_existing_findings_across_rename_with_edit() {
+    let tmp = create_rename_attribution_fixture();
+    let dir = tmp.path();
+    rename_old_directory(dir);
+
+    // Edit the moved file without introducing any finding: the rename is no
+    // longer R100, but the surviving findings must still match their base
+    // counterparts under the old path.
+    let mut edited = fs::read_to_string(dir.join("src/renamed/impl.ts")).unwrap();
+    edited.push_str("\nexport const answer = 42;\n");
+    fs::write(dir.join("src/renamed/impl.ts"), &edited).unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { complexFn, answer } from './renamed/impl';\ncomplexFn(answer);\n",
+    )
+    .unwrap();
+    commit_all(dir, "rename plus benign edit");
+
+    let output = run_rename_audit(dir);
+
+    assert_eq!(
+        output.code, 0,
+        "a rename with a benign edit keeps pre-existing findings inherited. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    let attribution = &json["attribution"];
+    assert_eq!(
+        attribution["complexity_introduced"].as_u64(),
+        Some(0),
+        "an edited rename still relocates the baseline: {attribution:#?}"
+    );
+    assert!(
+        attribution["complexity_inherited"]
+            .as_u64()
+            .is_some_and(|count| count >= 1),
+        "the surviving function stays inherited: {attribution:#?}"
+    );
+    assert_eq!(
+        attribution["dead_code_introduced"].as_u64(),
+        Some(0),
+        "no dead code was added by the edit: {attribution:#?}"
+    );
+}

@@ -365,6 +365,60 @@ impl AuditComparison {
     }
 }
 
+/// Remap root-relative path tokens inside base-snapshot attribution keys so a
+/// finding on a renamed file matches its base counterpart under the old path.
+///
+/// `renames` maps base-relative old paths to head-relative new paths, both in
+/// [`relative_key_path`] form. Keys embed paths as whole `:`-separated
+/// segments, with sorted `|`-separated path lists inside one segment for
+/// multi-file findings (duplication groups, circular dependencies, duplicate
+/// exports). Segments are remapped only on an exact path match, and
+/// multi-path list segments are re-sorted after remapping so they stay
+/// canonical. Non-path segments (names, lines, hashes) never collide with a
+/// relative path and pass through unchanged.
+#[must_use]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashMap/FxHashSet across audit attribution keys"
+)]
+pub fn remap_keys_for_renames(
+    keys: &FxHashSet<String>,
+    renames: &FxHashMap<String, String>,
+) -> FxHashSet<String> {
+    keys.iter()
+        .map(|key| remap_key_for_renames(key, renames))
+        .collect()
+}
+
+fn remap_key_for_renames(key: &str, renames: &FxHashMap<String, String>) -> String {
+    if !key
+        .split([':', '|'])
+        .any(|segment| renames.contains_key(segment))
+    {
+        return key.to_string();
+    }
+    let segments: Vec<String> = key
+        .split(':')
+        .map(|segment| {
+            if segment.contains('|') {
+                let mut pieces: Vec<&str> = segment
+                    .split('|')
+                    .map(|piece| renames.get(piece).map_or(piece, String::as_str))
+                    .collect();
+                pieces.sort_unstable();
+                pieces.dedup();
+                pieces.join("|")
+            } else {
+                renames
+                    .get(segment)
+                    .cloned()
+                    .unwrap_or_else(|| segment.to_string())
+            }
+        })
+        .collect();
+    segments.join(":")
+}
+
 pub fn relative_key_path(path: &Path, root: &Path) -> String {
     let simple_path = dunce::simplified(path);
     let simple_root = dunce::simplified(root);
@@ -3161,7 +3215,7 @@ mod tests {
     use super::{
         AuditDomainLedger, annotate_dead_code_json, annotate_dupes_json, annotate_health_json,
         annotate_stale_suppressions_json, dead_code_audit_ledger, dead_code_keys, dupe_group_key,
-        dupes_keys, health_finding_key, health_keys, relative_key_path,
+        dupes_keys, health_finding_key, health_keys, relative_key_path, remap_keys_for_renames,
         retain_introduced_dead_code,
     };
 
@@ -4476,5 +4530,76 @@ mod tests {
         annotate_stale_suppressions_json(&mut json, &results, &root, &FxHashSet::default());
 
         assert_eq!(json["stale_suppressions"][0]["introduced"], true);
+    }
+
+    #[test]
+    fn remap_keys_for_renames_relocates_path_segments() {
+        use rustc_hash::FxHashMap;
+
+        let mut renames = FxHashMap::default();
+        renames.insert(
+            "src/old/impl.ts".to_string(),
+            "src/renamed/impl.ts".to_string(),
+        );
+
+        let keys: FxHashSet<String> = [
+            "complexity:src/old/impl.ts:complexFn:[Cyclomatic]".to_string(),
+            "unused-export:src/old/impl.ts:unusedHelper".to_string(),
+            "unused-file:src/old/impl.ts".to_string(),
+            "unused-export:src/other.ts:src/old/impl.ts-unrelated".to_string(),
+        ]
+        .into_iter()
+        .collect();
+
+        let remapped = remap_keys_for_renames(&keys, &renames);
+
+        assert!(remapped.contains("complexity:src/renamed/impl.ts:complexFn:[Cyclomatic]"));
+        assert!(remapped.contains("unused-export:src/renamed/impl.ts:unusedHelper"));
+        assert!(remapped.contains("unused-file:src/renamed/impl.ts"));
+        assert!(
+            remapped.contains("unused-export:src/other.ts:src/old/impl.ts-unrelated"),
+            "non-exact segment matches must pass through untouched"
+        );
+    }
+
+    #[test]
+    fn remap_keys_for_renames_recanonicalizes_sorted_path_lists() {
+        use rustc_hash::FxHashMap;
+
+        let mut renames = FxHashMap::default();
+        renames.insert("src/a.ts".to_string(), "src/z.ts".to_string());
+
+        let keys: FxHashSet<String> = [
+            // The base list was sorted as [src/a.ts, src/m.ts]; after the
+            // rename the head list sorts as [src/m.ts, src/z.ts].
+            "dupe:src/a.ts|src/m.ts:120:12:deadbeef".to_string(),
+            "circular-dependency:src/a.ts|src/m.ts".to_string(),
+        ]
+        .into_iter()
+        .collect();
+
+        let remapped = remap_keys_for_renames(&keys, &renames);
+
+        assert!(
+            remapped.contains("dupe:src/m.ts|src/z.ts:120:12:deadbeef"),
+            "duplicate-group file lists must be re-sorted: {remapped:#?}"
+        );
+        assert!(
+            remapped.contains("circular-dependency:src/m.ts|src/z.ts"),
+            "cycle file lists must be re-sorted: {remapped:#?}"
+        );
+    }
+
+    #[test]
+    fn remap_keys_for_renames_without_matches_is_identity() {
+        use rustc_hash::FxHashMap;
+
+        let mut renames = FxHashMap::default();
+        renames.insert("src/elsewhere.ts".to_string(), "src/moved.ts".to_string());
+
+        let keys: FxHashSet<String> =
+            std::iter::once("unused-export:src/utils.ts:helper".to_string()).collect();
+
+        assert_eq!(remap_keys_for_renames(&keys, &renames), keys);
     }
 }

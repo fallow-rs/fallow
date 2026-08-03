@@ -241,11 +241,16 @@ with `env -u {var} fallow audit` to confirm."
     None
 }
 
+/// Analyze the base worktree and snapshot its attribution keys.
+///
+/// `base_focus_files` is the changed-file set extended with the pre-rename
+/// paths of detected renames, so base findings on moved files survive the
+/// changed-file scoping and can be remapped onto their head paths.
 fn compute_base_snapshot(
     opts: &AuditOptions<'_>,
     type_aware: AuditTypeAwareOptions<'_>,
     base_ref: &str,
-    changed_files: &FxHashSet<PathBuf>,
+    base_focus_files: &FxHashSet<PathBuf>,
     base_sha: Option<&str>,
 ) -> Result<AuditKeySnapshot, ExitCode> {
     let Some(worktree) = BaseWorktree::create(opts.root, base_ref, base_sha) else {
@@ -266,7 +271,7 @@ fn compute_base_snapshot(
     let base_opts =
         build_base_audit_options(opts, &base_root, &current_config_path, &base_cache_dir);
 
-    let base_changed_files = remap_focus_files(changed_files, opts.root, &base_root);
+    let base_changed_files = remap_focus_files(base_focus_files, opts.root, &base_root);
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let share_dead_code_parse_with_health = check_production == health_production;
@@ -728,6 +733,51 @@ fn remap_focus_files(
     Some(remapped)
 }
 
+/// Detect base..head renames for rename-aware attribution.
+///
+/// Best effort: on any git failure the audit falls back to plain path-keyed
+/// attribution, which reports pre-existing findings on moved files as
+/// introduced (the behavior before rename awareness).
+fn audit_renamed_files(
+    root: &Path,
+    base_ref: &str,
+) -> Vec<fallow_engine::changed_files::RenamedFile> {
+    fallow_engine::changed_files::try_get_renamed_files(root, base_ref).unwrap_or_default()
+}
+
+/// Relocate a base snapshot's attribution keys onto post-rename head paths.
+///
+/// Applies to every path-keyed family (dead code, complexity, styling,
+/// duplication, cycles, public API). Boundary-edge keys are zone-pair keys
+/// without a path component, so they are left untouched. Type-aware identity
+/// fields are path-free as well.
+fn remap_base_snapshot_for_renames(
+    snapshot: &mut AuditKeySnapshot,
+    renames: &[fallow_engine::changed_files::RenamedFile],
+    root: &Path,
+) {
+    if renames.is_empty() {
+        return;
+    }
+    let rename_map: FxHashMap<String, String> = renames
+        .iter()
+        .filter_map(|rename| {
+            let from = keys::relative_key_path(&rename.from, root);
+            let to = keys::relative_key_path(&rename.to, root);
+            (from != to).then_some((from, to))
+        })
+        .collect();
+    if rename_map.is_empty() {
+        return;
+    }
+    snapshot.dead_code = keys::remap_keys_for_renames(&snapshot.dead_code, &rename_map);
+    snapshot.health = keys::remap_keys_for_renames(&snapshot.health, &rename_map);
+    snapshot.styling = keys::remap_keys_for_renames(&snapshot.styling, &rename_map);
+    snapshot.dupes = keys::remap_keys_for_renames(&snapshot.dupes, &rename_map);
+    snapshot.cycles = keys::remap_keys_for_renames(&snapshot.cycles, &rename_map);
+    snapshot.public_api = keys::remap_keys_for_renames(&snapshot.public_api, &rename_map);
+}
+
 #[cfg(test)]
 use std::time::SystemTime;
 
@@ -781,6 +831,7 @@ fn run_audit_head_and_base(
     type_aware: AuditTypeAwareOptions<'_>,
     changed_since: Option<&str>,
     changed_files: &FxHashSet<PathBuf>,
+    base_focus_files: &FxHashSet<PathBuf>,
     base_ref: &str,
     base_cache_key: Option<&AuditBaseSnapshotCacheKey>,
     run_base: bool,
@@ -789,7 +840,7 @@ fn run_audit_head_and_base(
         let base_sha = base_cache_key.map(|key| key.base_sha.as_str());
         let (h, b) = rayon::join(
             || run_audit_head_analyses(opts, type_aware, changed_since, changed_files),
-            || compute_base_snapshot(opts, type_aware, base_ref, changed_files, base_sha),
+            || compute_base_snapshot(opts, type_aware, base_ref, base_focus_files, base_sha),
         );
         (h, Some(b))
     } else {
@@ -1073,8 +1124,26 @@ pub fn execute_audit_with_type_aware(
 
     let needs_real_base_snapshot = matches!(opts.gate, AuditGate::NewOnly)
         && !can_reuse_current_as_base(opts, &base_ref, &changed_files);
+    // Rename pairs feed two things: the base analysis focus set (so findings on
+    // the pre-rename paths are present in the base snapshot at all) and the
+    // base-key remap in `assemble_audit_result` (so those findings join against
+    // their post-rename head keys). Only the real base-snapshot path needs them.
+    let rename_pairs = if needs_real_base_snapshot {
+        audit_renamed_files(opts.root, &base_ref)
+    } else {
+        Vec::new()
+    };
+    let base_focus_files: FxHashSet<PathBuf> = if rename_pairs.is_empty() {
+        changed_files.clone()
+    } else {
+        changed_files
+            .iter()
+            .cloned()
+            .chain(rename_pairs.iter().map(|rename| rename.from.clone()))
+            .collect()
+    };
     let base_cache_key = if needs_real_base_snapshot {
-        audit_base_snapshot_cache_key(opts, &base_ref, &changed_files)?
+        audit_base_snapshot_cache_key(opts, &base_ref, &base_focus_files)?
     } else {
         None
     };
@@ -1091,6 +1160,7 @@ pub fn execute_audit_with_type_aware(
         type_aware,
         changed_since,
         &changed_files,
+        &base_focus_files,
         &base_ref,
         base_cache_key.as_ref(),
         needs_real_base_snapshot && cached_base_snapshot.is_none(),
@@ -1108,6 +1178,7 @@ pub fn execute_audit_with_type_aware(
         },
         changed_files,
         changed_files_count,
+        rename_pairs,
         base_ref,
         base_description,
         start,
@@ -1123,6 +1194,7 @@ struct AuditAssemblyInput<'a> {
     base_cache_key: Option<AuditBaseSnapshotCacheKey>,
     changed_files: FxHashSet<PathBuf>,
     changed_files_count: usize,
+    rename_pairs: Vec<fallow_engine::changed_files::RenamedFile>,
     base_ref: String,
     base_description: Option<String>,
     start: Instant,
@@ -1141,7 +1213,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
     let dupes_result = head.dupes;
     let mut health_result = head.health;
 
-    let (base_snapshot, base_snapshot_skipped) = resolve_base_snapshot(
+    let (mut base_snapshot, base_snapshot_skipped) = resolve_base_snapshot(
         opts,
         input.cached_base_snapshot,
         input.base_res,
@@ -1152,6 +1224,14 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
             health: health_result.as_ref(),
         },
     )?;
+    // Rename-aware attribution: relocate base keys of renamed files onto their
+    // head paths so the by-path join matches. Content-based newness is
+    // untouched, so a rename WITH content changes still attributes any finding
+    // the edit introduced. A skipped base snapshot reuses head keys, which are
+    // already head-keyed, so it must not be remapped.
+    if !base_snapshot_skipped && let Some(snapshot) = base_snapshot.as_mut() {
+        remap_base_snapshot_for_renames(snapshot, &input.rename_pairs, opts.root);
+    }
     let head_type_aware = check_result
         .as_ref()
         .and_then(|result| result.type_aware_meta.as_ref());
