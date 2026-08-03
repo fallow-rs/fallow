@@ -3,8 +3,18 @@ use rmcp::model::*;
 #[cfg(any(unix, windows))]
 use std::time::Duration;
 
+/// Ceiling for a PowerShell fixture that is expected to complete. The
+/// subprocess wait early-exits on completion, so this only bounds the failure
+/// path; generous headroom absorbs slow CI runner spawning (issue #2112).
 #[cfg(windows)]
-const WINDOWS_FIXTURE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+const WINDOWS_FIXTURE_COMPLETION_TIMEOUT: Duration = Duration::from_mins(2);
+
+/// Timeout that must actually fire for the reap test, so its full duration is
+/// paid on every run. It still needs enough headroom for the fixture to start
+/// and write its PID files on a loaded runner before the job is terminated
+/// (issue #2112); the fixture sleeps must stay well above this value.
+#[cfg(windows)]
+const WINDOWS_FIXTURE_FIRED_TIMEOUT: Duration = Duration::from_mins(1);
 
 use crate::tools::run_fallow;
 #[cfg(any(unix, windows))]
@@ -113,26 +123,34 @@ fn process_exists(pid: u32) -> bool {
 
 #[cfg(any(unix, windows))]
 async fn read_pid(path: &std::path::Path) -> u32 {
-    for _ in 0..50 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
         if let Ok(pid) = std::fs::read_to_string(path)
             && let Ok(pid) = pid.trim().parse()
         {
             return pid;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for PID file {}",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("timed out waiting for PID file {}", path.display());
 }
 
 #[cfg(any(unix, windows))]
 async fn wait_for_process_exit(pid: u32) -> bool {
-    for _ in 0..200 {
+    let deadline = std::time::Instant::now() + Duration::from_mins(1);
+    loop {
         if !process_exists(pid) {
             return true;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    false
 }
 
 #[cfg(unix)]
@@ -737,13 +755,15 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
 
 #[cfg(windows)]
 #[tokio::test]
+#[cfg_attr(miri, ignore = "spawns real subprocesses, unsupported under Miri")]
 async fn run_fallow_completed_success_cleans_descendant_process_tree_windows_job() {
+    let _serial = crate::test_support::PROCESS_TREE_TEST_LOCK.lock().await;
     let temp = tempfile::tempdir().expect("temp directory");
     let descendant_pid_path = temp.path().join("descendant.pid");
     let script_path = temp.path().join("completed-process-tree-fixture.ps1");
     let script = r"
 param([Parameter(Mandatory = $true)][string]$DescendantPidPath)
-$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru
+$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 600' -PassThru
 $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
 Write-Output '{}'
 ";
@@ -761,7 +781,7 @@ Write-Output '{}'
             "-DescendantPidPath".to_string(),
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
-        WINDOWS_FIXTURE_STARTUP_TIMEOUT,
+        WINDOWS_FIXTURE_COMPLETION_TIMEOUT,
     )
     .await
     .expect("completed subprocess should stay a tool result");
@@ -882,7 +902,9 @@ async fn run_fallow_timeout_is_not_held_open_by_escaped_pipe_writer() {
 
 #[cfg(windows)]
 #[tokio::test]
+#[cfg_attr(miri, ignore = "spawns real subprocesses, unsupported under Miri")]
 async fn run_fallow_timeout_terminates_and_reaps_windows_job_tree() {
+    let _serial = crate::test_support::PROCESS_TREE_TEST_LOCK.lock().await;
     let temp = tempfile::tempdir().expect("temp directory");
     let direct_pid_path = temp.path().join("direct.pid");
     let descendant_pid_path = temp.path().join("descendant.pid");
@@ -893,9 +915,9 @@ param(
     [Parameter(Mandatory = $true)][string]$DescendantPidPath
 )
 $PID | Set-Content -NoNewline -LiteralPath $DirectPidPath
-$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru
+$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 600' -PassThru
 $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
-Start-Sleep -Seconds 30
+Start-Sleep -Seconds 600
 ";
     std::fs::write(&script_path, script).expect("PowerShell fixture script");
 
@@ -913,7 +935,7 @@ Start-Sleep -Seconds 30
             "-DescendantPidPath".to_string(),
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
-        WINDOWS_FIXTURE_STARTUP_TIMEOUT,
+        WINDOWS_FIXTURE_FIRED_TIMEOUT,
     )
     .await
     .expect("timeout should stay a tool result");

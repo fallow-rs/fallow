@@ -17,6 +17,17 @@ mod params;
 mod server;
 mod tools;
 
+#[cfg(all(test, windows))]
+pub(crate) mod test_support {
+    /// Serializes the Windows process-tree lifecycle tests. Each one spawns a
+    /// nested PowerShell tree; running them concurrently on a loaded CI runner
+    /// multiplies process-spawn latency past the fixture timeouts and they
+    /// contend on the shared kill-target registry (issue #2112). A tokio mutex
+    /// is used so async tests can hold the guard across await points.
+    pub(crate) static PROCESS_TREE_TEST_LOCK: tokio::sync::Mutex<()> =
+        tokio::sync::Mutex::const_new(());
+}
+
 /// Run the MCP stdio server and return the process exit code.
 ///
 /// The standalone `fallow-mcp` binary and the multicall `fallow mcp-server`
