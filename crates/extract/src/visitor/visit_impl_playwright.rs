@@ -272,6 +272,44 @@ impl ModuleInfoExtractor {
             });
     }
 
+    /// Record `X.doMock(...)` / `ns.vi.doMock(...)` for coverage credit only.
+    ///
+    /// Decision for issue #2082: `doMock` never masks. Unlike `vi.mock` it is
+    /// not hoisted, affects only module requests evaluated after the call, and
+    /// usually sits inside a test callback whose execution (and order relative
+    /// to the file's dynamic imports) is a runtime scheduling question, so a
+    /// mask derived from it could produce false uncovered findings. The safe,
+    /// useful part is the credit side: the target and its speculative
+    /// `__mocks__` sibling become dynamic-import edges, so a manual mock
+    /// registered only through `doMock` stops looking like an unused file.
+    /// `doUnmock` is ignored entirely: it only affects later dynamic imports,
+    /// so letting it clear a sound hoisted `vi.mock` mask would lose
+    /// precision for nothing.
+    pub(super) fn record_vitest_do_mock(&mut self, expr: &CallExpression<'_>) {
+        let Some((object_span, provenance)) = mock_method_object_span(expr, "doMock") else {
+            return;
+        };
+        let Some(target_source) = mock_static_target_source(expr) else {
+            return;
+        };
+
+        let has_factory = vi_mock_has_factory(expr);
+        if mock_object_is_literal_global(expr) {
+            self.push_mock_credit_edges(&target_source, expr.span, has_factory);
+            return;
+        }
+        self.pending_vitest_mock_operations
+            .push(PendingVitestMockOperation {
+                source: target_source,
+                object_span,
+                provenance,
+                call_span: expr.span,
+                has_factory,
+                needs_deferred_edges: true,
+                proof: PendingVitestMockProof::CreditOnly,
+            });
+    }
+
     fn push_mock_credit_edges(
         &mut self,
         target_source: &str,
@@ -351,7 +389,7 @@ impl ModuleInfoExtractor {
         }
 
         self.semantic_facts
-            .extend(operations.into_iter().map(|operation| {
+            .extend(operations.into_iter().filter_map(|operation| {
                 let action = match operation.proof {
                     PendingVitestMockProof::ClosedFactory {
                         binding_requirement_spans,
@@ -368,12 +406,17 @@ impl ModuleInfoExtractor {
                         factory_replaces_original: false,
                     },
                     PendingVitestMockProof::Unmock => VitestModuleMockAction::Unmock,
+                    // `doMock` contributes credit edges only; it must never
+                    // enter the ordered mask fact stream (issue #2082).
+                    PendingVitestMockProof::CreditOnly => return None,
                 };
-                SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
-                    source: operation.source,
-                    call_start: operation.call_span.start,
-                    action,
-                })
+                Some(SemanticFact::VitestModuleMockOperation(
+                    VitestModuleMockOperationFact {
+                        source: operation.source,
+                        call_start: operation.call_span.start,
+                        action,
+                    },
+                ))
             }));
     }
 }

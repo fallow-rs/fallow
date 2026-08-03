@@ -671,6 +671,120 @@ fn jest_abstain_controls() {
     }
 }
 
+fn dynamic_import_sources_sorted(info: &ModuleInfo) -> Vec<&str> {
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|import| import.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    sources
+}
+
+#[test]
+fn vitest_do_mock_credits_target_and_auto_mock_sibling_without_masking() {
+    let info = parse_source(r#"import { vi } from "vitest"; vi.doMock("./services/api");"#);
+    assert_eq!(
+        dynamic_import_sources_sorted(&info),
+        vec!["./services/__mocks__/api", "./services/api"]
+    );
+    assert!(
+        vitest_mock_actions(&info).is_empty(),
+        "doMock is unhoisted and order-sensitive, so it must never enter the mask fact stream (issue #2082)"
+    );
+}
+
+#[test]
+fn vitest_do_mock_with_factory_credits_target_only_and_never_masks() {
+    let info =
+        parse_source(r#"import { vi } from "vitest"; vi.doMock("./dep", () => ({ f: vi.fn() }));"#);
+    assert_eq!(dynamic_import_sources_sorted(&info), vec!["./dep"]);
+    assert!(
+        vitest_mock_actions(&info).is_empty(),
+        "even a provably closed doMock factory must not mask: whether and when the call runs is a runtime scheduling question"
+    );
+}
+
+#[test]
+fn jest_do_mock_credits_target_and_manual_mock_sibling() {
+    let info = parse_source(r#"jest.doMock("./services/api");"#);
+    assert_eq!(
+        dynamic_import_sources_sorted(&info),
+        vec!["./services/__mocks__/api", "./services/api"]
+    );
+    assert!(vitest_mock_actions(&info).is_empty());
+}
+
+#[test]
+fn aliased_vi_do_mock_credits_after_provenance_is_proven() {
+    let info = parse_source(r#"import { vi as v } from "vitest"; v.doMock("./services/api");"#);
+    assert_eq!(
+        dynamic_import_sources_sorted(&info),
+        vec!["./services/__mocks__/api", "./services/api"]
+    );
+    assert!(vitest_mock_actions(&info).is_empty());
+}
+
+#[test]
+fn vitest_namespace_do_mock_credits_after_provenance_is_proven() {
+    let info =
+        parse_source(r#"import * as vitest from "vitest"; vitest.vi.doMock("./services/api");"#);
+    assert_eq!(
+        dynamic_import_sources_sorted(&info),
+        vec!["./services/__mocks__/api", "./services/api"]
+    );
+    assert!(vitest_mock_actions(&info).is_empty());
+}
+
+#[test]
+fn unproven_do_mock_receivers_credit_nothing() {
+    for source in [
+        r#"registry.doMock("./services/api");"#,
+        r#"import { vi as v } from "other-lib"; v.doMock("./services/api");"#,
+        r#"import * as helpers from "./helpers"; helpers.vi.doMock("./services/api");"#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            info.dynamic_imports.is_empty(),
+            "an unproven doMock receiver must not credit any file: {source}"
+        );
+        assert!(vitest_mock_actions(&info).is_empty());
+    }
+}
+
+#[test]
+fn vitest_do_unmock_is_ignored_and_keeps_hoisted_mask() {
+    let info = parse_source(
+        r#"
+        import { vi } from "vitest";
+        vi.mock("./dep", () => ({ f: vi.fn() }));
+        vi.doUnmock("./dep");
+        "#,
+    );
+    assert_eq!(
+        replaced_module_targets(&info),
+        vec!["./dep"],
+        "doUnmock affects only later dynamic imports, so it must not clear the hoisted vi.mock mask"
+    );
+}
+
+#[test]
+fn vitest_automock_keeps_coverage_credit_by_decision() {
+    // Pinned decision for issue #2082: automock evaluates the original module
+    // for its shape, so the fact stays `factory_replaces_original: false` and
+    // the target keeps coverage credit.
+    let info = parse_source(r#"import { vi } from "vitest"; vi.mock("./auto");"#);
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![(
+            "./auto",
+            VitestModuleMockAction::Mock {
+                factory_replaces_original: false,
+            },
+        )]
+    );
+}
+
 #[test]
 fn dynamic_import_await_captures_local_name() {
     let info = parse_source(

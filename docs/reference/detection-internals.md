@@ -73,6 +73,40 @@ error by suppressing a downstream detector.
 - Security findings are verification candidates until an agent or human
   confirms the evidence.
 
+## Mock-aware test reachability
+
+Test-reachability masking (issues #2031, #2068, #2082) removes a mocked module
+from a test root's coverage credit only when the mock provably replaces the
+original module without ever loading it. Every idiom is proven through
+span-provenance (`crates/extract` `compute_semantic_usage` mock-API reference
+spans) plus the abstain-by-default closed-factory proof; anything unproven
+keeps coverage credit. Per-idiom semantics decisions:
+
+- `vi.mock` / `jest.mock` with a statically closed factory masks. Proven
+  receivers are the literal `vi` / `jest` globals, aliased named imports from
+  `vitest` / `@jest/globals`, and `ns.vi` through a `vitest` namespace import.
+- Automock (`vi.mock` / `jest.mock` without a factory) never masks, by
+  decision. Vitest derives the auto-mocked shape by importing the original
+  module, so its top-level code executes at collection time; file-level
+  masking cannot express "module evaluated, exports stubbed". When a
+  `__mocks__` sibling exists the original may not load, but the manual mock
+  itself may load the original (`importActual`), and proving it does not would
+  need a cross-file factory proof. The target and the speculative `__mocks__`
+  sibling still receive dynamic-import credit edges.
+- `vi.doMock` / `jest.doMock` never masks, by decision. The call is not
+  hoisted, affects only module requests evaluated after it runs, and usually
+  sits inside a test callback whose execution and ordering relative to the
+  file's dynamic imports is runtime scheduling. It contributes credit edges
+  only (target plus speculative `__mocks__` sibling), gated behind the same
+  provenance proof for aliased and namespace receivers, so a manual mock
+  referenced only through `doMock` does not surface as an unused file.
+- `vi.unmock` / `jest.unmock` clears an earlier mask (fail-open).
+  `doUnmock` is ignored entirely: it only affects later dynamic imports, so it
+  must not clear a sound hoisted mask.
+- Unresolved bare `vi` (Vitest `globals: true`) stays unproven for masking;
+  without reading the Vitest config the safe direction is abstention. Its
+  credit edges are still pushed eagerly.
+
 ## Script indirection crediting
 
 `crates/core/src/scripts/` credits dependencies, config files, and entry files

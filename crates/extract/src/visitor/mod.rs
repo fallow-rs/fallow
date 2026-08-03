@@ -281,6 +281,14 @@ pub(super) enum PendingVitestMockProof {
     },
     UnprovenMock,
     Unmock,
+    /// `vi.doMock` / `jest.doMock` (issue #2082): unhoisted and
+    /// order-sensitive, the call affects only module requests evaluated after
+    /// it runs and may sit inside a test callback that never executes, so it
+    /// never enters the mask fact stream. It still deserves the
+    /// dynamic-import credit edges (target plus speculative `__mocks__`
+    /// sibling) once provenance is proven, so a manual mock referenced only
+    /// through `doMock` does not surface as an unused file.
+    CreditOnly,
 }
 
 #[derive(Debug, Clone)]

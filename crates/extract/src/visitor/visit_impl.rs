@@ -2448,6 +2448,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.bind_iterable_callback_parameter(expr);
         self.record_vitest_mock_imports(expr);
+        self.record_vitest_do_mock(expr);
         self.record_vitest_unmock(expr);
 
         self.try_record_pino_transport_targets(expr);

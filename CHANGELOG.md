@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`vi.doMock` / `jest.doMock` targets and their manual mocks now receive
+  coverage credit.** The unhoisted `doMock` registration credits the mocked
+  target and its speculative `__mocks__` sibling as dynamic-import edges
+  (behind the same import-provenance proof as `vi.mock` for aliased and
+  namespace receivers), so a manual mock referenced only through `doMock` no
+  longer surfaces as an unused file. By decision, `doMock` never masks
+  test-reachability coverage: it is order-sensitive and may run conditionally
+  inside a test callback, so masking could produce false uncovered findings.
+  Automock (`vi.mock` without a factory) keeps coverage credit by explicit
+  decision as well, since Vitest evaluates the original module to derive the
+  mocked shape. Both decisions are documented in
+  `docs/reference/detection-internals.md`.
+  ([#2082](https://github.com/fallow-rs/fallow/issues/2082))
+
 ### Fixed
 
 - **`fallow type-aware status` no longer reports a wrapper-wired sidecar as

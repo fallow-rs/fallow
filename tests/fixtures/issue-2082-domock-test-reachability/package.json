@@ -1,0 +1,9 @@
+{
+  "name": "issue-2082-domock-test-reachability",
+  "private": true,
+  "type": "module",
+  "main": "src/entry.ts",
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

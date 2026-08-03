@@ -142,6 +142,39 @@ fn vitest_vi_mock_makes_auto_mock_reachable() {
 }
 
 #[test]
+fn vitest_vi_do_mock_credits_manual_mock_sibling() {
+    let root = fixture_path("vitest-do-mocks");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&f.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    assert!(
+        !unused_files.contains(&"src/services/__mocks__/api.ts".to_string()),
+        "manual mock referenced only through vi.doMock() must be credited, unused files: {unused_files:?}"
+    );
+    assert!(
+        !unused_files.contains(&"src/services/api.ts".to_string()),
+        "doMock target must stay credited, unused files: {unused_files:?}"
+    );
+    assert!(
+        unused_files.contains(&"src/services/__mocks__/unused.ts".to_string()),
+        "unreferenced mock siblings should still be unused, found: {unused_files:?}"
+    );
+}
+
+#[test]
 fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
     let root = fixture_path("issue-311-vi-mock-factory-target");
     let config = create_config(root.clone());

@@ -2429,6 +2429,64 @@ fn health_coverage_gaps_exclude_jest_replacement_targets() {
 }
 
 #[test]
+fn health_coverage_gaps_keep_do_mock_targets_covered() {
+    // Pinned decision for issue #2082: `vi.doMock` never masks test
+    // reachability (unhoisted, order-sensitive, may run conditionally inside a
+    // test callback), so the dependency keeps its coverage credit even though
+    // the doMock factory is provably closed.
+    let output = run_fallow(
+        "health",
+        "issue-2082-domock-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let coverage = json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    let summary = coverage["summary"]
+        .as_object()
+        .expect("coverage_gaps.summary should be an object");
+    assert_eq!(summary["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        summary["covered_files"].as_u64(),
+        Some(2),
+        "both the wrapper and the doMock'd dependency stay test-covered"
+    );
+
+    let file_names: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert!(
+        !file_names
+            .iter()
+            .any(|path| path.ends_with("src/dependency.ts")),
+        "a doMock'd dependency must keep coverage credit (doMock never masks): {file_names:?}"
+    );
+    assert!(
+        !file_names
+            .iter()
+            .any(|path| path.ends_with("src/wrapper.ts")),
+        "the dynamically imported wrapper should be test-covered: {file_names:?}"
+    );
+}
+
+#[test]
 fn health_crap_estimation_excludes_vitest_replacement_targets() {
     let output = run_fallow(
         "health",
