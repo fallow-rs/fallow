@@ -250,9 +250,9 @@ inputs:
     required: false
     default: 'false'
   type-aware:
-    description: 'Enable optional project-wide TypeScript semantic evidence. Does not emit compiler diagnostics or generic typed lint findings.'
+    description: 'Enable optional project-wide TypeScript semantic evidence. Does not emit compiler diagnostics or generic typed lint findings. Accepts true, false, or auto (default). auto provisions the exact-version fallow-type-aware sidecar when the project fallow config enables typeAware and lets the config drive the analysis. true also passes --type-aware; false skips sidecar provisioning and passes --no-type-aware.'
     required: false
-    default: 'false'
+    default: 'auto'
   type-aware-projects:
     description: 'Comma-separated tsconfig paths for type-aware analysis. Empty uses automatic project discovery.'
     required: false
@@ -347,6 +347,8 @@ runs:
       env:
         FALLOW_VERSION: ${{ inputs.version }}
         INPUT_ROOT: ${{ inputs.root }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_TYPE_AWARE: ${{ inputs.type-aware }}
       run: bash ${{ github.action_path }}/action/scripts/install.sh
 
     - name: Fallow branded token

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The GitHub Action now provisions the `fallow-type-aware` sidecar for
+  typeAware-enabled projects.** The Action previously installed only the CLI,
+  so projects with `typeAware.enabled` (or `audit.typeAware`) hard-failed on
+  fallow 3.11.0+ and silently fell back to syntactic analysis before that. The
+  install step now reads the project's fallow config
+  (`.fallowrc.json`/`.fallowrc.jsonc`/`fallow.toml`/`.fallow.toml`, or the
+  `config` input path) and, when type-aware is enabled, installs
+  `fallow-type-aware` at exactly the CLI version the Action resolved (the
+  `version` input, then the `package.json` pin, then latest) into a tool
+  directory and exports `FALLOW_TYPE_AWARE_BIN`. The `type-aware` input gains
+  an `auto` default alongside `true` and `false`: `true` forces provisioning
+  and still passes `--type-aware`, and `false` skips provisioning and passes
+  `--no-type-aware` on CLIs that support it, keeping the run syntactic even
+  when the config opts in. (Closes
+  [#2107](https://github.com/fallow-rs/fallow/issues/2107).)
+
 ## [3.12.0] - 2026-08-03
 
 ### Fixed

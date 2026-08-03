@@ -263,6 +263,14 @@ To force a specific CLI version regardless of `package.json`, set the `version` 
     version: <fallow version> # exact version, e.g. 1.2.3
 ```
 
+When the project's fallow config enables type-aware analysis
+(`typeAware.enabled` or `audit.typeAware`), the Action automatically installs
+the `fallow-type-aware` sidecar at exactly the resolved CLI version and wires
+it through `FALLOW_TYPE_AWARE_BIN`, so no extra workflow setup is needed. The
+`type-aware` input controls this: `auto` (default) follows the config, `true`
+forces the sidecar and passes `--type-aware`, and `false` skips the sidecar and
+keeps the run syntactic even when the config opts in.
+
 When `comment: true` or `review-comments: true` is enabled, grant the job the
 permissions needed for branded feedback:
 

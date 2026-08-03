@@ -272,6 +272,82 @@ else
   fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
 fi
 
+# --- Type-aware sidecar provisioning ---
+
+echo ""
+echo "=== Install script: type-aware sidecar ==="
+
+mkdir -p "$INSTALL_TMP/ta-jsonc" "$INSTALL_TMP/ta-toml" "$INSTALL_TMP/ta-off" \
+  "$INSTALL_TMP/ta-audit" "$INSTALL_TMP/ta-pinned" "$INSTALL_TMP/ta-explicit"
+
+cat > "$INSTALL_TMP/ta-jsonc/.fallowrc.jsonc" <<'JSONC'
+{
+  // semantic evidence for dead-code candidates
+  "typeAware": { "enabled": true, "require": "best-effort" },
+}
+JSONC
+cat > "$INSTALL_TMP/ta-toml/fallow.toml" <<'TOML'
+[typeAware]
+enabled = true
+TOML
+cat > "$INSTALL_TMP/ta-off/.fallowrc.json" <<'JSON'
+{"typeAware":{"enabled":false}}
+JSON
+cat > "$INSTALL_TMP/ta-audit/.fallowrc.json" <<'JSON'
+{"audit":{"typeAware":true}}
+JSON
+cat > "$INSTALL_TMP/ta-pinned/package.json" <<'JSON'
+{"devDependencies":{"fallow":"2.7.3"}}
+JSON
+cat > "$INSTALL_TMP/ta-pinned/.fallowrc.json" <<'JSON'
+{"typeAware":{"enabled":true}}
+JSON
+cat > "$INSTALL_TMP/ta-explicit/custom-config.jsonc" <<'JSONC'
+{"typeAware":{"enabled":true}}
+JSONC
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Type-aware sidecar enabled via the project fallow config" "sidecar: auto detects jsonc typeAware.enabled"
+assert_contains "$OUT" "DRY RUN: npm install --prefix <tool-dir> --ignore-scripts fallow-type-aware@<resolved CLI version>" "sidecar: auto installs sidecar for unpinned CLI"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-toml" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "fallow-type-aware@" "sidecar: auto detects fallow.toml typeAware section"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-audit" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "fallow-type-aware@" "sidecar: auto detects audit.typeAware override"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-explicit" INPUT_CONFIG="$INSTALL_TMP/ta-explicit/custom-config.jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "fallow-type-aware@" "sidecar: auto respects explicit config path"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" INPUT_TYPE_AWARE=true FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Type-aware sidecar enabled via the action 'type-aware' input" "sidecar: input true forces provisioning"
+assert_contains "$OUT" "fallow-type-aware@" "sidecar: input true installs sidecar"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-off" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_not_contains "$OUT" "fallow-type-aware@" "sidecar: config enabled=false skips provisioning"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-jsonc" INPUT_TYPE_AWARE=false FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_not_contains "$OUT" "fallow-type-aware@" "sidecar: input false wins over enabled config"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_not_contains "$OUT" "fallow-type-aware@" "sidecar: auto without config skips provisioning"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-pinned" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.7.3" "sidecar: pinned CLI still installs pin"
+assert_contains "$OUT" "DRY RUN: npm install --prefix <tool-dir> --ignore-scripts fallow-type-aware@2.7.3" "sidecar: exact pin propagates to sidecar version"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-pinned" FALLOW_VERSION="3.11.0" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install --prefix <tool-dir> --ignore-scripts fallow-type-aware@3.11.0" "sidecar: version input wins for sidecar version"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" INPUT_TYPE_AWARE=bogus FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -ne 0 ]; then
+  pass "sidecar: invalid type-aware input fails"
+else
+  fail "sidecar: invalid type-aware input fails" "expected non-zero exit"
+fi
+assert_contains "$OUT" "Invalid 'type-aware' input" "sidecar: invalid type-aware input explains failure"
+
 # --- Binary verification integration ---
 #
 # Exercises the same verifier path used by install.sh against a controlled

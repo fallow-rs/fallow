@@ -170,6 +170,12 @@ build_common_args() {
     fi
     [ -n "${INPUT_TYPE_AWARE_REQUIRE:-}" ] && \
       ARGS+=(--type-aware-require "$INPUT_TYPE_AWARE_REQUIRE")
+  elif [ "${INPUT_TYPE_AWARE:-}" = "false" ] && [ "${HAS_NO_TYPE_AWARE:-false}" = "true" ]; then
+    # Explicit opt-out overrides a config-enabled typeAware, keeping the run
+    # syntactic even though the sidecar was not provisioned (#2107). The
+    # 'auto' default adds no flag: the project config drives the analysis.
+    # Gated on binary support so older CLIs keep their previous behavior.
+    ARGS+=(--no-type-aware)
   fi
 
   if [ -z "$INPUT_COMMAND" ]; then
@@ -414,6 +420,17 @@ fi
 HAS_NATIVE_REPORT=false
 if fallow report --help > /dev/null 2>&1; then
   HAS_NATIVE_REPORT=true
+fi
+
+# --- Check for --no-type-aware support ---
+# Only probed for the explicit `type-aware: false` opt-out; the flag is global
+# on supporting CLIs, so any subcommand help lists it.
+
+HAS_NO_TYPE_AWARE=false
+if [ "${INPUT_TYPE_AWARE:-}" = "false" ]; then
+  if fallow dead-code --help 2>/dev/null | /usr/bin/grep -q -- '--no-type-aware'; then
+    HAS_NO_TYPE_AWARE=true
+  fi
 fi
 if [ -n "${GITHUB_ENV:-}" ]; then
   printf '%s\n' "HAS_NATIVE_REPORT=${HAS_NATIVE_REPORT}" >> "$GITHUB_ENV"
