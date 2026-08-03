@@ -6,6 +6,8 @@ set -euo pipefail
 # Requires bash and jq. On Windows run via git-bash or WSL.
 # Blocks Claude Code git commit and git push when fallow audit returns verdict fail.
 # Runtime errors fail open with a single stderr notice so skips stay visible.
+# Set FALLOW_GATE_DEBUG=1 to also log when a command is skipped because it is
+# not classified as a git commit or push.
 #
 # Version floor (FALLOW_GATE_MIN_VERSION, default 2.85.0). The gate passes
 # --gate-marker agent (added in v2.85.0) so Impact can record containment;
@@ -24,7 +26,60 @@ fi
 INPUT="$(cat)"
 CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
 
-if ! printf '%s\n' "$CMD" | grep -Eq '(^|[[:space:];|&()])git[[:space:]]+(commit|push)([[:space:]]|$)'; then
+# Tokenize instead of matching one regex so git-level options between `git`
+# and the subcommand (git -c k=v commit, git -C dir push, git --no-pager
+# commit, git --git-dir=/x push) still route into the audit, while subcommand
+# lookalikes in arguments (git log commit-message.txt) do not. See issue #2106.
+is_git_write_command() {
+  local cmd="$1" segment
+  # Control operators separate simple commands; each becomes its own line.
+  while IFS= read -r segment; do
+    # Intentional word splitting; globbing is disabled below.
+    # shellcheck disable=SC2086
+    set -- $segment
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" != "git" ]; then
+        shift
+        continue
+      fi
+      shift
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          commit | push)
+            return 0
+            ;;
+          -c | -C | --git-dir | --work-tree | --namespace | --config-env | --super-prefix | --exec-path | --list-cmds | --attr-source)
+            # Global option whose value arrives as the next word.
+            shift
+            [ "$#" -gt 0 ] && shift
+            ;;
+          -*)
+            # Value-less global option (--no-pager) or inline-value form
+            # (--git-dir=/x, -cuser.name=x).
+            shift
+            ;;
+          *)
+            # A different subcommand; resume scanning for a later `git` word.
+            break
+            ;;
+        esac
+      done
+    done
+  done < <(printf '%s\n' "$cmd" | tr ';|&()' '\n\n\n\n\n')
+  return 1
+}
+
+set -f
+if is_git_write_command "$CMD"; then
+  GIT_WRITE=1
+else
+  GIT_WRITE=0
+fi
+set +f
+if [ "$GIT_WRITE" -eq 0 ]; then
+  if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
+    echo "fallow-gate: not a git commit/push, skipping audit." >&2
+  fi
   exit 0
 fi
 
