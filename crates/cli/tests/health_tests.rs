@@ -469,6 +469,66 @@ fn health_summary_exposes_max_unit_size_threshold() {
     );
 }
 
+/// Reporter scenario from #2116: raising the global `health.maxUnitSize`
+/// empties the large-functions list while `health_score` and
+/// `penalties.unit_size` stay byte-identical. The score penalties use fixed
+/// calibration on purpose (grades stay comparable across projects); this test
+/// locks that decoupling as documented behavior rather than an accident.
+#[test]
+fn health_global_max_unit_size_filters_list_without_moving_score() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"unit-size-score-fixture","type":"module","main":"src/big.ts"}"#,
+    );
+    write_file(&root.join("src/big.ts"), &large_unit_source(80));
+
+    let default_run = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    assert!(
+        default_run["large_functions"]
+            .as_array()
+            .map_or(0, Vec::len)
+            >= 1,
+        "oversized function should be listed under the default threshold"
+    );
+    assert!(
+        !default_run["health_score"].is_null(),
+        "default run should carry a health score"
+    );
+    assert!(
+        default_run["health_score"]["penalties"]["unit_size"]
+            .as_f64()
+            .is_some_and(|p| p > 0.0),
+        "fixture should produce a non-zero unit_size penalty: {}",
+        default_run["health_score"]
+    );
+
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"health":{"maxUnitSize":200}}"#,
+    );
+    let _ = std::fs::remove_dir_all(root.join(".fallow"));
+    let raised = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        raised["large_functions"].as_array().map_or(0, Vec::len),
+        0,
+        "raised global maxUnitSize should empty the large-functions list"
+    );
+    assert_eq!(
+        default_run["health_score"], raised["health_score"],
+        "global maxUnitSize must not change the health score or any penalty"
+    );
+}
+
 #[test]
 fn health_threshold_override_reports_stale_when_under_global_threshold() {
     let dir = tempdir().expect("create temp dir");
