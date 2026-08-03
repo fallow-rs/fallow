@@ -8,13 +8,14 @@ mod pnpm_overrides;
 
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use deno_json::{
-    dir_has_deno_json, dir_has_package_manifest, is_deno_without_node_modules,
+    DirManifestProbe, dir_has_deno_json, dir_has_package_manifest, is_deno_without_node_modules,
     load_deno_import_map, load_dir_package_json, load_member_package_manifest,
-    load_root_deno_workspace_patterns,
+    load_root_deno_workspace_patterns, probe_dir_manifest,
 };
 #[cfg(test)]
 pub use diagnostics::capture_workspace_warnings;
@@ -149,6 +150,7 @@ fn collect_workspaces_and_diagnostics(
     let mut diagnostics = Vec::new();
     let patterns = collect_workspace_patterns(root)?;
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut manifest_cache = ManifestCache::default();
 
     let mut workspaces = expand_patterns_to_workspaces(
         root,
@@ -156,15 +158,21 @@ fn collect_workspaces_and_diagnostics(
         &canonical_root,
         ignore_patterns,
         &mut diagnostics,
+        &mut manifest_cache,
     );
     workspaces.extend(collect_tsconfig_workspaces(
         root,
         &canonical_root,
         ignore_patterns,
         &mut diagnostics,
+        &mut manifest_cache,
     ));
     if patterns.is_empty() {
-        workspaces.extend(collect_shallow_package_workspaces(root, &canonical_root));
+        workspaces.extend(collect_shallow_package_workspaces(
+            root,
+            &canonical_root,
+            &mut manifest_cache,
+        ));
     }
 
     if !workspaces.is_empty() {
@@ -352,6 +360,29 @@ fn collect_workspace_patterns(root: &Path) -> Result<Vec<String>, WorkspaceLoadE
     Ok(patterns)
 }
 
+/// Memoized [`load_member_package_manifest`] outcomes for one discovery run.
+///
+/// The same directory is commonly matched by more than one workspace source
+/// (identical globs in `package.json` and `pnpm-workspace.yaml`, tsconfig
+/// references overlapping npm workspaces). Each manifest load costs a
+/// `package.json` read plus Deno `deno.json` / `deno.jsonc` probes, so repeat
+/// visits replay the memoized outcome instead of touching the filesystem again.
+type ManifestCache = FxHashMap<PathBuf, Result<Option<(String, PackageJson, Vec<String>)>, String>>;
+
+/// Load a member manifest through the per-discovery memo, preserving the
+/// exact per-call outcome (including errors) on repeat visits.
+fn load_member_package_manifest_cached(
+    dir: &Path,
+    cache: &mut ManifestCache,
+) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
+    if let Some(cached) = cache.get(dir) {
+        return cached.clone();
+    }
+    let outcome = load_member_package_manifest(dir);
+    cache.insert(dir.to_path_buf(), outcome.clone());
+    outcome
+}
+
 /// Expand workspace glob patterns to discover workspace directories.
 ///
 /// Handles positive/negated pattern splitting, glob matching, and package.json
@@ -362,6 +393,7 @@ fn expand_patterns_to_workspaces(
     canonical_root: &Path,
     ignore_patterns: &globset::GlobSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
 ) -> Vec<(WorkspaceInfo, Vec<String>)> {
     if patterns.is_empty() {
         return Vec::new();
@@ -403,7 +435,7 @@ fn expand_patterns_to_workspaces(
             if matches_negation(root, &dir, &negation_matchers) {
                 continue;
             }
-            register_matched_workspace(root, dir, &mut workspaces, diagnostics);
+            register_matched_workspace(root, dir, &mut workspaces, diagnostics, manifest_cache);
         }
     }
 
@@ -427,8 +459,9 @@ fn register_matched_workspace(
     dir: PathBuf,
     workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
 ) {
-    match load_member_package_manifest(&dir) {
+    match load_member_package_manifest_cached(&dir, manifest_cache) {
         Ok(Some((name, _pkg, dep_names))) => {
             workspaces.push((
                 WorkspaceInfo {
@@ -460,11 +493,13 @@ fn collect_tsconfig_workspaces(
     canonical_root: &Path,
     ignore_patterns: &globset::GlobSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
 ) -> Vec<(WorkspaceInfo, Vec<String>)> {
     let mut workspaces = Vec::new();
 
     for dir in parse_tsconfig_references_with_diagnostics(root, ignore_patterns, diagnostics) {
-        if let Some(workspace) = tsconfig_workspace_from_dir(root, dir, canonical_root, diagnostics)
+        if let Some(workspace) =
+            tsconfig_workspace_from_dir(root, dir, canonical_root, diagnostics, manifest_cache)
         {
             workspaces.push(workspace);
         }
@@ -478,13 +513,15 @@ fn tsconfig_workspace_from_dir(
     dir: PathBuf,
     canonical_root: &Path,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
 ) -> Option<(WorkspaceInfo, Vec<String>)> {
     let canonical_dir = dunce::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
     if canonical_dir == *canonical_root || !canonical_dir.starts_with(canonical_root) {
         return None;
     }
 
-    let (name, dep_names) = load_tsconfig_workspace_package(root, &dir, diagnostics);
+    let (name, dep_names) =
+        load_tsconfig_workspace_package(root, &dir, diagnostics, manifest_cache);
     Some((
         WorkspaceInfo {
             root: dir,
@@ -499,8 +536,9 @@ fn load_tsconfig_workspace_package(
     root: &Path,
     dir: &Path,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
 ) -> (String, Vec<String>) {
-    match load_member_package_manifest(dir) {
+    match load_member_package_manifest_cached(dir, manifest_cache) {
         Ok(Some((name, _pkg, deps))) => (name, deps),
         Ok(None) => (dir_name(dir), Vec::new()),
         Err(error) => {
@@ -524,6 +562,7 @@ fn load_tsconfig_workspace_package(
 fn collect_shallow_package_workspaces(
     root: &Path,
     canonical_root: &Path,
+    manifest_cache: &mut ManifestCache,
 ) -> Vec<(WorkspaceInfo, Vec<String>)> {
     let mut workspaces = Vec::new();
     let Ok(top_entries) = std::fs::read_dir(root) else {
@@ -536,8 +575,8 @@ fn collect_shallow_package_workspaces(
             continue;
         }
 
-        collect_shallow_workspace_candidate(&path, canonical_root, &mut workspaces);
-        collect_shallow_child_workspaces(&path, canonical_root, &mut workspaces);
+        collect_shallow_workspace_candidate(&path, canonical_root, &mut workspaces, manifest_cache);
+        collect_shallow_child_workspaces(&path, canonical_root, &mut workspaces, manifest_cache);
     }
 
     workspaces
@@ -547,6 +586,7 @@ fn collect_shallow_child_workspaces(
     parent: &Path,
     canonical_root: &Path,
     workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
+    manifest_cache: &mut ManifestCache,
 ) {
     let Ok(child_entries) = std::fs::read_dir(parent) else {
         return;
@@ -559,7 +599,12 @@ fn collect_shallow_child_workspaces(
             continue;
         }
 
-        collect_shallow_workspace_candidate(&child_path, canonical_root, workspaces);
+        collect_shallow_workspace_candidate(
+            &child_path,
+            canonical_root,
+            workspaces,
+            manifest_cache,
+        );
     }
 }
 
@@ -567,13 +612,16 @@ fn collect_shallow_workspace_candidate(
     dir: &Path,
     canonical_root: &Path,
     workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
+    manifest_cache: &mut ManifestCache,
 ) {
     let canonical_dir = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     if canonical_dir == *canonical_root || !canonical_dir.starts_with(canonical_root) {
         return;
     }
 
-    let Ok(Some((name, _pkg, dep_names))) = load_member_package_manifest(dir) else {
+    let Ok(Some((name, _pkg, dep_names))) =
+        load_member_package_manifest_cached(dir, manifest_cache)
+    else {
         return;
     };
 

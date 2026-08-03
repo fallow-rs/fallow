@@ -273,11 +273,10 @@ fn build_package_manifests(
 ) -> Vec<PackageManifestInfo> {
     let root_canonical =
         dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
-    let root_import_map = merge_deno_import_maps(&[], input.root);
+    let root_probe = fallow_config::probe_dir_manifest(input.root);
+    let root_import_map = merge_deno_import_maps(&[], input.root, root_probe.deno_import_map);
     let mut package_manifests = Vec::new();
-    if let Ok(Some((_name, package_json, _deps))) =
-        fallow_config::load_member_package_manifest(input.root)
-    {
+    if let Ok(Some((_name, package_json, _deps))) = root_probe.manifest {
         package_manifests.push(PackageManifestInfo {
             root: input.root.to_path_buf(),
             canonical_root: root_canonical,
@@ -287,15 +286,18 @@ fn build_package_manifests(
         });
     }
     for (ws, canonical_root) in input.workspaces.iter().zip(canonical_ws_roots.iter()) {
-        if let Ok(Some((_name, package_json, _deps))) =
-            fallow_config::load_member_package_manifest(&ws.root)
-        {
+        let ws_probe = fallow_config::probe_dir_manifest(&ws.root);
+        if let Ok(Some((_name, package_json, _deps))) = ws_probe.manifest {
             package_manifests.push(PackageManifestInfo {
                 root: ws.root.clone(),
                 canonical_root: canonical_root.clone(),
                 name: package_json.name.clone().or_else(|| Some(ws.name.clone())),
                 package_json,
-                deno_import_map: merge_deno_import_maps(&root_import_map, &ws.root),
+                deno_import_map: merge_deno_import_maps(
+                    &root_import_map,
+                    &ws.root,
+                    ws_probe.deno_import_map,
+                ),
             });
         }
     }
@@ -304,10 +306,13 @@ fn build_package_manifests(
 
 /// Merge inherited and package-local Deno import maps once per resolver
 /// session. Equal local keys replace inherited keys while retaining the
-/// declaring directory needed for relative target resolution.
+/// declaring directory needed for relative target resolution. The local map
+/// comes from the caller's single-probe manifest load so the Deno config is
+/// not read and parsed a second time.
 fn merge_deno_import_maps(
     inherited: &[DenoImportMapEntry],
     package_root: &Path,
+    local: Option<(PathBuf, Vec<(String, String)>)>,
 ) -> Vec<DenoImportMapEntry> {
     let mut entries: FxHashMap<String, DenoImportMapEntry> = inherited
         .iter()
@@ -315,9 +320,7 @@ fn merge_deno_import_maps(
         .map(|entry| (entry.key.clone(), entry))
         .collect();
 
-    if let Ok(Some((config_path, local_entries))) =
-        fallow_config::load_deno_import_map(package_root)
-    {
+    if let Some((config_path, local_entries)) = local {
         let declaring_dir = config_path.parent().unwrap_or(package_root).to_path_buf();
         for (key, target) in local_entries {
             entries.insert(

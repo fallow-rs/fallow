@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **Workspace discovery loads each member manifest once per run.** Directories
+  matched by more than one workspace source (identical globs in `package.json`
+  and `pnpm-workspace.yaml`, tsconfig references overlapping npm workspaces)
+  previously re-read and re-parsed `package.json` and re-probed
+  `deno.json` / `deno.jsonc` on every visit; a per-discovery memo now replays
+  the first outcome. Module resolution also probes each package's Deno config
+  once instead of twice (manifest load plus import-map load). Local criterion
+  runs of `component_config_workspace_discovery` and
+  `component_config_workspace_diagnostics` improved by about 7% and 12%.
+
 ## [3.13.0] - 2026-08-03
 
 ### Fixed
