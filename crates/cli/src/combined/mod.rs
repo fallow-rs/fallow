@@ -543,6 +543,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         baseline: None,
         save_baseline: None,
         baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        baseline_mode_explicit: false,
         complexity: true,
         file_scores: true,
         coverage_gaps: false,

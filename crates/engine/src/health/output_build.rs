@@ -61,6 +61,7 @@ pub(super) struct HealthOutputBuildInput<'a, R> {
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
+    baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
     timing_base: HealthTimingBaseInput,
     start: &'a Instant,
 }
@@ -91,6 +92,7 @@ pub(super) fn prepare_health_output_context<R>(
         sev_high,
         sev_moderate,
         loaded_baseline: _,
+        baseline_staleness,
     } = input.findings_data;
 
     HealthOutputContext {
@@ -113,6 +115,7 @@ pub(super) fn prepare_health_output_context<R>(
             sev_critical,
             sev_high,
             sev_moderate,
+            baseline_staleness,
             timing_base: input.timings.into_base_input(complexity_ms),
             start: input.start,
         },
@@ -214,6 +217,7 @@ fn build_health_report_pipeline_input<R>(
         sev_critical: build.sev_critical,
         sev_high: build.sev_high,
         sev_moderate: build.sev_moderate,
+        baseline_staleness: build.baseline_staleness.clone(),
     }
 }
 
@@ -292,6 +296,7 @@ struct HealthReportPipelineInput {
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
+    baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
 }
 
 fn build_health_report_from_pipeline(
@@ -330,6 +335,7 @@ fn build_health_report_from_pipeline(
             sev_critical: input.sev_critical,
             sev_high: input.sev_high,
             sev_moderate: input.sev_moderate,
+            baseline_staleness: input.baseline_staleness,
         },
     )
 }

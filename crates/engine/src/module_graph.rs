@@ -106,8 +106,8 @@ impl<'a> StaticTestCoverage<'a> {
         self.graph.is_test_reachable(file_id)
     }
 
-    pub(crate) fn covers_reference(self, reference: &fallow_graph::graph::SymbolReference) -> bool {
-        self.graph.is_test_reference_covered(reference)
+    pub(crate) fn covers_any_reference(self, export: &fallow_graph::graph::ExportSymbol) -> bool {
+        self.graph.is_any_test_reference_covered(export)
     }
 }
 
@@ -272,10 +272,7 @@ pub fn module_value_exports(graph: &RetainedModuleGraph) -> Vec<ModuleValueExpor
                     file_id: node.file_id,
                     name: export.name.to_string(),
                     span_start: export.span.start,
-                    test_referenced: export
-                        .references
-                        .iter()
-                        .any(|reference| test_coverage.covers_reference(reference)),
+                    test_referenced: test_coverage.covers_any_reference(export),
                 })
         })
         .collect()

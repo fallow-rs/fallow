@@ -347,6 +347,7 @@ fn derive_programmatic_health_execution_options<'a>(
         baseline: None,
         save_baseline: None,
         baseline_mode: fallow_engine::baseline::HealthBaselineMode::Count,
+        baseline_mode_explicit: false,
         complexity: run.sections.complexity,
         file_scores: run.sections.file_scores,
         coverage_gaps: run.sections.coverage_gaps,

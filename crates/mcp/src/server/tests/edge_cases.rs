@@ -402,6 +402,21 @@ fn health_args_baseline_and_save_baseline() {
 }
 
 #[test]
+fn health_args_baseline_mode() {
+    let params = HealthParams {
+        save_baseline: Some("new.json".to_string()),
+        baseline_mode: Some(crate::params::BaselineModeParam::Identity),
+        ..Default::default()
+    };
+    let args = build_health_args(&params);
+    assert!(args.contains(&"--baseline-mode".to_string()));
+    assert!(args.contains(&"identity".to_string()));
+
+    let omitted = build_health_args(&HealthParams::default());
+    assert!(!omitted.contains(&"--baseline-mode".to_string()));
+}
+
+#[test]
 fn health_args_targets_flag_only() {
     let params = HealthParams {
         targets: Some(true),
@@ -697,6 +712,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         save_snapshot: Some("snap.json".to_string()),
         baseline: Some("base.json".to_string()),
         save_baseline: Some("new.json".to_string()),
+        baseline_mode: Some(crate::params::BaselineModeParam::Identity),
         no_cache: Some(true),
         threads: Some(4),
         type_aware: None,

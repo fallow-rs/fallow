@@ -164,6 +164,7 @@ fn warm_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_
         baseline: None,
         save_baseline: None,
         baseline_mode: fallow_engine::baseline::HealthBaselineMode::Count,
+        baseline_mode_explicit: false,
         complexity: true,
         file_scores: false,
         coverage_gaps: false,

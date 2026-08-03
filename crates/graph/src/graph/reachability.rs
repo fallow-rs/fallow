@@ -11,6 +11,19 @@ use fallow_types::extract::ModuleLoadMechanism;
 
 use super::{ModuleGraph, TestReachabilityIndex};
 
+/// Upper bound on distinct replacement-mask profiles before profiled
+/// reachability falls back to the legacy coarse bitset pass.
+///
+/// Follows the `re_export_transition_safety_cap` precedent of bounding an
+/// otherwise unbounded blowup. `TestReachabilityIndex` storage is
+/// O(files * profile_count / 64) u64 words and worklist propagation touches
+/// every profile word per edge visit, so at 1024 profiles each file costs 16
+/// words (128 bytes): about 12 MiB of index for a 100k-file monorepo. Beyond
+/// that the memory and propagation cost outweigh the masking precision, and
+/// the legacy pass is a safe over-approximation (fail-open, pre-#2068
+/// behavior).
+const PROFILE_COUNT_SAFETY_CAP: usize = 1024;
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct TestReachabilityProfile {
     masked_targets: Vec<FileId>,
@@ -63,6 +76,19 @@ impl<'roots> TestReachabilityPlan<'roots> {
         for &root in test_entry_points {
             let mask = targets_by_root.remove(&root).unwrap_or_default();
             roots_by_mask.entry(mask).or_default().push(root);
+        }
+
+        if roots_by_mask.len() > PROFILE_COUNT_SAFETY_CAP {
+            tracing::warn!(
+                profile_count = roots_by_mask.len(),
+                safety_cap = PROFILE_COUNT_SAFETY_CAP,
+                "Test-reachability profile count exceeded its safety cap; \
+                 falling back to coarse test reachability without replacement \
+                 masking. Mocked modules stay test-reachable (fail-open)."
+            );
+            return Self::Legacy {
+                roots: test_entry_points,
+            };
         }
 
         let mut profiles: Vec<_> = roots_by_mask
@@ -977,65 +1003,64 @@ mod tests {
     fn replacement_masks_a_target_behind_an_esm_re_export() {
         let graph = build_masked_re_export_graph(false, false);
         let target_export = &graph.modules[2].exports[0];
-        let reference = target_export
-            .references
-            .first()
-            .expect("barrel consumer reference should propagate");
+        assert!(
+            !target_export.references.is_empty(),
+            "barrel consumer reference should propagate"
+        );
 
         assert!(graph.modules[1].is_test_reachable());
         assert!(!graph.modules[2].is_test_reachable());
         assert_eq!(
-            graph.reference_path_hops(reference)[0].1,
+            graph.reference_path_hops(target_export, 0)[0].1,
             ModuleLoadMechanism::EsModule
         );
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(target_export, 0));
     }
 
     #[test]
     fn commonjs_loaded_barrel_does_not_bypass_its_esm_re_export() {
         let graph = build_masked_re_export_graph(true, false);
         let target_export = &graph.modules[2].exports[0];
-        let reference = target_export
-            .references
-            .first()
-            .expect("barrel consumer reference should propagate");
+        assert!(
+            !target_export.references.is_empty(),
+            "barrel consumer reference should propagate"
+        );
 
         assert!(graph.modules[1].is_test_reachable());
         assert!(!graph.modules[2].is_test_reachable());
         assert_eq!(
-            graph.reference_path_hops(reference)[0].1,
+            graph.reference_path_hops(target_export, 0)[0].1,
             ModuleLoadMechanism::EsModule
         );
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(target_export, 0));
     }
 
     #[test]
     fn direct_commonjs_and_esm_re_export_retain_distinct_coverage() {
         let graph = build_masked_re_export_graph(false, true);
-        let references = &graph.modules[2].exports[0].references;
+        let export = &graph.modules[2].exports[0];
 
-        assert_eq!(references.len(), 2);
-        let esm = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::EsModule
+        assert_eq!(export.references.len(), 2);
+        let esm = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1 == ModuleLoadMechanism::EsModule
             })
             .expect("ESM re-export reference");
-        let commonjs = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::CommonJsRequire
+        let commonjs = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1
+                    == ModuleLoadMechanism::CommonJsRequire
             })
             .expect("direct CommonJS reference");
-        assert!(!graph.is_test_reference_covered(esm));
-        assert!(graph.is_test_reference_covered(commonjs));
+        assert!(!graph.is_test_reference_covered(export, esm));
+        assert!(graph.is_test_reference_covered(export, commonjs));
     }
 
     #[test]
     fn mocked_intermediate_barrel_blocks_a_reference_despite_an_alternate_target_route() {
         let graph = build_intermediate_replacement_graph(false, false, false);
-        let reference = &graph.modules[2].exports[0].references[0];
-        let hops = graph.reference_path_hops(reference);
+        let export = &graph.modules[2].exports[0];
+        let hops = graph.reference_path_hops(export, 0);
 
         assert!(graph.modules[2].is_test_reachable());
         assert_eq!(
@@ -1045,13 +1070,13 @@ mod tests {
                 (FileId(1), ModuleLoadMechanism::EsModule),
             ]
         );
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn mocked_re_export_cycle_member_blocks_the_cyclic_reference_path() {
         let graph = build_intermediate_replacement_graph(false, true, false);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
         assert!(
             graph
@@ -1060,30 +1085,30 @@ mod tests {
                 .any(|cycle| cycle.file_ids == vec![FileId(1), FileId(2)])
         );
         assert!(graph.modules[2].is_test_reachable());
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn commonjs_barrel_hop_bypasses_only_its_own_replacement() {
         let graph = build_intermediate_replacement_graph(true, false, false);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
         assert_eq!(
-            graph.reference_path_hops(reference),
+            graph.reference_path_hops(export, 0),
             vec![
                 (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::CommonJsRequire),
             ]
         );
-        assert!(graph.is_test_reference_covered(reference));
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn commonjs_barrel_hop_does_not_bypass_a_replaced_esm_target() {
         let graph = build_intermediate_replacement_graph(true, false, true);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
@@ -1091,29 +1116,29 @@ mod tests {
         let graph = build_intermediate_replacement_graph(false, false, false);
         let encoded = postcard::to_allocvec(&graph).expect("encode graph");
         let decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
-        let reference = &decoded.modules[2].exports[0].references[0];
+        let export = &decoded.modules[2].exports[0];
 
         assert_eq!(
-            decoded.reference_path_hops(reference),
+            decoded.reference_path_hops(export, 0),
             vec![
                 (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::EsModule),
             ]
         );
-        assert!(!decoded.is_test_reference_covered(reference));
+        assert!(!decoded.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn require_context_keeps_a_replaced_target_covered() {
         let graph = build_masked_pattern_graph(&[ModuleLoadMechanism::CommonJsRequire]);
-        let reference = &graph.modules[1].exports[0].references[0];
+        let export = &graph.modules[1].exports[0];
 
         assert!(graph.modules[1].is_test_reachable());
         assert_eq!(
-            graph.reference_path_hops(reference)[0].1,
+            graph.reference_path_hops(export, 0)[0].1,
             ModuleLoadMechanism::CommonJsRequire
         );
-        assert!(graph.is_test_reference_covered(reference));
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
@@ -1122,24 +1147,23 @@ mod tests {
             ModuleLoadMechanism::EsModule,
             ModuleLoadMechanism::CommonJsRequire,
         ]);
-        let references = &graph.modules[1].exports[0].references;
+        let export = &graph.modules[1].exports[0];
 
         assert!(graph.modules[1].is_test_reachable());
-        assert_eq!(references.len(), 2);
-        let esm = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::EsModule
+        assert_eq!(export.references.len(), 2);
+        let esm = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1 == ModuleLoadMechanism::EsModule
             })
             .expect("ESM pattern reference");
-        let commonjs = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::CommonJsRequire
+        let commonjs = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1
+                    == ModuleLoadMechanism::CommonJsRequire
             })
             .expect("CommonJS pattern reference");
-        assert!(!graph.is_test_reference_covered(esm));
-        assert!(graph.is_test_reference_covered(commonjs));
+        assert!(!graph.is_test_reference_covered(export, esm));
+        assert!(graph.is_test_reference_covered(export, commonjs));
     }
 
     #[test]
@@ -1308,6 +1332,94 @@ mod tests {
                 },
             ]
         );
+    }
+
+    type UniqueMaskInputs = (
+        Vec<u32>,
+        Vec<(u32, u32, bool)>,
+        Vec<ResolvedReplacedModuleTarget>,
+    );
+
+    /// Build roots 0..count, each importing and mocking a unique target at
+    /// count + root, so every root lands in its own mask profile.
+    fn unique_mask_graph_inputs(count: u32) -> UniqueMaskInputs {
+        let test_roots: Vec<u32> = (0..count).collect();
+        let mut edges = Vec::with_capacity(test_roots.len());
+        let mut replacements = Vec::with_capacity(test_roots.len());
+        for &root in &test_roots {
+            let masked_target = count + root;
+            edges.push((root, masked_target, false));
+            replacements.push(ResolvedReplacedModuleTarget {
+                source_file: FileId(root),
+                target_file: FileId(masked_target),
+            });
+        }
+        (test_roots, edges, replacements)
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "thousands of synthetic profiles are too slow under miri"
+    )]
+    fn profile_count_at_the_safety_cap_keeps_profiled_masking() {
+        let count = u32::try_from(super::PROFILE_COUNT_SAFETY_CAP).expect("cap fits in u32");
+        let total = count as usize * 2;
+        let (test_roots, edges, replacements) = unique_mask_graph_inputs(count);
+        let graph = build_reachability_graph_with_replacements(
+            total,
+            &edges,
+            &[],
+            &test_roots,
+            &replacements,
+        );
+
+        assert_eq!(
+            graph.test_reachability_index.profile_count,
+            super::PROFILE_COUNT_SAFETY_CAP
+        );
+        // Profiles sort by mask, so profile 0 belongs to root 0 whose unique
+        // target is FileId(count).
+        assert!(
+            graph
+                .test_reachability_index
+                .profile_masks(FileId(count), 0)
+        );
+        assert!(graph.modules[0].is_test_reachable());
+        // Masking still applies under the cap: the mocked target is only
+        // imported by the root that replaces it, so it stays unreachable.
+        assert!(!graph.modules[count as usize].is_test_reachable());
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "thousands of synthetic profiles are too slow under miri"
+    )]
+    fn profile_count_above_the_safety_cap_falls_back_to_coarse_reachability() {
+        let count = u32::try_from(super::PROFILE_COUNT_SAFETY_CAP * 4).expect("cap fits in u32");
+        let total = count as usize * 2;
+        let (test_roots, edges, replacements) = unique_mask_graph_inputs(count);
+        let graph = build_reachability_graph_with_replacements(
+            total,
+            &edges,
+            &[],
+            &test_roots,
+            &replacements,
+        );
+        let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
+
+        let plan = TestReachabilityPlan::new(&root_set, &replacements, total);
+        assert!(matches!(&plan, TestReachabilityPlan::Legacy { .. }));
+        assert!(!plan.requires_reference_provenance());
+
+        // Fail-open: no profiles survive, and mocked targets stay
+        // test-reachable exactly as the pre-profile coarse pass reported them.
+        assert_eq!(graph.test_reachability_index.profile_count, 0);
+        for &root in &test_roots {
+            assert!(graph.modules[root as usize].is_test_reachable());
+            assert!(graph.modules[(count + root) as usize].is_test_reachable());
+        }
     }
 
     #[test]
@@ -1574,12 +1686,15 @@ mod tests {
             &test_entry_points,
             &files,
         );
-        let reference = &graph.modules[CHAIN_LENGTH as usize].exports[0].references[0];
+        let export = &graph.modules[CHAIN_LENGTH as usize].exports[0];
 
         assert_eq!(graph.test_reachability_index.profile_count, 0);
-        assert!(reference.path.is_none());
+        assert!(
+            export.reference_paths.is_empty(),
+            "the provenance side table must stay unallocated on the fast path"
+        );
         assert!(graph.reference_paths.is_empty());
-        assert!(graph.is_test_reference_covered(reference));
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]

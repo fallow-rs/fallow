@@ -436,6 +436,242 @@ fn shadowed_vitest_operations_do_not_change_imported_vi_state() {
 }
 
 #[test]
+fn aliased_vi_import_replacement_records_typed_target() {
+    let info = parse_source(
+        r#"
+        import { vi as v } from "vitest";
+        v.mock("./services/api", () => ({ request: v.fn() }));
+        "#,
+    );
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert!(
+        sources.contains(&"./services/api"),
+        "aliased mock target must be credited once provenance is proven, got {sources:?}"
+    );
+}
+
+#[test]
+fn aliased_vi_import_without_factory_synthesizes_auto_mock_sibling() {
+    let info = parse_source(
+        r#"
+        import { vi as v } from "vitest";
+        v.mock("./services/api");
+        "#,
+    );
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["./services/__mocks__/api", "./services/api"]);
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![(
+            "./services/api",
+            VitestModuleMockAction::Mock {
+                factory_replaces_original: false,
+            },
+        )]
+    );
+}
+
+#[test]
+fn aliased_vi_import_unmock_records_action() {
+    let info = parse_source(
+        r#"
+        import { vi as v } from "vitest";
+        v.mock("./dep", () => ({ request: v.fn() }));
+        v.unmock("./dep");
+        "#,
+    );
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![
+            (
+                "./dep",
+                VitestModuleMockAction::Mock {
+                    factory_replaces_original: true,
+                },
+            ),
+            ("./dep", VitestModuleMockAction::Unmock),
+        ]
+    );
+}
+
+#[test]
+fn aliased_vi_shadowed_or_unimported_binding_abstains() {
+    for source in [
+        r#"import { vi as v } from "vitest"; function f(v) { v.mock("./dep", () => ({})); }"#,
+        r#"const v = mockApi; v.mock("./dep", () => ({}));"#,
+        r#"import { v } from "not-vitest"; v.mock("./dep", () => ({}));"#,
+        r#"import type { vi as v } from "vitest"; v.mock("./dep", () => ({}));"#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            vitest_mock_actions(&info).is_empty(),
+            "unproven alias must not record mock operations: {source}"
+        );
+        assert!(
+            info.dynamic_imports.is_empty(),
+            "unproven alias must not credit files: {source}"
+        );
+    }
+}
+
+#[test]
+fn aliased_vi_factory_depending_on_outer_value_abstains_to_unproven() {
+    let info = parse_source(
+        r#"
+        import { vi as v } from "vitest";
+        const stub = () => 1;
+        v.mock("./dep", () => ({ request: stub }));
+        "#,
+    );
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![(
+            "./dep",
+            VitestModuleMockAction::Mock {
+                factory_replaces_original: false,
+            },
+        )]
+    );
+}
+
+#[test]
+fn vitest_namespace_import_replacement_records_typed_target() {
+    let info = parse_source(
+        r#"
+        import * as vitest from "vitest";
+        vitest.vi.mock("./services/api", () => ({ request: vitest.vi.fn() }));
+        "#,
+    );
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+}
+
+#[test]
+fn vitest_namespace_unmock_records_action() {
+    let info = parse_source(
+        r#"
+        import * as vitest from "vitest";
+        vitest.vi.unmock("./dep");
+        "#,
+    );
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![("./dep", VitestModuleMockAction::Unmock)]
+    );
+}
+
+#[test]
+fn vitest_namespace_abstain_controls() {
+    for source in [
+        // `.mock` directly on the namespace is not the Vitest API.
+        r#"import * as vitest from "vitest"; vitest.mock("./dep", () => ({}));"#,
+        // A namespace of another module must not prove `ns.vi.mock`.
+        r#"import * as other from "not-vitest"; other.vi.mock("./dep", () => ({}));"#,
+        // A local object named like a namespace must not prove.
+        r#"const vitest = { vi: mockApi }; vitest.vi.mock("./dep", () => ({}));"#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            vitest_mock_actions(&info).is_empty(),
+            "unproven namespace form must not record mock operations: {source}"
+        );
+    }
+}
+
+#[test]
+fn vitest_namespace_factory_using_unproven_bare_vi_abstains_to_unproven() {
+    let info = parse_source(
+        r#"
+        import * as vitest from "vitest";
+        vitest.vi.mock("./dep", () => ({ request: vi.fn() }));
+        "#,
+    );
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![(
+            "./dep",
+            VitestModuleMockAction::Mock {
+                factory_replaces_original: false,
+            },
+        )]
+    );
+}
+
+#[test]
+fn jest_global_replacement_records_typed_target() {
+    let info = parse_source(r#"jest.mock("./services/api", () => ({ request: jest.fn() }));"#);
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+}
+
+#[test]
+fn jest_global_mock_records_target_and_auto_mock_sibling() {
+    let info = parse_source(r#"jest.mock("./services/api");"#);
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["./services/__mocks__/api", "./services/api"]);
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![(
+            "./services/api",
+            VitestModuleMockAction::Mock {
+                factory_replaces_original: false,
+            },
+        )]
+    );
+}
+
+#[test]
+fn jest_globals_import_aliased_replacement_records_typed_target() {
+    let info = parse_source(
+        r#"
+        import { jest as j } from "@jest/globals";
+        j.mock("./services/api", () => ({ request: j.fn() }));
+        "#,
+    );
+    assert_eq!(replaced_module_targets(&info), vec!["./services/api"]);
+}
+
+#[test]
+fn jest_unmock_records_action() {
+    let info = parse_source(r#"jest.unmock("./dep");"#);
+    assert_eq!(
+        vitest_mock_actions(&info),
+        vec![("./dep", VitestModuleMockAction::Unmock)]
+    );
+}
+
+#[test]
+fn jest_abstain_controls() {
+    for source in [
+        // A shadowing local `jest` binding removes global provenance.
+        r#"const jest = fakeApi; jest.mock("./dep", () => ({}));"#,
+        r#"import { jest } from "not-jest"; jest.mock("./dep", () => ({}));"#,
+        // `requireActual` loads the original module, poisoning the proof.
+        r#"jest.mock("./dep", () => jest.requireActual("./dep"));"#,
+        r#"jest.mock("./dep", () => { const { requireActual } = jest; return requireActual("./dep"); });"#,
+    ] {
+        let info = parse_source(source);
+        assert!(
+            replaced_module_targets(&info).is_empty(),
+            "unproven or original-loading jest form must abstain: {source}"
+        );
+    }
+}
+
+#[test]
 fn dynamic_import_await_captures_local_name() {
     let info = parse_source(
         "async function f() { const mod = await import('./service'); mod.doStuff(); }",

@@ -303,13 +303,12 @@ struct Cli {
     /// as new. Re-save the baseline after that kind of refactor. Functions
     /// that share a name in one file, and unnamed functions, share one
     /// identity and can mask each other.
-    #[arg(
-        long = "baseline-mode",
-        value_enum,
-        default_value = "count",
-        global = true
-    )]
-    baseline_mode: BaselineModeArg,
+    ///
+    /// Defaults to `count` when omitted. Saving without the flag refuses to
+    /// overwrite a baseline that carries identities; pass `--baseline-mode
+    /// count` explicitly to downgrade such a baseline on purpose.
+    #[arg(long = "baseline-mode", value_enum, global = true)]
+    baseline_mode: Option<BaselineModeArg>,
 
     /// Correlate this run with a previous telemetry analysis run.
     ///
@@ -5014,7 +5013,7 @@ fn run_resolved_audit(
             dead_code_baseline: inputs.dead_code_baseline.as_deref(),
             health_baseline: inputs.health_baseline.as_deref(),
             dupes_baseline: inputs.dupes_baseline.as_deref(),
-            health_baseline_mode: cli.baseline_mode.into(),
+            health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
             max_crap: args.max_crap,
             coverage: inputs.coverage.as_deref(),
             coverage_root: args.coverage_root.as_deref(),
@@ -5121,7 +5120,7 @@ fn decision_surface_audit_options<'a>(
         dead_code_baseline: inputs.dead_code_baseline.as_deref(),
         health_baseline: inputs.health_baseline.as_deref(),
         dupes_baseline: inputs.dupes_baseline.as_deref(),
-        health_baseline_mode: cli.baseline_mode.into(),
+        health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -5429,7 +5428,8 @@ fn run_health_dispatch(
             changed_workspaces: cli.changed_workspaces.as_deref(),
             baseline: cli.baseline.as_deref(),
             save_baseline: cli.save_baseline.as_deref(),
-            baseline_mode: cli.baseline_mode.into(),
+            baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
+            baseline_mode_explicit: cli.baseline_mode.is_some(),
             complexity: sections.complexity,
             file_scores: sections.file_scores,
             coverage_gaps: sections.coverage_gaps,

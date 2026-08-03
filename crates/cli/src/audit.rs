@@ -2303,6 +2303,7 @@ fn build_audit_health_options<'a>(
         baseline: opts.health_baseline,
         save_baseline: None,
         baseline_mode: opts.health_baseline_mode,
+        baseline_mode_explicit: false,
         complexity: true,
         file_scores: false,
         coverage_gaps: false,

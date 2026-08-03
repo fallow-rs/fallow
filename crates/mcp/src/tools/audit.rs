@@ -128,6 +128,11 @@ fn push_audit_baseline_flags(args: &mut Vec<String>, params: &AuditParams) {
         params.dead_code_baseline.as_deref(),
     );
     push_str_flag(args, "--health-baseline", params.health_baseline.as_deref());
+    push_str_flag(
+        args,
+        "--baseline-mode",
+        params.health_baseline_mode.map(|mode| mode.as_cli()),
+    );
     push_str_flag(args, "--dupes-baseline", params.dupes_baseline.as_deref());
 }
 
@@ -272,6 +277,22 @@ mod tests {
         assert!(requires_cli_fallback(&baseline));
         assert!(requires_cli_fallback(&grouped));
         assert!(requires_cli_fallback(&runtime));
+    }
+
+    #[test]
+    fn audit_args_forward_health_baseline_mode() {
+        let params = AuditParams {
+            health_baseline: Some("health.json".to_string()),
+            health_baseline_mode: Some(crate::params::BaselineModeParam::Identity),
+            ..AuditParams::default()
+        };
+        let args = build_audit_args(&params).expect("args");
+        assert!(args.contains(&"--health-baseline".to_string()));
+        assert!(args.contains(&"--baseline-mode".to_string()));
+        assert!(args.contains(&"identity".to_string()));
+
+        let omitted = build_audit_args(&AuditParams::default()).expect("args");
+        assert!(!omitted.contains(&"--baseline-mode".to_string()));
     }
 
     #[tokio::test]
