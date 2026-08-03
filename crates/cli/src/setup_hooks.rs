@@ -1730,6 +1730,144 @@ mod tests {
         );
     }
 
+    /// Runs the rendered gate against a hook payload for `command`, with a
+    /// fake below-floor fallow on PATH so classification is observable via the
+    /// exit code: a recognized commit/push reaches the version-floor check and
+    /// exits 2, an unrecognized command exits 0 before any binary work.
+    /// Mirrors the payload-based reproduction from issue #2106.
+    #[cfg(unix)]
+    fn probe_gate_command(command: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempdir().unwrap();
+        let fake_bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&fake_bin).unwrap();
+        let fallow_path = fake_bin.join("fallow");
+        std::fs::write(
+            &fallow_path,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fallow 1.0.0'; exit 0; fi\nexit 0\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&fallow_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fallow_path, perms).unwrap();
+
+        let script_path = tmp.path().join("fallow-gate.sh");
+        std::fs::write(&script_path, rendered_gate_script()).unwrap();
+
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{existing_path}", fake_bin.display());
+        let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
+
+        let mut cmd = std::process::Command::new("bash");
+        cmd.arg(&script_path).env("PATH", &new_path);
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
+        let mut child = cmd
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn bash");
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        child.wait_with_output().expect("wait")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gate_recognizes_git_write_commands_despite_global_flags() {
+        if std::process::Command::new("jq")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: jq not on PATH");
+            return;
+        }
+
+        let recognized = [
+            "git commit -m x",
+            "git push",
+            "git -c user.name=x commit -m y",
+            "git -c core.pager=cat push",
+            "git --no-pager commit -m z",
+            "git -C /tmp/dir push origin main",
+            "git --git-dir=/x/.git commit -m a",
+            "git --git-dir /x/.git commit -m a",
+            "git --work-tree=/x commit -m a",
+            "git --work-tree /x commit -m a",
+            "git --git-dir /x/.git --work-tree=/x -c a=b push",
+            "cd /tmp && git commit -m x",
+            "echo hi; git -c u=v push",
+        ];
+        for command in recognized {
+            let output = probe_gate_command(command, &[]);
+            assert_eq!(
+                output.status.code(),
+                Some(2),
+                "gate must classify {command:?} as a git write and reach the \
+                 version floor (exit 2). stderr={:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let skipped = [
+            "git status --short",
+            "git log --oneline -5",
+            "git log commit-message.txt",
+            "git stash push",
+            "git show commit",
+            "git -c",
+            "cargo test",
+            "",
+        ];
+        for command in skipped {
+            let output = probe_gate_command(command, &[]);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "gate must skip {command:?} without auditing. stderr={:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gate_skip_is_silent_unless_debug_env_set() {
+        if std::process::Command::new("jq")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: jq not on PATH");
+            return;
+        }
+
+        let silent = probe_gate_command("git status", &[]);
+        assert_eq!(silent.status.code(), Some(0));
+        assert!(
+            silent.stderr.is_empty(),
+            "skip must stay silent without FALLOW_GATE_DEBUG; stderr={:?}",
+            String::from_utf8_lossy(&silent.stderr)
+        );
+
+        let debug = probe_gate_command("git status", &[("FALLOW_GATE_DEBUG", "1")]);
+        assert_eq!(debug.status.code(), Some(0));
+        let stderr = String::from_utf8_lossy(&debug.stderr);
+        assert!(
+            stderr.contains("not a git commit/push"),
+            "FALLOW_GATE_DEBUG=1 must surface the skip; stderr={stderr:?}"
+        );
+    }
+
     #[test]
     fn agents_block_appends_once() {
         let tmp = tempdir().unwrap();

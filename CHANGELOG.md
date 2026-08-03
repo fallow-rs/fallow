@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The generated agent gate now audits `git commit`/`git push` invocations
+  that pass git-level options before the subcommand.** The
+  `fallow hooks install --target agent` gate script previously only recognized
+  the subcommand when it immediately followed `git`, so forms like
+  `git -c user.name=x commit`, `git --no-pager commit`, `git -C dir push`, and
+  `git --git-dir=/x push` silently skipped the audit. Command recognition now
+  tokenizes the command line and steps over git-level flags, including options
+  whose value arrives as a separate word (`-c k v`, `-C path`,
+  `--work-tree path`), while subcommand lookalikes in arguments
+  (`git log commit-message.txt`) still skip. Setting `FALLOW_GATE_DEBUG=1`
+  makes the previously silent not-a-commit/push skip visible on stderr.
+  Reinstall the hook with `fallow hooks install --target agent` to pick up the
+  new script. (Closes
+  [#2106](https://github.com/fallow-rs/fallow/issues/2106).)
+
 ## [3.12.0] - 2026-08-03
 
 ### Fixed
