@@ -178,6 +178,16 @@ pub struct ExportSymbol {
     pub span: oxc_span::Span,
     /// Which files reference this export.
     pub references: Vec<SymbolReference>,
+    /// Interned provenance paths parallel to `references`, keyed by reference
+    /// index (issue #2083).
+    ///
+    /// Only populated when the test-reachability plan requires reference
+    /// provenance (a replacement mock exists). It stays empty for every other
+    /// project so the reference list itself remains 16 bytes per entry and the
+    /// side table allocates nothing. Entries can be `None` even when populated:
+    /// legacy reachability stores no path, profiled reachability always does.
+    #[serde(default)]
+    pub reference_paths: Vec<Option<ReferencePathId>>,
     /// Members of this export (enum members, class members).
     ///
     /// `MemberInfo` is a shared `fallow-types` struct whose serde shape is
@@ -195,11 +205,6 @@ pub struct SymbolReference {
     pub from_file: FileId,
     /// How the export is referenced.
     pub kind: ReferenceKind,
-    /// Interned linked path from `from_file` to the owning export.
-    ///
-    /// Legacy reachability does not need root-specific provenance and stores
-    /// `None`; profiled reachability always stores an exact path.
-    pub(crate) path: Option<ReferencePathId>,
     /// Byte span of the import statement in the referencing file.
     /// Used by the LSP to locate references for Code Lens navigation.
     #[serde(with = "crate::cache::span_serde")]
@@ -207,8 +212,69 @@ pub struct SymbolReference {
 }
 
 /// Compact identifier for an interned reference path.
+///
+/// Opaque outside the graph crate; it only appears in the public API as the
+/// element type of [`ExportSymbol::reference_paths`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ReferencePathId(NonZeroU32);
+pub struct ReferencePathId(NonZeroU32);
+
+/// A symbol reference paired with its optional provenance path while build
+/// passes route it between exports, before it lands in a reference list plus
+/// its provenance side table.
+#[derive(Clone, Copy)]
+pub(crate) struct RoutedReference {
+    pub(crate) reference: SymbolReference,
+    pub(crate) path: Option<ReferencePathId>,
+}
+
+impl ExportSymbol {
+    /// Provenance path recorded for the reference at `index`, when tracked.
+    pub(crate) fn reference_path(&self, index: usize) -> Option<ReferencePathId> {
+        self.reference_paths.get(index).copied().flatten()
+    }
+
+    /// Whether a reference from `from_file` with this exact provenance path is
+    /// already attached.
+    pub(crate) fn has_reference_from(
+        &self,
+        from_file: FileId,
+        path: Option<ReferencePathId>,
+    ) -> bool {
+        self.references
+            .iter()
+            .enumerate()
+            .any(|(index, reference)| {
+                reference.from_file == from_file && self.reference_path(index) == path
+            })
+    }
+
+    /// Attach `reference`, recording `path` in the provenance side table.
+    ///
+    /// The side table stays untouched until the first tracked path arrives, so
+    /// projects without replacement mocks never allocate it.
+    pub(crate) fn push_reference(
+        &mut self,
+        reference: SymbolReference,
+        path: Option<ReferencePathId>,
+    ) {
+        if path.is_some() || !self.reference_paths.is_empty() {
+            self.reference_paths.resize(self.references.len(), None);
+            self.reference_paths.push(path);
+        }
+        self.references.push(reference);
+    }
+
+    /// Iterate references together with their recorded provenance paths.
+    pub(crate) fn routed_references(&self) -> impl Iterator<Item = RoutedReference> + '_ {
+        self.references
+            .iter()
+            .enumerate()
+            .map(|(index, reference)| RoutedReference {
+                reference: *reference,
+                path: self.reference_path(index),
+            })
+    }
+}
 
 /// One conjunctive step in an interned export-reference route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -622,13 +688,13 @@ impl ReferencePathInterner {
             }
         }
 
-        for reference in modules
+        for path in modules
             .iter_mut()
             .flat_map(|module| &mut module.exports)
-            .flat_map(|export| &mut export.references)
+            .flat_map(|export| &mut export.reference_paths)
         {
-            if let Some(path) = reference.path {
-                reference.path = Some(remap[path.index()]);
+            if let Some(existing) = *path {
+                *path = Some(remap[existing.index()]);
             }
         }
 
@@ -785,9 +851,9 @@ pub enum ReferenceKind {
 }
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 112);
+const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 136);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SymbolReference>() == 24);
+const _: () = assert!(std::mem::size_of::<SymbolReference>() == 16);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ReExportEdge>() == 64);
 #[cfg(all(target_pointer_width = "64", unix))]
@@ -852,14 +918,13 @@ mod tests {
                 span: oxc_span::Span::default(),
                 references: paths
                     .iter()
-                    .copied()
-                    .map(|path| SymbolReference {
+                    .map(|_| SymbolReference {
                         from_file: FileId(0),
                         kind: ReferenceKind::NamedImport,
-                        path,
                         import_span: oxc_span::Span::default(),
                     })
                     .collect(),
+                reference_paths: paths.to_vec(),
                 members: Vec::new(),
             }],
             re_exports: Vec::new(),
@@ -912,17 +977,10 @@ mod tests {
         let second_nodes = second.finalize(&mut second_modules);
 
         assert_eq!(first_nodes, second_nodes);
-        let first_paths: Vec<_> = first_modules[0].exports[0]
-            .references
-            .iter()
-            .map(|reference| reference.path)
-            .collect();
-        let second_paths: Vec<_> = second_modules[0].exports[0]
-            .references
-            .iter()
-            .map(|reference| reference.path)
-            .collect();
-        assert_eq!(first_paths, second_paths);
+        assert_eq!(
+            first_modules[0].exports[0].reference_paths,
+            second_modules[0].exports[0].reference_paths
+        );
     }
 
     fn two_hop_route(first: FileId, second: FileId) -> ReferenceRouteGraphSpec {
@@ -982,17 +1040,10 @@ mod tests {
         let second_paths = second.finalize(&mut second_modules);
 
         assert_eq!(first_paths, second_paths);
-        let first_reference_paths: Vec<_> = first_modules[0].exports[0]
-            .references
-            .iter()
-            .map(|reference| reference.path)
-            .collect();
-        let second_reference_paths: Vec<_> = second_modules[0].exports[0]
-            .references
-            .iter()
-            .map(|reference| reference.path)
-            .collect();
-        assert_eq!(first_reference_paths, second_reference_paths);
+        assert_eq!(
+            first_modules[0].exports[0].reference_paths,
+            second_modules[0].exports[0].reference_paths
+        );
     }
 
     #[test]
@@ -1000,7 +1051,6 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(42),
             kind: ReferenceKind::NamedImport,
-            path: Some(ReferencePathId::from_index(0)),
             import_span: oxc_span::Span::new(10, 30),
         };
         assert_eq!(reference.from_file, FileId(42));
@@ -1014,7 +1064,6 @@ mod tests {
         let reference = SymbolReference {
             from_file: FileId(7),
             kind: ReferenceKind::ReExport,
-            path: Some(ReferencePathId::from_index(0)),
             import_span: oxc_span::Span::new(5, 25),
         };
         let copied = reference;
@@ -1075,6 +1124,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 50),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         };
         assert!(matches!(sym.name, ExportName::Named(ref n) if n == "myFunction"));
@@ -1092,6 +1142,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 20),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         };
         assert!(matches!(sym.name, ExportName::Default));
@@ -1107,6 +1158,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 10),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         };
         assert_eq!(sym.visibility, VisibilityTag::Public);
@@ -1122,6 +1174,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 30),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         };
         assert!(sym.is_type_only);
@@ -1140,21 +1193,84 @@ mod tests {
                 SymbolReference {
                     from_file: FileId(1),
                     kind: ReferenceKind::NamedImport,
-                    path: Some(ReferencePathId::from_index(0)),
                     import_span: oxc_span::Span::new(0, 10),
                 },
                 SymbolReference {
                     from_file: FileId(2),
                     kind: ReferenceKind::ReExport,
-                    path: Some(ReferencePathId::from_index(1)),
                     import_span: oxc_span::Span::new(5, 15),
                 },
+            ],
+            reference_paths: vec![
+                Some(ReferencePathId::from_index(0)),
+                Some(ReferencePathId::from_index(1)),
             ],
             members: vec![],
         };
         assert_eq!(sym.references.len(), 2);
         assert_eq!(sym.references[0].from_file, FileId(1));
         assert_eq!(sym.references[1].kind, ReferenceKind::ReExport);
+    }
+
+    #[test]
+    fn push_reference_without_paths_never_allocates_the_side_table() {
+        let mut export = ExportSymbol {
+            name: ExportName::Named("value".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::default(),
+            references: Vec::new(),
+            reference_paths: Vec::new(),
+            members: Vec::new(),
+        };
+        for id in 0..3 {
+            export.push_reference(
+                SymbolReference {
+                    from_file: FileId(id),
+                    kind: ReferenceKind::NamedImport,
+                    import_span: oxc_span::Span::default(),
+                },
+                None,
+            );
+        }
+        assert_eq!(export.references.len(), 3);
+        assert!(export.reference_paths.is_empty());
+        assert_eq!(export.reference_paths.capacity(), 0);
+        assert_eq!(export.reference_path(1), None);
+        assert!(export.has_reference_from(FileId(1), None));
+        assert!(!export.has_reference_from(FileId(9), None));
+    }
+
+    #[test]
+    fn push_reference_backfills_the_side_table_on_the_first_tracked_path() {
+        let mut export = ExportSymbol {
+            name: ExportName::Named("value".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::default(),
+            references: Vec::new(),
+            reference_paths: Vec::new(),
+            members: Vec::new(),
+        };
+        let reference = SymbolReference {
+            from_file: FileId(0),
+            kind: ReferenceKind::NamedImport,
+            import_span: oxc_span::Span::default(),
+        };
+        export.push_reference(reference, None);
+        let tracked = ReferencePathId::from_index(4);
+        export.push_reference(reference, Some(tracked));
+        export.push_reference(reference, None);
+
+        assert_eq!(export.reference_paths, vec![None, Some(tracked), None]);
+        assert_eq!(export.reference_path(0), None);
+        assert_eq!(export.reference_path(1), Some(tracked));
+        assert!(export.has_reference_from(FileId(0), Some(tracked)));
+        assert!(!export.has_reference_from(FileId(0), Some(ReferencePathId::from_index(7))));
     }
 
     #[test]
@@ -1224,6 +1340,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::new(0, 20),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             }],
             re_exports: vec![ReExportEdge {

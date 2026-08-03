@@ -1,0 +1,191 @@
+# Community-maintainable catalogue of CLI flag-value dependency credits.
+#
+# Some CLIs load an npm package because a flag VALUE names it: `eslint --format
+# gha` loads `eslint-formatter-gha`, `mocha --reporter mochawesome` loads
+# `mochawesome`, `node -r dotenv/config` loads `dotenv`. A package used only
+# that way has no import, no config entry, and no binary invocation anywhere in
+# the project, so without a credit it is reported as an unused dependency.
+#
+# This file is the single source of truth for those rules: it is embedded into
+# the binary via `include_str!` and parsed once at startup (see
+# `crates/core/src/scripts/flag_credits.rs`). There is NO regeneration step. To
+# cover another flag of a listed tool, or another tool with a documented
+# value-to-package convention, add one entry below and open a PR.
+#
+# Each entry is `(binaries, flags) -> resolution`:
+#   - `binaries`: the CLI names the rule applies to, as they appear in a script
+#     or CI command after package-manager wrappers are stripped.
+#   - `flags`: the flag spellings that take the package-naming value. Both
+#     `--flag value` and `--flag=value` forms are matched, and comma-separated
+#     values credit each listed name.
+#   - `resolution`: how the tool maps the value to a package.
+#       `prefixed`         the tool expands a bare value with `prefix` the way
+#                          eslint's normalizePackageName does; scoped values are
+#                          always packages, unscoped values with a path
+#                          character are files and credit nothing.
+#       `prefixed-then-bare` the tool tries `prefix`-expanded first and the
+#                          plain name second (jest-resolve), so both candidates
+#                          are credited.
+#       `verbatim`         the value is the package name itself, optionally
+#                          with a subpath (`dotenv/config` credits `dotenv`).
+#   - `prefix`: required for the prefixed resolutions, forbidden for verbatim.
+#   - `builtins`: values the tool resolves internally; they never name an
+#     installable package, so they credit nothing.
+#   - `notes`: optional human context; does not affect matching.
+#
+# A credit only ever exempts an already-declared dependency from the unused
+# scan; it is never consulted by unlisted-dependency detection, so a wrong row
+# cannot invent a finding. It CAN make a real finding vanish, which is why
+# there is deliberately no generic "any bare token matching a declared
+# dependency" rule: values like `--platform node`, `--target html` and `--env
+# production` collide with real package names. Every row here is a documented,
+# tool-specific loading convention (issue #2019).
+
+# ── eslint ────────────────────────────────────────────────────────────────
+
+[[flag-credit]]
+binaries = ["eslint"]
+flags = ["--format", "-f"]
+resolution = "prefixed"
+prefix = "eslint-formatter"
+notes = """
+eslint expands `--format gha` to `eslint-formatter-gha` through a documented
+shorthand (issue #2006). Bundled formatter names are not filtered out: eslint
+resolves the npm package before falling back to its bundled one, so a declared
+`eslint-formatter-json` really is loaded.
+"""
+
+[[flag-credit]]
+binaries = ["eslint"]
+flags = ["--plugin"]
+resolution = "prefixed"
+prefix = "eslint-plugin"
+notes = """
+Same normalizePackageName expansion with the `eslint-plugin` prefix. There are
+no built-in plugins, so every resolvable value names an installable package.
+"""
+
+# ── jest ──────────────────────────────────────────────────────────────────
+
+[[flag-credit]]
+binaries = ["jest"]
+flags = ["--testEnvironment", "--test-environment", "--env"]
+resolution = "prefixed-then-bare"
+prefix = "jest-environment"
+builtins = ["node"]
+notes = """
+jest-resolve tries `jest-environment-<value>` and then the plain value, so
+both candidates are credited. `node` is the built-in environment.
+"""
+
+[[flag-credit]]
+binaries = ["jest"]
+flags = ["--runner"]
+resolution = "prefixed-then-bare"
+prefix = "jest-runner"
+notes = """
+Same jest-resolve lookup with the `jest-runner` prefix. The default `jest-runner`
+package ships with jest itself and is credited only when declared.
+"""
+
+[[flag-credit]]
+binaries = ["jest"]
+flags = ["--reporters"]
+resolution = "verbatim"
+builtins = ["default", "github-actions", "summary"]
+notes = """
+Reporter values name the module verbatim (`jest-junit`); the listed built-ins
+resolve inside jest and never name an installable package.
+"""
+
+[[flag-credit]]
+binaries = ["jest"]
+flags = ["--preset"]
+resolution = "verbatim"
+notes = """
+A preset value points at an npm module containing a jest-preset file
+(`ts-jest`, `react-native`); jest resolves the name verbatim.
+"""
+
+# ── node module preloading (node, tsx, ts-node) ───────────────────────────
+
+[[flag-credit]]
+binaries = ["node", "tsx", "ts-node"]
+flags = ["--require", "-r", "--loader", "--experimental-loader", "--import"]
+resolution = "verbatim"
+notes = """
+Preload and loader flags take a module specifier verbatim; subpath specifiers
+like `ts-node/register` and `dotenv/config` credit the owning package. Values
+starting with `.` or `/` are file paths and `node:` specifiers are built-in
+modules; both credit nothing.
+"""
+
+# ── mocha ─────────────────────────────────────────────────────────────────
+
+[[flag-credit]]
+binaries = ["mocha"]
+flags = ["--reporter", "-R"]
+resolution = "verbatim"
+builtins = [
+    "base",
+    "doc",
+    "dot",
+    "html",
+    "json",
+    "json-stream",
+    "landing",
+    "list",
+    "markdown",
+    "min",
+    "nyan",
+    "progress",
+    "spec",
+    "tap",
+    "xunit",
+]
+notes = """
+Third-party reporters are named verbatim (`mochawesome`). The built-in
+reporter names are excluded because mocha resolves them internally and several
+(`json`, `markdown`, `list`) collide with real npm packages.
+"""
+
+[[flag-credit]]
+binaries = ["mocha"]
+flags = ["--require", "-r"]
+resolution = "verbatim"
+notes = """
+Same preload semantics as node's `--require`, resolved verbatim.
+"""
+
+# ── prettier ──────────────────────────────────────────────────────────────
+
+[[flag-credit]]
+binaries = ["prettier"]
+flags = ["--plugin"]
+resolution = "verbatim"
+notes = """
+prettier does not auto-prefix plugin names; the value is the package itself
+(`prettier-plugin-tailwindcss`, `@prettier/plugin-xml`).
+"""
+
+# ── stylelint ─────────────────────────────────────────────────────────────
+
+[[flag-credit]]
+binaries = ["stylelint"]
+flags = ["--custom-syntax"]
+resolution = "verbatim"
+notes = """
+Custom syntaxes are named verbatim (`postcss-scss`). `--formatter` has no row
+on purpose: no `stylelint-formatter-*` naming convention exists.
+"""
+
+# ── postcss ───────────────────────────────────────────────────────────────
+
+[[flag-credit]]
+binaries = ["postcss"]
+flags = ["--use", "-u"]
+resolution = "verbatim"
+notes = """
+postcss-cli loads each `--use` value as a plugin package verbatim
+(`autoprefixer`, `postcss-preset-env`).
+"""

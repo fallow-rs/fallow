@@ -1718,8 +1718,8 @@ pub enum HealthBaselineMode {
     ///
     /// Identity buckets tolerate file moves conservatively: a bucket whose
     /// path no longer exists on disk follows its function name to a new path
-    /// when exactly one unclaimed current bucket carries that name. See
-    /// [`moved_identity_bucket_remaps`].
+    /// when exactly one unclaimed current bucket carries that name, resolved
+    /// by `moved_identity_bucket_remaps`.
     Identity,
 }
 
