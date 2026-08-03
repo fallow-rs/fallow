@@ -145,12 +145,18 @@ function resolveTypeAwareCompanion(
   }
 }
 
-function childEnvironment(resolvedVersion) {
+function childEnvironment(resolvedVersion, resolveCompanion = resolveTypeAwareCompanion) {
   if (process.env.FALLOW_TYPE_AWARE_BIN) return process.env;
-  const companion = resolveTypeAwareCompanion(resolvedVersion);
+  const companion = resolveCompanion(resolvedVersion);
   return companion === undefined
     ? process.env
-    : { ...process.env, FALLOW_TYPE_AWARE_BIN: companion };
+    : {
+        ...process.env,
+        FALLOW_TYPE_AWARE_BIN: companion,
+        // Marks the wiring as launcher-provided node_modules resolution so
+        // `type-aware status` does not report it as a user-set override.
+        FALLOW_TYPE_AWARE_BIN_SOURCE: "npm-wrapper",
+      };
 }
 
 // Swallow EPIPE on stdout. When fallow's output is piped into a reader that
@@ -223,4 +229,5 @@ module.exports = {
   guardBrokenStdout, // test-only
   exitCodeForChildFailure, // test-only
   resolveTypeAwareCompanion, // test-only
+  childEnvironment, // test-only
 };

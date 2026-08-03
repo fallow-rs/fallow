@@ -159,6 +159,39 @@ test("resolveTypeAwareCompanion accepts only an exact matching package", (t) => 
   assert.equal(resolveTypeAwareCompanion("3.8.0", resolvePackage), undefined);
 });
 
+test("childEnvironment marks launcher-wired companions as npm-wrapper", (t) => {
+  const { childEnvironment } = require(RUN_BINARY);
+  const previousBin = process.env.FALLOW_TYPE_AWARE_BIN;
+  delete process.env.FALLOW_TYPE_AWARE_BIN;
+  t.after(() => {
+    if (previousBin === undefined) delete process.env.FALLOW_TYPE_AWARE_BIN;
+    else process.env.FALLOW_TYPE_AWARE_BIN = previousBin;
+  });
+
+  const env = childEnvironment("3.8.0", () => "/tmp/fallow-type-aware.mjs");
+  assert.equal(env.FALLOW_TYPE_AWARE_BIN, "/tmp/fallow-type-aware.mjs");
+  assert.equal(env.FALLOW_TYPE_AWARE_BIN_SOURCE, "npm-wrapper");
+
+  // No resolvable companion: the environment passes through untouched.
+  const untouched = childEnvironment("3.8.0", () => undefined);
+  assert.equal(untouched, process.env);
+  assert.equal(untouched.FALLOW_TYPE_AWARE_BIN_SOURCE, undefined);
+});
+
+test("childEnvironment leaves a user-set override unmarked", (t) => {
+  const { childEnvironment } = require(RUN_BINARY);
+  const previousBin = process.env.FALLOW_TYPE_AWARE_BIN;
+  process.env.FALLOW_TYPE_AWARE_BIN = "/opt/custom-sidecar";
+  t.after(() => {
+    if (previousBin === undefined) delete process.env.FALLOW_TYPE_AWARE_BIN;
+    else process.env.FALLOW_TYPE_AWARE_BIN = previousBin;
+  });
+
+  const env = childEnvironment("3.8.0", () => "/tmp/fallow-type-aware.mjs");
+  assert.equal(env, process.env);
+  assert.equal(env.FALLOW_TYPE_AWARE_BIN_SOURCE, undefined);
+});
+
 test(
   "fallow-lsp executes the multicall binary with the lsp-server subcommand",
   { skip: process.platform === "win32" },

@@ -308,6 +308,9 @@ if [ "$sidecar_wanted" = "true" ]; then
 
   if [ -n "${GITHUB_ENV:-}" ]; then
     printf 'FALLOW_TYPE_AWARE_BIN=%s\n' "$sidecar_bin" >> "$GITHUB_ENV"
+    # Marks the wiring as Action-provisioned so `type-aware status` reports
+    # github-action instead of environment-override.
+    printf 'FALLOW_TYPE_AWARE_BIN_SOURCE=github-action\n' >> "$GITHUB_ENV"
   fi
   echo "Installed fallow-type-aware ${sidecar_version} sidecar at ${sidecar_bin}"
 fi

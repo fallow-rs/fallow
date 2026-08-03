@@ -136,18 +136,35 @@ struct StatusResponse {
     backend_version: String,
 }
 
+/// Marker set alongside `FALLOW_TYPE_AWARE_BIN` by fallow's own launchers
+/// (npm CLI launcher, Node-API loader, GitHub Action) when they wire a
+/// version-matched companion themselves. Distinguishes tooling-provided wiring
+/// from a user-set override in status output.
+const SIDECAR_SOURCE_ENV: &str = "FALLOW_TYPE_AWARE_BIN_SOURCE";
+const WRAPPER_SOURCES: &[&str] = &["npm-wrapper", "github-action"];
+
+fn discovery_source_label(override_set: bool, source_marker: Option<&str>) -> &'static str {
+    if !override_set {
+        return "installed-sibling";
+    }
+    source_marker
+        .and_then(|marker| WRAPPER_SOURCES.iter().find(|known| **known == marker))
+        .map_or("environment-override", |known| known)
+}
+
 /// Inspect the optional semantic companion without loading or analyzing a
 /// TypeScript project.
 pub fn status(root: &Path) -> TypeAwareStatus {
-    let discovery_source = if non_empty_env("FALLOW_TYPE_AWARE_BIN").is_some() {
-        "environment-override"
-    } else {
-        "installed-sibling"
-    };
+    let discovery_source = discovery_source_label(
+        non_empty_env("FALLOW_TYPE_AWARE_BIN").is_some(),
+        non_empty_env(SIDECAR_SOURCE_ENV).as_deref(),
+    );
     let sidecar = match discover_type_aware_sidecar(root) {
         Ok(sidecar) => sidecar,
         Err(error) => {
-            let remediation = if discovery_source == "installed-sibling" {
+            // Both the sibling and wrapper paths are installation problems the
+            // npm package fixes; only a user-set override keeps the raw error.
+            let remediation = if discovery_source != "environment-override" {
                 format!(
                     "Install the matching companion with: npm install --save-dev fallow-type-aware@{}",
                     env!("CARGO_PKG_VERSION")
@@ -274,6 +291,30 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    #[test]
+    fn discovery_source_labels_each_resolution_path() {
+        assert_eq!(discovery_source_label(false, None), "installed-sibling");
+        // A stale wrapper marker without an override must not relabel siblings.
+        assert_eq!(
+            discovery_source_label(false, Some("npm-wrapper")),
+            "installed-sibling"
+        );
+        assert_eq!(discovery_source_label(true, None), "environment-override");
+        assert_eq!(
+            discovery_source_label(true, Some("npm-wrapper")),
+            "npm-wrapper"
+        );
+        assert_eq!(
+            discovery_source_label(true, Some("github-action")),
+            "github-action"
+        );
+        // Unrecognized marker values never leak into the reported taxonomy.
+        assert_eq!(
+            discovery_source_label(true, Some("custom-marker")),
+            "environment-override"
+        );
     }
 
     #[test]

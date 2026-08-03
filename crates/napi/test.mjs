@@ -235,7 +235,7 @@ function runLoaderCompanionFixture(companionVersion) {
   );
   writeFileSync(
     join(work, "index.js"),
-    "module.exports = { binary: process.env.FALLOW_TYPE_AWARE_BIN || null, script: process.env.FALLOW_TYPE_AWARE_SCRIPT || null };\n",
+    "module.exports = { binary: process.env.FALLOW_TYPE_AWARE_BIN || null, script: process.env.FALLOW_TYPE_AWARE_SCRIPT || null, source: process.env.FALLOW_TYPE_AWARE_BIN_SOURCE || null };\n",
   );
   writeFileSync(join(work, "loader.js"), readFileSync(join(process.cwd(), "loader.js"), "utf8"));
   writeFileSync(
@@ -250,6 +250,7 @@ function runLoaderCompanionFixture(companionVersion) {
   const {
     FALLOW_TYPE_AWARE_BIN: _ignoredBinary,
     FALLOW_TYPE_AWARE_SCRIPT: _ignoredScript,
+    FALLOW_TYPE_AWARE_BIN_SOURCE: _ignoredSource,
     ...env
   } = process.env;
   const child = spawnSync(
@@ -400,10 +401,11 @@ writeFileSync(
     assert.match(matchingCommand.binary, /fallow-type-aware\.mjs$/);
     assert.equal(matchingCommand.script, null);
   }
+  assert.equal(matchingCommand.source, "npm-wrapper");
 
   const mismatched = runLoaderCompanionFixture("3.7.0");
   assert.equal(mismatched.status, 0, mismatched.stderr);
-  assert.deepEqual(JSON.parse(mismatched.stdout), { binary: null, script: null });
+  assert.deepEqual(JSON.parse(mismatched.stdout), { binary: null, script: null, source: null });
 
   const launchRoot = mkdtempSync(join(tmpdir(), "fallow-node-sidecar-launch-"));
   const launchScript = join(launchRoot, "sidecar.mjs");

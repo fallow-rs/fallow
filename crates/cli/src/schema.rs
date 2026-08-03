@@ -910,6 +910,10 @@ mod tests {
                 "FALLOW_DIFF_FILTER",
                 "set by the bundled Action/CI scripts, not user-configured",
             ),
+            (
+                "FALLOW_TYPE_AWARE_BIN_SOURCE",
+                "set by the npm launcher and Node-API loader, not user-configured",
+            ),
         ];
         let schema = schema();
         let env_vars = env_var_map(&schema);

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fallow type-aware status` no longer reports a wrapper-wired sidecar as
+  `environment-override`.** The npm launcher, the Node-API loader, and the
+  GitHub Action resolve a version-matched `fallow-type-aware` themselves and
+  pass it to the binary through `FALLOW_TYPE_AWARE_BIN`, so a plain
+  `npx fallow type-aware status` against a project-local `node_modules`
+  install claimed the user had set an environment override. Those launchers
+  now mark their wiring (internal `FALLOW_TYPE_AWARE_BIN_SOURCE` variable) and
+  `discovery_source` reports `npm-wrapper` or `github-action` for
+  tooling-provided wiring, keeping `environment-override` for a genuinely
+  user-set `FALLOW_TYPE_AWARE_BIN` and `installed-sibling` for a sidecar found
+  next to the executable. Failed discovery through wrapper wiring now also
+  gets the actionable npm install remediation instead of the raw override
+  error.
+
 ## [3.13.0] - 2026-08-03
 
 ### Fixed

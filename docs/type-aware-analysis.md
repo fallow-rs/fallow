@@ -170,7 +170,13 @@ fallow dead-code --root packages/app --unused-class-members --type-aware \
 
 Fallow never searches project `node_modules/.bin` or `PATH` for this executable.
 It accepts an explicit `FALLOW_TYPE_AWARE_BIN` path, or a regular non-symlinked
-sidecar next to the active Fallow executable. Requests, responses, warnings,
+sidecar next to the active Fallow executable. The `fallow` npm launcher and the
+Node-API loader resolve a version-matched `fallow-type-aware` npm package
+themselves and wire it through `FALLOW_TYPE_AWARE_BIN`, marked as
+wrapper-provided. `type-aware status` reports the resolution path as
+`discovery_source`: `environment-override` (user-set `FALLOW_TYPE_AWARE_BIN`),
+`npm-wrapper` (companion resolved from `node_modules` by a fallow npm wrapper),
+or `installed-sibling` (found next to the active executable). Requests, responses, warnings,
 candidate counts, project counts, and execution time are bounded. The child
 process receives a minimal environment. Relative, missing, and project-local
 search-path entries are removed before its Node interpreter is resolved. Its
