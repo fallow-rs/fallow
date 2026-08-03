@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster namespace-alias propagation during graph build.** The
+  cross-package namespace alias pass no longer formats a lookup string per
+  consumer import or builds the chained re-export state machine when the
+  alias target has no `export * as` edge, cutting allocations in the hot
+  loop. The `namespace_object_alias_propagation` benchmark improves by about
+  11% locally (883 us to 780 us), recovering the regression introduced by the
+  provenance side table in 3.13.0. Analysis output is unchanged.
+
 ## [3.13.0] - 2026-08-03
 
 ### Fixed
