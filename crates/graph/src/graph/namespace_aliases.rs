@@ -66,7 +66,7 @@ pub(super) fn propagate_cross_package_aliases(
     reference_paths: &mut ReferencePathInterner,
 ) {
     let pending = collect_pending_credits(graph, module_by_id, indexes, reference_paths);
-    apply_pending_credits(graph, &pending);
+    apply_pending_credits(graph, pending);
 }
 
 fn collect_pending_credits(
@@ -230,9 +230,13 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
     if consumer_local.is_empty() {
         return;
     }
-    let expected_object = format!("{consumer_local}{prefix_match}");
     for access in &consumer.member_accesses {
-        if access.object != expected_object {
+        // Zero-allocation equivalent of `access.object == format!("{consumer_local}{prefix_match}")`.
+        let object_matches = access
+            .object
+            .strip_prefix(consumer_local)
+            .is_some_and(|rest| rest == prefix_match);
+        if !object_matches {
             continue;
         }
         pending.push(PendingCredit {
@@ -242,6 +246,19 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
             import_span: import.info.span,
             path,
         });
+        // The chain walker only produces credits when the alias target has an
+        // `export * as <member>` edge, so skip building its state machine (and
+        // formatting the accessor prefix) for the common leaf-target case.
+        let target_has_chained_re_export =
+            graph.modules.get(target_module_idx).is_some_and(|barrel| {
+                barrel
+                    .re_exports
+                    .iter()
+                    .any(|edge| edge.imported_name == "*" && edge.exported_name == access.member)
+            });
+        if !target_has_chained_re_export {
+            continue;
+        }
         let mut ctx = ChainWalkContext {
             graph,
             consumer,
@@ -253,7 +270,7 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
             &mut ctx,
             target_module_idx,
             &access.member,
-            &format!("{expected_object}.{}", access.member),
+            &format!("{consumer_local}{prefix_match}.{}", access.member),
             path,
         );
     }
@@ -490,7 +507,7 @@ fn collect_chained_re_export_credits(
 /// namespace target is a star barrel (`export * from './bar'`): missing
 /// member exports are stubbed so Phase 4 chain resolution can propagate the
 /// reference to the real defining file.
-fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
+fn apply_pending_credits(graph: &mut ModuleGraph, pending: Vec<PendingCredit>) {
     type GroupKey = (usize, FileId, oxc_span::Span, Option<ReferencePathId>);
 
     let mut groups: FxHashMap<GroupKey, Vec<String>> = FxHashMap::default();
@@ -503,7 +520,7 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
                 credit.path,
             ))
             .or_default()
-            .push(credit.member.clone());
+            .push(credit.member);
     }
 
     for ((target_module_idx, consumer_file_id, import_span, path), members) in groups {
