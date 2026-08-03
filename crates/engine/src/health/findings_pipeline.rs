@@ -30,6 +30,7 @@ pub(super) struct HealthFindingsData {
     pub(super) sev_high: usize,
     pub(super) sev_moderate: usize,
     pub(super) loaded_baseline: Option<HealthBaselineData>,
+    pub(super) baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
 }
 
 struct CollectedHealthFindings {
@@ -88,13 +89,20 @@ pub(super) fn prepare_health_findings(
         threshold_state_tracker: &mut threshold_state_tracker,
     };
     apply_optional_crap_findings(input.opts, &mut collected.findings, &mut crap_ctx);
-    let (total_above_threshold, sev_critical, sev_high, sev_moderate, loaded_baseline) =
-        finalize_health_findings(
-            input.opts,
-            input.config,
-            &mut collected.findings,
-            input.diff_index,
-        )?;
+    let HealthFindingFinalizeResult {
+        total_above_threshold,
+        sev_critical,
+        sev_high,
+        sev_moderate,
+        loaded_baseline,
+        baseline_staleness,
+    } = finalize_health_findings(
+        input.opts,
+        input.config,
+        &mut collected.findings,
+        input.diff_index,
+        is_change_scoped(&input),
+    )?;
     threshold_state_tracker.record_no_match_entries(
         &threshold_resolver,
         should_emit_no_match_threshold_overrides(
@@ -116,6 +124,7 @@ pub(super) fn prepare_health_findings(
         sev_high,
         sev_moderate,
         loaded_baseline,
+        baseline_staleness,
     })
 }
 
@@ -210,13 +219,27 @@ fn should_emit_no_match_threshold_overrides(
         && diff_index.is_none()
 }
 
-type HealthFindingFinalizeResult = (usize, usize, usize, usize, Option<HealthBaselineData>);
+/// True when this run analyzes a subset of the project, so a loaded full-repo
+/// baseline would look stale for reasons that have nothing to do with rot.
+fn is_change_scoped(input: &HealthFindingsInput<'_>) -> bool {
+    input.diff_index.is_some() || input.changed_files.is_some() || input.ws_roots.is_some()
+}
+
+struct HealthFindingFinalizeResult {
+    total_above_threshold: usize,
+    sev_critical: usize,
+    sev_high: usize,
+    sev_moderate: usize,
+    loaded_baseline: Option<HealthBaselineData>,
+    baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
+}
 
 fn finalize_health_findings(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     findings: &mut Vec<ComplexityViolation>,
     diff_index: Option<&fallow_output::DiffIndex>,
+    change_scoped: bool,
 ) -> Result<HealthFindingFinalizeResult, HealthError> {
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
@@ -224,14 +247,16 @@ fn finalize_health_findings(
     sort_findings(findings, opts.sort);
     let total_above_threshold = findings.len();
     let (sev_critical, sev_high, sev_moderate) = count_finding_severities(findings);
-    let loaded_baseline = apply_health_baseline_and_top(opts, config, findings)?;
-    Ok((
+    let (loaded_baseline, baseline_staleness) =
+        apply_health_baseline_and_top(opts, config, findings, change_scoped)?;
+    Ok(HealthFindingFinalizeResult {
         total_above_threshold,
         sev_critical,
         sev_high,
         sev_moderate,
         loaded_baseline,
-    ))
+        baseline_staleness,
+    })
 }
 
 fn count_finding_severities(findings: &[ComplexityViolation]) -> (usize, usize, usize) {
@@ -246,26 +271,34 @@ fn count_finding_severities(findings: &[ComplexityViolation]) -> (usize, usize, 
     (critical, high, moderate)
 }
 
+type LoadedBaselineParts = (
+    Option<HealthBaselineData>,
+    Option<fallow_output::HealthBaselineStaleness>,
+);
+
 fn apply_health_baseline_and_top(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     findings: &mut Vec<ComplexityViolation>,
-) -> Result<Option<HealthBaselineData>, HealthError> {
-    let loaded_baseline = if let Some(load_path) = opts.baseline {
-        Some(load_health_baseline(
+    change_scoped: bool,
+) -> Result<LoadedBaselineParts, HealthError> {
+    let (loaded_baseline, baseline_staleness) = if let Some(load_path) = opts.baseline {
+        let loaded = load_health_baseline(
             load_path,
             findings,
             &config.root,
             opts.quiet,
             opts.baseline_mode,
-        )?)
+            change_scoped,
+        )?;
+        (Some(loaded.data), Some(loaded.staleness))
     } else {
-        None
+        (None, None)
     };
     if let Some(top) = opts.top {
         findings.truncate(top);
     }
-    Ok(loaded_baseline)
+    Ok((loaded_baseline, baseline_staleness))
 }
 
 pub(super) fn save_health_baseline_if_requested(

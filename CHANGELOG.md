@@ -27,6 +27,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to downgrade the baseline on purpose. (Closes
   [#2062](https://github.com/fallow-rs/fallow/issues/2062).)
 
+### Added
+
+- **A partially stale health baseline now says so instead of rotting
+  silently.** When a quarter or more of a loaded baseline's complexity and
+  CRAP entries match no current finding, human output prints a warning naming
+  how many of the saved entries went stale and how to re-save, instead of only
+  warning at zero overlap. JSON output gains a `summary.baseline_staleness`
+  object (`baseline_entries`, `matched_entries`, `stale_entries`,
+  `moved_entries`, `change_scoped`, `stale`) whenever a baseline is loaded, so
+  CI can watch a baseline degrade without parsing stderr. The `stale` bool
+  mirrors the human warning exactly: change-scoped runs (`--changed-since`,
+  diff, or workspace scoping) and runs with no current findings report their
+  counts with `stale: false` and print no re-save advice, since re-saving from
+  a scoped run would gut the gate. Entries matched through a followed file
+  move are reported in `moved_entries` and noted on stderr. Exit codes are
+  unchanged. (Closes
+  [#2065](https://github.com/fallow-rs/fallow/issues/2065).)
+
+### Fixed
+
+- **Identity-mode health baselines now survive file moves.** A baseline
+  entry whose saved path no longer exists on disk follows its function name to
+  the new path when exactly one unclaimed current finding carries that name,
+  so moving or renaming a file no longer reports every finding it carried as
+  new. The match is deliberately conservative: ambiguous candidates, anonymous
+  functions, and files that still exist at their saved path are never
+  remapped, and count-mode baselines are unchanged because a per-file count
+  bucket has no identity component left to re-match once its path is gone.
+  (Closes [#2066](https://github.com/fallow-rs/fallow/issues/2066).)
+
+### Fixed
+
+- **Test-reachability profiles are capped to keep huge monorepos fast.** When
+  test-root mock replacements produce more than 1024 distinct mask profiles,
+  analysis now falls back to the coarse test-reachability pass instead of
+  letting index storage and propagation cost grow without bound. The fallback
+  is fail-open (mocked modules stay test-reachable, matching pre-profile
+  behavior) and logs a warning so the degradation is visible. The persisted
+  graph cache version is bumped so warm caches written before this change are
+  rebuilt under the new semantics instead of replaying stale profiled results.
+  (Closes
+  [#2084](https://github.com/fallow-rs/fallow/issues/2084).)
+
+### Added
+
+- **CLI flag values that name packages by convention now credit the
+  dependency.** The eslint `--format` shorthand from
+  [#2006](https://github.com/fallow-rs/fallow/issues/2006) is now one row in
+  an embedded convention catalogue that also covers eslint `--plugin`, jest
+  `--testEnvironment` / `--runner` / `--reporters` / `--preset`, preload and
+  loader flags on node, tsx and ts-node (`-r`, `--require`, `--loader`,
+  `--experimental-loader`, `--import`, including subpaths like
+  `dotenv/config`), mocha `--reporter` and `--require`, prettier `--plugin`,
+  stylelint `--custom-syntax` and postcss `--use`. A package used only through
+  such a flag in a script or CI command is no longer reported as an unused
+  dependency; built-in values, paths and unlisted flags keep abstaining, and a
+  malformed catalogue row fails the parse loudly. (Closes
+  [#2019](https://github.com/fallow-rs/fallow/issues/2019).)
+
+### Changed
+
+- **Per-reference memory is back to its pre-3.11 size for projects without
+  replacement mocks.** The reference provenance introduced for mock-aware
+  test reachability now lives in a per-export side table that is only
+  populated when a `vi.mock`-style replacement exists, restoring the compact
+  16-byte symbol reference for every other project in RAM and in the graph
+  cache. Masked-reachability behavior is unchanged, and the graph cache
+  version is bumped so older caches are rebuilt. (Closes
+  [#2083](https://github.com/fallow-rs/fallow/issues/2083).)
+
+### Added
+
+- **Mock-aware test reachability covers aliased `vi` imports, `vitest`
+  namespace imports, and `jest.mock`.** The mock masking that shipped for the
+  literal `import { vi } from "vitest"` binding now also proves
+  `import { vi as v }` aliases, `import * as vitest` namespace access
+  (`vitest.vi.mock`), and `jest.mock` through the `jest` global or a
+  `@jest/globals` import (any alias), so a module whose only test-side use is
+  a proven complete replacement no longer keeps test-coverage credit in Jest
+  projects or under the wider Vitest idioms. Provenance stays span-exact and
+  factories abstain toward the old covered behavior unless they are
+  statically closed; `vi.doMock` and automock remain out of scope. (Refs
+  [#2082](https://github.com/fallow-rs/fallow/issues/2082).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added

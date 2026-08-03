@@ -128,17 +128,15 @@ pub(super) fn mark_all_exports_referenced_at_site(
 }
 
 fn attach_reference(export: &mut ExportSymbol, site: ReferenceSite, kind: ReferenceKind) {
-    let already_referenced = export
-        .references
-        .iter()
-        .any(|reference| reference.from_file == site.from_file && reference.path == site.path);
-    if !already_referenced {
-        export.references.push(SymbolReference {
-            from_file: site.from_file,
-            kind,
-            path: site.path,
-            import_span: site.import_span,
-        });
+    if !export.has_reference_from(site.from_file, site.path) {
+        export.push_reference(
+            SymbolReference {
+                from_file: site.from_file,
+                kind,
+                import_span: site.import_span,
+            },
+            site.path,
+        );
     }
 }
 
@@ -227,9 +225,9 @@ pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
             references: vec![SymbolReference {
                 from_file: site.from_file,
                 kind: ReferenceKind::NamespaceImport,
-                path: site.path,
                 import_span: site.import_span,
             }],
+            reference_paths: site.path.map(|path| vec![Some(path)]).unwrap_or_default(),
             members: Vec::new(),
         });
     }
@@ -638,6 +636,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::new(0, 5),
                 references: Vec::new(),
+                reference_paths: Vec::new(),
                 members: Vec::new(),
             },
             ExportSymbol {
@@ -648,6 +647,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::new(10, 15),
                 references: Vec::new(),
+                reference_paths: Vec::new(),
                 members: Vec::new(),
             },
         ];
@@ -674,9 +674,9 @@ mod tests {
             references: vec![SymbolReference {
                 from_file: FileId(5),
                 kind: ReferenceKind::NamedImport,
-                path: reference_paths.direct(FileId(9), ModuleLoadMechanism::EsModule),
                 import_span: oxc_span::Span::new(0, 10),
             }],
+            reference_paths: vec![reference_paths.direct(FileId(9), ModuleLoadMechanism::EsModule)],
             members: Vec::new(),
         }];
         mark_all_exports_referenced(
@@ -697,6 +697,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
+            reference_paths: Vec::new(),
             members: Vec::new(),
         };
 
@@ -728,6 +729,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::new(0, 5),
                 references: Vec::new(),
+                reference_paths: Vec::new(),
                 members: Vec::new(),
             },
             ExportSymbol {
@@ -738,6 +740,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::new(10, 15),
                 references: Vec::new(),
+                reference_paths: Vec::new(),
                 members: Vec::new(),
             },
         ];
@@ -766,6 +769,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
+            reference_paths: Vec::new(),
             members: Vec::new(),
         }];
         let re_exports = vec![ReExportEdge {
@@ -1327,6 +1331,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
+            reference_paths: Vec::new(),
             members: Vec::new(),
         }];
         let accessed = vec!["default".to_string()];
@@ -1353,9 +1358,9 @@ mod tests {
             references: vec![SymbolReference {
                 from_file: FileId(0),
                 kind: ReferenceKind::NamedImport,
-                path: reference_paths.direct(FileId(9), ModuleLoadMechanism::EsModule),
                 import_span: oxc_span::Span::new(0, 10),
             }],
+            reference_paths: vec![reference_paths.direct(FileId(9), ModuleLoadMechanism::EsModule)],
             members: Vec::new(),
         }];
         let accessed = vec!["foo".to_string()];
@@ -1380,6 +1385,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
+            reference_paths: Vec::new(),
             members: Vec::new(),
         }];
         let accessed: Vec<String> = vec![];

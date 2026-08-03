@@ -91,6 +91,31 @@ analyzes, so a production run cannot enter a body that script filtering skipped.
 A name declared with different bodies in several workspace packages keeps its
 name but permanently loses its body.
 
+### CLI flag-value crediting
+
+Some CLIs load an npm package because a flag value names it: `eslint --format
+gha` loads `eslint-formatter-gha`, `mocha --reporter mochawesome` loads
+`mochawesome`, `node -r dotenv/config` loads `dotenv`. Fallow credits these
+packages from a closed convention table of `(binary, flag)` pairs;
+`crates/core/data/cli_flag_credits.toml` is the authoritative list of covered
+binaries, flags, resolution rules, and tool built-ins. This is why a package
+used only through such a flag (mochawesome, dotenv, a SARIF formatter in CI) is
+not reported as an unused dependency.
+
+Two invariants matter to users:
+
+- A credit can only remove an unused-dependency finding for a dependency the
+  project already declares.
+- The table is never consulted by unlisted-dependency detection, so a
+  synthesized name can never invent a finding.
+
+Values that name files rather than packages abstain: relative and absolute
+paths, and any unscoped value whose final path segment ends in a script
+extension (`mocha --require test/setup.js` credits nothing, because tools
+resolve an existing relative file before treating the value as a module).
+Built-in values listed per tool (`mocha --reporter spec`, `jest --reporters
+default`) also credit nothing.
+
 Expansion is bounded twice. `MAX_SCRIPT_INDIRECTION_DEPTH` caps the depth of a
 single chain, and `MAX_SCRIPT_EXPANSIONS` caps the total number of bodies
 expanded for one command, because the cycle guard only rejects names on the

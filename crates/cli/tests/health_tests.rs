@@ -2360,6 +2360,75 @@ fn health_coverage_gaps_exclude_vitest_replacement_targets() {
 }
 
 #[test]
+fn health_coverage_gaps_exclude_jest_replacement_targets() {
+    let output = run_fallow(
+        "health",
+        "issue-2082-jest-mocked-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let coverage = json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    let summary = coverage["summary"]
+        .as_object()
+        .expect("coverage_gaps.summary should be an object");
+    assert_eq!(summary["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        summary["covered_files"].as_u64(),
+        Some(1),
+        "only the real wrapper executes through the jest test root"
+    );
+
+    let file_names: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert!(
+        file_names
+            .iter()
+            .any(|path| path.ends_with("src/dependency.ts")),
+        "the jest.mock replaced dependency should remain an untested runtime file: {file_names:?}"
+    );
+    assert!(
+        !file_names
+            .iter()
+            .any(|path| path.ends_with("src/wrapper.ts")),
+        "the wrapper itself should remain test-covered: {file_names:?}"
+    );
+
+    let export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item["export_name"].as_str())
+        .collect();
+    assert!(
+        export_names.contains(&"renderDependency"),
+        "the jest.mock replacement must not cover the real dependency export: {export_names:?}"
+    );
+    assert!(
+        !export_names.contains(&"renderWrapper"),
+        "the directly tested wrapper export should remain covered: {export_names:?}"
+    );
+}
+
+#[test]
 fn health_crap_estimation_excludes_vitest_replacement_targets() {
     let output = run_fallow(
         "health",

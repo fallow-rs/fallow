@@ -209,12 +209,12 @@ pub use health_scores::{
     DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH, DEFAULT_CRAP_CRITICAL, DEFAULT_CRAP_HIGH,
     DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, DEFAULT_MAX_UNIT_SIZE, ExceededThreshold,
     FileHealthScore, FindingSeverity, HEALTH_SCORE_FORMULA_VERSION, HOTSPOT_SCORE_THRESHOLD,
-    HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore, HealthScorePenalties,
-    HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry, MI_DENSITY_MIN_LINES,
-    OwnershipMetrics, OwnershipState, ReactHookProfile, STYLING_HEALTH_FORMULA_VERSION,
-    StylingHealth, StylingHealthConfidence, StylingHealthPenalties, ThresholdOverrideMetrics,
-    ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource, compute_finding_severity,
-    letter_grade, summarize_coverage_source_consistency,
+    HealthBaselineStaleness, HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore,
+    HealthScorePenalties, HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry,
+    MI_DENSITY_MIN_LINES, OwnershipMetrics, OwnershipState, ReactHookProfile,
+    STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthConfidence, StylingHealthPenalties,
+    ThresholdOverrideMetrics, ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource,
+    compute_finding_severity, letter_grade, summarize_coverage_source_consistency,
 };
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,

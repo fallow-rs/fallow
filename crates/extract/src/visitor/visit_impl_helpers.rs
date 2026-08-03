@@ -192,17 +192,9 @@ pub(super) fn is_private_member_key(key: &PropertyKey<'_>) -> bool {
     matches!(key, PropertyKey::PrivateIdentifier(_))
 }
 
-pub(super) fn vitest_mock_source(call: &CallExpression<'_>) -> Option<String> {
-    vitest_method_object_span(call, "mock")?;
-    vitest_static_target_source(call)
-}
+use super::super::MockObjectProvenance;
 
-pub(super) fn vitest_unmock_source(call: &CallExpression<'_>) -> Option<String> {
-    vitest_method_object_span(call, "unmock")?;
-    vitest_static_target_source(call)
-}
-
-fn vitest_static_target_source(call: &CallExpression<'_>) -> Option<String> {
+pub(super) fn mock_static_target_source(call: &CallExpression<'_>) -> Option<String> {
     call.arguments.first().and_then(|argument| match argument {
         Argument::StringLiteral(value) => Some(value.value.to_string()),
         Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
@@ -217,29 +209,44 @@ fn vitest_static_target_source(call: &CallExpression<'_>) -> Option<String> {
     })
 }
 
-pub(super) fn vitest_mock_object_span(call: &CallExpression<'_>) -> Option<Span> {
-    vitest_method_object_span(call, "mock")
-}
-
-pub(super) fn vitest_unmock_object_span(call: &CallExpression<'_>) -> Option<Span> {
-    vitest_method_object_span(call, "unmock")
-}
-
-fn vitest_method_object_span(call: &CallExpression<'_>, expected_method: &str) -> Option<Span> {
+/// Shape-match `X.<method>(...)` or `ns.vi.<method>(...)` and return the span
+/// whose provenance the semantic pass must later confirm. No name gating here:
+/// the span-provenance filter in `resolve_vitest_mock_operations` is the
+/// authority, so an unproven identifier simply drops out there.
+pub(super) fn mock_method_object_span(
+    call: &CallExpression<'_>,
+    expected_method: &str,
+) -> Option<(Span, MockObjectProvenance)> {
     let Expression::StaticMemberExpression(member) = &call.callee else {
         return None;
     };
     if member.property.name != expected_method {
         return None;
     }
-    let Expression::Identifier(object) = &member.object else {
-        return None;
-    };
-    if object.name != "vi" {
-        return None;
+    match &member.object {
+        Expression::Identifier(object) => Some((object.span, MockObjectProvenance::Binding)),
+        Expression::StaticMemberExpression(inner) if inner.property.name == "vi" => {
+            let Expression::Identifier(namespace) = &inner.object else {
+                return None;
+            };
+            Some((namespace.span, MockObjectProvenance::VitestNamespace))
+        }
+        _ => None,
     }
+}
 
-    Some(object.span)
+/// Whether the mock call object is the literal `vi` or `jest` identifier.
+///
+/// These two names may be injected globals (Vitest `globals: true`, the Jest
+/// test environment), so their dynamic-import credit edges are pushed eagerly
+/// at record time even when no import exists to prove provenance. Aliased and
+/// namespace forms always have an import, so their edges wait for the
+/// provenance check.
+pub(super) fn mock_object_is_literal_global(call: &CallExpression<'_>) -> bool {
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return false;
+    };
+    matches!(&member.object, Expression::Identifier(object) if object.name == "vi" || object.name == "jest")
 }
 
 pub(super) fn vitest_auto_mock_source(source: &str) -> Option<String> {
@@ -372,8 +379,13 @@ pub(super) fn vi_mock_has_factory(call: &CallExpression<'_>) -> bool {
 }
 
 #[derive(Debug)]
-pub(super) struct VitestReplacementCandidate {
-    pub(super) factory_vi_reference_spans: Vec<Span>,
+pub(super) struct MockReplacementCandidate {
+    /// Identifier-reference spans that must later prove to be mock-API binding
+    /// references (`vi` / `jest` imports or the `jest` global).
+    pub(super) binding_requirement_spans: Vec<Span>,
+    /// Identifier-reference spans that must later prove to be `vitest`
+    /// namespace-import references (the `ns` in `ns.vi.fn()`).
+    pub(super) namespace_requirement_spans: Vec<Span>,
 }
 
 fn vitest_factory_has_no_parameters(argument: &Argument<'_>) -> Option<bool> {
@@ -398,36 +410,63 @@ fn vitest_factory_has_no_parameters(argument: &Argument<'_>) -> Option<bool> {
     }
 }
 
-#[derive(Default)]
-struct VitestFactoryProofVisitor {
-    unsafe_escape: bool,
-    vi_reference_spans: Vec<Span>,
+/// Property names that load the original module and therefore poison a
+/// factory proof regardless of the receiver (`vi.importActual`,
+/// `jest.requireActual`, or any alias of either).
+const MOCK_ORIGINAL_LOADER_PROPERTIES: &[&str] = &["importActual", "requireActual"];
+
+fn is_original_loader_property(name: &str) -> bool {
+    MOCK_ORIGINAL_LOADER_PROPERTIES.contains(&name)
 }
 
-impl<'a> Visit<'a> for VitestFactoryProofVisitor {
+#[derive(Default)]
+struct MockFactoryProofVisitor {
+    unsafe_escape: bool,
+    binding_requirement_spans: Vec<Span>,
+    namespace_requirement_spans: Vec<Span>,
+}
+
+impl<'a> Visit<'a> for MockFactoryProofVisitor {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        // The only calls a closed factory may make are stub constructors:
+        // `X.fn()` (where `X` must later prove to be a `vi`/`jest` binding) or
+        // `ns.vi.fn()` (where `ns` must prove to be the `vitest` namespace).
+        // The callee is consumed here rather than walked, so its identifier
+        // lands in exactly one requirement bucket; arguments are still walked.
         let Expression::StaticMemberExpression(member) = &call.callee else {
             self.unsafe_escape = true;
             return;
         };
-        let Expression::Identifier(object) = &member.object else {
-            self.unsafe_escape = true;
-            return;
-        };
-        if object.name != "vi" || member.property.name != "fn" {
+        if member.property.name != "fn" {
             self.unsafe_escape = true;
             return;
         }
-
-        walk::walk_call_expression(self, call);
+        match &member.object {
+            Expression::Identifier(object) => {
+                self.binding_requirement_spans.push(object.span);
+            }
+            Expression::StaticMemberExpression(inner) if inner.property.name == "vi" => {
+                let Expression::Identifier(namespace) = &inner.object else {
+                    self.unsafe_escape = true;
+                    return;
+                };
+                self.namespace_requirement_spans.push(namespace.span);
+            }
+            _ => {
+                self.unsafe_escape = true;
+                return;
+            }
+        }
+        for argument in &call.arguments {
+            self.visit_argument(argument);
+        }
     }
 
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-        if identifier.name == "vi" {
-            self.vi_reference_spans.push(identifier.span);
-        } else {
-            self.unsafe_escape = true;
-        }
+        // Every free identifier must later prove to be a mock-API binding
+        // reference; anything else (locals, other imports, globals) fails the
+        // resolve-time check and the factory abstains.
+        self.binding_requirement_spans.push(identifier.span);
     }
 
     fn visit_import_expression(&mut self, _expression: &ImportExpression<'a>) {
@@ -443,9 +482,7 @@ impl<'a> Visit<'a> for VitestFactoryProofVisitor {
     }
 
     fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
-        if member.property.name == "importActual"
-            && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
-        {
+        if is_original_loader_property(member.property.name.as_str()) {
             self.unsafe_escape = true;
             return;
         }
@@ -455,8 +492,7 @@ impl<'a> Visit<'a> for VitestFactoryProofVisitor {
     fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
         if member
             .static_property_name()
-            .is_some_and(|name| name == "importActual")
-            && matches!(&member.object, Expression::Identifier(object) if object.name == "vi")
+            .is_some_and(|name| is_original_loader_property(&name))
         {
             self.unsafe_escape = true;
             return;
@@ -465,14 +501,12 @@ impl<'a> Visit<'a> for VitestFactoryProofVisitor {
     }
 
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
-        if let (BindingPattern::ObjectPattern(pattern), Some(Expression::Identifier(object))) =
-            (&declarator.id, &declarator.init)
-            && object.name == "vi"
+        if let BindingPattern::ObjectPattern(pattern) = &declarator.id
             && pattern.properties.iter().any(|property| {
                 property
                     .key
                     .static_name()
-                    .is_some_and(|name| name == "importActual")
+                    .is_some_and(|name| is_original_loader_property(&name))
             })
         {
             self.unsafe_escape = true;
@@ -482,24 +516,23 @@ impl<'a> Visit<'a> for VitestFactoryProofVisitor {
     }
 }
 
-/// Return a Vitest mock whose factory provably replaces the original module
+/// Return a module mock whose factory provably replaces the original module
 /// without loading it.
 ///
-/// Import provenance is checked by the caller. This helper stays conservative:
-/// factories with parameters can receive `importOriginal`; zero-argument
-/// factories abstain when they depend on any value other than the imported
-/// `vi`, construct values, dynamically import code, invoke an unproven helper,
-/// or call an original-module loader.
-pub(super) fn vitest_replacement_candidate(
+/// Import provenance is checked by the caller through span requirements. This
+/// helper stays conservative: factories with parameters can receive
+/// `importOriginal`; zero-argument factories abstain when they depend on any
+/// value other than a proven mock-API binding, construct values, dynamically
+/// import code, invoke an unproven helper, or call an original-module loader.
+pub(super) fn mock_replacement_candidate(
     call: &CallExpression<'_>,
-) -> Option<VitestReplacementCandidate> {
-    vitest_mock_source(call)?;
+) -> Option<MockReplacementCandidate> {
     let factory = call.arguments.get(1)?;
     if vitest_factory_has_no_parameters(factory) != Some(true) {
         return None;
     }
 
-    let mut proof = VitestFactoryProofVisitor::default();
+    let mut proof = MockFactoryProofVisitor::default();
     match factory {
         Argument::ArrowFunctionExpression(factory) => {
             proof.visit_arrow_function_expression(factory);
@@ -512,8 +545,9 @@ pub(super) fn vitest_replacement_candidate(
         }
         _ => return None,
     }
-    (!proof.unsafe_escape).then_some(VitestReplacementCandidate {
-        factory_vi_reference_spans: proof.vi_reference_spans,
+    (!proof.unsafe_escape).then_some(MockReplacementCandidate {
+        binding_requirement_spans: proof.binding_requirement_spans,
+        namespace_requirement_spans: proof.namespace_requirement_spans,
     })
 }
 

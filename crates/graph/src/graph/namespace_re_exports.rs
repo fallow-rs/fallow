@@ -544,32 +544,32 @@ mod tests {
     #[test]
     fn mocked_namespace_barrel_stays_uncovered_when_target_has_an_alternate_route() {
         let graph = namespace_coverage_graph(false);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
         assert!(graph.modules[2].is_test_reachable());
         assert_eq!(
-            graph.reference_path_hops(reference),
+            graph.reference_path_hops(export, 0),
             vec![
                 (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::EsModule),
             ]
         );
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn commonjs_namespace_consumer_retains_its_exact_load_path() {
         let graph = namespace_coverage_graph(true);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
         assert_eq!(
-            graph.reference_path_hops(reference),
+            graph.reference_path_hops(export, 0),
             vec![
                 (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::CommonJsRequire),
             ]
         );
-        assert!(graph.is_test_reference_covered(reference));
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
@@ -578,16 +578,16 @@ mod tests {
         let encoded = postcard::to_allocvec(&graph).expect("encode namespace route graph");
         let decoded: ModuleGraph =
             postcard::from_bytes(&encoded).expect("decode namespace route graph");
-        let reference = &decoded.modules[2].exports[0].references[0];
+        let export = &decoded.modules[2].exports[0];
 
         assert_eq!(
-            decoded.reference_path_hops(reference),
+            decoded.reference_path_hops(export, 0),
             vec![
                 (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::EsModule),
             ]
         );
-        assert!(!decoded.is_test_reference_covered(reference));
+        assert!(!decoded.is_test_reference_covered(export, 0));
         assert_eq!(decoded.reference_routes.graphs.len(), 1);
         assert_eq!(decoded.reference_routes.nodes.len(), 2);
     }
@@ -595,20 +595,20 @@ mod tests {
     #[test]
     fn namespace_diamond_is_covered_when_one_route_remains_active() {
         let graph = namespace_diamond_graph(false);
-        let references = &graph.modules[5].exports[0].references;
+        let export = &graph.modules[5].exports[0];
 
-        assert_eq!(references.len(), 1);
-        assert!(graph.is_test_reference_covered(&references[0]));
+        assert_eq!(export.references.len(), 1);
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn namespace_diamond_is_uncovered_when_every_route_is_masked() {
         let graph = namespace_diamond_graph(true);
-        let references = &graph.modules[5].exports[0].references;
+        let export = &graph.modules[5].exports[0];
 
         assert!(graph.modules[5].is_test_reachable());
-        assert_eq!(references.len(), 1);
-        assert!(!graph.is_test_reference_covered(&references[0]));
+        assert_eq!(export.references.len(), 1);
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
