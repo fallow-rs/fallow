@@ -107,6 +107,18 @@ keeps coverage credit. Per-idiom semantics decisions:
   without reading the Vitest config the safe direction is abstention. Its
   credit edges are still pushed eagerly.
 
+Credit edges have their own abstentions, separate from masking. The mock
+target must be a static string (string literal, expressionless template
+literal, or `import('...')` with a string-literal source); a templated
+``vi.doMock(`./adapters/${name}`)`` credits nothing. The speculative `__mocks__`
+sibling is synthesized only for path-shaped specifiers containing a `/`
+(`./services/api` credits `./services/__mocks__/api`); a bare package
+specifier (`vi.mock('axios')`) credits the package itself but gets no
+root-level `__mocks__/axios.ts` sibling edge, so a root manual mock referenced
+only through a bare-specifier mock can still surface as an unused file.
+"Anything unproven keeps coverage credit" describes masking abstention only;
+it does not imply a credit edge exists.
+
 ## Script indirection crediting
 
 `crates/core/src/scripts/` credits dependencies, config files, and entry files

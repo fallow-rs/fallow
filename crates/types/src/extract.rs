@@ -2245,13 +2245,15 @@ pub enum VitestModuleMockAction {
     /// factory is structurally closed and cannot load the original module.
     ///
     /// Automock (`vi.mock` / `jest.mock` without a factory) is always
-    /// `factory_replaces_original: false` by decision (issue #2082): Vitest
-    /// derives the mocked shape by importing the original module, so its
-    /// top-level code executes at collection time, and file-level masking
-    /// cannot express "module evaluated but exports stubbed". When a
-    /// `__mocks__` sibling exists the original may not load, but proving that
-    /// the manual mock itself never loads the original would need a
-    /// cross-file factory proof, so automock keeps coverage credit.
+    /// `factory_replaces_original: false` by decision (issue #2082). For
+    /// Vitest, the runner derives the mocked shape by importing the original
+    /// module, so its top-level code executes at collection time, and
+    /// file-level masking cannot express "module evaluated but exports
+    /// stubbed". For Jest, a `__mocks__` sibling takes precedence and the
+    /// original is genuinely not required, but the manual mock itself may
+    /// load the original (`jest.requireActual`), and proving it never does
+    /// would need a cross-file factory proof. Both runners therefore keep
+    /// coverage credit for the automock form.
     Mock {
         /// Whether the factory provably replaces the original module.
         factory_replaces_original: bool,
