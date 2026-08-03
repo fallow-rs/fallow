@@ -163,9 +163,24 @@ pub struct AuditOptions<'a> {
 
 #[derive(Clone, Copy, Default)]
 pub struct AuditTypeAwareOptions<'a> {
-    pub enabled: bool,
+    /// CLI override: `Some(true)` for `--type-aware`, `Some(false)` for
+    /// `--no-type-aware`, `None` when neither flag was passed.
+    pub enabled: Option<bool>,
+    /// `audit.typeAware` from config, applied below the CLI flags and the
+    /// `FALLOW_TYPE_AWARE` environment variable but above `typeAware.enabled`.
+    pub config_default: Option<bool>,
     pub projects: &'a [std::path::PathBuf],
     pub require: Option<fallow_config::TypeAwareRequire>,
+}
+
+impl AuditTypeAwareOptions<'_> {
+    /// Whether the CLI explicitly forced type-aware analysis on. Guards the
+    /// base-snapshot cache exactly like the previous boolean flag did; runs
+    /// enabled through config alone are still isolated by the config
+    /// fingerprint inside the cache key.
+    const fn cli_enabled(&self) -> bool {
+        matches!(self.enabled, Some(true))
+    }
 }
 
 #[path = "audit_base_ref.rs"]
@@ -206,6 +221,12 @@ fn styling_finding_gates(rules: &fallow_config::RulesConfig, code: &str) -> bool
 pub struct AuditKeySnapshot {
     type_aware_identity: Option<fallow_types::semantic::SemanticAnalysisIdentity>,
     type_aware_gap_signature: Vec<String>,
+    /// Pre-refinement dead-code keys captured before the type-aware pass
+    /// mutated the base results. `None` when the base pass ran without
+    /// type-aware analysis (then `dead_code` is already syntactic). Used for
+    /// the identity-independent fallback attribution when base and head
+    /// semantic identities cannot be compared.
+    syntactic_dead_code: Option<FxHashSet<String>>,
     dead_code: FxHashSet<String>,
     health: FxHashSet<String>,
     styling: FxHashSet<String>,
@@ -346,6 +367,7 @@ fn snapshot_from_results(
         type_aware_gap_signature: check
             .and_then(|result| result.type_aware_meta.as_ref())
             .map_or_else(Vec::new, type_aware_gap_signature),
+        syntactic_dead_code: check.and_then(|result| result.syntactic_dead_code_keys.clone()),
         dead_code: check.map_or_else(FxHashSet::default, |r| {
             dead_code_keys(&r.results, &r.config.root)
         }),
@@ -362,6 +384,37 @@ fn snapshot_from_results(
         cycles,
         public_api,
     }
+}
+
+/// Why type-aware base and head attribution cannot be compared directly, or
+/// `None` when the comparison is sound (including fully syntactic runs).
+///
+/// When a reason is returned the audit does not fail; it falls back to the
+/// identity-independent syntactic key sets captured before refinement on each
+/// side, so `--gate new-only` keeps working with `typeAware.enabled` set even
+/// when base and head resolve different semantic identities (changed
+/// tsconfigs, one-sided sidecar availability, differing omissions).
+fn type_aware_attribution_degrade_reason(
+    base: Option<&AuditKeySnapshot>,
+    head: Option<&fallow_types::envelope::TypeAwareMeta>,
+) -> Option<&'static str> {
+    let base = base?;
+    let base_identity = base.type_aware_identity.as_ref();
+    if base_identity.is_some() != head.is_some() {
+        return Some("only one side produced a semantic analysis identity");
+    }
+    if let (Some(base_identity), Some(head_identity)) =
+        (base_identity, head.and_then(|meta| meta.identity.as_ref()))
+        && base_identity != head_identity
+    {
+        return Some("their semantic analysis identities differ");
+    }
+    if let Some(head) = head
+        && base.type_aware_gap_signature != type_aware_gap_signature(head)
+    {
+        return Some("their incomplete semantic query reasons or omissions differ");
+    }
+    None
 }
 
 fn type_aware_gap_signature(meta: &fallow_types::envelope::TypeAwareMeta) -> Vec<String> {
@@ -1147,7 +1200,7 @@ pub fn execute_audit_with_type_aware(
     } else {
         None
     };
-    let cached_base_snapshot = if type_aware.enabled {
+    let cached_base_snapshot = if type_aware.cli_enabled() {
         None
     } else {
         base_cache_key
@@ -1171,7 +1224,7 @@ pub fn execute_audit_with_type_aware(
         head_res,
         base_res,
         cached_base_snapshot,
-        base_cache_key: if type_aware.enabled {
+        base_cache_key: if type_aware.cli_enabled() {
             None
         } else {
             base_cache_key
@@ -1232,38 +1285,36 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
     if !base_snapshot_skipped && let Some(snapshot) = base_snapshot.as_mut() {
         remap_base_snapshot_for_renames(snapshot, &input.rename_pairs, opts.root);
     }
-    let head_type_aware = check_result
-        .as_ref()
-        .and_then(|result| result.type_aware_meta.as_ref());
-    let base_type_aware_identity = base_snapshot
-        .as_ref()
-        .and_then(|snapshot| snapshot.type_aware_identity.as_ref());
-    if base_snapshot.is_some() && base_type_aware_identity.is_some() != head_type_aware.is_some() {
-        return Err(emit_error(
-            "type-aware audit cannot compare base and head because only one side has semantic analysis identity",
-            2,
-            opts.output,
-        ));
-    }
-    if let (Some(base_identity), Some(head_identity)) = (
-        base_type_aware_identity,
-        head_type_aware.and_then(|meta| meta.identity.as_ref()),
-    ) && base_identity != head_identity
-    {
-        return Err(emit_error(
-            "type-aware audit cannot compare base and head because their semantic analysis identities differ",
-            2,
-            opts.output,
-        ));
-    }
-    if let (Some(base), Some(head)) = (base_snapshot.as_ref(), head_type_aware)
-        && base.type_aware_gap_signature != type_aware_gap_signature(head)
-    {
-        return Err(emit_error(
-            "type-aware audit cannot compare base and head because their incomplete query reasons or omissions differ",
-            2,
-            opts.output,
-        ));
+    let type_aware_degrade = type_aware_attribution_degrade_reason(
+        base_snapshot.as_ref(),
+        check_result
+            .as_ref()
+            .and_then(|result| result.type_aware_meta.as_ref()),
+    );
+    if let Some(reason) = type_aware_degrade {
+        let warning = format!(
+            "audit compared base and head with syntactic attribution because {reason} \
+(usually a tsconfig change between base and head, or the sidecar being unavailable \
+on the base side); type-aware refinement still applies to head findings, and \
+semantic-only findings stay out of the new-only gate for this run; set \
+audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
+        );
+        if matches!(opts.output, fallow_config::OutputFormat::Human) && !opts.quiet {
+            eprintln!(
+                "{}",
+                crate::report::human_status_line(
+                    crate::report::HumanStatus::Warning,
+                    format_args!("Type-aware: {warning}")
+                )
+            );
+        }
+        if let Some(check) = check_result.as_mut() {
+            check.type_aware_warnings.push(warning.clone());
+            if let Some(meta) = check.type_aware_meta.as_mut() {
+                meta.warnings.push(warning);
+                meta.warning_count = meta.warnings.len();
+            }
+        }
     }
     drop_check_shared_parse(&mut check_result);
     let comparison = build_cli_audit_comparison(
@@ -1271,6 +1322,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         dupes_result.as_ref(),
         health_result.as_ref(),
         base_snapshot.as_ref(),
+        type_aware_degrade.is_some(),
     );
     let (attribution, verdict, summary) = compute_comparison_audit_outcome(
         opts.gate,
@@ -1811,14 +1863,37 @@ fn build_cli_audit_comparison(
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
     base: Option<&AuditKeySnapshot>,
+    syntactic_dead_code_fallback: bool,
 ) -> keys::AuditComparison {
     let dead_code = check.map_or_else(keys::DeadCodeAuditLedger::default, |result| {
-        keys::dead_code_audit_ledger(
+        // On the degraded path, diff against the base's pre-refinement keys
+        // (identity-independent); a base that ran without type-aware analysis
+        // is already syntactic, so its refined set doubles as the fallback.
+        let base_keys = base.map(|snapshot| {
+            if syntactic_dead_code_fallback {
+                snapshot
+                    .syntactic_dead_code
+                    .as_ref()
+                    .unwrap_or(&snapshot.dead_code)
+            } else {
+                &snapshot.dead_code
+            }
+        });
+        let mut ledger = keys::dead_code_audit_ledger(
             &result.results,
             &result.config.root,
             &result.config,
-            base.map(|snapshot| &snapshot.dead_code),
-        )
+            base_keys,
+        );
+        if syntactic_dead_code_fallback
+            && let Some(head_syntactic) = result.syntactic_dead_code_keys.as_ref()
+        {
+            // Head findings that only exist because of semantic evidence have
+            // no syntactic base counterpart to attribute against; keep them
+            // advisory instead of failing the new-only gate.
+            ledger.demote_unattributable_introductions(head_syntactic);
+        }
+        ledger
     });
     let health_ledger = keys::AuditDomainLedger::compare(
         health.into_iter().flat_map(|result| {
@@ -2131,6 +2206,7 @@ fn run_audit_check<'a>(
         group_by: opts.group_by,
         include_dupes: false,
         type_aware: type_aware.enabled,
+        type_aware_config_override: type_aware.config_default,
         type_aware_projects: type_aware.projects,
         type_aware_require: type_aware.require,
         trace_opts: &trace_opts,
@@ -2307,6 +2383,7 @@ fn build_audit_health_options<'a>(
         baseline: opts.health_baseline,
         save_baseline: None,
         baseline_mode: opts.health_baseline_mode,
+        baseline_mode_explicit: false,
         complexity: true,
         file_scores: false,
         coverage_gaps: false,

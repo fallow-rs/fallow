@@ -33,7 +33,7 @@ pub struct WatchOptions<'a> {
     pub explain: bool,
     /// Mirror of the global `--include-entry-exports` flag.
     pub include_entry_exports: bool,
-    pub type_aware: bool,
+    pub type_aware: Option<bool>,
     pub type_aware_projects: &'a [PathBuf],
     pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
 }
@@ -589,6 +589,7 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedC
     crate::check::apply_type_aware_overrides_from(
         opts.output,
         opts.type_aware,
+        None,
         opts.type_aware_projects,
         opts.type_aware_require,
         &mut config,
@@ -1133,7 +1134,7 @@ mod tests {
             clear_screen: false,
             explain: false,
             include_entry_exports: false,
-            type_aware: false,
+            type_aware: None,
             type_aware_projects: &[],
             type_aware_require: None,
         }

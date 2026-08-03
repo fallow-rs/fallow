@@ -54,7 +54,9 @@ pub type HealthOptions<'a> = HealthExecutionOptions<'a>;
 
 /// CLI-only semantic overlay options for `health --type-coupling`.
 pub struct TypeAwareHealthOptions<'a> {
-    pub enabled: bool,
+    /// CLI override: `Some(true)` for `--type-aware`, `Some(false)` for
+    /// `--no-type-aware`, `None` when neither flag was passed.
+    pub enabled: Option<bool>,
     pub requested: bool,
     pub unfiltered: bool,
     pub projects: &'a [std::path::PathBuf],
@@ -417,11 +419,10 @@ pub fn resolve_type_aware_health_options(
             ),
         })
         .transpose()?;
-    let enabled = if options.enabled {
-        true
-    } else {
-        env_enabled.unwrap_or(config.type_aware.enabled)
-    };
+    let enabled = options
+        .enabled
+        .or(env_enabled)
+        .unwrap_or(config.type_aware.enabled);
     let projects = if !options.projects.is_empty() {
         options.projects.to_vec()
     } else if let Some(value) = std::env::var_os("FALLOW_TYPE_AWARE_PROJECTS") {

@@ -42,7 +42,7 @@ pub struct InspectOptions<'a> {
     /// ranked path).
     pub symbol_chain: bool,
     /// Include project-wide TypeScript semantic evidence for symbol targets.
-    pub type_aware: bool,
+    pub type_aware: Option<bool>,
     /// Explicit TypeScript project configs for semantic analysis.
     pub type_aware_projects: &'a [PathBuf],
     /// Whether incomplete semantic evidence is advisory or gating.
@@ -288,6 +288,7 @@ fn collect_semantic_evidence(
     if crate::check::apply_type_aware_overrides_from(
         opts.output,
         opts.type_aware,
+        None,
         opts.type_aware_projects,
         opts.type_aware_require,
         &mut config,
@@ -1098,7 +1099,7 @@ mod tests {
             target,
             churn_cache_dir: None,
             symbol_chain: false,
-            type_aware: false,
+            type_aware: None,
             type_aware_projects: &[],
             type_aware_require: None,
         }

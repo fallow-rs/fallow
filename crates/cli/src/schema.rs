@@ -657,6 +657,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
     ),
     (
+        "FALLOW_TYPE_AWARE",
+        "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled.",
+    ),
+    (
         "FALLOW_AUDIT_BASE",
         "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
     ),

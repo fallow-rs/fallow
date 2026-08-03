@@ -96,6 +96,28 @@ impl DeadCodeAuditLedger {
             .any(|record| record.effective_severity == Severity::Error)
     }
 
+    /// Demote introduced findings that have no syntactic counterpart in the
+    /// current head run to inherited (advisory) status.
+    ///
+    /// Used by the audit's degraded type-aware path: when base and head
+    /// semantic identities cannot be compared, attribution diffs the
+    /// pre-refinement syntactic key sets. A head finding absent from its own
+    /// syntactic set exists only because of semantic evidence and cannot be
+    /// attributed against a syntactic base, so it must not fail the new-only
+    /// gate. Findings present syntactically keep their classification, so a
+    /// genuinely new syntactic finding still gates.
+    pub fn demote_unattributable_introductions(&mut self, head_syntactic: &FxHashSet<String>) {
+        for record in &mut self.records {
+            if record.introduced && !head_syntactic.contains(&record.stable_key) {
+                record.introduced = false;
+                self.introduced_keys.remove(&record.stable_key);
+                if record.effective_severity != Severity::Off {
+                    self.inherited_keys.insert(record.stable_key.clone());
+                }
+            }
+        }
+    }
+
     /// Persist comparison membership into existing typed output fields.
     ///
     /// `StaleSuppression` is the sole legacy finding without a typed
@@ -4453,6 +4475,56 @@ mod tests {
         assert_eq!(
             results.unused_exports[1].introduced,
             Some(AuditIntroduced(true))
+        );
+    }
+
+    #[test]
+    fn audit_ledger_demotes_semantic_only_introductions_but_keeps_syntactic_new_findings() {
+        let root = root();
+        let config: FallowConfig = serde_json::from_value(json!({
+            "rules": { "unused-exports": "error" }
+        }))
+        .expect("config");
+        let config = config.resolve(root.clone(), OutputFormat::Json, 1, false, true, None);
+        let mut results = AnalysisResults::default();
+        // A pre-existing finding, a genuinely new syntactic finding, and a
+        // semantic-only finding with no syntactic counterpart on head.
+        results
+            .unused_exports
+            .push(export(&root.join("src/base.ts"), "baseExport"));
+        results
+            .unused_exports
+            .push(export(&root.join("src/new.ts"), "newExport"));
+        results
+            .unused_exports
+            .push(export(&root.join("src/semantic.ts"), "semanticOnly"));
+        let base = FxHashSet::from_iter(["unused-export:src/base.ts:baseExport".to_string()]);
+        let head_syntactic = FxHashSet::from_iter([
+            "unused-export:src/base.ts:baseExport".to_string(),
+            "unused-export:src/new.ts:newExport".to_string(),
+        ]);
+
+        let mut ledger = dead_code_audit_ledger(&results, &root, &config, Some(&base));
+        assert_eq!(ledger.introduced_count(), 2);
+
+        ledger.demote_unattributable_introductions(&head_syntactic);
+
+        // Control: the genuinely new syntactic finding still gates.
+        assert_eq!(ledger.introduced_count(), 1);
+        assert!(ledger.has_introduced_errors());
+        assert_eq!(ledger.inherited_count(), 2);
+        ledger.annotate_results(&mut results);
+        assert_eq!(
+            results.unused_exports[0].introduced,
+            Some(AuditIntroduced(false))
+        );
+        assert_eq!(
+            results.unused_exports[1].introduced,
+            Some(AuditIntroduced(true))
+        );
+        assert_eq!(
+            results.unused_exports[2].introduced,
+            Some(AuditIntroduced(false))
         );
     }
 

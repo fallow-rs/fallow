@@ -237,7 +237,7 @@ fn build_primary_extractor(
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
     let semantic_usage =
         compute_semantic_usage(program, &extractor.imports, &template_used_imports);
-    extractor.resolve_vitest_mock_operations(&semantic_usage.vitest_vi_reference_spans);
+    extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
     (extractor, semantic_usage)
 }
 
@@ -381,7 +381,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         &extractor.imports,
         &template_used_imports,
     );
-    extractor.resolve_vitest_mock_operations(&semantic_usage.vitest_vi_reference_spans);
+    extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
     let complexity = retry_complexity(
         input.need_complexity,
         &retry_return.program,
@@ -1085,11 +1085,25 @@ pub struct ImportBindingUsage {
     pub value_referenced: Vec<String>,
 }
 
+/// Reference spans proving module-mock API provenance (issue #2068 / #2082).
+///
+/// `mock_bindings` holds spans of references that resolve to a mock-API value
+/// binding: a named `vi` import from `vitest` (any local alias), a named
+/// `jest` import from `@jest/globals` (any local alias), or the unresolved
+/// `jest` global that the Jest test environment injects. `vitest_namespaces`
+/// holds spans of references to a `import * as ns from "vitest"` binding, so
+/// `ns.vi.mock(...)` can be proven through the namespace identifier.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct MockApiReferenceSpans {
+    pub(crate) mock_bindings: rustc_hash::FxHashSet<Span>,
+    pub(crate) vitest_namespaces: rustc_hash::FxHashSet<Span>,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SemanticUsage {
     pub import_binding_usage: ImportBindingUsage,
     pub auto_import_candidates: Vec<String>,
-    pub(crate) vitest_vi_reference_spans: rustc_hash::FxHashSet<Span>,
+    pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
 }
 
 pub fn compute_semantic_usage(
@@ -1148,8 +1162,7 @@ pub fn compute_semantic_usage(
     let mut value_referenced_bindings: Vec<String> =
         value_referenced_bindings.into_iter().collect();
     value_referenced_bindings.sort_unstable();
-    let vitest_vi_reference_spans =
-        compute_vitest_vi_reference_spans(&semantic, imports, root_scope);
+    let mock_api_reference_spans = compute_mock_api_reference_spans(&semantic, imports, root_scope);
 
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
@@ -1158,41 +1171,83 @@ pub fn compute_semantic_usage(
             value_referenced: value_referenced_bindings,
         },
         auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
-        vitest_vi_reference_spans,
+        mock_api_reference_spans,
     }
 }
 
-fn compute_vitest_vi_reference_spans(
+fn compute_mock_api_reference_spans(
     semantic: &oxc_semantic::Semantic<'_>,
     imports: &[ImportInfo],
     root_scope: oxc_semantic::ScopeId,
-) -> rustc_hash::FxHashSet<Span> {
-    let has_direct_vitest_import = imports.iter().any(|import| {
-        import.source == "vitest"
-            && import.local_name == "vi"
-            && !import.is_type_only
-            && matches!(&import.imported_name, ImportedName::Named(name) if name == "vi")
-    });
-    if !has_direct_vitest_import {
-        return rustc_hash::FxHashSet::default();
-    }
-
+) -> MockApiReferenceSpans {
     let scoping = semantic.scoping();
-    let Some(symbol_id) = scoping.get_binding(root_scope, oxc_str::Ident::from("vi")) else {
-        return rustc_hash::FxHashSet::default();
+    let mut spans = MockApiReferenceSpans::default();
+
+    let collect_binding_spans = |local_name: &str, out: &mut rustc_hash::FxHashSet<Span>| {
+        let Some(symbol_id) = scoping.get_binding(root_scope, oxc_str::Ident::from(local_name))
+        else {
+            return;
+        };
+        out.extend(
+            scoping
+                .get_resolved_references(symbol_id)
+                .filter_map(|reference| {
+                    let AstKind::IdentifierReference(identifier) =
+                        semantic.nodes().kind(reference.node_id())
+                    else {
+                        return None;
+                    };
+                    Some(identifier.span)
+                }),
+        );
     };
 
-    scoping
-        .get_resolved_references(symbol_id)
-        .filter_map(|reference| {
-            let AstKind::IdentifierReference(identifier) =
-                semantic.nodes().kind(reference.node_id())
-            else {
-                return None;
-            };
-            Some(identifier.span)
-        })
-        .collect()
+    for import in imports {
+        if import.is_type_only || import.local_name.is_empty() {
+            continue;
+        }
+        let is_vi_binding = import.source == "vitest"
+            && matches!(&import.imported_name, ImportedName::Named(name) if name == "vi");
+        let is_jest_binding = import.source == "@jest/globals"
+            && matches!(&import.imported_name, ImportedName::Named(name) if name == "jest");
+        let is_vitest_namespace =
+            import.source == "vitest" && matches!(&import.imported_name, ImportedName::Namespace);
+
+        if is_vi_binding || is_jest_binding {
+            collect_binding_spans(&import.local_name, &mut spans.mock_bindings);
+        } else if is_vitest_namespace {
+            collect_binding_spans(&import.local_name, &mut spans.vitest_namespaces);
+        }
+    }
+
+    // The Jest test environment injects `jest` as a global, so unresolved
+    // value references named `jest` count as mock-API provenance. Masking only
+    // ever applies to files the plugin layer classified as test entry points,
+    // which grounds this in the existing Jest test-root detection. Unresolved
+    // `vi` stays unproven on purpose (unchanged from #2068): Vitest exposes
+    // `vi` as a global only under `globals: true`, and without reading that
+    // config the safe direction is to abstain.
+    for (name, reference_ids) in scoping.root_unresolved_references() {
+        if name.as_str() != "jest" {
+            continue;
+        }
+        spans
+            .mock_bindings
+            .extend(reference_ids.iter().filter_map(|reference_id| {
+                let reference = scoping.get_reference(*reference_id);
+                if !reference.is_value() {
+                    return None;
+                }
+                let AstKind::IdentifierReference(identifier) =
+                    semantic.nodes().kind(reference.node_id())
+                else {
+                    return None;
+                };
+                Some(identifier.span)
+            }));
+    }
+
+    spans
 }
 
 pub fn compute_auto_import_candidates(program: &Program<'_>) -> Vec<String> {

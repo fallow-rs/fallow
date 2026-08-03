@@ -32,6 +32,7 @@ pub(super) struct HealthReportAssembly {
     pub(super) sev_critical: usize,
     pub(super) sev_high: usize,
     pub(super) sev_moderate: usize,
+    pub(super) baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
 }
 
 struct HealthSummaryAssembly<'a> {
@@ -52,6 +53,7 @@ struct HealthSummaryAssembly<'a> {
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
+    baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
 }
 
 /// Assemble the final `HealthReport` from all computed data.
@@ -93,6 +95,7 @@ fn build_summary_from_assembly(
             sev_critical: assembly.sev_critical,
             sev_high: assembly.sev_high,
             sev_moderate: assembly.sev_moderate,
+            baseline_staleness: assembly.baseline_staleness.clone(),
         },
     )
 }
@@ -393,6 +396,7 @@ fn build_health_summary(
         severity_critical_count: input.sev_critical,
         severity_high_count: input.sev_high,
         severity_moderate_count: input.sev_moderate,
+        baseline_staleness: input.baseline_staleness.clone(),
     }
 }
 

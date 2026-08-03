@@ -1230,6 +1230,7 @@ fn security_runtime_health_options<'a>(
         baseline: None,
         save_baseline: None,
         baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        baseline_mode_explicit: false,
         complexity: false,
         file_scores: false,
         coverage_gaps: false,

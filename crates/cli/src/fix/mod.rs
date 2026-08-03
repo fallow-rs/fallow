@@ -93,7 +93,7 @@ pub struct FixOptions<'a> {
     /// entry; source-file fixes proceed normally. Honored by
     /// `fix::config::apply_config_fixes`.
     pub no_create_config: bool,
-    pub type_aware: bool,
+    pub type_aware: Option<bool>,
     pub type_aware_projects: &'a [PathBuf],
     pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
 }
@@ -123,6 +123,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     if let Err(code) = crate::check::apply_type_aware_overrides_from(
         opts.output,
         opts.type_aware,
+        None,
         opts.type_aware_projects,
         opts.type_aware_require,
         &mut config,

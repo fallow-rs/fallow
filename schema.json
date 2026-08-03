@@ -2705,6 +2705,13 @@
           ],
           "format": "uint32",
           "minimum": 0
+        },
+        "typeAware": {
+          "description": "Overrides the top-level `typeAware.enabled` opt-in for `fallow audit` only: set `false` to keep persistent type-aware analysis on for cleanup commands (`dead-code`, `fix`, `health`) while the audit gate stays syntactic, or `true` to enable it for audit alone. Unset inherits `typeAware.enabled`. The `--type-aware`/`--no-type-aware` CLI flags and the `FALLOW_TYPE_AWARE` environment variable both take precedence over this field.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },

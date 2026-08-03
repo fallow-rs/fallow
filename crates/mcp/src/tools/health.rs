@@ -230,6 +230,11 @@ impl HealthArgsBuilder<'_> {
             self.params.baseline.as_deref(),
             self.params.save_baseline.as_deref(),
         );
+        push_str_flag(
+            &mut self.args,
+            "--baseline-mode",
+            self.params.baseline_mode.map(|mode| mode.as_cli()),
+        );
         if self.params.trend == Some(true) {
             self.args.push("--trend".to_string());
         }

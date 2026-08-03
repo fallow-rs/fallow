@@ -1926,6 +1926,103 @@ fn remove_node_modules_context(worktree_path: &Path) {
     }
 }
 
+fn empty_snapshot_with_type_aware(
+    identity: Option<fallow_types::semantic::SemanticAnalysisIdentity>,
+    gap_signature: Vec<String>,
+) -> AuditKeySnapshot {
+    AuditKeySnapshot {
+        type_aware_identity: identity,
+        type_aware_gap_signature: gap_signature,
+        syntactic_dead_code: None,
+        dead_code: FxHashSet::default(),
+        health: FxHashSet::default(),
+        styling: FxHashSet::default(),
+        dupes: FxHashSet::default(),
+        boundary_edges: FxHashSet::default(),
+        cycles: FxHashSet::default(),
+        public_api: FxHashSet::default(),
+    }
+}
+
+fn identity_with_hash(
+    project_config_hash: &str,
+) -> fallow_types::semantic::SemanticAnalysisIdentity {
+    fallow_types::semantic::SemanticAnalysisIdentity {
+        project_config_hash: project_config_hash.to_string(),
+        ..Default::default()
+    }
+}
+
+fn meta_with_identity(
+    identity: fallow_types::semantic::SemanticAnalysisIdentity,
+) -> fallow_types::envelope::TypeAwareMeta {
+    fallow_types::envelope::TypeAwareMeta {
+        identity: Some(identity),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn degrade_reason_absent_for_fully_syntactic_comparison() {
+    let base = empty_snapshot_with_type_aware(None, Vec::new());
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), None),
+        None
+    );
+    assert_eq!(type_aware_attribution_degrade_reason(None, None), None);
+}
+
+#[test]
+fn degrade_reason_when_only_one_side_has_type_aware_identity() {
+    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
+    assert!(type_aware_attribution_degrade_reason(Some(&base), None).is_some());
+
+    let base = empty_snapshot_with_type_aware(None, Vec::new());
+    let head = meta_with_identity(identity_with_hash("hash-a"));
+    assert!(type_aware_attribution_degrade_reason(Some(&base), Some(&head)).is_some());
+}
+
+#[test]
+fn degrade_reason_when_semantic_identities_differ() {
+    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
+    let head = meta_with_identity(identity_with_hash("hash-b"));
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
+        Some("their semantic analysis identities differ")
+    );
+}
+
+#[test]
+fn degrade_reason_absent_when_identities_and_gap_signatures_match() {
+    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
+    let head = meta_with_identity(identity_with_hash("hash-a"));
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
+        None
+    );
+}
+
+#[test]
+fn degrade_reason_when_gap_signatures_differ() {
+    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
+    let mut head = meta_with_identity(identity_with_hash("hash-a"));
+    head.queries = vec![fallow_types::semantic::SemanticQuerySummary {
+        query_id: 0,
+        capability: fallow_types::semantic::SemanticCapability::SymbolUse,
+        assertion: "candidate usage refinement".to_string(),
+        status: fallow_types::semantic::SemanticCompleteness::Partial,
+        reason_code: None,
+        total_evidence_count: 0,
+        truncated: false,
+        omissions: Vec::new(),
+        actions: Vec::new(),
+    }];
+    assert_eq!(
+        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
+        Some("their incomplete semantic query reasons or omissions differ")
+    );
+}
+
 #[test]
 fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     let key = AuditBaseSnapshotCacheKey {
@@ -1933,8 +2030,13 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         base_sha: "abc123".to_string(),
     };
     let snapshot = AuditKeySnapshot {
-        type_aware_identity: None,
-        type_aware_gap_signature: Vec::new(),
+        type_aware_identity: Some(identity_with_hash("hash-roundtrip")),
+        type_aware_gap_signature: vec!["SymbolUse:None:".to_string()],
+        syntactic_dead_code: Some(
+            ["syn:a".to_string(), "syn:b".to_string()]
+                .into_iter()
+                .collect(),
+        ),
         dead_code: ["dead:a".to_string(), "dead:b".to_string()]
             .into_iter()
             .collect(),
@@ -1948,13 +2050,23 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         public_api: std::iter::once("src/index.ts::foo".to_string()).collect(),
     };
 
-    let cached = cached_from_snapshot(&key, &snapshot);
+    let cached = cached_from_snapshot(&key, &snapshot).expect("snapshot should serialize");
     assert_eq!(cached.version, AUDIT_BASE_SNAPSHOT_CACHE_VERSION);
     assert_eq!(cached.key_hash, key.hash);
     assert_eq!(cached.base_sha, key.base_sha);
     assert_eq!(cached.dead_code, vec!["dead:a", "dead:b"]);
+    assert_eq!(
+        cached.syntactic_dead_code,
+        Some(vec!["syn:a".to_string(), "syn:b".to_string()])
+    );
 
-    let decoded = snapshot_from_cached(cached);
+    let decoded = snapshot_from_cached(cached).expect("cached snapshot should decode");
+    assert_eq!(decoded.type_aware_identity, snapshot.type_aware_identity);
+    assert_eq!(
+        decoded.type_aware_gap_signature,
+        snapshot.type_aware_gap_signature
+    );
+    assert_eq!(decoded.syntactic_dead_code, snapshot.syntactic_dead_code);
     assert_eq!(decoded.dead_code, snapshot.dead_code);
     assert_eq!(decoded.health, snapshot.health);
     assert_eq!(decoded.styling, snapshot.styling);
@@ -2033,6 +2145,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
     let snapshot = AuditKeySnapshot {
         type_aware_identity: None,
         type_aware_gap_signature: Vec::new(),
+        syntactic_dead_code: None,
         dead_code: std::iter::once("dead:a".to_string()).collect(),
         health: std::iter::once("health:a".to_string()).collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),
@@ -2111,6 +2224,9 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
         key_hash: key.hash,
         base_sha: "other".to_string(),
+        type_aware_identity: None,
+        type_aware_gap_signature: Vec::new(),
+        syntactic_dead_code: None,
         dead_code: vec!["dead:a".to_string()],
         health: vec![],
         styling: vec![],

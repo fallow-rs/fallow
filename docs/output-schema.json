@@ -2741,6 +2741,17 @@
         },
         "severity_moderate_count": {
           "type": "integer"
+        },
+        "baseline_staleness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthBaselineStaleness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Baseline staleness data, present only when a baseline was loaded."
         }
       },
       "required": [
@@ -21264,6 +21275,44 @@
       "maxLength": 64,
       "pattern": "^[A-Za-z0-9._-]+$",
       "description": "Stable identifier used to isolate independent review integrations on the\nsame pull or merge request."
+    },
+    "HealthBaselineStaleness": {
+      "type": "object",
+      "properties": {
+        "baseline_entries": {
+          "type": "integer",
+          "description": "Complexity and CRAP finding entries carried by the loaded baseline."
+        },
+        "matched_entries": {
+          "type": "integer",
+          "description": "Entries that matched a current finding in the active baseline mode,\nincluding entries matched through a followed file move."
+        },
+        "stale_entries": {
+          "type": "integer",
+          "description": "Entries that matched no current finding on this run."
+        },
+        "moved_entries": {
+          "type": "integer",
+          "description": "Entries that matched only by following a file move in identity mode.\nAlways zero in count mode."
+        },
+        "change_scoped": {
+          "type": "boolean",
+          "description": "True when this run analyzed a subset of the project (changed-file,\ndiff, or workspace scoping), so the baseline was compared against a\nnarrowed finding set and staleness cannot be judged. `stale` is always\nfalse on scoped runs."
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "True exactly when the run was not change-scoped, at least one current\nfinding existed before baseline filtering, and `stale_entries` reached\na quarter of `baseline_entries`. Mirrors the human warning so machine\nconsumers do not have to reimplement the threshold."
+        }
+      },
+      "required": [
+        "baseline_entries",
+        "matched_entries",
+        "stale_entries",
+        "moved_entries",
+        "change_scoped",
+        "stale"
+      ],
+      "description": "Staleness of a loaded health baseline.\n\nReports how many saved complexity and CRAP finding entries still matched a\ncurrent finding on this run, so consumers can see a rotting baseline before\nit degrades to zero overlap. Runtime-coverage suppressions and refactoring\ntarget keys carried by the same baseline are not counted here. Present in\nthe summary only when a baseline was loaded."
     }
   }
 }

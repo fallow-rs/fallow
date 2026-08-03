@@ -1410,6 +1410,104 @@ fn health_baseline_save_mode_controls_written_buckets() {
     );
 }
 
+/// A defaulted count save must not clobber a baseline that carries identity
+/// buckets: forgetting `--baseline-mode identity` on a re-save would silently
+/// drop them and only fail later, in CI, on the next identity comparison
+/// (#2062).
+#[test]
+fn health_count_save_refuses_to_overwrite_identity_baseline() {
+    let dir = hotspot_project("firstHotspot");
+    let baseline_path = dir.path().join("health-baseline.json");
+    run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    let saved_bytes = std::fs::read_to_string(&baseline_path).unwrap();
+
+    let refused = run_health_with_baseline(
+        dir.path(),
+        &["--save-baseline", baseline_path.to_str().unwrap()],
+    );
+    let rendered = redact_all(
+        &format!("{}\n{}", refused.stdout, refused.stderr),
+        dir.path(),
+    );
+    assert_eq!(refused.code, 2, "defaulted count save should refuse");
+    assert!(
+        rendered.contains("refusing to overwrite health baseline"),
+        "error should name the refusal: {rendered}"
+    );
+    assert!(
+        rendered.contains("--baseline-mode count"),
+        "error should document the explicit downgrade override: {rendered}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&baseline_path).unwrap(),
+        saved_bytes,
+        "a refused save must leave the identity baseline untouched"
+    );
+
+    let identity_resave = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    assert_ne!(
+        identity_resave.code,
+        2,
+        "an identity re-save over an identity baseline stays allowed: {}",
+        redact_all(&identity_resave.stderr, dir.path())
+    );
+}
+
+/// Passing `--baseline-mode count` explicitly expresses intent to downgrade,
+/// so the overwrite guard steps aside (#2062).
+#[test]
+fn health_explicit_count_save_downgrades_identity_baseline() {
+    let dir = hotspot_project("firstHotspot");
+    let baseline_path = dir.path().join("health-baseline.json");
+    run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+
+    let downgraded = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "count",
+        ],
+    );
+    assert_ne!(
+        downgraded.code,
+        2,
+        "explicit count mode should overwrite: {}",
+        redact_all(&downgraded.stderr, dir.path())
+    );
+    let baseline: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&baseline_path).unwrap()).unwrap();
+    assert!(
+        baseline.get("identity_finding_counts").is_none(),
+        "explicit count save should drop identity buckets: {baseline:#?}"
+    );
+}
+
 /// Identity mode must stay quiet when the same hotspot only moves down the file.
 #[test]
 fn health_identity_baseline_survives_line_shifts() {
@@ -2254,6 +2352,75 @@ fn health_coverage_gaps_exclude_vitest_replacement_targets() {
     assert!(
         export_names.contains(&"renderDependency"),
         "the replacement must not cover the real dependency export: {export_names:?}"
+    );
+    assert!(
+        !export_names.contains(&"renderWrapper"),
+        "the directly tested wrapper export should remain covered: {export_names:?}"
+    );
+}
+
+#[test]
+fn health_coverage_gaps_exclude_jest_replacement_targets() {
+    let output = run_fallow(
+        "health",
+        "issue-2082-jest-mocked-test-reachability",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let coverage = json["coverage_gaps"]
+        .as_object()
+        .expect("coverage_gaps should be an object");
+    let summary = coverage["summary"]
+        .as_object()
+        .expect("coverage_gaps.summary should be an object");
+    assert_eq!(summary["runtime_files"].as_u64(), Some(3));
+    assert_eq!(
+        summary["covered_files"].as_u64(),
+        Some(1),
+        "only the real wrapper executes through the jest test root"
+    );
+
+    let file_names: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert!(
+        file_names
+            .iter()
+            .any(|path| path.ends_with("src/dependency.ts")),
+        "the jest.mock replaced dependency should remain an untested runtime file: {file_names:?}"
+    );
+    assert!(
+        !file_names
+            .iter()
+            .any(|path| path.ends_with("src/wrapper.ts")),
+        "the wrapper itself should remain test-covered: {file_names:?}"
+    );
+
+    let export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item["export_name"].as_str())
+        .collect();
+    assert!(
+        export_names.contains(&"renderDependency"),
+        "the jest.mock replacement must not cover the real dependency export: {export_names:?}"
     );
     assert!(
         !export_names.contains(&"renderWrapper"),

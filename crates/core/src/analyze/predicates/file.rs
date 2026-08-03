@@ -530,6 +530,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(10, 50),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
@@ -579,6 +580,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::new(0, 0),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         assert!(is_barrel_with_reachable_sources(&graph.modules[1], &graph));

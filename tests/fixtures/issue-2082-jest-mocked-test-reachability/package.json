@@ -1,0 +1,9 @@
+{
+  "name": "issue-2082-jest-mocked-test-reachability",
+  "private": true,
+  "type": "module",
+  "main": "src/entry.ts",
+  "devDependencies": {
+    "jest": "^30.0.0"
+  }
+}

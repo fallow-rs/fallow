@@ -28,6 +28,24 @@ impl EmailModeParam {
     }
 }
 
+/// How a health baseline matches findings, mirroring the CLI's
+/// `--baseline-mode` flag.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BaselineModeParam {
+    Count,
+    Identity,
+}
+
+impl BaselineModeParam {
+    pub const fn as_cli(self) -> &'static str {
+        match self {
+            Self::Count => "count",
+            Self::Identity => "identity",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TypeAwareRequireParam {
@@ -826,6 +844,15 @@ pub struct HealthParams {
     /// Save current results as a baseline file for future comparisons.
     pub save_baseline: Option<String>,
 
+    /// How `baseline` matches health findings and which buckets `save_baseline`
+    /// writes: "count" (per file and category, the CLI default) or "identity"
+    /// (per function identity, strict; requires a baseline saved in identity
+    /// mode). When refreshing a baseline that was saved in identity mode, pass
+    /// "identity" to preserve its identity buckets: a count-mode save drops
+    /// them and is refused unless "count" is passed explicitly. Passed through
+    /// to the CLI's `--baseline-mode` flag.
+    pub baseline_mode: Option<BaselineModeParam>,
+
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
@@ -1063,6 +1090,12 @@ pub struct AuditParams {
     /// baseline are excluded from the audit verdict. Passed through to
     /// the CLI's `--health-baseline` flag.
     pub health_baseline: Option<String>,
+
+    /// How `health_baseline` matches complexity findings: "count" (per file
+    /// and category, the CLI default) or "identity" (per function identity,
+    /// strict; requires a baseline saved with `--baseline-mode identity`).
+    /// Passed through to the CLI's `--baseline-mode` flag.
+    pub health_baseline_mode: Option<BaselineModeParam>,
 
     /// Path to a duplication baseline file (produced by `fallow dupes
     /// --save-baseline`). When set, clone groups present in the baseline

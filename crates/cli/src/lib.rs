@@ -303,13 +303,12 @@ struct Cli {
     /// as new. Re-save the baseline after that kind of refactor. Functions
     /// that share a name in one file, and unnamed functions, share one
     /// identity and can mask each other.
-    #[arg(
-        long = "baseline-mode",
-        value_enum,
-        default_value = "count",
-        global = true
-    )]
-    baseline_mode: BaselineModeArg,
+    ///
+    /// Defaults to `count` when omitted. Saving without the flag refuses to
+    /// overwrite a baseline that carries identities; pass `--baseline-mode
+    /// count` explicitly to downgrade such a baseline on purpose.
+    #[arg(long = "baseline-mode", value_enum, global = true)]
+    baseline_mode: Option<BaselineModeArg>,
 
     /// Correlate this run with a previous telemetry analysis run.
     ///
@@ -519,6 +518,11 @@ struct Cli {
     #[arg(long, global = true)]
     type_aware: bool,
 
+    /// Disable TypeScript semantic analysis even when `typeAware.enabled` or
+    /// `FALLOW_TYPE_AWARE` opts in, keeping this run fully syntactic.
+    #[arg(long, global = true, conflicts_with = "type_aware")]
+    no_type_aware: bool,
+
     /// TypeScript project config to use for type-aware analysis (repeatable).
     #[arg(long, global = true, value_name = "PATH", action = clap::ArgAction::Append)]
     type_aware_project: Vec<PathBuf>,
@@ -526,6 +530,21 @@ struct Cli {
     /// Decide whether incomplete type-aware analysis is advisory or gating.
     #[arg(long, global = true, value_enum)]
     type_aware_require: Option<TypeAwareRequireArg>,
+}
+
+impl Cli {
+    /// Tri-state CLI override for type-aware analysis: `Some(true)` for
+    /// `--type-aware`, `Some(false)` for `--no-type-aware`, `None` when
+    /// neither flag was passed (environment and config decide).
+    const fn type_aware_override(&self) -> Option<bool> {
+        if self.no_type_aware {
+            Some(false)
+        } else if self.type_aware {
+            Some(true)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Copy, Subcommand)]
@@ -2941,7 +2960,7 @@ fn run_bare_combined(
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,
-        type_aware: cli.type_aware,
+        type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
         type_aware_require: cli.type_aware_require.map(Into::into),
         explain: cli.explain,
@@ -3223,7 +3242,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
                 performance: dispatch.cli.performance,
             },
             include_dupes,
-            type_aware: dispatch.cli.type_aware,
+            type_aware: dispatch.cli.type_aware_override(),
             type_aware_project: dispatch.cli.type_aware_project.clone(),
             type_aware_require: dispatch.cli.type_aware_require,
             top,
@@ -3427,7 +3446,7 @@ fn dispatch_inspect_command(
             .as_ref()
             .map(|config| config.cache_dir.as_path()),
         symbol_chain,
-        type_aware: dispatch.cli.type_aware,
+        type_aware: dispatch.cli.type_aware_override(),
         type_aware_projects: &dispatch.cli.type_aware_project,
         type_aware_require: dispatch.cli.type_aware_require.map(Into::into),
     })
@@ -4503,7 +4522,7 @@ struct CheckDispatchArgs {
     filters: IssueFilters,
     trace_opts: TraceOptions,
     include_dupes: bool,
-    type_aware: bool,
+    type_aware: Option<bool>,
     type_aware_project: Vec<std::path::PathBuf>,
     type_aware_require: Option<TypeAwareRequireArg>,
     top: Option<usize>,
@@ -4575,7 +4594,7 @@ fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
         clear_screen: !no_clear,
         explain: cli.explain,
         include_entry_exports: cli.include_entry_exports,
-        type_aware: cli.type_aware,
+        type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
         type_aware_require: cli.type_aware_require.map(Into::into),
     })
@@ -4607,7 +4626,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
         yes: args.yes,
         production,
         no_create_config: args.no_create_config,
-        type_aware: cli.type_aware,
+        type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
         type_aware_require: cli.type_aware_require.map(Into::into),
     })
@@ -4671,6 +4690,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         group_by: cli.group_by,
         include_dupes: args.include_dupes,
         type_aware: args.type_aware,
+        type_aware_config_override: None,
         type_aware_projects: &args.type_aware_project,
         type_aware_require: args.type_aware_require.map(Into::into),
         trace_opts: &args.trace_opts,
@@ -4696,21 +4716,21 @@ fn validate_type_aware_check_options(
     args: &CheckDispatchArgs,
 ) -> Option<ExitCode> {
     let output = dispatch.output;
-    if !args.type_aware_project.is_empty() && !args.type_aware {
+    if !args.type_aware_project.is_empty() && args.type_aware != Some(true) {
         return Some(emit_error(
             "--type-aware-project requires --type-aware",
             2,
             output,
         ));
     }
-    if args.type_aware_require.is_some() && !args.type_aware {
+    if args.type_aware_require.is_some() && args.type_aware != Some(true) {
         return Some(emit_error(
             "--type-aware-require requires --type-aware",
             2,
             output,
         ));
     }
-    if args.trace_opts.symbol_impact.is_some() && !args.type_aware {
+    if args.trace_opts.symbol_impact.is_some() && args.type_aware != Some(true) {
         return Some(emit_error(
             "--symbol-impact requires --type-aware",
             2,
@@ -4734,7 +4754,7 @@ fn validate_type_aware_check_options(
             output,
         ));
     }
-    if args.type_aware
+    if args.type_aware == Some(true)
         && !matches!(
             output,
             fallow_config::OutputFormat::Human
@@ -4993,7 +5013,7 @@ fn run_resolved_audit(
             dead_code_baseline: inputs.dead_code_baseline.as_deref(),
             health_baseline: inputs.health_baseline.as_deref(),
             dupes_baseline: inputs.dupes_baseline.as_deref(),
-            health_baseline_mode: cli.baseline_mode.into(),
+            health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
             max_crap: args.max_crap,
             coverage: inputs.coverage.as_deref(),
             coverage_root: args.coverage_root.as_deref(),
@@ -5017,7 +5037,8 @@ fn run_resolved_audit(
         },
         args.gate_marker.as_deref(),
         audit::AuditTypeAwareOptions {
-            enabled: cli.type_aware,
+            enabled: cli.type_aware_override(),
+            config_default: inputs.audit_cfg.type_aware,
             projects: &cli.type_aware_project,
             require: cli.type_aware_require.map(Into::into),
         },
@@ -5099,7 +5120,7 @@ fn decision_surface_audit_options<'a>(
         dead_code_baseline: inputs.dead_code_baseline.as_deref(),
         health_baseline: inputs.health_baseline.as_deref(),
         dupes_baseline: inputs.dupes_baseline.as_deref(),
-        health_baseline_mode: cli.baseline_mode.into(),
+        health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -5407,7 +5428,8 @@ fn run_health_dispatch(
             changed_workspaces: cli.changed_workspaces.as_deref(),
             baseline: cli.baseline.as_deref(),
             save_baseline: cli.save_baseline.as_deref(),
-            baseline_mode: cli.baseline_mode.into(),
+            baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
+            baseline_mode_explicit: cli.baseline_mode.is_some(),
             complexity: sections.complexity,
             file_scores: sections.file_scores,
             coverage_gaps: sections.coverage_gaps,
@@ -5442,7 +5464,7 @@ fn run_health_dispatch(
         },
         dispatch.json_style,
         &health::TypeAwareHealthOptions {
-            enabled: cli.type_aware,
+            enabled: cli.type_aware_override(),
             requested: args.type_coupling,
             unfiltered: health_type_coupling_is_default_section(args),
             projects: &cli.type_aware_project,
@@ -6045,6 +6067,29 @@ mod tests {
             panic!("dead-code should parse as the check command");
         };
         assert!(unused_class_members);
+    }
+
+    #[test]
+    fn no_type_aware_conflicts_with_type_aware() {
+        let Err(err) = Cli::try_parse_from(["fallow", "audit", "--type-aware", "--no-type-aware"])
+        else {
+            panic!("--no-type-aware must conflict with --type-aware");
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn no_type_aware_forces_semantic_analysis_off() {
+        let cli = Cli::try_parse_from(["fallow", "audit", "--no-type-aware"])
+            .expect("--no-type-aware should parse on audit");
+        assert_eq!(cli.type_aware_override(), Some(false));
+
+        let cli = Cli::try_parse_from(["fallow", "dead-code", "--type-aware"])
+            .expect("--type-aware should parse");
+        assert_eq!(cli.type_aware_override(), Some(true));
+
+        let cli = Cli::try_parse_from(["fallow", "dead-code"]).expect("bare command should parse");
+        assert_eq!(cli.type_aware_override(), None);
     }
 
     #[test]

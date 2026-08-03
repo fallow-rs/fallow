@@ -670,10 +670,7 @@ fn build_test_referenced_exports(
         if export.is_type_only {
             continue;
         }
-        let has_test_ref = export
-            .references
-            .iter()
-            .any(|reference| test_coverage.covers_reference(reference));
+        let has_test_ref = test_coverage.covers_any_reference(export);
         if has_test_ref {
             set.insert(export.name.to_string());
         }
@@ -1960,6 +1957,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             },
             fallow_graph::graph::ExportSymbol {
@@ -1970,6 +1968,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             },
             fallow_graph::graph::ExportSymbol {
@@ -1980,6 +1979,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             },
             fallow_graph::graph::ExportSymbol {
@@ -1990,6 +1990,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             },
         ];
@@ -2015,6 +2016,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::empty(0),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
         let unused_map = rustc_hash::FxHashMap::default();
@@ -2390,6 +2392,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             },
             fallow_graph::graph::ExportSymbol {
@@ -2400,6 +2403,7 @@ mod tests {
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
+                reference_paths: Vec::new(),
                 members: vec![],
             },
         ];
@@ -2425,6 +2429,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::empty(0),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
 
@@ -2449,6 +2454,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::empty(0),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }];
 
@@ -4247,6 +4253,7 @@ mod tests {
             expected_unused_reason: None,
             span: oxc_span::Span::default(),
             references: vec![],
+            reference_paths: Vec::new(),
             members: vec![],
         }
     }

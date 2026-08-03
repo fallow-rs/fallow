@@ -590,6 +590,10 @@ pub struct AuditConfig {
     /// Garbage-collection threshold, in whole days, for the persistent reusable base-snapshot worktree caches `fallow audit` creates: entries older than this window are swept on each audit run. Set to control cache accumulation; `0` disables the sweep and unset defaults to 30 days. The `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` environment variable overrides this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_max_age_days: Option<u32>,
+
+    /// Overrides the top-level `typeAware.enabled` opt-in for `fallow audit` only: set `false` to keep persistent type-aware analysis on for cleanup commands (`dead-code`, `fix`, `health`) while the audit gate stays syntactic, or `true` to enable it for audit alone. Unset inherits `typeAware.enabled`. The `--type-aware`/`--no-type-aware` CLI flags and the `FALLOW_TYPE_AWARE` environment variable both take precedence over this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_aware: Option<bool>,
 }
 
 impl AuditConfig {
@@ -602,6 +606,7 @@ impl AuditConfig {
             && self.health_baseline.is_none()
             && self.dupes_baseline.is_none()
             && self.cache_max_age_days.is_none()
+            && self.type_aware.is_none()
     }
 }
 
