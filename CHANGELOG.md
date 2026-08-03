@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version is bumped so older caches are rebuilt. (Closes
   [#2083](https://github.com/fallow-rs/fallow/issues/2083).)
 
+### Added
+
+- **Mock-aware test reachability covers aliased `vi` imports, `vitest`
+  namespace imports, and `jest.mock`.** The mock masking that shipped for the
+  literal `import { vi } from "vitest"` binding now also proves
+  `import { vi as v }` aliases, `import * as vitest` namespace access
+  (`vitest.vi.mock`), and `jest.mock` through the `jest` global or a
+  `@jest/globals` import (any alias), so a module whose only test-side use is
+  a proven complete replacement no longer keeps test-coverage credit in Jest
+  projects or under the wider Vitest idioms. Provenance stays span-exact and
+  factories abstain toward the old covered behavior unless they are
+  statically closed; `vi.doMock` and automock remain out of scope. (Refs
+  [#2082](https://github.com/fallow-rs/fallow/issues/2082).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added
