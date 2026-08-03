@@ -977,65 +977,64 @@ mod tests {
     fn replacement_masks_a_target_behind_an_esm_re_export() {
         let graph = build_masked_re_export_graph(false, false);
         let target_export = &graph.modules[2].exports[0];
-        let reference = target_export
-            .references
-            .first()
-            .expect("barrel consumer reference should propagate");
+        assert!(
+            !target_export.references.is_empty(),
+            "barrel consumer reference should propagate"
+        );
 
         assert!(graph.modules[1].is_test_reachable());
         assert!(!graph.modules[2].is_test_reachable());
         assert_eq!(
-            graph.reference_path_hops(reference)[0].1,
+            graph.reference_path_hops(target_export, 0)[0].1,
             ModuleLoadMechanism::EsModule
         );
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(target_export, 0));
     }
 
     #[test]
     fn commonjs_loaded_barrel_does_not_bypass_its_esm_re_export() {
         let graph = build_masked_re_export_graph(true, false);
         let target_export = &graph.modules[2].exports[0];
-        let reference = target_export
-            .references
-            .first()
-            .expect("barrel consumer reference should propagate");
+        assert!(
+            !target_export.references.is_empty(),
+            "barrel consumer reference should propagate"
+        );
 
         assert!(graph.modules[1].is_test_reachable());
         assert!(!graph.modules[2].is_test_reachable());
         assert_eq!(
-            graph.reference_path_hops(reference)[0].1,
+            graph.reference_path_hops(target_export, 0)[0].1,
             ModuleLoadMechanism::EsModule
         );
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(target_export, 0));
     }
 
     #[test]
     fn direct_commonjs_and_esm_re_export_retain_distinct_coverage() {
         let graph = build_masked_re_export_graph(false, true);
-        let references = &graph.modules[2].exports[0].references;
+        let export = &graph.modules[2].exports[0];
 
-        assert_eq!(references.len(), 2);
-        let esm = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::EsModule
+        assert_eq!(export.references.len(), 2);
+        let esm = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1 == ModuleLoadMechanism::EsModule
             })
             .expect("ESM re-export reference");
-        let commonjs = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::CommonJsRequire
+        let commonjs = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1
+                    == ModuleLoadMechanism::CommonJsRequire
             })
             .expect("direct CommonJS reference");
-        assert!(!graph.is_test_reference_covered(esm));
-        assert!(graph.is_test_reference_covered(commonjs));
+        assert!(!graph.is_test_reference_covered(export, esm));
+        assert!(graph.is_test_reference_covered(export, commonjs));
     }
 
     #[test]
     fn mocked_intermediate_barrel_blocks_a_reference_despite_an_alternate_target_route() {
         let graph = build_intermediate_replacement_graph(false, false, false);
-        let reference = &graph.modules[2].exports[0].references[0];
-        let hops = graph.reference_path_hops(reference);
+        let export = &graph.modules[2].exports[0];
+        let hops = graph.reference_path_hops(export, 0);
 
         assert!(graph.modules[2].is_test_reachable());
         assert_eq!(
@@ -1045,13 +1044,13 @@ mod tests {
                 (FileId(1), ModuleLoadMechanism::EsModule),
             ]
         );
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn mocked_re_export_cycle_member_blocks_the_cyclic_reference_path() {
         let graph = build_intermediate_replacement_graph(false, true, false);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
         assert!(
             graph
@@ -1060,30 +1059,30 @@ mod tests {
                 .any(|cycle| cycle.file_ids == vec![FileId(1), FileId(2)])
         );
         assert!(graph.modules[2].is_test_reachable());
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn commonjs_barrel_hop_bypasses_only_its_own_replacement() {
         let graph = build_intermediate_replacement_graph(true, false, false);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
         assert_eq!(
-            graph.reference_path_hops(reference),
+            graph.reference_path_hops(export, 0),
             vec![
                 (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::CommonJsRequire),
             ]
         );
-        assert!(graph.is_test_reference_covered(reference));
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn commonjs_barrel_hop_does_not_bypass_a_replaced_esm_target() {
         let graph = build_intermediate_replacement_graph(true, false, true);
-        let reference = &graph.modules[2].exports[0].references[0];
+        let export = &graph.modules[2].exports[0];
 
-        assert!(!graph.is_test_reference_covered(reference));
+        assert!(!graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
@@ -1091,29 +1090,29 @@ mod tests {
         let graph = build_intermediate_replacement_graph(false, false, false);
         let encoded = postcard::to_allocvec(&graph).expect("encode graph");
         let decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
-        let reference = &decoded.modules[2].exports[0].references[0];
+        let export = &decoded.modules[2].exports[0];
 
         assert_eq!(
-            decoded.reference_path_hops(reference),
+            decoded.reference_path_hops(export, 0),
             vec![
                 (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::EsModule),
             ]
         );
-        assert!(!decoded.is_test_reference_covered(reference));
+        assert!(!decoded.is_test_reference_covered(export, 0));
     }
 
     #[test]
     fn require_context_keeps_a_replaced_target_covered() {
         let graph = build_masked_pattern_graph(&[ModuleLoadMechanism::CommonJsRequire]);
-        let reference = &graph.modules[1].exports[0].references[0];
+        let export = &graph.modules[1].exports[0];
 
         assert!(graph.modules[1].is_test_reachable());
         assert_eq!(
-            graph.reference_path_hops(reference)[0].1,
+            graph.reference_path_hops(export, 0)[0].1,
             ModuleLoadMechanism::CommonJsRequire
         );
-        assert!(graph.is_test_reference_covered(reference));
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]
@@ -1122,24 +1121,23 @@ mod tests {
             ModuleLoadMechanism::EsModule,
             ModuleLoadMechanism::CommonJsRequire,
         ]);
-        let references = &graph.modules[1].exports[0].references;
+        let export = &graph.modules[1].exports[0];
 
         assert!(graph.modules[1].is_test_reachable());
-        assert_eq!(references.len(), 2);
-        let esm = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::EsModule
+        assert_eq!(export.references.len(), 2);
+        let esm = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1 == ModuleLoadMechanism::EsModule
             })
             .expect("ESM pattern reference");
-        let commonjs = references
-            .iter()
-            .find(|reference| {
-                graph.reference_path_hops(reference)[0].1 == ModuleLoadMechanism::CommonJsRequire
+        let commonjs = (0..export.references.len())
+            .find(|&index| {
+                graph.reference_path_hops(export, index)[0].1
+                    == ModuleLoadMechanism::CommonJsRequire
             })
             .expect("CommonJS pattern reference");
-        assert!(!graph.is_test_reference_covered(esm));
-        assert!(graph.is_test_reference_covered(commonjs));
+        assert!(!graph.is_test_reference_covered(export, esm));
+        assert!(graph.is_test_reference_covered(export, commonjs));
     }
 
     #[test]
@@ -1574,12 +1572,15 @@ mod tests {
             &test_entry_points,
             &files,
         );
-        let reference = &graph.modules[CHAIN_LENGTH as usize].exports[0].references[0];
+        let export = &graph.modules[CHAIN_LENGTH as usize].exports[0];
 
         assert_eq!(graph.test_reachability_index.profile_count, 0);
-        assert!(reference.path.is_none());
+        assert!(
+            export.reference_paths.is_empty(),
+            "the provenance side table must stay unallocated on the fast path"
+        );
         assert!(graph.reference_paths.is_empty());
-        assert!(graph.is_test_reference_covered(reference));
+        assert!(graph.is_test_reference_covered(export, 0));
     }
 
     #[test]

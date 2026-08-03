@@ -23,6 +23,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   malformed catalogue row fails the parse loudly. (Closes
   [#2019](https://github.com/fallow-rs/fallow/issues/2019).)
 
+### Changed
+
+- **Per-reference memory is back to its pre-3.11 size for projects without
+  replacement mocks.** The reference provenance introduced for mock-aware
+  test reachability now lives in a per-export side table that is only
+  populated when a `vi.mock`-style replacement exists, restoring the compact
+  16-byte symbol reference for every other project in RAM and in the graph
+  cache. Masked-reachability behavior is unchanged, and the graph cache
+  version is bumped so older caches are rebuilt. (Closes
+  [#2083](https://github.com/fallow-rs/fallow/issues/2083).)
+
+### Added
+
+- **Mock-aware test reachability covers aliased `vi` imports, `vitest`
+  namespace imports, and `jest.mock`.** The mock masking that shipped for the
+  literal `import { vi } from "vitest"` binding now also proves
+  `import { vi as v }` aliases, `import * as vitest` namespace access
+  (`vitest.vi.mock`), and `jest.mock` through the `jest` global or a
+  `@jest/globals` import (any alias), so a module whose only test-side use is
+  a proven complete replacement no longer keeps test-coverage credit in Jest
+  projects or under the wider Vitest idioms. Provenance stays span-exact and
+  factories abstain toward the old covered behavior unless they are
+  statically closed; `vi.doMock` and automock remain out of scope. (Refs
+  [#2082](https://github.com/fallow-rs/fallow/issues/2082).)
+
 ## [3.11.0] - 2026-08-02
 
 ### Added
