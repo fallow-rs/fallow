@@ -130,22 +130,64 @@ pub fn dir_has_package_manifest(dir: &Path) -> bool {
 pub fn load_member_package_manifest(
     dir: &Path,
 ) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
+    manifest_from_probe(dir, DenoJson::load_from_dir(dir))
+}
+
+/// Project a pre-loaded Deno probe plus `package.json` into the
+/// [`load_member_package_manifest`] result shape. Shared so combined probes
+/// pay the `deno.json` / `deno.jsonc` filesystem probe only once.
+fn manifest_from_probe(
+    dir: &Path,
+    deno: Result<Option<(PathBuf, DenoJson)>, (PathBuf, String)>,
+) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
     let pkg_path = dir.join("package.json");
     if pkg_path.is_file() {
         let pkg = PackageJson::load(&pkg_path)?;
-        DenoJson::load_from_dir(dir).map_err(|(_path, error)| error)?;
+        deno.map_err(|(_path, error)| error)?;
         let deps = pkg.all_dependency_names();
         let name = pkg.name.clone().unwrap_or_else(|| dir_name_fallback(dir));
         return Ok(Some((name, pkg, deps)));
     }
 
-    match DenoJson::load_from_dir(dir).map_err(|(_path, error)| error)? {
+    match deno.map_err(|(_path, error)| error)? {
         Some((_path, deno)) => {
             let pkg = deno.to_package_json();
             let name = pkg.name.clone().unwrap_or_else(|| dir_name_fallback(dir));
             Ok(Some((name, pkg, Vec::new())))
         }
         None => Ok(None),
+    }
+}
+
+/// A directory's package-manifest outcome plus its Deno import map, produced
+/// from a single `deno.json` / `deno.jsonc` filesystem probe.
+///
+/// The two fields keep the independent error semantics of the separate
+/// loaders: `manifest` matches [`load_member_package_manifest`] exactly, and
+/// `deno_import_map` matches the success case of [`load_deno_import_map`]
+/// (absent when no Deno config exists or it fails to parse). A malformed
+/// `package.json` therefore does not discard a valid colocated import map.
+#[derive(Debug)]
+pub struct DirManifestProbe {
+    /// `(name, package_json_view, dependency_names)` or the manifest parse error.
+    pub manifest: Result<Option<(String, PackageJson, Vec<String>)>, String>,
+    /// Declaring config path and sorted `(specifier, target)` import-map entries.
+    pub deno_import_map: Option<(PathBuf, Vec<(String, String)>)>,
+}
+
+/// Load a directory's package manifest and Deno import map together, probing
+/// and parsing `deno.json` / `deno.jsonc` once instead of once per consumer.
+#[must_use]
+pub fn probe_dir_manifest(dir: &Path) -> DirManifestProbe {
+    let deno = DenoJson::load_from_dir(dir);
+    let deno_import_map = match &deno {
+        Ok(Some((path, config))) => Some((path.clone(), config.import_map_entries())),
+        _ => None,
+    };
+    let manifest = manifest_from_probe(dir, deno);
+    DirManifestProbe {
+        manifest,
+        deno_import_map,
     }
 }
 

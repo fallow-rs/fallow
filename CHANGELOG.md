@@ -23,6 +23,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gets the actionable npm install remediation instead of the raw override
   error.
 
+### Performance
+
+- **Workspace discovery loads each member manifest once per run.** Directories
+  matched by more than one workspace source (identical globs in `package.json`
+  and `pnpm-workspace.yaml`, tsconfig references overlapping npm workspaces)
+  previously re-read and re-parsed `package.json` and re-probed
+  `deno.json` / `deno.jsonc` on every visit; a per-discovery memo now replays
+  the first outcome. Module resolution also probes each package's Deno config
+  once instead of twice (manifest load plus import-map load). Local criterion
+  runs of `component_config_workspace_discovery` and
+  `component_config_workspace_diagnostics` improved by about 7% and 12%.
+
+### Changed
+
+- **Faster namespace-alias propagation during graph build.** The
+  cross-package namespace alias pass no longer formats a lookup string per
+  consumer import or builds the chained re-export state machine when the
+  alias target has no `export * as` edge, cutting allocations in the hot
+  loop. The `namespace_object_alias_propagation` benchmark improves by about
+  11% locally (883 us to 780 us), recovering the regression introduced by the
+  provenance side table in 3.13.0. Analysis output is unchanged.
+
 ## [3.13.0] - 2026-08-03
 
 ### Fixed
