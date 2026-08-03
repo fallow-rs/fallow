@@ -33,7 +33,9 @@ pub use impact_closure::{
 };
 pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, ReviewUnitPaths};
 pub use re_exports::GraphReExportCycle;
-pub use types::{ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, SymbolReference};
+pub use types::{
+    ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, ReferencePathId, SymbolReference,
+};
 
 /// True when the path's final component looks like a TypeScript declaration
 /// file (`.d.ts`, `.d.mts`, `.d.cts`). Used to seed declaration files as
@@ -614,19 +616,23 @@ impl ModuleGraph {
             .is_some_and(ModuleNode::is_test_reachable)
     }
 
-    /// Return whether one test-root traversal covers this exact export reference.
+    /// Return whether one test-root traversal covers the export reference at
+    /// `reference_index` on `export`.
     ///
     /// Coverage requires one profile that reaches the referencing file and
     /// every target hop. ESM hops also require that profile not to replace the
     /// hop target; CommonJS hops remain active because Vitest replacement mocks
     /// do not intercept `require()`.
     #[must_use]
-    pub fn is_test_reference_covered(&self, reference: &SymbolReference) -> bool {
+    pub fn is_test_reference_covered(&self, export: &ExportSymbol, reference_index: usize) -> bool {
+        let Some(reference) = export.references.get(reference_index) else {
+            return false;
+        };
         if self.test_reachability_index.profile_count == 0 {
             return self.is_test_reachable(reference.from_file);
         }
 
-        let Some(path) = reference.path else {
+        let Some(path) = export.reference_path(reference_index) else {
             return false;
         };
 
@@ -638,13 +644,22 @@ impl ModuleGraph {
         )
     }
 
+    /// Return whether any reference on `export` is covered by a test-root
+    /// traversal.
+    #[must_use]
+    pub fn is_any_test_reference_covered(&self, export: &ExportSymbol) -> bool {
+        (0..export.references.len())
+            .any(|reference_index| self.is_test_reference_covered(export, reference_index))
+    }
+
     #[cfg(test)]
     fn reference_path_hops(
         &self,
-        reference: &SymbolReference,
+        export: &ExportSymbol,
+        reference_index: usize,
     ) -> Vec<(FileId, ModuleLoadMechanism)> {
         let mut hops = Vec::new();
-        let mut next = reference.path;
+        let mut next = export.reference_path(reference_index);
         while let Some(path_id) = next {
             let Some(node) = self.reference_paths.get(path_id.index()) else {
                 return Vec::new();

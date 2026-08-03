@@ -243,17 +243,42 @@ struct LitCustomElementCandidate {
     span_start: u32,
 }
 
+/// How a pending mock operation's recorded object span must be proven before
+/// the operation is trusted (issue #2082).
+///
+/// `Binding` covers `X.mock(...)` where `X` is an identifier: the span must
+/// resolve to a `vi` import from `vitest` (any local alias), a `jest` import
+/// from `@jest/globals` (any local alias), or the unresolved `jest` global.
+/// `VitestNamespace` covers `ns.vi.mock(...)`: the span must resolve to a
+/// namespace import of `vitest`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MockObjectProvenance {
+    Binding,
+    VitestNamespace,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct PendingVitestMockOperation {
     source: String,
-    vi_reference_span: Span,
-    call_start: u32,
+    /// Span of the identifier whose provenance the semantic pass must confirm
+    /// (the `vi`/`jest`/alias object, or the namespace in `ns.vi.mock`).
+    object_span: Span,
+    provenance: MockObjectProvenance,
+    call_span: Span,
+    has_factory: bool,
+    /// Aliased and namespace forms defer their dynamic-import credit edges to
+    /// `resolve_vitest_mock_operations`, where provenance is proven; literal
+    /// `vi`/`jest` objects push edges eagerly (they may be injected globals).
+    needs_deferred_edges: bool,
     proof: PendingVitestMockProof,
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum PendingVitestMockProof {
-    ClosedFactory { vi_reference_spans: Vec<Span> },
+    ClosedFactory {
+        binding_requirement_spans: Vec<Span>,
+        namespace_requirement_spans: Vec<Span>,
+    },
     UnprovenMock,
     Unmock,
 }

@@ -7,15 +7,16 @@ use crate::{
 };
 
 use super::super::{
-    ModuleInfoExtractor, PendingPlaywrightFactory, PendingVitestMockOperation,
-    PendingVitestMockProof,
+    MockObjectProvenance, ModuleInfoExtractor, PendingPlaywrightFactory,
+    PendingVitestMockOperation, PendingVitestMockProof,
 };
 use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
-    playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source,
-    vitest_mock_object_span, vitest_mock_source, vitest_replacement_candidate,
-    vitest_unmock_object_span, vitest_unmock_source,
+    mock_method_object_span, mock_object_is_literal_global, mock_replacement_candidate,
+    mock_static_target_source, playwright_extend_base_name, vi_mock_has_factory,
+    vitest_auto_mock_source,
 };
+use crate::parse::MockApiReferenceSpans;
 
 impl ModuleInfoExtractor {
     fn collect_playwright_fixture_type_bindings(&self, ty: &TSType<'_>) -> Vec<(String, String)> {
@@ -233,82 +234,136 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_vitest_mock_imports(&mut self, expr: &CallExpression<'_>) {
-        let Some(target_source) = vitest_mock_source(expr) else {
+        let Some((object_span, provenance)) = mock_method_object_span(expr, "mock") else {
+            return;
+        };
+        let Some(target_source) = mock_static_target_source(expr) else {
             return;
         };
 
+        let has_factory = vi_mock_has_factory(expr);
+        // Literal `vi`/`jest` objects may be injected globals with no import to
+        // prove provenance against, so their credit edges are pushed eagerly.
+        // Aliased and namespace forms always come from an import; their edges
+        // wait for the span-provenance check in
+        // `resolve_vitest_mock_operations` so an unrelated `x.mock("./y")`
+        // never credits a file.
+        let literal_global = mock_object_is_literal_global(expr);
+        if literal_global {
+            self.push_mock_credit_edges(&target_source, expr.span, has_factory);
+        }
+
+        let proof = mock_replacement_candidate(expr).map_or(
+            PendingVitestMockProof::UnprovenMock,
+            |candidate| PendingVitestMockProof::ClosedFactory {
+                binding_requirement_spans: candidate.binding_requirement_spans,
+                namespace_requirement_spans: candidate.namespace_requirement_spans,
+            },
+        );
+        self.pending_vitest_mock_operations
+            .push(PendingVitestMockOperation {
+                source: target_source,
+                object_span,
+                provenance,
+                call_span: expr.span,
+                has_factory,
+                needs_deferred_edges: !literal_global,
+                proof,
+            });
+    }
+
+    fn push_mock_credit_edges(
+        &mut self,
+        target_source: &str,
+        span: oxc_span::Span,
+        has_factory: bool,
+    ) {
         self.dynamic_imports.push(DynamicImportInfo {
-            source: target_source.clone(),
-            span: expr.span,
+            source: target_source.to_string(),
+            span,
             destructured_names: Vec::new(),
             local_name: None,
             is_speculative: false,
         });
 
-        if !vi_mock_has_factory(expr)
-            && let Some(mock_source) = vitest_auto_mock_source(&target_source)
-        {
+        if !has_factory && let Some(mock_source) = vitest_auto_mock_source(target_source) {
             self.dynamic_imports.push(DynamicImportInfo {
                 source: mock_source,
-                span: expr.span,
+                span,
                 destructured_names: Vec::new(),
                 local_name: Some(String::new()),
                 is_speculative: true,
             });
         }
-
-        if let Some(vi_reference_span) = vitest_mock_object_span(expr) {
-            let proof = vitest_replacement_candidate(expr).map_or(
-                PendingVitestMockProof::UnprovenMock,
-                |candidate| PendingVitestMockProof::ClosedFactory {
-                    vi_reference_spans: candidate.factory_vi_reference_spans,
-                },
-            );
-            self.pending_vitest_mock_operations
-                .push(PendingVitestMockOperation {
-                    source: target_source,
-                    vi_reference_span,
-                    call_start: expr.span.start,
-                    proof,
-                });
-        }
     }
 
     pub(super) fn record_vitest_unmock(&mut self, expr: &CallExpression<'_>) {
-        if let Some(source) = vitest_unmock_source(expr)
-            && let Some(vi_reference_span) = vitest_unmock_object_span(expr)
+        if let Some((object_span, provenance)) = mock_method_object_span(expr, "unmock")
+            && let Some(source) = mock_static_target_source(expr)
         {
             self.pending_vitest_mock_operations
                 .push(PendingVitestMockOperation {
                     source,
-                    vi_reference_span,
-                    call_start: expr.span.start,
+                    object_span,
+                    provenance,
+                    call_span: expr.span,
+                    has_factory: false,
+                    needs_deferred_edges: false,
                     proof: PendingVitestMockProof::Unmock,
                 });
         }
     }
 
-    pub(crate) fn resolve_vitest_mock_operations(
-        &mut self,
-        vitest_vi_reference_spans: &rustc_hash::FxHashSet<oxc_span::Span>,
-    ) {
+    pub(crate) fn resolve_vitest_mock_operations(&mut self, spans: &MockApiReferenceSpans) {
         let mut operations: Vec<_> = self
             .pending_vitest_mock_operations
             .drain(..)
-            .filter(|operation| vitest_vi_reference_spans.contains(&operation.vi_reference_span))
+            .filter(|operation| match operation.provenance {
+                MockObjectProvenance::Binding => {
+                    spans.mock_bindings.contains(&operation.object_span)
+                }
+                MockObjectProvenance::VitestNamespace => {
+                    spans.vitest_namespaces.contains(&operation.object_span)
+                }
+            })
             .collect();
-        operations.sort_unstable_by_key(|operation| operation.call_start);
+        operations.sort_unstable_by_key(|operation| operation.call_span.start);
+
+        // Provenance is proven now, so push the deferred credit edges for
+        // aliased and namespace mock registrations (the literal `vi`/`jest`
+        // forms already pushed theirs at record time).
+        let deferred_edges: Vec<(String, oxc_span::Span, bool)> = operations
+            .iter()
+            .filter(|operation| {
+                operation.needs_deferred_edges
+                    && !matches!(operation.proof, PendingVitestMockProof::Unmock)
+            })
+            .map(|operation| {
+                (
+                    operation.source.clone(),
+                    operation.call_span,
+                    operation.has_factory,
+                )
+            })
+            .collect();
+        for (source, span, has_factory) in deferred_edges {
+            self.push_mock_credit_edges(&source, span, has_factory);
+        }
 
         self.semantic_facts
             .extend(operations.into_iter().map(|operation| {
                 let action = match operation.proof {
-                    PendingVitestMockProof::ClosedFactory { vi_reference_spans } => {
-                        VitestModuleMockAction::Mock {
-                            factory_replaces_original: vi_reference_spans
+                    PendingVitestMockProof::ClosedFactory {
+                        binding_requirement_spans,
+                        namespace_requirement_spans,
+                    } => VitestModuleMockAction::Mock {
+                        factory_replaces_original: binding_requirement_spans
+                            .iter()
+                            .all(|span| spans.mock_bindings.contains(span))
+                            && namespace_requirement_spans
                                 .iter()
-                                .all(|span| vitest_vi_reference_spans.contains(span)),
-                        }
-                    }
+                                .all(|span| spans.vitest_namespaces.contains(span)),
+                    },
                     PendingVitestMockProof::UnprovenMock => VitestModuleMockAction::Mock {
                         factory_replaces_original: false,
                     },
@@ -316,7 +371,7 @@ impl ModuleInfoExtractor {
                 };
                 SemanticFact::VitestModuleMockOperation(VitestModuleMockOperationFact {
                     source: operation.source,
-                    call_start: operation.call_start,
+                    call_start: operation.call_span.start,
                     action,
                 })
             }));

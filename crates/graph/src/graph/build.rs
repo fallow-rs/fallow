@@ -225,6 +225,7 @@ fn build_export_symbols(resolved: Option<&ResolvedModule>) -> Vec<ExportSymbol> 
                     expected_unused_reason: e.expected_unused_reason.clone(),
                     span: e.span,
                     references: Vec::new(),
+                    reference_paths: Vec::new(),
                     members: e.members.clone(),
                 })
                 .collect()
@@ -311,6 +312,7 @@ fn push_re_export_stub(
         expected_unused_reason: None,
         span: re_export.info.span,
         references: Vec::new(),
+        reference_paths: Vec::new(),
         members: Vec::new(),
     });
 }

@@ -856,7 +856,7 @@ use crate::MemberKind;
 /// encodes literal-string indexed-access fixture types
 /// (`Factory["getter"]`) as bindings. Warm 248 caches lack those facts and
 /// keep the getter-typed fixture's target class members uncredited.
-pub(super) const CACHE_VERSION: u32 = 249;
+pub(super) const CACHE_VERSION: u32 = 250;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
