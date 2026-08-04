@@ -16,6 +16,10 @@ use fallow_config::EffectKind;
 use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
 use rustc_hash::FxHashSet;
 
+mod severity;
+
+pub use severity::{derive_security_severity, security_catalogue_title};
+
 pub const HARDCODED_SECRET_CATEGORY_ID: &str = "hardcoded-secret";
 pub const HARDCODED_SECRET_CATEGORY_TITLE: &str = "Hardcoded secret candidate";
 
