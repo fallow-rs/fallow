@@ -39,7 +39,7 @@ oxc_coverage_instrument = "0.9.0"
 # CSS AST parser (browser-grade, built on Mozilla cssparser/selectors). Pinned
 # exact because it has no stable release line and pre-release semver matching is
 # brittle. Used by fallow-extract for CSS class/import extraction and analytics.
-lightningcss = { version = "=1.0.0-alpha.71", default-features = false, features = [
+lightningcss = { version = "=1.0.0-alpha.72", default-features = false, features = [
     "visitor",
 ] }
 
