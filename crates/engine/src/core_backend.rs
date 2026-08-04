@@ -25,6 +25,10 @@ pub use fallow_core::plugins::manifest_entries::{
     CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
 };
 pub use fallow_core::plugins::registry::is_external_plugin_active;
+// Test-only: the discover_walk no-drift gate compares its hardcoded
+// config-candidate list against the registry through this adapter.
+#[cfg(test)]
+pub use fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParseMetrics {

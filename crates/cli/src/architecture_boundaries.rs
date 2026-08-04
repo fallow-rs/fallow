@@ -1514,6 +1514,7 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::plugins::PluginRegistry",
         "fallow_core::plugins::manifest_entries",
         "fallow_core::plugins::registry::is_external_plugin_active",
+        "fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames",
     ];
 
     for line in core_backend.lines() {

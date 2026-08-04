@@ -858,8 +858,7 @@ mod tests {
     /// `BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES`.
     #[test]
     fn config_candidate_basenames_match_plugin_registry() {
-        let registry_derived =
-            fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames();
+        let registry_derived = crate::core_backend::builtin_plugin_config_candidate_basenames();
         let hardcoded: Vec<String> = BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES
             .iter()
             .map(|basename| (*basename).to_string())
