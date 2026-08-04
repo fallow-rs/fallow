@@ -425,6 +425,12 @@ kind: "malformed-tsconfig"
 kind: "tsconfig-reference-dir-missing"
 } | {
 /**
+ * `serde_yaml_ng` parse error text.
+ */
+error: string
+kind: "malformed-pnpm-workspace-yaml"
+} | {
+/**
  * On-disk size of the skipped file in bytes.
  */
 size_bytes: number

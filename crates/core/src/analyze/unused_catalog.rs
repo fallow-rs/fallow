@@ -39,7 +39,8 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{
     CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, ResolvedConfig,
-    WorkspaceInfo, parse_package_json_catalog_data, parse_pnpm_catalog_data,
+    WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo, parse_package_json_catalog_data,
+    parse_pnpm_catalog_data, record_workspace_diagnostics,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
@@ -65,10 +66,11 @@ pub fn gather_pnpm_catalog_state(
 ) -> Option<PnpmCatalogState> {
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let (data, source_path) = if let Ok(yaml_source) = std::fs::read_to_string(&yaml_path) {
-        (
-            parse_pnpm_catalog_data(&yaml_source),
-            PathBuf::from(PNPM_WORKSPACE_FILE),
-        )
+        let data = parse_pnpm_catalog_data(&yaml_source).unwrap_or_else(|error| {
+            report_malformed_pnpm_workspace_yaml(&config.root, &yaml_path, error);
+            PnpmCatalogData::default()
+        });
+        (data, PathBuf::from(PNPM_WORKSPACE_FILE))
     } else {
         let package_json_path = config.root.join(PACKAGE_JSON_FILE);
         let package_json_source = std::fs::read_to_string(&package_json_path).ok()?;
@@ -86,6 +88,21 @@ pub fn gather_pnpm_catalog_state(
         consumers,
         source_path,
     })
+}
+
+/// Record the degraded-continue diagnostic for a `pnpm-workspace.yaml` that
+/// exists but fails to parse: catalog and override analysis proceeds with no
+/// entries, and the cause surfaces in `workspace_diagnostics[]` JSON and as
+/// one deduplicated stderr warning instead of being silently discarded.
+pub fn report_malformed_pnpm_workspace_yaml(root: &Path, yaml_path: &Path, error: String) {
+    record_workspace_diagnostics(
+        root,
+        vec![WorkspaceDiagnostic::new(
+            root,
+            yaml_path.to_path_buf(),
+            WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml { error },
+        )],
+    );
 }
 
 /// Emit one `UnusedCatalogEntry` for every catalog entry not referenced by any
@@ -587,6 +604,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn malformed_pnpm_workspace_yaml_records_a_diagnostic_and_empty_catalogs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "catalog:\n  react: ^18.2.0\n{this is\nnot: valid: yaml: at: all\n",
+        )
+        .expect("write pnpm-workspace.yaml");
+        let config = fallow_config::FallowConfig::default().resolve(
+            dir.path().to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        let state = gather_pnpm_catalog_state(&config, &[])
+            .expect("pnpm-workspace.yaml exists, so the pnpm source is selected");
+
+        assert!(
+            state.data.catalogs.is_empty(),
+            "a parse failure must not fabricate catalog entries"
+        );
+        let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
+        assert!(
+            diagnostics.iter().any(|d| matches!(
+                d.kind,
+                WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml { .. }
+            )),
+            "expected a malformed-pnpm-workspace-yaml diagnostic: {diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn parses_bare_catalog_as_default() {
         assert_eq!(parse_catalog_reference("catalog:"), Some("default"));
         assert_eq!(parse_catalog_reference("catalog:default"), Some("default"));
@@ -679,7 +730,8 @@ catalogs:
   react18:
     react: ^18.2.0
 ",
-        );
+        )
+        .expect("valid yaml");
         let available = collect_available_in_catalogs(&data, "react", "react17");
         assert_eq!(available, vec!["react18".to_string()]);
     }
@@ -691,7 +743,8 @@ catalogs:
 catalog:
   react: ^18.2.0
 ",
-        );
+        )
+        .expect("valid yaml");
         assert!(catalog_has_entry(&data, "default", "react"));
         assert!(!catalog_has_entry(&data, "default", "vue"));
         assert!(!catalog_has_entry(&data, "react17", "react"));

@@ -90,22 +90,21 @@ pub struct ParsedOverrideKey {
 }
 
 /// Parse the `overrides:` section of `pnpm-workspace.yaml`. Returns an empty
-/// `PnpmOverrideData` when the file has no overrides, when the YAML is
-/// malformed, or when the section is present but empty.
-#[must_use]
-pub fn parse_pnpm_workspace_overrides(source: &str) -> PnpmOverrideData {
-    let value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(source) {
-        Ok(v) => v,
-        Err(_) => return PnpmOverrideData::default(),
-    };
+/// `PnpmOverrideData` when the file has no overrides or when the section is
+/// present but empty. Malformed YAML is an `Err` carrying the parse error text
+/// so callers can surface a workspace diagnostic instead of silently dropping
+/// every entry.
+pub fn parse_pnpm_workspace_overrides(source: &str) -> Result<PnpmOverrideData, String> {
+    let value: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(source).map_err(|error| error.to_string())?;
     let Some(mapping) = value.as_mapping() else {
-        return PnpmOverrideData::default();
+        return Ok(PnpmOverrideData::default());
     };
     let Some(overrides_value) = mapping.get("overrides") else {
-        return PnpmOverrideData::default();
+        return Ok(PnpmOverrideData::default());
     };
     let Some(overrides_map) = overrides_value.as_mapping() else {
-        return PnpmOverrideData::default();
+        return Ok(PnpmOverrideData::default());
     };
 
     let line_index = build_yaml_line_index(source);
@@ -129,7 +128,7 @@ pub fn parse_pnpm_workspace_overrides(source: &str) -> PnpmOverrideData {
         })
         .collect();
 
-    PnpmOverrideData { entries }
+    Ok(PnpmOverrideData { entries })
 }
 
 /// Parse the `pnpm.overrides` section of a root `package.json`. Returns an
@@ -543,7 +542,7 @@ mod tests {
     #[test]
     fn parses_workspace_yaml_overrides() {
         let yaml = "packages:\n  - 'packages/*'\n\noverrides:\n  axios: ^1.6.0\n  \"@types/react@<18\": '18.0.0'\n  \"react>react-dom\": ^17\n";
-        let data = parse_pnpm_workspace_overrides(yaml);
+        let data = parse_pnpm_workspace_overrides(yaml).expect("valid yaml");
         assert_eq!(data.entries.len(), 3);
         assert_eq!(data.entries[0].raw_key, "axios");
         assert_eq!(data.entries[0].line, 5);
@@ -596,14 +595,15 @@ mod tests {
 
     #[test]
     fn empty_workspace_overrides_returns_no_entries() {
-        let data = parse_pnpm_workspace_overrides("overrides: {}\n");
+        let data = parse_pnpm_workspace_overrides("overrides: {}\n").expect("valid yaml");
         assert!(data.entries.is_empty());
     }
 
     #[test]
-    fn malformed_yaml_returns_no_entries() {
-        let data = parse_pnpm_workspace_overrides("{this is\nnot: valid: yaml");
-        assert!(data.entries.is_empty());
+    fn malformed_yaml_returns_the_parse_error() {
+        let error = parse_pnpm_workspace_overrides("{this is\nnot: valid: yaml")
+            .expect_err("malformed yaml surfaces the error");
+        assert!(!error.is_empty(), "error text names the syntax problem");
     }
 
     #[test]
@@ -621,7 +621,7 @@ mod tests {
     #[test]
     fn unparsable_key_carries_misconfig_signal() {
         let yaml = "overrides:\n  \">@bad-key>\": ^1.0.0\n";
-        let data = parse_pnpm_workspace_overrides(yaml);
+        let data = parse_pnpm_workspace_overrides(yaml).expect("valid yaml");
         assert_eq!(data.entries.len(), 1);
         assert!(data.entries[0].parsed_key.is_none());
         assert_eq!(

@@ -76,18 +76,16 @@ pub struct PnpmCatalogGroup {
 
 /// Parse the catalog sections of a `pnpm-workspace.yaml` file.
 ///
-/// Returns an empty `PnpmCatalogData` when the file has no catalog data, when
-/// the YAML is malformed, or when the catalog sections are present but empty.
-/// All non-catalog top-level keys (`packages`, `catalog`, `catalogs`, etc.)
-/// are ignored.
-#[must_use]
-pub fn parse_pnpm_catalog_data(source: &str) -> PnpmCatalogData {
-    let value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(source) {
-        Ok(v) => v,
-        Err(_) => return PnpmCatalogData::default(),
-    };
+/// Returns an empty `PnpmCatalogData` when the file has no catalog data or
+/// when the catalog sections are present but empty. All non-catalog top-level
+/// keys (`packages`, `catalog`, `catalogs`, etc.) are ignored. Malformed YAML
+/// is an `Err` carrying the parse error text so callers can surface a
+/// workspace diagnostic instead of silently dropping every entry.
+pub fn parse_pnpm_catalog_data(source: &str) -> Result<PnpmCatalogData, String> {
+    let value: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(source).map_err(|error| error.to_string())?;
     let Some(mapping) = value.as_mapping() else {
-        return PnpmCatalogData::default();
+        return Ok(PnpmCatalogData::default());
     };
 
     let line_index = build_line_index(source);
@@ -102,10 +100,10 @@ pub fn parse_pnpm_catalog_data(source: &str) -> PnpmCatalogData {
         &mut empty_named_catalog_groups,
     );
 
-    PnpmCatalogData {
+    Ok(PnpmCatalogData {
         catalogs,
         empty_named_catalog_groups,
-    }
+    })
 }
 
 /// Push the default pnpm catalog when it contains package entries.
@@ -694,7 +692,7 @@ mod tests {
     #[test]
     fn parses_default_catalog() {
         let yaml = "packages:\n  - 'packages/*'\n\ncatalog:\n  react: ^18.2.0\n  is-even: ^1.0.0\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs.len(), 1);
         let default = &data.catalogs[0];
         assert_eq!(default.name, "default");
@@ -813,7 +811,7 @@ mod tests {
     #[test]
     fn parses_named_catalogs() {
         let yaml = "catalogs:\n  react17:\n    react: ^17.0.2\n    react-dom: ^17.0.2\n  ui:\n    headlessui: ^2.0.0\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs.len(), 2);
         assert_eq!(data.catalogs[0].name, "react17");
         assert_eq!(data.catalogs[0].entries.len(), 2);
@@ -828,7 +826,7 @@ mod tests {
     #[test]
     fn handles_default_and_named_together() {
         let yaml = "catalog:\n  react: ^18\n\ncatalogs:\n  legacy:\n    react: ^17\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs.len(), 2);
         assert_eq!(data.catalogs[0].name, "default");
         assert_eq!(data.catalogs[0].entries[0].line, 2);
@@ -839,7 +837,7 @@ mod tests {
     #[test]
     fn handles_quoted_keys() {
         let yaml = "catalog:\n  \"@scope/lib\": ^1.0.0\n  'my-pkg': ^2.0.0\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         let default = &data.catalogs[0];
         assert_eq!(default.entries[0].package_name, "@scope/lib");
         assert_eq!(default.entries[0].line, 2);
@@ -850,7 +848,7 @@ mod tests {
     #[test]
     fn handles_inline_comments() {
         let yaml = "catalog:\n  react: ^18  # pin until #1234\n  is-even: ^1.0\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs[0].entries.len(), 2);
         assert_eq!(data.catalogs[0].entries[0].package_name, "react");
         assert_eq!(data.catalogs[0].entries[1].package_name, "is-even");
@@ -860,7 +858,7 @@ mod tests {
     #[test]
     fn handles_four_space_indentation() {
         let yaml = "catalog:\n    react: ^18.2.0\n    vue: ^3.4.0\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs[0].entries.len(), 2);
         assert_eq!(data.catalogs[0].entries[0].line, 2);
         assert_eq!(data.catalogs[0].entries[1].line, 3);
@@ -869,7 +867,7 @@ mod tests {
     #[test]
     fn empty_catalog_returns_no_catalogs() {
         let yaml = "catalog: {}\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert!(data.catalogs.is_empty());
         assert!(data.empty_named_catalog_groups.is_empty());
     }
@@ -877,7 +875,7 @@ mod tests {
     #[test]
     fn tracks_empty_named_catalog_groups() {
         let yaml = "catalog:\n  react: ^18\n\ncatalogs:\n  react17: {}\n  legacy:\n    # retained note\n  vue3:\n    vue: ^3.4.0\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs.len(), 2);
         let empty: Vec<_> = data
             .empty_named_catalog_groups
@@ -890,27 +888,27 @@ mod tests {
     #[test]
     fn no_catalog_keys_returns_no_catalogs() {
         let yaml = "packages:\n  - 'packages/*'\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert!(data.catalogs.is_empty());
     }
 
     #[test]
-    fn malformed_yaml_returns_no_catalogs() {
+    fn malformed_yaml_returns_the_parse_error() {
         let yaml = "{this is\nnot: valid: yaml: at: all";
-        let data = parse_pnpm_catalog_data(yaml);
-        assert!(data.catalogs.is_empty());
+        let error = parse_pnpm_catalog_data(yaml).expect_err("malformed yaml surfaces the error");
+        assert!(!error.is_empty(), "error text names the syntax problem");
     }
 
     #[test]
     fn empty_input_returns_no_catalogs() {
-        let data = parse_pnpm_catalog_data("");
+        let data = parse_pnpm_catalog_data("").expect("empty input is valid yaml");
         assert!(data.catalogs.is_empty());
     }
 
     #[test]
     fn handles_object_form_entries() {
         let yaml = "catalog:\n  react:\n    specifier: ^18.2.0\n  vue: ^3.4.0\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs[0].entries.len(), 2);
         let names: Vec<_> = data.catalogs[0]
             .entries
@@ -924,7 +922,7 @@ mod tests {
     #[test]
     fn skips_packages_section() {
         let yaml = "packages:\n  - 'apps/*'\n  - 'libs/*'\ncatalog:\n  react: ^18\n";
-        let data = parse_pnpm_catalog_data(yaml);
+        let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs.len(), 1);
         assert_eq!(data.catalogs[0].entries[0].line, 5);
     }

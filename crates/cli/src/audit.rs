@@ -596,8 +596,9 @@ fn can_reuse_current_as_base(
                 reader.insert(spawned)
             }
         };
-        let Some(base) = reader.read(base_ref, relative) else {
-            return false;
+        let base = match reader.read(base_ref, relative) {
+            BaseRead::Content(base) => base,
+            BaseRead::Missing | BaseRead::Error => return false,
         };
         if current == base {
             continue;
@@ -615,8 +616,8 @@ fn can_reuse_current_as_base(
 /// Requests and responses are strictly lockstep (one request line, one
 /// response) to avoid pipe-buffer deadlock. Per-file comparison semantics are
 /// byte-identical to the previous `git show` path: a missing object yields
-/// `None` (treated as not reusable), and content is read with lossy UTF-8
-/// conversion to match `String::from_utf8_lossy`.
+/// [`BaseRead::Missing`], and content is read with lossy UTF-8 conversion to
+/// match `String::from_utf8_lossy`.
 ///
 /// The child is owned through a [`ScopedChild`](crate::signal::ScopedChild) so
 /// an interrupt (SIGINT/SIGTERM) during a large reuse loop kills the long-lived
@@ -660,42 +661,73 @@ impl BaseFileReader {
     /// Read the base version of `relative` at `base_ref`.
     ///
     /// Writes one `<base_ref>:<path>` request line (forward-slash separators)
-    /// and reads exactly one response in lockstep. Returns `None` if the object
-    /// is missing (the ` missing` header path), on any parse or IO error, or if
-    /// the path contains a newline (which would corrupt the request stream).
-    fn read(&mut self, base_ref: &str, relative: &Path) -> Option<String> {
+    /// and reads exactly one response in lockstep. A ` missing` header yields
+    /// [`BaseRead::Missing`]; any parse or IO error, or a path containing a
+    /// newline (which would corrupt the request stream), yields
+    /// [`BaseRead::Error`].
+    fn read(&mut self, base_ref: &str, relative: &Path) -> BaseRead {
         use std::io::{BufRead, Read};
 
         let relative = relative.to_string_lossy().replace('\\', "/");
         // A newline in the path cannot be expressed as a single batch request
-        // line; treat it as not reusable rather than writing a corrupt request.
+        // line; treat it as an error rather than writing a corrupt request.
         if relative.contains('\n') {
-            return None;
+            return BaseRead::Error;
         }
 
-        let stdin = self.stdin.as_mut()?;
-        writeln!(stdin, "{base_ref}:{relative}").ok()?;
-        stdin.flush().ok()?;
+        let Some(stdin) = self.stdin.as_mut() else {
+            return BaseRead::Error;
+        };
+        if writeln!(stdin, "{base_ref}:{relative}").is_err() || stdin.flush().is_err() {
+            return BaseRead::Error;
+        }
 
         let mut header = String::new();
-        if self.stdout.read_line(&mut header).ok()? == 0 {
-            return None;
+        if !matches!(self.stdout.read_line(&mut header), Ok(n) if n > 0) {
+            return BaseRead::Error;
         }
         // `git cat-file --batch` reports a missing object as `<spec> missing\n`.
         if header.trim_end().ends_with(" missing") {
-            return None;
+            return BaseRead::Missing;
         }
         // Otherwise the header is `<oid> <type> <size>\n`; parse the size.
-        let size: usize = header.trim_end().rsplit(' ').next()?.parse().ok()?;
+        let Some(size) = header
+            .trim_end()
+            .rsplit(' ')
+            .next()
+            .and_then(|raw| raw.parse::<usize>().ok())
+        else {
+            return BaseRead::Error;
+        };
         let mut buf = vec![0u8; size];
-        self.stdout.read_exact(&mut buf).ok()?;
+        if self.stdout.read_exact(&mut buf).is_err() {
+            return BaseRead::Error;
+        }
         // Consume the single trailing newline that follows the object content.
         // An off-by-one here corrupts every subsequent read in the batch.
         let mut newline = [0u8; 1];
-        self.stdout.read_exact(&mut newline).ok()?;
+        if self.stdout.read_exact(&mut newline).is_err() {
+            return BaseRead::Error;
+        }
 
-        Some(String::from_utf8_lossy(&buf).into_owned())
+        BaseRead::Content(String::from_utf8_lossy(&buf).into_owned())
     }
+}
+
+/// Outcome of one batched base-file read. Distinguishing "the object does not
+/// exist at base" from "the pipe or parse failed" keeps a transient
+/// `git cat-file` failure from masquerading as an empty base file, which would
+/// fabricate weakening signals for every pre-existing suppression and test.
+enum BaseRead {
+    /// The object exists at base; lossy UTF-8 content.
+    Content(String),
+    /// `git cat-file` reported the object as ` missing`: the file is new
+    /// relative to base.
+    Missing,
+    /// A pipe write/read or header parse failed (or the path cannot be
+    /// requested). The request/response lockstep may be broken, so subsequent
+    /// reads from this reader are unreliable.
+    Error,
 }
 
 impl Drop for BaseFileReader {
@@ -1765,8 +1797,11 @@ fn compute_brief_e3_data(
 
 /// Run the weakening-signal pass over the changed files: read each file's base
 /// content via [`BaseFileReader`], diff it against the on-disk head content, and
-/// emit a [`weakening::WeakeningSignal`] per detected weakening. Best-effort: a
-/// file whose base or head cannot be read is skipped silently.
+/// emit a [`weakening::WeakeningSignal`] per detected weakening. Best-effort,
+/// but a read FAILURE is never conflated with empty content: a file deleted at
+/// head or absent at base scans against `""` (the intended removed/new-file
+/// signals), an unreadable head file is skipped, and a base-reader error stops
+/// the scan for the remaining files (the batch pipe is no longer trustworthy).
 fn compute_weakening_signals(
     root: &Path,
     base_ref: &str,
@@ -1789,10 +1824,23 @@ fn compute_weakening_signals(
             continue;
         };
         let rel_str = relative.to_string_lossy().replace('\\', "/");
-        let head = std::fs::read_to_string(abs).unwrap_or_default();
-        let base = reader.read(base_ref, relative).unwrap_or_default();
-        // A net-new file (no base) or a non-source file still gets the scan; the
-        // detectors are no-ops on irrelevant content.
+        // A file deleted at head scans against empty content (the intended
+        // removed-tests signal); any other read failure skips the file so an
+        // unreadable file is never reported as removed content.
+        let head = match std::fs::read(abs) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(_) => continue,
+        };
+        let base = match reader.read(base_ref, relative) {
+            BaseRead::Content(base) => base,
+            // A net-new file (no base) or a non-source file still gets the
+            // scan; the detectors are no-ops on irrelevant content.
+            BaseRead::Missing => String::new(),
+            // The batch pipe is in an undefined state after an IO/parse
+            // error; stop instead of scanning the remaining files against "".
+            BaseRead::Error => break,
+        };
 
         signals.extend(weakening_signals_for_file(&rel_str, &base, &head));
     }

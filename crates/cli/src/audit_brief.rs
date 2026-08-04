@@ -900,14 +900,22 @@ pub fn print_walkthrough_guide_result(
 ///
 /// A path that cannot be read yields an empty agent payload (default `""` hash),
 /// which never matches the current hash, so it is refused as stale, the safe
-/// direction: a missing or garbled agent file never accepts a judgment.
+/// direction: a missing or garbled agent file never accepts a judgment. The
+/// read error itself is reported on stderr naming the failing path, so a typo'd
+/// path is not misdiagnosed as a moved tree.
 #[must_use]
 pub fn print_walkthrough_file_result(
     result: &AuditResult,
     path: &std::path::Path,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    let contents = std::fs::read_to_string(path).unwrap_or_default();
+    let contents = std::fs::read_to_string(path).unwrap_or_else(|error| {
+        eprintln!(
+            "fallow: cannot read walkthrough file '{}': {error}",
+            path.display()
+        );
+        String::new()
+    });
     let agent = crate::audit_walkthrough::parse_agent_walkthrough(&contents);
     let surface = result.decision_surface.clone().unwrap_or_default();
     let current_hash = result.graph_snapshot_hash.clone().unwrap_or_default();

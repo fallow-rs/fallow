@@ -99,8 +99,16 @@ pub fn gather_pnpm_override_state(
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let workspace_yaml_data = std::fs::read_to_string(&yaml_path)
         .ok()
-        .as_deref()
-        .map(parse_pnpm_workspace_overrides)
+        .map(|yaml_source| {
+            parse_pnpm_workspace_overrides(&yaml_source).unwrap_or_else(|error| {
+                super::unused_catalog::report_malformed_pnpm_workspace_yaml(
+                    &config.root,
+                    &yaml_path,
+                    error,
+                );
+                PnpmOverrideData::default()
+            })
+        })
         .unwrap_or_default();
 
     let root_pkg_path = config.root.join(ROOT_PACKAGE_JSON);

@@ -55,6 +55,14 @@ pub enum WorkspaceDiagnosticKind {
     /// `tsconfig.json` lists a `references[].path` that does not point to an
     /// existing directory.
     TsconfigReferenceDirMissing,
+    /// `pnpm-workspace.yaml` exists but failed to parse as YAML. Catalog and
+    /// dependency-override analysis proceeds with no entries (degraded), so
+    /// `catalog:`-referenced dependencies may be misclassified until the
+    /// syntax is fixed.
+    MalformedPnpmWorkspaceYaml {
+        /// `serde_yaml_ng` parse error text.
+        error: String,
+    },
     /// A source file was skipped at discovery because it exceeds the configured
     /// per-file size limit (`--max-file-size` / `FALLOW_MAX_FILE_SIZE`, default
     /// 5 MB). The file is never read, parsed, or analyzed, guarding against the
@@ -94,6 +102,7 @@ impl WorkspaceDiagnosticKind {
             Self::GlobMatchedNoPackageJson { .. } => "glob-matched-no-package-json",
             Self::MalformedTsconfig { .. } => "malformed-tsconfig",
             Self::TsconfigReferenceDirMissing => "tsconfig-reference-dir-missing",
+            Self::MalformedPnpmWorkspaceYaml { .. } => "malformed-pnpm-workspace-yaml",
             Self::SkippedLargeFile { .. } => "skipped-large-file",
             Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
             Self::SourceReadFailure { .. } => "source-read-failure",
@@ -244,6 +253,10 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => format!(
             "tsconfig.json references '{display}' but the directory does not exist. \
              Update or remove the reference, or restore the missing directory."
+        ),
+        WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml { error } => format!(
+            "'{display}' failed to parse ({error}); catalog and override entries \
+             will be ignored. Fix the YAML syntax."
         ),
         WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes } => format!(
             "Skipped '{display}' ({size}): exceeds the max file size limit. \

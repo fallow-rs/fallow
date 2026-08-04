@@ -10623,6 +10623,24 @@
         {
           "type": "object",
           "properties": {
+            "error": {
+              "type": "string",
+              "description": "`serde_yaml_ng` parse error text."
+            },
+            "kind": {
+              "type": "string",
+              "const": "malformed-pnpm-workspace-yaml"
+            }
+          },
+          "required": [
+            "kind",
+            "error"
+          ],
+          "description": "`pnpm-workspace.yaml` exists but failed to parse as YAML. Catalog and\ndependency-override analysis proceeds with no entries (degraded), so\n`catalog:`-referenced dependencies may be misclassified until the\nsyntax is fixed."
+        },
+        {
+          "type": "object",
+          "properties": {
             "size_bytes": {
               "type": "integer",
               "description": "On-disk size of the skipped file in bytes."

@@ -3208,6 +3208,48 @@ fn e5_walkthrough_guide_pins_a_deterministic_snapshot_hash() {
     assert_eq!(again["graph_snapshot_hash"], guide["graph_snapshot_hash"]);
 }
 
+/// A nonexistent `--walkthrough-file` path still refuses the whole payload
+/// (nothing is accepted), but the real cause is named on stderr instead of
+/// leaving the stale-snapshot refusal as the only, misleading signal.
+#[test]
+fn e5_unreadable_walkthrough_file_names_the_read_error_on_stderr() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let missing = tmp.path().join("no_such_agent.json");
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough-file",
+        missing.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "walkthrough-file always exits 0. stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("cannot read walkthrough file"),
+        "stderr names the read failure: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("no_such_agent.json"),
+        "stderr names the failing path: {}",
+        output.stderr
+    );
+    let validation = parse_json(&output);
+    assert_eq!(
+        validation["stale"], true,
+        "an unreadable file never accepts a judgment"
+    );
+    assert_eq!(validation["accepted_count"], 0);
+}
+
 /// The guide emits per-hunk `change_anchors` from the committed diff, and a
 /// judgment citing one (with NO signal_id) is ACCEPTED with `anchor_kind: change`,
 /// the weaker region-level anchor. End-to-end through the real binary, so the

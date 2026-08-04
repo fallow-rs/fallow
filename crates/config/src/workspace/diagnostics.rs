@@ -407,6 +407,19 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
     }
 }
 
+/// Append `diagnostics` to the registry for `root` AND emit their deduplicated
+/// stderr warnings, for analysis-stage callers outside this crate (e.g. the
+/// pnpm catalog/override gathers in `fallow-core`) that surface a diagnostic
+/// after config load completed. [`append_workspace_diagnostics`] alone would
+/// reach `workspace_diagnostics[]` JSON but never warn a human on stderr.
+pub fn record_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagnostic>) {
+    if diagnostics.is_empty() {
+        return;
+    }
+    emit_diagnostics(root, &diagnostics);
+    append_workspace_diagnostics(root, diagnostics);
+}
+
 /// Replace source-read-failure diagnostics for `root` with the failures from
 /// the current parse while preserving every workspace and discovery diagnostic
 /// produced by other stages.
