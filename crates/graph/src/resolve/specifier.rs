@@ -215,7 +215,7 @@ fn resolve_root_relative_from_dir(
     if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
         return Some(ResolveResult::InternalModule(file_id));
     }
-    let canonical = dunce::canonicalize(resolved_path).ok()?;
+    let canonical = ctx.canonicalize_cache.get(resolved_path)?;
     if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
         return Some(ResolveResult::InternalModule(file_id));
     }
@@ -483,7 +483,7 @@ fn resolve_filesystem_path(ctx: &ResolveContext<'_>, path: &Path) -> Option<Reso
     if let Some(&file_id) = ctx.raw_path_to_id.get(path) {
         return Some(ResolveResult::InternalModule(file_id));
     }
-    let canonical = dunce::canonicalize(path).ok()?;
+    let canonical = ctx.canonicalize_cache.get(path)?;
     if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
         return Some(ResolveResult::InternalModule(file_id));
     }
@@ -996,7 +996,7 @@ fn resolve_tsconfig_alias_candidate(
     if let Some(&file_id) = ctx.raw_path_to_id.get(candidate) {
         return Some(ResolveResult::InternalModule(file_id));
     }
-    if let Ok(canonical) = dunce::canonicalize(candidate) {
+    if let Some(canonical) = ctx.canonicalize_cache.get(candidate) {
         if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
             return Some(ResolveResult::InternalModule(file_id));
         }
@@ -1193,7 +1193,7 @@ fn try_style_condition_package_resolution(
         return Some(ResolveResult::NpmPackage(pkg_name));
     }
 
-    if let Ok(canonical) = dunce::canonicalize(resolved_path) {
+    if let Some(canonical) = ctx.canonicalize_cache.get(resolved_path) {
         return Some(resolve_style_canonical_path(
             ctx, from_file, specifier, from_style, canonical,
         ));

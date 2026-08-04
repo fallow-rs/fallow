@@ -53,7 +53,7 @@ pub(super) fn try_path_alias_fallback(
             if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
                 return Some(ResolveResult::InternalModule(file_id));
             }
-            if let Ok(canonical) = dunce::canonicalize(resolved_path) {
+            if let Some(canonical) = ctx.canonicalize_cache.get(resolved_path) {
                 if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
                     return Some(ResolveResult::InternalModule(file_id));
                 }
@@ -171,7 +171,7 @@ fn try_resolve_scss(
     if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
         return Some(ResolveResult::InternalModule(file_id));
     }
-    if let Ok(canonical) = dunce::canonicalize(resolved_path)
+    if let Some(canonical) = ctx.canonicalize_cache.get(resolved_path)
         && let Some(&file_id) = ctx.path_to_id.get(canonical.as_path())
     {
         return Some(ResolveResult::InternalModule(file_id));
@@ -298,7 +298,7 @@ fn lookup_scss_path(candidate: &Path, ctx: &ResolveContext<'_>) -> Option<FileId
     if let Some(&file_id) = ctx.raw_path_to_id.get(candidate) {
         return Some(file_id);
     }
-    if let Ok(canonical) = dunce::canonicalize(candidate) {
+    if let Some(canonical) = ctx.canonicalize_cache.get(candidate) {
         if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
             return Some(file_id);
         }
@@ -517,7 +517,7 @@ pub(super) fn try_relative_package_root_source_fallback(
     let candidate = from_dir.join(specifier);
     let normalized_candidate = normalize_path_lexically(&candidate);
     #[cfg(not(miri))]
-    let canonical_candidate = dunce::canonicalize(&candidate).ok();
+    let canonical_candidate = ctx.canonicalize_cache.get(&candidate);
     #[cfg(miri)]
     let canonical_candidate: Option<PathBuf> = None;
 
@@ -836,7 +836,7 @@ pub(super) fn lookup_internal_file_id(
         return Some(file_id);
     }
     #[cfg(not(miri))]
-    if let Ok(canonical) = dunce::canonicalize(candidate) {
+    if let Some(canonical) = ctx.canonicalize_cache.get(candidate) {
         if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
             return Some(file_id);
         }
@@ -1075,7 +1075,7 @@ fn resolve_workspace_self_reference(
             package_name,
         });
     }
-    if let Ok(canonical) = dunce::canonicalize(resolved_path) {
+    if let Some(canonical) = ctx.canonicalize_cache.get(resolved_path) {
         if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
             return Some(ResolveResult::InternalPackageModule {
                 file_id,
