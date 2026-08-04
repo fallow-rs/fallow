@@ -4,7 +4,6 @@
 //! coverage against deployed bundle paths; source maps uploaded here let the
 //! cloud resolver map those positions back to original source files.
 
-use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -17,10 +16,11 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
-    NETWORK_EXIT_CODE, ResponseBodyReader, api_url, parse_error_envelope, response_message_suffix,
+    NETWORK_EXIT_CODE, ResponseBodyReader, parse_error_envelope, response_message_suffix,
     retry_delay_for_status, sanitize_network_error, should_retry_status,
     try_api_agent_with_timeout,
 };
+use crate::coverage::upload_common::{self, take_last_two_segments, url_encode_path_segment};
 
 const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
 const DEFAULT_ENDPOINT: &str = "https://api.fallow.cloud";
@@ -198,20 +198,6 @@ fn parse_repo_name_from_url(url: &str) -> Option<String> {
         return Some(project_id);
     }
     None
-}
-
-fn take_last_two_segments(path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = path
-        .trim_end_matches('/')
-        .split('/')
-        .filter(|segment| !segment.trim().is_empty())
-        .collect();
-    if parts.len() < 2 {
-        return None;
-    }
-    let repo = parts.pop()?.trim();
-    let owner = parts.pop()?.trim();
-    (!owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
 }
 
 fn validate_repo_name(repo: &str) -> Result<&str, UploadSourceMapsError> {
@@ -917,7 +903,7 @@ fn send_source_map(
     api_key: &str,
     map: &PreparedSourceMap,
 ) -> Result<SourceMapUploadEnvelope, UploadAttemptError> {
-    let url = endpoint_url(endpoint_override, repo);
+    let url = upload_common::endpoint_url(endpoint_override, repo, "source-maps");
     let payload = SourceMapRequest {
         git_sha,
         file_name: &map.candidate.file_name,
@@ -964,14 +950,6 @@ fn send_source_map(
     })
 }
 
-fn endpoint_url(override_endpoint: Option<&str>, repo: &str) -> String {
-    let path = format!("/v1/coverage/{}/source-maps", url_encode_path_segment(repo));
-    match override_endpoint {
-        Some(base) => format!("{}{path}", base.trim().trim_end_matches('/')),
-        None => api_url(&path),
-    }
-}
-
 fn display_endpoint_url(override_endpoint: Option<&str>, repo: &str) -> String {
     let base = override_endpoint.map_or_else(
         || {
@@ -989,25 +967,6 @@ fn display_endpoint_url(override_endpoint: Option<&str>, repo: &str) -> String {
         "{base}/v1/coverage/{}/source-maps",
         url_encode_path_segment(repo)
     )
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "formatting percent-encoded bytes into String is infallible"
-)]
-fn url_encode_path_segment(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => {
-                write!(out, "%{byte:02X}").expect("writing to String never fails");
-            }
-        }
-    }
-    out
 }
 
 fn classify_http_error(status: u16, body: &str) -> String {
@@ -1476,14 +1435,6 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_url_encodes_repo_as_one_segment() {
-        assert_eq!(
-            endpoint_url(Some("http://localhost:3000"), "owner/repo"),
-            "http://localhost:3000/v1/coverage/owner%2Frepo/source-maps"
-        );
-    }
-
-    #[test]
     fn classify_http_errors_matches_spec_messages() {
         assert_eq!(
             classify_http_error(401, ""),
@@ -1615,20 +1566,6 @@ mod tests {
     }
 
     #[test]
-    fn take_last_two_segments_needs_two_nonempty_segments() {
-        assert_eq!(take_last_two_segments("widgets"), None);
-        assert_eq!(
-            take_last_two_segments("acme/widgets"),
-            Some("acme/widgets".to_owned())
-        );
-        // Trailing slashes and empty interior segments are ignored.
-        assert_eq!(
-            take_last_two_segments("group/acme/widgets/"),
-            Some("acme/widgets".to_owned())
-        );
-    }
-
-    #[test]
     fn resolve_repo_name_reads_package_json_repository_url() {
         let dir = tempdir().expect("tempdir");
         std::fs::write(
@@ -1692,14 +1629,6 @@ mod tests {
             prepare_source_map(&missing),
             MapOutcome::Failed { kind: FailureKind::Validation, ref reason, .. } if reason.contains("read failed")
         ));
-    }
-
-    #[test]
-    fn url_encode_path_segment_percent_encodes_reserved_bytes() {
-        assert_eq!(url_encode_path_segment("owner/repo"), "owner%2Frepo");
-        // Unreserved characters pass through unchanged.
-        assert_eq!(url_encode_path_segment("a-b_c.d~e"), "a-b_c.d~e");
-        assert_eq!(url_encode_path_segment("a b"), "a%20b");
     }
 
     #[test]

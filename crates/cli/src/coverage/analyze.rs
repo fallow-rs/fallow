@@ -15,6 +15,7 @@ use crate::coverage::cloud_client::{
     CloudError, CloudNeverCalledSource, CloudRequest, CloudRuntimeContext, CloudRuntimeFunction,
     CloudRuntimeProvenance, CloudRuntimeWarning, CloudTrackingState, fetch_runtime_context,
 };
+use crate::coverage::upload_common::parse_git_remote_to_project_id;
 use crate::error::emit_error;
 use crate::health::HealthOptions;
 use fallow_output::{
@@ -292,32 +293,6 @@ fn git_origin_project_id(root: &Path) -> Option<String> {
         return None;
     }
     parse_git_remote_to_project_id(String::from_utf8_lossy(&output.stdout).trim())
-}
-
-fn parse_git_remote_to_project_id(url: &str) -> Option<String> {
-    let stripped_suffix = url.trim().trim_end_matches(".git");
-    if let Some((_, path)) = stripped_suffix.split_once(':')
-        && let Some(project_id) = take_last_two_segments(path)
-    {
-        return Some(project_id);
-    }
-    if let Some(path_part) = stripped_suffix.split("://").nth(1)
-        && let Some((_, tail)) = path_part.split_once('/')
-        && let Some(project_id) = take_last_two_segments(tail)
-    {
-        return Some(project_id);
-    }
-    None
-}
-
-fn take_last_two_segments(path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.len() < 2 {
-        return None;
-    }
-    let repo = parts.pop()?;
-    let owner = parts.pop()?;
-    Some(format!("{owner}/{repo}"))
 }
 
 fn emit_cloud_error(err: &CloudError, output: OutputFormat) -> ExitCode {
@@ -1572,33 +1547,6 @@ mod tests {
                 .expect("explicit repo should resolve"),
             "fallow-rs/fallow"
         );
-    }
-
-    #[test]
-    fn parse_git_remote_https() {
-        assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_ssh_and_nested_paths() {
-        assert_eq!(
-            parse_git_remote_to_project_id("git@github.com:fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-        assert_eq!(
-            parse_git_remote_to_project_id("ssh://git@gitlab.com/group/subgroup/repo.git"),
-            Some("subgroup/repo".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_rejects_incomplete_urls() {
-        assert_eq!(parse_git_remote_to_project_id("git@github.com:owner"), None);
-        assert_eq!(parse_git_remote_to_project_id("https://github.com"), None);
-        assert_eq!(parse_git_remote_to_project_id("not a remote"), None);
     }
 
     #[test]

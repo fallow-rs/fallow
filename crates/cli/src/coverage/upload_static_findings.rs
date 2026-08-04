@@ -23,7 +23,7 @@
 //! This subcommand is a paid-tier workflow. It runs only when the user invokes
 //! it explicitly; no other fallow command touches the network.
 
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use colored::Colorize as _;
 
 use crate::api::{
-    NETWORK_EXIT_CODE, ParsedErrorEnvelope, ResponseBodyReader, actionable_error_hint, api_url,
+    NETWORK_EXIT_CODE, ParsedErrorEnvelope, ResponseBodyReader, actionable_error_hint,
     parse_error_envelope, response_message_suffix, sanitize_network_error,
     try_api_agent_with_timeout,
 };
@@ -200,7 +200,8 @@ fn run_inner(
         return Ok(());
     }
 
-    let api_key = resolve_api_key(args)?;
+    let api_key =
+        upload_common::resolve_api_key(args.api_key.as_deref()).map_err(UploadError::Validation)?;
     upload(
         &project_id,
         args.api_endpoint.as_deref(),
@@ -327,69 +328,13 @@ struct StaticFindingsResponseEnvelope {
     data: StaticFindingsResponseData,
 }
 
-fn resolve_api_key(args: &UploadStaticFindingsArgs) -> Result<String, UploadError> {
-    if let Some(explicit) = args.api_key.as_deref() {
-        let trimmed = explicit.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    if let Ok(from_env) = std::env::var("FALLOW_API_KEY") {
-        let trimmed = from_env.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    Err(UploadError::Validation(
-        "no API key. Set $FALLOW_API_KEY or pass --api-key <KEY>. Generate at \
-         https://fallow.cloud/settings#api-keys."
-            .to_owned(),
-    ))
-}
-
-fn endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
-    let path = format!(
-        "/v1/coverage/{}/static-findings",
-        url_encode_path_segment(project_id)
-    );
-    match override_endpoint {
-        Some(base) => format!("{}{path}", base.trim().trim_end_matches('/')),
-        None => api_url(&path),
-    }
-}
-
-/// URL-encode the `{repo}` path segment.
-///
-/// Project IDs can be bare (`fallow-cloud-api`) or slash-scoped
-/// (`acme/widgets`), but the server receives them as a single percent-encoded
-/// segment under `/v1/coverage/{repo}/static-findings`, so `/` must be encoded
-/// too.
-#[expect(
-    clippy::expect_used,
-    reason = "formatting percent-encoded bytes into String is infallible"
-)]
-fn url_encode_path_segment(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => {
-                write!(out, "%{byte:02X}").expect("writing to String never fails");
-            }
-        }
-    }
-    out
-}
-
 fn upload(
     project_id: &str,
     endpoint_override: Option<&str>,
     api_key: &str,
     payload: &StaticFindingsRequest<'_>,
 ) -> Result<(), UploadError> {
-    let url = endpoint_url(endpoint_override, project_id);
+    let url = upload_common::endpoint_url(endpoint_override, project_id, "static-findings");
     println!(
         "{LOG_PREFIX}: uploading {} findings for {project_id} @ {}",
         format_count(payload.findings.len()),
@@ -567,9 +512,7 @@ impl AnalysisLike for fallow_types::results::AnalysisResults {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coverage::upload_common::{
-        GIT_SHA_MAX_LEN, parse_git_remote_to_project_id, validate_project_id,
-    };
+    use crate::coverage::upload_common::GIT_SHA_MAX_LEN;
     use fallow_config::FallowConfig;
     use std::path::PathBuf;
     use std::process::Command;
@@ -627,67 +570,6 @@ mod tests {
         assert!(
             formatted_bare.contains("api_key: None"),
             "expected None for unset api_key, got: {formatted_bare}"
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_https_with_dot_git() {
-        assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_ssh_colon_shape() {
-        assert_eq!(
-            parse_git_remote_to_project_id("git@github.com:fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_protocol_shape() {
-        assert_eq!(
-            parse_git_remote_to_project_id("ssh://git@gitlab.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-        assert_eq!(parse_git_remote_to_project_id("not-a-remote"), None);
-    }
-
-    #[test]
-    fn validate_project_id_accepts_owner_repo_and_bare() {
-        assert!(validate_project_id("fallow-rs/fallow").is_ok());
-        assert!(validate_project_id("fallow-cloud-api").is_ok());
-    }
-
-    #[test]
-    fn validate_project_id_rejects_path_traversal_and_empty() {
-        assert!(validate_project_id("../etc/passwd").is_err());
-        assert!(validate_project_id("acme/../secret").is_err());
-        assert!(validate_project_id("").is_err());
-    }
-
-    #[test]
-    fn url_encode_path_segment_encodes_slash() {
-        assert_eq!(
-            url_encode_path_segment("fallow-rs/fallow"),
-            "fallow-rs%2Ffallow"
-        );
-        assert_eq!(url_encode_path_segment("a b"), "a%20b");
-    }
-
-    #[test]
-    fn endpoint_url_builds_static_findings_path() {
-        let url = endpoint_url(Some("http://127.0.0.1:3000"), "a/b");
-        assert_eq!(
-            url,
-            "http://127.0.0.1:3000/v1/coverage/a%2Fb/static-findings"
-        );
-        let trimmed = endpoint_url(Some("http://127.0.0.1:3000/"), "a/b");
-        assert_eq!(
-            trimmed,
-            "http://127.0.0.1:3000/v1/coverage/a%2Fb/static-findings"
         );
     }
 

@@ -36,7 +36,7 @@ pub use upload_static_findings::UploadStaticFindingsArgs;
 
 mod analyze;
 mod cloud_client;
-mod upload_common;
+pub mod upload_common;
 mod upload_inventory;
 mod upload_source_maps;
 mod upload_static_findings;

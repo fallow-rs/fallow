@@ -3,10 +3,11 @@
 //! This is intentionally the only runtime-coverage module that talks to the
 //! network. Local `health --runtime-coverage` analysis stays disk-only.
 
-use std::fmt::{self, Write as _};
+use std::fmt;
 
 use serde::Deserialize;
 
+use super::upload_common::url_encode_path_segment;
 use crate::api::{
     NETWORK_EXIT_CODE, api_url, parse_error_envelope, sanitize_network_error,
     try_api_agent_with_timeout,
@@ -411,25 +412,6 @@ fn network_message(detail: &str) -> String {
     format!(
         "Could not reach fallow.cloud for cloud runtime coverage{suffix}.\n\nCloud mode is explicitly network-backed. Local runtime coverage still works:\n\n  fallow coverage analyze --runtime-coverage ./coverage"
     )
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "formatting percent-encoded bytes into String is infallible"
-)]
-pub fn url_encode_path_segment(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => {
-                write!(out, "%{byte:02X}").expect("writing to String never fails");
-            }
-        }
-    }
-    out
 }
 
 fn url_encode_query_value(value: &str) -> String {

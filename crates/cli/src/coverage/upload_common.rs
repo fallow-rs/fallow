@@ -1,8 +1,11 @@
+use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 
 use fallow_config::{FallowConfig, OutputFormat, ResolvedConfig};
 use fallow_engine::changed_files::clear_ambient_git_env;
+
+use crate::api::api_url;
 
 pub(super) const GIT_SHA_MAX_LEN: usize = 64;
 
@@ -85,14 +88,77 @@ pub(super) fn parse_git_remote_to_project_id(url: &str) -> Option<String> {
     None
 }
 
-fn take_last_two_segments(path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+pub(super) fn take_last_two_segments(path: &str) -> Option<String> {
+    let mut parts: Vec<&str> = path
+        .trim_end_matches('/')
+        .split('/')
+        .filter(|segment| !segment.trim().is_empty())
+        .collect();
     if parts.len() < 2 {
         return None;
     }
-    let repo = parts.pop()?;
-    let owner = parts.pop()?;
-    Some(format!("{owner}/{repo}"))
+    let repo = parts.pop()?.trim();
+    let owner = parts.pop()?.trim();
+    (!owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
+}
+
+pub(super) fn resolve_api_key(explicit: Option<&str>) -> Result<String, String> {
+    if let Some(explicit) = explicit {
+        let trimmed = explicit.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_owned());
+        }
+    }
+    if let Ok(from_env) = std::env::var("FALLOW_API_KEY") {
+        let trimmed = from_env.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_owned());
+        }
+    }
+    Err(
+        "no API key. Set $FALLOW_API_KEY or pass --api-key <KEY>. Generate at \
+         https://fallow.cloud/settings#api-keys."
+            .to_owned(),
+    )
+}
+
+pub(super) fn endpoint_url(
+    override_endpoint: Option<&str>,
+    project_id: &str,
+    path_suffix: &str,
+) -> String {
+    let path = format!(
+        "/v1/coverage/{}/{path_suffix}",
+        url_encode_path_segment(project_id)
+    );
+    match override_endpoint {
+        Some(base) => format!("{}{path}", base.trim().trim_end_matches('/')),
+        None => api_url(&path),
+    }
+}
+
+/// URL-encode a single URL path segment (RFC 3986 unreserved set).
+///
+/// Project IDs can be bare (`fallow-cloud-api`) or slash-scoped
+/// (`acme/widgets`), but the server receives them as a single percent-encoded
+/// segment under `/v1/coverage/{repo}/...`, so `/` must be encoded too.
+#[expect(
+    clippy::expect_used,
+    reason = "formatting percent-encoded bytes into String is infallible"
+)]
+pub fn url_encode_path_segment(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => {
+                write!(out, "%{byte:02X}").expect("writing to String never fails");
+            }
+        }
+    }
+    out
 }
 
 pub(super) fn resolve_git_sha(
@@ -177,4 +243,145 @@ pub(super) fn load_resolved_config_with_options(
         /* quiet */ true,
         /* cache_max_size_mb */ None,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_git_remote_https_with_dot_git() {
+        assert_eq!(
+            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
+            Some("fallow-rs/fallow".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_git_remote_https_without_dot_git() {
+        assert_eq!(
+            parse_git_remote_to_project_id("https://gitlab.com/acme/widgets"),
+            Some("acme/widgets".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_git_remote_ssh_colon_shape() {
+        assert_eq!(
+            parse_git_remote_to_project_id("git@github.com:fallow-rs/fallow.git"),
+            Some("fallow-rs/fallow".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_git_remote_ssh_scheme_shape() {
+        assert_eq!(
+            parse_git_remote_to_project_id("ssh://git@github.com/fallow-rs/fallow.git"),
+            Some("fallow-rs/fallow".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_git_remote_nested_group_uses_last_two_segments() {
+        assert_eq!(
+            parse_git_remote_to_project_id("https://gitlab.com/acme/team/widgets.git"),
+            Some("team/widgets".to_owned())
+        );
+        assert_eq!(
+            parse_git_remote_to_project_id("ssh://git@gitlab.com/group/subgroup/repo.git"),
+            Some("subgroup/repo".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_git_remote_rejects_incomplete_urls() {
+        assert_eq!(parse_git_remote_to_project_id("https://example.com/"), None);
+        assert_eq!(parse_git_remote_to_project_id(""), None);
+        assert_eq!(parse_git_remote_to_project_id("not-a-remote"), None);
+        assert_eq!(parse_git_remote_to_project_id("git@github.com:owner"), None);
+        assert_eq!(parse_git_remote_to_project_id("https://github.com"), None);
+        assert_eq!(parse_git_remote_to_project_id("not a remote"), None);
+    }
+
+    #[test]
+    fn take_last_two_segments_needs_two_nonempty_segments() {
+        assert_eq!(take_last_two_segments("widgets"), None);
+        assert_eq!(
+            take_last_two_segments("acme/widgets"),
+            Some("acme/widgets".to_owned())
+        );
+        // Trailing slashes and empty interior segments are ignored.
+        assert_eq!(
+            take_last_two_segments("group/acme/widgets/"),
+            Some("acme/widgets".to_owned())
+        );
+    }
+
+    #[test]
+    fn validate_project_id_accepts_owner_repo_and_bare() {
+        assert!(validate_project_id("fallow-rs/fallow").is_ok());
+        assert!(validate_project_id("fallow-cloud-api").is_ok());
+    }
+
+    #[test]
+    fn validate_project_id_rejects_path_traversal_and_empty() {
+        assert!(validate_project_id("../etc/passwd").is_err());
+        assert!(validate_project_id("acme/../secret").is_err());
+        assert!(validate_project_id("").is_err());
+    }
+
+    #[test]
+    fn url_encode_path_segment_passthrough_for_unreserved_chars() {
+        assert_eq!(
+            url_encode_path_segment("abc-123_foo.bar~"),
+            "abc-123_foo.bar~"
+        );
+        assert_eq!(url_encode_path_segment("a-b_c.d~e"), "a-b_c.d~e");
+    }
+
+    #[test]
+    fn url_encode_path_segment_encodes_reserved_bytes() {
+        assert_eq!(url_encode_path_segment("/"), "%2F");
+        assert_eq!(url_encode_path_segment("@"), "%40");
+        assert_eq!(url_encode_path_segment("a b"), "a%20b");
+        assert_eq!(
+            url_encode_path_segment("fallow-rs/fallow"),
+            "fallow-rs%2Ffallow"
+        );
+        assert_eq!(url_encode_path_segment("a/b@c"), "a%2Fb%40c");
+    }
+
+    #[test]
+    fn url_encode_path_segment_empty_string_returns_empty() {
+        assert_eq!(url_encode_path_segment(""), "");
+    }
+
+    #[test]
+    fn url_encode_path_segment_percent_encodes_utf8() {
+        assert_eq!(url_encode_path_segment("caf\u{e9}"), "caf%C3%A9");
+    }
+
+    #[test]
+    fn endpoint_url_uses_override_and_encodes_project_id() {
+        assert_eq!(
+            endpoint_url(Some("http://127.0.0.1:3000"), "a/b", "inventory"),
+            "http://127.0.0.1:3000/v1/coverage/a%2Fb/inventory"
+        );
+        assert_eq!(
+            endpoint_url(Some("http://127.0.0.1:3000/"), "a/b", "static-findings"),
+            "http://127.0.0.1:3000/v1/coverage/a%2Fb/static-findings"
+        );
+        assert_eq!(
+            endpoint_url(Some("http://localhost:3000"), "owner/repo", "source-maps"),
+            "http://localhost:3000/v1/coverage/owner%2Frepo/source-maps"
+        );
+    }
+
+    #[test]
+    fn resolve_api_key_trims_explicit_value() {
+        assert_eq!(
+            resolve_api_key(Some("  fallow_key_123  ")).unwrap(),
+            "fallow_key_123"
+        );
+    }
 }

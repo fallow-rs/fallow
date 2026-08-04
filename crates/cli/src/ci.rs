@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
+use crate::coverage::upload_common::url_encode_path_segment;
 use crate::error::emit_error_with_style;
 
 #[path = "ci_check_run.rs"]
@@ -1858,26 +1859,6 @@ fn resolved_body(fingerprint: &str, sha: Option<&str>, review_id: Option<&Review
     body
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "formatting percent-encoded bytes into String is infallible"
-)]
-fn url_encode_path_segment(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(char::from(byte));
-            }
-            _ => {
-                use std::fmt::Write as _;
-                write!(&mut out, "%{byte:02X}").expect("write to string");
-            }
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2779,36 +2760,6 @@ mod tests {
         let body = resolved_body("fp-x", None, None);
         assert!(!body.contains('`'), "no backtick when sha is None");
         assert!(body.contains("fallow-resolved-fingerprint: fp-x"));
-    }
-
-    // --- url_encode_path_segment (lines 1415-1429) ---
-
-    #[test]
-    fn url_encode_path_segment_passthrough_for_unreserved_chars() {
-        assert_eq!(
-            url_encode_path_segment("abc-123_foo.bar~"),
-            "abc-123_foo.bar~"
-        );
-    }
-
-    #[test]
-    fn url_encode_path_segment_encodes_slash() {
-        assert_eq!(url_encode_path_segment("/"), "%2F");
-    }
-
-    #[test]
-    fn url_encode_path_segment_encodes_at_sign() {
-        assert_eq!(url_encode_path_segment("@"), "%40");
-    }
-
-    #[test]
-    fn url_encode_path_segment_encodes_mixed_safe_and_reserved() {
-        assert_eq!(url_encode_path_segment("a/b@c"), "a%2Fb%40c");
-    }
-
-    #[test]
-    fn url_encode_path_segment_empty_string_returns_empty() {
-        assert_eq!(url_encode_path_segment(""), "");
     }
 
     // --- is_github_bot_comment: missing branch (line 1323-1331) ---

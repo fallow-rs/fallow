@@ -16,7 +16,7 @@
 //! invokes it explicitly; no other fallow command touches the network.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use colored::Colorize as _;
 
 use crate::api::{
-    NETWORK_EXIT_CODE, ParsedErrorEnvelope, ResponseBodyReader, actionable_error_hint, api_url,
+    NETWORK_EXIT_CODE, ParsedErrorEnvelope, ResponseBodyReader, actionable_error_hint,
     parse_error_envelope, response_message_suffix, sanitize_network_error,
     try_api_agent_with_timeout,
 };
@@ -238,7 +238,8 @@ fn run_inner(
         return Ok(());
     }
 
-    let api_key = resolve_api_key(args)?;
+    let api_key =
+        upload_common::resolve_api_key(args.api_key.as_deref()).map_err(UploadError::Validation)?;
     upload(
         &prepared.project_id,
         args.api_endpoint.as_deref(),
@@ -876,61 +877,6 @@ struct InventoryResponseEnvelope {
     data: InventoryResponseData,
 }
 
-fn resolve_api_key(args: &UploadInventoryArgs) -> Result<String, UploadError> {
-    if let Some(explicit) = args.api_key.as_deref() {
-        let trimmed = explicit.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    if let Ok(from_env) = std::env::var("FALLOW_API_KEY") {
-        let trimmed = from_env.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    Err(UploadError::Validation(
-        "no API key. Set $FALLOW_API_KEY or pass --api-key <KEY>. Generate at \
-         https://fallow.cloud/settings#api-keys."
-            .to_owned(),
-    ))
-}
-
-fn endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
-    let path = format!(
-        "/v1/coverage/{}/inventory",
-        url_encode_path_segment(project_id)
-    );
-    match override_endpoint {
-        Some(base) => format!("{}{path}", base.trim().trim_end_matches('/')),
-        None => api_url(&path),
-    }
-}
-
-/// URL-encode the `{repo}` path segment.
-///
-/// Project IDs can be bare (`fallow-cloud-api`) or slash-scoped
-/// (`acme/widgets`), but the server receives them as a single percent-encoded
-/// segment under `/v1/coverage/{repo}/inventory`, so `/` must be encoded too.
-#[expect(
-    clippy::expect_used,
-    reason = "formatting percent-encoded bytes into String is infallible"
-)]
-fn url_encode_path_segment(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => {
-                write!(out, "%{byte:02X}").expect("writing to String never fails");
-            }
-        }
-    }
-    out
-}
-
 /// Print a yellow warning when the server reports that the just-uploaded
 /// inventory's paths don't meaningfully overlap with recent runtime paths
 /// for the same SHA. Fires when matched * 2 < sampled (less than half the
@@ -972,7 +918,7 @@ fn upload(
     api_key: &str,
     payload: &InventoryRequest<'_>,
 ) -> Result<(), UploadError> {
-    let url = endpoint_url(endpoint_override, project_id);
+    let url = upload_common::endpoint_url(endpoint_override, project_id, "inventory");
     println!(
         "{LOG_PREFIX}: uploading {} functions for {project_id} @ {}",
         format_count(payload.functions.len()),
@@ -1146,9 +1092,7 @@ fn count_digits(mut n: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coverage::upload_common::{
-        GIT_SHA_MAX_LEN, parse_git_remote_to_project_id, validate_project_id,
-    };
+    use crate::coverage::upload_common::GIT_SHA_MAX_LEN;
     use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
@@ -1179,111 +1123,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_git_remote_https_with_dot_git() {
-        assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_https_without_dot_git() {
-        assert_eq!(
-            parse_git_remote_to_project_id("https://gitlab.com/acme/widgets"),
-            Some("acme/widgets".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_ssh_colon_shape() {
-        assert_eq!(
-            parse_git_remote_to_project_id("git@github.com:fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_ssh_scheme_shape() {
-        assert_eq!(
-            parse_git_remote_to_project_id("ssh://git@github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_nested_group_uses_last_two_segments() {
-        assert_eq!(
-            parse_git_remote_to_project_id("https://gitlab.com/acme/team/widgets.git"),
-            Some("team/widgets".to_owned())
-        );
-    }
-
-    #[test]
-    fn parse_git_remote_rejects_single_segment() {
-        assert_eq!(parse_git_remote_to_project_id("https://example.com/"), None);
-        assert_eq!(parse_git_remote_to_project_id(""), None);
-    }
-
-    #[test]
-    fn validate_project_id_accepts_owner_repo() {
-        assert!(validate_project_id("fallow-rs/fallow").is_ok());
-    }
-
-    #[test]
-    fn validate_project_id_accepts_bare_name() {
-        assert!(validate_project_id("fallow-cloud-api").is_ok());
-    }
-
-    #[test]
-    fn validate_project_id_rejects_path_traversal() {
-        assert!(validate_project_id("../etc/passwd").is_err());
-        assert!(validate_project_id("acme/../secret").is_err());
-    }
-
-    #[test]
-    fn validate_project_id_rejects_empty() {
-        assert!(validate_project_id("").is_err());
-    }
-
-    #[test]
-    fn url_encode_path_segment_preserves_safe_chars() {
-        assert_eq!(
-            url_encode_path_segment("fallow-rs/fallow"),
-            "fallow-rs%2Ffallow"
-        );
-    }
-
-    #[test]
-    fn url_encode_path_segment_handles_utf8() {
-        assert_eq!(url_encode_path_segment("a b"), "a%20b");
-    }
-
-    #[test]
-    fn endpoint_url_uses_override_when_provided() {
-        let url = endpoint_url(Some("http://127.0.0.1:3000"), "a/b");
-        assert_eq!(url, "http://127.0.0.1:3000/v1/coverage/a%2Fb/inventory");
-    }
-
-    #[test]
-    fn endpoint_url_strips_override_trailing_slash() {
-        let url = endpoint_url(Some("http://127.0.0.1:3000/"), "a/b");
-        assert_eq!(url, "http://127.0.0.1:3000/v1/coverage/a%2Fb/inventory");
-    }
-
-    #[test]
     fn display_endpoint_url_uses_override_when_provided() {
         let url = display_endpoint_url(Some("http://127.0.0.1:3000/"), "a/b");
         assert_eq!(url, "http://127.0.0.1:3000/v1/coverage/a/b/inventory");
-    }
-
-    #[test]
-    fn resolve_api_key_trims_explicit_value() {
-        let args = UploadInventoryArgs {
-            api_key: Some("  fallow_key_123  ".to_owned()),
-            ..UploadInventoryArgs::default()
-        };
-
-        assert_eq!(resolve_api_key(&args).unwrap(), "fallow_key_123");
     }
 
     #[test]
