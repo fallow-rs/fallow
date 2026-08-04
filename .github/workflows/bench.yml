@@ -103,7 +103,7 @@ jobs:
           cache-key: bench-${{ matrix.cache_key }}
 
       - name: Install cargo-codspeed
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-codspeed@4.7.0
 
@@ -112,7 +112,7 @@ jobs:
         run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run benchmark shard
-        uses: CodSpeedHQ/action@f99becdce5e5d51fd556489ebef684f4ecfd6286 # v4.18.5
+        uses: CodSpeedHQ/action@f22792bfac16f3e14eb9fbea76f4a48e9cc22b93 # v4.19.1
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
@@ -152,7 +152,7 @@ jobs:
           cache-key: bench-${{ matrix.cache_key }}
 
       - name: Install cargo-codspeed
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-codspeed@4.7.0
 
@@ -161,7 +161,7 @@ jobs:
         run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run full benchmark shard
-        uses: CodSpeedHQ/action@f99becdce5e5d51fd556489ebef684f4ecfd6286 # v4.18.5
+        uses: CodSpeedHQ/action@f22792bfac16f3e14eb9fbea76f4a48e9cc22b93 # v4.19.1
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
