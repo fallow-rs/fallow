@@ -2170,6 +2170,21 @@ pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
+/// Whether `specifier` is a bare package specifier: not empty, not relative or
+/// absolute, not protocol-prefixed, and free of characters that are invalid in
+/// an npm package name (backslashes, whitespace).
+pub(crate) fn is_package_specifier(specifier: &str) -> bool {
+    !specifier.is_empty()
+        && specifier != "."
+        && specifier != ".."
+        && !specifier.starts_with("./")
+        && !specifier.starts_with("../")
+        && !specifier.starts_with('/')
+        && !specifier.contains(':')
+        && !specifier.contains('\\')
+        && !specifier.chars().any(char::is_whitespace)
+}
+
 /// Convert an expression to a string array if it's an array of string literals.
 fn expression_to_string_array(expr: &Expression) -> Vec<String> {
     match expr {

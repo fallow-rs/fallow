@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::config_parser::is_package_specifier;
 use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["varlock", "@varlock/"];
@@ -136,18 +137,6 @@ fn strip_npm_version_selector(specifier: &str) -> String {
     }
 
     specifier.split('@').next().unwrap_or(specifier).to_string()
-}
-
-fn is_package_specifier(specifier: &str) -> bool {
-    !specifier.is_empty()
-        && specifier != "."
-        && specifier != ".."
-        && !specifier.starts_with("./")
-        && !specifier.starts_with("../")
-        && !specifier.starts_with('/')
-        && !specifier.contains(':')
-        && !specifier.contains('\\')
-        && !specifier.chars().any(char::is_whitespace)
 }
 
 #[cfg(test)]

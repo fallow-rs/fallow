@@ -37,6 +37,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{PropDrillHop, PropDrillingChain};
 
+use super::predicates::is_react_file;
 use super::react_resolve::{ChildResolver, CompKey};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -602,12 +603,4 @@ fn hop_at(
         line,
         component: key.name.clone(),
     }
-}
-
-/// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`).
-fn is_react_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("jsx" | "tsx")
-    )
 }

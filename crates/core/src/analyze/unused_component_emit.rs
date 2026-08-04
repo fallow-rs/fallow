@@ -28,6 +28,7 @@ use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::results::UnusedComponentEmit;
 
+use super::predicates::component_name_for;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Find Vue `<script setup>` `defineEmits` events emitted nowhere in their own
@@ -111,12 +112,4 @@ fn component_abstains_emits(module: &ModuleInfo) -> bool {
 /// Whether the path is a Vue SFC (`.vue`).
 fn is_vue_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("vue")
-}
-
-/// The component name: the `.vue` file stem.
-fn component_name_for(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string()
 }

@@ -37,6 +37,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{RenderFanInComponent, RenderFanInMetric};
 
+use super::predicates::is_react_file;
 use super::react_resolve::{ChildResolver, CompKey};
 
 /// The same concentration floor `compute_coupling_concentration` uses
@@ -283,12 +284,4 @@ fn concentration(distinct_parents: &[u32]) -> (Option<u32>, Option<f64>) {
     let high_pct = (high_count as f64 / sorted.len() as f64 * 1000.0).round() / 10.0;
 
     (Some(p95), Some(high_pct))
-}
-
-/// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`).
-fn is_react_file(path: &std::path::Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("jsx" | "tsx")
-    )
 }

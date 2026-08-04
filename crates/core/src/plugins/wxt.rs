@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use super::config_parser::is_package_specifier;
 use super::{Plugin, PluginResult, config_parser};
 
 const ENABLERS: &[&str] = &["wxt", "@wxt-dev/"];
@@ -103,17 +104,6 @@ fn has_wxt_config(root: &Path) -> bool {
 fn package_name_for_specifier(specifier: &str) -> Option<String> {
     let specifier = specifier.trim();
     is_package_specifier(specifier).then(|| crate::resolve::extract_package_name(specifier))
-}
-
-fn is_package_specifier(specifier: &str) -> bool {
-    !specifier.is_empty()
-        && specifier != "."
-        && specifier != ".."
-        && !specifier.starts_with("./")
-        && !specifier.starts_with("../")
-        && !specifier.starts_with('/')
-        && !specifier.contains(':')
-        && !specifier.contains('\\')
 }
 
 #[cfg(test)]

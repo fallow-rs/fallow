@@ -978,24 +978,10 @@ fn normalize_project_relative(base_dir: &str, raw: &str) -> Option<String> {
         Path::new(base_dir).join(path)
     };
 
-    let normalized = lexical_normalize(&joined)
+    let normalized = config_parser::lexical_normalize(&joined)
         .to_string_lossy()
         .replace('\\', "/");
     (!normalized.is_empty()).then_some(normalized)
-}
-
-fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    normalized
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {

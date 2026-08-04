@@ -47,6 +47,7 @@ use crate::graph::{ModuleGraph, ModuleNode};
 use crate::resolve::ResolvedModule;
 use crate::results::ThinWrapper;
 
+use super::predicates::is_react_file;
 use super::react_resolve::ChildResolver;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -340,12 +341,4 @@ fn resolves_distinct_child(
     }
 
     true
-}
-
-/// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`).
-fn is_react_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("jsx" | "tsx")
-    )
 }

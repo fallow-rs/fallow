@@ -27,6 +27,7 @@ use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::results::UnusedSvelteEvent;
 
+use super::predicates::component_name_for;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Find Svelte custom events dispatched via `createEventDispatcher()` and
@@ -122,14 +123,6 @@ fn flag_unlistened_events(
 /// Whether the path is a Svelte SFC (`.svelte`).
 fn is_svelte_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("svelte")
-}
-
-/// The component name: the `.svelte` file stem.
-fn component_name_for(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string()
 }
 
 #[cfg(test)]

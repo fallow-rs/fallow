@@ -8,6 +8,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use super::config_parser::is_package_specifier;
 use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["@opencode-ai/"];
@@ -95,17 +96,6 @@ fn plugin_specifier(value: &Value) -> Option<&str> {
 fn package_name_for_specifier(specifier: &str) -> Option<String> {
     let specifier = specifier.trim();
     is_package_specifier(specifier).then(|| crate::resolve::extract_package_name(specifier))
-}
-
-fn is_package_specifier(specifier: &str) -> bool {
-    !specifier.is_empty()
-        && specifier != "."
-        && specifier != ".."
-        && !specifier.starts_with("./")
-        && !specifier.starts_with("../")
-        && !specifier.starts_with('/')
-        && !specifier.contains(':')
-        && !specifier.contains('\\')
 }
 
 #[cfg(test)]

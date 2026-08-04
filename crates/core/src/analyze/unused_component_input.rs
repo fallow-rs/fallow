@@ -33,8 +33,6 @@
 //! heritage `extends` is present (the conservative, zero-FP-leaning direction
 //! documented in the design review).
 
-use std::path::Path;
-
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{ModuleInfo, SemanticFactView};
@@ -43,6 +41,7 @@ use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::results::UnusedComponentInput;
 
+use super::predicates::component_name_for;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Find Angular component/directive inputs read nowhere in their own component.
@@ -218,14 +217,6 @@ fn external_template_modules<'a>(
         }
     }
     out
-}
-
-/// The component name: the file stem (e.g. `user-card` for `user-card.ts`).
-fn component_name_for(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string()
 }
 
 /// Whether `name` is a JavaScript reserved word that fallow's JS-based template

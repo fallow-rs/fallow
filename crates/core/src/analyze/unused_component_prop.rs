@@ -27,6 +27,7 @@ use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::results::UnusedComponentProp;
 
+use super::predicates::{component_name_for, is_react_file};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Result of the SFC (Vue/Svelte/Astro) prop scan: the findings plus the count
@@ -166,24 +167,6 @@ fn component_prop_framework(path: &Path) -> Option<ComponentPropFramework> {
         Some("astro") => Some(ComponentPropFramework::Astro),
         _ => None,
     }
-}
-
-/// The component name: the SFC file stem.
-fn component_name_for(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string()
-}
-
-/// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`). `.js` / `.ts`
-/// files re-parsed through the JSX retry path also carry React IR, but the prop
-/// arm scopes to the canonical JSX extensions to keep the surface tight in v1.
-fn is_react_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("jsx" | "tsx")
-    )
 }
 
 /// Result of the React prop scan: the findings plus the number of React

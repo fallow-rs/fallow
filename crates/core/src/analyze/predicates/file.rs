@@ -4,6 +4,24 @@ pub(in crate::analyze) fn is_declaration_file(path: &std::path::Path) -> bool {
     name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts")
 }
 
+/// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`). `.js` / `.ts`
+/// files re-parsed through the JSX retry path also carry React IR, but React
+/// detectors scope to the canonical JSX extensions to keep the surface tight.
+pub(in crate::analyze) fn is_react_file(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("jsx" | "tsx")
+    )
+}
+
+/// The component name: the file stem (e.g. `UserCard` for `UserCard.vue`).
+pub(in crate::analyze) fn component_name_for(path: &std::path::Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
 /// Check if a path is an HTML file.
 ///
 /// HTML files are excluded from unused-file detection because they are entry-point-like:

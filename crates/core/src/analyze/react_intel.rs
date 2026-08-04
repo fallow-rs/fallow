@@ -31,6 +31,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel};
 
+use super::predicates::is_react_file;
 use super::prop_drilling::find_prop_drilling_chains;
 use super::react_resolve::{ChildResolver, CompKey};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -349,12 +350,4 @@ fn summarize_hooks(component_name: &str, module: &ModuleInfo) -> ReactHookSummar
 fn is_project_test_path(path: &Path, root: &Path) -> bool {
     let rel = path.strip_prefix(root).unwrap_or(path);
     super::predicates::is_test_or_spec_file(rel)
-}
-
-/// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`).
-fn is_react_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("jsx" | "tsx")
-    )
 }

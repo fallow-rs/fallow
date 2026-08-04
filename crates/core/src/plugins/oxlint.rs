@@ -2,7 +2,7 @@
 //!
 //! Detects Oxlint projects and marks config files as always used.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
@@ -83,21 +83,7 @@ fn resolve_config_relative_path(config_path: &Path, root: &Path, specifier: &str
     } else {
         root.join(config_path)
     };
-    lexical_normalize(&config_abs.parent().unwrap_or(root).join(specifier))
-}
-
-fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    normalized
+    config_parser::lexical_normalize(&config_abs.parent().unwrap_or(root).join(specifier))
 }
 
 #[cfg(test)]

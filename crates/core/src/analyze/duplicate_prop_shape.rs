@@ -72,6 +72,7 @@ use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::results::{DuplicatePropShape, DuplicatePropShapeMember};
 
+use super::predicates::is_react_file;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// The minimum number of SIGNIFICANT props (declared names surviving the
@@ -356,11 +357,3 @@ const UBIQUITOUS_PROP_NAMES: &[&str] = &[
     "tabIndex",
     "title",
 ];
-
-/// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`).
-fn is_react_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("jsx" | "tsx")
-    )
-}
