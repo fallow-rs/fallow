@@ -21,9 +21,14 @@ use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 mod analysis_context;
+/// Stable per-finding keys and audit ledgers that compare head results against
+/// a base snapshot, plus helpers that annotate output JSON with
+/// introduced-vs-pre-existing attribution.
 pub mod audit_keys;
 pub mod audit_output;
 pub mod combined_output;
+/// One-line-per-finding compact text builders for dead-code, grouped, health,
+/// and duplication output.
 pub mod compact_output;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
@@ -37,6 +42,8 @@ pub mod health_codeclimate;
 pub mod json_output;
 pub mod list_output;
 mod list_runtime;
+/// Markdown report builders for dead-code, grouped, duplication, health, and
+/// walkthrough output.
 pub mod markdown_output;
 mod next_steps;
 pub mod output_contracts;
@@ -193,6 +200,12 @@ pub use type_aware::{
     type_coupling as analyze_type_coupling,
 };
 
+/// Long names of the analysis-affecting global CLI flags that
+/// [`AnalysisOptions`] mirrors for embedders.
+///
+/// A contract test in the CLI crate asserts this list stays in sync with the
+/// clap globals, so drift between the CLI surface and the programmatic
+/// options is caught at test time.
 pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "root",
     "config",
@@ -210,14 +223,21 @@ pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
 /// Structured error surface for the programmatic API.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProgrammaticError {
+    /// Human-readable description; also the `Display` output.
     pub message: String,
+    /// Process exit code the CLI maps this failure to.
     pub exit_code: u8,
+    /// Stable machine-readable code such as `FALLOW_INVALID_COVERAGE_PATH`.
     pub code: Option<String>,
+    /// Optional remediation hint for the caller.
     pub help: Option<String>,
+    /// Dotted path of the offending input, such as `health.coverage`.
     pub context: Option<String>,
 }
 
 impl ProgrammaticError {
+    /// Create an error from the required message and exit code, with all
+    /// optional fields left empty.
     #[must_use]
     pub fn new(message: impl Into<String>, exit_code: u8) -> Self {
         Self {
@@ -259,12 +279,18 @@ impl std::error::Error for ProgrammaticError {}
 /// Shared options for all one-shot analyses.
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisOptions {
+    /// Project root to analyze. `None` resolves to the current working
+    /// directory.
     pub root: Option<PathBuf>,
+    /// Explicit config file path. `None` uses config discovery from the root.
     pub config_path: Option<PathBuf>,
     /// Permit `https://` config inheritance for this analysis call.
     pub allow_remote_extends: bool,
+    /// Bypass the on-disk analysis cache for this call.
     pub no_cache: bool,
+    /// Worker thread count. `None` picks the default; `Some(0)` is rejected.
     pub threads: Option<usize>,
+    /// Explicit unified diff file that scopes changed-code analysis.
     pub diff_file: Option<PathBuf>,
     /// Legacy convenience override. `true` forces production mode; `false`
     /// defers to config unless `production_override` is set.
@@ -272,9 +298,13 @@ pub struct AnalysisOptions {
     /// Explicit production override from an embedder option. `None` means
     /// use the project config for the current analysis.
     pub production_override: Option<bool>,
+    /// Git base reference that scopes analysis to files changed since it.
     pub changed_since: Option<String>,
+    /// Restrict analysis to the named workspace packages.
     pub workspace: Option<Vec<String>>,
+    /// Restrict analysis to workspaces changed since the given git reference.
     pub changed_workspaces: Option<String>,
+    /// Include rule and metric explanations (`_meta`) in machine output.
     pub explain: bool,
     /// Optional project-wide TypeScript semantic analysis. Disabled by default
     /// and never changes compiler or typed-lint ownership.
@@ -284,43 +314,80 @@ pub struct AnalysisOptions {
 /// Typed options for Fallow's optional TypeScript semantic companion.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TypeAwareOptions {
+    /// Turn on TypeScript semantic refinement for this call.
     pub enabled: bool,
+    /// Explicit TypeScript project paths handed to the semantic sidecar.
+    /// Empty defers to project discovery.
     pub projects: Vec<PathBuf>,
+    /// How strictly semantic completion is required before results are kept.
     pub require: fallow_config::TypeAwareRequire,
 }
 
 /// Issue-type filters for the dead-code analysis.
+///
+/// Each flag opts one issue type into the report. When no flag is enabled the
+/// analysis reports every issue type.
 #[derive(Debug, Clone, Default)]
 pub struct DeadCodeFilters {
+    /// Files never reached from any entry point.
     pub unused_files: bool,
+    /// Exported symbols never imported elsewhere.
     pub unused_exports: bool,
+    /// Declared dependencies never imported.
     pub unused_deps: bool,
+    /// Exported types never referenced.
     pub unused_types: bool,
+    /// Exported APIs that expose non-exported types.
     pub private_type_leaks: bool,
+    /// Enum members never read.
     pub unused_enum_members: bool,
+    /// Class members never used outside their declaration.
     pub unused_class_members: bool,
+    /// Store members (for example Pinia) never used outside the store.
     pub unused_store_members: bool,
+    /// `inject` calls with no matching `provide`.
     pub unprovided_injects: bool,
+    /// Components never rendered by any template or JSX.
     pub unrendered_components: bool,
+    /// Declared component props never used.
     pub unused_component_props: bool,
+    /// Declared component emits never used.
     pub unused_component_emits: bool,
+    /// Declared component inputs never bound.
     pub unused_component_inputs: bool,
+    /// Declared component outputs never listened to.
     pub unused_component_outputs: bool,
+    /// Svelte component events never listened to.
     pub unused_svelte_events: bool,
+    /// Server actions never invoked.
     pub unused_server_actions: bool,
+    /// `load` data keys never read by the consuming page.
     pub unused_load_data_keys: bool,
+    /// Imports that do not resolve to a file or package.
     pub unresolved_imports: bool,
+    /// Imported packages missing from the dependency manifest.
     pub unlisted_deps: bool,
+    /// The same symbol exported more than once.
     pub duplicate_exports: bool,
+    /// Circular import chains.
     pub circular_deps: bool,
+    /// Cycles formed through re-export chains.
     pub re_export_cycles: bool,
+    /// Imports that cross configured architecture boundaries.
     pub boundary_violations: bool,
+    /// Violations of configured dependency policy rules.
     pub policy_violations: bool,
+    /// Suppression comments that no longer match a finding.
     pub stale_suppressions: bool,
+    /// Catalog entries never referenced by a workspace package.
     pub unused_catalog_entries: bool,
+    /// Catalog groups that contain no entries.
     pub empty_catalog_groups: bool,
+    /// `catalog:` references without a matching catalog entry.
     pub unresolved_catalog_references: bool,
+    /// Dependency overrides that never affect a resolved package.
     pub unused_dependency_overrides: bool,
+    /// Dependency overrides that cannot apply as written.
     pub misconfigured_dependency_overrides: bool,
 }
 
@@ -416,41 +483,69 @@ impl DeadCodeFilters {
 /// Options for dead-code-oriented analyses.
 #[derive(Debug, Clone, Default)]
 pub struct DeadCodeOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Issue-type selection; everything is reported when no filter is set.
     pub filters: DeadCodeFilters,
+    /// Restrict findings to these files when non-empty.
     pub files: Vec<PathBuf>,
+    /// Also report unused exports declared in entry-point files.
     pub include_entry_exports: bool,
 }
 
 /// Options for changed-code audit analysis.
 #[derive(Debug, Clone, Default)]
 pub struct AuditOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Git base reference for the changed-code comparison. `None` lets the
+    /// audit detect a base itself.
     pub base: Option<String>,
+    /// Force production mode for every audit domain.
     pub production: bool,
+    /// Production override for the dead-code domain; `None` defers to config.
     pub production_dead_code: Option<bool>,
+    /// Production override for the health domain; `None` defers to config.
     pub production_health: Option<bool>,
+    /// Production override for the duplication domain; `None` defers to
+    /// config.
     pub production_dupes: Option<bool>,
+    /// Enable CSS / styling analysis; `None` defers to config.
     pub css: Option<bool>,
+    /// Enable deep cross-file CSS analysis; `None` defers to config.
     pub css_deep: Option<bool>,
+    /// Gate mode deciding which findings fail the audit.
     pub gate: fallow_config::AuditGate,
+    /// Fail the gate when a changed function exceeds this CRAP score.
     pub max_crap: Option<f64>,
+    /// Test coverage report path for coverage-aware findings.
     pub coverage: Option<PathBuf>,
+    /// Absolute path prefix the coverage report recorded its files under.
     pub coverage_root: Option<PathBuf>,
+    /// Also report unused exports declared in entry-point files.
     pub include_entry_exports: bool,
+    /// Runtime coverage capture merged into the audit.
     pub runtime_coverage: Option<PathBuf>,
+    /// Minimum recorded invocations for a code path to count as hot.
     pub min_invocations_hot: u64,
 }
 
 /// Options for bare combined analysis through the programmatic API.
 #[derive(Debug, Clone)]
 pub struct CombinedOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Run the dead-code domain.
     pub dead_code: bool,
+    /// Run the duplication domain.
     pub duplication: bool,
+    /// Run the health domain.
     pub health: bool,
+    /// Also report unused exports declared in entry-point files.
     pub include_entry_exports: bool,
+    /// Options for the duplication domain.
     pub duplication_options: DuplicationOptions,
+    /// Options for the health domain.
     pub health_options: ComplexityOptions,
 }
 
@@ -471,99 +566,144 @@ impl Default for CombinedOptions {
 /// Options for changed-code decision-surface analysis.
 #[derive(Debug, Clone, Default)]
 pub struct DecisionSurfaceOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Git base reference for the changed-code comparison. `None` lets the
+    /// analysis detect a base itself.
     pub base: Option<String>,
+    /// Cap on the number of decisions surfaced.
     pub max_decisions: Option<usize>,
 }
 
 /// Options for feature-flag analysis.
 #[derive(Debug, Clone, Default)]
 pub struct FeatureFlagsOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Cap on the number of reported flags.
     pub top: Option<usize>,
 }
 
 /// Programmatic duplication mode selection.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum DuplicationMode {
+    /// Preserve all tokens, including identifier names and literal values
+    /// (Type-1 clones only).
     Strict,
+    /// Default mode, equivalent to strict for AST-based tokenization.
     #[default]
     Mild,
+    /// Blind string literal values while preserving structure.
     Weak,
+    /// Blind all identifiers and literal values for structural (Type-2)
+    /// detection.
     Semantic,
 }
 
 /// Options for duplication analysis.
 #[derive(Debug, Clone, Default)]
 pub struct DuplicationOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Detection mode; `None` defers to the project config.
     pub mode: Option<DuplicationMode>,
+    /// Minimum number of tokens for a clone.
     pub min_tokens: Option<usize>,
+    /// Minimum number of lines for a clone.
     pub min_lines: Option<usize>,
     /// Minimum number of occurrences before a clone group is reported.
     /// Values below 2 are silently treated as 2 by the engine-facing adapter.
     pub min_occurrences: Option<usize>,
+    /// Maximum allowed duplication percentage before the gate fails; 0 means
+    /// no limit. `None` defers to the project config.
     pub threshold: Option<f64>,
+    /// Only report cross-directory duplicates. `None` defers to the project
+    /// config.
     pub skip_local: Option<bool>,
+    /// Match clones across languages. `None` defers to the project config.
     pub cross_language: Option<bool>,
     /// Exclude module wiring from clone detection. `None` defers to the project
     /// config.
     pub ignore_imports: Option<bool>,
+    /// Cap on the number of reported clone groups.
     pub top: Option<usize>,
 }
 
 /// Options for export trace analysis.
 #[derive(Debug, Clone, Default)]
 pub struct TraceExportOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Path of the module that declares the export.
     pub file: String,
+    /// Name of the export to trace.
     pub export_name: String,
 }
 
 /// Options for file trace analysis.
 #[derive(Debug, Clone, Default)]
 pub struct TraceFileOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Path of the file to trace.
     pub file: String,
 }
 
 /// Options for dependency trace analysis.
 #[derive(Debug, Clone, Default)]
 pub struct TraceDependencyOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Package whose importers are traced.
     pub package_name: String,
 }
 
 /// Duplicate-code trace target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TraceCloneTarget {
-    Location { file: String, line: usize },
+    /// Select the clone group covering this file and line.
+    Location {
+        /// Path of the file containing the clone instance.
+        file: String,
+        /// One-based line inside the clone instance.
+        line: usize,
+    },
+    /// Select the clone group by its fingerprint.
     Fingerprint(String),
 }
 
 /// Options for duplicate-code trace analysis.
 #[derive(Debug, Clone)]
 pub struct TraceCloneOptions {
+    /// Duplication options controlling detection before the trace.
     pub duplication: DuplicationOptions,
+    /// Clone group to trace.
     pub target: TraceCloneTarget,
 }
 
 /// Sort criteria for complexity findings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ComplexitySort {
+    /// Sort by cyclomatic complexity (default).
     #[default]
     Cyclomatic,
+    /// Sort by cognitive complexity.
     Cognitive,
+    /// Sort by function length in lines.
     Lines,
+    /// Sort by finding severity.
     Severity,
 }
 
 /// Privacy mode for ownership-aware hotspot output.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OwnershipEmailMode {
+    /// Show the raw email address as it appears in git history.
     Raw,
+    /// Show only the local part before the `@` (default).
     #[default]
     Handle,
+    /// Show a stable non-cryptographic pseudonym derived from the raw email.
     Anonymized,
     /// Legacy spelling retained for embedders that already pass `hash`.
     Hash,
@@ -572,126 +712,208 @@ pub enum OwnershipEmailMode {
 /// Effort filter for refactoring targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetEffort {
+    /// Low estimated refactoring effort.
     Low,
+    /// Medium estimated refactoring effort.
     Medium,
+    /// High estimated refactoring effort.
     High,
 }
 
 /// Options for complexity / health analysis.
 #[derive(Debug, Clone, Default)]
 pub struct ComplexityOptions {
+    /// Shared analysis options.
     pub analysis: AnalysisOptions,
+    /// Override for the cyclomatic complexity threshold.
     pub max_cyclomatic: Option<u16>,
+    /// Override for the cognitive complexity threshold.
     pub max_cognitive: Option<u16>,
+    /// Override for the CRAP score threshold.
     pub max_crap: Option<f64>,
+    /// Cap on the number of reported findings.
     pub top: Option<usize>,
+    /// Sort order for complexity findings.
     pub sort: ComplexitySort,
+    /// Include the per-metric complexity breakdown with each finding.
     pub complexity_breakdown: bool,
+    /// Request the complexity findings section.
     pub complexity: bool,
+    /// Request the per-file score section.
     pub file_scores: bool,
+    /// Request the coverage-gap section.
     pub coverage_gaps: bool,
+    /// Request the churn hotspot section.
     pub hotspots: bool,
+    /// Include ownership data with hotspots; implies the hotspot section.
     pub ownership: bool,
+    /// Email privacy mode for ownership output; implies ownership when set.
     pub ownership_emails: Option<OwnershipEmailMode>,
+    /// Request the refactoring targets section.
     pub targets: bool,
+    /// Include CSS / styling health.
     pub css: bool,
+    /// Enable deep cross-file CSS analysis.
     pub css_deep: bool,
+    /// Filter refactoring targets by estimated effort; implies the targets
+    /// section when set.
     pub effort: Option<TargetEffort>,
+    /// Request the overall health score.
     pub score: bool,
+    /// Git time window (for example `30d`) for churn-based sections.
     pub since: Option<String>,
+    /// Minimum commit count for a file to count as a hotspot.
     pub min_commits: Option<u32>,
+    /// Test coverage report path for coverage-aware sections.
     pub coverage: Option<PathBuf>,
+    /// Absolute path prefix the coverage report recorded its files under.
     pub coverage_root: Option<PathBuf>,
 }
 
 /// Health threshold overrides accepted by the programmatic API.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ComplexityThresholdOverrides {
+    /// Override for the cyclomatic complexity threshold.
     pub max_cyclomatic: Option<u16>,
+    /// Override for the cognitive complexity threshold.
     pub max_cognitive: Option<u16>,
+    /// Override for the CRAP score threshold.
     pub max_crap: Option<f64>,
 }
 
 /// Coverage inputs accepted by the programmatic API.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ComplexityCoverageInputs<'a> {
+    /// Test coverage report path.
     pub coverage: Option<&'a Path>,
+    /// Absolute path prefix the coverage report recorded its files under.
     pub coverage_root: Option<&'a Path>,
 }
 
 /// Input for deriving effective health sections from API-owned flags.
 #[derive(Debug, Clone)]
 pub struct HealthSectionOptions {
+    /// Requested output format; `Badge` implies the score section.
     pub output: fallow_types::output_format::OutputFormat,
+    /// The complexity findings section was requested.
     pub complexity: bool,
+    /// The per-file score section was requested.
     pub file_scores: bool,
+    /// The coverage-gap section was requested.
     pub coverage_gaps: bool,
+    /// The churn hotspot section was requested.
     pub hotspots: bool,
+    /// The refactoring targets section was requested.
     pub targets: bool,
+    /// CSS / styling health was requested.
     pub css: bool,
+    /// The overall health score was requested.
     pub score: bool,
+    /// A score gate is active; implies the score section.
     pub score_gate: bool,
+    /// A snapshot write was requested; forces full hidden inputs.
     pub snapshot_requested: bool,
+    /// Trend output was requested; implies score and hotspot inputs.
     pub trend: bool,
 }
 
 /// Derived section selection for health runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DerivedHealthSections {
+    /// At least one section was explicitly requested.
     pub any_section: bool,
+    /// Emit the complexity findings section.
     pub complexity: bool,
+    /// Compute the per-file score section.
     pub file_scores: bool,
+    /// Emit the coverage-gap section.
     pub coverage_gaps: bool,
+    /// Compute the churn hotspot section.
     pub hotspots: bool,
+    /// Emit the refactoring targets section.
     pub targets: bool,
+    /// Include CSS / styling health.
     pub css: bool,
+    /// Compute the overall health score.
     pub score: bool,
+    /// Compute full inputs even for sections that are not emitted.
     pub force_full: bool,
+    /// Only the score should be printed.
     pub score_only_output: bool,
 }
 
 /// Input for deriving effective programmatic complexity sections.
 #[derive(Debug, Clone)]
 pub struct ComplexitySectionOptions {
+    /// The complexity findings section was requested.
     pub complexity: bool,
+    /// The per-file score section was requested.
     pub file_scores: bool,
+    /// The coverage-gap section was requested.
     pub coverage_gaps: bool,
+    /// The churn hotspot section was requested.
     pub hotspots: bool,
+    /// Ownership data was requested; implies the hotspot section.
     pub ownership: bool,
+    /// The refactoring targets section was requested.
     pub targets: bool,
+    /// CSS / styling health was requested.
     pub css: bool,
+    /// The overall health score was requested.
     pub score: bool,
 }
 
 /// Derived section selection for programmatic health / complexity runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DerivedComplexityOptions {
+    /// At least one section was explicitly requested.
     pub any_section: bool,
+    /// Emit the complexity findings section.
     pub complexity: bool,
+    /// Compute the per-file score section.
     pub file_scores: bool,
+    /// Emit the coverage-gap section.
     pub coverage_gaps: bool,
+    /// Compute the churn hotspot section.
     pub hotspots: bool,
+    /// Include ownership data with hotspots.
     pub ownership: bool,
+    /// Emit the refactoring targets section.
     pub targets: bool,
+    /// Compute full inputs even for sections that are not emitted.
     pub force_full: bool,
+    /// Only the score should be printed.
     pub score_only_output: bool,
+    /// Compute the overall health score.
     pub score: bool,
 }
 
 /// Normalized programmatic complexity / health inputs owned by `fallow-api`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexityRunOptions<'a> {
+    /// Complexity threshold overrides.
     pub thresholds: ComplexityThresholdOverrides,
+    /// Cap on the number of reported findings.
     pub top: Option<usize>,
+    /// Sort order for complexity findings.
     pub sort: ComplexitySort,
+    /// Include the per-metric complexity breakdown with each finding.
     pub complexity_breakdown: bool,
+    /// Derived effective section selection.
     pub sections: DerivedComplexityOptions,
+    /// Email privacy mode for ownership output.
     pub ownership_emails: Option<OwnershipEmailMode>,
+    /// Filter refactoring targets by estimated effort.
     pub effort: Option<TargetEffort>,
+    /// Include CSS / styling health.
     pub css: bool,
+    /// Enable deep cross-file CSS analysis.
     pub css_deep: bool,
+    /// Git time window (for example `30d`) for churn-based sections.
     pub since: Option<&'a str>,
+    /// Minimum commit count for a file to count as a hotspot.
     pub min_commits: Option<u32>,
+    /// Test coverage inputs.
     pub coverage_inputs: ComplexityCoverageInputs<'a>,
 }
 
