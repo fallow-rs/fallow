@@ -139,13 +139,16 @@ Workflow:
   fix            Auto-fix safe unused-code findings
 
 Project inspection:
-  list           List discovered files, entry points, plugins, boundaries, and workspaces
-  inspect        Inspect one file or exported symbol as a bundled evidence query
-  workspaces     Show monorepo workspace discovery diagnostics
-  explain        Explain one issue type without running analysis
-  suppressions   List active fallow-ignore suppression markers
-  impact         Show what fallow has done for you (opt-in, local-only)
-  viz            Generate an interactive HTML map of the codebase
+  list              List discovered files, entry points, plugins, boundaries, and workspaces
+  inspect           Inspect one file or exported symbol as a bundled evidence query
+  trace             Trace a symbol's call chain (best-effort, syntactic)
+  guard             Show which architecture rules apply to files before editing
+  decision-surface  Surface the structural decisions a change embeds (advisory)
+  workspaces        Show monorepo workspace discovery diagnostics
+  explain           Explain one issue type without running analysis
+  suppressions      List active fallow-ignore suppression markers
+  impact            Show what fallow has done for you (opt-in, local-only)
+  viz               Generate an interactive HTML map of the codebase
 
 Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
@@ -156,7 +159,9 @@ Setup and configuration:
   config-schema     Print the fallow config JSON Schema
   plugin-schema     Print the external plugin JSON Schema
   plugin-check      Dry-run external plugins and report what they seed
+  rule-pack         Manage declarative rule packs (policy-as-code)
   rule-pack-schema  Print the rule pack JSON Schema
+  type-aware        Inspect the optional TypeScript semantic companion
 
 Automation and CI:
   ci             Build PR/MR feedback envelopes
@@ -5551,6 +5556,30 @@ mod tests {
                 "root --help cheat sheet is missing task-matrix command '{}'; \
                  update TOP_LEVEL_AFTER_HELP to match TASK_MATRIX",
                 row.command
+            );
+        }
+    }
+
+    /// The curated cheat sheet replaces clap's auto-generated subcommand list,
+    /// so a new subcommand stays invisible in `fallow --help` unless it is
+    /// added here. Substring matching is not enough (e.g. `--trace` contains
+    /// `trace`), so each name must lead a cheat-sheet line.
+    #[test]
+    fn after_help_lists_every_visible_subcommand() {
+        use clap::CommandFactory;
+
+        for sub in Cli::command().get_subcommands() {
+            if sub.is_hide_set() {
+                continue;
+            }
+            let name = sub.get_name();
+            let listed = TOP_LEVEL_AFTER_HELP
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some(name));
+            assert!(
+                listed,
+                "root --help cheat sheet is missing subcommand '{name}'; \
+                 add it to a TOP_LEVEL_AFTER_HELP section"
             );
         }
     }
