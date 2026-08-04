@@ -1398,6 +1398,57 @@ mod tests {
         assert!(diagnostics[0].message.contains("deno.jsonc"));
     }
 
+    /// The per-discovery [`ManifestCache`] memoizes `Err` outcomes; a member
+    /// reached through two workspace sources (npm glob + tsconfig reference)
+    /// must still surface one diagnostic per source from the replayed error.
+    #[test]
+    fn malformed_member_reached_via_two_sources_diagnosed_per_source() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_good = dir.path().join("packages").join("good");
+        let pkg_bad = dir.path().join("packages").join("bad");
+        std::fs::create_dir_all(&pkg_good).unwrap();
+        std::fs::create_dir_all(&pkg_bad).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("tsconfig.json"),
+            r#"{"references": [{"path": "./packages/bad"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_good.join("package.json"), r#"{"name": "good"}"#).unwrap();
+        std::fs::write(pkg_bad.join("package.json"), r"{,}").unwrap();
+
+        let (result, _) = capture_workspace_warnings(|| {
+            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+        });
+        let (workspaces, diagnostics) = result.expect("root package.json is valid");
+
+        assert!(
+            workspaces.iter().any(|w| w.name == "good"),
+            "valid sibling should still discover: {workspaces:?}"
+        );
+        assert!(
+            workspaces.iter().any(|w| w.name == "bad"),
+            "tsconfig reference falls back to the directory name on manifest error"
+        );
+        let malformed: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| matches!(d.kind, WorkspaceDiagnosticKind::MalformedPackageJson { .. }))
+            .collect();
+        assert_eq!(
+            malformed.len(),
+            2,
+            "cached Err replays once per workspace source: {diagnostics:?}"
+        );
+        assert!(
+            malformed.iter().all(|d| d.path.ends_with("bad")),
+            "both diagnostics point at the malformed member"
+        );
+    }
+
     #[test]
     fn multiple_malformed_workspace_package_jsons_all_diagnosed() {
         let dir = tempfile::tempdir().expect("create temp dir");

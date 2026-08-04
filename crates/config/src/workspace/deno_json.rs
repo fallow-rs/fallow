@@ -362,6 +362,70 @@ mod tests {
     }
 
     #[test]
+    fn probe_keeps_import_map_when_package_json_is_malformed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), r"{,}").unwrap();
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{"imports":{"@std/assert":"jsr:@std/assert@1"}}"#,
+        )
+        .unwrap();
+
+        let probe = probe_dir_manifest(dir.path());
+        assert!(
+            probe.manifest.is_err(),
+            "malformed package.json must surface as a manifest error"
+        );
+        let (path, entries) = probe
+            .deno_import_map
+            .expect("valid colocated import map survives a broken package.json");
+        assert!(path.ends_with("deno.json"));
+        assert_eq!(
+            entries,
+            vec![("@std/assert".to_string(), "jsr:@std/assert@1".to_string())]
+        );
+    }
+
+    #[test]
+    fn probe_drops_import_map_when_deno_config_is_malformed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("deno.jsonc"), "{ imports: [ }").unwrap();
+
+        let probe = probe_dir_manifest(dir.path());
+        let error = probe
+            .manifest
+            .expect_err("malformed deno.jsonc must surface as a manifest error");
+        assert!(
+            error.contains("deno.jsonc"),
+            "error should name the failing config: {error}"
+        );
+        assert!(probe.deno_import_map.is_none());
+    }
+
+    #[test]
+    fn probe_returns_manifest_and_import_map_when_both_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"name":"from-npm"}"#).unwrap();
+        std::fs::write(
+            dir.path().join("deno.json"),
+            r#"{"imports":{"a":"./a.ts"}}"#,
+        )
+        .unwrap();
+
+        let probe = probe_dir_manifest(dir.path());
+        let (name, _pkg, _deps) = probe
+            .manifest
+            .expect("both configs parse")
+            .expect("manifest present");
+        assert_eq!(
+            name, "from-npm",
+            "package.json identity wins over deno.json"
+        );
+        let (_path, entries) = probe.deno_import_map.expect("import map present");
+        assert_eq!(entries, vec![("a".to_string(), "./a.ts".to_string())]);
+    }
+
+    #[test]
     fn accepts_jsonc_comments() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(

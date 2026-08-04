@@ -610,6 +610,99 @@ fn nonexistent_root_exits_2() {
     assert_eq!(output.code, 2, "nonexistent root should exit 2");
 }
 
+/// #2091 made workspace discovery fatal for analysis commands: a root
+/// `package.json` that cannot be parsed must exit 2 with the malformed-JSON
+/// message instead of analyzing a fictional workspace layout. The JSON error
+/// envelope on stdout is a published contract.
+#[test]
+fn malformed_root_package_json_exits_2_across_commands() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("mk src");
+    std::fs::write(root.join("package.json"), "{ not json").expect("write package.json");
+    std::fs::write(root.join("src").join("index.ts"), "export const a = 1;\n")
+        .expect("write source");
+
+    for command in ["check", "dupes", "list"] {
+        let human = run_fallow_in_root(command, root, &["--quiet"]);
+        assert_eq!(
+            human.code, 2,
+            "{command} should exit 2 on malformed root package.json, stderr: {}",
+            human.stderr
+        );
+        assert!(
+            human.stderr.contains("is not valid JSON"),
+            "{command} stderr should explain the parse failure, got: {}",
+            human.stderr
+        );
+
+        let json = run_fallow_in_root(command, root, &["--format", "json", "--quiet"]);
+        assert_eq!(
+            json.code, 2,
+            "{command} --format json should exit 2, stderr: {}",
+            json.stderr
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&json.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{command} stdout should be a JSON error envelope: {e}\nstdout: {}",
+                json.stdout
+            )
+        });
+        assert_eq!(parsed["error"], serde_json::Value::Bool(true));
+        assert_eq!(parsed["exit_code"], serde_json::Value::from(2));
+        assert!(
+            parsed["message"]
+                .as_str()
+                .is_some_and(|msg| msg.contains("is not valid JSON")),
+            "{command} envelope message should explain the parse failure, got: {}",
+            json.stdout
+        );
+    }
+}
+
+/// Sibling of [`malformed_root_package_json_exits_2_across_commands`] for the
+/// `MalformedRootDenoConfig` arm: a pure Deno root with an unparsable
+/// `deno.json` must also exit 2 instead of proceeding without workspaces.
+#[test]
+fn malformed_root_deno_config_exits_2_with_structured_envelope() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("mk src");
+    std::fs::write(root.join("deno.json"), r#"{"name":"broken""#).expect("write deno.json");
+    std::fs::write(root.join("src").join("index.ts"), "export const a = 1;\n")
+        .expect("write source");
+
+    let human = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        human.code, 2,
+        "check should exit 2 on malformed root deno.json, stderr: {}",
+        human.stderr
+    );
+    assert!(
+        human.stderr.contains("is not valid JSONC"),
+        "stderr should explain the parse failure, got: {}",
+        human.stderr
+    );
+
+    let json = run_fallow_in_root("check", root, &["--format", "json", "--quiet"]);
+    assert_eq!(json.code, 2, "stderr: {}", json.stderr);
+    let parsed: serde_json::Value = serde_json::from_str(&json.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout should be a JSON error envelope: {e}\nstdout: {}",
+            json.stdout
+        )
+    });
+    assert_eq!(parsed["error"], serde_json::Value::Bool(true));
+    assert_eq!(parsed["exit_code"], serde_json::Value::from(2));
+    assert!(
+        parsed["message"]
+            .as_str()
+            .is_some_and(|msg| msg.contains("is not valid JSONC")),
+        "envelope message should explain the parse failure, got: {}",
+        json.stdout
+    );
+}
+
 #[test]
 fn config_with_traversal_glob_exits_2() {
     let dir = tempfile::tempdir().expect("create temp dir");
