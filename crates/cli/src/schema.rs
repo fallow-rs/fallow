@@ -578,7 +578,7 @@ fn plugins_schema() -> serde_json::Value {
 const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     (
         "FALLOW_FORMAT",
-        "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge). CLI --format flag overrides this.",
+        "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge/github-annotations/github-summary). CLI --format flag overrides this.",
     ),
     (
         "FALLOW_QUIET",
@@ -653,12 +653,20 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this.",
     ),
     (
+        "FALLOW_COVERAGE_ROOT",
+        "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this.",
+    ),
+    (
         "FALLOW_MAX_FILE_SIZE",
         "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
     ),
     (
         "FALLOW_TYPE_AWARE",
         "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled.",
+    ),
+    (
+        "FALLOW_TYPE_AWARE_BIN",
+        "Trusted executable override for the TypeScript semantic refinement sidecar used by dead-code --type-aware. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
     ),
     (
         "FALLOW_AUDIT_BASE",

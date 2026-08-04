@@ -5917,7 +5917,7 @@
     "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}"
   },
   "environment_variables": {
-    "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge). CLI --format flag overrides this.",
+    "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge/github-annotations/github-summary). CLI --format flag overrides this.",
     "FALLOW_QUIET": "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
     "FALLOW_PRODUCTION": "Set to true/false to override production mode for all analyses.",
     "FALLOW_PRODUCTION_DEAD_CODE": "Set to true/false to override production mode for dead-code analysis.",
@@ -5936,8 +5936,10 @@
     "FALLOW_CACHE_MAX_SIZE": "Extraction cache size cap in megabytes (default 256). Wins over the cache.maxSizeMb config field.",
     "FALLOW_EXTENDS_TIMEOUT_SECS": "Timeout in seconds for fetching https:// configs referenced via the extends field (default 5).",
     "FALLOW_COVERAGE": "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this.",
+    "FALLOW_COVERAGE_ROOT": "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this.",
     "FALLOW_MAX_FILE_SIZE": "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
     "FALLOW_TYPE_AWARE": "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled.",
+    "FALLOW_TYPE_AWARE_BIN": "Trusted executable override for the TypeScript semantic refinement sidecar used by dead-code --type-aware. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
     "FALLOW_AUDIT_BASE": "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
     "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
     "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",

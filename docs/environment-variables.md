@@ -8,7 +8,9 @@ otherwise.
 
 The same user-facing list is emitted as a machine-readable manifest by
 `fallow schema` (under `environment_variables`), so agents and tooling can
-discover these without parsing this page.
+discover these without parsing this page. Variables set by the bundled CI
+integrations rather than by users (such as `FALLOW_MAX_COMMENTS`) are
+documented here for completeness but stay out of the manifest.
 
 ## Output
 
@@ -84,7 +86,7 @@ discover these without parsing this page.
 | `FALLOW_DIFF_FILE` | Path to a unified diff that scopes all findings by changed line (MCP server). | unset | `FALLOW_DIFF_FILE=/tmp/pr.diff` |
 | `FALLOW_DIFF_CONTEXT` | Line radius around changed diff lines when scoping findings to a diff in the review/PR-comment formats. | `3` | `FALLOW_DIFF_CONTEXT=5` |
 | `FALLOW_ROOT` | Project root used by the `review-github`/`review-gitlab` renderers to read source for suggestion blocks. Set it alongside `--root` when rendering review formats outside the bundled CI integrations. | `--root` value | `FALLOW_ROOT=/workspace/repo` |
-| `FALLOW_MAX_COMMENTS` | Maximum number of inline review comments emitted by `review-github`/`review-gitlab`. The GitHub Action sets this from `max-comments`; the GitLab template exposes the same variable directly. Sticky summary comments are not counted against this limit. | `50` | `FALLOW_MAX_COMMENTS=30` |
+| `FALLOW_MAX_COMMENTS` | Maximum number of inline review comments emitted by `review-github`/`review-gitlab`. CI-integration plumbing: the bundled GitHub Action sets it from its `max-comments` input and the GitLab template wires it through its job configuration, so you normally tune those surfaces instead of exporting this variable yourself. Sticky summary comments are not counted against this limit. | `50` | `FALLOW_MAX_COMMENTS=30` |
 | `FALLOW_SUMMARY_SCOPE` | Summary scope for `pr-comment-github`/`pr-comment-gitlab`: `all` keeps project-level dependency/catalog/override findings outside the diff filter; `diff` applies the diff filter to them too. | `all` | `FALLOW_SUMMARY_SCOPE=diff` |
 | `FALLOW_PR_COMMENT_LAYOUT` | Sticky PR comment layout: `default`, `compact`, `gate-only`, or `details`. Useful when teams prefer provider-native checks and want less Markdown in the PR conversation. | `default` | `FALLOW_PR_COMMENT_LAYOUT=gate-only` |
 | `FALLOW_CONSOLIDATED_STATUS` | When `fallow ci post-check-run --split-gates` is used, truthy values add one aggregate `Fallow` check alongside the per-gate checks. | unset (off) | `FALLOW_CONSOLIDATED_STATUS=1` |
