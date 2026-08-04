@@ -13,8 +13,10 @@
 //!    directory, producing a list of candidate `FileId`s.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use oxc_span::Span;
+use rustc_hash::FxHashMap;
 
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName};
@@ -111,10 +113,40 @@ fn dynamic_import_with(
     }
 }
 
+/// Session-local cache of compiled glob matchers keyed by glob string.
+///
+/// The glob string derives only from the pattern text, not the importing
+/// directory, so one compiled matcher serves every module that contains the
+/// same dynamic import pattern. Failed compilations are cached as `None` so a
+/// malformed pattern is not recompiled per module.
+#[derive(Default)]
+pub(super) struct GlobMatcherCache {
+    map: Mutex<FxHashMap<String, Option<globset::GlobMatcher>>>,
+}
+
+impl GlobMatcherCache {
+    /// Return the cached matcher for `glob_str`, compiling it on first miss.
+    fn get(&self, glob_str: &str) -> Option<globset::GlobMatcher> {
+        if let Ok(cache) = self.map.lock()
+            && let Some(value) = cache.get(glob_str)
+        {
+            return value.clone();
+        }
+        let value = globset::Glob::new(glob_str)
+            .ok()
+            .map(|g| g.compile_matcher());
+        if let Ok(mut cache) = self.map.lock() {
+            cache.insert(glob_str.to_string(), value.clone());
+        }
+        value
+    }
+}
+
 /// Resolve dynamic import patterns via glob matching against discovered files.
 /// When canonical paths are available, uses those for matching. Otherwise falls
 /// back to raw file paths from `files` (avoids allocating a separate PathBuf vec).
 pub(super) fn resolve_dynamic_patterns(
+    glob_cache: &GlobMatcherCache,
     from_dir: &Path,
     patterns: &[DynamicImportPattern],
     canonical_paths: &[PathBuf],
@@ -124,17 +156,18 @@ pub(super) fn resolve_dynamic_patterns(
         .iter()
         .filter_map(|pattern| {
             let glob_str = make_glob_from_pattern(pattern);
-            let matcher = globset::Glob::new(&glob_str)
-                .ok()
-                .map(|g| g.compile_matcher())?;
+            // Candidates are the paths relative to `from_dir`, which carry no
+            // leading "./". Stripping the prefix from the glob once lets each
+            // candidate be matched as-is instead of allocating a "./"-prefixed
+            // String per file per pattern.
+            let matcher = glob_cache.get(glob_str.strip_prefix("./").unwrap_or(&glob_str))?;
             let matched: Vec<FileId> = if canonical_paths.is_empty() {
                 files
                     .iter()
                     .filter(|f| {
-                        f.path.strip_prefix(from_dir).is_ok_and(|relative| {
-                            let rel_str = format!("./{}", relative.to_string_lossy());
-                            matcher.is_match(&rel_str)
-                        })
+                        f.path
+                            .strip_prefix(from_dir)
+                            .is_ok_and(|relative| matcher.is_match(relative))
                     })
                     .map(|f| f.id)
                     .collect()
@@ -143,10 +176,9 @@ pub(super) fn resolve_dynamic_patterns(
                     .iter()
                     .enumerate()
                     .filter(|(_idx, canonical)| {
-                        canonical.strip_prefix(from_dir).is_ok_and(|relative| {
-                            let rel_str = format!("./{}", relative.to_string_lossy());
-                            matcher.is_match(&rel_str)
-                        })
+                        canonical
+                            .strip_prefix(from_dir)
+                            .is_ok_and(|relative| matcher.is_match(relative))
                     })
                     .map(|(idx, _)| files[idx].id)
                     .collect()

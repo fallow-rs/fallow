@@ -48,7 +48,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo, SemanticFact};
 use oxc_span::Span;
 
-use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
+use dynamic_imports::{GlobMatcherCache, resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
 use react_native::{build_condition_names, build_extensions, synthesize_platform_family_edges};
 use require_imports::resolve_require_imports;
@@ -184,6 +184,7 @@ pub fn resolve_all_imports_with_session(
     let tsconfig_warned: Mutex<FxHashSet<String>> = Mutex::new(FxHashSet::default());
     let tsconfig_cache = types::TsconfigCache::default();
     let canonicalize_cache = types::CanonicalizeCache::default();
+    let glob_matcher_cache = GlobMatcherCache::default();
 
     let ctx = ResolveContext {
         resolver: &session.resolver,
@@ -209,7 +210,14 @@ pub fn resolve_all_imports_with_session(
         .modules
         .par_iter()
         .filter_map(|module| {
-            resolve_module_imports(module, &ctx, &file_paths, &canonical_paths, input.files)
+            resolve_module_imports(
+                module,
+                &ctx,
+                &glob_matcher_cache,
+                &file_paths,
+                &canonical_paths,
+                input.files,
+            )
         })
         .collect();
     let mut resolved = Vec::with_capacity(resolved_outputs.len());
@@ -360,6 +368,7 @@ fn build_path_to_id<'a>(
 fn resolve_module_imports(
     module: &ModuleInfo,
     ctx: &ResolveContext<'_>,
+    glob_matcher_cache: &GlobMatcherCache,
     file_paths: &[&Path],
     canonical_paths: &[PathBuf],
     files: &[DiscoveredFile],
@@ -393,6 +402,7 @@ fn resolve_module_imports(
     let module = build_resolved_module(ResolvedModuleBuildInput {
         module,
         ctx,
+        glob_matcher_cache,
         file_path,
         from_dir,
         canonical_paths,
@@ -477,6 +487,7 @@ fn final_replaced_module_targets(
 struct ResolvedModuleBuildInput<'a> {
     module: &'a ModuleInfo,
     ctx: &'a ResolveContext<'a>,
+    glob_matcher_cache: &'a GlobMatcherCache,
     file_path: &'a Path,
     from_dir: &'a Path,
     canonical_paths: &'a [PathBuf],
@@ -497,6 +508,7 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
             &input.module.dynamic_imports,
         ),
         resolved_dynamic_patterns: resolve_dynamic_patterns(
+            input.glob_matcher_cache,
             input.from_dir,
             &input.module.dynamic_import_patterns,
             input.canonical_paths,

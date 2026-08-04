@@ -11,7 +11,8 @@ use fallow_types::extract::{
 };
 
 use super::dynamic_imports::{
-    resolve_dynamic_imports, resolve_dynamic_patterns, resolve_single_dynamic_import,
+    GlobMatcherCache, resolve_dynamic_imports, resolve_dynamic_patterns,
+    resolve_single_dynamic_import,
 };
 use super::re_exports::resolve_re_exports;
 use super::react_native;
@@ -1077,7 +1078,13 @@ fn dynamic_patterns_matches_files_in_dir() {
         },
     ];
 
-    let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        from_dir,
+        &patterns,
+        &canonical_paths,
+        &files,
+    );
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].1.len(), 2);
@@ -1101,7 +1108,13 @@ fn dynamic_patterns_no_matches_returns_empty() {
         size_bytes: 100,
     }];
 
-    let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        from_dir,
+        &patterns,
+        &canonical_paths,
+        &files,
+    );
 
     assert!(result.is_empty());
 }
@@ -1116,7 +1129,13 @@ fn dynamic_patterns_empty_patterns_list() {
         size_bytes: 100,
     }];
 
-    let result = resolve_dynamic_patterns(from_dir, &[], &canonical_paths, &files);
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        from_dir,
+        &[],
+        &canonical_paths,
+        &files,
+    );
     assert!(result.is_empty());
 }
 
@@ -1146,7 +1165,13 @@ fn dynamic_patterns_glob_prefix_passthrough() {
         },
     ];
 
-    let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        from_dir,
+        &patterns,
+        &canonical_paths,
+        &files,
+    );
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].1.len(), 2);
@@ -1355,7 +1380,13 @@ fn dynamic_patterns_prefix_without_suffix() {
         },
     ];
 
-    let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        from_dir,
+        &patterns,
+        &canonical_paths,
+        &files,
+    );
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].1.len(), 2);
@@ -1373,7 +1404,8 @@ fn dynamic_patterns_empty_canonical_paths() {
         mechanism: ModuleLoadMechanism::EsModule,
     }];
 
-    let result = resolve_dynamic_patterns(from_dir, &patterns, &[], &[]);
+    let result =
+        resolve_dynamic_patterns(&GlobMatcherCache::default(), from_dir, &patterns, &[], &[]);
     assert!(result.is_empty());
 }
 
