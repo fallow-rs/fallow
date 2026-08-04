@@ -624,8 +624,9 @@ const BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES: &[&str] = &[
     "unocss.config.{ts,js,mjs,cjs}",
     "velite.config.{ts,mts,cts,js,mjs,cjs}",
     "vercel.{ts,js,mjs,cjs,mts}",
+    "vite.config.{ts,js,mts,mjs,cts,cjs}",
     "vite.config.{ts,js,mts,mjs}",
-    "vitest.config.{ts,js,mts,mjs}",
+    "vitest.config.{ts,js,mts,mjs,cts,cjs}",
     "vitest.workspace.{ts,js}",
     "webpack.*.config.{ts,js,mjs,cjs}",
     "webpack.config.{ts,js,mjs,cjs}",
@@ -847,6 +848,26 @@ mod tests {
         assert!(basenames.contains(&"bunfig.toml"));
         assert!(basenames.contains(&"eslint.config.{js,mjs,cjs,ts,mts,cts}"));
         assert!(basenames.contains(&"next.config.{ts,js,mjs,cjs}"));
+    }
+
+    /// No-drift gate: the hardcoded list must stay identical to the set the
+    /// core discovery walk derives live from every built-in plugin's
+    /// `config_patterns()`. A plugin added or changed in fallow-core would
+    /// otherwise silently miss this walk's config-candidate channel. On
+    /// failure, mirror the registry-derived set into
+    /// `BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES`.
+    #[test]
+    fn config_candidate_basenames_match_plugin_registry() {
+        let registry_derived =
+            fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames();
+        let hardcoded: Vec<String> = BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES
+            .iter()
+            .map(|basename| (*basename).to_string())
+            .collect();
+        assert_eq!(
+            hardcoded, registry_derived,
+            "BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES drifted from the plugin-registry-derived config-candidate set"
+        );
     }
 
     /// ADR-004: an identical file set must yield identical FileIds regardless of
