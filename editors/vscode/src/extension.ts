@@ -423,12 +423,13 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
 
-  // Concurrency guard: config-change re-analysis (fire-and-forget), workspace
-  // scope changes, the lazy view-visibility trigger, and explicit re-analyze /
-  // post-fix runs can all fire while another run is in flight. Without a guard
-  // they race on `lastCheckResult` / `lastDupesResult` (last-writer-wins).
-  // Background triggers dedup onto the in-flight run; an explicit `force` run
-  // arriving mid-run re-runs once afterward so it reflects the latest config.
+  // Concurrency guard: the lazy view-visibility trigger, workspace scope
+  // changes, config-change re-analysis, and explicit re-analyze / post-fix
+  // runs can all fire while another run is in flight. Without a guard they
+  // race on `lastCheckResult` / `lastDupesResult` (last-writer-wins). The
+  // view-visibility trigger dedups onto the in-flight run; a `force` run
+  // (explicit, scope change, or config change) arriving mid-run re-runs once
+  // afterward so the results reflect the latest scope and config.
   const cliAnalysisFlight = createSingleFlight((force) => runCliAnalysisOnce({ force }));
   const triggerCliAnalysis = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> =>
     cliAnalysisFlight.run(options.force === true);
@@ -813,14 +814,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   // Re-run the sidebar after a scope change so the tree views and status bar
-  // reflect the newly selected workspace. The picker persists the choice to
-  // workspaceState; resolveActiveWorkspaceScope picks it up on the next run.
-  // Mark the analysis as run so a later first-open of the sidebar does not
-  // trigger a redundant second pass.
+  // reflect the newly selected workspace. Forced: a non-force trigger would
+  // dedup onto an in-flight run spawned with the OLD scope and latch its
+  // results as current with no follow-up run. Mark the analysis as run so a
+  // later first-open of the sidebar does not trigger a redundant second pass.
   const onWorkspaceScopeChange = (): void => {
     refreshWorkspacePicker(context);
     void (async (): Promise<void> => {
-      cliAnalysisRan = await triggerCliAnalysis();
+      cliAnalysisRan = await triggerCliAnalysis({ force: true });
     })();
   };
 
@@ -1137,9 +1138,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       }
 
       if (needsReanalysis) {
-        // Re-run CLI analysis for tree views and status bar
-        // (sequenced after LSP restart if both apply)
-        void triggerCliAnalysis();
+        // Re-run CLI analysis for tree views and status bar (sequenced after
+        // LSP restart if both apply). Forced: a run already in flight was
+        // spawned with the old config, so deduping onto it would latch stale
+        // results with no follow-up run.
+        void triggerCliAnalysis({ force: true });
       }
 
       if (needsHealthReanalysis) {

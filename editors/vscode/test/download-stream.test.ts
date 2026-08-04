@@ -7,15 +7,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type FakeStream = EventEmitter & {
   statusCode?: number;
   headers?: Record<string, string>;
+  complete?: boolean;
   resume?: () => void;
   pipe?: () => void;
-  destroy?: () => void;
+  destroy?: (err?: Error) => void;
   close?: () => void;
 };
 
 const httpsState = vi.hoisted(() => ({
   response: null as unknown as FakeStream,
   request: null as unknown as EventEmitter,
+  // The inactivity-timeout callback withRedirects registers via
+  // request.setTimeout, captured so tests can fire a simulated stall.
+  onRequestTimeout: null as (() => void) | null,
 }));
 const fsState = vi.hoisted(() => ({
   writeStream: null as unknown as FakeStream,
@@ -46,11 +50,21 @@ describe("httpsDownload stream-error handling", () => {
     const response = Object.assign(new EventEmitter(), {
       statusCode: 200,
       headers: {} as Record<string, string>,
+      complete: false,
       resume: vi.fn(),
       pipe: vi.fn(),
+      destroy: vi.fn((err?: Error) => {
+        response.emit("error", err);
+      }),
     });
     httpsState.response = response;
-    httpsState.request = new EventEmitter();
+    httpsState.request = Object.assign(new EventEmitter(), {
+      setTimeout: vi.fn((_ms: number, cb: () => void) => {
+        httpsState.onRequestTimeout = cb;
+      }),
+      destroy: vi.fn(),
+    });
+    httpsState.onRequestTimeout = null;
     const ws = Object.assign(new EventEmitter(), {
       destroy: vi.fn(),
       close: vi.fn(),
@@ -77,5 +91,30 @@ describe("httpsDownload stream-error handling", () => {
     await expect(pending).resolves.toBeUndefined();
     expect((fsState.writeStream.close as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
     expect(fsState.unlinked).not.toContain("/tmp/ok");
+  });
+
+  it("rejects and cleans up when the response stalls mid-body", async () => {
+    const pending = httpsDownload("https://example.test/bin", "/tmp/stalled");
+    // The socket goes idle with an incomplete body; the inactivity timeout
+    // destroys the response, which must route through the same cleanup path
+    // as a socket error.
+    httpsState.onRequestTimeout?.();
+
+    await expect(pending).rejects.toThrow("Download timed out");
+    expect((fsState.writeStream.destroy as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+    expect(fsState.unlinked).toContain("/tmp/stalled");
+  });
+
+  it("does not destroy a completed response on a late keep-alive timeout", async () => {
+    const pending = httpsDownload("https://example.test/bin", "/tmp/done");
+    httpsState.response.complete = true;
+    fsState.writeStream.emit("finish");
+    await expect(pending).resolves.toBeUndefined();
+
+    // A keep-alive socket can fire the inactivity timeout after the download
+    // finished; that must not tear down the published file.
+    httpsState.onRequestTimeout?.();
+    expect((httpsState.response.destroy as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(fsState.unlinked).not.toContain("/tmp/done");
   });
 });

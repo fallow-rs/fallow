@@ -89,6 +89,12 @@ const execLicense = (
     });
 
     if (stdin !== undefined && child.stdin) {
+      // A child that exits before consuming stdin (stale binary path, a CLI
+      // that rejects --stdin) destroys the pipe; without a listener the
+      // resulting EPIPE is an uncaught stream error in the extension host. The
+      // meaningful failure already surfaces via the child 'error'/'close'
+      // handlers above, so the stream error is swallowed, not rerouted.
+      child.stdin.once("error", () => {});
       child.stdin.end(stdin);
     }
   });

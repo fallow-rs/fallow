@@ -56,6 +56,14 @@ interface GithubRelease {
 const REQUEST_HEADERS = { "User-Agent": "fallow-vscode" };
 const EXTENSION_ID = "fallow-rs.fallow-vscode";
 
+// Socket-inactivity guard. A proxy that accepts the TCP connection but never
+// sends bytes fires no 'error' event, which used to park the download (and the
+// LSP startup awaiting it) forever behind the progress notification.
+const REQUEST_TIMEOUT_MS = 30_000;
+// GitHub asset URLs redirect once to the CDN; anything deeper is a
+// misconfigured proxy or a loop, and unbounded recursion here never settles.
+const MAX_REDIRECTS = 5;
+
 /** Outcome of one locked LSP+CLI install attempt. */
 type LspCliInstall =
   | { kind: "lsp-missing"; tag: string }
@@ -85,9 +93,13 @@ const getPlatformTarget = (): string | null => platformTargetFor(os.platform(), 
 const withRedirects = <T>(
   url: string,
   handleResponse: (response: IncomingMessage) => Promise<T>,
+  signal?: AbortSignal,
+  redirectDepth = 0,
 ): Promise<T> =>
   new Promise((resolve, reject) => {
-    const request = https.get(url, { headers: REQUEST_HEADERS }, (response) => {
+    let activeResponse: IncomingMessage | null = null;
+    const request = https.get(url, { headers: REQUEST_HEADERS, signal }, (response) => {
+      activeResponse = response;
       if (
         response.statusCode &&
         response.statusCode >= 300 &&
@@ -95,7 +107,14 @@ const withRedirects = <T>(
         response.headers.location
       ) {
         response.resume();
-        withRedirects(response.headers.location, handleResponse).then(resolve, reject);
+        if (redirectDepth >= MAX_REDIRECTS) {
+          reject(new Error(`Too many redirects (limit ${MAX_REDIRECTS})`));
+          return;
+        }
+        withRedirects(response.headers.location, handleResponse, signal, redirectDepth + 1).then(
+          resolve,
+          reject,
+        );
         return;
       }
 
@@ -108,21 +127,41 @@ const withRedirects = <T>(
       void handleResponse(response).then(resolve, reject);
     });
 
+    // Covers both a connection that never yields a response and a stall
+    // mid-body. Destroying the *response* (when one exists) routes the failure
+    // through the response 'error' handlers in httpsGet / httpsDownload so
+    // their cleanup (partial-file unlink) runs; the completed-response guard
+    // keeps a later keep-alive socket timeout from clobbering a finished
+    // download.
+    request.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      const timeoutError = new Error(`Download timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      if (activeResponse) {
+        if (!activeResponse.complete) {
+          activeResponse.destroy(timeoutError);
+        }
+        return;
+      }
+      request.destroy(timeoutError);
+    });
     request.on("error", reject);
   });
 
-const httpsGet = (url: string): Promise<string> =>
-  withRedirects(url, async (response) => {
-    const chunks: Buffer[] = [];
+const httpsGet = (url: string, signal?: AbortSignal): Promise<string> =>
+  withRedirects(
+    url,
+    async (response) => {
+      const chunks: Buffer[] = [];
 
-    return await new Promise<string>((resolve, reject) => {
-      response.on("data", (chunk: Buffer) => chunks.push(chunk));
-      response.on("end", () => resolve(Buffer.concat(chunks).toString()));
-      response.on("error", reject);
-    });
-  });
+      return await new Promise<string>((resolve, reject) => {
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => resolve(Buffer.concat(chunks).toString()));
+        response.on("error", reject);
+      });
+    },
+    signal,
+  );
 
-export const httpsDownload = (url: string, dest: string): Promise<void> =>
+export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): Promise<void> =>
   withRedirects(
     url,
     async (response) =>
@@ -147,6 +186,7 @@ export const httpsDownload = (url: string, dest: string): Promise<void> =>
           reject(err);
         });
       }),
+    signal,
   );
 
 // Matches the `.${name}.${pid}.${counter}.tmp` names minted by `uniqueTempPath`
@@ -497,8 +537,8 @@ export const releaseApiUrlForVersion = (version: string | null): string =>
 const normalizeReleaseVersion = (release: GithubRelease): string =>
   release.tag_name.replace(/^v/, "").trim();
 
-const fetchReleaseForExtension = async (): Promise<GithubRelease> => {
-  const releaseJson = await httpsGet(releaseApiUrlForVersion(getExtensionVersion()));
+const fetchReleaseForExtension = async (signal?: AbortSignal): Promise<GithubRelease> => {
+  const releaseJson = await httpsGet(releaseApiUrlForVersion(getExtensionVersion()), signal);
   return JSON.parse(releaseJson) as GithubRelease;
 };
 
@@ -580,6 +620,7 @@ const downloadAsset = async (
   binaryName: string,
   target: string,
   dir: string,
+  signal?: AbortSignal,
 ): Promise<string | null> => {
   const extension = getExecutableExtension();
   const assetName = `${binaryName}-${target}${extension}`;
@@ -610,10 +651,10 @@ const downloadAsset = async (
   let sidecarsPublished = false;
 
   try {
-    await httpsDownload(asset.browser_download_url, tempBinary);
+    await httpsDownload(asset.browser_download_url, tempBinary, signal);
 
     if (signatureAsset) {
-      await httpsDownload(signatureAsset.browser_download_url, tempSignature);
+      await httpsDownload(signatureAsset.browser_download_url, tempSignature, signal);
 
       // verifyBinarySignature reads `${tempBinary}.sig`, i.e. tempSignature.
       if (!verifyBinarySignature(tempBinary)) {
@@ -719,61 +760,80 @@ const downloadManagedBinary = async (
     {
       location: vscode.ProgressLocation.Notification,
       title: `Fallow: Downloading ${label} binary...`,
-      cancellable: false,
+      cancellable: true,
     },
-    async () => {
-      for (;;) {
-        const dir = getInstallDir(context);
-        try {
-          // The lock holds only for one download attempt; user prompts run
-          // outside it so a modal never blocks a sibling window.
-          const result = await withInstallLock(
-            dir,
-            async (): Promise<{ path: string; toast: string | null } | { tag: string }> => {
-              // A sibling window may have installed it while we waited for the
-              // lock; reuse it instead of downloading again.
-              const existing = await getManagedBinaryPath(context, binaryName, label);
-              if (existing) {
-                return { path: existing, toast: null };
-              }
+    async (_progress, token) => {
+      const aborter = new AbortController();
+      const cancellation = token.onCancellationRequested(() => aborter.abort());
+      try {
+        for (;;) {
+          if (token.isCancellationRequested) {
+            return null;
+          }
+          const dir = getInstallDir(context);
+          try {
+            // The lock holds only for one download attempt; user prompts run
+            // outside it so a modal never blocks a sibling window.
+            const result = await withInstallLock(
+              dir,
+              async (): Promise<{ path: string; toast: string | null } | { tag: string }> => {
+                // A sibling window may have installed it while we waited for the
+                // lock; reuse it instead of downloading again.
+                const existing = await getManagedBinaryPath(context, binaryName, label);
+                if (existing) {
+                  return { path: existing, toast: null };
+                }
 
-              const release = await fetchReleaseForExtension();
-              const binaryPath = await downloadAsset(release, binaryName, target, dir);
-              if (!binaryPath) {
-                return { tag: release.tag_name };
-              }
+                const release = await fetchReleaseForExtension(aborter.signal);
+                const binaryPath = await downloadAsset(
+                  release,
+                  binaryName,
+                  target,
+                  dir,
+                  aborter.signal,
+                );
+                if (!binaryPath) {
+                  return { tag: release.tag_name };
+                }
 
-              writeVersionMarker(dir, normalizeReleaseVersion(release));
-              return {
-                path: binaryPath,
-                toast: `Fallow: ${label} ${release.tag_name} installed.`,
-              };
-            },
-          );
-
-          if ("tag" in result) {
-            const shouldRetry = await promptAfterDownloadFailure(
-              `Fallow: no ${label} binary found for ${target} in release ${result.tag}.`,
+                writeVersionMarker(dir, normalizeReleaseVersion(release));
+                return {
+                  path: binaryPath,
+                  toast: `Fallow: ${label} ${release.tag_name} installed.`,
+                };
+              },
             );
-            if (shouldRetry) {
-              continue;
-            }
-            return null;
-          }
 
-          if (result.toast) {
-            void vscode.window.showInformationMessage(result.toast);
-          }
-          return result.path;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          const shouldRetry = await promptAfterDownloadFailure(
-            `Fallow: failed to download ${label} binary: ${message}`,
-          );
-          if (!shouldRetry) {
-            return null;
+            if ("tag" in result) {
+              const shouldRetry = await promptAfterDownloadFailure(
+                `Fallow: no ${label} binary found for ${target} in release ${result.tag}.`,
+              );
+              if (shouldRetry) {
+                continue;
+              }
+              return null;
+            }
+
+            if (result.toast) {
+              void vscode.window.showInformationMessage(result.toast);
+            }
+            return result.path;
+          } catch (err) {
+            // The user cancelled; the abort rejection is not a failure to report.
+            if (token.isCancellationRequested) {
+              return null;
+            }
+            const message = err instanceof Error ? err.message : String(err);
+            const shouldRetry = await promptAfterDownloadFailure(
+              `Fallow: failed to download ${label} binary: ${message}`,
+            );
+            if (!shouldRetry) {
+              return null;
+            }
           }
         }
+      } finally {
+        cancellation.dispose();
       }
     },
   );
@@ -792,94 +852,127 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
     {
       location: vscode.ProgressLocation.Notification,
       title: "Fallow: Downloading binaries...",
-      cancellable: false,
+      cancellable: true,
     },
-    async () => {
+    async (_progress, token) => {
+      const aborter = new AbortController();
+      const cancellation = token.onCancellationRequested(() => aborter.abort());
       let cliRetried = false;
 
-      for (;;) {
-        const dir = getInstallDir(context);
-        try {
-          // One lock per attempt; prompts run outside the lock. The locked body
-          // double-checks each binary so a sibling-installed copy is reused.
-          const result = await withInstallLock(dir, async (): Promise<LspCliInstall> => {
-            let lspPath = await getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP");
-            let lspDownloaded = false;
-            let release: GithubRelease | null = null;
-
-            if (!lspPath) {
-              release = await fetchReleaseForExtension();
-              lspPath = await downloadAsset(release, LSP_BINARY_NAME, target, dir);
-              if (!lspPath) {
-                return { kind: "lsp-missing", tag: release.tag_name };
-              }
-              writeVersionMarker(dir, normalizeReleaseVersion(release));
-              lspDownloaded = true;
-            }
-
-            let cliPath = await getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI");
-            let cliDownloaded = false;
-            let cliError: string | null = null;
-
-            if (!cliPath) {
-              if (!release) {
-                release = await fetchReleaseForExtension();
-              }
-              try {
-                cliPath = await downloadAsset(release, CLI_BINARY_NAME, target, dir);
-                cliDownloaded = cliPath !== null;
-              } catch (cliErr) {
-                cliError = cliErr instanceof Error ? cliErr.message : String(cliErr);
-              }
-            }
-
-            const tag = release ? release.tag_name : (readVersionMarker(dir) ?? "");
-            return { kind: "ready", lspPath, lspDownloaded, cliPath, cliDownloaded, cliError, tag };
-          });
-
-          if (result.kind === "lsp-missing") {
-            const shouldRetry = await promptAfterDownloadFailure(
-              `Fallow: no LSP binary found for ${target} in release ${result.tag}.`,
-            );
-            if (shouldRetry) {
-              continue;
-            }
+      try {
+        for (;;) {
+          if (token.isCancellationRequested) {
             return null;
           }
+          const dir = getInstallDir(context);
+          try {
+            // One lock per attempt; prompts run outside the lock. The locked body
+            // double-checks each binary so a sibling-installed copy is reused.
+            const result = await withInstallLock(dir, async (): Promise<LspCliInstall> => {
+              let lspPath = await getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP");
+              let lspDownloaded = false;
+              let release: GithubRelease | null = null;
 
-          if (!result.cliPath) {
-            // CLI is best-effort: prompt once, then warn and keep the LSP.
-            if (!cliRetried) {
-              cliRetried = true;
-              const reason = result.cliError
-                ? `Fallow: failed to download CLI binary: ${result.cliError}`
-                : `Fallow: no CLI binary found for ${target} in release ${result.tag}. Tree views and fix commands require the fallow CLI.`;
-              const shouldRetry = await promptAfterDownloadFailure(reason);
+              if (!lspPath) {
+                release = await fetchReleaseForExtension(aborter.signal);
+                lspPath = await downloadAsset(
+                  release,
+                  LSP_BINARY_NAME,
+                  target,
+                  dir,
+                  aborter.signal,
+                );
+                if (!lspPath) {
+                  return { kind: "lsp-missing", tag: release.tag_name };
+                }
+                writeVersionMarker(dir, normalizeReleaseVersion(release));
+                lspDownloaded = true;
+              }
+
+              let cliPath = await getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI");
+              let cliDownloaded = false;
+              let cliError: string | null = null;
+
+              if (!cliPath) {
+                if (!release) {
+                  release = await fetchReleaseForExtension(aborter.signal);
+                }
+                try {
+                  cliPath = await downloadAsset(
+                    release,
+                    CLI_BINARY_NAME,
+                    target,
+                    dir,
+                    aborter.signal,
+                  );
+                  cliDownloaded = cliPath !== null;
+                } catch (cliErr) {
+                  cliError = cliErr instanceof Error ? cliErr.message : String(cliErr);
+                }
+              }
+
+              const tag = release ? release.tag_name : (readVersionMarker(dir) ?? "");
+              return {
+                kind: "ready",
+                lspPath,
+                lspDownloaded,
+                cliPath,
+                cliDownloaded,
+                cliError,
+                tag,
+              };
+            });
+
+            if (result.kind === "lsp-missing") {
+              const shouldRetry = await promptAfterDownloadFailure(
+                `Fallow: no LSP binary found for ${target} in release ${result.tag}.`,
+              );
               if (shouldRetry) {
                 continue;
               }
+              return null;
             }
-            void vscode.window.showWarningMessage(
-              `Fallow: LSP ${result.tag} installed. CLI binary is still missing, so tree views and fix commands need another CLI source.`,
-            );
-            return result.lspPath;
-          }
 
-          if (result.lspDownloaded || result.cliDownloaded) {
-            void vscode.window.showInformationMessage(
-              `Fallow: ${result.tag} installed (LSP + CLI).`,
+            if (!result.cliPath) {
+              // CLI is best-effort: prompt once, then warn and keep the LSP.
+              if (!cliRetried) {
+                cliRetried = true;
+                const reason = result.cliError
+                  ? `Fallow: failed to download CLI binary: ${result.cliError}`
+                  : `Fallow: no CLI binary found for ${target} in release ${result.tag}. Tree views and fix commands require the fallow CLI.`;
+                const shouldRetry = await promptAfterDownloadFailure(reason);
+                if (shouldRetry) {
+                  continue;
+                }
+              }
+              void vscode.window.showWarningMessage(
+                `Fallow: LSP ${result.tag} installed. CLI binary is still missing, so tree views and fix commands need another CLI source.`,
+              );
+              return result.lspPath;
+            }
+
+            if (result.lspDownloaded || result.cliDownloaded) {
+              void vscode.window.showInformationMessage(
+                `Fallow: ${result.tag} installed (LSP + CLI).`,
+              );
+            }
+            return result.lspPath;
+          } catch (err) {
+            // The user cancelled; the abort rejection is not a failure to report.
+            if (token.isCancellationRequested) {
+              return null;
+            }
+            const message = err instanceof Error ? err.message : String(err);
+            const shouldRetry = await promptAfterDownloadFailure(
+              `Fallow: failed to download binaries: ${message}`,
             );
-          }
-          return result.lspPath;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          const shouldRetry = await promptAfterDownloadFailure(
-            `Fallow: failed to download binaries: ${message}`,
-          );
-          if (!shouldRetry) {
-            return null;
+            if (!shouldRetry) {
+              return null;
+            }
           }
         }
+      } finally {
+        cancellation.dispose();
       }
     },
   );

@@ -124,7 +124,14 @@ vi.mock("vscode", () => ({
     getExtension: () => ({ packageJSON: { version: "2.26.0" } }),
   },
   window: {
-    withProgress: (_opts: unknown, task: () => Promise<unknown>) => task(),
+    withProgress: (
+      _opts: unknown,
+      task: (progress: unknown, token: unknown) => Promise<unknown>,
+    ) =>
+      task(undefined, {
+        isCancellationRequested: false,
+        onCancellationRequested: () => ({ dispose: () => {} }),
+      }),
     showInformationMessage: (...args: unknown[]) => showInformationMessage(...args),
     showErrorMessage: (...args: unknown[]) => showErrorMessage(...args),
     showWarningMessage: (...args: unknown[]) => showWarningMessage(...args),

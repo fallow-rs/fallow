@@ -12,17 +12,19 @@ type FakeResponse = EventEmitter & {
 };
 
 // The body the mock https.get hands back, plus the response shape. A test sets
-// `body` for the 200 path or `statusCode` for the non-200 reject path.
+// `body` for the 200 path, `statusCode` for the non-200 reject path, or
+// `headers.location` (with a 3xx code) for the redirect path.
 const httpsState = vi.hoisted(() => ({
   body: "" as string,
   statusCode: 200 as number,
+  headers: {} as Record<string, string>,
 }));
 
 vi.mock("node:https", () => ({
   get: (_url: string, _opts: unknown, cb: (res: FakeResponse) => void) => {
     const response = Object.assign(new EventEmitter(), {
       statusCode: httpsState.statusCode,
-      headers: {} as Record<string, string>,
+      headers: { ...httpsState.headers },
       resume: vi.fn(),
     });
     // Deliver the response on a microtask so listeners attached synchronously
@@ -34,7 +36,7 @@ vi.mock("node:https", () => ({
         response.emit("end");
       }
     });
-    return new EventEmitter();
+    return Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() });
   },
 }));
 
@@ -75,7 +77,14 @@ vi.mock("vscode", () => ({
     getExtension: () => ({ packageJSON: { version: "2.26.0" } }),
   },
   window: {
-    withProgress: (_opts: unknown, task: () => Promise<unknown>) => task(),
+    withProgress: (
+      _opts: unknown,
+      task: (progress: unknown, token: unknown) => Promise<unknown>,
+    ) =>
+      task(undefined, {
+        isCancellationRequested: false,
+        onCancellationRequested: () => ({ dispose: () => {} }),
+      }),
     showInformationMessage: (...args: unknown[]) => showInformationMessage(...args),
     // The default undefined return means promptAfterDownloadFailure sees no
     // "Retry" choice, so the loop bails after a single attempt.
@@ -93,6 +102,7 @@ const fakeContext = { globalStorageUri: { fsPath: "/storage" } } as never;
 const reset = (): void => {
   httpsState.body = "";
   httpsState.statusCode = 200;
+  httpsState.headers = {};
   showInformationMessage.mockReset();
   showErrorMessage.mockReset();
   showWarningMessage.mockReset();
@@ -145,6 +155,18 @@ describe("downloadCliBinary network error paths", () => {
     expect(result).toBeNull();
     expect(showErrorMessage).toHaveBeenCalledTimes(1);
     expect(showErrorMessage.mock.calls[0][0]).toContain("failed to download CLI binary");
+  });
+
+  it("returns null and prompts on a redirect loop instead of recursing forever", async () => {
+    // Every response 302s back to itself; the depth cap must reject.
+    httpsState.statusCode = 302;
+    httpsState.headers = { location: "https://example.test/loop" };
+
+    const result = await downloadCliBinary(fakeContext);
+
+    expect(result).toBeNull();
+    expect(showErrorMessage).toHaveBeenCalledTimes(1);
+    expect(showErrorMessage.mock.calls[0][0]).toContain("Too many redirects");
   });
 });
 

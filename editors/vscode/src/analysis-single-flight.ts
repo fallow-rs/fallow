@@ -3,14 +3,15 @@
  * cannot race on the shared state the task writes (last-writer-wins).
  *
  * Two trigger classes need different handling:
- * - background triggers (`force === false`): the lazy view-visibility latch, a
- *   workspace-scope change, and a config-driven re-analysis. While a run is in
- *   flight these dedup onto the existing run; they only want the latest result,
- *   not a guaranteed fresh spawn.
- * - explicit triggers (`force === true`): a user-invoked re-analyze or a
- *   post-fix re-run. These must reflect the latest on-disk / config state, so a
- *   force call arriving mid-run schedules exactly one re-run after the current
- *   one settles. Multiple force calls in flight coalesce into a single re-run.
+ * - background triggers (`force === false`): the lazy view-visibility latch.
+ *   While a run is in flight it dedups onto the existing run; it only wants
+ *   the latest result, not a guaranteed fresh spawn.
+ * - fresh-state triggers (`force === true`): a user-invoked re-analyze, a
+ *   post-fix re-run, a workspace-scope change, or a config-driven re-analysis.
+ *   These must reflect the latest on-disk / scope / config state (an in-flight
+ *   run was spawned with the old arguments), so a force call arriving mid-run
+ *   schedules exactly one re-run after the current one settles. Multiple force
+ *   calls in flight coalesce into a single re-run.
  */
 export interface SingleFlight {
   /**
