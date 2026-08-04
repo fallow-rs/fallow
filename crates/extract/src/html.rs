@@ -152,7 +152,7 @@ pub fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) ->
 }
 
 /// Computed building blocks for an HTML [`ModuleInfo`], gathered before the
-/// (irreducible) struct literal is assembled.
+/// struct is assembled.
 struct HtmlModuleParts {
     imports: Vec<ImportInfo>,
     member_accesses: Vec<MemberAccess>,
@@ -237,8 +237,7 @@ pub fn parse_html_to_module_with_complexity(
 }
 
 /// Assemble the `ModuleInfo` for an HTML file from its computed parts; all
-/// JS-level fields stay empty since HTML carries no module structure. Pure
-/// plumbing struct literal.
+/// JS-level fields stay empty since HTML carries no module structure.
 fn html_module_info(
     file_id: FileId,
     content_hash: u64,
@@ -257,86 +256,23 @@ fn html_module_info(
     } = parts;
 
     ModuleInfo {
-        file_id,
-        exports: Vec::new(),
         imports,
-        re_exports: Vec::new(),
-        dynamic_imports: Vec::new(),
-        dynamic_import_patterns: Vec::new(),
-        require_calls: Vec::new(),
-        package_path_references: Box::default(),
         member_accesses,
         semantic_facts: semantic_facts.into(),
-        whole_object_uses: Box::default(),
-        has_cjs_exports: false,
-        has_angular_component_template_url: false,
         content_hash,
         suppressions: parsed_suppressions.suppressions,
         unknown_suppression_kinds: parsed_suppressions.unknown_kinds,
-        unused_import_bindings: Vec::new(),
-        type_referenced_import_bindings: Vec::new(),
-        value_referenced_import_bindings: Vec::new(),
         line_offsets: fallow_types::extract::compute_line_offsets(source),
         complexity,
-        flag_uses: Vec::new(),
-        class_heritage: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
-        injection_tokens: vec![],
-        local_type_declarations: Vec::new(),
-        public_signature_type_references: Vec::new(),
-        namespace_object_aliases: Vec::new(),
-        iconify_prefixes: Vec::new(),
-        iconify_icon_names: Vec::new(),
-        auto_import_candidates: Vec::new(),
-        directives: Vec::new(),
-        client_only_dynamic_import_spans: Vec::new(),
         security_sinks,
-        security_sinks_skipped: 0,
-        security_unresolved_callee_sites: Vec::new(),
-        tainted_bindings: Vec::new(),
-        sanitized_sink_args: Vec::new(),
-        security_control_sites: Vec::new(),
-        callee_uses: Vec::new(),
-        misplaced_directives: Vec::new(),
-        inline_server_action_exports: Vec::new(),
-        di_key_sites: Vec::new(),
-        has_dynamic_provide: false,
-        referenced_import_bindings: Vec::new(),
-        component_props: Vec::new(),
-        has_props_attrs_fallthrough: false,
-        has_define_expose: false,
-        has_define_model: false,
-        has_unharvestable_props: false,
-        component_emits: Vec::new(),
-        angular_inputs: Vec::new(),
-        angular_outputs: Vec::new(),
-        angular_component_selectors: Vec::new(),
-        registered_custom_elements: Vec::new(),
         // Custom-element tags rendered in a standalone `.html` document (an app
         // shell, demo, or dev page) feed the Lit `unrendered-component` arm's
         // project-wide rendered-tag union, so an element rendered only from HTML
         // (e.g. a root `<my-app>` in `index.html`) is not falsely flagged.
         used_custom_element_tags: collect_custom_element_tags(source),
         angular_used_selectors,
-        angular_entry_component_refs: Vec::new(),
         has_dynamic_component_render,
-        has_unharvestable_emits: false,
-        has_dynamic_emit: false,
-        has_emit_whole_object_use: false,
-        load_return_keys: Vec::new(),
-        has_unharvestable_load: false,
-        has_load_data_whole_use: false,
-        has_page_data_store_whole_use: false,
-        has_route_loader_data_whole_use: false,
-        component_functions: Vec::new(),
-        react_props: Vec::new(),
-        hook_uses: Vec::new(),
-        render_edges: Vec::new(),
-        svelte_dispatched_events: Vec::new(),
-        svelte_listened_events: Vec::new(),
-        has_dynamic_dispatch: false,
+        ..ModuleInfo::empty(file_id)
     }
 }
 
