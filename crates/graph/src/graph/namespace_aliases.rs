@@ -32,7 +32,7 @@ use super::namespace_indexes::{
     NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
 };
 use super::narrowing::{
-    ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
+    ReferenceDedup, ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
     mark_member_exports_referenced_at_site,
 };
 use super::types::{
@@ -523,14 +523,17 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: Vec<PendingCredit>) {
             .push(credit.member);
     }
 
+    let mut dedup = ReferenceDedup::default();
     for ((target_module_idx, consumer_file_id, import_span, path), members) in groups {
         let module = &mut graph.modules[target_module_idx];
         let site = ReferenceSite::exact(consumer_file_id, import_span, path);
         let found_members = mark_member_exports_referenced_at_site(
             &mut module.exports,
+            module.file_id,
             site,
             &members,
             ReferenceKind::NamespaceImport,
+            &mut dedup,
         );
         create_synthetic_exports_for_star_re_exports_at_site(
             &mut module.exports,

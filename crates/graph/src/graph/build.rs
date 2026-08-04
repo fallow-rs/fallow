@@ -6,7 +6,7 @@ use crate::resolve::{ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ExportName, ImportedName, ModuleLoadMechanism, VisibilityTag};
 
-use super::narrowing::attach_symbol_reference;
+use super::narrowing::{AttachContext, ReferenceDedup, attach_symbol_reference};
 use super::types::{ExportSymbol, ReExportEdge};
 use super::types::{ModuleNode, ReferencePathInterner};
 use super::{Edge, ImportedSymbol, ModuleGraph};
@@ -425,6 +425,13 @@ impl ModuleGraph {
         entry_point_ids: &FxHashSet<FileId>,
         reference_paths: &mut ReferencePathInterner,
     ) {
+        // Both maps are transient acceleration state for this pass: the name
+        // index gives O(1) export lookup per imported symbol instead of a scan
+        // over all target exports, and the dedup index keeps duplicate-
+        // reference checks O(1) for high-fan-in exports. Dropping them here
+        // keeps `references` as the only durable storage.
+        let mut dedup = ReferenceDedup::default();
+        let mut export_indices: FxHashMap<usize, ExportNameIndex> = FxHashMap::default();
         for edge_idx in 0..self.edges.len() {
             let source_id = self.edges[edge_idx].source;
             let target_idx = self.edges[edge_idx].target.0 as usize;
@@ -433,13 +440,22 @@ impl ModuleGraph {
             }
             for sym_idx in 0..self.edges[edge_idx].symbols.len() {
                 let sym = &self.edges[edge_idx].symbols[sym_idx];
+                let module = &mut self.modules[target_idx];
+                let export_index = export_indices
+                    .entry(target_idx)
+                    .and_modify(|index| index.sync(&module.exports))
+                    .or_insert_with(|| ExportNameIndex::build(&module.exports));
                 attach_symbol_reference(
-                    &mut self.modules[target_idx],
+                    module,
                     source_id,
                     sym,
-                    module_by_id,
-                    entry_point_ids,
                     reference_paths,
+                    AttachContext {
+                        module_by_id,
+                        entry_point_ids,
+                        export_index,
+                        dedup: &mut dedup,
+                    },
                 );
             }
         }
@@ -457,12 +473,53 @@ pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
             .is_some_and(|ext| ext == "css" || ext == "scss")
 }
 
-/// Check if an export name matches an imported name.
-pub(super) fn export_matches(export: &ExportName, import: &ImportedName) -> bool {
-    match (export, import) {
-        (ExportName::Named(e), ImportedName::Named(i)) => e == i,
-        (ExportName::Default, ImportedName::Default) => true,
-        _ => false,
+/// Per-module index of exports by importable name: `ExportName::Named`
+/// matches `ImportedName::Named` with the same string, `Default` matches
+/// `Default`, and namespace or side-effect imports match nothing.
+///
+/// Built once per target module in `populate_references` and reused across
+/// all of that module's incoming edge symbols, so wide barrels stop paying a
+/// full export scan per imported symbol (same shape as the star-propagation
+/// index from the issue #1843 follow-up). Per-name lists are appended in
+/// ascending export order, so lookups return exactly what the removed
+/// enumerate-and-filter scan produced.
+pub(super) struct ExportNameIndex {
+    named: FxHashMap<String, Vec<usize>>,
+    default: Vec<usize>,
+    indexed_len: usize,
+}
+
+impl ExportNameIndex {
+    pub(super) fn build(exports: &[ExportSymbol]) -> Self {
+        let mut index = Self {
+            named: FxHashMap::default(),
+            default: Vec::new(),
+            indexed_len: 0,
+        };
+        index.sync(exports);
+        index
+    }
+
+    /// Index exports appended since the last sync. Namespace narrowing pushes
+    /// synthetic star re-export stubs mid-pass; exports are append-only, so
+    /// picking up the tail keeps every per-name list complete and ascending.
+    pub(super) fn sync(&mut self, exports: &[ExportSymbol]) {
+        for (idx, export) in exports.iter().enumerate().skip(self.indexed_len) {
+            match &export.name {
+                ExportName::Named(name) => self.named.entry(name.clone()).or_default().push(idx),
+                ExportName::Default => self.default.push(idx),
+            }
+        }
+        self.indexed_len = exports.len();
+    }
+
+    /// Indices of exports matching `import`, in ascending export order.
+    pub(super) fn matches(&self, import: &ImportedName) -> &[usize] {
+        match import {
+            ImportedName::Named(name) => self.named.get(name).map_or(&[], Vec::as_slice),
+            ImportedName::Default => &self.default,
+            ImportedName::Namespace | ImportedName::SideEffect => &[],
+        }
     }
 }
 
@@ -473,61 +530,69 @@ mod tests {
     use fallow_types::discover::{DiscoveredFile, FileId};
     use fallow_types::extract::ImportedName;
 
-    #[test]
-    fn export_matches_named_same() {
-        assert!(export_matches(
-            &ExportName::Named("foo".to_string()),
-            &ImportedName::Named("foo".to_string())
-        ));
+    fn make_export(name: ExportName) -> ExportSymbol {
+        ExportSymbol {
+            name,
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 0),
+            references: Vec::new(),
+            reference_paths: Vec::new(),
+            members: Vec::new(),
+        }
     }
 
     #[test]
-    fn export_matches_named_different() {
-        assert!(!export_matches(
-            &ExportName::Named("foo".to_string()),
-            &ImportedName::Named("bar".to_string())
-        ));
+    fn export_name_index_matches_named_and_default() {
+        let exports = vec![
+            make_export(ExportName::Named("foo".to_string())),
+            make_export(ExportName::Default),
+            make_export(ExportName::Named("foo".to_string())),
+            make_export(ExportName::Named("bar".to_string())),
+        ];
+        let index = ExportNameIndex::build(&exports);
+
+        assert_eq!(
+            index.matches(&ImportedName::Named("foo".to_string())),
+            &[0, 2]
+        );
+        assert_eq!(index.matches(&ImportedName::Named("bar".to_string())), &[3]);
+        assert_eq!(index.matches(&ImportedName::Default), &[1]);
+        assert!(
+            index
+                .matches(&ImportedName::Named("missing".to_string()))
+                .is_empty()
+        );
     }
 
     #[test]
-    fn export_matches_default() {
-        assert!(export_matches(&ExportName::Default, &ImportedName::Default));
+    fn export_name_index_namespace_and_side_effect_match_nothing() {
+        let exports = vec![
+            make_export(ExportName::Named("foo".to_string())),
+            make_export(ExportName::Default),
+        ];
+        let index = ExportNameIndex::build(&exports);
+
+        assert!(index.matches(&ImportedName::Namespace).is_empty());
+        assert!(index.matches(&ImportedName::SideEffect).is_empty());
     }
 
     #[test]
-    fn export_matches_named_vs_default() {
-        assert!(!export_matches(
-            &ExportName::Named("foo".to_string()),
-            &ImportedName::Default
-        ));
-    }
+    fn export_name_index_sync_picks_up_appended_exports() {
+        let mut exports = vec![make_export(ExportName::Named("foo".to_string()))];
+        let mut index = ExportNameIndex::build(&exports);
 
-    #[test]
-    fn export_matches_default_vs_named() {
-        assert!(!export_matches(
-            &ExportName::Default,
-            &ImportedName::Named("foo".to_string())
-        ));
-    }
+        exports.push(make_export(ExportName::Named("foo".to_string())));
+        exports.push(make_export(ExportName::Default));
+        index.sync(&exports);
 
-    #[test]
-    fn export_matches_namespace_no_match() {
-        assert!(!export_matches(
-            &ExportName::Named("foo".to_string()),
-            &ImportedName::Namespace
-        ));
-        assert!(!export_matches(
-            &ExportName::Default,
-            &ImportedName::Namespace
-        ));
-    }
-
-    #[test]
-    fn export_matches_side_effect_no_match() {
-        assert!(!export_matches(
-            &ExportName::Named("foo".to_string()),
-            &ImportedName::SideEffect
-        ));
+        assert_eq!(
+            index.matches(&ImportedName::Named("foo".to_string())),
+            &[0, 1]
+        );
+        assert_eq!(index.matches(&ImportedName::Default), &[2]);
     }
 
     #[test]

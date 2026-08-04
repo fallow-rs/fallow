@@ -18,7 +18,51 @@ use super::types::{
 };
 use super::{ImportedSymbol, ModuleNode};
 
-use super::build::{export_matches, is_css_module_path};
+use super::build::{ExportNameIndex, is_css_module_path};
+
+/// Reference counts below this keep the linear duplicate scan in
+/// `attach_reference`; hot exports (barrels, widely imported utilities with
+/// thousands of consumers) cross it and switch to a hashed per-export set so
+/// the k-th attach stays O(1) instead of scanning k-1 earlier references.
+const REFERENCE_DEDUP_THRESHOLD: usize = 32;
+
+/// The `(from_file, path)` pairs already attached to one export.
+type AttachedSiteSet = FxHashSet<(FileId, Option<ReferencePathId>)>;
+
+/// Transient per-export index of already-attached `(from_file, path)` pairs,
+/// keyed by `(module file, export index)`.
+///
+/// Only valid while every reference push to the covered exports flows through
+/// [`attach_reference`]: each attachment pass creates its own instance and
+/// drops it before any other code (re-export propagation, cache merge) pushes
+/// references directly. Sets are seeded lazily from the export's current
+/// references at first touch, so a fresh instance is always correct.
+/// Exports are append-only during these passes, so `(module, index)` keys
+/// stay stable and synthetic exports created mid-pass get fresh keys.
+#[derive(Default)]
+pub(super) struct ReferenceDedup {
+    seen: FxHashMap<(FileId, usize), AttachedSiteSet>,
+}
+
+/// Shared lookup state threaded from `populate_references` into the
+/// symbol-attachment pipeline.
+pub(super) struct AttachContext<'a> {
+    pub(super) module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    pub(super) entry_point_ids: &'a FxHashSet<FileId>,
+    pub(super) export_index: &'a ExportNameIndex,
+    pub(super) dedup: &'a mut ReferenceDedup,
+}
+
+impl AttachContext<'_> {
+    fn reborrow(&mut self) -> AttachContext<'_> {
+        AttachContext {
+            module_by_id: self.module_by_id,
+            entry_point_ids: self.entry_point_ids,
+            export_index: self.export_index,
+            dedup: self.dedup,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct ReferenceSite {
@@ -106,29 +150,57 @@ fn extract_accessed_members(source_mod: Option<&&ResolvedModule>, local_name: &s
 /// behavior because no replacement mask can distinguish those paths.
 #[cfg(test)]
 pub(super) fn mark_all_exports_referenced(
-    exports: &mut Vec<ExportSymbol>,
+    exports: &mut [ExportSymbol],
     target: ReferenceTarget,
     reference_paths: &mut ReferencePathInterner,
 ) {
     mark_all_exports_referenced_at_site(
         exports,
+        target.target_id,
         ReferenceSite::esm(target, reference_paths),
         target.kind,
+        &mut ReferenceDedup::default(),
     );
 }
 
 pub(super) fn mark_all_exports_referenced_at_site(
-    exports: &mut Vec<ExportSymbol>,
+    exports: &mut [ExportSymbol],
+    module_id: FileId,
     site: ReferenceSite,
     kind: ReferenceKind,
+    dedup: &mut ReferenceDedup,
 ) {
-    for export in exports {
-        attach_reference(export, site, kind);
+    for (idx, export) in exports.iter_mut().enumerate() {
+        attach_reference(export, (module_id, idx), site, kind, dedup);
     }
 }
 
-fn attach_reference(export: &mut ExportSymbol, site: ReferenceSite, kind: ReferenceKind) {
-    if !export.has_reference_from(site.from_file, site.path) {
+fn attach_reference(
+    export: &mut ExportSymbol,
+    export_key: (FileId, usize),
+    site: ReferenceSite,
+    kind: ReferenceKind,
+    dedup: &mut ReferenceDedup,
+) {
+    let is_new = match dedup.seen.entry(export_key) {
+        std::collections::hash_map::Entry::Occupied(entry) => {
+            entry.into_mut().insert((site.from_file, site.path))
+        }
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            if export.references.len() < REFERENCE_DEDUP_THRESHOLD {
+                !export.has_reference_from(site.from_file, site.path)
+            } else {
+                let seen = entry.insert(
+                    export
+                        .routed_references()
+                        .map(|routed| (routed.reference.from_file, routed.path))
+                        .collect(),
+                );
+                seen.insert((site.from_file, site.path))
+            }
+        }
+    };
+    if is_new {
         export.push_reference(
             SymbolReference {
                 from_file: site.from_file,
@@ -152,28 +224,32 @@ pub(super) fn mark_member_exports_referenced(
 ) -> FxHashSet<String> {
     mark_member_exports_referenced_at_site(
         exports,
+        target.target_id,
         ReferenceSite::esm(target, reference_paths),
         accessed_members,
         target.kind,
+        &mut ReferenceDedup::default(),
     )
 }
 
 pub(super) fn mark_member_exports_referenced_at_site(
     exports: &mut [ExportSymbol],
+    module_id: FileId,
     site: ReferenceSite,
     accessed_members: &[String],
     kind: ReferenceKind,
+    dedup: &mut ReferenceDedup,
 ) -> FxHashSet<String> {
     let member_set: FxHashSet<&str> = accessed_members.iter().map(String::as_str).collect();
     let mut found_members: FxHashSet<String> = FxHashSet::default();
-    for export in exports {
+    for (idx, export) in exports.iter_mut().enumerate() {
         let name_str = match &export.name {
             fallow_types::extract::ExportName::Named(n) => n.as_str(),
             fallow_types::extract::ExportName::Default => "default",
         };
         if member_set.contains(name_str) {
             found_members.insert(name_str.to_owned());
-            attach_reference(export, site, kind);
+            attach_reference(export, (module_id, idx), site, kind, dedup);
         }
     }
     found_members
@@ -243,6 +319,7 @@ fn narrow_namespace_references(
     sym_local_name: &str,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     entry_point_ids: &FxHashSet<FileId>,
+    dedup: &mut ReferenceDedup,
 ) {
     let source_mod = module_by_id.get(&site.from_file);
     let accessed_members = extract_accessed_members(source_mod, sym_local_name);
@@ -266,15 +343,19 @@ fn narrow_namespace_references(
     {
         mark_all_exports_referenced_at_site(
             &mut module.exports,
+            module.file_id,
             site,
             ReferenceKind::NamespaceImport,
+            dedup,
         );
     } else {
         let found_members = mark_member_exports_referenced_at_site(
             &mut module.exports,
+            module.file_id,
             site,
             &accessed_members,
             ReferenceKind::NamespaceImport,
+            dedup,
         );
 
         create_synthetic_exports_for_star_re_exports_at_site(
@@ -293,10 +374,12 @@ fn narrow_namespace_references(
 /// mark the `primary` named export as referenced, since CSS module default imports act
 /// as namespace objects where each property corresponds to a class name (named export).
 fn narrow_css_module_references(
-    exports: &mut Vec<ExportSymbol>,
+    exports: &mut [ExportSymbol],
+    module_id: FileId,
     site: ReferenceSite,
     sym_local_name: &str,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    dedup: &mut ReferenceDedup,
 ) {
     let source_mod = module_by_id.get(&site.from_file);
     let is_whole_object =
@@ -304,13 +387,21 @@ fn narrow_css_module_references(
     let accessed_members = extract_accessed_members(source_mod, sym_local_name);
 
     if is_whole_object || accessed_members.is_empty() {
-        mark_all_exports_referenced_at_site(exports, site, ReferenceKind::DefaultImport);
+        mark_all_exports_referenced_at_site(
+            exports,
+            module_id,
+            site,
+            ReferenceKind::DefaultImport,
+            dedup,
+        );
     } else {
         mark_member_exports_referenced_at_site(
             exports,
+            module_id,
             site,
             &accessed_members,
             ReferenceKind::DefaultImport,
+            dedup,
         );
     }
 }
@@ -347,15 +438,17 @@ fn attach_direct_export_references(
     target_module: &mut ModuleNode,
     site: ReferenceSite,
     sym: &ImportedSymbol,
-    source_mod: Option<&&ResolvedModule>,
     ref_kind: ReferenceKind,
+    ctx: AttachContext<'_>,
 ) {
-    let matching_exports: Vec<usize> = target_module
-        .exports
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, export)| export_matches(&export.name, &sym.imported_name).then_some(idx))
-        .collect();
+    let AttachContext {
+        module_by_id,
+        export_index,
+        dedup,
+        ..
+    } = ctx;
+    let source_mod = module_by_id.get(&site.from_file);
+    let matching_exports: &[usize] = export_index.matches(&sym.imported_name);
 
     if matching_exports.is_empty() {
         return;
@@ -386,6 +479,7 @@ fn attach_direct_export_references(
             ref_kind,
             (&type_exports, attach_type_exports),
             (&value_exports, attach_value_exports),
+            dedup,
         );
         return;
     }
@@ -403,7 +497,13 @@ fn attach_direct_export_references(
     };
 
     if let Some(idx) = fallback_idx {
-        attach_reference(&mut target_module.exports[idx], site, ref_kind);
+        attach_reference(
+            &mut target_module.exports[idx],
+            (target_module.file_id, idx),
+            site,
+            ref_kind,
+            dedup,
+        );
     }
 }
 
@@ -443,13 +543,20 @@ fn attach_to_export_groups(
     ref_kind: ReferenceKind,
     type_group: (&[usize], bool),
     value_group: (&[usize], bool),
+    dedup: &mut ReferenceDedup,
 ) {
     for (group, should_attach) in [type_group, value_group] {
         if !should_attach {
             continue;
         }
         for idx in group {
-            attach_reference(&mut target_module.exports[*idx], site, ref_kind);
+            attach_reference(
+                &mut target_module.exports[*idx],
+                (target_module.file_id, *idx),
+                site,
+                ref_kind,
+                dedup,
+            );
         }
     }
 }
@@ -461,34 +568,36 @@ pub(super) fn attach_symbol_reference(
     target_module: &mut ModuleNode,
     source_id: FileId,
     sym: &ImportedSymbol,
-    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
-    entry_point_ids: &FxHashSet<FileId>,
     reference_paths: &mut ReferencePathInterner,
+    mut ctx: AttachContext<'_>,
 ) {
     let ref_kind = reference_kind_for(&sym.imported_name);
-    let source_mod = module_by_id.get(&source_id);
+    let source_mod = ctx.module_by_id.get(&source_id);
 
     if is_unused_import_binding(&sym.local_name, &sym.imported_name, source_mod) {
         return;
     }
 
     let site = ReferenceSite::from_symbol(source_id, target_module.file_id, sym, reference_paths);
-    attach_direct_export_references(target_module, site, sym, source_mod, ref_kind);
+    attach_direct_export_references(target_module, site, sym, ref_kind, ctx.reborrow());
 
     if matches!(sym.imported_name, ImportedName::Namespace) {
         if sym.local_name.is_empty() {
             mark_all_exports_referenced_at_site(
                 &mut target_module.exports,
+                target_module.file_id,
                 site,
                 ReferenceKind::NamespaceImport,
+                ctx.dedup,
             );
         } else {
             narrow_namespace_references(
                 target_module,
                 site,
                 &sym.local_name,
-                module_by_id,
-                entry_point_ids,
+                ctx.module_by_id,
+                ctx.entry_point_ids,
+                ctx.dedup,
             );
         }
     }
@@ -499,9 +608,11 @@ pub(super) fn attach_symbol_reference(
     {
         narrow_css_module_references(
             &mut target_module.exports,
+            target_module.file_id,
             site,
             &sym.local_name,
-            module_by_id,
+            ctx.module_by_id,
+            ctx.dedup,
         );
     }
 }
@@ -701,20 +812,98 @@ mod tests {
             members: Vec::new(),
         };
 
+        let mut dedup = ReferenceDedup::default();
         attach_reference(
             &mut export,
+            (FileId(9), 0),
             ReferenceSite::exact(FileId(5), oxc_span::Span::new(0, 10), None),
             ReferenceKind::NamedImport,
+            &mut dedup,
         );
         attach_reference(
             &mut export,
+            (FileId(9), 0),
             ReferenceSite::exact(FileId(5), oxc_span::Span::new(20, 30), None),
             ReferenceKind::NamespaceImport,
+            &mut dedup,
         );
 
         assert_eq!(export.references.len(), 1);
         assert_eq!(export.references[0].kind, ReferenceKind::NamedImport);
         assert_eq!(export.references[0].import_span, oxc_span::Span::new(0, 10));
+    }
+
+    #[test]
+    fn attach_reference_dedup_matches_linear_scan_across_threshold() {
+        let mut export = ExportSymbol {
+            name: ExportName::Named("hot".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 5),
+            references: Vec::new(),
+            reference_paths: Vec::new(),
+            members: Vec::new(),
+        };
+        let mut dedup = ReferenceDedup::default();
+        let total = u32::try_from(REFERENCE_DEDUP_THRESHOLD * 3).unwrap_or(u32::MAX);
+        for _ in 0..2 {
+            for consumer in 0..total {
+                attach_reference(
+                    &mut export,
+                    (FileId(9), 0),
+                    ReferenceSite::exact(FileId(consumer), oxc_span::Span::new(0, 10), None),
+                    ReferenceKind::NamedImport,
+                    &mut dedup,
+                );
+            }
+        }
+
+        assert_eq!(export.references.len(), total as usize);
+        for (consumer, reference) in export.references.iter().enumerate() {
+            assert_eq!(reference.from_file.0 as usize, consumer);
+        }
+    }
+
+    #[test]
+    fn attach_reference_dedup_seeds_from_existing_references() {
+        let mut export = ExportSymbol {
+            name: ExportName::Named("hot".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 5),
+            references: (0..u32::try_from(REFERENCE_DEDUP_THRESHOLD).unwrap_or(u32::MAX))
+                .map(|consumer| SymbolReference {
+                    from_file: FileId(consumer),
+                    kind: ReferenceKind::NamedImport,
+                    import_span: oxc_span::Span::new(0, 10),
+                })
+                .collect(),
+            reference_paths: Vec::new(),
+            members: Vec::new(),
+        };
+
+        let mut dedup = ReferenceDedup::default();
+        attach_reference(
+            &mut export,
+            (FileId(9), 0),
+            ReferenceSite::exact(FileId(0), oxc_span::Span::new(0, 10), None),
+            ReferenceKind::NamedImport,
+            &mut dedup,
+        );
+        assert_eq!(export.references.len(), REFERENCE_DEDUP_THRESHOLD);
+
+        attach_reference(
+            &mut export,
+            (FileId(9), 0),
+            ReferenceSite::exact(FileId(999), oxc_span::Span::new(0, 10), None),
+            ReferenceKind::NamedImport,
+            &mut dedup,
+        );
+        assert_eq!(export.references.len(), REFERENCE_DEDUP_THRESHOLD + 1);
     }
 
     #[test]

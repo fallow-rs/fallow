@@ -38,7 +38,7 @@ use super::namespace_indexes::{
     NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
 };
 use super::narrowing::{
-    ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
+    ReferenceDedup, ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
     mark_all_exports_referenced_at_site, mark_member_exports_referenced_at_site,
 };
 use super::types::{ReferenceKind, ReferencePathId, ReferencePathInterner};
@@ -241,21 +241,26 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
         }
     }
 
+    let mut dedup = ReferenceDedup::default();
     for ((target_module_idx, consumer_file_id, import_span, path), state) in groups {
         let module = &mut graph.modules[target_module_idx];
         let site = ReferenceSite::exact(consumer_file_id, import_span, path);
         if state.whole_object {
             mark_all_exports_referenced_at_site(
                 &mut module.exports,
+                module.file_id,
                 site,
                 ReferenceKind::NamespaceImport,
+                &mut dedup,
             );
         } else {
             let found = mark_member_exports_referenced_at_site(
                 &mut module.exports,
+                module.file_id,
                 site,
                 &state.members,
                 ReferenceKind::NamespaceImport,
+                &mut dedup,
             );
             create_synthetic_exports_for_star_re_exports_at_site(
                 &mut module.exports,
