@@ -2,21 +2,44 @@
 
 use crate::CoverageModel;
 
+/// Minimum churn-times-complexity hotspot score for an entry to count toward
+/// the vital-signs `hotspot_count`; lower-scoring entries still appear in the
+/// hotspot list but do not feed the health-score hotspot penalty.
 pub const HOTSPOT_SCORE_THRESHOLD: f64 = 50.0;
 
+/// Cognitive complexity at or above which a function is flagged as an
+/// extraction candidate in refactor targets and cited as a contributing
+/// factor on file health scores.
 pub const COGNITIVE_EXTRACTION_THRESHOLD: u16 = 30;
 
+/// Default cognitive complexity threshold for "high" finding severity;
+/// crossing it upgrades a complexity finding from moderate to high.
 pub const DEFAULT_COGNITIVE_HIGH: u16 = 25;
 
+/// Default cognitive complexity threshold for "critical" finding severity.
 pub const DEFAULT_COGNITIVE_CRITICAL: u16 = 40;
 
+/// Default cyclomatic complexity threshold for "high" finding severity;
+/// crossing it upgrades a complexity finding from moderate to high.
 pub const DEFAULT_CYCLOMATIC_HIGH: u16 = 30;
 
+/// Default cyclomatic complexity threshold for "critical" finding severity.
+/// Also the cutoff for the v2 health score's critical-complexity density
+/// penalty (share of functions at or above this value).
 pub const DEFAULT_CYCLOMATIC_CRITICAL: u16 = 50;
 
 /// Minimum lines of code for full complexity density weight in the MI formula.
 pub const MI_DENSITY_MIN_LINES: f64 = 50.0;
 
+/// Formula version for the overall health score, serialized as
+/// [`HealthScore::formula_version`] so consumers can distinguish a score shift
+/// caused by a formula change from one caused by an actual codebase change.
+/// v2 replaced the size-dependent aggregators (average and p90 cyclomatic,
+/// raw hotspot and dependency counts) with scale-invariant densities
+/// (critical-complexity share, per-thousand-file dependency rates, top-1%
+/// hotspot share) so scores are comparable across repository sizes; older
+/// snapshots that lack the density fields fall back to the v1 aggregators.
+/// See `engine::vital_signs` for the full penalty formula.
 pub const HEALTH_SCORE_FORMULA_VERSION: u32 = 2;
 
 /// Formula version for the styling-health score (the CSS / design-system axis).
