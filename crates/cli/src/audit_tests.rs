@@ -3752,3 +3752,127 @@ fn analysis_input_and_doc_classification() {
     assert!(!is_analysis_input(Path::new("package.json")));
     assert!(!is_non_behavioral_doc(Path::new("package.json")));
 }
+
+/// The weakening scan must never conflate a head-read FAILURE with removed
+/// content: a file deleted at head genuinely scans against empty head content,
+/// a net-new file (missing at base) scans against an empty base, and head
+/// bytes that are not valid UTF-8 are read lossily instead of collapsing to an
+/// empty string that fabricates an `it( removed` signal.
+#[test]
+fn weakening_scan_distinguishes_deleted_head_from_unreadable_content() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "weakening-head-reads");
+    let repo = dunce::canonicalize(&repo).expect("repo root should canonicalize");
+    let tests = "it('a', () => {});\nit('b', () => {});\n";
+    fs::write(repo.join("deleted.test.ts"), tests).expect("fixture write");
+    fs::write(repo.join("lossy.test.ts"), tests).expect("fixture write");
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "tests"],
+    );
+
+    fs::remove_file(repo.join("deleted.test.ts")).expect("fixture delete");
+    let mut lossy = tests.as_bytes().to_vec();
+    lossy.extend_from_slice(b"// ");
+    lossy.extend_from_slice(&[0xFF, 0xFE, b'\n']);
+    fs::write(repo.join("lossy.test.ts"), lossy).expect("fixture write");
+    fs::write(repo.join("added.test.ts"), "it('new', () => {});\n").expect("fixture write");
+
+    let changed: FxHashSet<PathBuf> = [
+        repo.join("deleted.test.ts"),
+        repo.join("lossy.test.ts"),
+        repo.join("added.test.ts"),
+    ]
+    .into_iter()
+    .collect();
+    let signals = compute_weakening_signals(&repo, "HEAD", &changed);
+
+    assert!(
+        signals
+            .iter()
+            .any(|signal| signal.file == "deleted.test.ts"
+                && signal.evidence.contains("it( removed")),
+        "a file deleted at head scans against empty head content: {signals:?}"
+    );
+    assert!(
+        !signals.iter().any(|signal| signal.file == "lossy.test.ts"),
+        "invalid UTF-8 head bytes are read lossily, never fabricated as removed tests: {signals:?}"
+    );
+    assert!(
+        !signals.iter().any(|signal| signal.file == "added.test.ts"),
+        "a net-new file scans against an empty base without fabricated signals: {signals:?}"
+    );
+}
+
+/// A head file that exists but cannot be read (permission denied) is skipped
+/// entirely; scanning it as empty content would fabricate a removed-tests
+/// signal for every test the file still contains.
+#[cfg(unix)]
+#[test]
+fn weakening_scan_skips_permission_denied_head_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "weakening-unreadable-head");
+    let repo = dunce::canonicalize(&repo).expect("repo root should canonicalize");
+    fs::write(
+        repo.join("guarded.test.ts"),
+        "it('a', () => {});\nit('b', () => {});\n",
+    )
+    .expect("fixture write");
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "tests"],
+    );
+    fs::set_permissions(
+        repo.join("guarded.test.ts"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .expect("permissions should be set");
+
+    let changed: FxHashSet<PathBuf> = std::iter::once(repo.join("guarded.test.ts")).collect();
+    let signals = compute_weakening_signals(&repo, "HEAD", &changed);
+
+    assert!(
+        signals.is_empty(),
+        "an unreadable head file is skipped, not scanned as removed content: {signals:?}"
+    );
+}
+
+/// [`BaseFileReader`] distinguishes a missing object (the file is new since
+/// base) from a broken request pipe: a pipe failure must surface as
+/// [`BaseRead::Error`], never as [`BaseRead::Missing`], so callers stop the
+/// scan instead of treating every remaining file as empty at base.
+#[test]
+fn base_file_reader_distinguishes_missing_from_pipe_error() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "base-read-modes");
+    let mut reader = BaseFileReader::spawn(&repo).expect("reader should spawn");
+
+    assert!(
+        matches!(
+            reader.read("HEAD", Path::new("README.md")),
+            BaseRead::Content(content) if content == "seed\n"
+        ),
+        "a committed file reads back as content"
+    );
+    assert!(
+        matches!(
+            reader.read("HEAD", Path::new("absent.ts")),
+            BaseRead::Missing
+        ),
+        "an object absent at base is Missing, not an error"
+    );
+    assert!(
+        matches!(reader.read("HEAD", Path::new("a\nb.ts")), BaseRead::Error),
+        "a newline path cannot be requested over the batch protocol"
+    );
+
+    reader.stdin.take();
+    assert!(
+        matches!(reader.read("HEAD", Path::new("README.md")), BaseRead::Error),
+        "a severed request pipe is an Error, never Missing or empty content"
+    );
+}

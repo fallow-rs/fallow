@@ -4425,3 +4425,76 @@ type-aware comparison, including from the base-snapshot cache. warnings: {warnin
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Weakening-signal base/head read semantics (6.F) through the real binary.
+// ---------------------------------------------------------------------------
+
+/// A test file deleted at head scans against empty head content and surfaces
+/// the removed-tests weakening signal in the review brief, while a file added
+/// since base (missing at base) scans against an empty base and must not
+/// fabricate any removed-content signal.
+#[test]
+fn review_brief_weakening_flags_deleted_test_file_not_added_file() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "weakening-fixture", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "export const run = (): number => 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/removed.test.ts"),
+        "it('a', () => {});\nit('b', () => {});\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+
+    fs::remove_file(dir.join("src/removed.test.ts")).unwrap();
+    fs::write(dir.join("src/added.test.ts"), "it('new', () => {});\n").unwrap();
+    commit_all(dir, "head");
+
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "the brief always exits 0. stderr: {}",
+        output.stderr
+    );
+    let brief = parse_json(&output);
+    let weakening = brief["weakening"]
+        .as_array()
+        .expect("brief JSON carries a weakening array");
+    assert!(
+        weakening.iter().any(|signal| {
+            signal["file"] == "src/removed.test.ts"
+                && signal["kind"] == "test-weakened"
+                && signal["evidence"]
+                    .as_str()
+                    .is_some_and(|evidence| evidence.contains("it( removed"))
+        }),
+        "the deleted test file yields the removed-tests signal: {weakening:?}"
+    );
+    assert!(
+        weakening
+            .iter()
+            .all(|signal| signal["file"] != "src/added.test.ts"),
+        "a net-new file scans against an empty base and must not fabricate signals: {weakening:?}"
+    );
+}
