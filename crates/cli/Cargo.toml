@@ -116,7 +116,7 @@ fallow-types = { workspace = true }
 proptest = { workspace = true }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full"] }
-base64 = "0.22"
+base64 = "0.23"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 fallow-cov-protocol = "0.8"
 serde_yaml_ng = { workspace = true }
