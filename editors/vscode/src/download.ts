@@ -907,6 +907,10 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
                   );
                   cliDownloaded = cliPath !== null;
                 } catch (cliErr) {
+                  // A user cancel must stay silent, not surface as a CLI failure.
+                  if (aborter.signal.aborted) {
+                    throw cliErr;
+                  }
                   cliError = cliErr instanceof Error ? cliErr.message : String(cliErr);
                 }
               }
