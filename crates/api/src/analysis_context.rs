@@ -59,8 +59,7 @@ fn resolve_programmatic_analysis_context_inner(
     let root = resolve_analysis_root(options.root.as_deref())?;
     validate_analysis_config_path(options.config_path.as_deref())?;
     let threads = options.threads.unwrap_or_else(default_threads);
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
+    let pool = fallow_engine::thread_pool::worker_pool_builder(threads)
         .build()
         .map_err(|err| {
             ProgrammaticError::new(format!("failed to build analysis thread pool: {err}"), 2)
@@ -438,4 +437,70 @@ fn quote_owned_patterns(patterns: &[String]) -> String {
         .map(|pattern| format!("'{pattern}'"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use crate::AnalysisOptions;
+
+    const STACK_PROBE_ENV: &str = "FALLOW_API_STACK_PROBE_CHILD";
+    const STACK_PROBE_TEST: &str =
+        "analysis_context::tests::programmatic_pool_survives_deep_worker_stack_probe";
+
+    // A stack overflow aborts the whole process, so the probe re-runs this
+    // test binary as a child and asserts on its exit status; the same pattern
+    // guards the CLI global pool in crates/cli/src/rayon_pool.rs. The child
+    // drops RUST_MIN_STACK (pinned to 16 MiB in .cargo/config.toml, and
+    // inherited by default-sized rayon workers) so the probe still fails if
+    // the pool loses its explicit stack_size.
+    #[test]
+    fn programmatic_pool_survives_deep_worker_stack_probe() {
+        if std::env::var_os(STACK_PROBE_ENV).is_some() {
+            run_stack_probe_child();
+            return;
+        }
+
+        let current_exe = std::env::current_exe().expect("current test binary should be known");
+        let output = Command::new(current_exe)
+            .arg("--exact")
+            .arg(STACK_PROBE_TEST)
+            .arg("--nocapture")
+            .env(STACK_PROBE_ENV, "1")
+            .env_remove("RUST_MIN_STACK")
+            .output()
+            .expect("stack probe child should start");
+
+        assert!(
+            output.status.success(),
+            "stack probe child failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn run_stack_probe_child() {
+        let root = tempfile::tempdir().expect("stack probe needs a temp analysis root");
+        let options = AnalysisOptions {
+            root: Some(root.path().to_path_buf()),
+            threads: Some(1),
+            ..AnalysisOptions::default()
+        };
+        let context = super::resolve_programmatic_analysis_context(&options)
+            .expect("stack probe context should resolve");
+        assert_eq!(context.install(|| consume_stack(5_000)), 5_000);
+    }
+
+    #[inline(never)]
+    fn consume_stack(depth: usize) -> usize {
+        let frame = [0_u8; 2048];
+        std::hint::black_box(&frame);
+        if depth == 0 {
+            usize::from(frame[0])
+        } else {
+            1 + consume_stack(depth - 1)
+        }
+    }
 }

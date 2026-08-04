@@ -149,6 +149,7 @@ mod security;
 pub mod session;
 pub mod source;
 mod suppress;
+pub mod thread_pool;
 pub mod trace;
 pub mod trace_chain;
 pub mod validate;

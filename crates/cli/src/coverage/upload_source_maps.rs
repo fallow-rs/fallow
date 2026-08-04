@@ -747,8 +747,7 @@ fn upload_ready_source_maps(
         ));
     }
 
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(args.concurrency.max(1))
+    let pool = fallow_engine::thread_pool::worker_pool_builder(args.concurrency.max(1))
         .build()
         .map_err(|err| {
             UploadSourceMapsError::Validation(format!("invalid --concurrency: {err}"))

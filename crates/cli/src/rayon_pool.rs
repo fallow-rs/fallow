@@ -1,25 +1,11 @@
-const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+use fallow_engine::thread_pool::worker_pool_builder;
 
 #[allow(
     dead_code,
     reason = "used by the CLI binary; the library build uses per-call pools"
 )]
 pub fn configure_global_pool(threads: usize) {
-    let _ = build_pool(threads).build_global();
-}
-
-#[allow(
-    dead_code,
-    reason = "used by library embedders; the CLI binary uses the global pool"
-)]
-pub fn build_thread_pool(threads: usize) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
-    build_pool(threads).build()
-}
-
-fn build_pool(threads: usize) -> rayon::ThreadPoolBuilder {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .stack_size(WORKER_STACK_SIZE)
+    let _ = worker_pool_builder(threads).build_global();
 }
 
 #[cfg(test)]
@@ -38,11 +24,15 @@ mod tests {
         }
 
         let current_exe = std::env::current_exe().expect("current test binary should be known");
+        // Drop RUST_MIN_STACK (pinned to 16 MiB in .cargo/config.toml, and
+        // inherited by default-sized rayon workers) so the probe still fails
+        // if the pool loses its explicit stack_size.
         let output = Command::new(current_exe)
             .arg("--exact")
             .arg(STACK_PROBE_TEST)
             .arg("--nocapture")
             .env(STACK_PROBE_ENV, "1")
+            .env_remove("RUST_MIN_STACK")
             .output()
             .expect("stack probe child should start");
 
@@ -56,7 +46,7 @@ mod tests {
     }
 
     fn run_stack_probe_child() {
-        super::build_pool(1)
+        fallow_engine::thread_pool::worker_pool_builder(1)
             .build_global()
             .expect("stack probe must own the global Rayon pool");
 

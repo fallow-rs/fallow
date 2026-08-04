@@ -282,11 +282,13 @@ fn codex_hook_status(root: &Path) -> HookSurfaceStatus {
     let has_end = raw
         .as_deref()
         .is_some_and(|text| text.contains(AGENTS_BLOCK_END));
-    let managed = has_start && has_end;
+    let managed = raw
+        .as_deref()
+        .is_some_and(|text| find_managed_block_bounds(text).is_some());
     HookSurfaceStatus {
         installed: managed,
         managed_block_present: managed,
-        user_edited: raw.is_some() && has_start != has_end,
+        user_edited: (has_start || has_end) && !managed,
         path: display_rel(root, &path),
         script_version: None,
         min_version_floor: None,
@@ -523,6 +525,9 @@ enum AgentsOutcome {
     Replaced,
     Unchanged,
     Removed,
+    /// Markers exist but not as a start-then-end pair; splicing would corrupt
+    /// user content, so the file is left untouched.
+    MalformedPreserved,
     NotPresent,
 }
 
@@ -1048,17 +1053,23 @@ fn set_executable_bit(path: &Path) {
 #[cfg(not(unix))]
 fn set_executable_bit(_path: &Path) {}
 
+/// Locate the managed block, requiring the end marker to appear after the
+/// start marker. Inverted or unpaired markers indicate a hand-edited file
+/// where splicing would duplicate or drop user content.
+fn find_managed_block_bounds(text: &str) -> Option<(usize, usize)> {
+    let start = text.find(AGENTS_BLOCK_START)?;
+    let end_offset = text[start..].find(AGENTS_BLOCK_END)?;
+    Some((start, start + end_offset))
+}
+
 /// Append or replace the managed Codex block in `AGENTS.md`. Idempotent.
 ///
 /// When the file already contains a managed block, it is replaced in place.
+/// Malformed markers (stray or inverted) preserve the file untouched.
 /// Otherwise the block is inserted under the first `## Tooling`, `##
 /// Development`, or `## Local development` heading (if present); failing
 /// that it is appended at the end with a horizontal-rule separator so the
 /// block reads as deliberate rather than orphaned prose.
-#[expect(
-    clippy::unwrap_used,
-    reason = "managed block bounds are checked before slicing replacement offsets"
-)]
 fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
     let existing = read_optional_text(path)?.unwrap_or_default();
     let new_block = format!(
@@ -1066,51 +1077,53 @@ fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOut
         agents_block_body()
     );
 
-    let (next, outcome) =
-        if existing.contains(AGENTS_BLOCK_START) && existing.contains(AGENTS_BLOCK_END) {
-            let start = existing.find(AGENTS_BLOCK_START).unwrap();
-            let end = existing.find(AGENTS_BLOCK_END).unwrap();
-            let end_line_end = existing[end..]
-                .find('\n')
-                .map_or(existing.len(), |offset| end + offset + 1);
-            let mut buf = String::with_capacity(existing.len() + new_block.len());
-            buf.push_str(&existing[..start]);
-            buf.push_str(&new_block);
-            buf.push_str(&existing[end_line_end..]);
-            let outcome = if buf == existing {
-                AgentsOutcome::Unchanged
-            } else {
-                AgentsOutcome::Replaced
-            };
-            (buf, outcome)
-        } else if existing.is_empty() {
-            (new_block, AgentsOutcome::Inserted)
-        } else if let Some(insert_at) = find_tooling_insertion_point(&existing) {
-            let mut buf = String::with_capacity(existing.len() + new_block.len() + 2);
-            buf.push_str(&existing[..insert_at]);
-            if !buf.ends_with("\n\n") {
-                buf.push('\n');
-            }
-            buf.push_str(&new_block);
-            if !existing[insert_at..].starts_with('\n') {
-                buf.push('\n');
-            }
-            buf.push_str(&existing[insert_at..]);
-            (buf, AgentsOutcome::Inserted)
+    let (next, outcome) = if let Some((start, end)) = find_managed_block_bounds(&existing) {
+        let end_line_end = existing[end..]
+            .find('\n')
+            .map_or(existing.len(), |offset| end + offset + 1);
+        let mut buf = String::with_capacity(existing.len() + new_block.len());
+        buf.push_str(&existing[..start]);
+        buf.push_str(&new_block);
+        buf.push_str(&existing[end_line_end..]);
+        let outcome = if buf == existing {
+            AgentsOutcome::Unchanged
         } else {
-            let mut buf = existing;
-            if !buf.ends_with('\n') {
-                buf.push('\n');
-            }
-            buf.push_str("\n---\n\n");
-            buf.push_str(&new_block);
-            (buf, AgentsOutcome::Inserted)
+            AgentsOutcome::Replaced
         };
+        (buf, outcome)
+    } else if existing.contains(AGENTS_BLOCK_START) || existing.contains(AGENTS_BLOCK_END) {
+        (existing, AgentsOutcome::MalformedPreserved)
+    } else if existing.is_empty() {
+        (new_block, AgentsOutcome::Inserted)
+    } else if let Some(insert_at) = find_tooling_insertion_point(&existing) {
+        let mut buf = String::with_capacity(existing.len() + new_block.len() + 2);
+        buf.push_str(&existing[..insert_at]);
+        if !buf.ends_with("\n\n") {
+            buf.push('\n');
+        }
+        buf.push_str(&new_block);
+        if !existing[insert_at..].starts_with('\n') {
+            buf.push('\n');
+        }
+        buf.push_str(&existing[insert_at..]);
+        (buf, AgentsOutcome::Inserted)
+    } else {
+        let mut buf = existing;
+        if !buf.ends_with('\n') {
+            buf.push('\n');
+        }
+        buf.push_str("\n---\n\n");
+        buf.push_str(&new_block);
+        (buf, AgentsOutcome::Inserted)
+    };
 
     if dry_run {
         return Ok(outcome);
     }
-    if matches!(outcome, AgentsOutcome::Unchanged) {
+    if matches!(
+        outcome,
+        AgentsOutcome::Unchanged | AgentsOutcome::MalformedPreserved
+    ) {
         return Ok(outcome);
     }
     std::fs::write(path, next)?;
@@ -1121,11 +1134,14 @@ fn remove_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOut
     let Some(existing) = read_optional_text(path)? else {
         return Ok(AgentsOutcome::NotPresent);
     };
-    let Some(start) = existing.find(AGENTS_BLOCK_START) else {
-        return Ok(AgentsOutcome::Unchanged);
-    };
-    let Some(end) = existing.find(AGENTS_BLOCK_END) else {
-        return Ok(AgentsOutcome::Unchanged);
+    let Some((start, end)) = find_managed_block_bounds(&existing) else {
+        let has_marker =
+            existing.contains(AGENTS_BLOCK_START) || existing.contains(AGENTS_BLOCK_END);
+        return Ok(if has_marker {
+            AgentsOutcome::MalformedPreserved
+        } else {
+            AgentsOutcome::Unchanged
+        });
     };
     let end_line_end = existing[end..]
         .find('\n')
@@ -1314,6 +1330,10 @@ fn describe_agents(outcome: &AgentsOutcome, dry_run: bool, _mode: Mode) -> Strin
         (AgentsOutcome::Removed, false) => "managed block removed".to_string(),
         (AgentsOutcome::Removed, true) => "would remove managed block".to_string(),
         (AgentsOutcome::Unchanged, _) => "unchanged (no managed block)".to_string(),
+        (AgentsOutcome::MalformedPreserved, _) => {
+            "preserved (managed block markers are out of order; repair AGENTS.md manually)"
+                .to_string()
+        }
         (AgentsOutcome::NotPresent, _) => "not present".to_string(),
     }
 }
@@ -1901,6 +1921,55 @@ mod tests {
         assert!(contents.contains("Fallow local gate"));
         assert!(!contents.contains("stale body"));
         assert!(contents.contains("below"));
+    }
+
+    #[test]
+    fn agents_block_upsert_preserves_file_when_end_marker_precedes_start() {
+        let tmp = tempdir().unwrap();
+        let agents_path = tmp.path().join("AGENTS.md");
+        let seeded =
+            format!("# agents\n\n{AGENTS_BLOCK_END}\n\nbetween\n\n{AGENTS_BLOCK_START}\ntail\n");
+        std::fs::write(&agents_path, &seeded).unwrap();
+
+        let outcome = upsert_managed_block(&agents_path, false).unwrap();
+        assert!(matches!(outcome, AgentsOutcome::MalformedPreserved));
+        assert_eq!(std::fs::read_to_string(&agents_path).unwrap(), seeded);
+    }
+
+    #[test]
+    fn agents_block_upsert_ignores_stray_end_marker_before_valid_block() {
+        let tmp = tempdir().unwrap();
+        let agents_path = tmp.path().join("AGENTS.md");
+        let seeded = format!(
+            "# agents\n\n{AGENTS_BLOCK_END}\n\nbetween\n\n{AGENTS_BLOCK_START}\nstale body\n{AGENTS_BLOCK_END}\n\nbelow\n"
+        );
+        std::fs::write(&agents_path, seeded).unwrap();
+
+        let outcome = upsert_managed_block(&agents_path, false).unwrap();
+        assert!(matches!(outcome, AgentsOutcome::Replaced));
+        let after_first = std::fs::read_to_string(&agents_path).unwrap();
+        assert!(after_first.contains("between"));
+        assert!(!after_first.contains("stale body"));
+        assert!(after_first.contains("below"));
+        assert_eq!(after_first.matches(AGENTS_BLOCK_START).count(), 1);
+
+        let outcome = upsert_managed_block(&agents_path, false).unwrap();
+        assert!(matches!(outcome, AgentsOutcome::Unchanged));
+        let after_second = std::fs::read_to_string(&agents_path).unwrap();
+        assert_eq!(after_second, after_first);
+    }
+
+    #[test]
+    fn agents_block_remove_preserves_file_when_end_marker_precedes_start() {
+        let tmp = tempdir().unwrap();
+        let agents_path = tmp.path().join("AGENTS.md");
+        let seeded =
+            format!("# agents\n\n{AGENTS_BLOCK_END}\n\nbetween\n\n{AGENTS_BLOCK_START}\ntail\n");
+        std::fs::write(&agents_path, &seeded).unwrap();
+
+        let outcome = remove_managed_block(&agents_path, false).unwrap();
+        assert!(matches!(outcome, AgentsOutcome::MalformedPreserved));
+        assert_eq!(std::fs::read_to_string(&agents_path).unwrap(), seeded);
     }
 
     #[test]
