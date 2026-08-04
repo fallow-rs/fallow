@@ -23,6 +23,8 @@ Fast PR shards:
 
 - `fallow-core/analysis`: core parser, graph, cache, resolver, and duplicate
   detector paths.
+- `fallow-engine/dupes_detect`: duplicate-detection engine paths (triggered by
+  `crates/engine/`, `crates/extract/`, and `crates/types/` changes).
 - `fallow-benchmarks/programmatic_stable`: deterministic programmatic API,
   session reuse, warm parse-cache, and health-cache paths.
 - `fallow-benchmarks/representative_sources`: focused source-shape extraction
@@ -43,6 +45,8 @@ Full main/manual shards:
 
 `programmatic_commands` still exists for local walltime investigation, but it
 contains git/audit scenarios and must not run in the fast CodSpeed matrix.
+`dupes_pipeline` in `crates/engine/benches/` is likewise a local-only bench
+outside the fast CodSpeed matrix.
 
 ## Adding Benchmarks
 
@@ -51,7 +55,8 @@ Use the smallest shard that matches the path being measured:
 - Add stable API/session/cache coverage to `programmatic_stable`.
 - Add source-shape extraction probes to `representative_sources`.
 - Add architecture-layer probes to the matching `component_*` shard.
-- Add broad parser, graph, cache, or duplication probes to `analysis`.
+- Add engine-level duplicate-detection probes to `dupes_detect`; keep only
+  broad parser, graph, and cache probes in `analysis`.
 - Add large synthetic or high-variance probes only to full shards.
 
 Keep benchmark names globally unique across `crates/*/benches/*.rs`.

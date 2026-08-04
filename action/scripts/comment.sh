@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Post or update a PR comment with analysis results
-# Required env: GH_TOKEN, PR_NUMBER, GH_REPO, FALLOW_COMMAND
-# Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_ANALYSIS_ARGS_FILE,
-#   FALLOW_ARTIFACTS_DIR
+# Env contract: see this script's step env block in action.yml, the
+#   authoritative list of consumed variables. Hard requirements are asserted
+#   below.
 
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"

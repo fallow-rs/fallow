@@ -105,8 +105,10 @@ The following surfaces are intentional bridges, not architecture boundaries to b
 - **Generated hook-script env vars**: `FALLOW_GATE_MIN_VERSION` (consumed by
   the generated `fallow-gate.sh` in the target project's Claude hooks
   directory; written by `fallow hooks install --target agent` or
-  `fallow setup-hooks`; controls the minimum fallow version the gate accepts,
-  default `2.46.0`, empty string disables) and `FALLOW_GATE_DEBUG` (any
+  `fallow setup-hooks`; controls the minimum fallow version the gate accepts;
+  the default is hand-bumped each release, with the generated
+  `crates/cli/src/setup_hooks/fallow-gate.sh` as the source of truth; empty
+  string disables) and `FALLOW_GATE_DEBUG` (any
   non-empty value makes the same script log a stderr notice when it skips a
   command it does not classify as a `git commit` or `git push`)
 
