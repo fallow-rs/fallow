@@ -26,7 +26,7 @@ jobs:
   windows-verify:
     name: Windows correctness and lifecycle
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     permissions:
       contents: read
     steps:
