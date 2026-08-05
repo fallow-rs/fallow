@@ -1,5 +1,16 @@
 def plural(n; word): "\(n) \(word)\(if n == 1 then "" else "s" end)";
 def rel_path: if startswith("/") then (split("/") | if length > 3 then .[-3:] | join("/") else join("/") end) else . end;
+# Mirrors markdown_table_code_span in the native renderer: code span whose
+# fence grows past inner backticks, pipes escaped, line endings collapsed.
+def code_cell:
+  gsub("\r\n"; " ") | gsub("[\r\n]"; " ") | gsub("\\|"; "\\|")
+  | ([scan("`+") | length] | max // 0) as $run
+  | ("`" * ($run + 1)) as $fence
+  | if startswith("`") or endswith("`")
+       or (startswith(" ") and endswith(" ") and (gsub(" "; "") != ""))
+    then "\($fence) \(.) \($fence)"
+    else "\($fence)\(.)\($fence)"
+    end;
 def verdict_label:
   if . == "fail" then ":warning: **Audit failed**"
   elif . == "warn" then ":warning: **Audit passed with warnings**"
@@ -27,10 +38,10 @@ def dead_code_rows:
    [ (.dead_code.duplicate_exports // [])[] | {kind:"Duplicate export", location:(.locations[:3] | map("`\(.path | rel_path):\(.line)`") | join(", ")), item:("`\(.export_name)`"), introduced:.introduced} ] +
    [ (.dead_code.circular_dependencies // [])[] | {kind:"Circular dependency", location:((.files // []) | map("`\(. | rel_path)`") | join(" -> ")), item:"cycle", introduced:.introduced} ] +
    [ (.dead_code.re_export_cycles // [])[] | {kind:"Re-export cycle", location:((.files // []) | map("`\(. | rel_path)`") | join(" <-> ")), item:(.kind // "cycle"), introduced:.introduced} ] +
-   [ (.dead_code.boundary_violations // [])[] | {kind:"Boundary violation", location:("`\(.from_path | rel_path):\(.line)`"), item:("\(.from_zone) -> \(.to_zone)"), introduced:.introduced} ] +
+   [ (.dead_code.boundary_violations // [])[] | {kind:"Boundary violation", location:("`\(.from_path | rel_path):\(.line)`"), item:("\(.from_zone | code_cell) -> \(.to_zone | code_cell)"), introduced:.introduced} ] +
    [ (.dead_code.boundary_coverage_violations // [])[] | {kind:"Boundary coverage", location:("`\(.path | rel_path):\(.line)`"), item:"no matching zone", introduced:.introduced} ] +
-   [ (.dead_code.boundary_call_violations // [])[] | {kind:"Boundary call", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.callee)` in \(.zone)"), introduced:.introduced} ] +
-   [ (.dead_code.policy_violations // [])[] | {kind:"Policy violation", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.matched)` banned by \(.pack)/\(.rule_id)"), introduced:.introduced} ] +
+   [ (.dead_code.boundary_call_violations // [])[] | {kind:"Boundary call", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.callee)` in \(.zone | code_cell)"), introduced:.introduced} ] +
+   [ (.dead_code.policy_violations // [])[] | {kind:"Policy violation", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.matched)` banned by \("\(.pack)/\(.rule_id)" | code_cell)"), introduced:.introduced} ] +
    [ (.dead_code.invalid_client_exports // [])[] | {kind:"Invalid client export", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.export_name)` in `\"\(.directive)\"`"), introduced:.introduced} ] +
    [ (.dead_code.mixed_client_server_barrels // [])[] | {kind:"Mixed client/server barrel", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.client_origin)` + `\(.server_origin)`"), introduced:.introduced} ] +
    [ (.dead_code.misplaced_directives // [])[] | {kind:"Misplaced directive", location:("`\(.path | rel_path):\(.line)`"), item:("`\"\(.directive)\"`"), introduced:.introduced} ] +
@@ -48,7 +59,7 @@ def dead_code_rows:
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.test_only_dependencies // [])[] | {kind:"Test-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.dev_dependencies_in_production // [])[] | {kind:"Dev dependency in production", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
-   [ (.dead_code.stale_suppressions // [])[] | {kind:"Stale suppression", location:path_line, item:(.description // "suppression"), introduced:.introduced} ] +
+   [ (.dead_code.stale_suppressions // [])[] | {kind:"Stale suppression", location:path_line, item:((.description // "suppression") | code_cell), introduced:.introduced} ] +
    [ (.dead_code.unused_catalog_entries // [])[] | {kind:"Unused catalog entry", location:path_line, item:("`\(.entry_name)` (`\(.catalog_name)`)"), introduced:.introduced} ] +
    [ (.dead_code.empty_catalog_groups // [])[] | {kind:"Empty catalog group", location:path_line, item:("`\(.catalog_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unresolved_catalog_references // [])[] | {kind:"Unresolved catalog reference", location:path_line, item:("`\(.entry_name)` -> `\(.catalog_name)`"), introduced:.introduced} ] +
@@ -60,7 +71,7 @@ def duplication_rows:
     ($instances[0] // {}) as $first |
     {
       location: (if ($first.file // "") != "" then "`\($first.file | rel_path):\($first.start_line // 1)`" else "-" end),
-      files: ($instances | map(.file | rel_path) | unique | .[:3] | join(", ")),
+      files: ($instances | map(.file | rel_path | code_cell) | unique | .[:3] | join(", ")),
       size: "\(.line_count // 0) lines / \(.token_count // 0) tokens",
       instances: ($instances | length),
       introduced: .introduced

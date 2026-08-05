@@ -1,4 +1,15 @@
 def docs(anchor): "https://docs.fallow.tools/explanations/dead-code#" + anchor;
+# Mirrors markdown_table_code_span in the native renderer: code span whose
+# fence grows past inner backticks, pipes escaped, line endings collapsed.
+def code_cell:
+  gsub("\r\n"; " ") | gsub("[\r\n]"; " ") | gsub("\\|"; "\\|")
+  | ([scan("`+") | length] | max // 0) as $run
+  | ("`" * ($run + 1)) as $fence
+  | if startswith("`") or endswith("`")
+       or (startswith(" ") and endswith(" ") and (gsub(" "; "") != ""))
+    then "\($fence) \(.) \($fence)"
+    else "\($fence)\(.)\($fence)"
+    end;
 def workspace_context:
   if ((.used_in_workspaces // []) | length) > 0 then
     (.used_in_workspaces | map("`\(.)`") | join(", "))
@@ -114,19 +125,19 @@ else
     "| `\(.export_name)` | \(.locations[:3] | map("`\(.path):\(.line)`") | join(", "))\(if (.locations | length) > 3 then " *+\((.locations | length) - 3) more*" else "" end) |") +
   section("Circular dependencies"; "circular_dependencies";
     "Import cycles that can cause initialization failures and prevent tree-shaking.\n\n| Cycle | Length |\n|-------|-------:|\n";
-    "| \(.files | join(" \u2192 ")) | \(.length) |") +
+    "| \(.files | map(code_cell) | join(" \u2192 ")) | \(.length) |") +
   section("Re-export cycles"; "re_export_cycles";
     "Barrel files that re-export from each other in a loop. Chain propagation through the loop is a no-op, so imports through any member may silently come up empty.\n\n| Cycle | Kind | Members |\n|-------|------|--------:|\n";
     "| \(.files | map("`\(.)`") | join(" <-> ")) | \(.kind) | \(.files | length) |") +
   section("Boundary violations"; "boundary_violations";
     "Imports that cross defined architecture zone boundaries.\n\n| From | To | Zones |\n|------|-----|-------|\n";
-    "| `\(.from_path):\(.line)` | `\(.to_path)` | \(.from_zone) \u2192 \(.to_zone) |") +
+    "| `\(.from_path):\(.line)` | `\(.to_path)` | \(.from_zone | code_cell) \u2192 \(.to_zone | code_cell) |") +
   section("Boundary coverage"; "boundary_coverage_violations";
     "Files that match no configured architecture boundary zone.\n\n| File |\n|------|\n";
     "| `\(.path):\(.line)` |") +
   section("Boundary calls"; "boundary_call_violations";
     "Calls from zoned files to callees forbidden for that zone.\n\n| File | Callee | Zone | Pattern |\n|------|--------|------|---------|\n";
-    "| `\(.path):\(.line)` | `\(.callee)` | \(.zone) | `\(.pattern)` |") +
+    "| `\(.path):\(.line)` | `\(.callee)` | \(.zone | code_cell) | `\(.pattern)` |") +
   section("Policy violations"; "policy_violations";
     "Banned calls, imports, and catalogue-derived effects matched by configured rule packs.\n\n| File | Matched | Rule | Severity |\n|------|---------|------|----------|\n";
     "| `\(.path):\(.line)` | `\(.matched)` | `\(.pack)/\(.rule_id)` | \(.severity) |") +

@@ -5,6 +5,17 @@ def rel_path:
   else . end;
 def path_line:
   "`\(.path | rel_path)\(if .line then ":\(.line)" else "" end)`";
+# Mirrors markdown_table_code_span in the native renderer: code span whose
+# fence grows past inner backticks, pipes escaped, line endings collapsed.
+def code_cell:
+  gsub("\r\n"; " ") | gsub("[\r\n]"; " ") | gsub("\\|"; "\\|")
+  | ([scan("`+") | length] | max // 0) as $run
+  | ("`" * ($run + 1)) as $fence
+  | if startswith("`") or endswith("`")
+       or (startswith(" ") and endswith(" ") and (gsub(" "; "") != ""))
+    then "\($fence) \(.) \($fence)"
+    else "\($fence)\(.)\($fence)"
+    end;
 def finding_count:
   if .gate then (.gate.new_count // 0)
   else (.summary.security_findings // ((.security_findings // []) | length))
@@ -15,7 +26,7 @@ def gate_line:
   else "" end;
 def finding_rows:
   [(.security_findings // [])[:15][] |
-    "| \(path_line) | \(.kind) | \(.severity // "unknown") | \(.candidate.sink.callee // "-") |"
+    "| \(path_line) | \(.kind) | \(.severity // "unknown") | \((.candidate.sink.callee // "-") | code_cell) |"
   ];
 
 finding_count as $count |
