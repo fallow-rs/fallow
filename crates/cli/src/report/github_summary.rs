@@ -2162,7 +2162,7 @@ fn render_security_summary(env: &Value) -> String {
                     path_line(finding),
                     escape_md(s(finding, "kind")),
                     escape_md(str_or(finding, "severity", "unknown")),
-                    escape_md(
+                    markdown_table_code_span(
                         finding
                             .get("candidate")
                             .and_then(|candidate| candidate.get("sink"))
