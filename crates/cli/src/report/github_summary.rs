@@ -18,6 +18,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
 
+use fallow_output::{escape_md, markdown_code_span, markdown_table_code_span};
 use serde_json::Value;
 
 use super::github::{PathRebase, arr, b, fmt_num, num, resolve_render_options, s, u};
@@ -158,15 +159,29 @@ fn str_or<'v>(value: &'v Value, key: &str, default: &'v str) -> &'v str {
 fn path_line(item: &Value) -> String {
     let path = rel_path_absolute_only(s(item, "path"));
     match item.get("line").filter(|line| !line.is_null()) {
-        Some(line) => format!("`{path}:{}`", fmt_num(line)),
-        None => format!("`{path}`"),
+        Some(line) => markdown_table_code_span(&format!("{path}:{}", fmt_num(line))),
+        None => markdown_table_code_span(&path),
     }
+}
+
+/// Escaped code-span table cell for an untrusted envelope string.
+fn code_cell(item: &Value, key: &str) -> String {
+    markdown_table_code_span(s(item, key))
+}
+
+/// `` `path:line` `` cell with the audit-flavor path shortening.
+fn rel_path_line_cell(item: &Value, path_key: &str) -> String {
+    markdown_table_code_span(&format!(
+        "{}:{}",
+        rel_path_absolute_only(s(item, path_key)),
+        num(item, "line")
+    ))
 }
 
 fn backtick_join(item: &Value, key: &str) -> String {
     arr(item, key)
         .filter_map(Value::as_str)
-        .map(|entry| format!("`{entry}`"))
+        .map(markdown_table_code_span)
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -435,7 +450,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
             name: "Unused files",
             key: "unused_files",
             header: "Files not reachable from any entry point.\n\n| File |\n|------|\n",
-            row: |it| format!("| `{}` |", s(it, "path")),
+            row: |it| format!("| {} |", code_cell(it, "path")),
         },
         SectionSpec {
             name: "Unused exports",
@@ -443,10 +458,10 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Exported symbols with no known consumers.\n\n| File | Line | Export |\n|------|-----:|--------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} | `{}`{} |",
-                    s(it, "path"),
+                    "| {} | {} | {}{} |",
+                    code_cell(it, "path"),
                     num(it, "line"),
-                    s(it, "export_name"),
+                    code_cell(it, "export_name"),
                     if b(it, "is_re_export") {
                         " *(re-export)*"
                     } else {
@@ -461,10 +476,10 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Type exports with no known consumers.\n\n| File | Line | Type |\n|------|-----:|------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} | `{}` |",
-                    s(it, "path"),
+                    "| {} | {} | {} |",
+                    code_cell(it, "path"),
                     num(it, "line"),
-                    s(it, "export_name"),
+                    code_cell(it, "export_name"),
                 )
             },
         },
@@ -474,11 +489,11 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Exported signatures that reference same-file private types.\n\n| File | Line | Export | Private type |\n|------|-----:|--------|--------------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} | `{}` | `{}` |",
-                    s(it, "path"),
+                    "| {} | {} | {} | {} |",
+                    code_cell(it, "path"),
                     num(it, "line"),
-                    s(it, "export_name"),
-                    s(it, "type_name"),
+                    code_cell(it, "export_name"),
+                    code_cell(it, "type_name"),
                 )
             },
         },
@@ -488,8 +503,8 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Listed in `dependencies` but never imported by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} |",
-                    s(it, "package_name"),
+                    "| {} | {} |",
+                    code_cell(it, "package_name"),
                     check_workspace_context(it),
                 )
             },
@@ -500,8 +515,8 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Listed in `devDependencies` but never imported or referenced by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} |",
-                    s(it, "package_name"),
+                    "| {} | {} |",
+                    code_cell(it, "package_name"),
                     check_workspace_context(it),
                 )
             },
@@ -512,8 +527,8 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Listed in `optionalDependencies` but never imported by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} |",
-                    s(it, "package_name"),
+                    "| {} | {} |",
+                    code_cell(it, "package_name"),
                     check_workspace_context(it),
                 )
             },
@@ -542,10 +557,10 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Import paths that could not be resolved - check for missing packages or broken paths.\n\n| File | Line | Import |\n|------|-----:|--------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} | `{}` |",
-                    s(it, "path"),
+                    "| {} | {} | {} |",
+                    code_cell(it, "path"),
                     num(it, "line"),
-                    s(it, "specifier"),
+                    code_cell(it, "specifier"),
                 )
             },
         },
@@ -561,7 +576,13 @@ fn check_sections_core() -> Vec<SectionSpec> {
                     let shown = sites
                         .iter()
                         .take(3)
-                        .map(|site| format!("`{}:{}`", s(site, "path"), num(site, "line")))
+                        .map(|site| {
+                            markdown_table_code_span(&format!(
+                                "{}:{}",
+                                s(site, "path"),
+                                num(site, "line")
+                            ))
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     let more = if sites.len() > 3 {
@@ -571,7 +592,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
                     };
                     format!("{shown}{more}")
                 };
-                format!("| `{}` | {cell} |", s(it, "package_name"))
+                format!("| {} | {cell} |", code_cell(it, "package_name"))
             },
         },
         SectionSpec {
@@ -583,7 +604,13 @@ fn check_sections_core() -> Vec<SectionSpec> {
                 let shown = locations
                     .iter()
                     .take(3)
-                    .map(|location| format!("`{}:{}`", s(location, "path"), num(location, "line")))
+                    .map(|location| {
+                        markdown_table_code_span(&format!(
+                            "{}:{}",
+                            s(location, "path"),
+                            num(location, "line")
+                        ))
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 let more = if locations.len() > 3 {
@@ -591,7 +618,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
                 } else {
                     String::new()
                 };
-                format!("| `{}` | {shown}{more} |", s(it, "export_name"))
+                format!("| {} | {shown}{more} |", code_cell(it, "export_name"))
             },
         },
         SectionSpec {
@@ -601,7 +628,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
             row: |it| {
                 format!(
                     "| {} | {} |",
-                    plain_join(it, "files", " \u{2192} "),
+                    escape_md(&plain_join(it, "files", " \u{2192} ")),
                     num(it, "length"),
                 )
             },
@@ -611,11 +638,11 @@ fn check_sections_core() -> Vec<SectionSpec> {
 
 fn member_row(it: &Value) -> String {
     format!(
-        "| `{}` | {} | `{}` | `{}` |",
-        s(it, "path"),
+        "| {} | {} | {} | {} |",
+        code_cell(it, "path"),
         num(it, "line"),
-        s(it, "parent_name"),
-        s(it, "member_name"),
+        code_cell(it, "parent_name"),
+        code_cell(it, "member_name"),
     )
 }
 
@@ -627,7 +654,7 @@ fn plain_join(item: &Value, key: &str, separator: &str) -> String {
 }
 
 fn path_line_cell(it: &Value) -> String {
-    format!("`{}:{}`", s(it, "path"), num(it, "line"))
+    markdown_table_code_span(&format!("{}:{}", s(it, "path"), num(it, "line")))
 }
 
 #[expect(
@@ -643,12 +670,12 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             row: |it| {
                 let cycle = arr(it, "files")
                     .filter_map(Value::as_str)
-                    .map(|file| format!("`{file}`"))
+                    .map(markdown_table_code_span)
                     .collect::<Vec<_>>()
                     .join(" <-> ");
                 format!(
                     "| {cycle} | {} | {} |",
-                    s(it, "kind"),
+                    escape_md(s(it, "kind")),
                     arr(it, "files").count()
                 )
             },
@@ -659,12 +686,15 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             header: "Imports that cross defined architecture zone boundaries.\n\n| From | To | Zones |\n|------|-----|-------|\n",
             row: |it| {
                 format!(
-                    "| `{}:{}` | `{}` | {} \u{2192} {} |",
-                    s(it, "from_path"),
-                    num(it, "line"),
-                    s(it, "to_path"),
-                    s(it, "from_zone"),
-                    s(it, "to_zone"),
+                    "| {} | {} | {} \u{2192} {} |",
+                    markdown_table_code_span(&format!(
+                        "{}:{}",
+                        s(it, "from_path"),
+                        num(it, "line")
+                    )),
+                    code_cell(it, "to_path"),
+                    escape_md(s(it, "from_zone")),
+                    escape_md(s(it, "to_zone")),
                 )
             },
         },
@@ -680,11 +710,11 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             header: "Calls from zoned files to callees forbidden for that zone.\n\n| File | Callee | Zone | Pattern |\n|------|--------|------|---------|\n",
             row: |it| {
                 format!(
-                    "| {} | `{}` | {} | `{}` |",
+                    "| {} | {} | {} | {} |",
                     path_line_cell(it),
-                    s(it, "callee"),
-                    s(it, "zone"),
-                    s(it, "pattern"),
+                    code_cell(it, "callee"),
+                    escape_md(s(it, "zone")),
+                    code_cell(it, "pattern"),
                 )
             },
         },
@@ -694,12 +724,11 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             header: "Banned calls, imports, and catalogue-derived effects matched by configured rule packs.\n\n| File | Matched | Rule | Severity |\n|------|---------|------|----------|\n",
             row: |it| {
                 format!(
-                    "| {} | `{}` | `{}/{}` | {} |",
+                    "| {} | {} | {} | {} |",
                     path_line_cell(it),
-                    s(it, "matched"),
-                    s(it, "pack"),
-                    s(it, "rule_id"),
-                    s(it, "severity"),
+                    code_cell(it, "matched"),
+                    markdown_table_code_span(&format!("{}/{}", s(it, "pack"), s(it, "rule_id"))),
+                    escape_md(s(it, "severity")),
                 )
             },
         },
@@ -709,10 +738,10 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             header: "`\"use client\"` files exporting a Next.js server-only / route-config name. Next.js rejects this at build time.\n\n| File | Export | Directive |\n|------|--------|-----------|\n",
             row: |it| {
                 format!(
-                    "| {} | `{}` | `\"{}\"` |",
+                    "| {} | {} | {} |",
                     path_line_cell(it),
-                    s(it, "export_name"),
-                    s(it, "directive"),
+                    code_cell(it, "export_name"),
+                    markdown_table_code_span(&format!("\"{}\"", s(it, "directive"))),
                 )
             },
         },
@@ -722,10 +751,10 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             header: "Barrels re-exporting both a `\"use client\"` module and a server-only module. One import drags the other's directive across the boundary.\n\n| File | Client origin | Server origin |\n|------|---------------|---------------|\n",
             row: |it| {
                 format!(
-                    "| {} | `{}` | `{}` |",
+                    "| {} | {} | {} |",
                     path_line_cell(it),
-                    s(it, "client_origin"),
-                    s(it, "server_origin"),
+                    code_cell(it, "client_origin"),
+                    code_cell(it, "server_origin"),
                 )
             },
         },
@@ -733,19 +762,31 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             name: "Misplaced directives",
             key: "misplaced_directives",
             header: "`\"use client\"` / `\"use server\"` directives written after a non-directive statement, so the RSC bundler ignores them. Move the directive to the top of the file.\n\n| File | Directive |\n|------|-----------|\n",
-            row: |it| format!("| {} | `\"{}\"` |", path_line_cell(it), s(it, "directive")),
+            row: |it| {
+                format!(
+                    "| {} | {} |",
+                    path_line_cell(it),
+                    markdown_table_code_span(&format!("\"{}\"", s(it, "directive"))),
+                )
+            },
         },
         SectionSpec {
             name: "Unused server actions",
             key: "unused_server_actions",
             header: "Next.js Server Actions (exports of a `\"use server\"` file) that no project code references. The endpoint stays POST-able, but no code calls it (likely dead).\n\n| File | Action |\n|------|--------|\n",
-            row: |it| format!("| {} | `{}` |", path_line_cell(it), s(it, "action_name")),
+            row: |it| {
+                format!(
+                    "| {} | {} |",
+                    path_line_cell(it),
+                    code_cell(it, "action_name")
+                )
+            },
         },
         SectionSpec {
             name: "Route collisions",
             key: "route_collisions",
             header: "Next.js App Router route files that resolve to the same URL within one app-root. Next.js fails the build because a URL can have only one owner.\n\n| File | URL |\n|------|-----|\n",
-            row: |it| format!("| `{}` | `{}` |", s(it, "path"), s(it, "url")),
+            row: |it| format!("| {} | {} |", code_cell(it, "path"), code_cell(it, "url")),
         },
         SectionSpec {
             name: "Dynamic segment conflicts",
@@ -753,10 +794,10 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
             header: "Sibling Next.js dynamic route segments at one position using different slug names. Next.js requires one consistent name per dynamic path.\n\n| File | Position | Segments |\n|------|----------|----------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | `{}` | `{}` |",
-                    s(it, "path"),
-                    s(it, "position"),
-                    plain_join(it, "conflicting_segments", ", "),
+                    "| {} | {} | {} |",
+                    code_cell(it, "path"),
+                    code_cell(it, "position"),
+                    markdown_table_code_span(&plain_join(it, "conflicting_segments", ", ")),
                 )
             },
         },
@@ -775,10 +816,10 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
             header: "Vue/Svelte components reachable in the module graph but rendered nowhere: no tag, no dynamic binding, no registration. A barrel re-export keeps them alive even though nothing instantiates them.\n\n| File | Component | Framework |\n|------|-----------|-----------|\n",
             row: |it| {
                 format!(
-                    "| {} | `{}` | {} |",
+                    "| {} | {} | {} |",
                     path_line_cell(it),
-                    s(it, "component_name"),
-                    s(it, "framework"),
+                    code_cell(it, "component_name"),
+                    escape_md(s(it, "framework")),
                 )
             },
         },
@@ -818,10 +859,10 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
             header: "Vue `inject` / Svelte `getContext` calls for a key that no ancestor `provide` / `setContext` supplies.\n\n| File | Key | Framework |\n|------|-----|-----------|\n",
             row: |it| {
                 format!(
-                    "| {} | `{}` | {} |",
+                    "| {} | {} | {} |",
                     path_line_cell(it),
-                    s(it, "key_name"),
-                    s(it, "framework"),
+                    code_cell(it, "key_name"),
+                    escape_md(s(it, "framework")),
                 )
             },
         },
@@ -831,10 +872,10 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
             header: "SvelteKit `load()` return-object keys read by no consumer (neither the sibling `+page.svelte` nor `$page.data`). The key runs a real server fetch / DB cost per request for data nothing renders.\n\n| File | Route | Key |\n|------|-------|-----|\n",
             row: |it| {
                 format!(
-                    "| {} | `{}` | `{}` |",
+                    "| {} | {} | {} |",
                     path_line_cell(it),
-                    s(it, "route_dir"),
-                    s(it, "key_name"),
+                    code_cell(it, "route_dir"),
+                    code_cell(it, "key_name"),
                 )
             },
         },
@@ -862,8 +903,8 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
             header: "Suppression comments or JSDoc tags that no longer match any active issue.\n\n| File | Line | Description |\n|------|-----:|-------------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | {} | {} |",
-                    s(it, "path"),
+                    "| {} | {} | {} |",
+                    code_cell(it, "path"),
                     num(it, "line"),
                     stale_suppression_description(it),
                 )
@@ -874,27 +915,30 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
 
 fn component_detail_row(it: &Value, detail_key: &str) -> String {
     format!(
-        "| {} | `{}` | `{}` |",
+        "| {} | {} | {} |",
         path_line_cell(it),
-        s(it, "component_name"),
-        s(it, detail_key),
+        code_cell(it, "component_name"),
+        code_cell(it, detail_key),
     )
 }
 
 fn package_row(it: &Value) -> String {
-    format!("| `{}` |", s(it, "package_name"))
+    format!("| {} |", code_cell(it, "package_name"))
 }
 
 fn stale_suppression_description(it: &Value) -> String {
     let origin = it.get("origin").cloned().unwrap_or(Value::Null);
     if s(&origin, "type") == "jsdoc_tag" {
-        return format!("`@expected-unused` on `{}`", s(&origin, "export_name"));
+        return format!(
+            "`@expected-unused` on {}",
+            code_cell(&origin, "export_name")
+        );
     }
     if origin.get("kind_known").and_then(Value::as_bool) == Some(false) {
-        return format!("unknown kind `{}`", s(&origin, "issue_kind"));
+        return format!("unknown kind {}", code_cell(&origin, "issue_kind"));
     }
     match origin.get("issue_kind").and_then(Value::as_str) {
-        Some(kind) => format!("`{kind}`"),
+        Some(kind) => markdown_table_code_span(kind),
         None => "blanket".to_owned(),
     }
 }
@@ -907,9 +951,9 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
             header: "pnpm catalog entries not referenced by any workspace package.\n\n| Entry | Catalog | Location | Hardcoded consumers |\n|-------|---------|----------|---------------------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | `{}` | {} | {} |",
-                    s(it, "entry_name"),
-                    s(it, "catalog_name"),
+                    "| {} | {} | {} | {} |",
+                    code_cell(it, "entry_name"),
+                    code_cell(it, "catalog_name"),
                     path_line_cell(it),
                     backtick_join(it, "hardcoded_consumers"),
                 )
@@ -919,7 +963,13 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
             name: "Empty catalog groups",
             key: "empty_catalog_groups",
             header: "Named pnpm catalog groups with no entries.\n\n| Catalog | Location |\n|---------|----------|\n",
-            row: |it| format!("| `{}` | {} |", s(it, "catalog_name"), path_line_cell(it)),
+            row: |it| {
+                format!(
+                    "| {} | {} |",
+                    code_cell(it, "catalog_name"),
+                    path_line_cell(it)
+                )
+            },
         },
         SectionSpec {
             name: "Unresolved catalog references",
@@ -927,9 +977,9 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
             header: "Workspace `package.json` references to catalogs that do not declare the package. `pnpm install` will fail until each entry is added to its named catalog or the reference is switched.\n\n| Entry | Catalog | Location | Available in |\n|-------|---------|----------|--------------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | `{}` | {} | {} |",
-                    s(it, "entry_name"),
-                    s(it, "catalog_name"),
+                    "| {} | {} | {} | {} |",
+                    code_cell(it, "entry_name"),
+                    code_cell(it, "catalog_name"),
                     path_line_cell(it),
                     backtick_join(it, "available_in_catalogs"),
                 )
@@ -941,13 +991,13 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
             header: "`pnpm.overrides` entries forcing a version no workspace package depends on. Some entries may be intentional pins for transitive CVEs; the hint column flags those.\n\n| Override | Forces | Source | Location | Hint |\n|----------|--------|--------|----------|------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | `{}` -> `{}` | `{}` | {} | {} |",
-                    s(it, "raw_key"),
-                    s(it, "target_package"),
-                    s(it, "version_range"),
-                    s(it, "source"),
+                    "| {} | {} -> {} | {} | {} | {} |",
+                    code_cell(it, "raw_key"),
+                    code_cell(it, "target_package"),
+                    code_cell(it, "version_range"),
+                    code_cell(it, "source"),
                     path_line_cell(it),
-                    str_or(it, "hint", ""),
+                    escape_md(str_or(it, "hint", "")),
                 )
             },
         },
@@ -957,12 +1007,12 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
             header: "`pnpm.overrides` entries with an unparsable key or empty value. `pnpm install` will reject these.\n\n| Override | Value | Source | Location | Reason |\n|----------|-------|--------|----------|--------|\n",
             row: |it| {
                 format!(
-                    "| `{}` | `{}` | `{}` | {} | {} |",
-                    str_or(it, "raw_key", ""),
-                    str_or(it, "raw_value", ""),
-                    s(it, "source"),
+                    "| {} | {} | {} | {} | {} |",
+                    markdown_table_code_span(str_or(it, "raw_key", "")),
+                    markdown_table_code_span(str_or(it, "raw_value", "")),
+                    code_cell(it, "source"),
                     path_line_cell(it),
-                    str_or(it, "reason", "unparsable"),
+                    escape_md(str_or(it, "reason", "unparsable")),
                 )
             },
         },
@@ -1024,8 +1074,11 @@ fn render_check_summary(env: &Value) -> String {
 // ---------------------------------------------------------------------------
 
 fn dupes_family_entry(family: &Value) -> String {
-    let files: Vec<&str> = arr(family, "files").filter_map(Value::as_str).collect();
-    let shown = files.iter().take(3).copied().collect::<Vec<_>>().join(", ");
+    let files: Vec<String> = arr(family, "files")
+        .filter_map(Value::as_str)
+        .map(escape_md)
+        .collect();
+    let shown = files.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
     let more = if files.len() > 3 {
         format!(" (+{} more)", files.len() - 3)
     } else {
@@ -1050,7 +1103,7 @@ fn dupes_family_entry(family: &Value) -> String {
             .map(|suggestion| {
                 format!(
                     "  - {} (~{} lines)",
-                    s(suggestion, "description"),
+                    escape_md(s(suggestion, "description")),
                     num(suggestion, "estimated_savings"),
                 )
             })
@@ -1062,12 +1115,12 @@ fn dupes_family_entry(family: &Value) -> String {
 }
 
 fn instance_location(instance: &Value) -> String {
-    format!(
-        "`{}:{}-{}`",
+    markdown_code_span(&format!(
+        "{}:{}-{}",
         s(instance, "file"),
         num(instance, "start_line"),
         num(instance, "end_line"),
-    )
+    ))
 }
 
 /// jq: `sort_by([line_count, token_count]) | reverse` (stable sort then full
@@ -1237,11 +1290,10 @@ fn crap_cell(it: &Value) -> String {
 
 fn complexity_table_row(it: &Value) -> String {
     format!(
-        "| `{}:{}` | `{}` | {} | {}{} | {}{} | {} | {} |",
-        s(it, "path"),
-        num(it, "line"),
-        s(it, "name"),
-        str_or(it, "severity", "moderate"),
+        "| {} | {} | {} | {}{} | {}{} | {} | {} |",
+        path_line_cell(it),
+        code_cell(it, "name"),
+        escape_md(str_or(it, "severity", "moderate")),
         num(it, "cyclomatic"),
         exceeded_marker(it, &["cyclomatic", "both", "all"]),
         num(it, "cognitive"),
@@ -1287,12 +1339,11 @@ fn runtime_finding_row(it: &Value) -> String {
         .filter(|value| !value.is_null())
         .map_or_else(|| "-".to_owned(), fmt_num);
     format!(
-        "| `{}:{}` | `{}` | `{}` | {invocations} | {} |",
-        s(it, "path"),
-        num(it, "line"),
-        s(it, "function"),
-        s(it, "verdict"),
-        s(it, "confidence"),
+        "| {} | {} | {} | {invocations} | {} |",
+        path_line_cell(it),
+        code_cell(it, "function"),
+        code_cell(it, "verdict"),
+        escape_md(s(it, "confidence")),
     )
 }
 
@@ -1410,10 +1461,9 @@ fn render_health_with_runtime(env: &Value, complex: usize, elapsed: &str) -> Str
                 .take(10)
                 .map(|path| {
                     format!(
-                        "| `{}:{}` | `{}` | {} | {} |",
-                        s(path, "path"),
-                        num(path, "line"),
-                        s(path, "function"),
+                        "| {} | {} | {} | {} |",
+                        path_line_cell(path),
+                        code_cell(path, "function"),
                         num(path, "invocations"),
                         num(path, "percentile"),
                     )
@@ -1513,113 +1563,135 @@ type AuditRowSpec = (&'static str, &'static str, fn(&Value) -> String);
 /// unresolved imports.
 const AUDIT_EXPORT_DEP_ROWS: &[AuditRowSpec] = &[
     ("Unused export", "unused_exports", |it| {
-        format!("`{}`", s(it, "export_name"))
+        code_cell(it, "export_name")
     }),
     ("Unused type", "unused_types", |it| {
-        format!("`{}`", s(it, "export_name"))
+        code_cell(it, "export_name")
     }),
     ("Private type leak", "private_type_leaks", |it| {
-        format!("`{}` -> `{}`", s(it, "export_name"), s(it, "type_name"))
+        format!(
+            "{} -> {}",
+            code_cell(it, "export_name"),
+            code_cell(it, "type_name")
+        )
     }),
     ("Unused dependency", "unused_dependencies", |it| {
-        format!("`{}`", s(it, "package_name"))
+        code_cell(it, "package_name")
     }),
     ("Unused devDependency", "unused_dev_dependencies", |it| {
-        format!("`{}`", s(it, "package_name"))
+        code_cell(it, "package_name")
     }),
     (
         "Unused optionalDependency",
         "unused_optional_dependencies",
-        |it| format!("`{}`", s(it, "package_name")),
+        |it| code_cell(it, "package_name"),
     ),
     ("Unused enum member", "unused_enum_members", member_item),
     ("Unused class member", "unused_class_members", member_item),
     ("Unused store member", "unused_store_members", member_item),
     ("Unresolved import", "unresolved_imports", |it| {
-        format!("`{}`", s(it, "specifier"))
+        code_cell(it, "specifier")
     }),
 ];
 
 /// jq order positions 26-33: component-model kinds.
 const AUDIT_COMPONENT_ROWS: &[AuditRowSpec] = &[
     ("Unrendered component", "unrendered_components", |it| {
-        format!("`{}` ({})", s(it, "component_name"), s(it, "framework"))
+        format!(
+            "{} ({})",
+            code_cell(it, "component_name"),
+            escape_md(s(it, "framework"))
+        )
     }),
     ("Unused component prop", "unused_component_props", |it| {
-        format!("`{}.{}`", s(it, "component_name"), s(it, "prop_name"))
+        component_member_item(it, "prop_name")
     }),
     ("Unused component emit", "unused_component_emits", |it| {
         format!(
-            "`{}` emit `{}`",
-            s(it, "component_name"),
-            s(it, "emit_name")
+            "{} emit {}",
+            code_cell(it, "component_name"),
+            code_cell(it, "emit_name")
         )
     }),
     ("Unused component input", "unused_component_inputs", |it| {
-        format!("`{}.{}`", s(it, "component_name"), s(it, "input_name"))
+        component_member_item(it, "input_name")
     }),
     (
         "Unused component output",
         "unused_component_outputs",
         |it| {
             format!(
-                "`{}` output `{}`",
-                s(it, "component_name"),
-                s(it, "output_name")
+                "{} output {}",
+                code_cell(it, "component_name"),
+                code_cell(it, "output_name")
             )
         },
     ),
     ("Unused Svelte event", "unused_svelte_events", |it| {
         format!(
-            "`{}` event `{}`",
-            s(it, "component_name"),
-            s(it, "event_name")
+            "{} event {}",
+            code_cell(it, "component_name"),
+            code_cell(it, "event_name")
         )
     }),
     ("Unprovided inject", "unprovided_injects", |it| {
-        format!("`{}` ({})", s(it, "key_name"), s(it, "framework"))
+        format!(
+            "{} ({})",
+            code_cell(it, "key_name"),
+            escape_md(s(it, "framework"))
+        )
     }),
     ("Unused load data key", "unused_load_data_keys", |it| {
-        format!("`{}`", s(it, "key_name"))
+        code_cell(it, "key_name")
     }),
 ];
 
 /// jq order positions 34-42: dependency hygiene, suppressions, catalog.
 const AUDIT_HYGIENE_ROWS: &[AuditRowSpec] = &[
     ("Type-only dependency", "type_only_dependencies", |it| {
-        format!("`{}`", s(it, "package_name"))
+        code_cell(it, "package_name")
     }),
     ("Test-only dependency", "test_only_dependencies", |it| {
-        format!("`{}`", s(it, "package_name"))
+        code_cell(it, "package_name")
     }),
     (
         "Dev dependency in production",
         "dev_dependencies_in_production",
-        |it| format!("`{}`", s(it, "package_name")),
+        |it| code_cell(it, "package_name"),
     ),
     ("Stale suppression", "stale_suppressions", |it| {
-        str_or(it, "description", "suppression").to_owned()
+        escape_md(str_or(it, "description", "suppression"))
     }),
     ("Unused catalog entry", "unused_catalog_entries", |it| {
-        format!("`{}` (`{}`)", s(it, "entry_name"), s(it, "catalog_name"))
+        format!(
+            "{} ({})",
+            code_cell(it, "entry_name"),
+            code_cell(it, "catalog_name")
+        )
     }),
     ("Empty catalog group", "empty_catalog_groups", |it| {
-        format!("`{}`", s(it, "catalog_name"))
+        code_cell(it, "catalog_name")
     }),
     (
         "Unresolved catalog reference",
         "unresolved_catalog_references",
-        |it| format!("`{}` -> `{}`", s(it, "entry_name"), s(it, "catalog_name")),
+        |it| {
+            format!(
+                "{} -> {}",
+                code_cell(it, "entry_name"),
+                code_cell(it, "catalog_name")
+            )
+        },
     ),
     (
         "Unused dependency override",
         "unused_dependency_overrides",
-        |it| format!("`{}` (`{}`)", s(it, "raw_key"), s(it, "source")),
+        |it| format!("{} ({})", code_cell(it, "raw_key"), code_cell(it, "source")),
     ),
     (
         "Misconfigured dependency override",
         "misconfigured_dependency_overrides",
-        |it| format!("`{}` (`{}`)", s(it, "raw_key"), s(it, "source")),
+        |it| format!("{} ({})", code_cell(it, "raw_key"), code_cell(it, "source")),
     ),
 ];
 
@@ -1637,18 +1709,30 @@ fn audit_rows_from_table(dead_code: &Value, table: &[AuditRowSpec], rows: &mut V
 }
 
 fn member_item(it: &Value) -> String {
-    format!("`{}.{}`", s(it, "parent_name"), s(it, "member_name"))
+    markdown_table_code_span(&format!(
+        "{}.{}",
+        s(it, "parent_name"),
+        s(it, "member_name")
+    ))
+}
+
+fn component_member_item(it: &Value, member_key: &str) -> String {
+    markdown_table_code_span(&format!(
+        "{}.{}",
+        s(it, "component_name"),
+        s(it, member_key)
+    ))
 }
 
 fn first_import_site(it: &Value) -> String {
     arr(it, "imported_from").next().map_or_else(
         || path_line(it),
         |site| {
-            format!(
-                "`{}:{}`",
+            markdown_table_code_span(&format!(
+                "{}:{}",
                 rel_path_absolute_only(s(site, "path")),
                 num(site, "line"),
-            )
+            ))
         },
     )
 }
@@ -1660,7 +1744,7 @@ fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
         rows.push(audit_row(
             "Unlisted dependency",
             first_import_site(it),
-            format!("`{}`", s(it, "package_name")),
+            code_cell(it, "package_name"),
             it,
         ));
     }
@@ -1668,25 +1752,25 @@ fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
         let location = arr(it, "locations")
             .take(3)
             .map(|loc| {
-                format!(
-                    "`{}:{}`",
+                markdown_table_code_span(&format!(
+                    "{}:{}",
                     rel_path_absolute_only(s(loc, "path")),
                     num(loc, "line")
-                )
+                ))
             })
             .collect::<Vec<_>>()
             .join(", ");
         rows.push(audit_row(
             "Duplicate export",
             location,
-            format!("`{}`", s(it, "export_name")),
+            code_cell(it, "export_name"),
             it,
         ));
     }
     for it in arr(dead_code, "circular_dependencies") {
         let location = arr(it, "files")
             .filter_map(Value::as_str)
-            .map(|file| format!("`{}`", rel_path_absolute_only(file)))
+            .map(|file| markdown_table_code_span(&rel_path_absolute_only(file)))
             .collect::<Vec<_>>()
             .join(" -> ");
         rows.push(audit_row(
@@ -1699,13 +1783,13 @@ fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
     for it in arr(dead_code, "re_export_cycles") {
         let location = arr(it, "files")
             .filter_map(Value::as_str)
-            .map(|file| format!("`{}`", rel_path_absolute_only(file)))
+            .map(|file| markdown_table_code_span(&rel_path_absolute_only(file)))
             .collect::<Vec<_>>()
             .join(" <-> ");
         rows.push(audit_row(
             "Re-export cycle",
             location,
-            str_or(it, "kind", "cycle").to_owned(),
+            escape_md(str_or(it, "kind", "cycle")),
             it,
         ));
     }
@@ -1716,23 +1800,19 @@ fn audit_rows_boundaries(dead_code: &Value, rows: &mut Vec<AuditRow>) {
     for it in arr(dead_code, "boundary_violations") {
         rows.push(audit_row(
             "Boundary violation",
+            rel_path_line_cell(it, "from_path"),
             format!(
-                "`{}:{}`",
-                rel_path_absolute_only(s(it, "from_path")),
-                num(it, "line")
+                "{} -> {}",
+                escape_md(s(it, "from_zone")),
+                escape_md(s(it, "to_zone"))
             ),
-            format!("{} -> {}", s(it, "from_zone"), s(it, "to_zone")),
             it,
         ));
     }
     for it in arr(dead_code, "boundary_coverage_violations") {
         rows.push(audit_row(
             "Boundary coverage",
-            format!(
-                "`{}:{}`",
-                rel_path_absolute_only(s(it, "path")),
-                num(it, "line")
-            ),
+            rel_path_line_cell(it, "path"),
             "no matching zone".to_owned(),
             it,
         ));
@@ -1740,28 +1820,23 @@ fn audit_rows_boundaries(dead_code: &Value, rows: &mut Vec<AuditRow>) {
     for it in arr(dead_code, "boundary_call_violations") {
         rows.push(audit_row(
             "Boundary call",
+            rel_path_line_cell(it, "path"),
             format!(
-                "`{}:{}`",
-                rel_path_absolute_only(s(it, "path")),
-                num(it, "line")
+                "{} in {}",
+                code_cell(it, "callee"),
+                escape_md(s(it, "zone"))
             ),
-            format!("`{}` in {}", s(it, "callee"), s(it, "zone")),
             it,
         ));
     }
     for it in arr(dead_code, "policy_violations") {
         rows.push(audit_row(
             "Policy violation",
+            rel_path_line_cell(it, "path"),
             format!(
-                "`{}:{}`",
-                rel_path_absolute_only(s(it, "path")),
-                num(it, "line")
-            ),
-            format!(
-                "`{}` banned by {}/{}",
-                s(it, "matched"),
-                s(it, "pack"),
-                s(it, "rule_id")
+                "{} banned by {}",
+                code_cell(it, "matched"),
+                escape_md(&format!("{}/{}", s(it, "pack"), s(it, "rule_id")))
             ),
             it,
         ));
@@ -1774,27 +1849,23 @@ fn audit_rows_frameworks(dead_code: &Value, rows: &mut Vec<AuditRow>) {
     for it in arr(dead_code, "invalid_client_exports") {
         rows.push(audit_row(
             "Invalid client export",
+            rel_path_line_cell(it, "path"),
             format!(
-                "`{}:{}`",
-                rel_path_absolute_only(s(it, "path")),
-                num(it, "line")
+                "{} in {}",
+                code_cell(it, "export_name"),
+                markdown_table_code_span(&format!("\"{}\"", s(it, "directive")))
             ),
-            format!("`{}` in `\"{}\"`", s(it, "export_name"), s(it, "directive")),
             it,
         ));
     }
     for it in arr(dead_code, "mixed_client_server_barrels") {
         rows.push(audit_row(
             "Mixed client/server barrel",
+            rel_path_line_cell(it, "path"),
             format!(
-                "`{}:{}`",
-                rel_path_absolute_only(s(it, "path")),
-                num(it, "line")
-            ),
-            format!(
-                "`{}` + `{}`",
-                s(it, "client_origin"),
-                s(it, "server_origin")
+                "{} + {}",
+                code_cell(it, "client_origin"),
+                code_cell(it, "server_origin")
             ),
             it,
         ));
@@ -1802,12 +1873,8 @@ fn audit_rows_frameworks(dead_code: &Value, rows: &mut Vec<AuditRow>) {
     for it in arr(dead_code, "misplaced_directives") {
         rows.push(audit_row(
             "Misplaced directive",
-            format!(
-                "`{}:{}`",
-                rel_path_absolute_only(s(it, "path")),
-                num(it, "line")
-            ),
-            format!("`\"{}\"`", s(it, "directive")),
+            rel_path_line_cell(it, "path"),
+            markdown_table_code_span(&format!("\"{}\"", s(it, "directive"))),
             it,
         ));
     }
@@ -1815,23 +1882,23 @@ fn audit_rows_frameworks(dead_code: &Value, rows: &mut Vec<AuditRow>) {
         rows.push(audit_row(
             "Unused server action",
             path_line(it),
-            format!("`{}`", s(it, "action_name")),
+            code_cell(it, "action_name"),
             it,
         ));
     }
     for it in arr(dead_code, "route_collisions") {
         rows.push(audit_row(
             "Route collision",
-            format!("`{}`", rel_path_absolute_only(s(it, "path"))),
-            format!("`{}`", s(it, "url")),
+            markdown_table_code_span(&rel_path_absolute_only(s(it, "path"))),
+            code_cell(it, "url"),
             it,
         ));
     }
     for it in arr(dead_code, "dynamic_segment_name_conflicts") {
         rows.push(audit_row(
             "Dynamic segment conflict",
-            format!("`{}`", rel_path_absolute_only(s(it, "path"))),
-            format!("`{}`", plain_join(it, "conflicting_segments", ", ")),
+            markdown_table_code_span(&rel_path_absolute_only(s(it, "path"))),
+            markdown_table_code_span(&plain_join(it, "conflicting_segments", ", ")),
             it,
         ));
     }
@@ -1843,7 +1910,7 @@ fn audit_dead_code_rows(dead_code: &Value) -> Vec<AuditRow> {
     for it in arr(dead_code, "unused_files") {
         rows.push(audit_row(
             "Unused file",
-            format!("`{}`", rel_path_absolute_only(s(it, "path"))),
+            markdown_table_code_span(&rel_path_absolute_only(s(it, "path"))),
             "-".to_owned(),
             it,
         ));
@@ -1868,15 +1935,14 @@ fn audit_complexity_section(env: &Value) -> String {
         .take(15)
         .map(|it| {
             format!(
-                "| `{}:{}` | `{}` | {} | {} | {} | {} | {} | {} |",
-                s(it, "path"),
-                num(it, "line"),
-                s(it, "name"),
+                "| {} | {} | {} | {} | {} | {} | {} | {} |",
+                path_line_cell(it),
+                code_cell(it, "name"),
                 introduced_label(it),
-                str_or(it, "severity", "moderate"),
+                escape_md(str_or(it, "severity", "moderate")),
                 num(it, "cyclomatic"),
                 num(it, "cognitive"),
-                str_or(it, "coverage_tier", "-"),
+                escape_md(str_or(it, "coverage_tier", "-")),
                 it.get("crap")
                     .filter(|crap| !crap.is_null())
                     .map_or_else(|| "-".to_owned(), fmt_num),
@@ -1948,13 +2014,16 @@ fn audit_duplication_section(env: &Value) -> String {
                             .get("start_line")
                             .filter(|line| !line.is_null())
                             .map_or_else(|| "1".to_owned(), fmt_num);
-                        format!("`{}:{start}`", rel_path_absolute_only(file))
+                        markdown_table_code_span(&format!(
+                            "{}:{start}",
+                            rel_path_absolute_only(file)
+                        ))
                     }
                 },
             );
             let mut files: Vec<String> = instances
                 .iter()
-                .map(|instance| rel_path_absolute_only(s(instance, "file")))
+                .map(|instance| escape_md(&rel_path_absolute_only(s(instance, "file"))))
                 .collect();
             files.sort();
             files.dedup();
@@ -2091,14 +2160,16 @@ fn render_security_summary(env: &Value) -> String {
                 format!(
                     "| {} | {} | {} | {} |",
                     path_line(finding),
-                    s(finding, "kind"),
-                    str_or(finding, "severity", "unknown"),
-                    finding
-                        .get("candidate")
-                        .and_then(|candidate| candidate.get("sink"))
-                        .and_then(|sink| sink.get("callee"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("-"),
+                    escape_md(s(finding, "kind")),
+                    escape_md(str_or(finding, "severity", "unknown")),
+                    escape_md(
+                        finding
+                            .get("candidate")
+                            .and_then(|candidate| candidate.get("sink"))
+                            .and_then(|sink| sink.get("callee"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("-")
+                    ),
                 )
             })
             .collect::<Vec<_>>()
@@ -2196,10 +2267,9 @@ pub fn render_fix_summary(env: &Value) -> String {
     if !exports.is_empty() {
         out.push_str(&fix_detail_block("Export removals", &exports, |it| {
             format!(
-                "- `{}:{}` - `{}`",
-                s(it, "path"),
-                num(it, "line"),
-                s(it, "name")
+                "- {} - {}",
+                markdown_code_span(&format!("{}:{}", s(it, "path"), num(it, "line"))),
+                markdown_code_span(s(it, "name"))
             )
         }));
         out.push_str("\n\n");
@@ -2210,10 +2280,10 @@ pub fn render_fix_summary(env: &Value) -> String {
             &dependencies,
             |it| {
                 format!(
-                    "- `{}` from {} in `{}`",
-                    s(it, "package"),
-                    s(it, "location"),
-                    s(it, "file"),
+                    "- {} from {} in {}",
+                    markdown_code_span(s(it, "package")),
+                    escape_md(s(it, "location")),
+                    markdown_code_span(s(it, "file")),
                 )
             },
         ));
@@ -2228,15 +2298,30 @@ pub fn render_fix_summary(env: &Value) -> String {
 // ---------------------------------------------------------------------------
 
 fn file_link(links: &LinkContext, path: &str, start: &str, end: &str) -> String {
-    let display = last_three_segments(path);
+    let display = markdown_table_code_span(&format!("{}:{start}-{end}", last_three_segments(path)));
     if links.repo.is_empty() || links.sha.is_empty() {
-        format!("`{display}:{start}-{end}`")
+        display
     } else {
         format!(
-            "[`{display}:{start}-{end}`](https://github.com/{}/blob/{}/{}{path}#L{start}-L{end})",
-            links.repo, links.sha, links.prefix,
+            "[{display}](https://github.com/{}/blob/{}/{}{}#L{start}-L{end})",
+            links.repo,
+            links.sha,
+            links.prefix,
+            encode_link_path(path),
         )
     }
+}
+
+/// Percent-encode the characters that would break a Markdown link destination
+/// or the surrounding table cell.
+fn encode_link_path(path: &str) -> String {
+    path.replace('%', "%25")
+        .replace(' ', "%20")
+        .replace('(', "%28")
+        .replace(')', "%29")
+        .replace('<', "%3C")
+        .replace('>', "%3E")
+        .replace('|', "%7C")
 }
 
 fn exceeded_priority(it: &Value) -> u8 {
@@ -2533,11 +2618,14 @@ fn combined_complexity_breakdown(env: &Value, counts: &CombinedCounts) -> String
                 String::new()
             };
             format!(
-                "| `{}:{}` | `{}` | {} | {}{} | {}{}{crap_column} | {} |",
-                last_three_segments(s(it, "path")),
-                num(it, "line"),
-                s(it, "name"),
-                str_or(it, "severity", "moderate"),
+                "| {} | {} | {} | {}{} | {}{}{crap_column} | {} |",
+                markdown_table_code_span(&format!(
+                    "{}:{}",
+                    last_three_segments(s(it, "path")),
+                    num(it, "line")
+                )),
+                code_cell(it, "name"),
+                escape_md(str_or(it, "severity", "moderate")),
                 num(it, "cyclomatic"),
                 exceeded_marker(it, &["cyclomatic", "both", "all"]),
                 num(it, "cognitive"),
@@ -2599,12 +2687,15 @@ fn combined_runtime_breakdown(env: &Value, counts: &CombinedCounts) -> String {
                         .filter(|value| !value.is_null())
                         .map_or_else(|| "-".to_owned(), fmt_num);
                     format!(
-                        "| `{}:{}` | `{}` | `{}` | {invocations} | {} |",
-                        last_three_segments(s(it, "path")),
-                        num(it, "line"),
-                        s(it, "function"),
-                        s(it, "verdict"),
-                        s(it, "confidence"),
+                        "| {} | {} | {} | {invocations} | {} |",
+                        markdown_table_code_span(&format!(
+                            "{}:{}",
+                            last_three_segments(s(it, "path")),
+                            num(it, "line")
+                        )),
+                        code_cell(it, "function"),
+                        code_cell(it, "verdict"),
+                        escape_md(s(it, "confidence")),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2621,10 +2712,13 @@ fn combined_runtime_breakdown(env: &Value, counts: &CombinedCounts) -> String {
                 .take(5)
                 .map(|it| {
                     format!(
-                        "| `{}:{}` | `{}` | {} | {} |",
-                        last_three_segments(s(it, "path")),
-                        num(it, "line"),
-                        s(it, "function"),
+                        "| {} | {} | {} | {} |",
+                        markdown_table_code_span(&format!(
+                            "{}:{}",
+                            last_three_segments(s(it, "path")),
+                            num(it, "line")
+                        )),
+                        code_cell(it, "function"),
                         num(it, "invocations"),
                         num(it, "percentile"),
                     )

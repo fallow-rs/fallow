@@ -752,6 +752,100 @@ fn github_summary_combined_snapshot() {
     insta::assert_snapshot!("github_summary_combined", rendered);
 }
 
+/// Backticks and pipes in envelope strings must not break out of their table
+/// cell: a suppression comment token is arbitrary source text, so an unknown
+/// `issue_kind` is the canonical markdown-injection vector into
+/// `GITHUB_STEP_SUMMARY`.
+#[test]
+fn github_summary_escapes_hostile_stale_suppression_kind() {
+    let rendered = render_summary(
+        EnvelopeKind::DeadCode,
+        &json!({
+            "kind": "dead-code",
+            "total_issues": 1,
+            "elapsed_ms": 5,
+            "stale_suppressions": [{
+                "path": "src/a.ts",
+                "line": 3,
+                "origin": { "type": "comment", "kind_known": false, "issue_kind": "x`|![evil](u)" }
+            }]
+        }),
+        &LinkContext::default(),
+    );
+    assert!(
+        rendered.contains("unknown kind ``x`\\|![evil](u)``"),
+        "hostile kind must stay one escaped code span: {rendered}"
+    );
+    assert!(
+        !rendered.contains("![evil](u) |"),
+        "pipe must not terminate the description cell: {rendered}"
+    );
+}
+
+/// Paths and export names with pipes/backticks stay inside a single escaped
+/// code span per cell instead of splitting or closing the row.
+#[test]
+fn github_summary_escapes_pipes_and_backticks_in_check_cells() {
+    let rendered = render_summary(
+        EnvelopeKind::DeadCode,
+        &json!({
+            "kind": "dead-code",
+            "total_issues": 2,
+            "elapsed_ms": 5,
+            "unused_exports": [{
+                "path": "src/we|ird.ts",
+                "line": 1,
+                "export_name": "bad`name",
+                "is_re_export": false
+            }],
+            "circular_dependencies": [{
+                "files": ["src/a|b.ts", "src/c.ts"],
+                "length": 2
+            }]
+        }),
+        &LinkContext::default(),
+    );
+    assert!(
+        rendered.contains("| `src/we\\|ird.ts` | 1 | ``bad`name`` |"),
+        "export row must escape both hostile cells: {rendered}"
+    );
+    assert!(
+        rendered.contains("src/a\\|b.ts"),
+        "cycle cell must escape pipes in file names: {rendered}"
+    );
+    assert!(
+        !rendered.contains("src/we|ird.ts"),
+        "raw pipe must not survive inside a data row: {rendered}"
+    );
+}
+
+/// CRLF in envelope strings must not leave a bare CR (a CommonMark line
+/// ending) inside a table row.
+#[test]
+fn github_summary_stale_description_survives_crlf_kind() {
+    let rendered = render_summary(
+        EnvelopeKind::DeadCode,
+        &json!({
+            "kind": "dead-code",
+            "total_issues": 1,
+            "elapsed_ms": 5,
+            "circular_dependencies": [{
+                "files": ["src/a\r\nb.ts", "src/c.ts"],
+                "length": 2
+            }]
+        }),
+        &LinkContext::default(),
+    );
+    assert!(
+        rendered.contains("src/a b.ts"),
+        "CRLF must collapse to one space: {rendered}"
+    );
+    assert!(
+        !rendered.contains('\r'),
+        "no carriage return may reach the summary: {rendered}"
+    );
+}
+
 #[test]
 fn summary_has_no_em_dashes() {
     // Repo style rule: the renderer templates must never emit em dashes,

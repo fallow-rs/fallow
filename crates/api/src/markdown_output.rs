@@ -6,7 +6,9 @@ use fallow_types::duplicates::DuplicationReport;
 use fallow_types::output_dead_code::*;
 use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 
-use fallow_output::normalize_uri;
+use fallow_output::{
+    markdown_code_span, markdown_table_code_span, markdown_table_text, normalize_uri,
+};
 
 use crate::ResultGroup;
 
@@ -36,28 +38,6 @@ fn format_window(seconds: u64) -> String {
 
 fn escape_markdown_prose(s: &str) -> String {
     s.replace('`', "\\`")
-}
-
-/// Render a complete CommonMark code span around an untrusted value.
-fn markdown_code_span(s: &str) -> String {
-    let longest_run = s
-        .split(|c| c != '`')
-        .map(str::len)
-        .max()
-        .unwrap_or_default();
-    let fence = "`".repeat(longest_run + 1);
-    let needs_padding = s.starts_with('`')
-        || s.ends_with('`')
-        || (s.starts_with(' ') && s.ends_with(' ') && !s.chars().all(|c| c == ' '));
-    if needs_padding {
-        format!("{fence} {s} {fence}")
-    } else {
-        format!("{fence}{s}{fence}")
-    }
-}
-
-fn markdown_table_code_span(s: &str) -> String {
-    markdown_code_span(&s.replace('|', "\\|"))
 }
 
 fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
@@ -2068,7 +2048,7 @@ fn write_targets_section(out: &mut String, report: &fallow_output::HealthReport,
             "| {:.1} | {category} | {effort} / {confidence} | {} | {} |",
             target.efficiency,
             markdown_table_code_span(&file_str),
-            target.recommendation,
+            markdown_table_text(&target.recommendation),
         );
     }
 }
@@ -2488,6 +2468,38 @@ mod health_markdown_tests {
         let output = build_health_markdown(&report, Path::new("/project"));
 
         assert!(output.contains("```btn` **injected** \\| btn``primary```"));
+    }
+
+    #[test]
+    fn health_markdown_escapes_pipes_in_target_recommendation_cell() {
+        use fallow_output::{
+            Confidence, EffortEstimate, RecommendationCategory, RefactoringTarget,
+            RefactoringTargetFinding,
+        };
+
+        let report = HealthReport {
+            targets: vec![RefactoringTargetFinding {
+                target: RefactoringTarget {
+                    path: "/project/src/big.ts".into(),
+                    priority: 80.0,
+                    efficiency: 4.0,
+                    recommendation: "Extract render|inject (cognitive: 30) into smaller functions"
+                        .to_string(),
+                    category: RecommendationCategory::ExtractComplexFunctions,
+                    effort: EffortEstimate::Medium,
+                    confidence: Confidence::Medium,
+                    factors: Vec::new(),
+                    evidence: None,
+                },
+                actions: Vec::new(),
+            }],
+            ..HealthReport::default()
+        };
+
+        let output = build_health_markdown(&report, Path::new("/project"));
+
+        assert!(output.contains("Extract render\\|inject (cognitive: 30)"));
+        assert!(!output.contains("Extract render|inject"));
     }
 }
 

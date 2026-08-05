@@ -334,7 +334,9 @@ pub fn command_title(command: &str) -> &'static str {
 /// Escape a string for inclusion in a Markdown table cell.
 #[must_use]
 pub fn escape_md(value: &str) -> String {
-    let collapsed = value.replace('\n', " ");
+    // CRLF collapses first so Windows line endings become one space; a bare CR
+    // is a CommonMark line ending and would otherwise split the table row.
+    let collapsed = value.replace("\r\n", " ").replace(['\n', '\r'], " ");
     let mut out = String::with_capacity(collapsed.len());
     for ch in collapsed.chars() {
         if matches!(
@@ -359,6 +361,44 @@ pub fn escape_md(value: &str) -> String {
         out.push(ch);
     }
     out.trim().to_owned()
+}
+
+/// Render a complete CommonMark code span around an untrusted value. The
+/// fence grows past the longest backtick run inside the value, so the span
+/// cannot be closed early from within.
+#[must_use]
+pub fn markdown_code_span(value: &str) -> String {
+    let longest_run = value
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or_default();
+    let fence = "`".repeat(longest_run + 1);
+    let needs_padding = value.starts_with('`')
+        || value.ends_with('`')
+        || (value.starts_with(' ') && value.ends_with(' ') && !value.chars().all(|c| c == ' '));
+    if needs_padding {
+        format!("{fence} {value} {fence}")
+    } else {
+        format!("{fence}{value}{fence}")
+    }
+}
+
+/// [`markdown_code_span`] for a Markdown table cell: pipes are additionally
+/// escaped so the value cannot terminate the cell.
+#[must_use]
+pub fn markdown_table_code_span(value: &str) -> String {
+    markdown_code_span(&value.replace('|', "\\|"))
+}
+
+/// Escape prose for a Markdown table cell while leaving intentional inline
+/// markup alone: pipes are escaped and line endings collapse to spaces.
+#[must_use]
+pub fn markdown_table_text(value: &str) -> String {
+    value
+        .replace("\r\n", " ")
+        .replace(['\n', '\r'], " ")
+        .replace('|', "\\|")
 }
 
 /// Render a provider-specific review envelope from typed CI issues.
@@ -883,6 +923,30 @@ mod tests {
     fn escape_md_collapses_newlines_to_spaces() {
         let raw = "first\nsecond\nthird";
         assert_eq!(escape_md(raw), "first second third");
+    }
+
+    #[test]
+    fn escape_md_collapses_carriage_returns_to_spaces() {
+        assert_eq!(escape_md("first\r\nsecond\rthird"), "first second third");
+    }
+
+    #[test]
+    fn markdown_code_span_grows_fence_past_inner_backticks() {
+        assert_eq!(markdown_code_span("plain"), "`plain`");
+        assert_eq!(markdown_code_span("has`tick"), "``has`tick``");
+        assert_eq!(markdown_code_span("`leading"), "`` `leading ``");
+    }
+
+    #[test]
+    fn markdown_table_code_span_escapes_pipes() {
+        assert_eq!(markdown_table_code_span("a|b"), "`a\\|b`");
+        assert_eq!(markdown_table_code_span("x`|y"), "``x`\\|y``");
+    }
+
+    #[test]
+    fn markdown_table_text_neutralizes_pipes_and_line_endings() {
+        assert_eq!(markdown_table_text("a|b"), "a\\|b");
+        assert_eq!(markdown_table_text("a\r\nb\rc\nd"), "a b c d");
     }
 
     #[test]

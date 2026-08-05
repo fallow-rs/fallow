@@ -11,7 +11,7 @@ Security gate: `new`, verdict: `fail`, matching candidates: **2**.
 
 | Location | Kind | Severity | Sink |
 |:---------|:-----|:---------|:-----|
-| `src/routes/exec.ts:17` | tainted-sink | high | child_process.exec |
+| `src/routes/exec.ts:17` | tainted-sink | high | child\_process.exec |
 | `src/pages/settings,page.tsx:4` | client-server-leak | medium | - |
 
 Treat these as candidates for verification, not confirmed vulnerabilities.
