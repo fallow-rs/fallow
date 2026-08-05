@@ -25,11 +25,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -180,10 +180,16 @@ struct FallowLspServer {
     root: Arc<RwLock<Option<PathBuf>>>,
     analysis: Arc<RwLock<Option<LspAnalysisSnapshot>>>,
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
-    last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
     /// Monotonic workspace event generation used to reject stale analysis.
     analysis_epoch: Arc<AtomicU64>,
+    /// Epoch of the last successfully applied analysis. `run_analysis` skips
+    /// the run when the current epoch already completed, so a burst of
+    /// workspace events queued on `analysis_guard` coalesces into one
+    /// analysis instead of N serialized full runs. Starts at `u64::MAX`
+    /// ("no epoch completed") so the epoch-0 startup analysis is never
+    /// skipped.
+    last_completed_epoch: Arc<AtomicU64>,
     /// Per-URI document state tracked from `did_open` / `did_change` /
     /// `did_close`. The `version` field is the LSP-supplied integer used by
     /// `run_analysis` to snapshot the document state at analysis start and
@@ -433,14 +439,8 @@ impl LanguageServer for FallowLspServer {
             record_type_aware_file_change(&mut changes, path.into_owned(), FileChangeType::CHANGED);
         }
         self.analysis_epoch.fetch_add(1, Ordering::SeqCst);
-        {
-            let now = Instant::now();
-            let mut last = self.last_analysis.lock().await;
-            *last = now;
-        }
-
         self.startup_analysis_started.store(true, Ordering::SeqCst);
-        self.run_analysis().await;
+        self.spawn_analysis();
     }
 
     async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
@@ -452,7 +452,7 @@ impl LanguageServer for FallowLspServer {
             invalidate_type_aware_changes(&mut changes);
         }
         self.analysis_epoch.fetch_add(1, Ordering::SeqCst);
-        self.run_analysis().await;
+        self.spawn_analysis();
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
@@ -469,7 +469,7 @@ impl LanguageServer for FallowLspServer {
             }
         }
         self.analysis_epoch.fetch_add(1, Ordering::SeqCst);
-        self.run_analysis().await;
+        self.spawn_analysis();
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -489,7 +489,7 @@ impl LanguageServer for FallowLspServer {
         }
 
         if !self.startup_analysis_started.swap(true, Ordering::SeqCst) {
-            self.spawn_startup_analysis();
+            self.spawn_analysis();
         }
     }
 
@@ -604,13 +604,9 @@ impl FallowLspServer {
             root: Arc::new(RwLock::new(None)),
             analysis: Arc::new(RwLock::new(None)),
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
-            last_analysis: Arc::new(Mutex::new(
-                Instant::now()
-                    .checked_sub(std::time::Duration::from_secs(10))
-                    .unwrap_or_else(Instant::now),
-            )),
             analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
             analysis_epoch: Arc::new(AtomicU64::new(0)),
+            last_completed_epoch: Arc::new(AtomicU64::new(u64::MAX)),
             documents: Arc::new(RwLock::new(FxHashMap::default())),
             startup_analysis_started: Arc::new(AtomicBool::new(false)),
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
@@ -674,10 +670,16 @@ impl FallowLspServer {
         Ok(())
     }
 
-    /// Run the first open-triggered analysis without blocking the `didOpen`
-    /// response. The existing `analysis_guard` still prevents overlap with a
-    /// concurrent save or restart-triggered analysis.
-    fn spawn_startup_analysis(&self) {
+    /// Run an analysis without blocking the triggering notification handler.
+    ///
+    /// tower-lsp-server dispatches requests and notifications through one
+    /// small concurrency-limited pool, so awaiting a full workspace analysis
+    /// inline parks a dispatch slot for the whole run; a burst of workspace
+    /// events would exhaust the pool and freeze `didChange`, hover, code
+    /// actions, and shutdown behind serialized analyses. `analysis_guard`
+    /// still prevents overlapping runs and `last_completed_epoch` coalesces
+    /// queued runs whose epoch already completed.
+    fn spawn_analysis(&self) {
         let server = self.clone();
         tokio::spawn(async move {
             server.run_analysis().await;
@@ -736,8 +738,12 @@ impl FallowLspServer {
             return;
         }
 
-        let version_snapshot = self.snapshot_document_versions().await;
         let analysis_epoch = self.analysis_epoch.load(Ordering::SeqCst);
+        if self.last_completed_epoch.load(Ordering::SeqCst) == analysis_epoch {
+            return;
+        }
+
+        let version_snapshot = self.snapshot_document_versions().await;
 
         self.client
             .log_message(MessageType::INFO, "Running fallow analysis...")
@@ -795,6 +801,8 @@ impl FallowLspServer {
             Ok(Ok(output)) if self.analysis_epoch.load(Ordering::SeqCst) == analysis_epoch => {
                 self.apply_analysis_output(output, &root, &version_snapshot)
                     .await;
+                self.last_completed_epoch
+                    .store(analysis_epoch, Ordering::SeqCst);
             }
             Ok(Ok(_)) => {
                 self.client
@@ -918,8 +926,12 @@ impl FallowLspServer {
             .map(|(uri, state)| (uri.clone(), state.clone()))
             .collect();
 
-        let use_pull_diagnostics = self.client_pulls.load(Ordering::SeqCst);
         let mut new_uris: FxHashSet<Uri> = FxHashSet::default();
+        // Live-document URIs pushed while the client had not pulled yet. The
+        // first-pull transition clears push diagnostics for open documents,
+        // but a pull landing mid-loop cannot clear pushes emitted after its
+        // clear; those URIs are re-cleared below once the flip is observed.
+        let mut pushed_live_uris: Vec<Uri> = Vec::new();
 
         for (uri, diags) in &diagnostics_by_file {
             new_uris.insert(uri.clone());
@@ -930,7 +942,12 @@ impl FallowLspServer {
 
             let filtered = filter_disabled_diagnostics(diags, &disabled);
 
-            if !use_pull_diagnostics || !live_documents.contains_key(uri) {
+            // Re-loaded per URI: the first textDocument/diagnostic request can
+            // arrive while this loop awaits, flipping the client into pull
+            // mode mid-publish.
+            let use_pull_diagnostics = self.client_pulls.load(Ordering::SeqCst);
+            let is_live = live_documents.contains_key(uri);
+            if !use_pull_diagnostics || !is_live {
                 self.client
                     .publish_diagnostics(
                         uri.clone(),
@@ -938,6 +955,9 @@ impl FallowLspServer {
                         snapshot.get(uri).map(|state| state.version),
                     )
                     .await;
+                if is_live && !filtered.is_empty() {
+                    pushed_live_uris.push(uri.clone());
+                }
             }
 
             self.cached_diagnostics
@@ -946,17 +966,20 @@ impl FallowLspServer {
                 .insert(uri.clone(), filtered);
         }
 
-        self.clear_stale_diagnostics(
-            &mut new_uris,
-            snapshot,
-            &live_documents,
-            use_pull_diagnostics,
-        )
-        .await;
+        self.clear_stale_diagnostics(&mut new_uris, snapshot, &live_documents)
+            .await;
 
         *self.previous_diagnostic_uris.write().await = new_uris;
 
-        if use_pull_diagnostics {
+        if self.client_pulls.load(Ordering::SeqCst) {
+            // The first pull landed mid-loop: its open-document clear ran
+            // before some pushes above, so those would otherwise double with
+            // the pull namespace forever (subsequent runs skip live-document
+            // pushes and clears). Re-clear only the push namespace; the pull
+            // cache stays authoritative.
+            for uri in pushed_live_uris {
+                self.client.publish_diagnostics(uri, vec![], None).await;
+            }
             self.spawn_diagnostic_refresh();
         }
     }
@@ -969,7 +992,6 @@ impl FallowLspServer {
         new_uris: &mut FxHashSet<Uri>,
         snapshot: &VersionSnapshot,
         live_documents: &FxHashMap<Uri, DocumentState>,
-        use_pull_diagnostics: bool,
     ) {
         let previous_uris = self.previous_diagnostic_uris.read().await;
         let mut cache = self.cached_diagnostics.write().await;
@@ -981,7 +1003,7 @@ impl FallowLspServer {
                 new_uris.insert(old_uri.clone());
                 continue;
             }
-            if !use_pull_diagnostics || !live_documents.contains_key(old_uri) {
+            if !self.client_pulls.load(Ordering::SeqCst) || !live_documents.contains_key(old_uri) {
                 self.client
                     .publish_diagnostics(
                         old_uri.clone(),

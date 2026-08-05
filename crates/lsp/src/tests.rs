@@ -353,6 +353,9 @@ async fn failed_analysis_refresh_preserves_last_valid_snapshot_and_diagnostics()
     );
 
     write_analysis_failure_fixture(&root, "^(?!layout\\.tsx$).+$");
+    // A real refresh always follows a workspace event that bumps the epoch;
+    // without the bump the coalescing skip would make this re-run a no-op.
+    backend.analysis_epoch.fetch_add(1, Ordering::SeqCst);
     backend.run_analysis().await;
 
     assert!(
@@ -401,6 +404,9 @@ async fn explicit_config_failure_preserves_last_valid_snapshot_and_diagnostics()
     let invalid_config = root.join("invalid.fallow.jsonc");
     std::fs::write(&invalid_config, "{ invalid json").expect("write invalid config");
     *backend.config_path.write().await = Some(invalid_config);
+    // A real config change bumps the epoch; without the bump the coalescing
+    // skip would make this re-run a no-op.
+    backend.analysis_epoch.fetch_add(1, Ordering::SeqCst);
     backend.run_analysis().await;
 
     assert!(
@@ -509,7 +515,7 @@ async fn first_did_open_runs_startup_analysis_once() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn did_save_waits_for_in_flight_startup_analysis() {
+async fn did_save_returns_while_analysis_waits_behind_guard() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path().canonicalize().expect("canonical root");
     let source = write_startup_analysis_fixture(&root);
@@ -530,24 +536,83 @@ async fn did_save_waits_for_in_flight_startup_analysis() {
             .await;
     });
 
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    assert!(
-        !save_task.is_finished(),
-        "didSave-triggered analysis must wait behind an in-flight startup analysis",
-    );
+    tokio::time::timeout(Duration::from_secs(1), save_task)
+        .await
+        .expect(
+            "didSave must return while the guard is held; awaiting the analysis \
+             inline parks a dispatch slot for the whole run",
+        )
+        .expect("didSave handler completes");
     assert!(
         backend.analysis.read().await.is_none(),
         "analysis cannot publish while the guard is held",
     );
+    assert_eq!(backend.analysis_epoch.load(Ordering::SeqCst), 1);
 
     drop(guard);
-    save_task.await.expect("didSave analysis task completes");
-
+    for _ in 0..100 {
+        if backend.analysis.read().await.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert!(
         backend.analysis.read().await.is_some(),
-        "didSave must rerun analysis after the in-flight startup analysis completes",
+        "the spawned didSave analysis must run once the in-flight analysis releases the guard",
     );
-    assert_eq!(backend.analysis_epoch.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn analysis_burst_coalesces_into_single_run() {
+    use futures::StreamExt;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    let source = write_startup_analysis_fixture(&root);
+    let uri = Uri::from_file_path(&source).expect("source file URI");
+
+    let (service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    *backend.root.write().await = Some(root);
+
+    for _ in 0..3 {
+        backend
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier::new(uri.clone()),
+                text: None,
+            })
+            .await;
+    }
+
+    // Drain server-to-client traffic (the socket channel is bounded, so the
+    // analysis blocks on logging otherwise) while counting run announcements,
+    // until the burst epoch completed and the stream has gone quiet.
+    let mut runs = 0;
+    loop {
+        match tokio::time::timeout(Duration::from_millis(200), socket.next()).await {
+            Ok(Some(message)) => {
+                if message.method() == "window/logMessage"
+                    && message.params().is_some_and(|params| {
+                        params["message"] == json!("Running fallow analysis...")
+                    })
+                {
+                    runs += 1;
+                }
+            }
+            Ok(None) => break,
+            Err(_) => {
+                if backend.last_completed_epoch.load(Ordering::SeqCst) == 3 {
+                    break;
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        runs, 1,
+        "a burst of saves queued on the guard must coalesce into one analysis run",
+    );
+    assert_eq!(backend.analysis_epoch.load(Ordering::SeqCst), 3);
 }
 
 #[test]
@@ -3260,6 +3325,94 @@ async fn did_open_clears_push_diagnostics_when_client_pulls() {
     tokio::join!(did_open, client);
 
     assert!(backend.documents.read().await.contains_key(&uri));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mid_run_first_pull_reclears_pushed_live_diagnostics() {
+    use futures::StreamExt;
+
+    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+
+    let initialize = Request::build("initialize")
+        .params(json!({
+            "capabilities": {
+                "workspace": {
+                    "diagnostics": {
+                        "refreshSupport": true
+                    }
+                }
+            }
+        }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("service ready")
+        .call(initialize)
+        .await
+        .expect("initialize call")
+        .expect("initialize response");
+
+    let backend = service.inner();
+    let uri = "file:///pull-race.ts".parse::<Uri>().unwrap();
+    install_document(backend, &uri, 1, "v1").await;
+    let snapshot = snapshot_for(&uri, 1);
+    let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+    diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+
+    // Park the publish loop between its push and its final pull re-check by
+    // holding the lock clear_stale_diagnostics needs.
+    let previous_uris_guard = backend.previous_diagnostic_uris.write().await;
+
+    let publish_backend = backend.clone();
+    let publish_task = tokio::spawn(async move {
+        publish_backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+    });
+
+    let request = tokio::time::timeout(Duration::from_millis(500), socket.next())
+        .await
+        .expect("the push must go out while the publish loop is parked")
+        .expect("ClientSocket stream yields the push");
+    assert_eq!(request.method(), "textDocument/publishDiagnostics");
+    let params = request
+        .params()
+        .expect("publishDiagnostics carries params on every call");
+    assert_eq!(params["uri"], json!(uri.to_string()));
+    assert_eq!(params["diagnostics"].as_array().map(Vec::len), Some(1));
+
+    // The first pull lands mid-run: the handler flips the flag and clears open
+    // documents, but the push above was already emitted after that clear.
+    backend.client_pulls.store(true, Ordering::SeqCst);
+    drop(previous_uris_guard);
+
+    publish_task.await.expect("publish task completes");
+
+    let reclear = loop {
+        let request = tokio::time::timeout(Duration::from_millis(500), socket.next())
+            .await
+            .expect("the re-clear must arrive after the mid-run pull transition")
+            .expect("ClientSocket stream yields the re-clear");
+        if request.method() == "textDocument/publishDiagnostics" {
+            break request;
+        }
+    };
+    let params = reclear
+        .params()
+        .expect("publishDiagnostics carries params on every call");
+    assert_eq!(params["uri"], json!(uri.to_string()));
+    assert_eq!(
+        params["diagnostics"],
+        json!([]),
+        "a pull arriving mid-publish must re-clear the already-pushed diagnostics \
+         so the push and pull namespaces do not double",
+    );
+    assert!(
+        backend.cached_diagnostics.read().await.contains_key(&uri),
+        "the pull cache must keep the diagnostics; only the push namespace is re-cleared",
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
