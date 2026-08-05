@@ -1623,11 +1623,17 @@ fn unresolved_spec_is_silenced(
     {
         return true;
     }
+    // Config compilation strips a single leading "./" from
+    // ignoreUnresolvedImports globs (see #1385), so the specifier must be
+    // stripped the same way or exact-path entries like "./generated/x.js"
+    // never match. The raw form is still tried so wildcard patterns that
+    // count the "./" segment keep matching.
+    let normalized_spec = spec.strip_prefix("./").unwrap_or(spec);
     filters
         .config
         .ignore_unresolved_imports
         .iter()
-        .any(|matcher| matcher.is_match(spec))
+        .any(|matcher| matcher.is_match(spec) || matcher.is_match(normalized_spec))
 }
 
 /// Resolve the declaration `(line, col)` plus the specifier column for an edge.

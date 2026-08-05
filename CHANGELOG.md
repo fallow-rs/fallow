@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ignoreUnresolvedImports` entries with a leading `./` match again.**
+  Pattern compilation strips a single leading `./` (since v2.103.0), but the
+  matcher still compared against the raw import specifier, which keeps its
+  `./` prefix, so exact entries such as `./generated/output-contract.js`
+  never silenced anything. The specifier is now normalized the same way
+  before matching, so both the `./`-prefixed and bare spellings work.
+
 ## [3.14.0] - 2026-08-04
 
 ### Added

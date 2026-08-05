@@ -132,6 +132,75 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
 }
 
 #[test]
+fn ignore_unresolved_imports_matches_leading_dot_slash_specifiers() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![
+            unresolved_import("./generated/output-contract.js"),
+            unresolved_import("./generated/other.js"),
+            unresolved_import("./still-missing"),
+        ],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
+        type_member_types: Box::default(),
+    }];
+
+    // Resolve through the real config pipeline so the leading "./" strip
+    // applied at pattern compile time (#1385) is part of the test.
+    let config = FallowConfig {
+        ignore_unresolved_imports: vec![
+            "./generated/output-contract.js".to_string(),
+            "generated/other.js".to_string(),
+        ],
+        ..Default::default()
+    };
+    let config = config.resolve(
+        PathBuf::from("/project"),
+        OutputFormat::Human,
+        1,
+        true,
+        true,
+        None,
+    );
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+    let specifiers: Vec<&str> = unresolved
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+
+    assert_eq!(
+        specifiers,
+        vec!["./still-missing"],
+        "both ./-prefixed and bare ignore entries should silence ./-prefixed specifiers"
+    );
+}
+
+#[test]
 fn unresolved_dynamic_import_detected_with_real_location() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
