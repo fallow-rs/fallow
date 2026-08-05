@@ -39,6 +39,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `./` prefix, so exact entries such as `./generated/output-contract.js`
   never silenced anything. The specifier is now normalized the same way
   before matching, so both the `./`-prefixed and bare spellings work.
+- **`fallow --help` now lists every subcommand.** The curated cheat sheet
+  replaces clap's auto-generated subcommand list, and `trace`, `type-aware`,
+  `rule-pack`, `decision-surface`, and `guard` had never been added to it, so
+  five documented commands were invisible from the root help. A test now
+  iterates the visible subcommands and asserts each one leads a cheat-sheet
+  line, so future commands cannot silently drop out.
+- **The `fallow schema` environment-variable manifest matches the documented
+  table again.** `FALLOW_COVERAGE_ROOT` and `FALLOW_TYPE_AWARE_BIN` were
+  missing from the manifest, and its `FALLOW_FORMAT` entry lagged behind the
+  current format list. Both variables are listed, the format list is synced,
+  and `FALLOW_MAX_COMMENTS` is documented as CI-integration plumbing so its
+  deliberate manifest exclusion no longer contradicts the parity claim.
+- **`fallow setup-hooks` can no longer corrupt a hand-edited `AGENTS.md`.**
+  The managed block was located by finding each marker anywhere in the file,
+  so an end marker before the start marker (a bad merge or hand edit) made
+  every rerun duplicate the content between them, while removal reported
+  success without removing anything. The block is now matched only as a
+  start-then-end pair; stray or inverted markers preserve the file, print a
+  repair hint, and surface as user-edited in `setup-hooks status`.
+- **Library and Node-API embedders get the same 16 MiB worker stack as the
+  CLI.** The api crate's per-call rayon pool omitted the worker stack size the
+  CLI global pool configures, so embedders could overflow on the same deeply
+  nested sources the CLI handles fine. Pool construction is now shared across
+  the CLI global pool, the programmatic per-call pool, and the source-map
+  upload pool.
+- **Audit read failures no longer fabricate weakening signals.** The
+  weakening-signal scan treated any base or head read failure as an empty
+  file, inventing added-suppression and removed-test signals for content it
+  never saw. Missing base objects are now distinguished from pipe errors
+  (which abort the remaining scan), unreadable head files are skipped, and an
+  unreadable `--walkthrough-file` path names the read error and failing path
+  on stderr instead of only claiming a stale graph snapshot.
+- **A malformed `pnpm-workspace.yaml` now warns instead of silently disabling
+  catalog and override resolution.** The parsers previously swallowed YAML
+  errors, so catalog references stopped resolving with no indication why. The
+  analysis now records a `malformed-pnpm-workspace-yaml` workspace diagnostic
+  (in JSON output plus one deduplicated stderr warning) and continues
+  degraded.
+- **MCP workspace comma lists work on API-backed tool paths.** The documented
+  `workspace: "a,b,c"` syntax was wrapped as one literal glob unless an
+  unrelated parameter happened to force the CLI fallback; all option mappings
+  now split comma lists the same way the CLI does. The `guard` tool also
+  validates its file entries, returning the structured validation error
+  instead of letting a flag-like entry such as `--allow-remote-extends` be
+  parsed as a CLI flag, and the `get_info` licensing text now matches the
+  tool descriptions (a single local runtime-coverage capture is free).
+- **Untrusted values are escaped in `github-summary` and report markdown
+  tables.** Envelope strings (paths, export names, suppression kinds, zone
+  names) were interpolated into `GITHUB_STEP_SUMMARY` tables unescaped, so
+  backticks and pipes from source comments could inject markdown, and CRLF
+  input could split a table row mid-cell. The code-span and table-cell
+  escapers are now shared by the api markdown renderer and the CLI summary
+  renderer.
+- **`fallow-ignore-next-line` inside a multi-line block comment now suppresses
+  the intended line.** The suppression anchored to the line after the comment
+  start, which is still inside the comment, so the marker silently never
+  matched; it now anchors after the comment end, and prose lines after the
+  marker are no longer tokenized into unknown-kind diagnostics. The same pass
+  also stops re-encoding the full line prefix per function when computing
+  UTF-16 columns, removing quadratic behavior on single-line minified files.
+- **VS Code: binary downloads can no longer hang LSP startup forever.**
+  Downloads gain a socket-inactivity timeout, a redirect-depth cap, and a
+  cancellable progress notification; user cancellation is treated as silent
+  instead of surfacing an error. Workspace-scope and config changes now force
+  re-analysis instead of latching onto an in-flight run spawned with the old
+  scope or config, and the license prompt guards its stdin write so a child
+  process that exits early no longer crashes the extension host with an
+  uncaught EPIPE.
+- **LSP: analysis no longer blocks the dispatch loop, and push and pull
+  diagnostics no longer double.** Save, configuration, and watched-file
+  handlers awaited the full workspace analysis inline, so a burst of events
+  froze `didChange`, hover, and shutdown behind serialized runs; they now
+  spawn the analysis, and a completion-epoch check coalesces a burst into one
+  run. Push publishing also re-checks per-URI pull state mid-run, so clients
+  that render both namespaces no longer show duplicated diagnostics after a
+  first pull races an in-flight analysis.
+
+### Performance
+
+- **Faster module resolution and graph build.** Resolve fallback and
+  specifier paths now reuse the session canonicalize cache instead of issuing
+  a realpath syscall per import of the same target; dynamic-import pattern
+  matching stops allocating a prefixed string per candidate file and memoizes
+  compiled glob matchers across modules; and reference attachment on
+  high-fan-in modules replaces two quadratic rescans (duplicate detection per
+  attach, export-name lookup per imported symbol) with a lazily seeded dedup
+  set and a per-target export-name index. Dedup semantics, first-seen
+  reference order, and the cache format are unchanged.
 
 ## [3.14.0] - 2026-08-04
 
