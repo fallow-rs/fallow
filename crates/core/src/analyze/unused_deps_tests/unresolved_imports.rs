@@ -201,6 +201,66 @@ fn ignore_unresolved_imports_matches_leading_dot_slash_specifiers() {
 }
 
 #[test]
+fn multi_binding_re_export_reports_one_unresolved_finding_per_specifier() {
+    let re_export = |imported: &str, span_start: u32| ResolvedReExport {
+        info: ReExportInfo {
+            source: "./missing.js".to_string(),
+            imported_name: imported.to_string(),
+            exported_name: imported.to_string(),
+            is_type_only: true,
+            span: oxc_span::Span::new(span_start, span_start + 1),
+        },
+        target: ResolveResult::Unresolvable("./missing.js".to_string()),
+    };
+
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![re_export("A", 10), re_export("B", 20), re_export("C", 30)],
+        resolved_imports: vec![unresolved_import("./also-missing")],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
+        type_member_types: Box::default(),
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+    let specifiers: Vec<&str> = unresolved
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+
+    assert_eq!(
+        specifiers,
+        vec!["./also-missing", "./missing.js"],
+        "one finding per unresolvable specifier per module, in source-edge order"
+    );
+}
+
+#[test]
 fn unresolved_dynamic_import_detected_with_real_location() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),

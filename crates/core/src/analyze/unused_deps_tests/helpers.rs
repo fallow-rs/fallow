@@ -11,14 +11,14 @@ pub(super) use fallow_config::{
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
-pub(super) use fallow_types::extract::{ImportInfo, ImportedName};
+pub(super) use fallow_types::extract::{ImportInfo, ImportedName, ReExportInfo};
 
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::graph::ModuleGraph;
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::plugins::AggregatedPluginResult;
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
-pub(super) use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+pub(super) use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::results::*;
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]

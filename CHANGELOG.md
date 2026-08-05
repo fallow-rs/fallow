@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One unresolved-import finding per specifier per file.** A multi-binding
+  re-export statement (`export type { A, B, C } from "./missing.js"`)
+  previously produced one finding per binding, inflating issue totals for
+  what is a single import problem. The first occurrence in source order is
+  reported; suppressing that line moves the report to the next occurrence.
 - **`.js` specifiers now resolve to declaration-only `.d.ts` modules.** The
   resolver's extension alias for `.js` (and `.mjs`/`.cjs`) omitted the
   matching declaration extension, so an import like

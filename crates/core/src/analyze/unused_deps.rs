@@ -1678,10 +1678,18 @@ pub fn find_unresolved_imports(
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
+        // A multi-binding re-export statement yields one edge per binding, all
+        // with the same unresolvable specifier. Report each specifier once per
+        // module (the first non-suppressed edge, keeping source order) instead
+        // of once per binding.
+        let mut reported_specs: FxHashSet<String> = FxHashSet::default();
         for edge in module.all_resolved_source_edges() {
             let crate::resolve::ResolveResult::Unresolvable(spec) = edge.target() else {
                 continue;
             };
+            if reported_specs.contains(spec.as_str()) {
+                continue;
+            }
             if unresolved_spec_is_silenced(spec, edge.is_type_only(), &filters) {
                 continue;
             }
@@ -1690,6 +1698,7 @@ pub fn find_unresolved_imports(
             if suppressions.is_suppressed(module.file_id, line, IssueKind::UnresolvedImport) {
                 continue;
             }
+            reported_specs.insert(spec.clone());
             unresolved.push(UnresolvedImport {
                 path: module.path.clone(),
                 specifier: spec.clone(),
