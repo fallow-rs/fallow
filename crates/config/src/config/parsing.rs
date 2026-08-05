@@ -1126,11 +1126,19 @@ impl FallowConfig {
         warn_on_unknown_rule_keys(path, &merged);
 
         let config: Self = serde_json::from_value(merged).map_err(|e| {
-            miette::miette!(
-                "Failed to deserialize config from {}: {}",
-                path.display(),
-                e
-            )
+            let reason = e.to_string();
+            // Unknown fields on overrides/ignoreExports entries are usually
+            // inline annotations; point at JSONC comments as the fix.
+            let hint = if matches!(ConfigFormat::from_path(path), ConfigFormat::Json)
+                && reason.contains("unknown field")
+                && (reason.contains("expected `files` or `rules`")
+                    || reason.contains("expected `file` or `exports`"))
+            {
+                " (annotations belong in a // comment; .fallowrc.json accepts JSONC)"
+            } else {
+                ""
+            };
+            miette::miette!("{reason} in {}{hint}", path.display())
         })?;
 
         config.validate_user_globs().map_err(|errors| {
@@ -1348,7 +1356,15 @@ impl FallowConfig {
                     match Self::load_with_options(&candidate, options) {
                         Ok(config) => return Ok(Some((config, candidate))),
                         Err(e) => {
-                            return Err(format!("Failed to parse {}: {e}", candidate.display()));
+                            // Most load errors already name the config file;
+                            // add the path only when the reason lacks it, so
+                            // it is mentioned exactly once.
+                            let msg = e.to_string();
+                            return Err(if msg.contains(&candidate.display().to_string()) {
+                                msg
+                            } else {
+                                format!("Failed to parse {}: {msg}", candidate.display())
+                            });
                         }
                     }
                 }
@@ -5118,8 +5134,37 @@ thresholdOverrides = [
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("Failed to deserialize"),
-            "error should mention deserialization: {err}"
+            err.contains("invalid type") && err.contains(&path.display().to_string()),
+            "error should lead with the reason and name the config file: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn unknown_override_field_error_names_path_once_and_hints_at_jsonc() {
+        let dir = test_dir("override-unknown-field");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"overrides": [{"files": ["src/**"], "reason": "legacy"}]}"#,
+        )
+        .unwrap();
+
+        let err = FallowConfig::find_and_load(dir.path())
+            .expect_err("unknown override field must be rejected");
+        let path_str = path.display().to_string();
+        assert!(
+            err.contains("unknown field `reason`"),
+            "error should lead with the serde reason: {err}"
+        );
+        assert_eq!(
+            err.matches(&path_str).count(),
+            1,
+            "path must appear exactly once: {err}"
+        );
+        assert!(
+            err.contains("// comment") && err.contains("JSONC"),
+            "error should point annotations at JSONC comments: {err}"
         );
     }
 
