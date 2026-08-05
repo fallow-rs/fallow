@@ -77,11 +77,21 @@ pub struct InventoryEntry {
     pub source_hash: String,
 }
 
+/// Rolling state for [`InventoryVisitor::line_col_utf16`]: the last resolved
+/// offset's line index, clamped byte position, and 0-based UTF-16 column.
+/// `line_idx` starts at `usize::MAX` so the first query never matches.
+struct ColCache {
+    line_idx: usize,
+    byte_end: usize,
+    utf16_units: usize,
+}
+
 /// Visitor that collects [`InventoryEntry`] values in file traversal order.
 struct InventoryVisitor<'a> {
     source: &'a str,
     line_offsets: &'a [u32],
     entries: Vec<InventoryEntry>,
+    col_cache: ColCache,
     /// Parent-provided name override (method key, variable binding, etc.).
     pending_name: Option<String>,
     /// Callee name for a function passed as a call / `new` argument. Ranks BELOW
@@ -98,6 +108,11 @@ impl<'a> InventoryVisitor<'a> {
             source,
             line_offsets,
             entries: Vec::new(),
+            col_cache: ColCache {
+                line_idx: usize::MAX,
+                byte_end: 0,
+                utf16_units: 0,
+            },
             pending_name: None,
             pending_callee_name: None,
             anonymous_counter: 0,
@@ -157,7 +172,13 @@ impl<'a> InventoryVisitor<'a> {
     /// to 1-indexed UTF-16). A byte offset that does not fall on a char
     /// boundary (it always should for an AST span) clamps to the nearest
     /// boundary at or before it rather than panicking.
-    fn line_col_utf16(&self, byte_offset: u32) -> (u32, u32) {
+    ///
+    /// Successive queries on the same line are answered incrementally from
+    /// [`ColCache`]: pre-order traversal emits nearby offsets, so counting
+    /// only the gap to the previous offset keeps the walk linear on
+    /// single-line (minified / generated) files instead of re-encoding the
+    /// full line prefix for every function.
+    fn line_col_utf16(&mut self, byte_offset: u32) -> (u32, u32) {
         let line_idx = match self.line_offsets.binary_search(&byte_offset) {
             Ok(idx) => idx,
             Err(idx) => idx.saturating_sub(1),
@@ -168,11 +189,35 @@ impl<'a> InventoryVisitor<'a> {
         while end > line_start && !self.source.is_char_boundary(end) {
             end -= 1;
         }
-        let col_utf16 = self
-            .source
-            .get(line_start..end)
-            .map_or(0, |slice| slice.encode_utf16().count());
+        // Both `end` and the cached position are char boundaries at or after
+        // `line_start` on the same line, so the gap slice is always valid and
+        // a backward gap never exceeds the cached column.
+        let from_cache = if self.col_cache.line_idx == line_idx {
+            if end >= self.col_cache.byte_end {
+                self.utf16_len(self.col_cache.byte_end, end)
+                    .map(|gap| self.col_cache.utf16_units + gap)
+            } else {
+                self.utf16_len(end, self.col_cache.byte_end)
+                    .map(|gap| self.col_cache.utf16_units - gap)
+            }
+        } else {
+            None
+        };
+        let col_utf16 = from_cache.unwrap_or_else(|| self.utf16_len(line_start, end).unwrap_or(0));
+        self.col_cache = ColCache {
+            line_idx,
+            byte_end: end,
+            utf16_units: col_utf16,
+        };
         (line, col_utf16 as u32 + 1)
+    }
+
+    /// UTF-16 code-unit count of `source[start..end]`, `None` when the range
+    /// is not sliceable.
+    fn utf16_len(&self, start: usize, end: usize) -> Option<usize> {
+        self.source
+            .get(start..end)
+            .map(|slice| slice.encode_utf16().count())
     }
 }
 
@@ -630,6 +675,58 @@ mod tests {
         let f = entries.iter().find(|e| e.name == "f").expect("f present");
         let byte_prefix_len = "const e = \"\u{1F600}\"; const f = ".len() as u32;
         assert!(f.start_column < byte_prefix_len + 1);
+    }
+
+    #[test]
+    fn utf16_columns_stay_exact_across_a_long_single_line() {
+        // Minified shape: many functions with non-ASCII content on one line.
+        // Columns must match a naive full-prefix UTF-16 count even though the
+        // walker resolves them incrementally, including the backward offset
+        // jump from `outer`'s end to `inner`'s start and the reset to line 2.
+        use std::fmt::Write as _;
+        let mut src = String::new();
+        for i in 0..40 {
+            let _ = write!(src, "function f{i}() {{ return \"\u{1F600}\"; }} ");
+        }
+        src.push_str("function outer() { const inner = () => \"\u{1F600}\"; return inner; }");
+        src.push_str("\nconst tail = () => 1;");
+        let entries = walk(&src);
+        let col = |byte: usize| src[..byte].encode_utf16().count() as u32 + 1;
+
+        for i in [0_usize, 17, 39] {
+            let body = format!("function f{i}() {{ return \"\u{1F600}\"; }}");
+            let start = src.find(&body).expect("function text present");
+            let entry = entries
+                .iter()
+                .find(|e| e.name == format!("f{i}"))
+                .expect("entry present");
+            assert_eq!(entry.line, 1);
+            assert_eq!(entry.start_column, col(start));
+            assert_eq!(entry.end_line, 1);
+            assert_eq!(entry.end_column, col(start + body.len()));
+        }
+
+        let inner_start = src
+            .find("() => \"\u{1F600}\"")
+            .expect("inner arrow present");
+        let inner = entries
+            .iter()
+            .find(|e| e.name == "inner")
+            .expect("inner present");
+        assert_eq!(inner.line, 1);
+        assert_eq!(inner.start_column, col(inner_start));
+
+        let tail = entries
+            .iter()
+            .find(|e| e.name == "tail")
+            .expect("tail present");
+        let line2_start = src.find('\n').expect("newline present") + 1;
+        let tail_start = src.rfind("() => 1").expect("tail arrow present");
+        assert_eq!(tail.line, 2);
+        assert_eq!(
+            tail.start_column,
+            src[line2_start..tail_start].encode_utf16().count() as u32 + 1
+        );
     }
 
     #[test]

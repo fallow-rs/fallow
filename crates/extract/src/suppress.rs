@@ -148,9 +148,12 @@ pub fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSuppressi
             let src_comment_line = byte_offset_to_line(source, comment.span.start);
             push_suppressions(&mut parsed, 0, src_comment_line, rest);
         } else if let Some(rest) = trimmed.strip_prefix("fallow-ignore-next-line") {
-            let rest = rest.trim();
+            // A block comment may span lines: only the marker line carries
+            // targets (later lines are prose), and the suppression applies to
+            // the line after the comment ENDS, not after it starts.
+            let rest = rest.lines().next().unwrap_or("").trim();
             let src_comment_line = byte_offset_to_line(source, comment.span.start);
-            let suppressed_line = src_comment_line + 1;
+            let suppressed_line = byte_offset_to_line(source, comment.span.end) + 1;
 
             push_suppressions(&mut parsed, suppressed_line, src_comment_line, rest);
         }
@@ -612,6 +615,33 @@ mod tests {
         assert_eq!(
             suppressions[0].issue_kind_target(),
             Some(IssueKind::UnusedFile)
+        );
+    }
+
+    #[test]
+    fn parse_oxc_multiline_block_comment_suppresses_line_after_comment_end() {
+        use oxc_allocator::Allocator;
+        use oxc_parser::Parser;
+        use oxc_span::SourceType;
+
+        let source = "/* fallow-ignore-next-line unused-export\n   kept for the legacy import path */\nexport const foo = 1;\n";
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, source, SourceType::mjs()).parse();
+
+        let parsed = parse_suppressions(&parser_return.program.comments, source);
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(
+            parsed.suppressions[0].line, 3,
+            "suppression must land on the line after `*/`, not inside the comment"
+        );
+        assert_eq!(parsed.suppressions[0].comment_line, 1);
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
+        assert!(
+            parsed.unknown_kinds.is_empty(),
+            "prose after the marker line must not be tokenized into unknown kinds"
         );
     }
 
