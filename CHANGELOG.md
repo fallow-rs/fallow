@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Malformed config shapes now fail loud instead of being silently
+  dropped.** Three previously-tolerated shapes are rejected at config load:
+  a malformed `extends` value (must be a string or an array of strings), an
+  unknown key inside an `overrides` entry, and an unknown key inside an
+  `ignoreExports` rule (`schema.json` mirrors this with
+  `additionalProperties: false`). These shapes were never applied; they were
+  discarded without a word, so a typo like `pattern` vs `patterns` silently
+  disabled the rule it was meant to configure. Migration: remove or correct
+  the offending key or value named in the error. This extends the strictness
+  the top-level config already enforced to the nested rule objects.
+
 ### Fixed
 
 - **One unresolved-import finding per specifier per file.** A multi-binding
