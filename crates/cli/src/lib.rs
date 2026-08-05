@@ -125,7 +125,32 @@ const DEFAULT_MIN_INVOCATIONS_HOT: u64 = 100;
 const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
 
-const TOP_LEVEL_AFTER_HELP: &str = "\
+// Macros instead of consts so `concat!` can assemble the short (`-h`) and
+// long (`--help`) after-help surfaces from the same source fragments.
+macro_rules! top_level_task_cheat_sheet {
+    () => {
+        "\
+When the agent is about to...
+  delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
+  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
+  delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
+  commit or open a PR                      fallow audit --base <ref>
+  prioritize refactoring                   fallow health --hotspots --targets
+  ask who owns code                        fallow health --ownership
+  check untested-but-reachable code        fallow health --coverage-gaps
+  consolidate duplication                  fallow dupes --trace dup:<fingerprint>
+  find feature flags                       fallow flags
+  check architecture rules before editing  fallow guard <files>
+  surface security candidates              fallow security
+  inspect a target before editing          fallow inspect --file <path>
+  understand a finding                     fallow explain <issue-type>
+  scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>"
+    };
+}
+
+macro_rules! top_level_core_command_groups {
+    () => {
+        "\
 Analysis:
   dead-code      Analyze unused code, dependency hygiene, and architecture cycles
   dupes          Find copy-paste and structural code duplication
@@ -136,8 +161,13 @@ Analysis:
 
 Workflow:
   watch          Re-run analysis as files change
-  fix            Auto-fix safe unused-code findings
+  fix            Auto-fix safe unused-code findings"
+    };
+}
 
+macro_rules! top_level_extended_command_groups {
+    () => {
+        "\
 Project inspection:
   list              List discovered files, entry points, plugins, boundaries, and workspaces
   inspect           Inspect one file or exported symbol as a bundled evidence query
@@ -177,26 +207,27 @@ Runtime coverage:
 
 Reference:
   schema         Dump the CLI interface as machine-readable JSON
-  help           Print this message or the help of a command
+  help           Print this message or the help of a command"
+    };
+}
 
-When no command is given, fallow runs dead-code + dupes + health together.
-Use --only/--skip to select specific analyses.
+const TOP_LEVEL_AFTER_HELP: &str = concat!(
+    top_level_task_cheat_sheet!(),
+    "\n\n",
+    top_level_core_command_groups!(),
+    "\n\nRun fallow --help for the complete command list."
+);
 
-When the agent is about to...
-  delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
-  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
-  delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
-  commit or open a PR                      fallow audit --base <ref>
-  prioritize refactoring                   fallow health --hotspots --targets
-  ask who owns code                        fallow health --ownership
-  check untested-but-reachable code        fallow health --coverage-gaps
-  consolidate duplication                  fallow dupes --trace dup:<fingerprint>
-  find feature flags                       fallow flags
-  check architecture rules before editing  fallow guard <files>
-  surface security candidates              fallow security
-  inspect a target before editing          fallow inspect --file <path>
-  understand a finding                     fallow explain <issue-type>
-  scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>";
+const TOP_LEVEL_AFTER_LONG_HELP: &str = concat!(
+    top_level_task_cheat_sheet!(),
+    "\n\n",
+    top_level_core_command_groups!(),
+    "\n\n",
+    top_level_extended_command_groups!(),
+    "\n\n",
+    "When no command is given, fallow runs dead-code + dupes + health together.\n",
+    "Use --only/--skip to select specific analyses."
+);
 
 #[derive(Parser)]
 #[command(
@@ -205,7 +236,8 @@ When the agent is about to...
     version,
     disable_version_flag = true,
     help_template = TOP_LEVEL_HELP_TEMPLATE,
-    after_help = TOP_LEVEL_AFTER_HELP
+    after_help = TOP_LEVEL_AFTER_HELP,
+    after_long_help = TOP_LEVEL_AFTER_LONG_HELP
 )]
 struct Cli {
     #[command(subcommand)]
@@ -231,7 +263,7 @@ struct Cli {
     config: Option<PathBuf>,
 
     /// Allow trusted config files to extend HTTPS URLs
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     allow_remote_extends: bool,
 
     /// Output format (alias: --output)
@@ -245,7 +277,7 @@ struct Cli {
     format: Format,
 
     /// Indent JSON output for manual inspection. Requires the final output format to be JSON.
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     pretty: bool,
 
     /// Suppress progress output
@@ -253,11 +285,11 @@ struct Cli {
     quiet: bool,
 
     /// Disable incremental caching
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     no_cache: bool,
 
     /// Number of parser threads
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     threads: Option<usize>,
 
     /// Only report issues in files changed since this git ref (e.g., main, HEAD~5)
@@ -268,12 +300,17 @@ struct Cli {
     /// Use `-` to read from stdin. Project-level findings still bypass this
     /// filter. When both this and `--changed-since` are set, the diff filter
     /// wins for finding scope while `--changed-since` still drives file discovery.
-    #[arg(long = "diff-file", value_name = "PATH", global = true)]
+    #[arg(
+        hide_short_help = true,
+        long = "diff-file",
+        value_name = "PATH",
+        global = true
+    )]
     diff_file: Option<PathBuf>,
 
     /// Read the unified diff from stdin.
     /// Equivalent to `--diff-file -`.
-    #[arg(long = "diff-stdin", global = true)]
+    #[arg(hide_short_help = true, long = "diff-stdin", global = true)]
     diff_stdin: bool,
 
     /// Import change history from a `fallow-churn/v1` JSON file instead of `git
@@ -282,7 +319,12 @@ struct Cli {
     /// translates your VCS log into the contract. Resolved relative to `--root`.
     /// Affects `health --hotspots` / `--ownership` / `--targets` only; `audit`,
     /// `impact`, and `--changed-since` still require git.
-    #[arg(long = "churn-file", value_name = "PATH", global = true)]
+    #[arg(
+        hide_short_help = true,
+        long = "churn-file",
+        value_name = "PATH",
+        global = true
+    )]
     churn_file: Option<PathBuf>,
 
     /// Skip source files larger than this many megabytes (default 5) instead of
@@ -291,11 +333,16 @@ struct Cli {
     /// for no limit. Declaration files (`.d.ts`) are always analyzed. Skipped
     /// files are reported and excluded from every analysis. Also settable via
     /// `FALLOW_MAX_FILE_SIZE`.
-    #[arg(long = "max-file-size", value_name = "MB", global = true)]
+    #[arg(
+        hide_short_help = true,
+        long = "max-file-size",
+        value_name = "MB",
+        global = true
+    )]
     max_file_size: Option<u32>,
 
     /// Compare against a previously saved baseline file
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     baseline: Option<PathBuf>,
 
     /// How `--baseline` matches health findings: per file and category
@@ -312,7 +359,12 @@ struct Cli {
     /// Defaults to `count` when omitted. Saving without the flag refuses to
     /// overwrite a baseline that carries identities; pass `--baseline-mode
     /// count` explicitly to downgrade such a baseline on purpose.
-    #[arg(long = "baseline-mode", value_enum, global = true)]
+    #[arg(
+        hide_short_help = true,
+        long = "baseline-mode",
+        value_enum,
+        global = true
+    )]
     baseline_mode: Option<BaselineModeArg>,
 
     /// Correlate this run with a previous telemetry analysis run.
@@ -324,7 +376,7 @@ struct Cli {
     parent_run: Option<String>,
 
     /// Save the current results as a baseline file
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     save_baseline: Option<PathBuf>,
 
     /// Production mode: exclude test/story/dev files, only start/build scripts,
@@ -335,19 +387,24 @@ struct Cli {
     /// Force production mode OFF for every analysis, overriding a project
     /// config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with
     /// `--production`.
-    #[arg(long = "no-production", global = true, conflicts_with = "production")]
+    #[arg(
+        hide_short_help = true,
+        long = "no-production",
+        global = true,
+        conflicts_with = "production"
+    )]
     no_production: bool,
 
     /// Run dead-code analysis in production mode when using bare combined mode.
-    #[arg(long = "production-dead-code")]
+    #[arg(hide_short_help = true, long = "production-dead-code")]
     production_dead_code: bool,
 
     /// Run health analysis in production mode when using bare combined mode.
-    #[arg(long = "production-health")]
+    #[arg(hide_short_help = true, long = "production-health")]
     production_health: bool,
 
     /// Run duplication analysis in production mode when using bare combined mode.
-    #[arg(long = "production-dupes")]
+    #[arg(hide_short_help = true, long = "production-dupes")]
     production_dupes: bool,
 
     /// Scope output to selected workspaces.
@@ -362,23 +419,23 @@ struct Cli {
     changed_workspaces: Option<String>,
 
     /// Group output by owner or by directory.
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     group_by: Option<GroupBy>,
 
     /// Show pipeline performance timing breakdown
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     performance: bool,
 
     /// Include metric definitions and rule descriptions in output.
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     explain: bool,
 
     /// Show a per-pattern breakdown for default duplicate ignores.
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     explain_skipped: bool,
 
     /// Show only category counts without individual items
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     summary: bool,
 
     /// CI mode: equivalent to --format sarif --fail-on-issues --quiet
@@ -386,11 +443,11 @@ struct Cli {
     ci: bool,
 
     /// Exit with code 1 if issues are found
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     fail_on_issues: bool,
 
     /// Write SARIF output to a file (in addition to the primary --format output)
-    #[arg(long, global = true, value_name = "PATH")]
+    #[arg(hide_short_help = true, long, global = true, value_name = "PATH")]
     sarif_file: Option<PathBuf>,
 
     /// Write the report to a file instead of stdout, for any --format (no ANSI
@@ -408,6 +465,7 @@ struct Cli {
     /// overrides the detection. Pass an empty string to disable rebasing and
     /// emit paths relative to `--root`.
     #[arg(
+        hide_short_help = true,
         long = "report-path-prefix",
         visible_alias = "annotations-path-prefix",
         global = true,
@@ -416,15 +474,21 @@ struct Cli {
     report_path_prefix: Option<String>,
 
     /// Fail if issue count increased beyond tolerance compared to a regression baseline.
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     fail_on_regression: bool,
 
     /// Allowed issue count increase before a regression is flagged.
-    #[arg(long, global = true, value_name = "TOLERANCE", default_value = "0")]
+    #[arg(
+        hide_short_help = true,
+        long,
+        global = true,
+        value_name = "TOLERANCE",
+        default_value = "0"
+    )]
     tolerance: String,
 
     /// Path to the regression baseline file.
-    #[arg(long, global = true, value_name = "PATH")]
+    #[arg(hide_short_help = true, long, global = true, value_name = "PATH")]
     regression_baseline: Option<PathBuf>,
 
     /// Save the current issue counts as a regression baseline. Omit PATH to
@@ -434,7 +498,7 @@ struct Cli {
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=flag only (write to config), Some(Some(path))=write to file"
     )]
-    #[arg(long, global = true, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    #[arg(hide_short_help = true, long, global = true, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     save_regression_baseline: Option<Option<String>>,
 
     /// Run only specific analyses when no subcommand is given.
@@ -446,41 +510,42 @@ struct Cli {
     skip: Vec<AnalysisKind>,
 
     /// Override duplication detection mode in combined mode.
-    #[arg(long = "dupes-mode", global = true)]
+    #[arg(hide_short_help = true, long = "dupes-mode", global = true)]
     dupes_mode: Option<DupesMode>,
 
     /// Override duplication threshold in combined mode.
-    #[arg(long = "dupes-threshold", global = true)]
+    #[arg(hide_short_help = true, long = "dupes-threshold", global = true)]
     dupes_threshold: Option<f64>,
 
     /// Override the minimum token count for clones in combined mode.
-    #[arg(long = "dupes-min-tokens", global = true)]
+    #[arg(hide_short_help = true, long = "dupes-min-tokens", global = true)]
     dupes_min_tokens: Option<usize>,
 
     /// Override the minimum line count for clones in combined mode.
-    #[arg(long = "dupes-min-lines", global = true)]
+    #[arg(hide_short_help = true, long = "dupes-min-lines", global = true)]
     dupes_min_lines: Option<usize>,
 
     /// Override the minimum clone occurrences in combined mode (must be >= 2).
-    #[arg(long = "dupes-min-occurrences", global = true, value_parser = parse_min_occurrences)]
+    #[arg(hide_short_help = true, long = "dupes-min-occurrences", global = true, value_parser = parse_min_occurrences)]
     dupes_min_occurrences: Option<usize>,
 
     /// Only report cross-directory duplicates in combined mode.
-    #[arg(long = "dupes-skip-local", global = true)]
+    #[arg(hide_short_help = true, long = "dupes-skip-local", global = true)]
     dupes_skip_local: bool,
 
     /// Enable cross-language duplicate detection in combined mode.
-    #[arg(long = "dupes-cross-language", global = true)]
+    #[arg(hide_short_help = true, long = "dupes-cross-language", global = true)]
     dupes_cross_language: bool,
 
     /// Exclude module wiring from duplicate detection in combined mode
     /// (default). Pass `--dupes-no-ignore-imports` to count it again.
-    #[arg(long = "dupes-ignore-imports", global = true)]
+    #[arg(hide_short_help = true, long = "dupes-ignore-imports", global = true)]
     dupes_ignore_imports: bool,
 
     /// Count module wiring as clone candidates in combined mode (opt out of the
     /// default exclusion).
     #[arg(
+        hide_short_help = true,
         long = "dupes-no-ignore-imports",
         global = true,
         conflicts_with = "dupes_ignore_imports"
@@ -488,11 +553,11 @@ struct Cli {
     dupes_no_ignore_imports: bool,
 
     /// Compute health score in combined mode.
-    #[arg(long)]
+    #[arg(hide_short_help = true, long)]
     score: bool,
 
     /// Compare current health metrics against the most recent saved snapshot.
-    #[arg(long)]
+    #[arg(hide_short_help = true, long)]
     trend: bool,
 
     /// Save a vital signs snapshot for trend tracking in combined mode.
@@ -501,39 +566,44 @@ struct Cli {
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=default path, Some(Some(path))=custom path"
     )]
-    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    #[arg(hide_short_help = true, long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     save_snapshot: Option<Option<String>>,
 
     /// Path to Istanbul coverage data for exact CRAP scores in combined mode.
     /// Also settable via `FALLOW_COVERAGE` or `health.coverage`.
-    #[arg(long, value_name = "PATH")]
+    #[arg(hide_short_help = true, long, value_name = "PATH")]
     coverage: Option<PathBuf>,
 
     /// Absolute prefix to strip from Istanbul file paths in combined mode.
     /// Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot`.
-    #[arg(long = "coverage-root", value_name = "PATH")]
+    #[arg(hide_short_help = true, long = "coverage-root", value_name = "PATH")]
     coverage_root: Option<PathBuf>,
 
     /// Report unused exports in entry files instead of auto-marking them as used.
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     include_entry_exports: bool,
 
     /// Opt in to TypeScript semantic analysis for project-wide symbol evidence.
     /// This does not emit compiler diagnostics or typed lint findings.
-    #[arg(long, global = true)]
+    #[arg(hide_short_help = true, long, global = true)]
     type_aware: bool,
 
     /// Disable TypeScript semantic analysis even when `typeAware.enabled` or
     /// `FALLOW_TYPE_AWARE` opts in, keeping this run fully syntactic.
-    #[arg(long, global = true, conflicts_with = "type_aware")]
+    #[arg(
+        hide_short_help = true,
+        long,
+        global = true,
+        conflicts_with = "type_aware"
+    )]
     no_type_aware: bool,
 
     /// TypeScript project config to use for type-aware analysis (repeatable).
-    #[arg(long, global = true, value_name = "PATH", action = clap::ArgAction::Append)]
+    #[arg(hide_short_help = true, long, global = true, value_name = "PATH", action = clap::ArgAction::Append)]
     type_aware_project: Vec<PathBuf>,
 
     /// Decide whether incomplete type-aware analysis is advisory or gating.
-    #[arg(long, global = true, value_enum)]
+    #[arg(hide_short_help = true, long, global = true, value_enum)]
     type_aware_require: Option<TypeAwareRequireArg>,
 }
 
@@ -5552,18 +5622,20 @@ mod tests {
     fn after_help_lists_every_task_matrix_command() {
         for row in crate::task_matrix::TASK_MATRIX {
             assert!(
-                TOP_LEVEL_AFTER_HELP.contains(row.command),
+                TOP_LEVEL_AFTER_LONG_HELP.contains(row.command),
                 "root --help cheat sheet is missing task-matrix command '{}'; \
-                 update TOP_LEVEL_AFTER_HELP to match TASK_MATRIX",
+                 update the top_level_task_cheat_sheet! fragment to match TASK_MATRIX",
                 row.command
             );
         }
     }
 
-    /// The curated cheat sheet replaces clap's auto-generated subcommand list,
-    /// so a new subcommand stays invisible in `fallow --help` unless it is
-    /// added here. Substring matching is not enough (e.g. `--trace` contains
-    /// `trace`), so each name must lead a cheat-sheet line.
+    /// The curated command groups replace clap's auto-generated subcommand
+    /// list, so a new subcommand stays invisible in `fallow --help` unless it
+    /// is added here. Substring matching is not enough (e.g. `--trace`
+    /// contains `trace`), so each name must lead a group line. The full
+    /// `--help` surface is the one that must stay complete; `-h` is the
+    /// curated progressive subset.
     #[test]
     fn after_help_lists_every_visible_subcommand() {
         use clap::CommandFactory;
@@ -5573,15 +5645,33 @@ mod tests {
                 continue;
             }
             let name = sub.get_name();
-            let listed = TOP_LEVEL_AFTER_HELP
+            let listed = TOP_LEVEL_AFTER_LONG_HELP
                 .lines()
                 .any(|line| line.split_whitespace().next() == Some(name));
             assert!(
                 listed,
-                "root --help cheat sheet is missing subcommand '{name}'; \
-                 add it to a TOP_LEVEL_AFTER_HELP section"
+                "root --help command list is missing subcommand '{name}'; \
+                 add it to a top_level_*_command_groups! section"
             );
         }
+    }
+
+    /// `-h` is the progressive entry point: it must stay scannable (ecosystem
+    /// norm is 40-80 lines) while leading with the task cheat sheet and
+    /// closing with the pointer to the complete `--help` surface.
+    #[test]
+    fn short_help_stays_scannable_with_cheat_sheet_and_pointer() {
+        use clap::CommandFactory;
+
+        let help = Cli::command().render_help().to_string();
+        let lines = help.lines().count();
+        assert!(
+            lines < 90,
+            "root -h grew to {lines} lines; keep the short surface under 90 \
+             (curate hide_short_help and the short after-help instead)"
+        );
+        assert!(help.contains("When the agent is about to..."));
+        assert!(help.contains("Run fallow --help for the complete command list."));
     }
 
     /// The high-value and coarse admin commands each get a distinct telemetry
