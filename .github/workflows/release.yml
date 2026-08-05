@@ -24,6 +24,7 @@ jobs:
   release-context:
     name: Verify tag-last release context
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -89,6 +90,7 @@ jobs:
     name: Publish Rust crates
     needs: [release-verified, release-assets]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -176,6 +178,7 @@ jobs:
     name: Build (${{ matrix.target }})
     needs: release-context
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
     container: ${{ matrix.container }}
     permissions:
       contents: read
@@ -518,6 +521,7 @@ jobs:
     name: Stage GitHub Release assets
     needs: release-verified
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -616,6 +620,7 @@ jobs:
     name: Release verified
     needs: [build, validate]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions: {}
     steps:
       - run: echo "Release artifacts and cross-platform checks passed"
@@ -629,6 +634,7 @@ jobs:
     name: Pack npm tarballs
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -892,6 +898,7 @@ jobs:
     # Anything that needs `npm ci` or runs dependency code belongs in npm-prep.
     needs: [npm-prep, release-assets]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -1032,6 +1039,7 @@ jobs:
     name: Build VS Code .vsix
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -1082,6 +1090,7 @@ jobs:
     name: Publish VS Code Extension
     needs: [vscode-prep, release-assets]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -1139,6 +1148,7 @@ jobs:
     name: Release ready for signed tag
     needs: [publish-crates, npm-publish, vscode-publish, release-assets]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:

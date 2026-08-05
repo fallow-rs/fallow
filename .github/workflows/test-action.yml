@@ -19,6 +19,7 @@ jobs:
   test-jq-scripts:
     name: Test jq scripts
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -30,6 +31,7 @@ jobs:
   test-sarif:
     name: Test SARIF output
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
@@ -89,6 +91,7 @@ jobs:
   test-json:
     name: Test JSON output
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -142,6 +145,7 @@ jobs:
   test-native-annotations:
     name: Test native annotation fastpath
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -205,6 +209,7 @@ jobs:
   test-zero-issues:
     name: Test clean project (zero issues)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -256,6 +261,7 @@ jobs:
   test-dupes:
     name: Test dupes command
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -307,6 +313,7 @@ jobs:
   test-fix:
     name: Test fix command (dry-run)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -358,6 +365,7 @@ jobs:
   test-dead-code-alias:
     name: Test dead-code command alias
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -397,6 +405,7 @@ jobs:
   test-bare-combined:
     name: Test bare invocation (combined JSON)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -443,6 +452,7 @@ jobs:
   test-comment:
     name: Test PR comment
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
