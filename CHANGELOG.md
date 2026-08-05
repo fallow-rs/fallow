@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`.js` specifiers now resolve to declaration-only `.d.ts` modules.** The
+  resolver's extension alias for `.js` (and `.mjs`/`.cjs`) omitted the
+  matching declaration extension, so an import like
+  `./generated/contract.js` backed only by `contract.d.ts` was reported as
+  an unresolved import even though TypeScript resolves it. Declaration
+  extensions are tried last, so runtime files keep priority.
 - **`ignoreUnresolvedImports` entries with a leading `./` match again.**
   Pattern compilation strips a single leading `./` (since v2.103.0), but the
   matcher still compared against the raw import specifier, which keeps its

@@ -42,12 +42,21 @@ pub(super) fn create_resolver(active_plugins: &[String], extra_conditions: &[Str
                     ".gts".into(),
                     ".js".into(),
                     ".gjs".into(),
+                    // Last so declaration-only modules resolve (TypeScript maps
+                    // .js to .d.ts too) without shadowing runtime files.
+                    ".d.ts".into(),
                 ],
             ),
             (".ts".into(), vec![".gts".into(), ".ts".into()]),
             (".jsx".into(), vec![".tsx".into(), ".jsx".into()]),
-            (".mjs".into(), vec![".mts".into(), ".mjs".into()]),
-            (".cjs".into(), vec![".cts".into(), ".cjs".into()]),
+            (
+                ".mjs".into(),
+                vec![".mts".into(), ".mjs".into(), ".d.mts".into()],
+            ),
+            (
+                ".cjs".into(),
+                vec![".cts".into(), ".cjs".into(), ".d.cts".into()],
+            ),
         ],
         condition_names: build_condition_names(active_plugins, extra_conditions),
         main_fields: vec!["module".into(), "main".into()],

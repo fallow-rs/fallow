@@ -2193,6 +2193,70 @@ fn resolve_falls_back_to_dts_when_no_runtime_file() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn resolve_js_specifier_falls_back_to_dts_when_no_runtime_file() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    std::fs::write(
+        root.join("contract.d.ts"),
+        "export declare const x: number;",
+    )
+    .unwrap();
+    std::fs::write(root.join("app.ts"), "import { x } from './contract.js';").unwrap();
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let from_file = root.join("app.ts");
+    let result = resolver.resolve_file(&from_file, "./contract.js");
+
+    assert!(
+        result.is_ok(),
+        "should resolve ./contract.js to the declaration-only module"
+    );
+    let resolved_path = result.unwrap().into_path_buf();
+    let resolved_name = resolved_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    assert_eq!(
+        resolved_name, "contract.d.ts",
+        "a .js specifier should reach contract.d.ts when no runtime file exists"
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn resolve_js_specifier_prefers_runtime_ts_over_dts() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    std::fs::write(root.join("contract.ts"), "export const x = 1;").unwrap();
+    std::fs::write(
+        root.join("contract.d.ts"),
+        "export declare const x: number;",
+    )
+    .unwrap();
+    std::fs::write(root.join("app.ts"), "import { x } from './contract.js';").unwrap();
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let from_file = root.join("app.ts");
+    let result = resolver.resolve_file(&from_file, "./contract.js");
+
+    assert!(result.is_ok(), "should resolve ./contract.js successfully");
+    let resolved_path = result.unwrap().into_path_buf();
+    let resolved_name = resolved_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    assert_eq!(
+        resolved_name, "contract.ts",
+        "runtime contract.ts must win over contract.d.ts for a .js specifier"
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn resolve_honors_development_condition_by_default() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
