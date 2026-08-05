@@ -551,7 +551,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         depth: usize,
     ) -> Result<serde_json::Value, miette::Report> {
         let mut value = parse_config_to_value(path)?;
-        let extends = extract_extends(&mut value);
+        let extends = extract_extends(&mut value, &path.display().to_string())?;
         if extends.is_empty() {
             return Ok(value);
         }
@@ -672,7 +672,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         depth: usize,
     ) -> Result<serde_json::Value, miette::Report> {
         let mut value = self.fetcher.fetch(url, url)?;
-        let extends = extract_extends(&mut value);
+        let extends = extract_extends(&mut value, &remote_config_display(url))?;
         if extends.is_empty() {
             return Ok(value);
         }
@@ -715,20 +715,45 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
 }
 
 /// Extract the `extends` array from a parsed JSON config value.
-fn extract_extends(value: &mut serde_json::Value) -> Vec<String> {
-    value
-        .as_object_mut()
-        .and_then(|obj| obj.remove("extends"))
-        .and_then(|v| match v {
-            serde_json::Value::Array(arr) => Some(
-                arr.into_iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>(),
-            ),
-            serde_json::Value::String(s) => Some(vec![s]),
-            _ => None,
-        })
-        .unwrap_or_default()
+///
+/// Fails loud on malformed values: the key is removed before
+/// deserialization, so `FallowConfig`'s `deny_unknown_fields` never sees a
+/// bad `extends` and the base config would otherwise go unmerged silently.
+fn extract_extends(
+    value: &mut serde_json::Value,
+    source: &str,
+) -> Result<Vec<String>, miette::Report> {
+    let Some(extends) = value.as_object_mut().and_then(|obj| obj.remove("extends")) else {
+        return Ok(Vec::new());
+    };
+    match extends {
+        serde_json::Value::String(s) => Ok(vec![s]),
+        serde_json::Value::Array(arr) => arr
+            .into_iter()
+            .map(|entry| match entry {
+                serde_json::Value::String(s) => Ok(s),
+                other => Err(miette::miette!(
+                    "extends entries must be strings, got {} (in {source})",
+                    json_type_name(&other)
+                )),
+            })
+            .collect(),
+        other => Err(miette::miette!(
+            "extends must be a string or an array of strings, got {} (in {source})",
+            json_type_name(&other)
+        )),
+    }
+}
+
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
+    }
 }
 
 #[cfg(test)]
@@ -3724,7 +3749,7 @@ thresholdOverrides = [
     }
 
     #[test]
-    fn extends_non_string_non_array_ignored() {
+    fn extends_non_string_non_array_fails_loud() {
         let dir = test_dir("extends-numeric");
         std::fs::write(
             dir.path().join(".fallowrc.json"),
@@ -3732,8 +3757,12 @@ thresholdOverrides = [
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
-        assert_eq!(config.entry, vec!["src/index.ts"]);
+        let err = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("extends must be a string or an array of strings"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -4350,7 +4379,7 @@ thresholdOverrides = [
             "extends": ["a.json", "b.json"],
             "entry": ["src/index.ts"]
         });
-        let extends = extract_extends(&mut value);
+        let extends = extract_extends(&mut value, "test.json").unwrap();
         assert_eq!(extends, vec!["a.json", "b.json"]);
         assert!(value.get("extends").is_none());
         assert!(value.get("entry").is_some());
@@ -4362,14 +4391,14 @@ thresholdOverrides = [
             "extends": "base.json",
             "entry": ["src/index.ts"]
         });
-        let extends = extract_extends(&mut value);
+        let extends = extract_extends(&mut value, "test.json").unwrap();
         assert_eq!(extends, vec!["base.json"]);
     }
 
     #[test]
     fn extract_extends_none() {
         let mut value = serde_json::json!({"entry": ["src/index.ts"]});
-        let extends = extract_extends(&mut value);
+        let extends = extract_extends(&mut value, "test.json").unwrap();
         assert!(extends.is_empty());
     }
 
@@ -5252,6 +5281,36 @@ thresholdOverrides = [
         assert!(FallowConfig::load(&path).is_err());
     }
 
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_rejects_unknown_override_entry_key() {
+        let dir = test_dir("override-entry-unknown-key");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"overrides": [{"files": ["src/**"], "rule": {"unused-files": "off"}}]}"#,
+        )
+        .unwrap();
+
+        // `deny_unknown_fields` rejects the `rule` typo instead of silently
+        // producing an override with empty rules.
+        assert!(FallowConfig::load(&path).is_err());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_rejects_unknown_ignore_exports_entry_key() {
+        let dir = test_dir("ignore-exports-entry-unknown-key");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"ignoreExports": [{"file": "src/a.ts", "exports": ["*"], "reason": "legacy"}]}"#,
+        )
+        .unwrap();
+
+        assert!(FallowConfig::load(&path).is_err());
+    }
+
     // ------------------------------------------------------------------
     // validate_resolved_boundaries: tsconfig rootDir filtering
     // (covers lines 1158-1160 - rootDir value is ".", starts with "..", or
@@ -5345,16 +5404,57 @@ thresholdOverrides = [
     }
 
     // ------------------------------------------------------------------
-    // extract_extends: array with non-string entries are filtered out
+    // extract_extends: malformed values fail loud instead of silently
+    // skipping the base config (the key is removed before deserialization,
+    // so deny_unknown_fields cannot catch these)
     // ------------------------------------------------------------------
 
     #[test]
-    fn extract_extends_array_filters_non_strings() {
-        let mut value = serde_json::json!({
-            "extends": ["a.json", 42, null, "b.json", true]
-        });
-        let extends = extract_extends(&mut value);
-        assert_eq!(extends, vec!["a.json", "b.json"]);
+    fn extract_extends_rejects_number_value() {
+        let mut value = serde_json::json!({"extends": 42});
+        let err = extract_extends(&mut value, "test.json").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("extends must be a string or an array of strings, got a number"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn extract_extends_rejects_object_value() {
+        let mut value = serde_json::json!({"extends": {"path": "./base.json"}});
+        let err = extract_extends(&mut value, "test.json").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("extends must be a string or an array of strings, got an object"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn extract_extends_rejects_non_string_array_entry() {
+        let mut value = serde_json::json!({"extends": ["a.json", 42]});
+        let err = extract_extends(&mut value, "test.json").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("extends entries must be strings, got a number"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_rejects_malformed_extends_value() {
+        let dir = test_dir("malformed-extends");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(&path, r#"{"extends": 42}"#).unwrap();
+
+        let err = FallowConfig::load(&path).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("extends must be a string or an array of strings"),
+            "unexpected error: {err}"
+        );
     }
 
     // ------------------------------------------------------------------

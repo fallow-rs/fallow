@@ -56,6 +56,7 @@ fn reset_inter_file_warn_dedup_for_test() {
 
 /// Rule for ignoring specific exports.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct IgnoreExportRule {
     /// Glob pattern for files.
     pub file: String,
@@ -149,7 +150,7 @@ impl CompiledIgnoreDependencyOverrideRule {
 
 /// Per-file override entry.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfigOverride {
     /// Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `["src/generated/**", "**/*.test.ts"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict).
     pub files: Vec<String>,

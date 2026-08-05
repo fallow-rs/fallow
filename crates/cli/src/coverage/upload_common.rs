@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 
-use fallow_config::{FallowConfig, OutputFormat, ResolvedConfig};
+use fallow_config::{FallowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig};
 use fallow_engine::changed_files::clear_ambient_git_env;
 
 use crate::api::api_url;
@@ -233,7 +233,14 @@ pub(super) fn load_resolved_config_with_options(
         Ok(None) => None,
         Err(e) => return Err(format!("config load failed: {e}")),
     };
-    let config = user_config.unwrap_or_default();
+    let mut config = user_config.unwrap_or_default();
+    // The upload pipeline runs dead-code analysis, and resolve() reads only
+    // the global production flag, so flatten per-analysis production first
+    // like the engine and core call sites do.
+    config.production = config
+        .production
+        .for_analysis(ProductionAnalysis::DeadCode)
+        .into();
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     Ok(config.resolve(
         root.to_path_buf(),
@@ -248,6 +255,22 @@ pub(super) fn load_resolved_config_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_resolved_config_flattens_per_analysis_production() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"production": {"deadCode": true}}"#,
+        )
+        .unwrap();
+
+        let resolved = load_resolved_config_with_options(dir.path(), false).unwrap();
+        assert!(
+            resolved.production,
+            "per-analysis deadCode production must survive resolve"
+        );
+    }
 
     #[test]
     fn parse_git_remote_https_with_dot_git() {

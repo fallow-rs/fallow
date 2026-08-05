@@ -709,6 +709,7 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
         "file",
         "exports"
@@ -1848,6 +1849,7 @@
           "default": {}
         }
       },
+      "additionalProperties": false,
       "required": [
         "files"
       ]
