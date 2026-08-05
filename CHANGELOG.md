@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discarded without a word, so a typo like `pattern` vs `patterns` silently
   disabled the rule it was meant to configure. Migration: remove or correct
   the offending key or value named in the error. This extends the strictness
-  the top-level config already enforced to the nested rule objects.
+  the top-level config already enforced to the nested rule objects. Before
+  upgrading, run `fallow config` against the repo: it exits non-zero with the
+  same load error, so rejected shapes surface ahead of CI.
 
 ### Fixed
 
