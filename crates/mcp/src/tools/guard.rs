@@ -26,14 +26,16 @@ pub fn build_guard_args(params: &GuardParams) -> Result<Vec<String>, String> {
     push_remote_extends(&mut args, params.allow_remote_extends);
     for file in &params.files {
         if file.trim().is_empty() {
-            return Err(validation_error_body("files entries must not be empty"));
+            return Err(validation_error_body(format!(
+                "files entries must not be empty (got '{file}')"
+            )));
         }
         // Files are appended as positional argv; a leading '-' would let clap
         // consume the entry as a flag (e.g. --allow-remote-extends, --config).
         if file.starts_with('-') {
-            return Err(validation_error_body(
-                "files entries must not start with '-'",
-            ));
+            return Err(validation_error_body(format!(
+                "files entries must not start with '-' (got '{file}')"
+            )));
         }
         args.push(file.clone());
     }
@@ -73,6 +75,7 @@ mod tests {
 
         let msg = build_guard_args(&params).expect_err("flag-like entry must be rejected");
         assert!(msg.contains("must not start with '-'"));
+        assert!(msg.contains("'--allow-remote-extends'"));
     }
 
     #[test]
@@ -85,5 +88,6 @@ mod tests {
 
         let msg = build_guard_args(&params).expect_err("empty entry must be rejected");
         assert!(msg.contains("must not be empty"));
+        assert!(msg.contains("'  '"));
     }
 }
