@@ -279,6 +279,21 @@ fn server_instructions_mention_all_tools() {
 }
 
 #[test]
+fn server_instructions_licensing_matches_runtime_tool_descriptions() {
+    let server = FallowMcp::new();
+    let info = ServerHandler::get_info(&server);
+    let instructions = info.instructions.as_deref().unwrap();
+    assert!(
+        !instructions.contains("(paid"),
+        "instructions must not flatten runtime coverage tools to 'paid'; a single local capture is free per the tool descriptions"
+    );
+    assert!(
+        instructions.contains("a single local capture is free"),
+        "instructions should state the free single-capture tier like the tool descriptions do"
+    );
+}
+
+#[test]
 fn all_tools_have_input_schema() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();

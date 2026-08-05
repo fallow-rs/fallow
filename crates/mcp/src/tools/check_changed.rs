@@ -9,8 +9,8 @@ use crate::params::CheckChangedParams;
 
 use super::{
     api_runtime::{
-        env_diff_file, json_success, non_empty_path, non_empty_string, programmatic_error_body,
-        run_api_blocking,
+        env_diff_file, json_success, non_empty_path, programmatic_error_body, run_api_blocking,
+        workspace_patterns_from_param,
     },
     fallback_policy::{CliFallbackReason, baseline_fallback_reason, regression_fallback_reason},
     push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
@@ -124,8 +124,7 @@ fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOpt
             production_override: params.production,
             changed_since: Some(params.since.clone()),
             diff_file: env_diff_file(),
-            workspace: non_empty_string(params.workspace.as_deref())
-                .map(|workspace| vec![workspace]),
+            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..AnalysisOptions::default()
         },

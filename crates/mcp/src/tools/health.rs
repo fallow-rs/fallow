@@ -10,7 +10,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     api_runtime::{
         changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, run_api_blocking,
+        programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
     },
     fallback_policy::{
         CliFallbackReason, baseline_fallback_reason, filled, grouped_fallback_reason,
@@ -341,8 +341,7 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
             production_override: params.production,
             changed_since: changed_since_from_param(params.changed_since.as_deref()),
             diff_file: env_diff_file(),
-            workspace: non_empty_string(params.workspace.as_deref())
-                .map(|workspace| vec![workspace]),
+            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..AnalysisOptions::default()
         },
@@ -414,6 +413,21 @@ mod tests {
     use rmcp::model::ContentBlock;
 
     use super::*;
+
+    #[test]
+    fn api_path_splits_comma_list_workspace_like_the_cli() {
+        let params = HealthParams {
+            workspace: Some("web,admin".to_string()),
+            ..HealthParams::default()
+        };
+
+        assert!(!requires_cli_fallback(&params));
+        let options = health_options_from_params(&params).expect("options");
+        assert_eq!(
+            options.analysis.workspace,
+            Some(vec!["web".to_string(), "admin".to_string()])
+        );
+    }
 
     #[test]
     fn api_path_maps_supported_health_params() {

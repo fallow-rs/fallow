@@ -1657,7 +1657,8 @@ fn guard_args_emit_json_quiet_and_files() {
         files: vec!["src/domain/user.ts".to_string(), "src/new.ts".to_string()],
         root: None,
         allow_remote_extends: None,
-    });
+    })
+    .expect("plain file entries are valid");
     assert_eq!(
         args,
         [
@@ -1677,7 +1678,8 @@ fn guard_args_with_root() {
         files: vec!["src/domain/user.ts".to_string()],
         root: Some("/repo".to_string()),
         allow_remote_extends: None,
-    });
+    })
+    .expect("plain file entries are valid");
     assert_eq!(
         args,
         [
@@ -1811,7 +1813,8 @@ fn all_arg_builders_include_format_json_and_quiet() {
         files: vec!["src/domain/user.ts".to_string()],
         root: None,
         allow_remote_extends: None,
-    });
+    })
+    .expect("plain file entries are valid");
     let impact_all = build_impact_all_args(&ImpactAllParams::default());
 
     for (name, args) in [
@@ -1871,7 +1874,7 @@ fn each_tool_uses_correct_subcommand() {
     );
     assert_eq!(build_health_args(&HealthParams::default())[0], "health");
     assert_eq!(build_impact_args(&ImpactParams::default())[0], "impact");
-    assert_eq!(build_guard_args(&guard_params())[0], "guard");
+    assert_eq!(build_guard_args(&guard_params()).unwrap()[0], "guard");
     let impact_all = build_impact_all_args(&ImpactAllParams::default());
     assert_eq!(impact_all[0], "impact");
     assert_eq!(impact_all[1], "--all");

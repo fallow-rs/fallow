@@ -13,7 +13,9 @@ use fallow_api::{
 
 use super::super::{
     analyze::run_analyze_api_value,
-    api_runtime::{changed_since_from_param, env_diff_file, non_empty_path, non_empty_string},
+    api_runtime::{
+        changed_since_from_param, env_diff_file, non_empty_path, workspace_patterns_from_param,
+    },
     audit::run_audit_api_value,
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -494,8 +496,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
             production_override: params.production,
             changed_since: changed_since_from_param(params.changed_since.as_deref()),
             diff_file: env_diff_file(),
-            workspace: non_empty_string(params.workspace.as_deref())
-                .map(|workspace| vec![workspace]),
+            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..AnalysisOptions::default()
         },

@@ -70,6 +70,19 @@ pub(super) fn non_empty_string(value: Option<&str>) -> Option<String> {
     value.and_then(|value| (!value.is_empty()).then(|| value.to_string()))
 }
 
+/// Split a workspace parameter into individual patterns. The schemas document
+/// comma-list syntax with CLI parity, and clap splits `--workspace` on commas,
+/// so the API-backed paths must split the same way.
+pub(super) fn workspace_patterns_from_param(value: Option<&str>) -> Option<Vec<String>> {
+    let patterns: Vec<String> = value?
+        .split(',')
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!patterns.is_empty()).then_some(patterns)
+}
+
 pub(super) fn json_success(value: &impl Serialize) -> CallToolResult {
     let text = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
     CallToolResult::success(vec![ContentBlock::text(text)])
@@ -104,6 +117,25 @@ mod tests {
         assert_eq!(err.exit_code, 2);
         assert_eq!(err.code.as_deref(), Some("FALLOW_MCP_API_TIMEOUT"));
         assert_eq!(err.context.as_deref(), Some("analyze"));
+    }
+
+    #[test]
+    fn workspace_patterns_split_on_commas_like_the_cli() {
+        assert_eq!(
+            workspace_patterns_from_param(Some("web,admin")),
+            Some(vec!["web".to_string(), "admin".to_string()])
+        );
+        assert_eq!(
+            workspace_patterns_from_param(Some("apps/*, !apps/legacy")),
+            Some(vec!["apps/*".to_string(), "!apps/legacy".to_string()])
+        );
+        assert_eq!(
+            workspace_patterns_from_param(Some("web")),
+            Some(vec!["web".to_string()])
+        );
+        assert_eq!(workspace_patterns_from_param(Some("")), None);
+        assert_eq!(workspace_patterns_from_param(Some(",, ,")), None);
+        assert_eq!(workspace_patterns_from_param(None), None);
     }
 
     #[test]

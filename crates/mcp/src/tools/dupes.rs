@@ -10,8 +10,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, run_api_blocking,
+        changed_since_from_param, env_diff_file, json_success, non_empty_path,
+        programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
     },
     fallback_policy::{CliFallbackReason, baseline_fallback_reason, duplication_fallback_reason},
     push_baseline, push_global, push_remote_extends, push_str_flag, run_tool,
@@ -118,8 +118,7 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
             threads: params.threads,
             changed_since: changed_since_from_param(params.changed_since.as_deref()),
             diff_file: env_diff_file(),
-            workspace: non_empty_string(params.workspace.as_deref())
-                .map(|workspace| vec![workspace]),
+            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..AnalysisOptions::default()
         },

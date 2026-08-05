@@ -386,8 +386,8 @@ impl ServerHandler for FallowMcp {
                  recommend (project-tailored config recommendation for cold-start onboarding: detected + a loader-validated proposed_config + three-valued auto/default/taste decisions; read-only, runs detection not analysis), \
                  trace_export / trace_file / impact_closure / trace_dependency / trace_clone (graph and clone evidence), \
                  check_health (code complexity metrics), \
-                 check_runtime_coverage (paid; merges a V8 or Istanbul runtime coverage dump into the health report), \
-                 get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (paid runtime context slices), \
+                 check_runtime_coverage (merges a V8 or Istanbul runtime coverage dump into the health report; a single local capture is free, continuous/multi-capture monitoring requires a license), \
+                 get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (runtime context slices; same licensing: single local capture free), \
                  get_token_blast_radius (free; design-token blast radius for Tailwind v4 @theme + CSS-in-JS defineVars/createTheme tokens via health --css token_consumers), \
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
                  decision_surface (the few consequential structural decisions a change embeds, ranked, capped, and signal_id-anchored, each as a judgment question with the routed expert), \

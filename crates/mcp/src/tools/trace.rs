@@ -13,8 +13,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, run_api_blocking,
+        changed_since_from_param, env_diff_file, json_success, non_empty_path,
+        programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
     },
     push_global, push_remote_extends, push_scope, validation_error_body,
 };
@@ -391,7 +391,7 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
                 no_cache: params.no_cache.unwrap_or(false),
                 threads: params.threads,
                 changed_since: changed_since_from_param(None),
-                workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
+                workspace: workspace_patterns_from_param(params.workspace.as_deref()),
                 ..AnalysisOptions::default()
             },
             mode: duplication_mode_from_param(params.mode.as_deref())?,
@@ -430,7 +430,7 @@ fn dead_code_analysis_options(input: DeadCodeAnalysisInput<'_>) -> AnalysisOptio
         production_override: input.production,
         changed_since: changed_since_from_param(None),
         diff_file: env_diff_file(),
-        workspace: non_empty_string(input.workspace).map(|value| vec![value]),
+        workspace: workspace_patterns_from_param(input.workspace),
         ..AnalysisOptions::default()
     }
 }

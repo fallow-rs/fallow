@@ -11,7 +11,7 @@ use super::{
     VALID_AUDIT_GATES,
     api_runtime::{
         changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, run_api_blocking,
+        programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_fallback_reason, filled, grouped_fallback_reason},
     push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
@@ -196,7 +196,7 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
             production: params.production.unwrap_or(false),
             production_override: params.production,
             changed_since: changed_since_from_param(None),
-            workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
+            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             changed_workspaces: None,
             explain: true,
             type_aware: fallow_api::TypeAwareOptions::default(),
