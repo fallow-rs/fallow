@@ -385,10 +385,12 @@ pub fn markdown_code_span(value: &str) -> String {
 }
 
 /// [`markdown_code_span`] for a Markdown table cell: pipes are additionally
-/// escaped so the value cannot terminate the cell.
+/// escaped so the value cannot terminate the cell, and line endings collapse
+/// to spaces because any CommonMark line ending would split the table row.
 #[must_use]
 pub fn markdown_table_code_span(value: &str) -> String {
-    markdown_code_span(&value.replace('|', "\\|"))
+    let collapsed = value.replace("\r\n", " ").replace(['\n', '\r'], " ");
+    markdown_code_span(&collapsed.replace('|', "\\|"))
 }
 
 /// Escape prose for a Markdown table cell while leaving intentional inline
@@ -941,6 +943,11 @@ mod tests {
     fn markdown_table_code_span_escapes_pipes() {
         assert_eq!(markdown_table_code_span("a|b"), "`a\\|b`");
         assert_eq!(markdown_table_code_span("x`|y"), "``x`\\|y``");
+    }
+
+    #[test]
+    fn markdown_table_code_span_collapses_line_endings() {
+        assert_eq!(markdown_table_code_span("a\r\nb\rc\nd"), "`a b c d`");
     }
 
     #[test]

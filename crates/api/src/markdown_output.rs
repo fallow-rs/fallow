@@ -913,7 +913,7 @@ fn format_dependency(
     } else {
         let workspaces = used_in_workspaces
             .iter()
-            .map(|path| escape_markdown_prose(&relative_path(path, root).display().to_string()))
+            .map(|path| markdown_code_span(&relative_path(path, root).display().to_string()))
             .collect::<Vec<_>>()
             .join(", ");
         format!("; imported in {workspaces}")
@@ -924,7 +924,7 @@ fn format_dependency(
         let label = if pkg_label == "package.json" {
             workspace_context.trim_start_matches("; ").to_string()
         } else {
-            format!("{}{workspace_context}", escape_markdown_prose(&pkg_label))
+            format!("{}{workspace_context}", markdown_code_span(&pkg_label))
         };
         vec![format!("- {name} ({label})")]
     }

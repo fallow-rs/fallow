@@ -33,6 +33,6 @@ expression: rendered
 
 | Location | Files | Size | Instances | Status |
 |:---------|:------|:-----|----------:|:-------|
-| `src/one.ts:4` | src/one.ts, src/two.ts | 9 lines / 80 tokens | 2 | inherited |
+| `src/one.ts:4` | `src/one.ts`, `src/two.ts` | 9 lines / 80 tokens | 2 | inherited |
 
 *Audit gate: new-only. Inherited findings are reported but do not fail the verdict.*

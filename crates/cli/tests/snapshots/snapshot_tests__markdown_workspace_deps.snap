@@ -6,4 +6,4 @@ expression: output
 
 ### Unused dependencies (1)
 
-- `lodash` (packages/ui/package.json)
+- `lodash` (`packages/ui/package.json`)

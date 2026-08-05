@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_output::{escape_md, markdown_code_span, markdown_table_code_span};
+use fallow_output::{markdown_code_span, markdown_table_code_span, markdown_table_text};
 use serde_json::Value;
 
 use super::github::{PathRebase, arr, b, fmt_num, num, resolve_render_options, s, u};
@@ -626,11 +626,12 @@ fn check_sections_core() -> Vec<SectionSpec> {
             key: "circular_dependencies",
             header: "Import cycles that can cause initialization failures and prevent tree-shaking.\n\n| Cycle | Length |\n|-------|-------:|\n",
             row: |it| {
-                format!(
-                    "| {} | {} |",
-                    escape_md(&plain_join(it, "files", " \u{2192} ")),
-                    num(it, "length"),
-                )
+                let cycle = arr(it, "files")
+                    .filter_map(Value::as_str)
+                    .map(markdown_table_code_span)
+                    .collect::<Vec<_>>()
+                    .join(" \u{2192} ");
+                format!("| {cycle} | {} |", num(it, "length"))
             },
         },
     ]
@@ -675,7 +676,7 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
                     .join(" <-> ");
                 format!(
                     "| {cycle} | {} | {} |",
-                    escape_md(s(it, "kind")),
+                    markdown_table_text(s(it, "kind")),
                     arr(it, "files").count()
                 )
             },
@@ -693,8 +694,8 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
                         num(it, "line")
                     )),
                     code_cell(it, "to_path"),
-                    escape_md(s(it, "from_zone")),
-                    escape_md(s(it, "to_zone")),
+                    markdown_table_code_span(s(it, "from_zone")),
+                    markdown_table_code_span(s(it, "to_zone")),
                 )
             },
         },
@@ -713,7 +714,7 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
                     "| {} | {} | {} | {} |",
                     path_line_cell(it),
                     code_cell(it, "callee"),
-                    escape_md(s(it, "zone")),
+                    markdown_table_code_span(s(it, "zone")),
                     code_cell(it, "pattern"),
                 )
             },
@@ -728,7 +729,7 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
                     path_line_cell(it),
                     code_cell(it, "matched"),
                     markdown_table_code_span(&format!("{}/{}", s(it, "pack"), s(it, "rule_id"))),
-                    escape_md(s(it, "severity")),
+                    markdown_table_text(s(it, "severity")),
                 )
             },
         },
@@ -819,7 +820,7 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
                     "| {} | {} | {} |",
                     path_line_cell(it),
                     code_cell(it, "component_name"),
-                    escape_md(s(it, "framework")),
+                    markdown_table_text(s(it, "framework")),
                 )
             },
         },
@@ -862,7 +863,7 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
                     "| {} | {} | {} |",
                     path_line_cell(it),
                     code_cell(it, "key_name"),
-                    escape_md(s(it, "framework")),
+                    markdown_table_text(s(it, "framework")),
                 )
             },
         },
@@ -997,7 +998,7 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
                     code_cell(it, "version_range"),
                     code_cell(it, "source"),
                     path_line_cell(it),
-                    escape_md(str_or(it, "hint", "")),
+                    markdown_table_text(str_or(it, "hint", "")),
                 )
             },
         },
@@ -1012,7 +1013,7 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
                     markdown_table_code_span(str_or(it, "raw_value", "")),
                     code_cell(it, "source"),
                     path_line_cell(it),
-                    escape_md(str_or(it, "reason", "unparsable")),
+                    markdown_table_text(str_or(it, "reason", "unparsable")),
                 )
             },
         },
@@ -1076,7 +1077,7 @@ fn render_check_summary(env: &Value) -> String {
 fn dupes_family_entry(family: &Value) -> String {
     let files: Vec<String> = arr(family, "files")
         .filter_map(Value::as_str)
-        .map(escape_md)
+        .map(markdown_code_span)
         .collect();
     let shown = files.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
     let more = if files.len() > 3 {
@@ -1103,7 +1104,7 @@ fn dupes_family_entry(family: &Value) -> String {
             .map(|suggestion| {
                 format!(
                     "  - {} (~{} lines)",
-                    escape_md(s(suggestion, "description")),
+                    markdown_table_text(s(suggestion, "description")),
                     num(suggestion, "estimated_savings"),
                 )
             })
@@ -1293,7 +1294,7 @@ fn complexity_table_row(it: &Value) -> String {
         "| {} | {} | {} | {}{} | {}{} | {} | {} |",
         path_line_cell(it),
         code_cell(it, "name"),
-        escape_md(str_or(it, "severity", "moderate")),
+        markdown_table_text(str_or(it, "severity", "moderate")),
         num(it, "cyclomatic"),
         exceeded_marker(it, &["cyclomatic", "both", "all"]),
         num(it, "cognitive"),
@@ -1343,7 +1344,7 @@ fn runtime_finding_row(it: &Value) -> String {
         path_line_cell(it),
         code_cell(it, "function"),
         code_cell(it, "verdict"),
-        escape_md(s(it, "confidence")),
+        markdown_table_text(s(it, "confidence")),
     )
 }
 
@@ -1600,7 +1601,7 @@ const AUDIT_COMPONENT_ROWS: &[AuditRowSpec] = &[
         format!(
             "{} ({})",
             code_cell(it, "component_name"),
-            escape_md(s(it, "framework"))
+            markdown_table_text(s(it, "framework"))
         )
     }),
     ("Unused component prop", "unused_component_props", |it| {
@@ -1638,7 +1639,7 @@ const AUDIT_COMPONENT_ROWS: &[AuditRowSpec] = &[
         format!(
             "{} ({})",
             code_cell(it, "key_name"),
-            escape_md(s(it, "framework"))
+            markdown_table_text(s(it, "framework"))
         )
     }),
     ("Unused load data key", "unused_load_data_keys", |it| {
@@ -1660,7 +1661,9 @@ const AUDIT_HYGIENE_ROWS: &[AuditRowSpec] = &[
         |it| code_cell(it, "package_name"),
     ),
     ("Stale suppression", "stale_suppressions", |it| {
-        escape_md(str_or(it, "description", "suppression"))
+        // The description is a literal suppression directive carrying
+        // user-authored comment text, so it renders as a code span.
+        markdown_table_code_span(str_or(it, "description", "suppression"))
     }),
     ("Unused catalog entry", "unused_catalog_entries", |it| {
         format!(
@@ -1789,7 +1792,7 @@ fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
         rows.push(audit_row(
             "Re-export cycle",
             location,
-            escape_md(str_or(it, "kind", "cycle")),
+            markdown_table_text(str_or(it, "kind", "cycle")),
             it,
         ));
     }
@@ -1803,8 +1806,8 @@ fn audit_rows_boundaries(dead_code: &Value, rows: &mut Vec<AuditRow>) {
             rel_path_line_cell(it, "from_path"),
             format!(
                 "{} -> {}",
-                escape_md(s(it, "from_zone")),
-                escape_md(s(it, "to_zone"))
+                markdown_table_code_span(s(it, "from_zone")),
+                markdown_table_code_span(s(it, "to_zone"))
             ),
             it,
         ));
@@ -1824,7 +1827,7 @@ fn audit_rows_boundaries(dead_code: &Value, rows: &mut Vec<AuditRow>) {
             format!(
                 "{} in {}",
                 code_cell(it, "callee"),
-                escape_md(s(it, "zone"))
+                markdown_table_code_span(s(it, "zone"))
             ),
             it,
         ));
@@ -1836,7 +1839,7 @@ fn audit_rows_boundaries(dead_code: &Value, rows: &mut Vec<AuditRow>) {
             format!(
                 "{} banned by {}",
                 code_cell(it, "matched"),
-                escape_md(&format!("{}/{}", s(it, "pack"), s(it, "rule_id")))
+                markdown_table_code_span(&format!("{}/{}", s(it, "pack"), s(it, "rule_id")))
             ),
             it,
         ));
@@ -1939,10 +1942,10 @@ fn audit_complexity_section(env: &Value) -> String {
                 path_line_cell(it),
                 code_cell(it, "name"),
                 introduced_label(it),
-                escape_md(str_or(it, "severity", "moderate")),
+                markdown_table_text(str_or(it, "severity", "moderate")),
                 num(it, "cyclomatic"),
                 num(it, "cognitive"),
-                escape_md(str_or(it, "coverage_tier", "-")),
+                markdown_table_text(str_or(it, "coverage_tier", "-")),
                 it.get("crap")
                     .filter(|crap| !crap.is_null())
                     .map_or_else(|| "-".to_owned(), fmt_num),
@@ -2023,7 +2026,9 @@ fn audit_duplication_section(env: &Value) -> String {
             );
             let mut files: Vec<String> = instances
                 .iter()
-                .map(|instance| escape_md(&rel_path_absolute_only(s(instance, "file"))))
+                .map(|instance| {
+                    markdown_table_code_span(&rel_path_absolute_only(s(instance, "file")))
+                })
                 .collect();
             files.sort();
             files.dedup();
@@ -2160,8 +2165,8 @@ fn render_security_summary(env: &Value) -> String {
                 format!(
                     "| {} | {} | {} | {} |",
                     path_line(finding),
-                    escape_md(s(finding, "kind")),
-                    escape_md(str_or(finding, "severity", "unknown")),
+                    markdown_table_text(s(finding, "kind")),
+                    markdown_table_text(str_or(finding, "severity", "unknown")),
                     markdown_table_code_span(
                         finding
                             .get("candidate")
@@ -2282,7 +2287,7 @@ pub fn render_fix_summary(env: &Value) -> String {
                 format!(
                     "- {} from {} in {}",
                     markdown_code_span(s(it, "package")),
-                    escape_md(s(it, "location")),
+                    markdown_code_span(s(it, "location")),
                     markdown_code_span(s(it, "file")),
                 )
             },
@@ -2625,7 +2630,7 @@ fn combined_complexity_breakdown(env: &Value, counts: &CombinedCounts) -> String
                     num(it, "line")
                 )),
                 code_cell(it, "name"),
-                escape_md(str_or(it, "severity", "moderate")),
+                markdown_table_text(str_or(it, "severity", "moderate")),
                 num(it, "cyclomatic"),
                 exceeded_marker(it, &["cyclomatic", "both", "all"]),
                 num(it, "cognitive"),
@@ -2695,7 +2700,7 @@ fn combined_runtime_breakdown(env: &Value, counts: &CombinedCounts) -> String {
                         )),
                         code_cell(it, "function"),
                         code_cell(it, "verdict"),
-                        escape_md(s(it, "confidence")),
+                        markdown_table_text(s(it, "confidence")),
                     )
                 })
                 .collect::<Vec<_>>()

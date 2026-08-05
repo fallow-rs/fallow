@@ -615,6 +615,83 @@ fn github_summary_dupes_snapshot() {
     insta::assert_snapshot!("github_summary_dupes", rendered);
 }
 
+/// Clone-family identifier cells render as code spans: file names with
+/// underscores and suggestion prose with parentheses must reach the summary
+/// without markdown escape backslashes.
+#[test]
+fn github_summary_dupes_family_renders_identifiers_as_code_spans() {
+    let rendered = render_summary(
+        EnvelopeKind::Dupes,
+        &json!({
+            "kind": "dupes",
+            "elapsed_ms": 5,
+            "stats": {
+                "total_files": 4, "files_with_clones": 2, "clone_groups": 1,
+                "clone_instances": 2, "duplicated_lines": 9, "total_lines": 100,
+                "duplication_percentage": 9.0
+            },
+            "clone_groups": [{
+                "line_count": 9, "token_count": 80,
+                "instances": [
+                    { "file": "src/auth_service_helper.ts", "start_line": 1, "end_line": 9 },
+                    { "file": "src/auth_service_backup.ts", "start_line": 4, "end_line": 12 }
+                ]
+            }],
+            "clone_families": [{
+                "files": ["src/auth_service_helper.ts", "src/auth_service_backup.ts"],
+                "total_duplicated_lines": 9,
+                "groups": [{
+                    "line_count": 9, "token_count": 80,
+                    "instances": [
+                        { "file": "src/auth_service_helper.ts", "start_line": 1, "end_line": 9 }
+                    ]
+                }],
+                "suggestions": [{
+                    "description": "Extract 1 shared clone group (9 lines) from auth_service_helper.ts, auth_service_backup.ts into src",
+                    "estimated_savings": 9
+                }]
+            }]
+        }),
+        &LinkContext::default(),
+    );
+    assert!(
+        rendered.contains("**`src/auth_service_helper.ts`, `src/auth_service_backup.ts`**"),
+        "family header must code-span each file: {rendered}"
+    );
+    assert!(
+        rendered.contains("(9 lines)"),
+        "suggestion parentheses must render unescaped: {rendered}"
+    );
+    assert!(
+        !rendered.contains("\\_") && !rendered.contains("\\(") && !rendered.contains("\\)"),
+        "no markdown escape backslashes may reach identifiers or prose: {rendered}"
+    );
+}
+
+/// The audit duplication Files column renders each path as a code span, so
+/// underscores survive verbatim and pipes cannot terminate the cell.
+#[test]
+fn github_summary_audit_dupes_files_column_uses_code_spans() {
+    let mut env = audit_envelope();
+    env["duplication"]["clone_groups"][0]["instances"] = json!([
+        { "file": "src/auth_service_helper.ts", "start_line": 4, "end_line": 12 },
+        { "file": "src/we|ird_helper.ts", "start_line": 20, "end_line": 28 }
+    ]);
+    let rendered = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+    assert!(
+        rendered.contains("`src/auth_service_helper.ts`"),
+        "files cell must code-span the path: {rendered}"
+    );
+    assert!(
+        !rendered.contains("auth\\_service\\_helper"),
+        "underscores must not be backslash-escaped: {rendered}"
+    );
+    assert!(
+        rendered.contains("`src/we\\|ird_helper.ts`"),
+        "pipes must stay escaped inside the code span: {rendered}"
+    );
+}
+
 #[test]
 fn github_summary_health_snapshot() {
     let rendered = render_summary(
@@ -700,7 +777,7 @@ fn render_summary_fix_mirrors_render_fix_summary() {
         "{via_dispatch}"
     );
     assert!(
-        via_dispatch.contains("- `left-pad` from dependencies in `package.json`"),
+        via_dispatch.contains("- `left-pad` from `dependencies` in `package.json`"),
         "{via_dispatch}"
     );
 }

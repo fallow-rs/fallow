@@ -82,7 +82,7 @@ Import cycles that can cause initialization failures and prevent tree-shaking.
 
 | Cycle | Length |
 |-------|-------:|
-| src/a.ts → src/b.ts | 2 |
+| `src/a.ts` → `src/b.ts` | 2 |
 
 </details>
 
@@ -102,7 +102,7 @@ Imports that cross defined architecture zone boundaries.
 
 | From | To | Zones |
 |------|-----|-------|
-| `src/ui/button.ts:4` | `src/db/pool.ts` | ui → db |
+| `src/ui/button.ts:4` | `src/db/pool.ts` | `ui` → `db` |
 
 </details>
 

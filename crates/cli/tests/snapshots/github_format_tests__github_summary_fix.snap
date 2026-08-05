@@ -19,7 +19,7 @@ expression: rendered
 - `src/api/types.ts:7` - `LegacyShape`
 
 **Dependency removals (1)**
-- `left-pad` from dependencies in `package.json`
+- `left-pad` from `dependencies` in `package.json`
 
 
 </details>
