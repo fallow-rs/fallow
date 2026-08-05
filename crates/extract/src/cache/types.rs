@@ -856,7 +856,12 @@ use crate::MemberKind;
 /// encodes literal-string indexed-access fixture types
 /// (`Factory["getter"]`) as bindings. Warm 248 caches lack those facts and
 /// keep the getter-typed fixture's target class members uncredited.
-pub(super) const CACHE_VERSION: u32 = 251;
+///
+/// Bumped to 252: re-exports now persist the enclosing statement span and the
+/// source string-literal span so unresolved-import findings anchor on the
+/// specifier and suppressions cover the whole statement. Warm 251 caches
+/// lack both spans.
+pub(super) const CACHE_VERSION: u32 = 252;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -925,7 +930,7 @@ assert_cached_type_size!(CachedExport, 136);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 88);
-assert_cached_type_size!(CachedReExport, 88);
+assert_cached_type_size!(CachedReExport, 104);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 64);
 assert_cached_type_size!(crate::MemberAccess, 48);
@@ -1346,6 +1351,14 @@ pub struct CachedReExport {
     pub(crate) span_start: u32,
     /// Byte offset of the re-export span end.
     pub(crate) span_end: u32,
+    /// Byte offset of the enclosing statement span start.
+    pub(crate) statement_span_start: u32,
+    /// Byte offset of the enclosing statement span end.
+    pub(crate) statement_span_end: u32,
+    /// Byte offset of the source string-literal span start.
+    pub(crate) source_span_start: u32,
+    /// Byte offset of the source string-literal span end.
+    pub(crate) source_span_end: u32,
 }
 
 /// Cached enum or class member data.

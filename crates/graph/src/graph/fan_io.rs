@@ -379,6 +379,8 @@ mod tests {
                         exported_name: "widget".to_string(),
                         is_type_only: false,
                         span: oxc_span::Span::new(0, 10),
+                        statement_span: oxc_span::Span::new(0, 0),
+                        source_span: oxc_span::Span::new(0, 0),
                     },
                     target: ResolveResult::InternalModule(FileId(0)),
                 }],

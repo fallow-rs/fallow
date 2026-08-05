@@ -113,6 +113,8 @@ fn cached_re_exports_to_module(re_exports: &[CachedReExport]) -> Vec<crate::ReEx
             exported_name: re_export.exported_name.clone(),
             is_type_only: re_export.is_type_only,
             span: Span::new(re_export.span_start, re_export.span_end),
+            statement_span: Span::new(re_export.statement_span_start, re_export.statement_span_end),
+            source_span: Span::new(re_export.source_span_start, re_export.source_span_end),
         })
         .collect()
 }
@@ -315,6 +317,10 @@ fn module_re_exports_to_cached(re_exports: &[crate::ReExportInfo]) -> Vec<Cached
             is_type_only: re_export.is_type_only,
             span_start: re_export.span.start,
             span_end: re_export.span.end,
+            statement_span_start: re_export.statement_span.start,
+            statement_span_end: re_export.statement_span.end,
+            source_span_start: re_export.source_span.start,
+            source_span_end: re_export.source_span.end,
         })
         .collect()
 }

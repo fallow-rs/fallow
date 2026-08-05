@@ -24,11 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **One unresolved-import finding per specifier per file.** A multi-binding
-  re-export statement (`export type { A, B, C } from "./missing.js"`)
-  previously produced one finding per binding, inflating issue totals for
-  what is a single import problem. The first occurrence in source order is
-  reported; suppressing that line moves the report to the next occurrence.
+- **One unresolved-import finding per specifier per file, anchored on the
+  specifier.** A multi-binding re-export statement
+  (`export type { A, B, C } from "./missing.js"`) previously produced one
+  finding per binding, inflating issue totals for what is a single import
+  problem. The deduped finding now anchors on the source specifier (the
+  string the user must edit) instead of a binding line, and a single
+  `fallow-ignore-next-line unresolved-import` comment above the statement
+  suppresses it, for multi-line statements too. Suppression crediting agrees
+  with the anchor, so a consumed suppression is never also reported stale.
 - **`.js` specifiers now resolve to declaration-only `.d.ts` modules.** The
   resolver's extension alias for `.js` (and `.mjs`/`.cjs`) omitted the
   matching declaration extension, so an import like

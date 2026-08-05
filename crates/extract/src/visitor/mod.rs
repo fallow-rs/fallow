@@ -1170,6 +1170,8 @@ impl ModuleInfoExtractor {
         }
         for re_export in &mut self.re_exports {
             re_export.span = remap(re_export.span);
+            re_export.statement_span = remap(re_export.statement_span);
+            re_export.source_span = remap(re_export.source_span);
         }
         for dynamic_import in &mut self.dynamic_imports {
             dynamic_import.span = remap(dynamic_import.span);
@@ -1267,12 +1269,19 @@ impl ModuleInfoExtractor {
                         unreachable!("filtered by matches! guard above")
                     }
                 };
+                // The unresolvable literal lives in the matching import
+                // statement, not in this `export { x }` statement, so a
+                // cross-statement source anchor would smear suppression
+                // coverage across unrelated lines. Both extra spans stay
+                // empty and consumers fall back to the specifier span.
                 self.re_exports.push(ReExportInfo {
                     source: import.source.clone(),
                     imported_name,
                     exported_name: spec.exported_name,
                     is_type_only: spec.is_type_only || import.is_type_only,
                     span: spec.span,
+                    statement_span: Span::new(0, 0),
+                    source_span: Span::new(0, 0),
                 });
             } else {
                 self.exports.push(ExportInfo {

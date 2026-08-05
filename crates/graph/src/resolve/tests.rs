@@ -95,6 +95,8 @@ fn make_re_export(source: &str, imported: &str, exported: &str) -> ReExportInfo 
         exported_name: exported.to_string(),
         is_type_only: false,
         span: oxc_span::Span::default(),
+        statement_span: oxc_span::Span::new(0, 0),
+        source_span: oxc_span::Span::new(0, 0),
     }
 }
 
@@ -624,6 +626,8 @@ fn re_exports_preserves_type_only() {
             exported_name: "MyType".into(),
             is_type_only: true,
             span: oxc_span::Span::default(),
+            statement_span: oxc_span::Span::new(0, 0),
+            source_span: oxc_span::Span::new(0, 0),
         }];
         let file = Path::new("/project/src/index.ts");
         let result = resolve_re_exports(ctx, file, &re_exports);

@@ -982,6 +982,8 @@ fn module_to_cached_roundtrip_re_exports() {
             exported_name: "bar".to_string(),
             is_type_only: true,
             span: oxc_span::Span::default(),
+            statement_span: oxc_span::Span::new(0, 0),
+            source_span: oxc_span::Span::new(0, 0),
         }],
         dynamic_imports: vec![],
         require_calls: vec![],

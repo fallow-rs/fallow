@@ -51,7 +51,11 @@ pub use store::GraphCacheStore;
 /// need more than the mask-profile cap, so caches written by the unbounded
 /// profiling code must not replay their old profiled results on large
 /// monorepos where the cap now engages.
-pub const GRAPH_CACHE_VERSION: u32 = 19;
+///
+/// Bumped to 20: cached re-export edges now carry the enclosing statement
+/// span and the source string-literal span used to anchor unresolved-import
+/// findings on the specifier. Warm 19 caches lack both spans.
+pub const GRAPH_CACHE_VERSION: u32 = 20;
 
 /// Cached form of a resolved target.
 ///
@@ -286,6 +290,10 @@ pub struct CachedReExportInfo {
     is_type_only: bool,
     /// Span of the re-export declaration.
     span: [u32; 2],
+    /// Span of the enclosing re-export statement.
+    statement_span: [u32; 2],
+    /// Span of the source string literal.
+    source_span: [u32; 2],
 }
 
 impl From<&ReExportInfo> for CachedReExportInfo {
@@ -296,6 +304,8 @@ impl From<&ReExportInfo> for CachedReExportInfo {
             exported_name: info.exported_name.clone(),
             is_type_only: info.is_type_only,
             span: span_to_pair(info.span),
+            statement_span: span_to_pair(info.statement_span),
+            source_span: span_to_pair(info.source_span),
         }
     }
 }
@@ -308,6 +318,8 @@ impl From<CachedReExportInfo> for ReExportInfo {
             exported_name: info.exported_name,
             is_type_only: info.is_type_only,
             span: pair_to_span(info.span),
+            statement_span: pair_to_span(info.statement_span),
+            source_span: pair_to_span(info.source_span),
         }
     }
 }

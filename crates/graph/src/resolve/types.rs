@@ -220,7 +220,19 @@ impl<'a> ResolvedSourceEdge<'a> {
     pub const fn source_span(&self) -> oxc_span::Span {
         match self {
             Self::Import(import) => import.info.source_span,
-            Self::ReExport(_) => oxc_span::Span::new(0, 0),
+            Self::ReExport(re_export) => re_export.info.source_span,
+        }
+    }
+
+    /// Return the span of the enclosing statement.
+    ///
+    /// Imports do not record a statement span, so their per-binding
+    /// declaration span is the closest available statement anchor.
+    #[must_use]
+    pub const fn statement_span(&self) -> oxc_span::Span {
+        match self {
+            Self::Import(import) => import.info.span,
+            Self::ReExport(re_export) => re_export.info.statement_span,
         }
     }
 }

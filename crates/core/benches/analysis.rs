@@ -234,6 +234,8 @@ fn create_named_re_export_stub_input(re_export_count: u32) -> ReExportInput {
                 exported_name: format!("value{idx}"),
                 is_type_only: false,
                 span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
             },
             target: ResolveResult::Unresolvable("./unresolved-source".to_string()),
         })
@@ -420,6 +422,8 @@ fn create_namespace_re_export_input() -> ReExportInput {
                 exported_name: format!("Ns{target}"),
                 is_type_only: false,
                 span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
             },
             target: ResolveResult::InternalModule(FileId(target)),
         });
@@ -437,6 +441,8 @@ fn create_namespace_re_export_input() -> ReExportInput {
                 exported_name: format!("PublicNs{target}"),
                 is_type_only: false,
                 span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
             },
             target: ResolveResult::InternalModule(FileId(barrel_start + target)),
         });
@@ -579,6 +585,8 @@ fn create_namespace_object_alias_input() -> ReExportInput {
                 exported_name: format!("PublicApi{target}"),
                 is_type_only: false,
                 span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
             },
             target: ResolveResult::InternalModule(FileId(alias_start + target)),
         });
@@ -729,6 +737,8 @@ fn create_re_export_input() -> ReExportInput {
                         exported_name: format!("value{e}"),
                         is_type_only: false,
                         span: oxc_span::Span::default(),
+                        statement_span: oxc_span::Span::new(0, 0),
+                        source_span: oxc_span::Span::new(0, 0),
                     },
                     target: ResolveResult::InternalModule(chained_id),
                 });
@@ -747,6 +757,8 @@ fn create_re_export_input() -> ReExportInput {
                         exported_name: format!("value{e}"),
                         is_type_only: false,
                         span: oxc_span::Span::default(),
+                        statement_span: oxc_span::Span::new(0, 0),
+                        source_span: oxc_span::Span::new(0, 0),
                     },
                     target: ResolveResult::InternalModule(src_a_id),
                 });
@@ -757,6 +769,8 @@ fn create_re_export_input() -> ReExportInput {
                         exported_name: format!("fn{e}"),
                         is_type_only: false,
                         span: oxc_span::Span::default(),
+                        statement_span: oxc_span::Span::new(0, 0),
+                        source_span: oxc_span::Span::new(0, 0),
                     },
                     target: ResolveResult::InternalModule(src_b_id),
                 });
@@ -919,6 +933,8 @@ fn create_reverse_re_export_chain_input(chain_length: u32) -> ReExportInput {
                 exported_name: "value".to_string(),
                 is_type_only: false,
                 span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
             },
             target: ResolveResult::InternalModule(FileId(idx - 1)),
         });
@@ -1169,6 +1185,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 exported_name: "capitalize".to_string(),
                 is_type_only: false,
                 span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
             },
             ReExportInfo {
                 source: "./helpers".to_string(),
@@ -1176,6 +1194,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 exported_name: "*".to_string(),
                 is_type_only: false,
                 span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
             },
         ],
         dynamic_imports: vec![DynamicImportInfo {

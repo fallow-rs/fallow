@@ -937,6 +937,8 @@ mod tests {
                 exported_name: "Widget".to_string(),
                 is_type_only: false,
                 span: Span::default(),
+                statement_span: Span::new(0, 0),
+                source_span: Span::new(0, 0),
             },
             target: ResolveResult::InternalModule(FileId(1)),
         }

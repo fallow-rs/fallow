@@ -209,6 +209,8 @@ fn multi_binding_re_export_reports_one_unresolved_finding_per_specifier() {
             exported_name: imported.to_string(),
             is_type_only: true,
             span: oxc_span::Span::new(span_start, span_start + 1),
+            statement_span: oxc_span::Span::new(0, 0),
+            source_span: oxc_span::Span::new(0, 0),
         },
         target: ResolveResult::Unresolvable("./missing.js".to_string()),
     };
@@ -257,6 +259,205 @@ fn multi_binding_re_export_reports_one_unresolved_finding_per_specifier() {
         specifiers,
         vec!["./also-missing", "./missing.js"],
         "one finding per unresolvable specifier per module, in source-edge order"
+    );
+}
+
+/// Simulated file for the multi-line re-export statement tests:
+///
+/// ```text
+/// 1 | export type {
+/// 2 |   Alpha,
+/// 3 |   Beta,
+/// 4 |   Gamma,
+/// 5 | } from "./missing.js";
+/// ```
+///
+/// Line-start byte offsets: 0, 14, 23, 31, 40. The statement spans bytes
+/// 0..62 and the source literal spans bytes 47..61 (line 5, column 7).
+const MULTI_LINE_RE_EXPORT_LINE_OFFSETS: [u32; 5] = [0, 14, 23, 31, 40];
+
+fn multi_line_re_export(imported: &str, span_start: u32) -> ResolvedReExport {
+    ResolvedReExport {
+        info: ReExportInfo {
+            source: "./missing.js".to_string(),
+            imported_name: imported.to_string(),
+            exported_name: imported.to_string(),
+            is_type_only: true,
+            span: oxc_span::Span::new(span_start, span_start + 5),
+            statement_span: oxc_span::Span::new(0, 62),
+            source_span: oxc_span::Span::new(47, 61),
+        },
+        target: ResolveResult::Unresolvable("./missing.js".to_string()),
+    }
+}
+
+fn multi_line_re_export_module() -> ResolvedModule {
+    ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        re_exports: vec![
+            multi_line_re_export("Alpha", 16),
+            multi_line_re_export("Beta", 25),
+            multi_line_re_export("Gamma", 33),
+        ],
+        ..ResolvedModule::default()
+    }
+}
+
+#[test]
+fn multi_line_re_export_anchors_on_the_specifier_line() {
+    let resolved_modules = vec![multi_line_re_export_module()];
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let mut line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    line_offsets.insert(FileId(0), MULTI_LINE_RE_EXPORT_LINE_OFFSETS.as_slice());
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert_eq!(unresolved.len(), 1, "one finding for the whole statement");
+    assert_eq!(unresolved[0].specifier, "./missing.js");
+    assert_eq!(
+        unresolved[0].line, 5,
+        "the finding anchors on the specifier line, not a binding line"
+    );
+    assert_eq!(unresolved[0].col, 7);
+    assert_eq!(unresolved[0].specifier_col, 7);
+}
+
+#[test]
+fn one_suppression_above_the_statement_covers_the_multi_line_re_export() {
+    let resolved_modules = vec![multi_line_re_export_module()];
+    let config = test_config(PathBuf::from("/project"));
+    // `// fallow-ignore-next-line unresolved-import` above the statement
+    // targets the statement's first line, four lines above the anchor.
+    let supps = vec![Suppression::issue(
+        1,
+        0,
+        suppress::IssueKind::UnresolvedImport,
+    )];
+    let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
+    supp_map.insert(FileId(0), &supps);
+    let suppressions = SuppressionContext::from_map(supp_map);
+    let mut line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    line_offsets.insert(FileId(0), MULTI_LINE_RE_EXPORT_LINE_OFFSETS.as_slice());
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert!(
+        unresolved.is_empty(),
+        "one suppression above the statement should cover the whole statement"
+    );
+}
+
+#[test]
+fn suppressed_anchor_statement_retires_the_specifier_for_the_module() {
+    let mut module = multi_line_re_export_module();
+    // Second single-line statement on line 6 repeating the same specifier:
+    // `export { Zeta } from "./missing.js";` at bytes 63..100.
+    module.re_exports.push(ResolvedReExport {
+        info: ReExportInfo {
+            source: "./missing.js".to_string(),
+            imported_name: "Zeta".to_string(),
+            exported_name: "Zeta".to_string(),
+            is_type_only: false,
+            span: oxc_span::Span::new(72, 76),
+            statement_span: oxc_span::Span::new(63, 100),
+            source_span: oxc_span::Span::new(84, 98),
+        },
+        target: ResolveResult::Unresolvable("./missing.js".to_string()),
+    });
+    let resolved_modules = vec![module];
+    let config = test_config(PathBuf::from("/project"));
+    let supps = vec![Suppression::issue(
+        1,
+        0,
+        suppress::IssueKind::UnresolvedImport,
+    )];
+    let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
+    supp_map.insert(FileId(0), &supps);
+    let suppressions = SuppressionContext::from_map(supp_map);
+    let offsets = vec![0, 14, 23, 31, 40, 63];
+    let mut line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    line_offsets.insert(FileId(0), offsets.as_slice());
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert!(
+        unresolved.is_empty(),
+        "suppressing the anchored statement retires the deduped specifier instead of moving the finding to the next statement"
+    );
+}
+
+#[test]
+fn single_line_re_export_keeps_the_statement_line_anchor() {
+    // `export { A } from "./missing.js";` entirely on line 1: binding at
+    // bytes 9..10, source literal at bytes 19..33.
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        re_exports: vec![ResolvedReExport {
+            info: ReExportInfo {
+                source: "./missing.js".to_string(),
+                imported_name: "A".to_string(),
+                exported_name: "A".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::new(9, 10),
+                statement_span: oxc_span::Span::new(0, 34),
+                source_span: oxc_span::Span::new(19, 33),
+            },
+            target: ResolveResult::Unresolvable("./missing.js".to_string()),
+        }],
+        ..ResolvedModule::default()
+    }];
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let offsets = vec![0];
+    let mut line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    line_offsets.insert(FileId(0), offsets.as_slice());
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert_eq!(unresolved.len(), 1);
+    assert_eq!(unresolved[0].line, 1);
+    assert_eq!(
+        unresolved[0].col, 9,
+        "single-line statements keep the declaration column"
+    );
+    assert_eq!(
+        unresolved[0].specifier_col, 19,
+        "the specifier column points at the source literal"
     );
 }
 

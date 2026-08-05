@@ -127,6 +127,8 @@ impl TestGraphFixture {
                     exported_name: re_export.exported_name,
                     is_type_only: re_export.is_type_only,
                     span: re_export.span,
+                    statement_span: Span::new(0, 0),
+                    source_span: Span::new(0, 0),
                 },
                 target: ResolveResult::InternalModule(re_export.source_file),
             })

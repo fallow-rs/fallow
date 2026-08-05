@@ -1636,7 +1636,14 @@ fn unresolved_spec_is_silenced(
         .any(|matcher| matcher.is_match(spec) || matcher.is_match(normalized_spec))
 }
 
-/// Resolve the declaration `(line, col)` plus the specifier column for an edge.
+/// Resolve the anchor `(line, col)` plus the specifier column for an edge.
+///
+/// The finding anchors on the source specifier (the string the user must
+/// edit) when the extractor recorded its span. A multi-line statement
+/// extracts one edge per binding line, so anchoring on the declaration span
+/// would point at an arbitrary binding instead of the specifier. When the
+/// specifier sits on the declaration line, the declaration column is kept so
+/// single-line reporting is unchanged.
 fn unresolved_import_location(
     edge: &crate::resolve::ResolvedSourceEdge<'_>,
     file_id: FileId,
@@ -1645,14 +1652,44 @@ fn unresolved_import_location(
     let (line, col) = byte_offset_to_line_col(line_offsets_by_file, file_id, edge.span().start);
 
     let source_span = edge.source_span();
-    let specifier_col = if source_span.end > source_span.start {
-        let (_, sc) = byte_offset_to_line_col(line_offsets_by_file, file_id, source_span.start);
-        sc
+    if source_span.end > source_span.start {
+        let (specifier_line, specifier_col) =
+            byte_offset_to_line_col(line_offsets_by_file, file_id, source_span.start);
+        if specifier_line == line {
+            (line, col, specifier_col)
+        } else {
+            (specifier_line, specifier_col, specifier_col)
+        }
     } else {
-        col
+        (line, col, col)
+    }
+}
+
+/// Check whether a suppression covers the statement that owns this edge.
+///
+/// The finding anchors on the specifier line, but a suppression comment
+/// above the statement targets the statement's first line, and pre-anchor
+/// suppressions may sit on any binding line in between. Probing every
+/// statement line keeps all three placements working and consumes the
+/// matched suppression so it is not reported stale.
+fn unresolved_import_suppressed(
+    suppressions: &SuppressionContext<'_>,
+    edge: &crate::resolve::ResolvedSourceEdge<'_>,
+    file_id: FileId,
+    anchor_line: u32,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> bool {
+    let statement_span = edge.statement_span();
+    let statement_line = if statement_span.end > statement_span.start {
+        byte_offset_to_line_col(line_offsets_by_file, file_id, statement_span.start).0
+    } else {
+        byte_offset_to_line_col(line_offsets_by_file, file_id, edge.span().start).0
     };
 
-    (line, col, specifier_col)
+    let first = statement_line.min(anchor_line);
+    let last = statement_line.max(anchor_line);
+    (first..=last)
+        .any(|line| suppressions.is_suppressed(file_id, line, IssueKind::UnresolvedImport))
 }
 
 /// Find imports that could not be resolved.
@@ -1680,8 +1717,10 @@ pub fn find_unresolved_imports(
     for module in resolved_modules {
         // A multi-binding re-export statement yields one edge per binding, all
         // with the same unresolvable specifier. Report each specifier once per
-        // module (the first non-suppressed edge, keeping source order) instead
-        // of once per binding.
+        // module, anchored on the first edge in source order. The dedup key is
+        // claimed before the suppression check so one suppression on the
+        // anchored statement retires the whole specifier instead of moving the
+        // finding to the next binding or statement.
         let mut reported_specs: FxHashSet<String> = FxHashSet::default();
         for edge in module.all_resolved_source_edges() {
             let crate::resolve::ResolveResult::Unresolvable(spec) = edge.target() else {
@@ -1695,10 +1734,16 @@ pub fn find_unresolved_imports(
             }
             let (line, col, specifier_col) =
                 unresolved_import_location(&edge, module.file_id, line_offsets_by_file);
-            if suppressions.is_suppressed(module.file_id, line, IssueKind::UnresolvedImport) {
+            reported_specs.insert(spec.clone());
+            if unresolved_import_suppressed(
+                suppressions,
+                &edge,
+                module.file_id,
+                line,
+                line_offsets_by_file,
+            ) {
                 continue;
             }
-            reported_specs.insert(spec.clone());
             unresolved.push(UnresolvedImport {
                 path: module.path.clone(),
                 specifier: spec.clone(),

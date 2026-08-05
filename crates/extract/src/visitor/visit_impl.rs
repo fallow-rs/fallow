@@ -1377,6 +1377,8 @@ impl<'a> ModuleInfoExtractor {
                 exported_name: spec.exported.name().to_string(),
                 is_type_only: is_type_only || spec.export_kind.is_type(),
                 span: spec.span,
+                statement_span: decl.span,
+                source_span: source.span,
             });
         }
     }
@@ -2315,6 +2317,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             exported_name,
             is_type_only: decl.export_kind.is_type(),
             span: decl.span,
+            statement_span: decl.span,
+            source_span: decl.source.span,
         });
 
         walk::walk_export_all_declaration(self, decl);
