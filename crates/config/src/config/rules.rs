@@ -64,25 +64,39 @@ impl std::str::FromStr for Severity {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct RulesConfig {
+    /// A file reachable from no entry point. Defaults to `error`.
     #[serde(default, alias = "unused-file")]
     pub unused_files: Severity,
+    /// An exported symbol no other module imports. Defaults to `error`.
     #[serde(default, alias = "unused-export")]
     pub unused_exports: Severity,
+    /// An exported type no other module uses. Defaults to `error`.
     #[serde(default, alias = "unused-type")]
     pub unused_types: Severity,
+    /// An exported signature referencing a same-file private type. Opt-in;
+    /// defaults to `off`.
     #[serde(default = "Severity::default_off", alias = "private-type-leak")]
     pub private_type_leaks: Severity,
+    /// A declared `dependencies` entry never observed used. Defaults to
+    /// `error`.
     #[serde(default, alias = "unused-dependency")]
     pub unused_dependencies: Severity,
+    /// A declared `devDependencies` entry never observed used. Defaults to
+    /// `warn`; production mode forces it to `off`.
     #[serde(default = "Severity::default_warn", alias = "unused-dev-dependency")]
     pub unused_dev_dependencies: Severity,
+    /// A declared `optionalDependencies` entry never observed used. Defaults
+    /// to `warn`; production mode forces it to `off`.
     #[serde(
         default = "Severity::default_warn",
         alias = "unused-optional-dependency"
     )]
     pub unused_optional_dependencies: Severity,
+    /// An enum member read nowhere in the project. Defaults to `error`.
     #[serde(default, alias = "unused-enum-member")]
     pub unused_enum_members: Severity,
+    /// A class member used nowhere; `usedClassMembers` and decorator
+    /// exemptions carve out framework-invoked members. Defaults to `error`.
     #[serde(default, alias = "unused-class-member")]
     pub unused_class_members: Severity,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
@@ -212,23 +226,39 @@ pub struct RulesConfig {
     /// to `warn` (verdict-neutral). Set to `error` to gate, or `off` to silence.
     #[serde(default = "Severity::default_warn", alias = "css-broken-reference")]
     pub css_broken_reference: Severity,
+    /// An import specifier that resolves to no file or package. Defaults to
+    /// `error`.
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
+    /// An imported package not declared in any relevant `package.json`.
+    /// Defaults to `error`.
     #[serde(default, alias = "unlisted-dependency")]
     pub unlisted_dependencies: Severity,
+    /// The same export name provided by multiple modules; `ignoreExports`
+    /// excludes intentional barrel re-exports. Defaults to `error`.
     #[serde(default, alias = "duplicate-export")]
     pub duplicate_exports: Severity,
+    /// A production dependency imported only via type-only imports (a
+    /// `devDependencies` candidate). Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "type-only-dependency")]
     pub type_only_dependencies: Severity,
+    /// A production dependency imported only by test files. Defaults to
+    /// `warn`.
     #[serde(default = "Severity::default_warn", alias = "test-only-dependency")]
     pub test_only_dependencies: Severity,
+    /// A `devDependencies` entry imported by production code, which a
+    /// production-only install would omit and break at runtime. Defaults to
+    /// `warn`.
     #[serde(
         default = "Severity::default_warn",
         alias = "dev-dependency-in-production"
     )]
     pub dev_dependencies_in_production: Severity,
+    /// A circular import chain between modules. Defaults to `error`.
     #[serde(default, alias = "circular-dependency")]
     pub circular_dependencies: Severity,
+    /// A cycle or self-loop in the re-export subgraph (barrel files
+    /// re-exporting from each other in a loop). Defaults to `warn`.
     #[serde(
         default = "Severity::default_warn",
         alias = "re-export-cycles",
@@ -236,29 +266,47 @@ pub struct RulesConfig {
         alias = "reexport-cycles"
     )]
     pub re_export_cycle: Severity,
+    /// An import crossing a forbidden architecture-boundary edge declared in
+    /// the `boundaries` config. Defaults to `error`.
     #[serde(default, alias = "boundary-violations")]
     pub boundary_violation: Severity,
+    /// A runtime file or export with no test dependency path. Opt-in;
+    /// defaults to `off`.
     #[serde(default = "Severity::default_off", alias = "coverage-gap")]
     pub coverage_gaps: Severity,
+    /// A detected feature-flag pattern (tuned via the `flags` config).
+    /// Opt-in; defaults to `off`.
     #[serde(default = "Severity::default_off", alias = "feature-flag")]
     pub feature_flags: Severity,
+    /// A `fallow-ignore` comment or `@expected-unused` tag that no longer
+    /// matches any issue. Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "stale-suppression")]
     pub stale_suppressions: Severity,
     /// Opt-in suppression hygiene rule: when enabled, every `fallow-ignore-*`
     /// comment and `@expected-unused` tag must carry a `-- <reason>` suffix.
     #[serde(default = "Severity::default_off", alias = "suppression-reason")]
     pub require_suppression_reason: Severity,
+    /// A `pnpm-workspace.yaml` catalog entry referenced by no workspace
+    /// package. Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "unused-catalog-entry")]
     pub unused_catalog_entries: Severity,
+    /// A named pnpm catalog group declaring no entries. Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "empty-catalog-group")]
     pub empty_catalog_groups: Severity,
+    /// A workspace `package.json` `catalog:` / `catalog:<name>` reference
+    /// pointing at a catalog that does not declare the consumed package.
+    /// Defaults to `error`; suppressible only via `ignoreCatalogReferences`.
     #[serde(default, alias = "unresolved-catalog-reference")]
     pub unresolved_catalog_references: Severity,
+    /// A pnpm `overrides:` / `pnpm.overrides` entry whose target package no
+    /// workspace `package.json` declares. Defaults to `warn`.
     #[serde(
         default = "Severity::default_warn",
         alias = "unused-dependency-override"
     )]
     pub unused_dependency_overrides: Severity,
+    /// A pnpm `overrides:` / `pnpm.overrides` entry whose key or value cannot
+    /// be parsed into a valid pnpm shape. Defaults to `error`.
     #[serde(default, alias = "misconfigured-dependency-override")]
     pub misconfigured_dependency_overrides: Severity,
     /// Opt-in (default off): a `"use client"` file that transitively imports a
@@ -577,210 +625,245 @@ pub fn is_opt_in_kind(kind: IssueKind) -> bool {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct PartialRulesConfig {
+    /// Optional override for [`RulesConfig::unused_files`].
     #[serde(
         default,
         alias = "unused-file",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_files: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_exports`].
     #[serde(
         default,
         alias = "unused-export",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_exports: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_types`].
     #[serde(
         default,
         alias = "unused-type",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_types: Option<Severity>,
+    /// Optional override for [`RulesConfig::private_type_leaks`].
     #[serde(
         default,
         alias = "private-type-leak",
         skip_serializing_if = "Option::is_none"
     )]
     pub private_type_leaks: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_dependencies`].
     #[serde(
         default,
         alias = "unused-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_dev_dependencies`].
     #[serde(
         default,
         alias = "unused-dev-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_dev_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_optional_dependencies`].
     #[serde(
         default,
         alias = "unused-optional-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_optional_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_enum_members`].
     #[serde(
         default,
         alias = "unused-enum-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_enum_members: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_class_members`].
     #[serde(
         default,
         alias = "unused-class-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_class_members: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_store_members`].
     #[serde(
         default,
         alias = "unused-store-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_store_members: Option<Severity>,
+    /// Optional override for [`RulesConfig::unprovided_injects`].
     #[serde(
         default,
         alias = "unprovided-inject",
         skip_serializing_if = "Option::is_none"
     )]
     pub unprovided_injects: Option<Severity>,
+    /// Optional override for [`RulesConfig::unrendered_components`].
     #[serde(
         default,
         alias = "unrendered-component",
         skip_serializing_if = "Option::is_none"
     )]
     pub unrendered_components: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_component_props`].
     #[serde(
         default,
         alias = "unused-component-prop",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_props: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_component_emits`].
     #[serde(
         default,
         alias = "unused-component-emit",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_emits: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_component_inputs`].
     #[serde(
         default,
         alias = "unused-component-input",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_inputs: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_component_outputs`].
     #[serde(
         default,
         alias = "unused-component-output",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_outputs: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_svelte_events`].
     #[serde(
         default,
         alias = "unused-svelte-event",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_svelte_events: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_server_actions`].
     #[serde(
         default,
         alias = "unused-server-action",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_server_actions: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_load_data_keys`].
     #[serde(
         default,
         alias = "unused-load-data-key",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_load_data_keys: Option<Severity>,
+    /// Optional override for [`RulesConfig::prop_drilling`].
     #[serde(
         default,
         alias = "prop-drilling",
         skip_serializing_if = "Option::is_none"
     )]
     pub prop_drilling: Option<Severity>,
+    /// Optional override for [`RulesConfig::thin_wrapper`].
     #[serde(
         default,
         alias = "thin-wrapper",
         skip_serializing_if = "Option::is_none"
     )]
     pub thin_wrapper: Option<Severity>,
+    /// Optional override for [`RulesConfig::duplicate_prop_shape`].
     #[serde(
         default,
         alias = "duplicate-prop-shape",
         skip_serializing_if = "Option::is_none"
     )]
     pub duplicate_prop_shape: Option<Severity>,
+    /// Optional override for [`RulesConfig::css_token_drift`].
     #[serde(
         default,
         alias = "css-token-drift",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_token_drift: Option<Severity>,
+    /// Optional override for [`RulesConfig::css_duplicate_block`].
     #[serde(
         default,
         alias = "css-duplicate-block",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_duplicate_block: Option<Severity>,
+    /// Optional override for [`RulesConfig::css_selector_complexity`].
     #[serde(
         default,
         alias = "css-selector-complexity",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_selector_complexity: Option<Severity>,
+    /// Optional override for [`RulesConfig::css_dead_surface`].
     #[serde(
         default,
         alias = "css-dead-surface",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_dead_surface: Option<Severity>,
+    /// Optional override for [`RulesConfig::css_broken_reference`].
     #[serde(
         default,
         alias = "css-broken-reference",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_broken_reference: Option<Severity>,
+    /// Optional override for [`RulesConfig::unresolved_imports`].
     #[serde(
         default,
         alias = "unresolved-import",
         skip_serializing_if = "Option::is_none"
     )]
     pub unresolved_imports: Option<Severity>,
+    /// Optional override for [`RulesConfig::unlisted_dependencies`].
     #[serde(
         default,
         alias = "unlisted-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unlisted_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::duplicate_exports`].
     #[serde(
         default,
         alias = "duplicate-export",
         skip_serializing_if = "Option::is_none"
     )]
     pub duplicate_exports: Option<Severity>,
+    /// Optional override for [`RulesConfig::type_only_dependencies`].
     #[serde(
         default,
         alias = "type-only-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub type_only_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::test_only_dependencies`].
     #[serde(
         default,
         alias = "test-only-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub test_only_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::dev_dependencies_in_production`].
     #[serde(
         default,
         alias = "dev-dependency-in-production",
         skip_serializing_if = "Option::is_none"
     )]
     pub dev_dependencies_in_production: Option<Severity>,
+    /// Optional override for [`RulesConfig::circular_dependencies`].
     #[serde(
         default,
         alias = "circular-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub circular_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::re_export_cycle`].
     #[serde(
         default,
         alias = "re-export-cycles",
@@ -789,100 +872,118 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub re_export_cycle: Option<Severity>,
+    /// Optional override for [`RulesConfig::boundary_violation`].
     #[serde(
         default,
         alias = "boundary-violations",
         skip_serializing_if = "Option::is_none"
     )]
     pub boundary_violation: Option<Severity>,
+    /// Optional override for [`RulesConfig::coverage_gaps`].
     #[serde(
         default,
         alias = "coverage-gap",
         skip_serializing_if = "Option::is_none"
     )]
     pub coverage_gaps: Option<Severity>,
+    /// Optional override for [`RulesConfig::feature_flags`].
     #[serde(
         default,
         alias = "feature-flag",
         skip_serializing_if = "Option::is_none"
     )]
     pub feature_flags: Option<Severity>,
+    /// Optional override for [`RulesConfig::stale_suppressions`].
     #[serde(
         default,
         alias = "stale-suppression",
         skip_serializing_if = "Option::is_none"
     )]
     pub stale_suppressions: Option<Severity>,
+    /// Optional override for [`RulesConfig::require_suppression_reason`].
     #[serde(
         default,
         alias = "suppression-reason",
         skip_serializing_if = "Option::is_none"
     )]
     pub require_suppression_reason: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_catalog_entries`].
     #[serde(
         default,
         alias = "unused-catalog-entry",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_catalog_entries: Option<Severity>,
+    /// Optional override for [`RulesConfig::empty_catalog_groups`].
     #[serde(
         default,
         alias = "empty-catalog-group",
         skip_serializing_if = "Option::is_none"
     )]
     pub empty_catalog_groups: Option<Severity>,
+    /// Optional override for [`RulesConfig::unresolved_catalog_references`].
     #[serde(
         default,
         alias = "unresolved-catalog-reference",
         skip_serializing_if = "Option::is_none"
     )]
     pub unresolved_catalog_references: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_dependency_overrides`].
     #[serde(
         default,
         alias = "unused-dependency-override",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_dependency_overrides: Option<Severity>,
+    /// Optional override for [`RulesConfig::misconfigured_dependency_overrides`].
     #[serde(
         default,
         alias = "misconfigured-dependency-override",
         skip_serializing_if = "Option::is_none"
     )]
     pub misconfigured_dependency_overrides: Option<Severity>,
+    /// Optional override for [`RulesConfig::security_client_server_leak`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_client_server_leak: Option<Severity>,
+    /// Optional override for [`RulesConfig::security_sink`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_sink: Option<Severity>,
+    /// Optional override for [`RulesConfig::policy_violation`].
     #[serde(
         default,
         alias = "policy-violations",
         skip_serializing_if = "Option::is_none"
     )]
     pub policy_violation: Option<Severity>,
+    /// Optional override for [`RulesConfig::invalid_client_export`].
     #[serde(
         default,
         alias = "invalid-client-exports",
         skip_serializing_if = "Option::is_none"
     )]
     pub invalid_client_export: Option<Severity>,
+    /// Optional override for [`RulesConfig::mixed_client_server_barrel`].
     #[serde(
         default,
         alias = "mixed-client-server-barrels",
         skip_serializing_if = "Option::is_none"
     )]
     pub mixed_client_server_barrel: Option<Severity>,
+    /// Optional override for [`RulesConfig::misplaced_directive`].
     #[serde(
         default,
         alias = "misplaced-directives",
         skip_serializing_if = "Option::is_none"
     )]
     pub misplaced_directive: Option<Severity>,
+    /// Optional override for [`RulesConfig::route_collision`].
     #[serde(
         default,
         alias = "route-collisions",
         skip_serializing_if = "Option::is_none"
     )]
     pub route_collision: Option<Severity>,
+    /// Optional override for [`RulesConfig::dynamic_segment_name_conflict`].
     #[serde(
         default,
         alias = "dynamic-segment-name-conflicts",

@@ -7,6 +7,7 @@
 //! `package.json` discovery, declarative external plugin definitions, rule
 //! packs, and the in-place config editing used by `fallow fix`.
 
+#![warn(missing_docs)]
 #![cfg_attr(
     test,
     allow(
