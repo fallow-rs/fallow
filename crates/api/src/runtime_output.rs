@@ -19,6 +19,7 @@ use rustc_hash::FxHashSet;
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload, DuplicationGroup};
 
+/// Schema version stamped into health JSON envelopes built through this API.
 pub const HEALTH_SCHEMA_VERSION: u32 = 7;
 
 /// Concrete dead-code output contract returned by typed programmatic runs.
@@ -69,30 +70,51 @@ pub type TraceCloneOutput = fallow_types::trace::CloneTrace;
 
 /// Inputs for serializing health JSON output through the API boundary.
 pub struct HealthJsonReportInput<'a> {
+    /// Typed health report to serialize.
     pub report: HealthReport,
+    /// Project root; its prefix is stripped from every path in the output.
     pub root: &'a Path,
+    /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: std::time::Duration,
+    /// Emit explain metadata under `meta`.
     pub explain: bool,
+    /// Type-aware pass metadata merged into `meta` even when `explain` is
+    /// off.
     pub type_aware: Option<fallow_types::envelope::TypeAwareMeta>,
+    /// Grouping axis recorded as `grouped_by`; `None` when ungrouped.
     pub grouped_by: Option<GroupByMode>,
+    /// Precomputed group buckets matching `grouped_by`.
     pub groups: Option<Vec<HealthGroup>>,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 
 /// Typed programmatic combined output before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct CombinedProgrammaticOutput {
+    /// Dead-code section; `None` when the run skipped it.
     pub dead_code: Option<DeadCodeProgrammaticOutput>,
+    /// Duplication section; `None` when the run skipped it.
     pub duplication: Option<DuplicationProgrammaticOutput>,
+    /// Health section; `None` when the run skipped it.
     pub health: Option<HealthProgrammaticOutput>,
+    /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
+    /// Total wall time across sections, emitted as the root `elapsed_ms`.
     pub elapsed: std::time::Duration,
+    /// Emit per-section explain metadata when serialized.
     pub explain: bool,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
@@ -103,10 +125,16 @@ pub struct CombinedProgrammaticOutput {
 /// their JSON boundary.
 #[derive(Debug, Clone)]
 pub struct DeadCodeProgrammaticOutput {
+    /// Typed dead-code envelope produced by the run.
     pub output: DeadCodeOutput,
+    /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
+    /// Whether duplicate-export findings can be auto-fixed through config;
+    /// propagated onto their fix actions when serialized.
     pub config_fixable: bool,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
@@ -131,9 +159,13 @@ impl DeadCodeProgrammaticOutput {
 /// generic dead-code run.
 #[derive(Debug, Clone)]
 pub struct CircularDependenciesProgrammaticOutput {
+    /// Typed check envelope scoped to circular-dependency findings.
     pub output: CircularDependenciesOutput,
+    /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
@@ -168,9 +200,13 @@ impl From<DeadCodeProgrammaticOutput> for CircularDependenciesProgrammaticOutput
 /// while preserving the stable dead-code/check JSON envelope.
 #[derive(Debug, Clone)]
 pub struct BoundaryViolationsProgrammaticOutput {
+    /// Typed check envelope scoped to boundary-family findings.
     pub output: BoundaryViolationsOutput,
+    /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
@@ -214,10 +250,16 @@ impl From<DeadCodeProgrammaticOutput> for BoundaryViolationsProgrammaticOutput {
 /// Typed programmatic duplication output before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct DuplicationProgrammaticOutput {
+    /// Typed duplication envelope produced by the run.
     pub output: DuplicationOutput,
+    /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
+    /// Maximum allowed duplication percentage from the resolved config;
+    /// 0 disables the percentage gate.
     pub threshold: f64,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
@@ -250,8 +292,11 @@ impl DuplicationProgrammaticOutput {
 /// Typed programmatic feature-flag output before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct FeatureFlagsProgrammaticOutput {
+    /// Typed feature-flag envelope produced by the run.
     pub output: FeatureFlagsOutput,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
@@ -273,6 +318,7 @@ impl FeatureFlagsProgrammaticOutput {
 /// either an export trace or (fallback) a class / enum / store member trace.
 #[derive(Debug)]
 pub struct TraceExportProgrammaticOutput {
+    /// Typed export-or-member trace produced by the run.
     pub output: TraceExportTargetOutput,
 }
 
@@ -306,6 +352,7 @@ impl TraceExportProgrammaticOutput {
 /// Typed programmatic file-trace output before JSON serialization.
 #[derive(Debug)]
 pub struct TraceFileProgrammaticOutput {
+    /// Typed file trace produced by the run.
     pub output: TraceFileOutput,
 }
 
@@ -320,6 +367,7 @@ impl TraceFileProgrammaticOutput {
 /// Typed programmatic dependency-trace output before JSON serialization.
 #[derive(Debug)]
 pub struct TraceDependencyProgrammaticOutput {
+    /// Typed dependency trace produced by the run.
     pub output: TraceDependencyOutput,
 }
 
@@ -334,6 +382,7 @@ impl TraceDependencyProgrammaticOutput {
 /// Typed programmatic duplicate-code trace output before JSON serialization.
 #[derive(Debug)]
 pub struct TraceCloneProgrammaticOutput {
+    /// Typed clone trace produced by the run.
     pub output: TraceCloneOutput,
 }
 
@@ -348,52 +397,86 @@ impl TraceCloneProgrammaticOutput {
 /// Typed programmatic health / complexity output before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct HealthProgrammaticOutput {
+    /// Typed health report produced by the run.
     pub report: HealthReport,
+    /// Grouped findings when a grouping mode was requested.
     pub grouping: Option<HealthGrouping>,
+    /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
+    /// Analysis wall time, emitted as `elapsed_ms` when serialized.
     pub elapsed: std::time::Duration,
+    /// Emit explain metadata when serialized.
     pub explain: bool,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
 /// Typed programmatic audit output before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct AuditProgrammaticOutput {
+    /// Overall audit verdict.
     pub verdict: AuditVerdict,
+    /// Per-category issue counts.
     pub summary: AuditSummary,
+    /// New-vs-inherited counts and the configured gate.
     pub attribution: AuditAttribution,
+    /// Number of changed files the audit analyzed.
     pub changed_files_count: usize,
+    /// Git revision the audit compared against.
     pub base_ref: String,
+    /// Human-readable description of how the base was chosen.
     pub base_description: Option<String>,
+    /// Commit SHA of the analyzed head, when known.
     pub head_sha: Option<String>,
+    /// Audit wall time, emitted as `elapsed_ms` when serialized.
     pub elapsed: std::time::Duration,
+    /// `Some(true)` when the base snapshot was skipped, so no attribution
+    /// ran.
     pub base_snapshot_skipped: Option<bool>,
+    /// Attribution key sets computed from the base run; present only when a
+    /// base snapshot was analyzed.
     pub base_snapshot: Option<AuditProgrammaticKeySnapshot>,
+    /// Dead-code section; `None` when the audit skipped it.
     pub dead_code: Option<DeadCodeProgrammaticOutput>,
+    /// Duplication section; `None` when the audit skipped it.
     pub duplication: Option<DuplicationProgrammaticOutput>,
+    /// Complexity (health) section; `None` when the audit skipped it.
     pub complexity: Option<HealthProgrammaticOutput>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
 /// Stable audit key snapshot used to classify introduced vs inherited findings.
 #[derive(Debug, Clone, Default)]
 pub struct AuditProgrammaticKeySnapshot {
+    /// Base-run dead-code attribution keys.
     pub dead_code: FxHashSet<String>,
+    /// Base-run complexity attribution keys.
     pub health: FxHashSet<String>,
+    /// Base-run duplication group attribution keys.
     pub dupes: FxHashSet<String>,
 }
 
 /// Typed programmatic decision-surface output before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct DecisionSurfaceProgrammaticOutput {
+    /// Typed decision surface produced by the run.
     pub surface: fallow_output::DecisionSurface,
+    /// Analysis wall time, emitted as `elapsed_ms` when serialized.
     pub elapsed: std::time::Duration,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 

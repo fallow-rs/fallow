@@ -21,28 +21,41 @@ type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 /// Options for MCP/project metadata listing through the programmatic API.
 #[derive(Debug, Clone, Default)]
 pub struct ProjectInfoOptions {
+    /// Shared analysis options: root, config path, and cache behavior.
     pub analysis: AnalysisOptions,
+    /// Include the resolved entry points in the output.
     pub entry_points: bool,
+    /// Include the discovered file list in the output.
     pub files: bool,
+    /// Include the detected plugin names in the output.
     pub plugins: bool,
+    /// Include the boundaries listing in the output.
     pub boundaries: bool,
 }
 
 /// Options for `fallow list --boundaries` through the programmatic API.
 #[derive(Debug, Clone, Default)]
 pub struct ListBoundariesOptions {
+    /// Shared analysis options: root, config path, and cache behavior.
     pub analysis: AnalysisOptions,
 }
 
 /// Typed output for project metadata listing before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct ProjectInfoProgrammaticOutput {
+    /// Detected plugin names; `None` when the section was not requested.
     pub plugins: Option<Vec<String>>,
+    /// Discovered file paths; `None` when the section was not requested.
     pub files: Option<Vec<String>>,
+    /// Resolved entry points; `None` when the section was not requested.
     pub entry_points: Option<Vec<ListEntryPointOutput>>,
+    /// Boundaries listing; `None` when the section was not requested.
     pub boundaries: Option<BoundariesListing>,
+    /// Workspace listing; `None` when the section was not requested.
     pub workspaces: Option<WorkspacesOutput<fallow_config::WorkspaceDiagnostic>>,
+    /// Which list envelope shape wraps the serialized body.
     pub envelope: ListJsonEnvelope,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
 }
 
@@ -75,7 +88,9 @@ pub fn serialize_project_info_programmatic_json(
 /// Typed output for `fallow list --boundaries` before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct ListBoundariesProgrammaticOutput {
+    /// Typed boundaries listing produced by the run.
     pub boundaries: BoundariesListing,
+    /// Whether the serialized root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
 }
 
@@ -111,40 +126,64 @@ pub fn serialize_list_boundaries_programmatic_json(
 /// Owned boundary listing data shared by CLI and programmatic renderers.
 #[derive(Debug, Clone)]
 pub struct BoundaryData {
+    /// Configured zones with per-zone matched file counts.
     pub zones: Vec<ZoneInfo>,
+    /// Configured allow rules between zones.
     pub rules: Vec<RuleInfo>,
+    /// Logical parent/child groups with derived file-count totals.
     pub logical_groups: Vec<LogicalGroupInfo>,
+    /// Whether the resolved config declares no boundaries at all.
     pub is_empty: bool,
 }
 
+/// One configured boundary zone with its matched file count.
 #[derive(Debug, Clone)]
 pub struct ZoneInfo {
+    /// Zone name from the config.
     pub name: String,
+    /// Glob patterns that assign files to the zone.
     pub patterns: Vec<String>,
+    /// Number of discovered files matching the zone.
     pub file_count: usize,
 }
 
+/// One configured boundary allow rule.
 #[derive(Debug, Clone)]
 pub struct RuleInfo {
+    /// Source zone the rule applies to.
     pub from: String,
+    /// Zone names the source zone may import from.
     pub allow: Vec<String>,
 }
 
 /// View-model mirror of [`LogicalGroup`] with derived file-count totals.
 #[derive(Debug, Clone)]
 pub struct LogicalGroupInfo {
+    /// Parent zone name.
     pub name: String,
+    /// Child zone names.
     pub children: Vec<String>,
+    /// Authored `autoDiscover` paths.
     pub auto_discover: Vec<String>,
+    /// Authored parent rule, if any.
     pub authored_rule: Option<AuthoredRule>,
+    /// Fallback zone name, if the parent kept patterns.
     pub fallback_zone: Option<String>,
+    /// Original `zones[]` index.
     pub source_zone_index: usize,
+    /// Discovery status.
     pub status: LogicalGroupStatus,
+    /// Total files across children plus the fallback zone.
     pub file_count: usize,
+    /// Files matched by the child zones only.
     pub child_file_count: usize,
+    /// Files matched by the fallback zone only.
     pub fallback_file_count: usize,
+    /// Merged duplicate parent indices.
     pub merged_from: Option<Vec<usize>>,
+    /// Authored parent root, if any.
     pub original_zone_root: Option<String>,
+    /// Child-to-source zone indexes.
     pub child_source_indices: Vec<usize>,
 }
 

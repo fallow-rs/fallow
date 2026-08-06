@@ -147,9 +147,13 @@ pub(super) fn health_may_consume_duplication_report(options: &ComplexityOptions)
 /// Concrete runners supply environment and project facts while the stable
 /// command strings and output ordering remain owned by `fallow-output`.
 pub struct ProgrammaticHealthNextStepFacts {
+    /// False when `FALLOW_SUGGESTIONS=off`; suppresses all steps.
     pub suggestions_enabled: bool,
+    /// Offer the guided-setup pointer because no fallow config exists yet.
     pub offer_setup: bool,
+    /// Local impact digest counters, when a digest is available.
     pub impact_digest: Option<fallow_output::ImpactDigestCounts>,
+    /// Offer `fallow audit` because the working tree has changed files.
     pub audit_changed: bool,
 }
 
@@ -158,9 +162,13 @@ pub struct ProgrammaticHealthNextStepFacts {
 /// The engine owns execution, but this type is the public runner contract so
 /// embedders do not have to construct or depend on engine result structs.
 pub struct ProgrammaticHealthAnalysis {
+    /// Typed health report produced by the engine.
     pub report: HealthReport,
+    /// Grouped findings when a grouping mode was requested.
     pub grouping: Option<HealthGrouping>,
+    /// Resolved analysis root the report paths are relative to.
     pub root: PathBuf,
+    /// Analysis wall time.
     pub elapsed: std::time::Duration,
 }
 
@@ -182,9 +190,13 @@ impl ProgrammaticHealthAnalysis {
 /// Runtime-only presentation probes stay explicit so the API boundary, not the
 /// concrete runner, owns the final programmatic report assembly.
 pub struct ProgrammaticHealthRun {
+    /// Engine analysis payload.
     pub analysis: ProgrammaticHealthAnalysis,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Environment and project facts that drive next-step suggestions.
     pub next_step_facts: ProgrammaticHealthNextStepFacts,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
 
