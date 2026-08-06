@@ -10,10 +10,34 @@
 //! scanners (sibling modules) own only the control-flow tokenization and feed
 //! their bound expressions through [`TemplateComplexity::add_expression`].
 
+use fallow_types::extract::{ComplexityContributionKind, ComplexityMetric};
+
 /// Internal scanner error. Carries no data: any malformed-template path
 /// just falls through and the caller drops the synthetic finding.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ScanError;
+
+/// Accumulator state captured before a fallible expression scan, so a scan that
+/// fails partway can be undone.
+#[derive(Debug, Clone, Copy)]
+struct Checkpoint {
+    cyclomatic: u16,
+    cognitive: u16,
+    first_offset: Option<usize>,
+    contributions: usize,
+}
+
+/// One recorded increment, still anchored at a byte offset into the template
+/// source. [`super::build_template_complexity`] resolves the offset to
+/// line/column once, against the original (unmasked) file.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RawContribution {
+    pub(super) offset: usize,
+    pub(super) metric: ComplexityMetric,
+    pub(super) kind: ComplexityContributionKind,
+    pub(super) weight: u16,
+    pub(super) nesting: u16,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LogicalOperator {
@@ -30,6 +54,7 @@ pub(super) struct TemplateComplexity {
     pub(super) cyclomatic: u16,
     pub(super) cognitive: u16,
     pub(super) first_offset: Option<usize>,
+    pub(super) contributions: Vec<RawContribution>,
 }
 
 impl Default for TemplateComplexity {
@@ -38,14 +63,61 @@ impl Default for TemplateComplexity {
             cyclomatic: 1,
             cognitive: 0,
             first_offset: None,
+            contributions: Vec::new(),
         }
     }
 }
 
 impl TemplateComplexity {
+    /// Record a cyclomatic `+1` at `offset`. Every cyclomatic increment in this
+    /// module goes through here so the breakdown can never drift from the
+    /// aggregate, mirroring the discipline in `crate::complexity`.
+    pub(super) fn inc_cyclomatic(&mut self, offset: usize, kind: ComplexityContributionKind) {
+        self.contributions.push(RawContribution {
+            offset,
+            metric: ComplexityMetric::Cyclomatic,
+            kind,
+            weight: 1,
+            nesting: 0,
+        });
+        self.cyclomatic = self.cyclomatic.saturating_add(1);
+    }
+
+    /// Record a cognitive increment of `1 + nesting` at `offset`.
+    pub(super) fn inc_cognitive(
+        &mut self,
+        offset: usize,
+        kind: ComplexityContributionKind,
+        nesting: u16,
+    ) {
+        let weight = 1_u16.saturating_add(nesting);
+        self.contributions.push(RawContribution {
+            offset,
+            metric: ComplexityMetric::Cognitive,
+            kind,
+            weight,
+            nesting,
+        });
+        self.cognitive = self.cognitive.saturating_add(weight);
+    }
+
+    /// Record a cognitive `+1` at `offset` with no nesting penalty (an `else` /
+    /// `v-else` continuation, an `else if` cascade).
+    pub(super) fn inc_cognitive_flat(&mut self, offset: usize, kind: ComplexityContributionKind) {
+        self.inc_cognitive(offset, kind, 0);
+    }
+
     /// Score one bound JS expression and fold its metrics in. `offset` is the
     /// byte offset of `source` within the original template, used to anchor the
-    /// synthetic finding at the first non-trivial expression.
+    /// synthetic finding at the first non-trivial expression and every
+    /// contribution recorded inside the expression.
+    ///
+    /// All-or-nothing: the scan records increments as it walks, so a malformed
+    /// expression is rolled back before returning. Most callers propagate the
+    /// error and drop the whole template, but the Astro scanner deliberately
+    /// swallows it (a benign non-boolean markup expression need not tokenize as
+    /// one), and half-scored metrics there would invent a synthetic finding for
+    /// a template that has none.
     pub(super) fn add_expression(
         &mut self,
         source: &str,
@@ -55,19 +127,35 @@ impl TemplateComplexity {
         let Some(trim_start) = source.find(|c: char| !c.is_whitespace()) else {
             return Ok(());
         };
+        let checkpoint = Checkpoint {
+            cyclomatic: self.cyclomatic,
+            cognitive: self.cognitive,
+            first_offset: self.first_offset,
+            contributions: self.contributions.len(),
+        };
         self.first_offset.get_or_insert(offset + trim_start);
-        let metrics = compute_expression_metrics(&source[trim_start..], nesting, 0)?;
-        self.cyclomatic = self.cyclomatic.saturating_add(metrics.cyclomatic);
-        self.cognitive = self.cognitive.saturating_add(metrics.cognitive);
-        Ok(())
+        let result = self.scan_expression(&source[trim_start..], offset + trim_start, nesting, 0);
+        if result.is_err() {
+            self.cyclomatic = checkpoint.cyclomatic;
+            self.cognitive = checkpoint.cognitive;
+            self.first_offset = checkpoint.first_offset;
+            self.contributions.truncate(checkpoint.contributions);
+        }
+        result
     }
 
     /// Account for one control-flow construct (an `@if`/`@for`, a `v-if`/`v-for`,
     /// a `{#if}`/`{#each}`): +1 cyclomatic and +1+nesting cognitive (the cognitive
-    /// nesting penalty mirrors Sonar's nesting model).
-    pub(super) fn add_control_flow(&mut self, nesting: u16) {
-        self.cyclomatic = self.cyclomatic.saturating_add(1);
-        self.cognitive = self.cognitive.saturating_add(1 + nesting);
+    /// nesting penalty mirrors Sonar's nesting model). `offset` anchors both
+    /// increments at the directive or block keyword that introduced them.
+    pub(super) fn add_control_flow(
+        &mut self,
+        offset: usize,
+        kind: ComplexityContributionKind,
+        nesting: u16,
+    ) {
+        self.inc_cyclomatic(offset, kind);
+        self.inc_cognitive(offset, kind, nesting);
     }
 }
 
@@ -107,19 +195,6 @@ pub(super) fn read_attribute_value(
     }
 }
 
-#[derive(Clone, Copy, Default)]
-struct ExpressionMetrics {
-    cyclomatic: u16,
-    cognitive: u16,
-}
-
-impl ExpressionMetrics {
-    fn add(&mut self, other: Self) {
-        self.cyclomatic = self.cyclomatic.saturating_add(other.cyclomatic);
-        self.cognitive = self.cognitive.saturating_add(other.cognitive);
-    }
-}
-
 /// Maximum bracket/ternary recursion depth for template-expression metric
 /// scoring. Real template expressions nest only 3-5 levels deep, so this cap is
 /// generous; past it a pathological input like `((((...))))` is treated as
@@ -129,159 +204,203 @@ impl ExpressionMetrics {
 /// `MAX_BINDING_PATH_DEPTH` bounded-work style. Issue #1843 follow-up.
 const MAX_TEMPLATE_EXPR_DEPTH: u16 = 64;
 
-fn compute_expression_metrics(
-    source: &str,
-    nesting: u16,
-    depth: u16,
-) -> Result<ExpressionMetrics, ScanError> {
-    if depth > MAX_TEMPLATE_EXPR_DEPTH {
-        return Err(ScanError);
-    }
-    let source = source.trim();
-    if source.is_empty() {
-        return Ok(ExpressionMetrics::default());
-    }
-    if let Some((question, colon)) = find_top_level_ternary(source)? {
-        let mut metrics = ExpressionMetrics::default();
-        metrics.add(compute_expression_metrics(
-            &source[..question],
+impl TemplateComplexity {
+    /// Score a JS expression, recording each increment at its absolute offset.
+    /// `base` is the byte offset of `source` within the original template, so a
+    /// recursive call into a sub-slice must advance it by the slice's start.
+    fn scan_expression(
+        &mut self,
+        source: &str,
+        base: usize,
+        nesting: u16,
+        depth: u16,
+    ) -> Result<(), ScanError> {
+        if depth > MAX_TEMPLATE_EXPR_DEPTH {
+            return Err(ScanError);
+        }
+        let leading = source.len() - source.trim_start().len();
+        let base = base + leading;
+        let source = source.trim();
+        if source.is_empty() {
+            return Ok(());
+        }
+        if let Some((question, colon)) = find_top_level_ternary(source)? {
+            self.scan_expression(&source[..question], base, nesting, depth + 1)?;
+            self.inc_cyclomatic(base + question, ComplexityContributionKind::Ternary);
+            self.inc_cognitive(
+                base + question,
+                ComplexityContributionKind::Ternary,
+                nesting,
+            );
+            self.scan_expression(
+                &source[question + 1..colon],
+                base + question + 1,
+                nesting.saturating_add(1),
+                depth + 1,
+            )?;
+            self.scan_expression(
+                &source[colon + 1..],
+                base + colon + 1,
+                nesting.saturating_add(1),
+                depth + 1,
+            )?;
+            return Ok(());
+        }
+        self.scan_expression_without_ternary(ExprScope {
+            source,
+            base,
             nesting,
-            depth + 1,
-        )?);
-        metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
-        metrics.cognitive = metrics.cognitive.saturating_add(1 + nesting);
-        metrics.add(compute_expression_metrics(
-            &source[question + 1..colon],
-            nesting.saturating_add(1),
-            depth + 1,
-        )?);
-        metrics.add(compute_expression_metrics(
-            &source[colon + 1..],
-            nesting.saturating_add(1),
-            depth + 1,
-        )?);
-        return Ok(metrics);
+            depth,
+        })
     }
-    scan_expression_without_ternary(source, nesting, depth)
 }
 
-/// Mutable scanning state shared across the [`scan_expression_without_ternary`]
-/// match arms.
+/// Mutable scanning state shared across the `scan_expression_without_ternary`
+/// match arms. The metric counters live on [`TemplateComplexity`]; what remains
+/// here is the operator-run bookkeeping that decides whether the NEXT logical
+/// operator earns a cognitive increment.
 struct ScanState {
-    metrics: ExpressionMetrics,
     last_logical_operator: Option<LogicalOperator>,
     needs_rhs: bool,
 }
 
-fn scan_expression_without_ternary(
-    source: &str,
+/// The expression slice currently being scanned, with everything needed to
+/// place a contribution: `base` is the slice's byte offset in the template,
+/// `nesting` the cognitive nesting penalty in force, `depth` the recursion
+/// guard.
+#[derive(Clone, Copy)]
+struct ExprScope<'a> {
+    source: &'a str,
+    base: usize,
     nesting: u16,
     depth: u16,
-) -> Result<ExpressionMetrics, ScanError> {
-    let mut state = ScanState {
-        metrics: ExpressionMetrics::default(),
-        last_logical_operator: None,
-        needs_rhs: false,
-    };
-    let mut offset = 0;
+}
 
-    while offset < source.len() {
-        match source.as_bytes()[offset] {
-            byte if byte.is_ascii_whitespace() => offset += 1,
-            b'\'' | b'"' | b'`' => {
-                offset = skip_quoted(source, offset)?;
-                state.needs_rhs = false;
-            }
-            b'(' | b'[' | b'{' => {
-                offset = scan_bracket_group(source, offset, nesting, depth, &mut state)?;
-            }
-            b')' | b']' | b'}' => return Err(ScanError),
-            _ if source[offset..].starts_with("?.") => {
-                state.metrics.cyclomatic = state.metrics.cyclomatic.saturating_add(1);
-                offset += 2;
-            }
-            _ if source[offset..].starts_with("&&=")
-                || source[offset..].starts_with("||=")
-                || source[offset..].starts_with("??=") =>
-            {
-                state.metrics.cyclomatic = state.metrics.cyclomatic.saturating_add(1);
-                state.last_logical_operator = None;
-                state.needs_rhs = true;
-                offset += 3;
-            }
-            _ if source[offset..].starts_with("&&")
-                || source[offset..].starts_with("||")
-                || source[offset..].starts_with("??") =>
-            {
-                offset = scan_logical_operator(source, offset, &mut state)?;
-            }
-            b',' | b';' => {
-                if state.needs_rhs {
-                    return Err(ScanError);
+impl TemplateComplexity {
+    fn scan_expression_without_ternary(&mut self, scope: ExprScope<'_>) -> Result<(), ScanError> {
+        let ExprScope { source, base, .. } = scope;
+        let mut state = ScanState {
+            last_logical_operator: None,
+            needs_rhs: false,
+        };
+        let mut offset = 0;
+
+        while offset < source.len() {
+            match source.as_bytes()[offset] {
+                byte if byte.is_ascii_whitespace() => offset += 1,
+                b'\'' | b'"' | b'`' => {
+                    offset = skip_quoted(source, offset)?;
+                    state.needs_rhs = false;
                 }
-                state.last_logical_operator = None;
-                offset += 1;
+                b'(' | b'[' | b'{' => {
+                    offset = self.scan_bracket_group(scope, offset, &mut state)?;
+                }
+                b')' | b']' | b'}' => return Err(ScanError),
+                _ if source[offset..].starts_with("?.") => {
+                    self.inc_cyclomatic(base + offset, ComplexityContributionKind::OptionalChain);
+                    offset += 2;
+                }
+                _ if source[offset..].starts_with("&&=")
+                    || source[offset..].starts_with("||=")
+                    || source[offset..].starts_with("??=") =>
+                {
+                    self.inc_cyclomatic(
+                        base + offset,
+                        ComplexityContributionKind::LogicalAssignment,
+                    );
+                    state.last_logical_operator = None;
+                    state.needs_rhs = true;
+                    offset += 3;
+                }
+                _ if source[offset..].starts_with("&&")
+                    || source[offset..].starts_with("||")
+                    || source[offset..].starts_with("??") =>
+                {
+                    offset = self.scan_logical_operator(source, base, offset, &mut state)?;
+                }
+                b',' | b';' => {
+                    if state.needs_rhs {
+                        return Err(ScanError);
+                    }
+                    state.last_logical_operator = None;
+                    offset += 1;
+                }
+                _ => {
+                    state.needs_rhs = false;
+                    offset += source[offset..].chars().next().map_or(1, char::len_utf8);
+                }
             }
-            _ => {
-                state.needs_rhs = false;
-                offset += source[offset..].chars().next().map_or(1, char::len_utf8);
-            }
+        }
+
+        if state.needs_rhs {
+            Err(ScanError)
+        } else {
+            Ok(())
         }
     }
 
-    if state.needs_rhs {
-        Err(ScanError)
-    } else {
-        Ok(state.metrics)
+    /// Recurse into a bracketed sub-expression `( [ {` at `offset`, recording its
+    /// contributions and returning the offset just past the closing bracket.
+    fn scan_bracket_group(
+        &mut self,
+        scope: ExprScope<'_>,
+        offset: usize,
+        state: &mut ScanState,
+    ) -> Result<usize, ScanError> {
+        let ExprScope {
+            source,
+            base,
+            nesting,
+            depth,
+        } = scope;
+        let close = matching_close_byte(source.as_bytes()[offset]).ok_or(ScanError)?;
+        let end = find_matching_delimiter(source, offset, source.as_bytes()[offset], close)?;
+        self.scan_expression(
+            &source[offset + 1..end],
+            base + offset + 1,
+            nesting,
+            depth + 1,
+        )?;
+        state.last_logical_operator = None;
+        state.needs_rhs = false;
+        Ok(end + 1)
     }
-}
 
-/// Recurse into a bracketed sub-expression `( [ {` at `offset`, folding its
-/// metrics into `state` and returning the offset just past the closing bracket.
-fn scan_bracket_group(
-    source: &str,
-    offset: usize,
-    nesting: u16,
-    depth: u16,
-    state: &mut ScanState,
-) -> Result<usize, ScanError> {
-    let close = matching_close_byte(source.as_bytes()[offset]).ok_or(ScanError)?;
-    let end = find_matching_delimiter(source, offset, source.as_bytes()[offset], close)?;
-    state.metrics.add(compute_expression_metrics(
-        &source[offset + 1..end],
-        nesting,
-        depth + 1,
-    )?);
-    state.last_logical_operator = None;
-    state.needs_rhs = false;
-    Ok(end + 1)
-}
-
-/// Score a 2-char logical operator (`&& || ??`) at `offset`, updating cyclomatic
-/// / cognitive counts and the logical-operator run state, and return the offset
-/// past the operator.
-fn scan_logical_operator(
-    source: &str,
-    offset: usize,
-    state: &mut ScanState,
-) -> Result<usize, ScanError> {
-    if state.needs_rhs {
-        return Err(ScanError);
+    /// Score a 2-char logical operator (`&& || ??`) at `offset`, updating the
+    /// counters and the logical-operator run state, and return the offset past
+    /// the operator. A run of the SAME operator earns one cognitive increment
+    /// for the run, so only the operator that opens the run records a cognitive
+    /// contribution; every operator records a cyclomatic one.
+    fn scan_logical_operator(
+        &mut self,
+        source: &str,
+        base: usize,
+        offset: usize,
+        state: &mut ScanState,
+    ) -> Result<usize, ScanError> {
+        if state.needs_rhs {
+            return Err(ScanError);
+        }
+        let operator = if source[offset..].starts_with("&&") {
+            LogicalOperator::And
+        } else if source[offset..].starts_with("||") {
+            LogicalOperator::Or
+        } else {
+            LogicalOperator::Nullish
+        };
+        let kind = match operator {
+            LogicalOperator::And => ComplexityContributionKind::LogicalAnd,
+            LogicalOperator::Or => ComplexityContributionKind::LogicalOr,
+            LogicalOperator::Nullish => ComplexityContributionKind::NullishCoalescing,
+        };
+        self.inc_cyclomatic(base + offset, kind);
+        if state.last_logical_operator != Some(operator) {
+            self.inc_cognitive_flat(base + offset, kind);
+            state.last_logical_operator = Some(operator);
+        }
+        state.needs_rhs = true;
+        Ok(offset + 2)
     }
-    let operator = if source[offset..].starts_with("&&") {
-        LogicalOperator::And
-    } else if source[offset..].starts_with("||") {
-        LogicalOperator::Or
-    } else {
-        LogicalOperator::Nullish
-    };
-    state.metrics.cyclomatic = state.metrics.cyclomatic.saturating_add(1);
-    if state.last_logical_operator != Some(operator) {
-        state.metrics.cognitive = state.metrics.cognitive.saturating_add(1);
-        state.last_logical_operator = Some(operator);
-    }
-    state.needs_rhs = true;
-    Ok(offset + 2)
 }
 
 fn find_top_level_ternary(source: &str) -> Result<Option<(usize, usize)>, ScanError> {
@@ -431,17 +550,20 @@ fn is_identifier_continue(byte: u8) -> bool {
 mod tests {
     use super::*;
 
+    /// Score one bare expression and return its own `(cyclomatic, cognitive)`
+    /// contribution, with the accumulator's implicit straight-line path removed.
+    fn expression_metrics(source: &str) -> Option<(u16, u16)> {
+        let mut complexity = TemplateComplexity::default();
+        complexity.add_expression(source, 0, 0).ok()?;
+        Some((complexity.cyclomatic - 1, complexity.cognitive))
+    }
+
     #[test]
     fn shallow_expression_metrics_are_stable() {
         // A normal 2-3 level nested expression scores by logical-operator and
         // ternary count; the depth guard never fires for it.
-        let ternary = compute_expression_metrics("(a && b) ? c : (d || e)", 0, 0).unwrap();
-        assert_eq!(ternary.cyclomatic, 3);
-        assert_eq!(ternary.cognitive, 3);
-
-        let bracketed = compute_expression_metrics("(a && b)", 0, 0).unwrap();
-        assert_eq!(bracketed.cyclomatic, 1);
-        assert_eq!(bracketed.cognitive, 1);
+        assert_eq!(expression_metrics("(a && b) ? c : (d || e)"), Some((3, 3)));
+        assert_eq!(expression_metrics("(a && b)"), Some((1, 1)));
     }
 
     #[test]
@@ -450,9 +572,7 @@ mod tests {
         // `a && b` in redundant parens yields the same metrics as the bare
         // expression.
         let source = format!("{}a && b{}", "(".repeat(10), ")".repeat(10));
-        let metrics = compute_expression_metrics(&source, 0, 0).unwrap();
-        assert_eq!(metrics.cyclomatic, 1);
-        assert_eq!(metrics.cognitive, 1);
+        assert_eq!(expression_metrics(&source), Some((1, 1)));
     }
 
     #[test]
@@ -462,10 +582,22 @@ mod tests {
         // past MAX_TEMPLATE_EXPR_DEPTH and the synthetic finding is dropped.
         let depth = 5000;
         let source = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
-        assert!(compute_expression_metrics(&source, 0, 0).is_err());
 
-        // The public entry point surfaces the same drop as a ScanError.
         let mut complexity = TemplateComplexity::default();
         assert!(complexity.add_expression(&source, 0, 0).is_err());
+    }
+
+    #[test]
+    fn expression_contributions_are_anchored_at_their_operator() {
+        let mut complexity = TemplateComplexity::default();
+        complexity.add_expression("a && b || c", 100, 0).unwrap();
+
+        let offsets: Vec<usize> = complexity
+            .contributions
+            .iter()
+            .filter(|contribution| contribution.metric == ComplexityMetric::Cyclomatic)
+            .map(|contribution| contribution.offset)
+            .collect();
+        assert_eq!(offsets, vec![102, 107]);
     }
 }

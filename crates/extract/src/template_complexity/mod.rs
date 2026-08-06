@@ -11,7 +11,10 @@ mod engine;
 mod svelte;
 mod vue;
 
-use fallow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
+use fallow_types::extract::{
+    ComplexityContribution, ComplexityContributionKind, FunctionComplexity,
+    byte_offset_to_line_col, compute_line_offsets,
+};
 
 use engine::{
     ScanError, TemplateComplexity, find_matching_delimiter, find_tag_end, is_identifier_after,
@@ -122,7 +125,13 @@ impl<'a> TemplateScanner<'a> {
             "if" | "for" => {
                 let (expr_start, expr_end, after_paren) =
                     parse_parenthesized(self.source, after_keyword)?;
-                self.complexity.add_control_flow(self.block_depth);
+                let kind = if keyword == "for" {
+                    ComplexityContributionKind::ForOf
+                } else {
+                    ComplexityContributionKind::If
+                };
+                self.complexity
+                    .add_control_flow(offset, kind, self.block_depth);
                 self.complexity.add_expression(
                     &self.source[expr_start..expr_end],
                     expr_start,
@@ -130,14 +139,15 @@ impl<'a> TemplateScanner<'a> {
                 )?;
                 Ok(Some(after_paren))
             }
-            "else" => self.scan_else(after_keyword),
+            "else" => self.scan_else(offset, after_keyword),
             "switch" => {
                 let (expr_start, expr_end, after_paren) =
                     parse_parenthesized(self.source, after_keyword)?;
-                self.complexity.cognitive = self
-                    .complexity
-                    .cognitive
-                    .saturating_add(1 + self.block_depth);
+                self.complexity.inc_cognitive(
+                    offset,
+                    ComplexityContributionKind::Switch,
+                    self.block_depth,
+                );
                 self.complexity.add_expression(
                     &self.source[expr_start..expr_end],
                     expr_start,
@@ -148,7 +158,8 @@ impl<'a> TemplateScanner<'a> {
             "case" => {
                 let (expr_start, expr_end, after_paren) =
                     parse_parenthesized(self.source, after_keyword)?;
-                self.complexity.cyclomatic = self.complexity.cyclomatic.saturating_add(1);
+                self.complexity
+                    .inc_cyclomatic(offset, ComplexityContributionKind::Case);
                 self.complexity.add_expression(
                     &self.source[expr_start..expr_end],
                     expr_start,
@@ -157,21 +168,23 @@ impl<'a> TemplateScanner<'a> {
                 Ok(Some(after_paren))
             }
             "default" | "placeholder" | "loading" | "error" | "empty" => Ok(Some(after_keyword)),
-            "defer" => self.scan_defer(after_keyword),
+            "defer" => self.scan_defer(offset, after_keyword),
             "let" => self.scan_let(after_keyword),
             _ => Ok(None),
         }
     }
 
-    fn scan_else(&mut self, after_else: usize) -> Result<Option<usize>, ScanError> {
+    fn scan_else(&mut self, offset: usize, after_else: usize) -> Result<Option<usize>, ScanError> {
         let after_ws = skip_whitespace(self.source, after_else);
         if self.source[after_ws..].starts_with("if")
             && !is_identifier_after(self.source, after_ws + "if".len())
         {
             let after_if = after_ws + "if".len();
             let (expr_start, expr_end, after_paren) = parse_parenthesized(self.source, after_if)?;
-            self.complexity.cyclomatic = self.complexity.cyclomatic.saturating_add(1);
-            self.complexity.cognitive = self.complexity.cognitive.saturating_add(1);
+            self.complexity
+                .inc_cyclomatic(offset, ComplexityContributionKind::ElseIf);
+            self.complexity
+                .inc_cognitive_flat(offset, ComplexityContributionKind::ElseIf);
             self.complexity.add_expression(
                 &self.source[expr_start..expr_end],
                 expr_start,
@@ -179,12 +192,17 @@ impl<'a> TemplateScanner<'a> {
             )?;
             Ok(Some(after_paren))
         } else {
-            self.complexity.cognitive = self.complexity.cognitive.saturating_add(1);
+            self.complexity
+                .inc_cognitive_flat(offset, ComplexityContributionKind::Else);
             Ok(Some(after_else))
         }
     }
 
-    fn scan_defer(&mut self, after_defer: usize) -> Result<Option<usize>, ScanError> {
+    fn scan_defer(
+        &mut self,
+        offset: usize,
+        after_defer: usize,
+    ) -> Result<Option<usize>, ScanError> {
         let after_ws = skip_whitespace(self.source, after_defer);
         if !self.source[after_ws..].starts_with('(') {
             return Ok(Some(after_defer));
@@ -193,7 +211,11 @@ impl<'a> TemplateScanner<'a> {
         let expr = &self.source[expr_start..expr_end];
         if let Some(when_offset) = find_word(expr, "when") {
             let condition_offset = expr_start + when_offset + "when".len();
-            self.complexity.add_control_flow(self.block_depth);
+            self.complexity.add_control_flow(
+                offset,
+                ComplexityContributionKind::If,
+                self.block_depth,
+            );
             self.complexity.add_expression(
                 &self.source[condition_offset..expr_end],
                 condition_offset,
@@ -258,7 +280,7 @@ impl<'a> TemplateScanner<'a> {
             }
             offset = skip_whitespace(self.source, offset + 1);
             let (value_start, value_end, next_offset) = read_attribute_value(self.source, offset)?;
-            self.scan_attribute_value(name, value_start, value_end)?;
+            self.scan_attribute_value(name, name_start, value_start, value_end)?;
             offset = next_offset;
         }
         Ok(())
@@ -267,6 +289,7 @@ impl<'a> TemplateScanner<'a> {
     fn scan_attribute_value(
         &mut self,
         name: &str,
+        name_start: usize,
         value_start: usize,
         value_end: usize,
     ) -> Result<(), ScanError> {
@@ -275,7 +298,13 @@ impl<'a> TemplateScanner<'a> {
             name,
             "*ngIf" | "[ngIf]" | "*ngFor" | "*ngForOf" | "[ngFor]" | "[ngForOf]"
         ) {
-            self.complexity.add_control_flow(self.block_depth);
+            let kind = if name.contains("For") {
+                ComplexityContributionKind::ForOf
+            } else {
+                ComplexityContributionKind::If
+            };
+            self.complexity
+                .add_control_flow(name_start, kind, self.block_depth);
             self.complexity
                 .add_expression(value, value_start, self.block_depth)?;
         } else if is_bound_template_attribute(name) {
@@ -336,6 +365,29 @@ pub(in crate::template_complexity) fn build_template_complexity(
     let (line, col) = byte_offset_to_line_col(&line_offsets, first_offset);
     let line_count = u32::try_from(source.lines().count()).unwrap_or(u32::MAX);
 
+    // The scanners record in scan order, which is source order for the outer
+    // markup walk but not within an expression that recurses into brackets or
+    // ternary branches. Sort so the editor breakdown reads top to bottom.
+    let mut contributions: Vec<ComplexityContribution> = complexity
+        .contributions
+        .iter()
+        .map(|raw| {
+            let (line, col) = byte_offset_to_line_col(
+                &line_offsets,
+                u32::try_from(raw.offset).unwrap_or(u32::MAX),
+            );
+            ComplexityContribution {
+                line,
+                col,
+                metric: raw.metric,
+                kind: raw.kind,
+                weight: raw.weight,
+                nesting: raw.nesting,
+            }
+        })
+        .collect();
+    contributions.sort_by_key(|contribution| (contribution.line, contribution.col));
+
     Some(FunctionComplexity {
         name: "<template>".to_string(),
         line,
@@ -348,9 +400,7 @@ pub(in crate::template_complexity) fn build_template_complexity(
         react_jsx_max_depth: 0,
         react_prop_count: 0,
         source_hash: None,
-        // The hand-rolled template scanners emit only aggregate metrics;
-        // per-construct contributions are out of scope for the first cut.
-        contributions: Vec::new(),
+        contributions,
     })
 }
 
@@ -408,7 +458,104 @@ fn is_bound_template_attribute(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_angular_template_complexity;
+    use fallow_types::extract::{ComplexityMetric, FunctionComplexity};
+
+    use super::{
+        compute_angular_template_complexity, compute_astro_template_complexity,
+        compute_svelte_template_complexity, compute_vue_template_complexity,
+    };
+
+    /// Every scanner must fully attribute the numbers it reports: the recorded
+    /// weights per metric have to add up to the metric itself. `cyclomatic`
+    /// keeps the implicit straight-line path, which is not a contribution.
+    fn assert_breakdown_explains_totals(complexity: &FunctionComplexity, label: &str) {
+        let sum = |metric: ComplexityMetric| -> u16 {
+            complexity
+                .contributions
+                .iter()
+                .filter(|contribution| contribution.metric == metric)
+                .map(|contribution| contribution.weight)
+                .sum()
+        };
+        assert!(
+            !complexity.contributions.is_empty(),
+            "{label} reported {} / {} with no breakdown",
+            complexity.cyclomatic,
+            complexity.cognitive
+        );
+        assert_eq!(
+            sum(ComplexityMetric::Cyclomatic),
+            complexity.cyclomatic - 1,
+            "{label} cyclomatic breakdown"
+        );
+        assert_eq!(
+            sum(ComplexityMetric::Cognitive),
+            complexity.cognitive,
+            "{label} cognitive breakdown"
+        );
+    }
+
+    /// #2150 was reported against Vue, but the empty breakdown came from the
+    /// shared accumulator, so every framework scanner is held to the invariant.
+    #[test]
+    fn every_framework_scanner_explains_its_totals() {
+        let angular = compute_angular_template_complexity(
+            r"
+@if (user?.enabled && flags.on) {
+  @for (item of items; track item.id) { <li>{{ item.name }}</li> }
+} @else if (fallback) { <p /> } @else { <p /> }
+",
+        )
+        .expect("angular template should have complexity");
+        assert_breakdown_explains_totals(&angular, "angular");
+
+        let vue = compute_vue_template_complexity(
+            r#"<template><div v-if="a && b"><li v-for="i in items">{{ i }}</li></div><p v-else>n</p></template>"#,
+        )
+        .expect("vue template should have complexity");
+        assert_breakdown_explains_totals(&vue, "vue");
+
+        let svelte = compute_svelte_template_complexity(
+            r"
+{#if user?.enabled && flags.on}
+  {#each items as item}<li>{item.name}</li>{/each}
+{:else if fallback}
+  <p />
+{:else}
+  <p />
+{/if}
+",
+        )
+        .expect("svelte template should have complexity");
+        assert_breakdown_explains_totals(&svelte, "svelte");
+
+        let astro = compute_astro_template_complexity(
+            "---\nconst items = [];\n---\n<ul>{items.map((i) => <li>{i.a && i.b}</li>)}</ul>\n",
+        )
+        .expect("astro template should have complexity");
+        assert_breakdown_explains_totals(&astro, "astro");
+    }
+
+    /// A Svelte block's bound expression is reached through several trims and
+    /// keyword splits, so its contributions are anchored by the slice's real
+    /// position rather than a base offset threaded by hand.
+    #[test]
+    fn svelte_contributions_land_on_the_source_line() {
+        let complexity = compute_svelte_template_complexity(
+            r"<div>
+  {#if alpha && beta}
+    <p />
+  {/if}
+</div>
+",
+        )
+        .expect("svelte template should have complexity");
+
+        assert!(!complexity.contributions.is_empty());
+        for contribution in &complexity.contributions {
+            assert_eq!(contribution.line, 2, "{contribution:?}");
+        }
+    }
 
     #[test]
     fn counts_control_flow_and_expressions() {

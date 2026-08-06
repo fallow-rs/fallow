@@ -13,7 +13,7 @@
 
 use std::sync::LazyLock;
 
-use fallow_types::extract::FunctionComplexity;
+use fallow_types::extract::{ComplexityContributionKind, FunctionComplexity};
 
 use super::build_template_complexity;
 use super::engine::{ScanError, TemplateComplexity, find_matching_delimiter};
@@ -68,7 +68,11 @@ fn scan_markup_expressions(
         for needle in ITERATION_CALLS {
             let mut from = 0;
             while let Some(pos) = expr[from..].find(needle) {
-                complexity.add_control_flow(0);
+                complexity.add_control_flow(
+                    offset + 1 + from + pos,
+                    ComplexityContributionKind::ForOf,
+                    0,
+                );
                 from += pos + needle.len();
             }
         }
@@ -109,6 +113,16 @@ mod tests {
     #[test]
     fn malformed_brace_drops_entry() {
         let source = "---\n---\n<div>{a && b</div>\n";
+        assert!(compute_astro_template_complexity(source).is_none());
+    }
+
+    /// This scanner swallows a per-expression scan error on purpose, so a
+    /// half-scored expression must leave no increments behind. Otherwise a
+    /// dangling operator invents a synthetic `<template>` finding for a
+    /// template that has no complexity at all.
+    #[test]
+    fn expression_that_fails_to_tokenize_contributes_nothing() {
+        let source = "---\n---\n<div>{ show && }</div>\n";
         assert!(compute_astro_template_complexity(source).is_none());
     }
 }

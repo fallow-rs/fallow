@@ -861,7 +861,12 @@ use crate::MemberKind;
 /// source string-literal span so unresolved-import findings anchor on the
 /// specifier and suppressions cover the whole statement. Warm 251 caches
 /// lack both spans.
-pub(super) const CACHE_VERSION: u32 = 252;
+///
+/// Bumped to 253 for issue #2150: synthetic `<template>` complexity now carries
+/// per-construct contributions for Angular, Vue, Svelte, and Astro. The metric
+/// totals are unchanged, but warm 252 caches hold an empty breakdown, so an
+/// unedited template would keep rendering a finding with no explanation.
+pub(super) const CACHE_VERSION: u32 = 253;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

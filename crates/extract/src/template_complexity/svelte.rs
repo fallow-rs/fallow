@@ -15,7 +15,7 @@
 
 use std::sync::LazyLock;
 
-use fallow_types::extract::FunctionComplexity;
+use fallow_types::extract::{ComplexityContributionKind, FunctionComplexity};
 
 use super::build_template_complexity;
 use super::engine::{ScanError, TemplateComplexity, skip_quoted};
@@ -95,7 +95,7 @@ impl<'a> SvelteScanner<'a> {
             match byte {
                 b'{' => {
                     let close = find_matching_curly(self.source, index)?;
-                    self.add_expr_slice(self.source[index + 1..close].trim(), index + 1)?;
+                    self.add_expr_slice(self.source[index + 1..close].trim())?;
                     index = close + 1;
                 }
                 b'\'' | b'"' => {
@@ -145,9 +145,10 @@ impl<'a> SvelteScanner<'a> {
         if let Some(rest) = inner.strip_prefix('@') {
             return self.scan_at_directive(rest, inner_offset);
         }
-        // Plain `{ expr }` text interpolation.
-        self.complexity
-            .add_expression(inner, inner_offset, self.nesting)
+        // Plain `{ expr }` text interpolation. `inner` is already trimmed, so
+        // it anchors its own contributions; `inner_offset` still points at the
+        // pre-trim `{`.
+        self.add_expr_slice(inner)
     }
 
     fn scan_block_open(&mut self, rest: &str, inner_offset: usize) -> Result<(), ScanError> {
@@ -164,8 +165,12 @@ impl<'a> SvelteScanner<'a> {
                 // `{#each <iterable> as <binding> (<key>)}`: score the iterable
                 // but not the binding pattern.
                 let iterable = each_iterable(after);
-                self.complexity.add_control_flow(self.nesting);
-                self.add_expr_slice(iterable, inner_offset)?;
+                self.complexity.add_control_flow(
+                    inner_offset,
+                    ComplexityContributionKind::ForOf,
+                    self.nesting,
+                );
+                self.add_expr_slice(iterable)?;
                 self.nesting = self.nesting.saturating_add(1);
                 Ok(())
             }
@@ -190,13 +195,16 @@ impl<'a> SvelteScanner<'a> {
                 if let Some(condition) = after_trim.strip_prefix("if") {
                     // `{:else if cond}`: a new branch. Match Angular's `@else if`:
                     // cyclomatic +1, cognitive +1 (flat, not nesting-weighted).
-                    self.complexity.cyclomatic = self.complexity.cyclomatic.saturating_add(1);
-                    self.complexity.cognitive = self.complexity.cognitive.saturating_add(1);
-                    self.add_expr_slice(condition.trim(), inner_offset)?;
+                    self.complexity
+                        .inc_cyclomatic(inner_offset, ComplexityContributionKind::ElseIf);
+                    self.complexity
+                        .inc_cognitive_flat(inner_offset, ComplexityContributionKind::ElseIf);
+                    self.add_expr_slice(condition.trim())?;
                 } else {
                     // Bare `{:else}`: continuation. Match Angular's bare `@else`:
                     // cognitive +1, no cyclomatic increment.
-                    self.complexity.cognitive = self.complexity.cognitive.saturating_add(1);
+                    self.complexity
+                        .inc_cognitive_flat(inner_offset, ComplexityContributionKind::Else);
                 }
                 Ok(())
             }
@@ -204,8 +212,13 @@ impl<'a> SvelteScanner<'a> {
             // path. Flat cognitive +1 (the await frame already supplied the
             // nesting weight), mirroring the else-if branch treatment.
             "then" | "catch" => {
-                self.complexity.cyclomatic = self.complexity.cyclomatic.saturating_add(1);
-                self.complexity.cognitive = self.complexity.cognitive.saturating_add(1);
+                let kind = if keyword == "catch" {
+                    ComplexityContributionKind::Catch
+                } else {
+                    ComplexityContributionKind::If
+                };
+                self.complexity.inc_cyclomatic(inner_offset, kind);
+                self.complexity.inc_cognitive_flat(inner_offset, kind);
                 Ok(())
             }
             _ => Ok(()),
@@ -225,7 +238,7 @@ impl<'a> SvelteScanner<'a> {
                 }
                 Ok(())
             }
-            "html" | "render" | "debug" => self.add_expr_slice(after.trim(), inner_offset),
+            "html" | "render" | "debug" => self.add_expr_slice(after.trim()),
             _ => Ok(()),
         }
     }
@@ -237,20 +250,44 @@ impl<'a> SvelteScanner<'a> {
         expr: &str,
         inner_offset: usize,
     ) -> Result<(), ScanError> {
-        self.complexity.add_control_flow(self.nesting);
-        self.add_expr_slice(expr.trim(), inner_offset)
+        self.complexity.add_control_flow(
+            inner_offset,
+            ComplexityContributionKind::If,
+            self.nesting,
+        );
+        self.add_expr_slice(expr.trim())
     }
 
-    /// Score `slice` as a bound expression. The `inner_offset` (the block-open
-    /// position) is a coarse anchor for the synthetic finding's line/col, which
-    /// is all `first_offset` needs: the precise expression column is not
-    /// surfaced for the aggregate `<template>` entry.
-    fn add_expr_slice(&mut self, slice: &str, inner_offset: usize) -> Result<(), ScanError> {
+    /// Score `slice` as a bound expression, anchored at its true position.
+    fn add_expr_slice(&mut self, slice: &str) -> Result<(), ScanError> {
         if slice.is_empty() {
             return Ok(());
         }
-        self.complexity
-            .add_expression(slice, inner_offset, self.nesting)
+        let offset = self.offset_of(slice);
+        self.complexity.add_expression(slice, offset, self.nesting)
+    }
+
+    /// Byte offset of `slice` within the scanned markup.
+    ///
+    /// Every slice that reaches this scanner is a subslice of `self.source`
+    /// (produced by splitting and trimming it), so the pointer delta is its
+    /// exact offset, and masking preserves offsets against the original file.
+    /// Recovering the offset this way keeps the block keyword parsing free of a
+    /// base offset threaded through every `split_keyword` and `trim` step, where
+    /// one missed adjustment would silently misplace a breakdown entry.
+    ///
+    /// Passing a slice from anywhere else (an owned `String`, a literal) would
+    /// saturate to `0` and anchor the whole breakdown at line 1, so the
+    /// subslice precondition is asserted in debug builds rather than left to
+    /// produce quietly wrong output.
+    fn offset_of(&self, slice: &str) -> usize {
+        let base = self.source.as_ptr().addr();
+        let start = slice.as_ptr().addr();
+        debug_assert!(
+            start >= base && start + slice.len() <= base + self.source.len(),
+            "offset_of expects a subslice of the scanned markup"
+        );
+        start.saturating_sub(base)
     }
 }
 

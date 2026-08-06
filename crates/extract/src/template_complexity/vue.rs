@@ -16,7 +16,7 @@
 
 use std::sync::LazyLock;
 
-use fallow_types::extract::FunctionComplexity;
+use fallow_types::extract::{ComplexityContributionKind, FunctionComplexity};
 
 use super::build_template_complexity;
 use super::engine::{
@@ -177,12 +177,13 @@ impl<'a> VueScanner<'a> {
             offset = skip_whitespace(self.source, offset);
             if offset >= tag_end || self.source.as_bytes()[offset] != b'=' {
                 // Valueless attribute (`disabled`, bare `v-else`).
-                has_control_flow |= self.scan_valueless_attr(name);
+                has_control_flow |= self.scan_valueless_attr(name, name_start);
                 continue;
             }
             offset = skip_whitespace(self.source, offset + 1);
             let (value_start, value_end, next_offset) = read_attribute_value(self.source, offset)?;
-            has_control_flow |= self.scan_attribute_value(name, value_start, value_end)?;
+            has_control_flow |=
+                self.scan_attribute_value(name, name_start, value_start, value_end)?;
             offset = next_offset;
         }
         Ok(has_control_flow)
@@ -192,9 +193,10 @@ impl<'a> VueScanner<'a> {
     /// control-flow continuation). Mirrors Angular's bare `@else`: cognitive
     /// +1, no cyclomatic increment (the new branch path is owned by the paired
     /// `v-if`). Returns `true` for `v-else` so its element opens a nesting level.
-    fn scan_valueless_attr(&mut self, name: &str) -> bool {
+    fn scan_valueless_attr(&mut self, name: &str, name_start: usize) -> bool {
         if name == "v-else" {
-            self.complexity.cognitive = self.complexity.cognitive.saturating_add(1);
+            self.complexity
+                .inc_cognitive_flat(name_start, ComplexityContributionKind::Else);
             return true;
         }
         false
@@ -207,12 +209,14 @@ impl<'a> VueScanner<'a> {
     fn scan_attribute_value(
         &mut self,
         name: &str,
+        name_start: usize,
         value_start: usize,
         value_end: usize,
     ) -> Result<bool, ScanError> {
         let value = &self.source[value_start..value_end];
         if is_control_flow_directive(name) {
-            self.complexity.add_control_flow(self.nesting);
+            self.complexity
+                .add_control_flow(name_start, control_flow_kind(name), self.nesting);
             self.complexity
                 .add_expression(value, value_start, self.nesting)?;
             return Ok(true);
@@ -228,6 +232,17 @@ impl<'a> VueScanner<'a> {
 /// `v-if` / `v-else-if` / `v-for` / `v-show` each introduce a branch / loop.
 fn is_control_flow_directive(name: &str) -> bool {
     matches!(name, "v-if" | "v-else-if" | "v-for" | "v-show")
+}
+
+/// The breakdown kind for a control-flow directive. `v-else-if` maps to
+/// `ElseIf` rather than `If` so a cascade reads the way the source does.
+/// `v-show` is a conditional render toggle, so it reports as a plain `If`.
+fn control_flow_kind(name: &str) -> ComplexityContributionKind {
+    match name {
+        "v-else-if" => ComplexityContributionKind::ElseIf,
+        "v-for" => ComplexityContributionKind::ForOf,
+        _ => ComplexityContributionKind::If,
+    }
 }
 
 /// Any directive whose value is a bound JS expression worth scoring for
@@ -264,7 +279,122 @@ fn is_void_tag(tag_name: &str) -> bool {
 
 #[cfg(all(test, not(miri)))]
 mod tests {
+    use fallow_types::extract::{ComplexityContributionKind, ComplexityMetric};
+
     use super::compute_vue_template_complexity;
+
+    /// The reporter's shape in #2150: a `v-if` / `v-else` pair must arrive with a
+    /// breakdown, not just a total. Before the shared engine recorded
+    /// contributions this returned an empty vec for every template, so the
+    /// editor had nothing to render next to the finding.
+    #[test]
+    fn v_if_else_reports_its_decision_points() {
+        let complexity = compute_vue_template_complexity(
+            r#"<template>
+  <p v-if="a">1</p>
+  <p v-else-if="b">2</p>
+  <p v-else>3</p>
+</template>
+"#,
+        )
+        .expect("template should have complexity");
+
+        let kinds: Vec<ComplexityContributionKind> = complexity
+            .contributions
+            .iter()
+            .map(|contribution| contribution.kind)
+            .collect();
+        assert!(
+            kinds.contains(&ComplexityContributionKind::If)
+                && kinds.contains(&ComplexityContributionKind::ElseIf)
+                && kinds.contains(&ComplexityContributionKind::Else),
+            "{kinds:?}"
+        );
+
+        // Each directive is reported on the line it is written on.
+        let lines: Vec<u32> = complexity
+            .contributions
+            .iter()
+            .map(|contribution| contribution.line)
+            .collect();
+        assert_eq!(*lines.iter().min().expect("contributions"), 2);
+        assert_eq!(*lines.iter().max().expect("contributions"), 4);
+    }
+
+    /// The breakdown must always explain the whole number. `cyclomatic` carries
+    /// the implicit straight-line path that is not a contribution; `cognitive`
+    /// starts at zero, so it must be fully attributed.
+    #[test]
+    fn contribution_weights_sum_to_the_reported_metrics() {
+        let complexity = compute_vue_template_complexity(
+            r#"<template>
+  <div v-if="user?.enabled && flags.dashboard">
+    <li v-for="item in items" :key="item.id">
+      <badge :color="item.level > 3 ? 'red' : 'green'" />
+    </li>
+  </div>
+  <p v-else>none</p>
+</template>
+"#,
+        )
+        .expect("template should have complexity");
+
+        let sum = |metric: ComplexityMetric| -> u16 {
+            complexity
+                .contributions
+                .iter()
+                .filter(|contribution| contribution.metric == metric)
+                .map(|contribution| contribution.weight)
+                .sum()
+        };
+        assert_eq!(sum(ComplexityMetric::Cyclomatic), complexity.cyclomatic - 1);
+        assert_eq!(sum(ComplexityMetric::Cognitive), complexity.cognitive);
+    }
+
+    /// Offsets are recorded against the masked markup, which preserves byte
+    /// offsets, so a `<script>` block above the template must not shift the
+    /// reported lines.
+    #[test]
+    fn contributions_are_anchored_past_a_leading_script_block() {
+        let complexity = compute_vue_template_complexity(
+            r#"<script setup>
+const a = 1;
+const b = 2;
+</script>
+
+<template>
+  <p v-if="a && b">x</p>
+</template>
+"#,
+        )
+        .expect("template should have complexity");
+
+        assert!(!complexity.contributions.is_empty());
+        for contribution in &complexity.contributions {
+            assert_eq!(contribution.line, 7, "{contribution:?}");
+        }
+    }
+
+    /// A nested control-flow construct carries the nesting penalty in its own
+    /// weight, so a consumer can explain a `+2` as "+1 base, +1 nesting".
+    #[test]
+    fn nested_control_flow_records_its_nesting_penalty() {
+        let complexity = compute_vue_template_complexity(
+            r#"<template><div v-if="a"><li v-for="i in items">{{ i }}</li></div></template>"#,
+        )
+        .expect("template should have complexity");
+
+        let nested = complexity
+            .contributions
+            .iter()
+            .find(|contribution| {
+                contribution.metric == ComplexityMetric::Cognitive
+                    && contribution.kind == ComplexityContributionKind::ForOf
+            })
+            .expect("nested v-for contribution");
+        assert_eq!(nested.nesting, 1, "{nested:?}");
+        assert_eq!(nested.weight, 2, "{nested:?}");
+    }
 
     #[test]
     fn nested_v_for_in_v_if_with_ternary_binding_counts() {
