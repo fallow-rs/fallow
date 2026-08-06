@@ -18,24 +18,41 @@ use crate::{
 
 /// Dead-code section inputs for a bare combined JSON report.
 pub struct CombinedCheckJsonSection<'a> {
+    /// Typed dead-code results serialized into the `check` section.
     pub results: &'a AnalysisResults,
+    /// Project root; its prefix is stripped from paths inside the section.
     pub root: &'a Path,
+    /// Dead-code analysis wall time, emitted as the section's `elapsed_ms`.
     pub elapsed: Duration,
+    /// Whether duplicate-export findings can be auto-fixed through config;
+    /// propagated onto their fix actions.
     pub config_fixable: bool,
+    /// Caller-computed baseline and regression sections.
     pub extras: CheckJsonExtraOutputs,
 }
 
 /// Inputs for bare `fallow --format json` output assembly.
 pub struct CombinedJsonOutputInput<'a> {
+    /// Dead-code section; `None` omits `check` from the envelope.
     pub check: Option<CombinedCheckJsonSection<'a>>,
+    /// Duplication section; `None` omits `dupes` from the envelope.
     pub dupes: Option<&'a DupesReportPayload>,
+    /// Health section; `None` omits `health` from the envelope.
     pub health: Option<&'a HealthReport>,
+    /// Project root; its prefix is stripped from paths in every section.
     pub root: &'a Path,
+    /// Total wall time across sections, emitted as the root `elapsed_ms`.
     pub elapsed: Duration,
+    /// Emit per-section explain metadata under `meta`.
     pub explain: bool,
+    /// Type-aware pass metadata, merged into the check section's meta even
+    /// when `explain` is off.
     pub type_aware: Option<fallow_types::envelope::TypeAwareMeta>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 

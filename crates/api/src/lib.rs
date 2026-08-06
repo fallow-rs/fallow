@@ -249,18 +249,23 @@ impl ProgrammaticError {
         }
     }
 
+    /// Attach a remediation hint shown to the caller alongside the message.
     #[must_use]
     pub fn with_help(mut self, help: impl Into<String>) -> Self {
         self.help = Some(help.into());
         self
     }
 
+    /// Attach a stable machine-readable code such as
+    /// `FALLOW_INVALID_COVERAGE_PATH`.
     #[must_use]
     pub fn with_code(mut self, code: impl Into<String>) -> Self {
         self.code = Some(code.into());
         self
     }
 
+    /// Attach the dotted path of the offending input, such as
+    /// `health.coverage`.
     #[must_use]
     pub fn with_context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(context.into());

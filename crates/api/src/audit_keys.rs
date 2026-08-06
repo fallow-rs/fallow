@@ -337,16 +337,32 @@ pub struct AuditComparison {
 
 /// Inputs for building one [`AuditComparison`].
 pub struct AuditComparisonInput<'a> {
+    /// Current-run dead-code analysis results to classify.
     pub results: &'a fallow_types::results::AnalysisResults,
+    /// Resolved config that drives effective severity routing.
     pub config: &'a ResolvedConfig,
+    /// Project root that dead-code key paths are made relative to.
     pub root: &'a Path,
+    /// Current-run health report whose findings are classified.
     pub health: &'a fallow_output::HealthReport,
+    /// Root that health finding key paths are made relative to; may differ
+    /// from `root` when health runs over a different tree.
     pub health_root: &'a Path,
+    /// Precomputed duplication group keys in typed output order.
     pub dupe_keys: Vec<String>,
+    /// Precomputed styling finding keys in typed output order.
     pub styling_keys: Vec<String>,
+    /// Base-snapshot dead-code keys; `None` disables attribution so no
+    /// finding is marked introduced.
     pub base_dead_code: Option<&'a FxHashSet<String>>,
+    /// Base-snapshot complexity keys; `None` disables attribution so no
+    /// finding is marked introduced.
     pub base_health: Option<&'a FxHashSet<String>>,
+    /// Base-snapshot duplication keys; `None` disables attribution so no
+    /// group is marked introduced.
     pub base_dupes: Option<&'a FxHashSet<String>>,
+    /// Base-snapshot styling keys; `None` disables attribution so no
+    /// finding is marked introduced.
     pub base_styling: Option<&'a FxHashSet<String>>,
 }
 
@@ -441,6 +457,9 @@ fn remap_key_for_renames(key: &str, renames: &FxHashMap<String, String>) -> Stri
     segments.join(":")
 }
 
+/// Canonical path form used inside attribution keys: root-relative with
+/// forward slashes on every platform. Paths outside `root` keep their
+/// simplified absolute form so keys stay unique.
 pub fn relative_key_path(path: &Path, root: &Path) -> String {
     let simple_path = dunce::simplified(path);
     let simple_root = dunce::simplified(root);
@@ -2424,6 +2443,10 @@ where
     }
 }
 
+/// Insert `"introduced": bool` into every dead-code finding object in the
+/// serialized JSON by re-deriving each key and testing membership against
+/// the base snapshot. JSON arrays must be in the same order as the typed
+/// `results` collections they were serialized from.
 #[expect(
     clippy::implicit_hasher,
     reason = "fallow standardizes on FxHashSet across audit attribution keys"
@@ -3069,6 +3092,9 @@ fn annotate_dependency_override_json(
     );
 }
 
+/// Insert `"introduced": bool` into each `findings` and `styling_findings`
+/// object in serialized health JSON, matching entries to the typed report by
+/// array position.
 #[expect(
     clippy::implicit_hasher,
     reason = "fallow standardizes on FxHashSet across audit attribution keys"
@@ -3113,6 +3139,8 @@ pub fn annotate_health_json(
     }
 }
 
+/// Insert `"introduced": bool` into each `clone_groups` object in serialized
+/// duplication JSON, matching groups to the typed report by array position.
 #[expect(
     clippy::implicit_hasher,
     reason = "fallow standardizes on FxHashSet across audit attribution keys"
@@ -3148,6 +3176,7 @@ pub fn annotate_domain_json(
     annotate_issue_array(json, collection, introduced);
 }
 
+/// Attribution key set for every complexity finding in a health report.
 pub fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
     report
         .findings
@@ -3156,6 +3185,9 @@ pub fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashS
         .collect()
 }
 
+/// Attribution key for one complexity finding:
+/// `complexity:<path>:<function>:<exceeded metric>`. Line numbers are
+/// deliberately excluded so a finding survives unrelated edits above it.
 pub fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path) -> String {
     format!(
         "complexity:{}:{}:{:?}",
@@ -3165,6 +3197,7 @@ pub fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &P
     )
 }
 
+/// Attribution key set for every styling finding in a health report.
 pub fn styling_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
     report
         .styling_findings
@@ -3173,6 +3206,8 @@ pub fn styling_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHash
         .collect()
 }
 
+/// Attribution key for one styling finding:
+/// `styling:<code>:<sub kind>:<path>:<line>:<value>`.
 pub fn styling_finding_key(finding: &fallow_output::StylingFinding, root: &Path) -> String {
     format!(
         "styling:{}:{}:{}:{}:{}",
@@ -3184,6 +3219,7 @@ pub fn styling_finding_key(finding: &fallow_output::StylingFinding, root: &Path)
     )
 }
 
+/// Attribution key set for every clone group in a duplication report.
 pub fn dupes_keys(
     report: &fallow_types::duplicates::DuplicationReport,
     root: &Path,
@@ -3195,6 +3231,10 @@ pub fn dupes_keys(
         .collect()
 }
 
+/// Attribution key for one clone group:
+/// `dupe:<sorted files joined by |>:<tokens>:<lines>:<fragment hash>`.
+/// The fragment hash keeps distinct groups spanning the same files apart;
+/// line positions are excluded so a group survives shifts within its files.
 pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path) -> String {
     let mut files: Vec<String> = group
         .instances

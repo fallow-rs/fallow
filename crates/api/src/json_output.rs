@@ -22,25 +22,43 @@ use crate::{DupesReportPayload, DuplicationGroup, DuplicationGrouping, ResultGro
 
 /// Inputs for `fallow dead-code --format json` output assembly.
 pub struct CheckJsonOutputInput<'a> {
+    /// Typed dead-code results to serialize.
     pub results: &'a AnalysisResults,
+    /// Project root; its prefix is stripped from every path in the output.
     pub root: &'a Path,
+    /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: Duration,
+    /// Whether duplicate-export findings can be auto-fixed through config;
+    /// propagated onto their fix actions.
     pub config_fixable: bool,
+    /// Optional explain metadata block for the envelope.
     pub meta: Option<Meta>,
+    /// Caller-computed baseline and regression sections.
     pub extras: CheckJsonExtraOutputs,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 
 /// Inputs for the dead-code JSON payload without a root envelope.
 pub struct CheckJsonPayloadInput<'a> {
+    /// Typed dead-code results to serialize.
     pub results: &'a AnalysisResults,
+    /// Project root; its prefix is stripped from every path in the output.
     pub root: &'a Path,
+    /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: Duration,
+    /// Whether duplicate-export findings can be auto-fixed through config;
+    /// propagated onto their fix actions.
     pub config_fixable: bool,
+    /// Caller-computed baseline and regression sections.
     pub extras: CheckJsonExtraOutputs,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
@@ -50,8 +68,11 @@ pub struct CheckJsonPayloadInput<'a> {
 /// caller-specific workflows such as baseline and regression gates.
 #[derive(Debug, Clone, Default)]
 pub struct CheckJsonExtraOutputs {
+    /// Per-category issue count changes against the matched baseline.
     pub baseline_deltas: Option<BaselineDeltas>,
+    /// Which baseline snapshot the run was compared against.
     pub baseline: Option<BaselineMatch>,
+    /// Outcome of the regression gate against the baseline.
     pub regression: Option<RegressionResult>,
 }
 
@@ -67,41 +88,70 @@ struct CheckJsonEnvelopeInput<'a> {
 
 /// Inputs for grouped dead-code JSON output assembly.
 pub struct GroupedCheckJsonOutputInput<'a> {
+    /// Results already partitioned into groups, in output order.
     pub groups: &'a [ResultGroup],
+    /// Ungrouped results, used for the envelope's `total_issues` count.
     pub original: &'a AnalysisResults,
+    /// Project root; its prefix is stripped from every path in the output.
     pub root: &'a Path,
+    /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: Duration,
+    /// Grouping axis recorded as `grouped_by` in the envelope.
     pub grouped_by: GroupByMode,
+    /// Whether duplicate-export findings can be auto-fixed through config;
+    /// propagated onto their fix actions per group.
     pub config_fixable: bool,
+    /// Optional explain metadata block for the envelope.
     pub meta: Option<Meta>,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 
 /// Inputs for `fallow dupes --format json` output assembly.
 pub struct DuplicationJsonOutputInput<'a> {
+    /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
+    /// Project root; its prefix is stripped from every path in the output.
     pub root: &'a Path,
+    /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: Duration,
+    /// Optional explain metadata block for the envelope.
     pub meta: Option<Meta>,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 
 /// Inputs for grouped duplication JSON output assembly.
 pub struct GroupedDuplicationJsonOutputInput<'a> {
+    /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
+    /// Precomputed grouping whose groups replace the flat `groups` array.
     pub grouping: &'a DuplicationGrouping,
+    /// Project root; its prefix is stripped from every path in the output.
     pub root: &'a Path,
+    /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: Duration,
+    /// Optional explain metadata block for the envelope.
     pub meta: Option<Meta>,
+    /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+    /// Whether the root envelope carries a `kind` discriminant.
     pub envelope_mode: RootEnvelopeMode,
+    /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 

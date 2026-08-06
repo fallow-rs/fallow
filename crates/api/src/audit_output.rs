@@ -26,10 +26,16 @@ pub enum AuditVerdict {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditSummary {
+    /// Total dead-code issues reported for the changed files.
     pub dead_code_issues: usize,
+    /// Whether any reported dead-code issue has error severity.
     pub dead_code_has_errors: bool,
+    /// Total complexity findings reported for the changed files.
     pub complexity_findings: usize,
+    /// Highest cyclomatic complexity among the findings; `None` when there
+    /// are no complexity findings.
     pub max_cyclomatic: Option<u16>,
+    /// Clone groups touching the changed files.
     pub duplication_clone_groups: usize,
 }
 
@@ -37,52 +43,86 @@ pub struct AuditSummary {
 #[derive(Debug, Default, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditAttribution {
+    /// Configured gate: `new-only` fails only on introduced findings,
+    /// `all` also fails on inherited ones.
     pub gate: AuditGate,
+    /// Dead-code findings absent from the base snapshot.
     pub dead_code_introduced: usize,
+    /// Dead-code findings already present in the base snapshot.
     pub dead_code_inherited: usize,
+    /// Complexity findings absent from the base snapshot.
     pub complexity_introduced: usize,
+    /// Complexity findings already present in the base snapshot.
     pub complexity_inherited: usize,
+    /// Clone groups absent from the base snapshot.
     pub duplication_introduced: usize,
+    /// Clone groups already present in the base snapshot.
     pub duplication_inherited: usize,
 }
 
 /// Header fields shared by audit JSON and review-brief subtract sections.
 pub struct AuditJsonHeaderInput {
+    /// Output schema version of the envelope.
     pub schema_version: SchemaVersion,
+    /// Fallow version that produced the output.
     pub version: ToolVersion,
+    /// Overall audit verdict.
     pub verdict: AuditVerdict,
+    /// Number of changed files the audit analyzed.
     pub changed_files_count: u32,
+    /// Git revision the audit compared against.
     pub base_ref: String,
+    /// Human-readable description of how the base was chosen, such as
+    /// `merge-base with origin/main`; omitted from JSON when `None`.
     pub base_description: Option<String>,
+    /// Commit SHA of the analyzed head; omitted from JSON when `None`.
     pub head_sha: Option<String>,
+    /// Audit wall time in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// `Some(true)` when the base snapshot was skipped, so no attribution
+    /// ran; omitted from JSON when `None`.
     pub base_snapshot_skipped: Option<bool>,
+    /// Per-category issue counts.
     pub summary: AuditSummary,
+    /// New-vs-inherited counts and the configured gate.
     pub attribution: AuditAttribution,
 }
 
 /// Typed audit JSON assembly input.
 pub struct AuditJsonOutputInput<DeadCode, Duplication, Complexity> {
+    /// Envelope header fields.
     pub header: AuditJsonHeaderInput,
+    /// Optional explain metadata block.
     pub meta: Option<fallow_types::envelope::Meta>,
+    /// Dead-code section payload; `None` omits the section.
     pub dead_code: Option<DeadCode>,
+    /// Duplication section payload; `None` omits the section.
     pub duplication: Option<Duplication>,
+    /// Complexity (health) section payload; `None` omits the section.
     pub complexity: Option<Complexity>,
+    /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
 }
 
 /// Typed audit SARIF assembly input.
 #[derive(Clone, Copy)]
 pub struct AuditSarifOutputInput<'a> {
+    /// Prebuilt dead-code SARIF document whose runs are merged in.
     pub dead_code: Option<&'a serde_json::Value>,
+    /// Duplication report converted into a dedicated SARIF run; skipped when
+    /// it has no clone groups.
     pub duplication: Option<&'a DuplicationReport>,
+    /// Prebuilt health SARIF document whose runs are merged in.
     pub health: Option<&'a serde_json::Value>,
 }
 
 /// Typed audit CodeClimate assembly input.
 pub struct AuditCodeClimateOutputInput {
+    /// Dead-code issues, emitted first in the combined array.
     pub dead_code: Vec<CodeClimateIssue>,
+    /// Duplication issues, emitted after dead code.
     pub duplication: Vec<CodeClimateIssue>,
+    /// Health issues, emitted last.
     pub health: Vec<CodeClimateIssue>,
 }
 

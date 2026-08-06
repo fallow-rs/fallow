@@ -18,10 +18,17 @@ pub enum ListJsonEnvelope {
 
 /// Section data for serializing a `fallow list --format json` payload.
 pub struct ListJsonOutputInput<Boundaries, Diagnostic> {
+    /// Detected plugin names; `None` omits the plugins section entirely.
     pub plugins: Option<Vec<String>>,
+    /// Analyzed file paths; `None` omits the files section and its count.
     pub files: Option<Vec<String>>,
+    /// Resolved entry points with the source that declared each one; `None`
+    /// omits the section and its count.
     pub entry_points: Option<Vec<ListEntryPointOutput>>,
+    /// Boundaries listing payload; `None` omits the section.
     pub boundaries: Option<Boundaries>,
+    /// Workspace listing whose count, members, and diagnostics are flattened
+    /// into the output body; `None` omits all three fields.
     pub workspaces: Option<WorkspacesOutput<Diagnostic>>,
 }
 
