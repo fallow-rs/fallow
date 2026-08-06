@@ -254,7 +254,7 @@ mod tests {
     fn emitted_output_is_credited() {
         let component = ModuleInfo {
             angular_outputs: vec![output("changed", 10)],
-            member_accesses: vec![access("this.changed", "emit")],
+            member_accesses: vec![access("this.changed", "emit")].into(),
             ..empty_module()
         };
         assert!(
@@ -299,7 +299,7 @@ mod tests {
     fn forwarded_output_value_read_is_credited() {
         let component = ModuleInfo {
             angular_outputs: vec![output("changed", 10)],
-            member_accesses: vec![access("this", "changed")],
+            member_accesses: vec![access("this", "changed")].into(),
             ..empty_module()
         };
         assert!(

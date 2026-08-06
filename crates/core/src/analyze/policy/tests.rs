@@ -183,23 +183,23 @@ fn build_graph(root: &std::path::Path, file_names: &[&str]) -> ModuleGraph {
         .map(|f| ResolvedModule {
             file_id: f.id,
             path: f.path.clone(),
-            exports: vec![],
+            exports: vec![].into(),
             re_exports: vec![],
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            semantic_facts: Box::default(),
-            whole_object_uses: Box::default(),
+            member_accesses: vec![].into(),
+            semantic_facts: std::sync::Arc::default(),
+            whole_object_uses: std::sync::Arc::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: Box::default(),
-            exported_factory_return_object_shapes: Box::default(),
-            type_member_types: Box::default(),
+            exported_factory_returns: std::sync::Arc::default(),
+            exported_factory_return_object_shapes: std::sync::Arc::default(),
+            type_member_types: std::sync::Arc::default(),
         })
         .collect();
 
@@ -620,7 +620,8 @@ fn banned_export_flags_default_and_prefix_matches() {
         export(ExportName::Default, false, 0),
         export(ExportName::Named("internalHelper".to_owned()), false, 12),
         export(ExportName::Named("publicHelper".to_owned()), false, 24),
-    ];
+    ]
+    .into();
     let suppressions = SuppressionContext::empty();
     let line_offsets = FxHashMap::default();
 
@@ -649,7 +650,8 @@ fn banned_export_can_ignore_type_only_exports() {
     module.exports = vec![
         export(ExportName::Named("InternalType".to_owned()), true, 0),
         export(ExportName::Named("InternalValue".to_owned()), false, 12),
-    ];
+    ]
+    .into();
     let suppressions = SuppressionContext::empty();
     let line_offsets = FxHashMap::default();
 

@@ -252,7 +252,7 @@ fn append_named_re_export_stubs(exports: &mut Vec<ExportSymbol>, resolved: &Reso
     let mut named_exports: FxHashSet<&str> = FxHashSet::default();
     named_exports.reserve(resolved.exports.len().saturating_add(named_re_export_count));
     let mut has_default = false;
-    for export in &resolved.exports {
+    for export in resolved.exports.iter() {
         match &export.name {
             ExportName::Named(name) => {
                 named_exports.insert(name.as_str());
@@ -1162,7 +1162,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1199,7 +1200,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             re_exports: vec![crate::resolve::ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {
                     source: "./source".to_string(),

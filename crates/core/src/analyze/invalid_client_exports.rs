@@ -135,7 +135,7 @@ fn append_invalid_client_exports_for_module(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     findings: &mut Vec<InvalidClientExport>,
 ) {
-    for export in &module.exports {
+    for export in module.exports.iter() {
         if export.is_type_only {
             continue;
         }

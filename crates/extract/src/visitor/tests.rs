@@ -7240,7 +7240,7 @@ mod proptests {
                 !info.re_exports.is_empty(),
                 "Star re-export should produce a re_export entry"
             );
-            for exp in &info.exports {
+            for exp in info.exports.iter() {
                 if let ExportName::Named(name) = &exp.name {
                     prop_assert_ne!(name, "*", "Star re-export should not appear in exports");
                 }
@@ -7250,7 +7250,7 @@ mod proptests {
         #[test]
         fn export_names_are_non_empty(source in arb_valid_js_source()) {
             let info = parse(&source);
-            for export in &info.exports {
+            for export in info.exports.iter() {
                 if let ExportName::Named(name) = &export.name {
                     prop_assert!(!name.is_empty(), "Named export should have non-empty name");
                 }

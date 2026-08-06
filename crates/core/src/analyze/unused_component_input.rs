@@ -346,7 +346,7 @@ mod tests {
     fn script_credited_input_is_used() {
         let component = ModuleInfo {
             angular_inputs: vec![input("count", 10)],
-            member_accesses: vec![this_access("count")],
+            member_accesses: vec![this_access("count")].into(),
             ..empty_module()
         };
         let used = input_usage_set(&component, &[]);

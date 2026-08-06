@@ -51,14 +51,14 @@ fn collect_store_auto_imports(dir: &Path, rules: &mut Vec<AutoImportRule>) {
             continue;
         };
         let module = fallow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
-        for export in module.exports {
+        for export in module.exports.iter() {
             if export.is_type_only {
                 continue;
             }
-            if let ExportName::Named(name) = export.name
-                && is_store_export_name(&name)
+            if let ExportName::Named(name) = &export.name
+                && is_store_export_name(name)
             {
-                push_store_rule(rules, name, path.clone());
+                push_store_rule(rules, name.clone(), path.clone());
             }
         }
     }

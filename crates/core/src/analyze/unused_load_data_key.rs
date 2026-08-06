@@ -203,7 +203,7 @@ fn collect_route_loader_used_keys(module: &ModuleInfo) -> Option<FxHashSet<&str>
     }
 
     let mut used = FxHashSet::default();
-    for access in &module.member_accesses {
+    for access in module.member_accesses.iter() {
         if access.object == ROUTE_LOADER_DATA_OBJECT || access.object == "loaderData" {
             used.insert(access.member.as_str());
         }
@@ -341,7 +341,7 @@ fn collect_global_page_data_member_accesses(modules: &[ModuleInfo]) -> FxHashSet
     // unify on the bare member name.
     let mut global_used: FxHashSet<&str> = FxHashSet::default();
     for module in modules {
-        for access in &module.member_accesses {
+        for access in module.member_accesses.iter() {
             if access.object == "page.data" || access.object == "$page.data" {
                 global_used.insert(access.member.as_str());
             }
@@ -464,7 +464,7 @@ fn collect_data_member_accesses<'a>(module: &'a ModuleInfo, used: &mut FxHashSet
     // `+page.svelte`'s file_id is not guaranteed to be in the `resolved_modules`
     // index, and `data` is never graph-narrowed (it is a prop, not an import), so
     // the resolved indirection only risked dropping a real consumer read.
-    for access in &module.member_accesses {
+    for access in module.member_accesses.iter() {
         if access.object == "data" {
             used.insert(access.member.as_str());
         }
@@ -598,7 +598,8 @@ mod tests {
         route.member_accesses = vec![MemberAccess {
             object: ROUTE_LOADER_DATA_OBJECT.to_string(),
             member: "used".to_string(),
-        }];
+        }]
+        .into();
 
         let mut declared_deps = FxHashSet::default();
         declared_deps.insert("@sveltejs/kit".to_string());

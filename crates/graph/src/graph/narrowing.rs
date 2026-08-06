@@ -722,7 +722,8 @@ mod tests {
                     object: "other".to_string(),
                     member: "baz".to_string(),
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         };
         let members = extract_accessed_members(Some(&&resolved), "ns");
@@ -1128,7 +1129,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1181,7 +1183,8 @@ mod tests {
                 member_accesses: vec![fallow_types::extract::MemberAccess {
                     object: "utils".to_string(),
                     member: "foo".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -1210,7 +1213,8 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1300,7 +1304,8 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1352,7 +1357,8 @@ mod tests {
                 member_accesses: vec![fallow_types::extract::MemberAccess {
                     object: "styles".to_string(),
                     member: "primary".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -1381,7 +1387,8 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1457,7 +1464,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];

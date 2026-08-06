@@ -202,7 +202,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/p/src/impl.ts"),
-                exports: vec![named_export("pub"), named_export("priv")],
+                exports: vec![named_export("pub"), named_export("priv")].into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -343,7 +343,7 @@ mod tests {
         let resolved = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/p/index.ts"),
-            exports: vec![type_export, named_export("v")],
+            exports: vec![type_export, named_export("v")].into(),
             ..Default::default()
         }];
         let graph = ModuleGraph::build(&resolved, &entry_points, &files);

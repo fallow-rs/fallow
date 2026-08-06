@@ -257,7 +257,7 @@ fn html_module_info(
 
     ModuleInfo {
         imports,
-        member_accesses,
+        member_accesses: member_accesses.into(),
         semantic_facts: semantic_facts.into(),
         content_hash,
         suppressions: parsed_suppressions.suppressions,

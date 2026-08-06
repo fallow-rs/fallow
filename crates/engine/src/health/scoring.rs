@@ -2514,7 +2514,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         }];
 
@@ -2845,7 +2846,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         }];
 
@@ -3189,7 +3191,8 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         }];
 
@@ -3236,7 +3239,8 @@ mod tests {
                 is_side_effect_used: false,
                 super_class: None,
             },
-        ];
+        ]
+        .into();
         let modules = vec![module];
 
         let mut file_paths: rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf> =
@@ -3357,7 +3361,8 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         }];
 
@@ -3404,7 +3409,8 @@ mod tests {
                 is_side_effect_used: false,
                 super_class: None,
             },
-        ];
+        ]
+        .into();
         let modules = vec![module];
 
         let mut file_paths: rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf> =
@@ -3622,7 +3628,8 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         }];
 

@@ -444,7 +444,7 @@ pub(super) fn build_local_to_export_keys(
         );
     }
 
-    for export in &resolved.exports {
+    for export in resolved.exports.iter() {
         if let Some(local_name) = export.local_name.as_deref() {
             push_local_export_key(
                 &mut local_to_export_keys,
@@ -1148,7 +1148,7 @@ fn build_ol_interaction_subclass_keys(
             continue;
         }
 
-        for export in &resolved.exports {
+        for export in resolved.exports.iter() {
             if let Some(super_local) = &export.super_class
                 && ol_import_locals.contains(super_local.as_str())
             {
@@ -1494,7 +1494,7 @@ fn collect_direct_member_accesses(
             }
         }
 
-        for local_name in &resolved.whole_object_uses {
+        for local_name in resolved.whole_object_uses.iter() {
             if let Some(export_keys) = local_to_export_keys.get(local_name.as_str()) {
                 whole_object_used_exports.extend(export_keys.iter().cloned());
             }

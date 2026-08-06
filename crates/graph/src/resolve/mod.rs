@@ -37,6 +37,8 @@ pub use types::{
     ResolvedReplacedModuleTarget, ResolvedSourceEdge,
 };
 
+use std::sync::Arc;
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -499,7 +501,7 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
     ResolvedModule {
         file_id: input.module.file_id,
         path: input.file_path.to_path_buf(),
-        exports: input.module.exports.clone(),
+        exports: Arc::clone(&input.module.exports),
         re_exports: resolve_re_exports(input.ctx, input.file_path, &input.module.re_exports),
         resolved_imports: input.all_imports,
         resolved_dynamic_imports: resolve_dynamic_imports(
@@ -514,9 +516,9 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
             input.canonical_paths,
             input.files,
         ),
-        member_accesses: input.module.member_accesses.clone(),
-        semantic_facts: input.module.semantic_facts.clone(),
-        whole_object_uses: input.module.whole_object_uses.clone(),
+        member_accesses: Arc::clone(&input.module.member_accesses),
+        semantic_facts: Arc::clone(&input.module.semantic_facts),
+        whole_object_uses: Arc::clone(&input.module.whole_object_uses),
         has_cjs_exports: input.module.has_cjs_exports,
         has_angular_component_template_url: input.module.has_angular_component_template_url,
         unused_import_bindings: input
@@ -528,12 +530,11 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
         type_referenced_import_bindings: input.module.type_referenced_import_bindings.clone(),
         value_referenced_import_bindings: input.module.value_referenced_import_bindings.clone(),
         namespace_object_aliases: input.module.namespace_object_aliases.clone(),
-        exported_factory_returns: input.module.exported_factory_returns.clone(),
-        exported_factory_return_object_shapes: input
-            .module
-            .exported_factory_return_object_shapes
-            .clone(),
-        type_member_types: input.module.type_member_types.clone(),
+        exported_factory_returns: Arc::clone(&input.module.exported_factory_returns),
+        exported_factory_return_object_shapes: Arc::clone(
+            &input.module.exported_factory_return_object_shapes,
+        ),
+        type_member_types: Arc::clone(&input.module.type_member_types),
     }
 }
 

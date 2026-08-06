@@ -878,7 +878,8 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -894,7 +895,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1008,7 +1010,8 @@ mod tests {
                     members: vec![method("used"), method("dead")],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1089,7 +1092,8 @@ mod tests {
                 ],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         }];
         let graph = ModuleGraph::build(&resolved_modules, &[], &files);
@@ -1176,7 +1180,8 @@ mod tests {
                     members: vec![method("dead")],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1280,7 +1285,8 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
         ];

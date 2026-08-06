@@ -84,7 +84,8 @@ fn graph_re_export_chain_propagates_references() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             re_exports: vec![ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
@@ -112,7 +113,8 @@ fn graph_re_export_chain_propagates_references() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -197,7 +199,8 @@ fn barrel_re_export_creates_export_symbol() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -340,7 +343,8 @@ fn barrel_unused_re_export_has_no_references() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -470,7 +474,8 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -575,7 +580,8 @@ fn default_re_export_creates_default_export_symbol() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -704,7 +710,8 @@ fn multi_level_re_export_chain_propagation() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -823,7 +830,8 @@ fn entry_point_named_re_export_propagates_to_source() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -918,7 +926,8 @@ fn entry_point_star_re_export_propagates_to_source() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1018,7 +1027,8 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1120,7 +1130,8 @@ fn entry_point_multi_level_named_re_export_chain() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1262,7 +1273,8 @@ fn star_re_export_through_multiple_barrel_layers() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1365,7 +1377,8 @@ fn entry_point_star_re_export_through_multiple_barrel_layers() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1456,7 +1469,8 @@ fn named_re_export_with_rename() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1537,7 +1551,8 @@ fn entry_point_star_re_export_source_has_only_default() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1678,7 +1693,8 @@ fn star_re_export_cycle_terminates() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             re_exports: vec![ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {
                     source: "./b".to_string(),
@@ -1861,7 +1877,8 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -1984,7 +2001,8 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -2086,7 +2104,8 @@ fn entry_point_star_re_export_skips_default() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -2164,7 +2183,8 @@ fn no_re_exports_skips_chain_resolution() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -2281,7 +2301,8 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 is_side_effect_used: false,
                 super_class: None,
             },
-        ],
+        ]
+        .into(),
         ..Default::default()
     });
 
@@ -2407,7 +2428,8 @@ fn deep_named_re_export_chain_propagates_25_hops() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         });
 
@@ -2448,7 +2470,7 @@ fn work_queue_does_not_revisit_unrelated_settled_edge() {
     resolved_modules.push(ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/leaf.ts"),
-        exports: vec![merged_export(false)],
+        exports: vec![merged_export(false)].into(),
         ..Default::default()
     });
 
@@ -2526,7 +2548,7 @@ fn work_queue_does_not_revisit_unrelated_settled_edge() {
     resolved_modules.push(ResolvedModule {
         file_id: unrelated_source_id,
         path: PathBuf::from("/project/unrelated_source.ts"),
-        exports: vec![merged_export(false)],
+        exports: vec![merged_export(false)].into(),
         ..Default::default()
     });
 
@@ -2697,7 +2719,7 @@ fn graph_for_named_chain(barrel_count: u32) -> ModuleGraph {
     let mut resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/leaf.ts"),
-        exports: vec![merged_export(false)],
+        exports: vec![merged_export(false)].into(),
         ..Default::default()
     }];
 
@@ -2815,13 +2837,13 @@ fn graph_for_parallel_named_re_exports(reverse: bool) -> ModuleGraph {
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/a.ts"),
-            exports: vec![named_export("A", false)],
+            exports: vec![named_export("A", false)].into(),
             ..Default::default()
         },
         ResolvedModule {
             file_id: FileId(3),
             path: PathBuf::from("/project/b.ts"),
-            exports: vec![named_export("B", false)],
+            exports: vec![named_export("B", false)].into(),
             ..Default::default()
         },
     ];
@@ -2882,7 +2904,8 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             re_exports: vec![ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {
                     source: "./b".to_string(),
@@ -2958,7 +2981,8 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
         ResolvedModule {
@@ -3092,7 +3116,8 @@ fn type_only_star_chain_synthesizes_type_only_stub() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -3219,7 +3244,8 @@ fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -3388,7 +3414,8 @@ fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -3773,7 +3800,7 @@ fn graph_for_merged_star_import(
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/merged.ts"),
-            exports: vec![merged_export(true), merged_export(false)],
+            exports: vec![merged_export(true), merged_export(false)].into(),
             ..Default::default()
         },
     ];
@@ -3847,7 +3874,7 @@ fn graph_for_merged_star_chain_import(
         ResolvedModule {
             file_id: FileId(3),
             path: PathBuf::from("/project/merged.ts"),
-            exports: vec![merged_export(true), merged_export(false)],
+            exports: vec![merged_export(true), merged_export(false)].into(),
             ..Default::default()
         },
     ];

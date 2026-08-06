@@ -7,6 +7,7 @@
 //! analysis pipeline. Eliminating these clones would require shared ownership
 //! (`Arc<str>`) across the entire extraction + analysis pipeline.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use oxc_span::Span;
@@ -456,6 +457,11 @@ fn module_namespace_aliases_to_cached(
         .collect()
 }
 
+/// Rehydrate an optional cached slice into the shared `Arc<[T]>` module form.
+fn cached_opt_to_arc<T: Clone>(cached: Option<&[T]>) -> Arc<[T]> {
+    cached.map(Arc::from).unwrap_or_default()
+}
+
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`], skipping
 /// the per-function complexity vec when `need_complexity` is `false`. Avoids the
 /// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `fallow dead-code`)
@@ -468,16 +474,16 @@ pub fn cached_to_module_opts(
 ) -> crate::ModuleInfo {
     crate::ModuleInfo {
         file_id,
-        exports: cached_exports_to_module(&cached.exports),
+        exports: cached_exports_to_module(&cached.exports).into(),
         imports: cached_imports_to_module(&cached.imports),
         re_exports: cached_re_exports_to_module(&cached.re_exports),
         dynamic_imports: cached_dynamic_imports_to_module(&cached.dynamic_imports),
         dynamic_import_patterns: cached_dynamic_patterns_to_module(&cached.dynamic_import_patterns),
         require_calls: cached_require_calls_to_module(&cached.require_calls),
         package_path_references: cached.package_path_references.clone(),
-        member_accesses: cached.member_accesses.clone(),
-        semantic_facts: cached.semantic_facts.clone().unwrap_or_default(),
-        whole_object_uses: cached.whole_object_uses.clone(),
+        member_accesses: cached.member_accesses.clone().into(),
+        semantic_facts: cached_opt_to_arc(cached.semantic_facts.as_deref()),
+        whole_object_uses: Arc::from(&*cached.whole_object_uses),
         has_cjs_exports: cached.has_cjs_exports,
         has_angular_component_template_url: cached.has_angular_component_template_url,
         content_hash: cached.content_hash,
@@ -496,12 +502,11 @@ pub fn cached_to_module_opts(
         },
         flag_uses: cached.flag_uses.clone(),
         class_heritage: cached.class_heritage.clone(),
-        exported_factory_returns: cached.exported_factory_returns.clone().unwrap_or_default(),
-        exported_factory_return_object_shapes: cached
-            .exported_factory_return_object_shapes
-            .clone()
-            .unwrap_or_default(),
-        type_member_types: cached.type_member_types.clone().unwrap_or_default(),
+        exported_factory_returns: cached_opt_to_arc(cached.exported_factory_returns.as_deref()),
+        exported_factory_return_object_shapes: cached_opt_to_arc(
+            cached.exported_factory_return_object_shapes.as_deref(),
+        ),
+        type_member_types: cached_opt_to_arc(cached.type_member_types.as_deref()),
         injection_tokens: cached.injection_tokens.clone(),
         local_type_declarations: cached_local_types_to_module(&cached.local_type_declarations),
         public_signature_type_references: cached_signature_refs_to_module(
@@ -584,9 +589,10 @@ pub fn module_to_cached(
         dynamic_imports: module_dynamic_imports_to_cached(&module.dynamic_imports),
         require_calls: module_require_calls_to_cached(&module.require_calls),
         package_path_references: module.package_path_references.clone(),
-        member_accesses: module.member_accesses.clone(),
-        semantic_facts: (!module.semantic_facts.is_empty()).then(|| module.semantic_facts.clone()),
-        whole_object_uses: module.whole_object_uses.clone(),
+        member_accesses: module.member_accesses.to_vec(),
+        semantic_facts: (!module.semantic_facts.is_empty())
+            .then(|| Box::from(&*module.semantic_facts)),
+        whole_object_uses: Box::from(&*module.whole_object_uses),
         dynamic_import_patterns: module_dynamic_patterns_to_cached(&module.dynamic_import_patterns),
         has_cjs_exports: module.has_cjs_exports,
         has_angular_component_template_url: module.has_angular_component_template_url,
@@ -602,13 +608,13 @@ pub fn module_to_cached(
         flag_uses: module.flag_uses.clone(),
         class_heritage: module.class_heritage.clone(),
         exported_factory_returns: (!module.exported_factory_returns.is_empty())
-            .then(|| module.exported_factory_returns.clone()),
+            .then(|| Box::from(&*module.exported_factory_returns)),
         exported_factory_return_object_shapes: (!module
             .exported_factory_return_object_shapes
             .is_empty())
-        .then(|| module.exported_factory_return_object_shapes.clone()),
+        .then(|| Box::from(&*module.exported_factory_return_object_shapes)),
         type_member_types: (!module.type_member_types.is_empty())
-            .then(|| module.type_member_types.clone()),
+            .then(|| Box::from(&*module.type_member_types)),
         injection_tokens: module.injection_tokens.clone(),
         local_type_declarations: module_local_types_to_cached(&module.local_type_declarations),
         public_signature_type_references: module_signature_refs_to_cached(

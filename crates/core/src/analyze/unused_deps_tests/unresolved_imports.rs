@@ -20,7 +20,7 @@ fn unresolved_import_detected() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -36,18 +36,18 @@ fn unresolved_import_detected() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -73,7 +73,7 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![
             unresolved_import("@example/icons"),
@@ -84,18 +84,18 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
         ],
         resolved_dynamic_imports: vec![unresolved_import("@example/icons/dynamic")],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let mut config = test_config(PathBuf::from("/project"));
@@ -136,7 +136,7 @@ fn ignore_unresolved_imports_matches_leading_dot_slash_specifiers() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![
             unresolved_import("./generated/output-contract.js"),
@@ -145,18 +145,18 @@ fn ignore_unresolved_imports_matches_leading_dot_slash_specifiers() {
         ],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     // Resolve through the real config pipeline so the leading "./" strip
@@ -218,23 +218,23 @@ fn multi_binding_re_export_reports_one_unresolved_finding_per_specifier() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![re_export("A", 10), re_export("B", 20), re_export("C", 30)],
         resolved_imports: vec![unresolved_import("./also-missing")],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -466,7 +466,7 @@ fn unresolved_dynamic_import_detected_with_real_location() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![],
         resolved_dynamic_imports: vec![ResolvedImport {
@@ -482,18 +482,18 @@ fn unresolved_dynamic_import_detected_with_real_location() {
             target: ResolveResult::Unresolvable("./missing-dynamic".to_string()),
         }],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -552,23 +552,23 @@ fn unresolved_platform_builtins_not_reported() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports,
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -600,7 +600,7 @@ fn unresolved_virtual_module_not_reported() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -616,18 +616,18 @@ fn unresolved_virtual_module_not_reported() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -655,7 +655,7 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -671,18 +671,18 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -710,7 +710,7 @@ fn unresolved_tanstack_start_virtual_imports_not_reported() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/router-manifest.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: [
             "tanstack-start-manifest:v",
@@ -733,18 +733,18 @@ fn unresolved_tanstack_start_virtual_imports_not_reported() {
         .collect(),
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -775,7 +775,7 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/routes/+page.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![
             ResolvedImport {
@@ -817,18 +817,18 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         ],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -856,7 +856,7 @@ fn unresolved_import_suppressed_by_generated_type_import_prefix() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/app/root.tsx"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![
             ResolvedImport {
@@ -898,18 +898,18 @@ fn unresolved_import_suppressed_by_generated_type_import_prefix() {
         ],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -943,7 +943,7 @@ fn generated_type_import_prefix_is_plugin_gated() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/app/root.tsx"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -959,18 +959,18 @@ fn generated_type_import_prefix_is_plugin_gated() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -996,7 +996,7 @@ fn unresolved_import_suppressed_by_inline_comment() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -1012,18 +1012,18 @@ fn unresolved_import_suppressed_by_inline_comment() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1058,7 +1058,7 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![],
         resolved_dynamic_imports: vec![ResolvedImport {
@@ -1074,18 +1074,18 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
             target: ResolveResult::Unresolvable("./broken-dynamic".to_string()),
         }],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1122,7 +1122,7 @@ fn unresolved_import_file_level_suppression() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -1138,18 +1138,18 @@ fn unresolved_import_file_level_suppression() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1184,7 +1184,7 @@ fn resolved_import_not_reported_as_unresolved() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![
             ResolvedImport {
@@ -1214,18 +1214,18 @@ fn resolved_import_not_reported_as_unresolved() {
         ],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1276,7 +1276,7 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -1292,18 +1292,18 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));

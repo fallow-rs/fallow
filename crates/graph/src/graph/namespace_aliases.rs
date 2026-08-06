@@ -230,7 +230,7 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
     if consumer_local.is_empty() {
         return;
     }
-    for access in &consumer.member_accesses {
+    for access in consumer.member_accesses.iter() {
         // Zero-allocation equivalent of `access.object == format!("{consumer_local}{prefix_match}")`.
         let object_matches = access
             .object
@@ -604,7 +604,7 @@ mod tests {
         }
         ResolvedModule {
             file_id: FileId(u32::MAX),
-            member_accesses,
+            member_accesses: member_accesses.into(),
             ..Default::default()
         }
     }

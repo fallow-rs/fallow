@@ -338,14 +338,14 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/p/src/core.ts"),
-                exports: vec![named_export("compute")],
+                exports: vec![named_export("compute")].into(),
                 ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/p/src/mid.ts"),
                 resolved_imports: vec![named_import("./core", "compute", FileId(0))],
-                exports: vec![named_export("midFn")],
+                exports: vec![named_export("midFn")].into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -377,7 +377,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/p/src/impl.ts"),
-                exports: vec![named_export("widget")],
+                exports: vec![named_export("widget")].into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -447,7 +447,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/p/src/button.component.ts"),
-                exports: vec![named_export("BzmButton")],
+                exports: vec![named_export("BzmButton")].into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -537,7 +537,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/p/src/core.ts"),
-                exports: vec![named_export("alpha"), named_export("beta")],
+                exports: vec![named_export("alpha"), named_export("beta")].into(),
                 ..Default::default()
             },
             ResolvedModule {

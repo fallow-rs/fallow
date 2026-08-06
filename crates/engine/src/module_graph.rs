@@ -523,7 +523,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: files[2].path.clone(),
-                exports: vec![value_export("target", 0)],
+                exports: vec![value_export("target", 0)].into(),
                 ..ResolvedModule::default()
             },
         ];
@@ -601,7 +601,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: files[1].path.clone(),
-                exports: vec![value_export("esmOnly", 0), value_export("required", 20)],
+                exports: vec![value_export("esmOnly", 0), value_export("required", 20)].into(),
                 ..ResolvedModule::default()
             },
         ];

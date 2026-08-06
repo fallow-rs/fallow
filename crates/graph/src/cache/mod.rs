@@ -5,6 +5,8 @@
 //! can reuse a previously-built `ModuleGraph`; stable-key resolver hits can
 //! reuse resolver output and rebuild the graph with current `FileId`s.
 
+use std::sync::Arc;
+
 use std::path::{Path, PathBuf};
 
 use fallow_types::discover::{DiscoveredFile, FileId, StableFileKey};
@@ -528,7 +530,7 @@ fn restore_cached_resolved_module(
     Some(ResolvedModule {
         file_id: module.file_id,
         path,
-        exports: module.exports.clone(),
+        exports: Arc::clone(&module.exports),
         re_exports: entry
             .re_exports
             .iter()
@@ -553,18 +555,20 @@ fn restore_cached_resolved_module(
             .cloned()
             .zip(resolved_dynamic_pattern_targets)
             .collect(),
-        member_accesses: module.member_accesses.clone(),
-        semantic_facts: module.semantic_facts.clone(),
-        whole_object_uses: module.whole_object_uses.clone(),
+        member_accesses: Arc::clone(&module.member_accesses),
+        semantic_facts: Arc::clone(&module.semantic_facts),
+        whole_object_uses: Arc::clone(&module.whole_object_uses),
         has_cjs_exports: module.has_cjs_exports,
         has_angular_component_template_url: module.has_angular_component_template_url,
         unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
         type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
         value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
         namespace_object_aliases: module.namespace_object_aliases.clone(),
-        exported_factory_returns: module.exported_factory_returns.clone(),
-        exported_factory_return_object_shapes: module.exported_factory_return_object_shapes.clone(),
-        type_member_types: module.type_member_types.clone(),
+        exported_factory_returns: Arc::clone(&module.exported_factory_returns),
+        exported_factory_return_object_shapes: Arc::clone(
+            &module.exported_factory_return_object_shapes,
+        ),
+        type_member_types: Arc::clone(&module.type_member_types),
     })
 }
 

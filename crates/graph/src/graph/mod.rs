@@ -1000,7 +1000,8 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1125,7 +1126,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -1175,7 +1177,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1291,7 +1294,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1386,7 +1390,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1467,7 +1472,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -1483,7 +1489,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1514,7 +1521,7 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/project/entry.ts"),
-            exports: vec![],
+            exports: vec![].into(),
             re_exports: vec![],
             resolved_imports: vec![
                 ResolvedImport {
@@ -1856,7 +1863,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -1924,7 +1932,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -2004,7 +2013,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
         ];

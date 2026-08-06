@@ -2522,16 +2522,16 @@ impl ModuleInfoExtractor {
         let type_member_types = self.collect_type_member_types();
         ModuleInfo {
             file_id,
-            exports: self.exports,
+            exports: self.exports.into(),
             imports: self.imports,
             re_exports: self.re_exports,
             dynamic_imports: self.dynamic_imports,
             dynamic_import_patterns: self.dynamic_import_patterns,
             require_calls: self.require_calls,
             package_path_references: self.package_path_references.into_boxed_slice(),
-            member_accesses: self.member_accesses,
-            semantic_facts: self.semantic_facts.into_boxed_slice(),
-            whole_object_uses: self.whole_object_uses.into_boxed_slice(),
+            member_accesses: self.member_accesses.into(),
+            semantic_facts: self.semantic_facts.into(),
+            whole_object_uses: self.whole_object_uses.into(),
             has_cjs_exports: self.has_cjs_exports,
             has_angular_component_template_url: self.has_angular_component_template_url,
             content_hash,
@@ -2544,10 +2544,9 @@ impl ModuleInfoExtractor {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: self.class_heritage,
-            exported_factory_returns: exported_factory_returns.into_boxed_slice(),
-            exported_factory_return_object_shapes: exported_factory_return_object_shapes
-                .into_boxed_slice(),
-            type_member_types: type_member_types.into_boxed_slice(),
+            exported_factory_returns: exported_factory_returns.into(),
+            exported_factory_return_object_shapes: exported_factory_return_object_shapes.into(),
+            type_member_types: type_member_types.into(),
             injection_tokens: self.injection_tokens,
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
@@ -2633,7 +2632,9 @@ impl ModuleInfoExtractor {
             self.collect_exported_factory_return_object_shapes();
         let mut type_member_types = self.collect_type_member_types();
         info.imports.append(&mut self.imports);
-        info.exports.append(&mut self.exports);
+        let mut exports = std::mem::take(&mut info.exports).to_vec();
+        exports.append(&mut self.exports);
+        info.exports = exports.into();
         info.re_exports.append(&mut self.re_exports);
         info.dynamic_imports.append(&mut self.dynamic_imports);
         info.dynamic_import_patterns
@@ -2643,36 +2644,38 @@ impl ModuleInfoExtractor {
             std::mem::take(&mut info.package_path_references).into_vec();
         package_path_references.append(&mut self.package_path_references);
         info.package_path_references = package_path_references.into_boxed_slice();
-        info.member_accesses.append(&mut self.member_accesses);
-        let mut whole_object_uses = std::mem::take(&mut info.whole_object_uses).into_vec();
+        let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
+        member_accesses.append(&mut self.member_accesses);
+        info.member_accesses = member_accesses.into();
+        let mut whole_object_uses = std::mem::take(&mut info.whole_object_uses).to_vec();
         whole_object_uses.append(&mut self.whole_object_uses);
-        info.whole_object_uses = whole_object_uses.into_boxed_slice();
+        info.whole_object_uses = whole_object_uses.into();
         // Carry typed semantic facts through the SFC merge path; without this
         // every fact kind (factory-fn, fluent-chain, typed-property-hop, ...)
         // was silently dropped for Vue/Svelte `<script>` blocks, so the
         // analyze-layer cross-module joins never saw SFC consumers. See issue
         // #1785 (review finding).
-        let mut semantic_facts = std::mem::take(&mut info.semantic_facts).into_vec();
+        let mut semantic_facts = std::mem::take(&mut info.semantic_facts).to_vec();
         semantic_facts.append(&mut self.semantic_facts);
-        info.semantic_facts = semantic_facts.into_boxed_slice();
+        info.semantic_facts = semantic_facts.into();
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
         info.class_heritage.append(&mut self.class_heritage);
         if !exported_factory_returns.is_empty() {
-            let mut merged = std::mem::take(&mut info.exported_factory_returns).into_vec();
+            let mut merged = std::mem::take(&mut info.exported_factory_returns).to_vec();
             merged.append(&mut exported_factory_returns);
-            info.exported_factory_returns = merged.into_boxed_slice();
+            info.exported_factory_returns = merged.into();
         }
         if !exported_factory_return_object_shapes.is_empty() {
             let mut merged =
-                std::mem::take(&mut info.exported_factory_return_object_shapes).into_vec();
+                std::mem::take(&mut info.exported_factory_return_object_shapes).to_vec();
             merged.append(&mut exported_factory_return_object_shapes);
-            info.exported_factory_return_object_shapes = merged.into_boxed_slice();
+            info.exported_factory_return_object_shapes = merged.into();
         }
         if !type_member_types.is_empty() {
-            let mut merged = std::mem::take(&mut info.type_member_types).into_vec();
+            let mut merged = std::mem::take(&mut info.type_member_types).to_vec();
             merged.append(&mut type_member_types);
-            info.type_member_types = merged.into_boxed_slice();
+            info.type_member_types = merged.into();
         }
         info.injection_tokens.append(&mut self.injection_tokens);
         info.local_type_declarations

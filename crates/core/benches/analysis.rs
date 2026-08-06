@@ -345,23 +345,23 @@ fn empty_resolved_module(
     fallow_core::resolve::ResolvedModule {
         file_id,
         path,
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }
 }
 
@@ -470,10 +470,11 @@ fn create_namespace_re_export_input() -> ReExportInput {
             if consumer == 0 {
                 module.whole_object_uses = vec![local_name].into();
             } else {
-                module.member_accesses.push(MemberAccess {
+                module.member_accesses = vec![MemberAccess {
                     object: local_name,
                     member: format!("member{}", consumer % NAMESPACE_EXPORTS_PER_TARGET),
-                });
+                }]
+                .into();
             }
             push_file(id, path, module);
         }
@@ -613,10 +614,11 @@ fn create_namespace_object_alias_input() -> ReExportInput {
                 },
                 target: ResolveResult::InternalModule(FileId(outer_start + target)),
             });
-            module.member_accesses.push(MemberAccess {
+            module.member_accesses = vec![MemberAccess {
                 object: format!("{local_name}.namespace"),
                 member: format!("member{}", consumer % NAMESPACE_EXPORTS_PER_TARGET),
-            });
+            }]
+            .into();
             push_file(id, path, module);
         }
     }
@@ -697,23 +699,23 @@ fn create_re_export_input() -> ReExportInput {
     resolved_modules.push(ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/entry.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: entry_imports,
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     });
 
     for b in 0..barrel_count {
@@ -780,23 +782,23 @@ fn create_re_export_input() -> ReExportInput {
         resolved_modules.push(ResolvedModule {
             file_id: barrel_id,
             path: PathBuf::from(format!("/project/src/barrel{b}.ts")),
-            exports: vec![],
+            exports: vec![].into(),
             re_exports,
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            semantic_facts: Box::default(),
-            whole_object_uses: Box::default(),
+            member_accesses: vec![].into(),
+            semantic_facts: std::sync::Arc::default(),
+            whole_object_uses: std::sync::Arc::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: Box::default(),
-            exported_factory_return_object_shapes: Box::default(),
-            type_member_types: Box::default(),
+            exported_factory_returns: std::sync::Arc::default(),
+            exported_factory_return_object_shapes: std::sync::Arc::default(),
+            type_member_types: std::sync::Arc::default(),
         });
     }
 
@@ -840,23 +842,23 @@ fn create_re_export_input() -> ReExportInput {
         resolved_modules.push(ResolvedModule {
             file_id: source_id,
             path: PathBuf::from(format!("/project/src/source{s}.ts")),
-            exports,
+            exports: exports.into(),
             re_exports: vec![],
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            semantic_facts: Box::default(),
-            whole_object_uses: Box::default(),
+            member_accesses: vec![].into(),
+            semantic_facts: std::sync::Arc::default(),
+            whole_object_uses: std::sync::Arc::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: Box::default(),
-            exported_factory_return_object_shapes: Box::default(),
-            type_member_types: Box::default(),
+            exported_factory_returns: std::sync::Arc::default(),
+            exported_factory_return_object_shapes: std::sync::Arc::default(),
+            type_member_types: std::sync::Arc::default(),
         });
     }
 
@@ -905,7 +907,7 @@ fn create_reverse_re_export_chain_input(chain_length: u32) -> ReExportInput {
         size_bytes: 50,
     });
     let mut leaf = empty_resolved_module(FileId(0), leaf_path);
-    leaf.exports.push(ExportInfo {
+    leaf.exports = vec![ExportInfo {
         name: ExportName::Named("value".to_string()),
         local_name: Some("value".to_string()),
         is_type_only: false,
@@ -915,7 +917,8 @@ fn create_reverse_re_export_chain_input(chain_length: u32) -> ReExportInput {
         members: Vec::new(),
         is_side_effect_used: false,
         super_class: None,
-    });
+    }]
+    .into();
     resolved_modules.push(leaf);
 
     for idx in 1..=chain_length {
@@ -1121,7 +1124,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 is_side_effect_used: false,
                 super_class: None,
             },
-        ],
+        ]
+        .into(),
         imports: vec![
             ImportInfo {
                 source: "react".to_string(),
@@ -1226,7 +1230,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 object: "console".to_string(),
                 member: "log".to_string(),
             },
-        ],
+        ]
+        .into(),
         content_hash: 0xDEAD_BEEF_CAFE_1234,
         line_offsets: vec![0],
         ..ModuleInfo::empty(FileId(0))

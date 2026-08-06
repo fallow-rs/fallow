@@ -1,7 +1,7 @@
 //! Type definitions and constants for import resolution.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use oxc_resolver::Resolver;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -238,6 +238,10 @@ impl<'a> ResolvedSourceEdge<'a> {
 }
 
 /// Fully resolved module with all imports mapped to targets.
+///
+/// The `Arc<[T]>` fields are refcounted views of the same allocations owned by
+/// the source [`fallow_types::extract::ModuleInfo`], not copies; see the note
+/// on that struct.
 #[derive(Debug)]
 pub struct ResolvedModule {
     /// Unique file identifier.
@@ -245,7 +249,7 @@ pub struct ResolvedModule {
     /// Absolute path to the module file.
     pub path: PathBuf,
     /// All export declarations in this module.
-    pub exports: Vec<fallow_types::extract::ExportInfo>,
+    pub exports: Arc<[fallow_types::extract::ExportInfo]>,
     /// All re-exports with resolved targets.
     pub re_exports: Vec<ResolvedReExport>,
     /// All static imports with resolved targets.
@@ -255,11 +259,11 @@ pub struct ResolvedModule {
     /// Dynamic import patterns matched against discovered files.
     pub resolved_dynamic_patterns: Vec<(fallow_types::extract::DynamicImportPattern, Vec<FileId>)>,
     /// Static member accesses (e.g., `Status.Active`).
-    pub member_accesses: Vec<fallow_types::extract::MemberAccess>,
+    pub member_accesses: Arc<[fallow_types::extract::MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
-    pub semantic_facts: Box<[fallow_types::extract::SemanticFact]>,
+    pub semantic_facts: Arc<[fallow_types::extract::SemanticFact]>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
-    pub whole_object_uses: Box<[String]>,
+    pub whole_object_uses: Arc<[String]>,
     /// Whether this module uses `CommonJS` exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares at least one Angular `@Component({
@@ -277,16 +281,16 @@ pub struct ResolvedModule {
     pub namespace_object_aliases: Vec<fallow_types::extract::NamespaceObjectAlias>,
     /// Exported free-function factories that provably return one class instance.
     /// See `fallow_types::extract::FactoryReturnExport` and issue #1441 (Part A).
-    pub exported_factory_returns: Box<[fallow_types::extract::FactoryReturnExport]>,
+    pub exported_factory_returns: Arc<[fallow_types::extract::FactoryReturnExport]>,
     /// Object-literal factory-return shapes (`export function createUi() {
     /// return { orders: factory.ordersPage } }`), threaded from `ModuleInfo` for
     /// the analyze-layer member-crediting join. See issue #1858.
     pub exported_factory_return_object_shapes:
-        Box<[fallow_types::extract::FactoryReturnObjectShapeExport]>,
+        Arc<[fallow_types::extract::FactoryReturnObjectShapeExport]>,
     /// Named-type property types declared by this module's top-level interfaces
     /// and type-literal aliases. See `fallow_types::extract::TypeMemberTypeEntry`
     /// and issue #1785.
-    pub type_member_types: Box<[fallow_types::extract::TypeMemberTypeEntry]>,
+    pub type_member_types: Arc<[fallow_types::extract::TypeMemberTypeEntry]>,
 }
 
 impl Default for ResolvedModule {
@@ -294,23 +298,23 @@ impl Default for ResolvedModule {
         Self {
             file_id: FileId(0),
             path: PathBuf::new(),
-            exports: vec![],
+            exports: Arc::default(),
             re_exports: vec![],
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            semantic_facts: Box::default(),
-            whole_object_uses: Box::default(),
+            member_accesses: Arc::default(),
+            semantic_facts: Arc::default(),
+            whole_object_uses: Arc::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: Box::default(),
-            exported_factory_return_object_shapes: Box::default(),
-            type_member_types: Box::default(),
+            exported_factory_returns: Arc::default(),
+            exported_factory_return_object_shapes: Arc::default(),
+            type_member_types: Arc::default(),
         }
     }
 }

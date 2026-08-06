@@ -1,6 +1,7 @@
 //! Module extraction types.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use oxc_span::Span;
 
@@ -8,12 +9,16 @@ use crate::discover::FileId;
 use crate::suppress::{Suppression, UnknownSuppressionKind};
 
 /// Extracted module information from a single file.
+///
+/// The `Arc<[T]>` fields are immutable after extraction and are shared by
+/// refcount with the resolver's per-file output, so the resolve/graph path
+/// does not deep-copy per-file extraction payloads.
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
     /// Unique identifier for this file.
     pub file_id: FileId,
     /// All export declarations in this module.
-    pub exports: Vec<ExportInfo>,
+    pub exports: Arc<[ExportInfo]>,
     /// All import declarations in this module.
     pub imports: Vec<ImportInfo>,
     /// All re-export declarations (e.g., `export { foo } from './bar'`).
@@ -27,14 +32,14 @@ pub struct ModuleInfo {
     /// Package names statically referenced through package path resolution.
     pub package_path_references: Box<[String]>,
     /// Static member access expressions (e.g., `Status.Active`).
-    pub member_accesses: Vec<MemberAccess>,
+    pub member_accesses: Arc<[MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
     ///
     /// This carries facts that were previously encoded as synthetic
     /// `member_accesses` strings. Extraction and analysis now use typed facts.
-    pub semantic_facts: Box<[SemanticFact]>,
+    pub semantic_facts: Arc<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
-    pub whole_object_uses: Box<[String]>,
+    pub whole_object_uses: Arc<[String]>,
     /// Whether this module uses CommonJS exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares an Angular component `templateUrl`.
@@ -72,20 +77,20 @@ pub struct ModuleInfo {
     /// that an exported function returns a class instance, so a cross-module
     /// `const x = useApi(); x.member` consumer can credit the returned class.
     /// See issue #1441 (Part A).
-    pub exported_factory_returns: Box<[FactoryReturnExport]>,
+    pub exported_factory_returns: Arc<[FactoryReturnExport]>,
     /// Exported factories that return an OBJECT LITERAL whose property values are
     /// class instances (`export function createUi() { return { orders: factory.ordersPage } }`).
     /// Each entry maps a dotted property path (`orders`, `invoke.dashboard`) to the
     /// returned class's local name within the factory module, so a cross-module
     /// `const ui = createUi(); ui.orders.member` consumer can credit the class. Names
     /// are local to this module; resolution is deferred to analyze time. See issue #1858.
-    pub exported_factory_return_object_shapes: Box<[FactoryReturnObjectShapeExport]>,
+    pub exported_factory_return_object_shapes: Arc<[FactoryReturnObjectShapeExport]>,
     /// Named-type property types declared by this module's top-level interfaces
     /// and type-literal aliases (`interface Opts { c: OptDep }`). Names are
     /// local to this module; resolution is deferred to analyze time. Consumed
     /// by the `unused-class-member` typed-property-hop join and the Playwright
     /// fixture-type resolution. See issue #1785.
-    pub type_member_types: Box<[TypeMemberTypeEntry]>,
+    pub type_member_types: Arc<[TypeMemberTypeEntry]>,
     /// Angular `InjectionToken<Interface>` declarations, as
     /// `(token_export_name, interface_name)` pairs. Recorded only for
     /// `new InjectionToken<I>(...)` initializers whose `InjectionToken` is
@@ -359,16 +364,16 @@ impl ModuleInfo {
     pub fn empty(file_id: FileId) -> Self {
         Self {
             file_id,
-            exports: Vec::new(),
+            exports: Arc::default(),
             imports: Vec::new(),
             re_exports: Vec::new(),
             dynamic_imports: Vec::new(),
             dynamic_import_patterns: Vec::new(),
             require_calls: Vec::new(),
             package_path_references: Box::default(),
-            member_accesses: Vec::new(),
-            semantic_facts: Box::default(),
-            whole_object_uses: Box::default(),
+            member_accesses: Arc::default(),
+            semantic_facts: Arc::default(),
+            whole_object_uses: Arc::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             content_hash: 0,
@@ -381,9 +386,9 @@ impl ModuleInfo {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: Vec::new(),
-            exported_factory_returns: Box::default(),
-            exported_factory_return_object_shapes: Box::default(),
-            type_member_types: Box::default(),
+            exported_factory_returns: Arc::default(),
+            exported_factory_return_object_shapes: Arc::default(),
+            type_member_types: Arc::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: Vec::new(),
             public_signature_type_references: Vec::new(),
@@ -477,7 +482,7 @@ impl ModuleInfo {
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
         Self::release_boxed_slice(&mut self.package_path_references);
-        Self::release_boxed_slice(&mut self.whole_object_uses);
+        Self::release_arc_slice(&mut self.whole_object_uses);
         Self::release_vec(&mut self.unused_import_bindings);
         Self::release_vec(&mut self.type_referenced_import_bindings);
         Self::release_vec(&mut self.value_referenced_import_bindings);
@@ -491,6 +496,12 @@ impl ModuleInfo {
 
     fn release_boxed_slice<T>(values: &mut Box<[T]>) {
         *values = Box::default();
+    }
+
+    /// Drop this module's refcount; the allocation itself is freed only once
+    /// the sharing `ResolvedModule` releases its clone too.
+    fn release_arc_slice<T>(values: &mut Arc<[T]>) {
+        *values = Arc::default();
     }
 }
 
@@ -2869,7 +2880,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1352);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1336);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -3284,7 +3295,8 @@ mod tests {
                 span: span(),
                 members: Vec::new(),
                 super_class: None,
-            }],
+            }]
+            .into(),
             imports: vec![ImportInfo {
                 source: "node:child_process".to_string(),
                 imported_name: ImportedName::Default,
@@ -3327,8 +3339,9 @@ mod tests {
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
-            }],
-            semantic_facts: Box::default(),
+            }]
+            .into(),
+            semantic_facts: std::sync::Arc::default(),
             whole_object_uses: vec!["Status".to_string()].into(),
             has_cjs_exports: true,
             has_angular_component_template_url: true,
@@ -3371,18 +3384,20 @@ mod tests {
                 super_class_type_args: Vec::new(),
                 generic_instance_bindings: Vec::new(),
             }],
-            exported_factory_returns: Box::from([FactoryReturnExport {
+            exported_factory_returns: std::sync::Arc::from([FactoryReturnExport {
                 export_name: "useApi".to_string(),
                 class_local_name: "RESTApi".to_string(),
             }]),
-            exported_factory_return_object_shapes: Box::from([FactoryReturnObjectShapeExport {
-                export_name: "createUi".to_string(),
-                properties: Box::from([FactoryReturnObjectProperty {
-                    property_path: "orders".to_string(),
-                    class_local_name: "OrdersPage".to_string(),
-                }]),
-            }]),
-            type_member_types: Box::from([TypeMemberTypeEntry {
+            exported_factory_return_object_shapes: std::sync::Arc::from([
+                FactoryReturnObjectShapeExport {
+                    export_name: "createUi".to_string(),
+                    properties: Box::from([FactoryReturnObjectProperty {
+                        property_path: "orders".to_string(),
+                        class_local_name: "OrdersPage".to_string(),
+                    }]),
+                },
+            ]),
+            type_member_types: std::sync::Arc::from([TypeMemberTypeEntry {
                 type_name: "Opts".to_string(),
                 property: "c".to_string(),
                 property_type: "OptDep".to_string(),
@@ -4606,9 +4621,9 @@ mod tests {
     }
 
     fn push_semantic_fact(module: &mut ModuleInfo, fact: SemanticFact) {
-        let mut facts = std::mem::take(&mut module.semantic_facts).into_vec();
+        let mut facts = std::mem::take(&mut module.semantic_facts).to_vec();
         facts.push(fact);
-        module.semantic_facts = facts.into_boxed_slice();
+        module.semantic_facts = facts.into();
     }
 
     #[test]

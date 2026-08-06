@@ -326,8 +326,9 @@ fn extend_template_expression_member_accesses(
         let mut extractor = ModuleInfoExtractor::new();
         extractor.seed_array_binding_element_types(frontmatter_array_element_types);
         extractor.visit_program(&parser_return.program);
-        info.member_accesses
-            .extend(extractor.take_resolved_iteration_member_accesses());
+        let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
+        member_accesses.extend(extractor.take_resolved_iteration_member_accesses());
+        info.member_accesses = member_accesses.into();
     }
 }
 

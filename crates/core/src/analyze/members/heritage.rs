@@ -364,7 +364,7 @@ pub(super) fn build_parent_to_children(
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
 
-        for export in &resolved.exports {
+        for export in resolved.exports.iter() {
             if let Some(super_local) = &export.super_class {
                 let Some(parent_keys) = local_to_export_keys.get(super_local.as_str()) else {
                     continue;

@@ -399,7 +399,7 @@ fn typed_playwright_fixture_alias_fact_expands_fixture_targets() {
                 "AdminPage",
                 3,
             )],
-            exports: vec![make_export_info("testPrimary", None)],
+            exports: vec![make_export_info("testPrimary", None)].into(),
             semantic_facts: vec![SemanticFact::PlaywrightFixtureDefinition(
                 PlaywrightFixtureDefinitionFact {
                     test_name: "testPrimary".to_string(),
@@ -419,7 +419,7 @@ fn typed_playwright_fixture_alias_fact_expands_fixture_targets() {
                 "testPrimary",
                 1,
             )],
-            exports: vec![make_export_info("mergedTest", None)],
+            exports: vec![make_export_info("mergedTest", None)].into(),
             semantic_facts: vec![SemanticFact::PlaywrightFixtureAlias(
                 PlaywrightFixtureAliasFact {
                     test_name: "mergedTest".to_string(),
@@ -502,7 +502,7 @@ fn typed_playwright_fixture_type_fact_expands_nested_fixture_targets() {
                 "AdminPage",
                 3,
             )],
-            exports: vec![make_export_info("Pages", None)],
+            exports: vec![make_export_info("Pages", None)].into(),
             semantic_facts: vec![SemanticFact::PlaywrightFixtureType(
                 PlaywrightFixtureTypeFact {
                     alias_name: "Pages".to_string(),
@@ -555,7 +555,7 @@ fn typed_instance_export_binding_fact_builds_target_map() {
             make_resolved_import("./service", "Service", "Service", 1),
             make_resolved_import("./stale-service", "StaleService", "StaleService", 2),
         ],
-        exports: vec![make_export_info("service", None)],
+        exports: vec![make_export_info("service", None)].into(),
         semantic_facts: vec![SemanticFact::InstanceExportBinding(
             InstanceExportBindingFact {
                 export_name: "service".to_string(),
@@ -635,7 +635,7 @@ fn typed_factory_call_fact_credits_class_member() {
         ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/src/my-class.ts"),
-            exports: vec![class_export],
+            exports: vec![class_export].into(),
             ..Default::default()
         },
     ];
@@ -715,7 +715,7 @@ fn typed_fluent_chain_fact_credits_class_member() {
         ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/src/event-builder.ts"),
-            exports: vec![class_export],
+            exports: vec![class_export].into(),
             ..Default::default()
         },
     ];
@@ -792,7 +792,7 @@ fn typed_fluent_chain_new_fact_credits_class_member() {
         ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/src/option-builder.ts"),
-            exports: vec![class_export],
+            exports: vec![class_export].into(),
             ..Default::default()
         },
     ];
@@ -915,7 +915,8 @@ fn accessed_enum_member_not_flagged() {
         member_accesses: vec![MemberAccess {
             object: "Status".to_string(),
             member: "Active".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -1000,7 +1001,8 @@ fn accessed_enum_member_via_re_export_not_flagged() {
                 object: "Status".to_string(),
                 member: "Inactive".to_string(),
             },
-        ],
+        ]
+        .into(),
         ..Default::default()
     }];
 
@@ -1076,7 +1078,8 @@ fn accessed_class_static_member_via_re_export_not_flagged() {
         member_accesses: vec![MemberAccess {
             object: "StringUtils".to_string(),
             member: "toUpper".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -1151,7 +1154,8 @@ fn accessed_member_via_renamed_re_export_not_flagged() {
         member_accesses: vec![MemberAccess {
             object: "Renamed".to_string(),
             member: "A".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -1222,7 +1226,8 @@ fn accessed_member_via_star_re_export_not_flagged() {
         member_accesses: vec![MemberAccess {
             object: "Status".to_string(),
             member: "Active".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -1837,7 +1842,8 @@ fn transitive_error_subclass_name_member_not_flagged() {
         exports: vec![
             make_export_info("DomainError", Some("Error")),
             make_export_info("ApiError", Some("DomainError")),
-        ],
+        ]
+        .into(),
         ..Default::default()
     }];
 
@@ -1892,7 +1898,8 @@ fn this_member_access_not_flagged() {
         member_accesses: vec![MemberAccess {
             object: "this".to_string(),
             member: "label".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -2094,7 +2101,8 @@ fn instance_member_access_not_flagged() {
         member_accesses: vec![MemberAccess {
             object: "MyService".to_string(),
             member: "greet".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -2134,7 +2142,8 @@ fn this_access_does_not_skip_enum_members() {
         member_accesses: vec![MemberAccess {
             object: "this".to_string(),
             member: "Up".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -2221,7 +2230,8 @@ fn local_name_mapped_to_imported_name() {
         member_accesses: vec![MemberAccess {
             object: "S".to_string(), // uses local alias
             member: "Active".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -2273,7 +2283,8 @@ fn default_import_maps_to_default_export() {
         member_accesses: vec![MemberAccess {
             object: "MyEnum".to_string(),
             member: "X".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -2448,7 +2459,8 @@ fn this_field_chained_access_not_flagged() {
         member_accesses: vec![MemberAccess {
             object: "MyService".to_string(),
             member: "doWork".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 
@@ -2557,7 +2569,8 @@ fn interface_member_usage_propagates_to_implementers() {
                     object: "VirtualScrollStrategy".to_string(),
                     member: "detach".to_string(),
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         },
     ];
@@ -2701,7 +2714,8 @@ fn same_named_interfaces_do_not_share_member_usage() {
             member_accesses: vec![MemberAccess {
                 object: "Strategy".to_string(),
                 member: "attach".to_string(),
-            }],
+            }]
+            .into(),
             ..Default::default()
         },
     ];
@@ -2797,7 +2811,8 @@ fn same_named_exports_do_not_share_member_usage() {
         member_accesses: vec![MemberAccess {
             object: "FirstWidget".to_string(),
             member: "refresh".to_string(),
-        }],
+        }]
+        .into(),
         ..Default::default()
     }];
 

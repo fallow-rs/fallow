@@ -504,23 +504,24 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
-                    }],
+                    }]
+                    .into(),
                     re_exports: vec![],
                     resolved_imports: imports,
                     resolved_dynamic_imports: vec![],
                     resolved_dynamic_patterns: vec![],
-                    member_accesses: vec![],
-                    semantic_facts: Box::default(),
-                    whole_object_uses: Box::default(),
+                    member_accesses: vec![].into(),
+                    semantic_facts: std::sync::Arc::default(),
+                    whole_object_uses: std::sync::Arc::default(),
                     has_cjs_exports: false,
                     has_angular_component_template_url: false,
                     unused_import_bindings: FxHashSet::default(),
                     type_referenced_import_bindings: vec![],
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
-                    exported_factory_returns: Box::default(),
-                    exported_factory_return_object_shapes: Box::default(),
-                    type_member_types: Box::default(),
+                    exported_factory_returns: std::sync::Arc::default(),
+                    exported_factory_return_object_shapes: std::sync::Arc::default(),
+                    type_member_types: std::sync::Arc::default(),
                 }
             })
             .collect();
@@ -632,7 +633,8 @@ mod tests {
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..ResolvedModule::default()
             },
         ];
@@ -695,7 +697,8 @@ mod tests {
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 ..ResolvedModule::default()
             },
         ];
@@ -805,7 +808,8 @@ mod tests {
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
-                }],
+                }]
+                .into(),
                 re_exports: target_re_exports,
                 ..ResolvedModule::default()
             },
@@ -1679,7 +1683,8 @@ mod tests {
                 members: Vec::new(),
                 is_side_effect_used: false,
                 super_class: None,
-            }],
+            }]
+            .into(),
             ..ResolvedModule::default()
         });
         let test_entry_points = vec![EntryPoint {

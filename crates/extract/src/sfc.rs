@@ -1135,12 +1135,12 @@ fn merge_template_usage_into_combined(
     combined
         .unused_import_bindings
         .retain(|binding| !template_usage.used_bindings.contains(binding));
-    combined
-        .member_accesses
-        .extend(template_usage.member_accesses);
-    let mut whole_object_uses = std::mem::take(&mut combined.whole_object_uses).into_vec();
+    let mut member_accesses = std::mem::take(&mut combined.member_accesses).to_vec();
+    member_accesses.extend(template_usage.member_accesses);
+    combined.member_accesses = member_accesses.into();
+    let mut whole_object_uses = std::mem::take(&mut combined.whole_object_uses).to_vec();
     whole_object_uses.extend(template_usage.whole_object_uses);
-    combined.whole_object_uses = whole_object_uses.into_boxed_slice();
+    combined.whole_object_uses = whole_object_uses.into();
     combined
         .security_sinks
         .extend(template_usage.security_sinks);

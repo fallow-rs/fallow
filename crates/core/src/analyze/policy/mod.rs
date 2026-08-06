@@ -483,7 +483,7 @@ fn collect_banned_exports(input: &mut PolicyCollectionInput<'_>) {
         let Some(severity) = wire_severity(rule.effective_severity(input.master)) else {
             continue;
         };
-        for export in &input.module.exports {
+        for export in input.module.exports.iter() {
             if rule.rule.ignore_type_only && export.is_type_only {
                 continue;
             }

@@ -789,10 +789,10 @@ fn collect_script_auto_imports(dir: &Path, recursive: bool, rules: &mut Vec<Auto
         };
         let module = fallow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
         let default_name = derive_script_default_name(&path);
-        for export in module.exports {
-            match export.name {
+        for export in module.exports.iter() {
+            match &export.name {
                 ExportName::Named(name) if !export.is_type_only => {
-                    push_auto_import_rule(rules, name, path.clone(), AutoImportKind::Named);
+                    push_auto_import_rule(rules, name.clone(), path.clone(), AutoImportKind::Named);
                 }
                 ExportName::Default if !export.is_type_only => {
                     if let Some(name) = &default_name {

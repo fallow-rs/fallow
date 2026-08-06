@@ -194,7 +194,7 @@ fn collect_consumer_credits(
                 continue;
             }
 
-            for access in &consumer.member_accesses {
+            for access in consumer.member_accesses.iter() {
                 if access.object != consumer_local {
                     continue;
                 }
@@ -421,7 +421,8 @@ mod tests {
                 member_accesses: vec![MemberAccess {
                     object: "Ns".to_string(),
                     member: "used".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -433,7 +434,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: files[2].path.clone(),
-                exports: vec![named_export("used")],
+                exports: vec![named_export("used")].into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -480,7 +481,8 @@ mod tests {
                 member_accesses: vec![MemberAccess {
                     object: "Ns".to_string(),
                     member: "used".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -513,7 +515,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(5),
                 path: files[5].path.clone(),
-                exports: vec![named_export("used")],
+                exports: vec![named_export("used")].into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -641,7 +643,8 @@ mod tests {
                 member_accesses: vec![MemberAccess {
                     object: "MyNamespace".to_string(),
                     member: "someExportedSymbol".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -656,7 +659,8 @@ mod tests {
                 exports: vec![
                     named_export("someExportedSymbol"),
                     named_export("anotherSymbol"),
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -704,7 +708,8 @@ mod tests {
                 member_accesses: vec![MemberAccess {
                     object: "Ns".to_string(),
                     member: "used".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -722,7 +727,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(3),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![named_export("used"), named_export("unused")],
+                exports: vec![named_export("used"), named_export("unused")].into(),
                 ..Default::default()
             },
         ];
@@ -777,7 +782,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![named_export("a"), named_export("b"), named_export("c")],
+                exports: vec![named_export("a"), named_export("b"), named_export("c")].into(),
                 ..Default::default()
             },
         ];
@@ -812,7 +817,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![named_export("apiOne"), named_export("apiTwo")],
+                exports: vec![named_export("apiOne"), named_export("apiTwo")].into(),
                 ..Default::default()
             },
         ];
@@ -847,7 +852,8 @@ mod tests {
                 member_accesses: vec![MemberAccess {
                     object: "Ns".to_string(),
                     member: "deepMember".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -876,7 +882,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(3),
                 path: PathBuf::from("/project/impl.ts"),
-                exports: vec![named_export("deepMember"), named_export("unused")],
+                exports: vec![named_export("deepMember"), named_export("unused")].into(),
                 ..Default::default()
             },
         ];
@@ -932,7 +938,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![named_export("a")],
+                exports: vec![named_export("a")].into(),
                 ..Default::default()
             },
         ];
@@ -980,7 +986,8 @@ mod tests {
                 member_accesses: vec![MemberAccess {
                     object: "MyFoo".to_string(),
                     member: "used".to_string(),
-                }],
+                }]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -992,7 +999,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![named_export("used"), named_export("unused")],
+                exports: vec![named_export("used"), named_export("unused")].into(),
                 ..Default::default()
             },
         ];
@@ -1056,7 +1063,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![named_export("fromSource"), named_export("untouched")],
+                exports: vec![named_export("fromSource"), named_export("untouched")].into(),
                 ..Default::default()
             },
         ];

@@ -415,7 +415,7 @@ fn path_alias_imports_not_reported_as_unlisted() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![
             ResolvedImport {
@@ -445,18 +445,18 @@ fn path_alias_imports_not_reported_as_unlisted() {
         ],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -484,7 +484,7 @@ fn multiple_unresolved_imports_collected() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: PathBuf::from("/project/src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![
             ResolvedImport {
@@ -514,18 +514,18 @@ fn multiple_unresolved_imports_collected() {
         ],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -580,7 +580,7 @@ fn workspace_dep_used_within_workspace_not_flagged() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
         path: ws_root.join("src/index.ts"),
-        exports: vec![],
+        exports: vec![].into(),
         re_exports: vec![],
         resolved_imports: vec![ResolvedImport {
             info: ImportInfo {
@@ -596,18 +596,18 @@ fn workspace_dep_used_within_workspace_not_flagged() {
         }],
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
-        member_accesses: vec![],
-        semantic_facts: Box::default(),
-        whole_object_uses: Box::default(),
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: Box::default(),
-        exported_factory_return_object_shapes: Box::default(),
-        type_member_types: Box::default(),
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

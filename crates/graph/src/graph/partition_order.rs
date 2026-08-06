@@ -351,20 +351,20 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/p/src/core/a.ts"),
-                exports: vec![named_export("alpha")],
+                exports: vec![named_export("alpha")].into(),
                 ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/p/src/core/b.ts"),
-                exports: vec![named_export("beta")],
+                exports: vec![named_export("beta")].into(),
                 ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(3),
                 path: PathBuf::from("/p/src/mid/m.ts"),
                 resolved_imports: vec![named_import("../core/a", "alpha", FileId(1))],
-                exports: vec![named_export("midFn")],
+                exports: vec![named_export("midFn")].into(),
                 ..Default::default()
             },
         ];
@@ -505,7 +505,7 @@ mod tests {
                 let mut module = ResolvedModule {
                     file_id: FileId(id),
                     path: PathBuf::from(format!("/p/src/mod{d:02}/file{f:02}.ts")),
-                    exports: vec![named_export(&format!("e{id}"))],
+                    exports: vec![named_export(&format!("e{id}"))].into(),
                     ..Default::default()
                 };
                 // The first file of each dir (except dir 0) imports the first file

@@ -17,7 +17,7 @@ pub struct NonJsModuleInfoInput<'a> {
 /// directly contribute JS AST-level facts.
 pub fn non_js_module_info(input: NonJsModuleInfoInput<'_>) -> ModuleInfo {
     ModuleInfo {
-        exports: input.exports,
+        exports: input.exports.into(),
         imports: input.imports,
         content_hash: input.content_hash,
         suppressions: input.parsed_suppressions.suppressions,

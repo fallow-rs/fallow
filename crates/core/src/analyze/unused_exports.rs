@@ -221,7 +221,7 @@ fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> 
     let root_scope = scoping.root_scope_id();
 
     let mut used = FxHashSet::default();
-    for export in &module.exports {
+    for export in module.exports.iter() {
         let Some(local_name) = local_export_binding_name(export) else {
             continue;
         };
@@ -1431,23 +1431,23 @@ mod tests {
             .map(|f| ResolvedModule {
                 file_id: f.id,
                 path: f.path.clone(),
-                exports: vec![],
+                exports: vec![].into(),
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
                 resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                semantic_facts: Box::default(),
-                whole_object_uses: Box::default(),
+                member_accesses: vec![].into(),
+                semantic_facts: std::sync::Arc::default(),
+                whole_object_uses: std::sync::Arc::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
-                exported_factory_returns: Box::default(),
-                exported_factory_return_object_shapes: Box::default(),
-                type_member_types: Box::default(),
+                exported_factory_returns: std::sync::Arc::default(),
+                exported_factory_return_object_shapes: std::sync::Arc::default(),
+                type_member_types: std::sync::Arc::default(),
             })
             .collect();
 
@@ -1517,7 +1517,7 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        resolved_modules[target].exports.push(ExportInfo {
+        resolved_modules[target].exports = vec![ExportInfo {
             name: ExportName::Named(name.to_string()),
             local_name: None,
             is_type_only: false,
@@ -1527,7 +1527,8 @@ mod tests {
             span: Span::new(span_start, span_end),
             members: vec![],
             super_class: None,
-        });
+        }]
+        .into();
         resolved_modules[from as usize]
             .resolved_imports
             .push(ResolvedImport {
@@ -1989,23 +1990,23 @@ mod tests {
         crate::resolve::ResolvedModule {
             file_id: FileId(file_id),
             path: std::path::PathBuf::from(path),
-            exports: vec![],
+            exports: vec![].into(),
             re_exports: vec![],
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            semantic_facts: Box::default(),
-            whole_object_uses: Box::default(),
+            member_accesses: vec![].into(),
+            semantic_facts: std::sync::Arc::default(),
+            whole_object_uses: std::sync::Arc::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: Box::default(),
-            exported_factory_return_object_shapes: Box::default(),
-            type_member_types: Box::default(),
+            exported_factory_returns: std::sync::Arc::default(),
+            exported_factory_return_object_shapes: std::sync::Arc::default(),
+            type_member_types: std::sync::Arc::default(),
         }
     }
 
