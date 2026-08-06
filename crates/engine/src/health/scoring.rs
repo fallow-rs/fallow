@@ -1115,7 +1115,9 @@ fn file_score_triage_concern(score: &FileHealthScore) -> f64 {
 /// one because its MI is the worse signal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileScoreConcern {
+    /// Ranked by structural quality: a low maintainability index.
     Structural,
+    /// Ranked by untested complexity: a high CRAP score.
     Risk,
 }
 

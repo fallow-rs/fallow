@@ -120,7 +120,9 @@ impl From<ModuleGraph> for RetainedModuleGraph {
 /// Engine-owned importer details for one file that directly imports a target module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectImporterSummary {
+    /// File containing the import statement.
     pub source: FileId,
+    /// Symbols this importer pulls from the target module.
     pub symbols: Vec<ImportedSymbolSummary>,
 }
 
@@ -136,8 +138,11 @@ impl From<GraphDirectImporterSummary> for DirectImporterSummary {
 /// Engine-owned symbol details for a direct import edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedSymbolSummary {
+    /// Exported name as declared by the target module.
     pub imported: String,
+    /// Local binding name at the import site.
     pub local: String,
+    /// True for type-only imports, which do not count as value usage.
     pub type_only: bool,
 }
 
@@ -154,17 +159,24 @@ impl From<GraphImportedSymbolSummary> for ImportedSymbolSummary {
 /// Engine-owned snapshot of one value export in a module graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleValueExport {
+    /// File declaring the export.
     pub file_id: FileId,
+    /// Exported name.
     pub name: String,
+    /// Byte offset where the export declaration starts.
     pub span_start: u32,
+    /// True when a test file references this export.
     pub test_referenced: bool,
 }
 
 /// Engine-owned impact closure with file ids resolved to paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImpactClosurePaths {
+    /// Changed files that are part of the diff under review.
     pub in_diff: Vec<String>,
+    /// Files affected through the import closure but absent from the diff.
     pub affected_not_shown: Vec<String>,
+    /// Changed contracts whose consumers were not updated in the same diff.
     pub coordination_gap: Vec<CoordinationGapPaths>,
 }
 
@@ -185,8 +197,11 @@ impl From<GraphImpactClosurePaths> for ImpactClosurePaths {
 /// Engine-owned coordination gap between a changed contract and consumer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoordinationGapPaths {
+    /// Path of the changed file whose contract moved.
     pub changed_file: String,
+    /// Path of the consumer that was not updated alongside it.
     pub consumer_file: String,
+    /// Symbols the consumer imports from the changed file.
     pub consumed_symbols: Vec<String>,
 }
 
@@ -203,7 +218,9 @@ impl From<GraphCoordinationGapPaths> for CoordinationGapPaths {
 /// Engine-owned review partition and dependency-sensible order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PartitionOrderPaths {
+    /// Changed files partitioned into per-module review units.
     pub units: Vec<ReviewUnitPaths>,
+    /// File paths in dependency-sensible review order (dependencies first).
     pub order: Vec<String>,
 }
 
@@ -219,7 +236,9 @@ impl From<GraphPartitionOrderPaths> for PartitionOrderPaths {
 /// Engine-owned changed-file review unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewUnitPaths {
+    /// Directory the unit's files share.
     pub module_dir: String,
+    /// Changed files grouped into this unit.
     pub files: Vec<String>,
 }
 
@@ -235,10 +254,19 @@ impl From<GraphReviewUnitPaths> for ReviewUnitPaths {
 /// Engine-owned focus facts for one changed file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FocusFileFactsPaths {
+    /// Path of the changed file the facts describe.
     pub file: String,
+    /// Count of distinct files importing this file (blast radius), excluding
+    /// the file itself.
     pub fan_in: u32,
+    /// Count of distinct files this file imports, excluding the file itself.
     pub fan_out: u32,
+    /// True when the file has a dynamic-import edge in either direction, so
+    /// its static reachability signal is not complete. Conservative: a file
+    /// that MAY be dynamically wired carries the flag.
     pub dynamic_dispatch: bool,
+    /// True when the file's reachability runs through re-export indirection,
+    /// so direct importer counts understate its reach.
     pub re_export_indirection: bool,
 }
 

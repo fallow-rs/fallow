@@ -49,6 +49,8 @@ mod runner;
 mod runtime_filter;
 mod runtime_sections;
 mod scope;
+/// File health scoring: maintainability index, CRAP risk, triage concern
+/// classification, and Istanbul coverage ingestion.
 pub mod scoring;
 pub mod styling_score;
 mod tailwind_theme;
@@ -200,17 +202,30 @@ pub type RuntimeCoverageAnalyzer<'a> = dyn Fn(&RuntimeCoverageOptions, RuntimeCo
 
 /// Inputs the runtime coverage seam needs from the analysis core.
 pub struct RuntimeCoverageSeamInput<'a> {
+    /// Project root the analysis ran against.
     pub root: &'a Path,
+    /// Parsed modules from the extract phase, for correlating trace symbols.
     pub modules: &'a [fallow_types::extract::ModuleInfo],
+    /// Retained dead-code artifacts (graph plus results) the sidecar joins
+    /// runtime traces against.
     pub analysis_output: &'a DeadCodeAnalysisArtifacts,
+    /// Parsed Istanbul test coverage when the run also supplied it.
     pub istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
+    /// `FileId` to absolute-path lookup for resolving finding locations.
     pub file_paths: &'a rustc_hash::FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
+    /// Compiled ignore globs; matching files are excluded from verdicts.
     pub ignore_set: &'a globset::GlobSet,
+    /// Diff scope when the run is limited to changed files.
     pub changed_files: Option<&'a rustc_hash::FxHashSet<PathBuf>>,
+    /// Workspace roots when the run is workspace-scoped.
     pub ws_roots: Option<&'a [PathBuf]>,
+    /// Cap on rendered findings, forwarded from `--top`.
     pub top: Option<usize>,
+    /// CODEOWNERS override path for ownership attribution on findings.
     pub codeowners_path: Option<&'a str>,
+    /// Suppress progress notes on stderr.
     pub quiet: bool,
+    /// Output format the seam should render its own diagnostics in.
     pub output: OutputFormat,
 }
 
@@ -229,16 +244,23 @@ pub struct HealthSeams<'a> {
 /// Command-neutral sort criteria for health complexity findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealthSort {
+    /// Worst first: exceeded-threshold class, then severity, CRAP presence,
+    /// and raw complexity metrics as tie-breakers.
     Severity,
+    /// Descending cyclomatic complexity.
     Cyclomatic,
+    /// Descending cognitive complexity.
     Cognitive,
+    /// Descending function line count.
     Lines,
 }
 
 /// Command-neutral threshold overrides for health complexity findings.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HealthThresholdOverrides {
+    /// Overrides the configured maximum cyclomatic complexity threshold.
     pub max_cyclomatic: Option<u16>,
+    /// Overrides the configured maximum cognitive complexity threshold.
     pub max_cognitive: Option<u16>,
     /// Maximum CRAP score threshold. Functions meeting or exceeding this score
     /// are reported as complexity findings.
@@ -248,6 +270,7 @@ pub struct HealthThresholdOverrides {
 /// Command-neutral Istanbul coverage inputs for health CRAP scoring.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HealthCoverageInputs<'a> {
+    /// Path to an Istanbul `coverage-final.json` used for CRAP scoring.
     pub coverage: Option<&'a Path>,
     /// Absolute coverage-path prefix to strip before rebasing files onto the
     /// project root.
@@ -275,7 +298,9 @@ pub fn validate_coverage_root_absolute(coverage_root: Option<&Path>) -> Result<(
 /// Command-neutral health exit gate options.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HealthGateOptions {
+    /// Fail the run when the health score (0-100) falls below this value.
     pub min_score: Option<f64>,
+    /// Fail the run when any finding at or above this severity exists.
     pub min_severity: Option<FindingSeverity>,
     /// Render the score and findings but never fail CI on a health gate.
     pub report_only: bool,
@@ -300,15 +325,28 @@ pub struct HealthSectionOptions {
 /// Derived section selection for health runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DerivedHealthSections {
+    /// True when at least one section was explicitly requested; a request with
+    /// no explicit sections defaults to the full section set.
     pub any_section: bool,
+    /// Render the complexity findings section.
     pub complexity: bool,
+    /// Render the per-file health scores section.
     pub file_scores: bool,
+    /// Render the static coverage gaps section.
     pub coverage_gaps: bool,
+    /// Render the churn-based hotspots section.
     pub hotspots: bool,
+    /// Render the refactoring targets section.
     pub targets: bool,
+    /// Render the CSS / styling analytics section.
     pub css: bool,
+    /// Compute and render the overall health score.
     pub score: bool,
+    /// Analyze the full project even when only a subset of sections was
+    /// requested, because scores and snapshots need complete data.
     pub force_full: bool,
+    /// True when the score is the only requested surface, so output can skip
+    /// section rendering entirely.
     pub score_only_output: bool,
 }
 
@@ -316,43 +354,76 @@ pub struct DerivedHealthSections {
 /// concrete runner.
 #[derive(Debug, Clone)]
 pub struct HealthRunOptionsInput<'a> {
+    /// Output format; badge output implies the score section.
     pub output: OutputFormat,
+    /// Complexity threshold overrides on top of the resolved config.
     pub thresholds: HealthThresholdOverrides,
+    /// Cap on rendered findings per section.
     pub top: Option<usize>,
+    /// Sort criteria for complexity findings.
     pub sort: HealthSort,
+    /// Explicit request for the complexity findings section.
     pub complexity: bool,
+    /// Explicit request for the per-file health scores section.
     pub file_scores: bool,
+    /// Explicit request for the static coverage gaps section.
     pub coverage_gaps: bool,
+    /// Explicit request for the churn-based hotspots section.
     pub hotspots: bool,
+    /// Attribute hotspots to owners (implies the hotspots section data).
     pub ownership: bool,
+    /// How owner identities are rendered (names or emails).
     pub ownership_emails: Option<EmailMode>,
+    /// Explicit request for the refactoring targets section.
     pub targets: bool,
+    /// Explicit request for the CSS / styling analytics section.
     pub css: bool,
+    /// Effort estimation mode; requesting it also enables the targets section.
     pub effort: Option<EffortEstimate>,
+    /// Explicit request for the overall health score.
     pub score: bool,
+    /// Exit gate thresholds; a score gate implies the score section.
     pub gates: HealthGateOptions,
+    /// True when the run should persist a health snapshot (forces a full run).
     pub snapshot_requested: bool,
+    /// Explicit request for the score trend section (implies score).
     pub trend: bool,
+    /// Churn lookback window for hotspots (`90d`, `6m`, `1y`, or an ISO date).
     pub since: Option<&'a str>,
+    /// Minimum commit count for a file to qualify as churn evidence.
     pub min_commits: Option<u32>,
+    /// Istanbul coverage inputs for CRAP scoring.
     pub coverage_inputs: HealthCoverageInputs<'a>,
+    /// Runtime coverage sidecar options, when runtime analysis was requested.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
 }
 
 /// Normalized health inputs shared by CLI, API, NAPI, and future runners.
 #[derive(Debug, Clone)]
 pub struct HealthRunOptions<'a> {
+    /// Complexity threshold overrides on top of the resolved config.
     pub thresholds: HealthThresholdOverrides,
+    /// Cap on rendered findings per section.
     pub top: Option<usize>,
+    /// Sort criteria for complexity findings.
     pub sort: HealthSort,
+    /// Effective section selection derived from the raw request flags.
     pub sections: DerivedHealthSections,
+    /// Attribute hotspots to owners; already gated on the hotspots section.
     pub ownership: bool,
+    /// How owner identities are rendered (names or emails).
     pub ownership_emails: Option<EmailMode>,
+    /// Effort estimation mode for refactoring targets.
     pub effort: Option<EffortEstimate>,
+    /// Exit gate thresholds.
     pub gates: HealthGateOptions,
+    /// Churn lookback window for hotspots (`90d`, `6m`, `1y`, or an ISO date).
     pub since: Option<&'a str>,
+    /// Minimum commit count for a file to qualify as churn evidence.
     pub min_commits: Option<u32>,
+    /// Istanbul coverage inputs for CRAP scoring.
     pub coverage_inputs: HealthCoverageInputs<'a>,
+    /// Runtime coverage sidecar options, when runtime analysis was requested.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
 }
 
@@ -361,29 +432,51 @@ pub struct HealthRunOptions<'a> {
 /// These fields are shared runner inputs rather than rendering concerns.
 #[derive(Debug, Clone)]
 pub struct HealthExecutionOptions<'a> {
+    /// Project root to analyze.
     pub root: &'a Path,
+    /// Explicit config file path; `None` triggers automatic discovery.
     pub config_path: &'a Option<PathBuf>,
+    /// Output format of the run; badge output implies the score section.
     pub output: OutputFormat,
+    /// Bypass the parse cache for this run.
     pub no_cache: bool,
+    /// Worker thread count for parsing and analysis.
     pub threads: usize,
+    /// Suppress progress notes on stderr.
     pub quiet: bool,
     /// Include per-decision-point complexity contributions in typed findings.
     ///
     /// This changes the produced health result shape, so it belongs to the
     /// runner input contract rather than CLI rendering options.
     pub complexity_breakdown: bool,
+    /// Complexity threshold overrides on top of the resolved config.
     pub thresholds: HealthThresholdOverrides,
+    /// Cap on rendered findings per section.
     pub top: Option<usize>,
+    /// Sort criteria for complexity findings.
     pub sort: HealthSort,
+    /// Raw production-only request flag; folded into `production_override`
+    /// when the tri-state override is unset.
     pub production: bool,
+    /// Tri-state production override: `Some` forces production-only analysis
+    /// on or off regardless of config, `None` defers to the config value.
     pub production_override: Option<bool>,
+    /// Permit `extends` config inheritance from remote URLs.
     pub allow_remote_extends: bool,
+    /// Git ref limiting findings to files changed since it.
     pub changed_since: Option<&'a str>,
+    /// Pre-built diff index scoping findings to changed lines.
     pub diff_index: Option<&'a DiffIndex>,
+    /// True when `diff_index` came from the process-shared diff source rather
+    /// than a health-specific one.
     pub use_shared_diff_index: bool,
+    /// Workspace member paths limiting the analysis scope.
     pub workspace: Option<&'a [String]>,
+    /// Git ref selecting only workspaces with changes since it.
     pub changed_workspaces: Option<&'a str>,
+    /// Baseline file to compare finding counts against.
     pub baseline: Option<&'a Path>,
+    /// Path to write the run's finding counts as a new baseline.
     pub save_baseline: Option<&'a Path>,
     /// Controls both halves of the baseline lifecycle: which buckets
     /// `save_baseline` writes and how a loaded `baseline` is matched. An
@@ -396,31 +489,60 @@ pub struct HealthExecutionOptions<'a> {
     /// comparisons; an explicit count request is treated as intent to
     /// downgrade.
     pub baseline_mode_explicit: bool,
+    /// Render the complexity findings section.
     pub complexity: bool,
+    /// Render the per-file health scores section.
     pub file_scores: bool,
+    /// Render the static coverage gaps section.
     pub coverage_gaps: bool,
+    /// Let config-enabled coverage settings activate the coverage gaps
+    /// section even when it was not requested on this run.
     pub config_activates_coverage_gaps: bool,
+    /// Render the churn-based hotspots section.
     pub hotspots: bool,
+    /// Attribute hotspots to owners.
     pub ownership: bool,
+    /// How owner identities are rendered (names or emails).
     pub ownership_emails: Option<EmailMode>,
+    /// Render the refactoring targets section.
     pub targets: bool,
+    /// Render the CSS / styling analytics section.
     pub css: bool,
+    /// Scan all stylesheets for the CSS section instead of only changed files.
     pub css_deep: bool,
+    /// Analyze the full project even when only a subset of sections was
+    /// requested, because scores and snapshots need complete data.
     pub force_full: bool,
+    /// True when the score is the only requested surface, so output can skip
+    /// section rendering entirely.
     pub score_only_output: bool,
+    /// Fail the run on coverage gaps instead of reporting them advisorily.
     pub enforce_coverage_gap_gate: bool,
+    /// Effort estimation mode for refactoring targets.
     pub effort: Option<EffortEstimate>,
+    /// Compute and render the overall health score.
     pub score: bool,
+    /// Exit gate thresholds.
     pub gates: HealthGateOptions,
+    /// Churn lookback window for hotspots (`90d`, `6m`, `1y`, or an ISO date).
     pub since: Option<&'a str>,
+    /// Minimum commit count for a file to qualify as churn evidence.
     pub min_commits: Option<u32>,
+    /// Include score-derivation explanations in the rendered output.
     pub explain: bool,
+    /// Render the condensed summary view instead of full sections.
     pub summary: bool,
+    /// Path to persist a health snapshot for later trend comparison.
     pub save_snapshot: Option<PathBuf>,
+    /// Render the score trend against previously saved snapshots.
     pub trend: bool,
+    /// Istanbul coverage inputs for CRAP scoring.
     pub coverage_inputs: HealthCoverageInputs<'a>,
+    /// Print per-phase timing diagnostics.
     pub performance: bool,
+    /// Runtime coverage sidecar options, when runtime analysis was requested.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
+    /// Pre-recorded churn data file replacing live `git log` analysis.
     pub churn_file: Option<&'a Path>,
     /// Compatibility identity persisted with snapshots and checked by trends.
     pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
@@ -596,7 +718,9 @@ pub struct ComplexityRunOptions<'a> {
 /// Command-neutral runtime coverage input for health analysis.
 #[derive(Debug, Clone)]
 pub struct RuntimeCoverageOptions {
+    /// Path to the runtime coverage artifact captured by the sidecar.
     pub path: PathBuf,
+    /// Minimum invocation count for a function to classify as hot-path.
     pub min_invocations_hot: u64,
     /// Minimum total trace volume before high-confidence `safe_to_delete` /
     /// `review_required` verdicts may be emitted. Below this the sidecar caps
@@ -607,16 +731,21 @@ pub struct RuntimeCoverageOptions {
     /// classified as `low_traffic` rather than `active`. `None` lets the
     /// sidecar use its spec-default (0.001 = 0.1%).
     pub low_traffic_threshold: Option<f64>,
+    /// Verified license JWT forwarded to the closed-source sidecar.
     pub license_jwt: String,
+    /// License or trial watermark to stamp on the runtime coverage output.
     pub watermark: Option<RuntimeCoverageWatermark>,
 }
 
 /// Pre-parsed health input reused from another analysis in the same process.
 pub struct HealthSharedParseData {
+    /// Discovered files reused from the upstream analysis.
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
+    /// Parsed modules reused from the upstream analysis.
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
     /// Dead-code results reused by advisory health surfaces that do not need the graph.
     pub dead_code_results: Option<AnalysisResults>,
+    /// Workspace metadata discovered during config resolution.
     pub workspaces: Vec<WorkspaceInfo>,
     /// Full analysis output (graph + results) for file scoring.
     pub analysis_output: Option<DeadCodeAnalysisArtifacts>,

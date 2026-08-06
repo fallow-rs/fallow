@@ -12,6 +12,7 @@ pub use crate::core_backend::{
     is_external_plugin_active,
 };
 
+/// Built-in plugin name roster and plugin-regex validation diagnostics.
 pub mod registry {
     use crate::core_backend;
 

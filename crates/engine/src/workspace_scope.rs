@@ -20,21 +20,42 @@ pub enum WorkspaceScopeMode {
 pub enum WorkspaceScopeError {
     /// No workspace metadata exists for the requested scope.
     NoWorkspaces {
+        /// Which scope mode was requested.
         mode: WorkspaceScopeMode,
+        /// The workspace patterns the request carried.
         patterns: Vec<String>,
+        /// The git ref for changed-workspace scoping, when that mode was used.
         git_ref: Option<String>,
     },
     /// A pattern was neither an exact name/path nor a valid glob.
-    InvalidPattern { pattern: String, message: String },
+    InvalidPattern {
+        /// The offending pattern as supplied.
+        pattern: String,
+        /// Glob-compilation error detail.
+        message: String,
+    },
     /// One or more positive patterns matched no workspace.
     UnmatchedPatterns {
+        /// The patterns that matched nothing.
         patterns: Vec<String>,
+        /// Preformatted list of available workspace names for the error text.
         available: String,
     },
     /// Negation removed every selected workspace.
-    EmptyAfterExclusions { included: String, excluded: String },
+    EmptyAfterExclusions {
+        /// Preformatted description of the positive patterns (`<all>` when
+        /// none were given).
+        included: String,
+        /// Preformatted description of the exclusion patterns.
+        excluded: String,
+    },
     /// Git failed while resolving changed workspaces.
-    ChangedWorkspacesFailed { git_ref: String, message: String },
+    ChangedWorkspacesFailed {
+        /// The git ref the changed-workspace resolution ran against.
+        git_ref: String,
+        /// Underlying git failure detail.
+        message: String,
+    },
     /// Both workspace scope modes were requested.
     MutuallyExclusive,
 }

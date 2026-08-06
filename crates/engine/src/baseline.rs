@@ -192,6 +192,8 @@ pub struct BaselineData {
 }
 
 impl BaselineData {
+    /// Build baseline keys from analysis results under the syntactic analysis
+    /// identity (the default for runs without semantic analysis).
     pub fn from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
         Self::from_results_with_identity(
             results,
@@ -200,6 +202,9 @@ impl BaselineData {
         )
     }
 
+    /// Build baseline keys from analysis results, stamping the given analysis
+    /// identity so later loads can reject baselines produced under an
+    /// incompatible analysis mode.
     pub fn from_results_with_identity(
         results: &crate::results::AnalysisResults,
         root: &Path,
@@ -258,6 +263,7 @@ impl BaselineData {
         }
     }
 
+    /// The analysis identity this baseline was captured under.
     #[must_use]
     pub const fn analysis_identity(&self) -> &fallow_types::semantic::SemanticAnalysisIdentity {
         &self.analysis_identity
@@ -1691,6 +1697,7 @@ pub struct HealthBaselineData {
     pub(crate) target_keys: Vec<String>,
 }
 
+/// Serialized per-bucket finding tally inside a health baseline file.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HealthBaselineCount {
     count: usize,
@@ -2278,8 +2285,11 @@ pub(crate) fn filter_new_health_targets(
 /// Per-category delta between current results and a baseline.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CategoryDelta {
+    /// Finding count in the current run.
     pub current: usize,
+    /// Finding count recorded in the baseline.
     pub baseline: usize,
+    /// `current - baseline`; positive means new findings appeared.
     pub delta: i64,
 }
 

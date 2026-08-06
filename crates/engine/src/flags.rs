@@ -14,7 +14,9 @@ use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 /// Typed result from running feature flag analysis.
 #[derive(Debug, Clone)]
 pub struct FeatureFlagsAnalysis {
+    /// Detected feature flags with their usage sites and confidence.
     pub flags: Vec<FeatureFlag>,
+    /// Number of files the flag scan covered.
     pub files_scanned: usize,
 }
 

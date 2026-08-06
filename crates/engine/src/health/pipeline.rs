@@ -15,21 +15,36 @@ use super::StylingAnalysisArtifacts;
 
 /// Discovery / parse inputs the CLI resolves before calling the engine.
 pub struct HealthPipelineInputs {
+    /// Resolved project config the run executes under.
     pub config: ResolvedConfig,
+    /// Discovered files for the analysis scope.
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
+    /// Parsed modules for the discovered files.
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
-    /// Pre-parse pipeline timings (config / discover / parse milliseconds).
+    /// Config resolution wall time in milliseconds.
     pub config_ms: f64,
+    /// File discovery wall time in milliseconds.
     pub discover_ms: f64,
+    /// Parse wall time in milliseconds.
     pub parse_ms: f64,
+    /// Summed parse CPU time across rayon workers in milliseconds; `0.0` when
+    /// parse output was reused.
     pub parse_cpu_ms: f64,
     /// True when discover + parse were reused from the upstream check pass.
     pub shared_parse: bool,
+    /// Dead-code analysis artifacts precomputed by the caller, so the health
+    /// pipeline skips its own graph build and dead-code pass.
     pub pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+    /// Dead-code results reused by advisory sections that do not need the graph.
     pub dead_code_results: Option<AnalysisResults>,
+    /// Styling analysis artifacts shared from an upstream pass.
     pub styling_artifacts: Option<Arc<StylingAnalysisArtifacts>>,
+    /// Duplication report precomputed by the caller, so the health pipeline
+    /// skips its own duplication detection.
     pub pre_computed_duplication: Option<DuplicationReport>,
+    /// Workspace metadata discovered during config resolution.
     pub workspaces: Vec<WorkspaceInfo>,
+    /// Diagnostics from workspace discovery (undeclared or invalid members).
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
@@ -80,9 +95,13 @@ impl From<HealthPipelineInputs>
 /// state (the shared-diff `OnceLock`, CODEOWNERS parsing, workspace discovery
 /// error rendering), so the CLI resolves them and threads them in here.
 pub struct HealthScopeInputs<'a, R> {
+    /// Files changed since the requested git ref, when the run is diff-scoped.
     pub changed_files: Option<FxHashSet<PathBuf>>,
+    /// Diff index scoping findings to changed lines.
     pub diff_index: Option<&'a DiffIndex>,
+    /// Workspace roots limiting the analysis scope.
     pub ws_roots: Option<Vec<PathBuf>>,
+    /// Grouping resolver for `--group-by` output; `None` disables grouping.
     pub group_resolver: Option<R>,
 }
 

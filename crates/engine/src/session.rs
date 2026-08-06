@@ -51,26 +51,42 @@ struct ParsedModuleCache {
 /// Owned session parts for runners that need to continue an existing pipeline.
 #[derive(Debug)]
 pub struct AnalysisSessionParts {
+    /// Resolved project config the session was created with.
     pub config: ResolvedConfig,
+    /// Path of the loaded config file; `None` when defaults were used.
     pub config_path: Option<PathBuf>,
+    /// Files discovered under the session root.
     pub files: Vec<DiscoveredFile>,
+    /// Workspace metadata discovered during config resolution.
     pub workspaces: Vec<WorkspaceInfo>,
+    /// Diagnostics from workspace discovery (undeclared or invalid members).
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
 /// Owned session parts after parsing the discovered files.
 #[derive(Debug)]
 pub struct ParsedAnalysisSessionParts {
+    /// Resolved project config the session was created with.
     pub config: ResolvedConfig,
+    /// Path of the loaded config file; `None` when defaults were used.
     pub config_path: Option<PathBuf>,
+    /// Files discovered under the session root.
     pub files: Vec<DiscoveredFile>,
+    /// Parsed modules, one per discovered file.
     pub modules: Vec<ModuleInfo>,
+    /// Workspace metadata discovered during config resolution.
     pub workspaces: Vec<WorkspaceInfo>,
+    /// Diagnostics from workspace discovery (undeclared or invalid members).
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Parse wall time in milliseconds.
     pub parse_ms: f64,
+    /// Parse-cache write-back wall time in milliseconds.
     pub cache_update_ms: f64,
+    /// Files served from the parse cache.
     pub cache_hits: usize,
+    /// Files that had to be parsed fresh.
     pub cache_misses: usize,
+    /// Summed parse CPU time across rayon workers in milliseconds.
     pub parse_cpu_ms: f64,
 }
 
@@ -88,8 +104,11 @@ pub(crate) struct SharedParsedAnalysisSessionParts {
 /// Reusable artifacts produced by one session-owned dead-code run.
 #[derive(Debug)]
 pub struct AnalysisSessionArtifacts {
+    /// Retained dead-code analysis output (results, graph, timings).
     pub analysis: DeadCodeAnalysisArtifacts,
+    /// Diff scope the run was limited to, when one was resolved.
     pub changed_files: Option<FxHashSet<PathBuf>>,
+    /// Per-file source fingerprints for downstream cache invalidation.
     pub source_fingerprints: FxHashMap<PathBuf, SourceFingerprint>,
 }
 

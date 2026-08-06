@@ -25,9 +25,15 @@ pub enum DeadCodeKind {
     /// The entire file containing the clone is unused.
     UnusedFile,
     /// A specific unused export overlaps with the clone's line range.
-    UnusedExport { export_name: String },
+    UnusedExport {
+        /// Name of the overlapping unused export.
+        export_name: String,
+    },
     /// A specific unused type overlaps with the clone's line range.
-    UnusedType { type_name: String },
+    UnusedType {
+        /// Name of the overlapping unused type.
+        type_name: String,
+    },
 }
 
 /// Result of cross-referencing duplication with dead-code analysis.

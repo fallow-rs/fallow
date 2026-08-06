@@ -18,15 +18,25 @@ pub struct SourceToken {
 /// Normalized token types for clone detection.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum TokenKind {
+    /// A language keyword.
     Keyword(KeywordType),
+    /// An identifier with its name; normalization may erase the name.
     Identifier(String),
+    /// A string literal with its raw text; normalization may erase the value.
     StringLiteral(String),
+    /// A numeric literal with its raw text; normalization may erase the value.
     NumericLiteral(String),
+    /// A `true` / `false` literal.
     BooleanLiteral(bool),
+    /// The `null` literal.
     NullLiteral,
+    /// A template literal, collapsed to one token regardless of its parts.
     TemplateLiteral,
+    /// A regular expression literal, collapsed to one token.
     RegExpLiteral,
+    /// An operator.
     Operator(OperatorType),
+    /// A punctuation / delimiter token.
     Punctuation(PunctuationType),
     /// Logical separator between independently tokenized regions in the same file.
     ///
@@ -40,123 +50,231 @@ pub enum TokenKind {
 /// TypeScript/JavaScript keyword types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum KeywordType {
+    /// `var`
     Var,
+    /// `let`
     Let,
+    /// `const`
     Const,
+    /// `function`
     Function,
+    /// `return`
     Return,
+    /// `if`
     If,
+    /// `else`
     Else,
+    /// `for`
     For,
+    /// `while`
     While,
+    /// `do`
     Do,
+    /// `switch`
     Switch,
+    /// `case`
     Case,
+    /// `break`
     Break,
+    /// `continue`
     Continue,
+    /// `default`
     Default,
+    /// `throw`
     Throw,
+    /// `try`
     Try,
+    /// `catch`
     Catch,
+    /// `finally`
     Finally,
+    /// `new`
     New,
+    /// `delete`
     Delete,
+    /// `typeof`
     Typeof,
+    /// `instanceof`
     Instanceof,
+    /// `in`
     In,
+    /// `of`
     Of,
+    /// `void`
     Void,
+    /// `this`
     This,
+    /// `super`
     Super,
+    /// `class`
     Class,
+    /// `extends`
     Extends,
+    /// `import`
     Import,
+    /// `export`
     Export,
+    /// `from`
     From,
+    /// `as`
     As,
+    /// `async`
     Async,
+    /// `await`
     Await,
+    /// `yield`
     Yield,
+    /// `static`
     Static,
+    /// `get`
     Get,
+    /// `set`
     Set,
+    /// `type`
     Type,
+    /// `interface`
     Interface,
+    /// `enum`
     Enum,
+    /// `implements`
     Implements,
+    /// `abstract`
     Abstract,
+    /// `declare`
     Declare,
+    /// `readonly`
     Readonly,
+    /// `keyof`
     Keyof,
+    /// `satisfies`
     Satisfies,
 }
 
 /// Operator categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum OperatorType {
+    /// `=`
     Assign,
+    /// `+`
     Add,
+    /// `-`
     Sub,
+    /// `*`
     Mul,
+    /// `/`
     Div,
+    /// `%`
     Mod,
+    /// `**`
     Exp,
+    /// `==`
     Eq,
+    /// `!=`
     NEq,
+    /// `===`
     StrictEq,
+    /// `!==`
     StrictNEq,
+    /// `<`
     Lt,
+    /// `>`
     Gt,
+    /// `<=`
     LtEq,
+    /// `>=`
     GtEq,
+    /// `&&`
     And,
+    /// `||`
     Or,
+    /// `!`
     Not,
+    /// `&`
     BitwiseAnd,
+    /// `|`
     BitwiseOr,
+    /// `^`
     BitwiseXor,
+    /// `~`
     BitwiseNot,
+    /// `<<`
     ShiftLeft,
+    /// `>>`
     ShiftRight,
+    /// `>>>`
     UnsignedShiftRight,
+    /// `??`
     NullishCoalescing,
+    /// `?.`
     OptionalChaining,
+    /// `...`
     Spread,
+    /// `? :`
     Ternary,
+    /// `=>`
     Arrow,
+    /// `,`
     Comma,
+    /// `+=`
     AddAssign,
+    /// `-=`
     SubAssign,
+    /// `*=`
     MulAssign,
+    /// `/=`
     DivAssign,
+    /// `%=`
     ModAssign,
+    /// `**=`
     ExpAssign,
+    /// `&&=`
     AndAssign,
+    /// `||=`
     OrAssign,
+    /// `??=`
     NullishAssign,
+    /// `&=`
     BitwiseAndAssign,
+    /// `|=`
     BitwiseOrAssign,
+    /// `^=`
     BitwiseXorAssign,
+    /// `<<=`
     ShiftLeftAssign,
+    /// `>>=`
     ShiftRightAssign,
+    /// `>>>=`
     UnsignedShiftRightAssign,
+    /// `++`
     Increment,
+    /// `--`
     Decrement,
+    /// `instanceof` in operator position.
     Instanceof,
+    /// `in` in operator position.
     In,
 }
 
 /// Punctuation / delimiter types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum PunctuationType {
+    /// `(`
     OpenParen,
+    /// `)`
     CloseParen,
+    /// `{`
     OpenBrace,
+    /// `}`
     CloseBrace,
+    /// `[`
     OpenBracket,
+    /// `]`
     CloseBracket,
+    /// `;`
     Semicolon,
+    /// `:`
     Colon,
+    /// `.`
     Dot,
 }
 

@@ -34,34 +34,55 @@ pub struct ChurnFetchResult {
 /// This reuses the health hotspot churn cache without running project parsing,
 /// file scoring, or any other health section.
 pub struct TargetChurnOptions<'a> {
+    /// Project root containing the git repository.
     pub root: &'a std::path::Path,
+    /// Normalized project-relative path of the file to fetch churn for.
     pub target: &'a std::path::Path,
+    /// Directory holding the shared hotspot churn cache.
     pub cache_dir: std::path::PathBuf,
+    /// Bypass the churn cache and re-run `git log`.
     pub no_cache: bool,
+    /// Churn lookback window (`90d`, `6m`, `1y`, or an ISO date); `None` uses
+    /// the default window.
     pub since: Option<&'a str>,
+    /// Minimum commit count for the target to qualify as churn evidence.
     pub min_commits: Option<u32>,
 }
 
 /// Qualifying target-level churn returned by the focused health API.
 #[derive(Debug)]
 pub struct TargetChurnEvidence {
+    /// Per-file churn metrics from git history.
     pub file: crate::churn::FileChurn,
+    /// The lookback window the churn was measured over.
     pub since: crate::churn::SinceDuration,
+    /// The commit-count threshold the target met to qualify.
     pub min_commits: u32,
+    /// True when the repository is a shallow clone, so churn counts may
+    /// undercount actual history.
     pub shallow_clone: bool,
 }
 
 /// Result states that do not represent a churn-analysis failure.
 #[derive(Debug)]
 pub enum TargetChurnOutcome {
+    /// The target met the churn threshold; evidence is attached.
     Found(TargetChurnEvidence),
+    /// The target was analyzed but did not meet the commit threshold.
     NoQualifyingChurn {
+        /// Commits observed for the target, when it appeared in history.
         observed_commits: Option<u32>,
+        /// The lookback window the churn was measured over.
         since: crate::churn::SinceDuration,
+        /// The commit-count threshold that was not met.
         min_commits: u32,
+        /// True when the repository is a shallow clone, so churn counts may
+        /// undercount actual history.
         shallow_clone: bool,
     },
+    /// Churn could not be measured at all (for example: not a git repository).
     Unavailable {
+        /// Human-readable reason churn analysis was unavailable.
         message: String,
     },
 }

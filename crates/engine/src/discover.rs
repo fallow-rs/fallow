@@ -15,6 +15,7 @@ use crate::{EngineError, EngineResult, plugins::PluginRegistry};
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
 
+/// File extensions discovery treats as analyzable source files.
 pub const SOURCE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte", "astro",
     "mdx", "css", "scss", "sass", "less", "html", "graphql", "gql",

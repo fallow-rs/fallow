@@ -9,10 +9,13 @@ mod cache;
 pub mod deepdive;
 pub mod detect;
 pub mod families;
+/// Token normalization and rolling-hash computation for detection modes that
+/// ignore identifier names and literal values.
 pub mod normalize;
 mod shingle_filter;
 pub mod token_types;
 mod token_visitor;
+/// AST-based tokenization of source files into normalized token streams.
 pub mod tokenize;
 pub mod types;
 

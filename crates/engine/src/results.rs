@@ -64,33 +64,47 @@ pub use fallow_types::results::{
 /// Typed dead-code analysis result.
 #[derive(Debug)]
 pub struct DeadCodeAnalysis {
+    /// Findings across all dead-code categories.
     pub results: AnalysisResults,
 }
 
 /// Typed dead-code analysis result with per-file source hashes.
 #[derive(Debug)]
 pub struct DeadCodeAnalysisWithHashes {
+    /// Findings across all dead-code categories.
     pub results: AnalysisResults,
+    /// Per-file source content hashes for cache invalidation.
     pub file_hashes: FxHashMap<PathBuf, u64>,
 }
 
 /// Typed dead-code analysis result with retained parser artifacts.
 #[derive(Debug)]
 pub struct DeadCodeAnalysisOutput {
+    /// Findings across all dead-code categories.
     pub results: AnalysisResults,
+    /// Parsed modules retained for reuse, when the caller asked for them.
     pub modules: Option<Vec<ModuleInfo>>,
+    /// Discovered files retained for reuse, when the caller asked for them.
     pub files: Option<Vec<DiscoveredFile>>,
 }
 
 /// Typed dead-code analysis result with all reusable pipeline artifacts.
 #[derive(Debug)]
 pub struct DeadCodeAnalysisArtifacts {
+    /// Findings across all dead-code categories.
     pub results: AnalysisResults,
+    /// Per-phase pipeline timings, when the run measured them.
     pub timings: Option<trace::PipelineTimings>,
+    /// Retained module graph for downstream passes (health, trace, impact).
     pub graph: Option<module_graph::RetainedModuleGraph>,
+    /// Parsed modules retained for reuse, when the caller asked for them.
     pub modules: Option<Vec<ModuleInfo>>,
+    /// Discovered files retained for reuse, when the caller asked for them.
     pub files: Option<Vec<DiscoveredFile>>,
+    /// Package names referenced from package.json scripts, which keeps those
+    /// dependencies from being reported unused.
     pub script_used_packages: FxHashSet<String>,
+    /// Per-file source content hashes for cache invalidation.
     pub file_hashes: FxHashMap<PathBuf, u64>,
 }
 
@@ -137,16 +151,22 @@ impl SharedDeadCodeAnalysisArtifacts {
 /// Typed project analysis result combining dead-code and duplication outputs.
 #[derive(Debug)]
 pub struct ProjectAnalysisOutput {
+    /// Dead-code findings with optionally retained parser artifacts.
     pub dead_code: DeadCodeAnalysisOutput,
+    /// Duplication report for the same file set.
     pub duplication: duplicates::DuplicationReport,
 }
 
 /// Typed project analysis result with reusable session artifacts.
 #[derive(Debug)]
 pub struct ProjectAnalysisArtifacts {
+    /// Dead-code findings with all reusable pipeline artifacts.
     pub dead_code: DeadCodeAnalysisArtifacts,
+    /// Duplication report for the same file set.
     pub duplication: duplicates::DuplicationReport,
+    /// Diff scope the run was limited to, when one was resolved.
     pub changed_files: Option<FxHashSet<PathBuf>>,
+    /// Per-file source fingerprints for downstream cache invalidation.
     pub source_fingerprints: Option<FxHashMap<PathBuf, SourceFingerprint>>,
 }
 
@@ -178,6 +198,7 @@ pub struct DuplicationAnalysis {
 /// depend on a command-neutral shape.
 #[derive(Debug)]
 pub struct HealthAnalysisResult<GroupResolver = ()> {
+    /// The assembled health report for the active run scope.
     pub report: HealthReport,
     /// Optional TypeScript semantic metadata for advisory health overlays.
     pub type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
@@ -190,11 +211,18 @@ pub struct HealthAnalysisResult<GroupResolver = ()> {
     /// Optional grouping resolver retained by callers that need to tag findings
     /// after analysis without rediscovering ownership or package metadata.
     pub group_resolver: Option<GroupResolver>,
+    /// Resolved config the run executed under.
     pub config: ResolvedConfig,
+    /// Diagnostics from workspace discovery (undeclared or invalid members).
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Total wall time of the health run.
     pub elapsed: Duration,
+    /// Per-phase timings, when the run measured them.
     pub timings: Option<HealthTimings>,
+    /// True when the coverage gaps section produced findings.
     pub coverage_gaps_has_findings: bool,
+    /// True when coverage gap findings should fail the run (the gate is
+    /// enforced rather than advisory).
     pub should_fail_on_coverage_gaps: bool,
 }
 

@@ -1,9 +1,22 @@
 use std::path::PathBuf;
 
+/// Validate a user-supplied git ref before it reaches a git subprocess:
+/// rejects empty refs, option-like refs starting with `-`, and characters
+/// outside the ref-syntax allowlist.
+///
+/// # Errors
+///
+/// Returns a message describing why the ref was rejected.
 pub fn validate_git_ref(s: &str) -> Result<&str, String> {
     crate::changed_files::validate_git_ref(s)
 }
 
+/// Canonicalize a project root and require it to be an existing directory.
+///
+/// # Errors
+///
+/// Returns a message when the path cannot be canonicalized or is not a
+/// directory.
 pub fn validate_root(root: &std::path::Path) -> Result<PathBuf, String> {
     let canonical = dunce::canonicalize(root)
         .map_err(|e| format!("invalid root path '{}': {e}", root.display()))?;

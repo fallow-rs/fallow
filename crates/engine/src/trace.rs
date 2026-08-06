@@ -14,19 +14,32 @@ use crate::module_graph::RetainedModuleGraph;
 #[path = "trace_impl.rs"]
 mod trace_impl;
 
+/// Engine alias for [`fallow_types::trace::ClassMemberTrace`].
 pub type ClassMemberTrace = fallow_types::trace::ClassMemberTrace;
+/// Engine alias for [`fallow_types::trace::CloneTrace`].
 pub type CloneTrace = fallow_types::trace::CloneTrace;
+/// Engine alias for [`fallow_types::trace::DependencyTrace`].
 pub type DependencyTrace = fallow_types::trace::DependencyTrace;
+/// Engine alias for [`fallow_types::trace::ExportReference`].
 pub type ExportReference = fallow_types::trace::ExportReference;
+/// Engine alias for [`fallow_types::trace::ExportTrace`].
 pub type ExportTrace = fallow_types::trace::ExportTrace;
+/// Engine alias for [`fallow_types::trace::FileTrace`].
 pub type FileTrace = fallow_types::trace::FileTrace;
+/// Engine alias for [`fallow_types::trace::ImpactClosureGap`].
 pub type ImpactClosureGap = fallow_types::trace::ImpactClosureGap;
+/// Engine alias for [`fallow_types::trace::ImpactClosureTrace`].
 pub type ImpactClosureTrace = fallow_types::trace::ImpactClosureTrace;
+/// Engine alias for [`fallow_types::trace::PipelineTimings`].
 pub type PipelineTimings = fallow_types::trace::PipelineTimings;
+/// Engine alias for [`fallow_types::trace::ReExportChain`].
 pub type ReExportChain = fallow_types::trace::ReExportChain;
 pub use trace_impl::SemanticClassMethodResolutionError;
+/// Engine alias for [`fallow_types::trace::TracedCloneGroup`].
 pub type TracedCloneGroup = fallow_types::trace::TracedCloneGroup;
+/// Engine alias for [`fallow_types::trace::TracedExport`].
 pub type TracedExport = fallow_types::trace::TracedExport;
+/// Engine alias for [`fallow_types::trace::TracedReExport`].
 pub type TracedReExport = fallow_types::trace::TracedReExport;
 
 /// Trace why an export is considered used or unused.

@@ -14,22 +14,35 @@ use crate::{EngineError, EngineResult};
 /// Resolved project config plus the config file path when one was loaded.
 #[derive(Debug)]
 pub struct ProjectConfig {
+    /// Fully resolved config for the project.
     pub config: ResolvedConfig,
+    /// Path of the loaded config file; `None` when defaults were used.
     pub path: Option<PathBuf>,
+    /// Workspace metadata discovered under the project root.
     pub workspaces: Vec<WorkspaceInfo>,
+    /// Diagnostics from workspace discovery (undeclared or invalid members).
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Workspace discovery wall time in milliseconds, when measured.
     pub workspace_discovery_ms: Option<f64>,
 }
 
 /// Scalar config-loading knobs for one analysis family.
 #[derive(Debug, Clone, Copy)]
 pub struct ProjectConfigOptions {
+    /// Output format the resolved config carries into rendering.
     pub output: OutputFormat,
+    /// Bypass the parse cache for this run.
     pub no_cache: bool,
+    /// Worker thread count recorded on the resolved config.
     pub threads: usize,
+    /// Tri-state production override: `Some` forces production-only analysis
+    /// on or off regardless of config, `None` defers to the config value.
     pub production_override: Option<bool>,
+    /// Suppress progress notes on stderr.
     pub quiet: bool,
+    /// Which analysis family's per-analysis production config to flatten.
     pub analysis: ProductionAnalysis,
+    /// Permit `extends` config inheritance from remote URLs.
     pub allow_remote_extends: bool,
 }
 
