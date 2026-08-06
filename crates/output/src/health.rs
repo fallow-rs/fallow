@@ -25,17 +25,25 @@ use crate::{
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]
 pub struct HealthOutput<Report, Group> {
+    /// Health output schema version.
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Health report body, flattened into the envelope root.
     #[serde(flatten)]
     pub report: Report,
+    /// Grouping mode when `--group-by` was passed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_by: Option<GroupByMode>,
+    /// Per-bucket recomputed metrics; present only in grouped output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Group>>,
+    /// `_meta` block with metric definitions, when `--explain` was passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings. See
@@ -48,23 +56,36 @@ pub struct HealthOutput<Report, Group> {
 /// assembly details to callers.
 #[derive(Debug, Clone)]
 pub struct HealthOutputInput<Report, Group> {
+    /// Health output schema version to report.
     pub schema_version: u32,
+    /// Fallow CLI version to report.
     pub version: String,
+    /// Wall-clock analysis duration; serialized as whole milliseconds.
     pub elapsed: Duration,
+    /// Health report body to flatten into the envelope root.
     pub report: Report,
+    /// Grouping mode when `--group-by` was passed.
     pub grouped_by: Option<GroupByMode>,
+    /// Per-bucket recomputed metrics, for grouped output.
     pub groups: Option<Vec<Group>>,
+    /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Read-only follow-up commands computed from this run's findings.
     pub next_steps: Vec<NextStep>,
 }
 
 /// Inputs for serializing a health report into the root JSON contract.
 #[derive(Debug, Clone)]
 pub struct HealthJsonOutputInput<'a, Report, Group> {
+    /// Envelope construction inputs.
     pub output: HealthOutputInput<Report, Group>,
+    /// Absolute root prefix to strip from every emitted path, when set.
     pub root_prefix: Option<&'a str>,
+    /// Root discriminator policy.
     pub envelope_mode: RootEnvelopeMode,
+    /// Telemetry run id to attach under `_meta.telemetry`, when available.
     pub analysis_run_id: Option<&'a str>,
 }
 

@@ -28,10 +28,15 @@ pub enum RuntimeCoverageSchemaVersion {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageReportVerdict {
+    /// No actionable runtime-coverage signal.
     Clean,
+    /// The current change touches a runtime hot path.
     HotPathTouched,
+    /// Runtime-cold code was detected.
     ColdCodeDetected,
+    /// The license expired; output is in grace mode.
     LicenseExpiredGrace,
+    /// No verdict could be derived.
     #[default]
     Unknown,
 }
@@ -46,12 +51,16 @@ pub enum RuntimeCoverageReportVerdict {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageSignal {
+    /// The license expired; output is in grace mode.
     LicenseExpiredGrace,
+    /// Runtime-cold code was detected.
     ColdCodeDetected,
+    /// The current change touches a runtime hot path.
     HotPathTouched,
 }
 
 impl RuntimeCoverageSignal {
+    /// Kebab-case wire value of the signal.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -69,6 +78,7 @@ impl fmt::Display for RuntimeCoverageSignal {
 }
 
 impl RuntimeCoverageReportVerdict {
+    /// Kebab-case wire value of the verdict.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -95,15 +105,22 @@ impl fmt::Display for RuntimeCoverageReportVerdict {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageVerdict {
+    /// Statically unused and never invoked; delete candidate.
     SafeToDelete,
+    /// Signals conflict; a human should review before acting.
     ReviewRequired,
+    /// The function could not be tracked, so no runtime verdict exists.
     CoverageUnavailable,
+    /// Tracked and invoked, but below the low-traffic threshold.
     LowTraffic,
+    /// Tracked and actively invoked; omitted from `findings`.
     Active,
+    /// No verdict could be derived.
     Unknown,
 }
 
 impl RuntimeCoverageVerdict {
+    /// Snake-case wire value of the verdict.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -116,6 +133,7 @@ impl RuntimeCoverageVerdict {
         }
     }
 
+    /// Space-separated label for human-readable output.
     #[must_use]
     pub const fn human_label(self) -> &'static str {
         match self {
@@ -140,15 +158,22 @@ impl fmt::Display for RuntimeCoverageVerdict {
 #[serde(rename_all = "snake_case")]
 /// Confidence level for a runtime coverage finding.
 pub enum RuntimeCoverageConfidence {
+    /// All evidence agrees and the observation volume is deep.
     VeryHigh,
+    /// Strong evidence with adequate observation volume.
     High,
+    /// Evidence is consistent but the observation volume is limited.
     Medium,
+    /// Sparse or conflicting evidence.
     Low,
+    /// No usable evidence for this finding.
     None,
+    /// Confidence could not be derived.
     Unknown,
 }
 
 impl RuntimeCoverageConfidence {
+    /// Snake-case wire value of the confidence level.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -173,12 +198,16 @@ impl fmt::Display for RuntimeCoverageConfidence {
 #[serde(rename_all = "kebab-case")]
 /// License or trial watermark applied to runtime coverage output.
 pub enum RuntimeCoverageWatermark {
+    /// The trial period ended.
     TrialExpired,
+    /// The license expired but grace-mode output continues.
     LicenseExpiredGrace,
+    /// Watermark state could not be derived.
     Unknown,
 }
 
 impl RuntimeCoverageWatermark {
+    /// Kebab-case wire value of the watermark.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -200,12 +229,15 @@ impl fmt::Display for RuntimeCoverageWatermark {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageDataSource {
+    /// Locally supplied runtime coverage artifact.
     #[default]
     Local,
+    /// Runtime context pulled from fallow.cloud after explicit opt-in.
     Cloud,
 }
 
 impl RuntimeCoverageDataSource {
+    /// Snake-case wire value of the data source.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -314,14 +346,17 @@ pub struct RuntimeCoverageAction {
     /// consumers should treat unknown values as forward-compat extensions.
     #[serde(rename = "type")]
     pub kind: String,
+    /// Human-readable action description.
     pub description: String,
     /// Whether fallow can apply this action automatically.
     pub auto_fixable: bool,
 }
 
+/// Non-fatal diagnostic emitted while merging runtime coverage.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageMessage {
+    /// Stable machine-readable warning code.
     pub code: String,
     /// Human-readable warning message.
     pub message: String,
@@ -360,6 +395,7 @@ pub struct RuntimeCoverageDiscriminators {
     pub meets_observation_volume: bool,
 }
 
+/// One per-function runtime-coverage finding in `runtime_coverage.findings`.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageFinding {
@@ -396,12 +432,15 @@ pub struct RuntimeCoverageFinding {
     pub function: String,
     /// 1-indexed line number the function starts on.
     pub line: u32,
+    /// Per-function runtime verdict from the protocol decision table.
     pub verdict: RuntimeCoverageVerdict,
     /// Raw V8 invocation count. `None` when the function was untracked
     /// (lazy-parsed, worker thread, or dynamic code).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invocations: Option<u64>,
+    /// Confidence in the verdict.
     pub confidence: RuntimeCoverageConfidence,
+    /// Static, test, and tracking evidence behind the verdict.
     pub evidence: RuntimeCoverageEvidence,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
@@ -416,6 +455,7 @@ pub struct RuntimeCoverageFinding {
     pub discriminators: Option<RuntimeCoverageDiscriminators>,
 }
 
+/// One hot function in `runtime_coverage.hot_paths`, ranked by invocations.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageHotPath {
@@ -459,12 +499,16 @@ pub struct RuntimeCoverageHotPath {
 /// callers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers
 /// or >=50,000 weighted reach; low otherwise.
 pub enum RuntimeCoverageRiskBand {
+    /// Small caller footprint.
     Low,
+    /// Moderate caller footprint.
     Medium,
+    /// Wide caller footprint; changes ripple far.
     High,
 }
 
 impl RuntimeCoverageRiskBand {
+    /// Snake-case wire value of the risk band.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -481,6 +525,8 @@ impl fmt::Display for RuntimeCoverageRiskBand {
     }
 }
 
+/// One blast-radius entry in `runtime_coverage.blast_radius`: how far a
+/// change to the function would ripple.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageBlastRadiusEntry {
@@ -507,9 +553,12 @@ pub struct RuntimeCoverageBlastRadiusEntry {
     /// Distinct deploy SHAs that touched the function in the observation
     /// window. Cloud mode only; omitted in local mode.
     pub deploys_touched: Option<u32>,
+    /// Risk band derived from caller counts and traffic-weighted reach.
     pub risk_band: RuntimeCoverageRiskBand,
 }
 
+/// One production-importance entry in `runtime_coverage.importance`, scoring
+/// how much a function matters in production.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageImportanceEntry {

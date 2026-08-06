@@ -194,14 +194,21 @@ pub struct VitalSignsCounts {
     pub total_files: usize,
     /// Total number of exports across all files.
     pub total_exports: usize,
+    /// Number of unreachable files.
     pub dead_files: usize,
+    /// Number of unused exports.
     pub dead_exports: usize,
+    /// Lines inside detected clones; absent when duplication did not run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicated_lines: Option<usize>,
+    /// Lines scanned by duplication; absent when duplication did not run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_lines: Option<usize>,
+    /// Files with a computed maintainability score; absent when file scoring
+    /// did not run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files_scored: Option<usize>,
+    /// Total declared dependencies across manifest sections.
     pub total_deps: usize,
 }
 

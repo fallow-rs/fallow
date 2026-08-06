@@ -20,16 +20,23 @@ pub enum CoverageIntelligenceSchemaVersion {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageIntelligenceVerdict {
+    /// A changed hot path lacks test coverage.
     RiskyChangeDetected,
+    /// Statically unused and runtime-cold; safe delete candidate.
     HighConfidenceDelete,
+    /// Evidence conflicts; a human should look before acting.
     ReviewRequired,
+    /// Runtime-reachable but poorly tested; behavior must be preserved.
     RefactorCarefully,
+    /// No combined-signal findings.
     Clean,
+    /// Evidence was insufficient to reach a verdict.
     #[default]
     Unknown,
 }
 
 impl CoverageIntelligenceVerdict {
+    /// Kebab-case wire value of the verdict.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -56,19 +63,30 @@ impl fmt::Display for CoverageIntelligenceVerdict {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageIntelligenceSignal {
+    /// The unit was changed in the current scope.
     Changed,
+    /// Runtime coverage shows frequent execution.
     HotPath,
+    /// Test coverage is below the low threshold.
     LowTestCoverage,
+    /// CRAP score is above the risk threshold.
     HighCrap,
+    /// Static analysis found no consumer.
     StaticUnused,
+    /// Runtime coverage never or rarely saw it execute.
     RuntimeCold,
+    /// No test dependency path reaches the unit.
     NoTestPath,
+    /// Runtime coverage saw it execute.
     RuntimeReachable,
+    /// File ownership drifted from its historic maintainers.
     OwnershipDrift,
+    /// A test dependency path reaches the unit.
     TestCovered,
 }
 
 impl CoverageIntelligenceSignal {
+    /// Snake-case wire value of the signal.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -97,13 +115,18 @@ impl fmt::Display for CoverageIntelligenceSignal {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageIntelligenceRecommendation {
+    /// Cover or split the risky change before merging.
     AddTestOrSplitBeforeMerge,
+    /// Delete the unit once an owner confirms it is dead.
     DeleteAfterConfirmingOwner,
+    /// Have a human review before changing the unit.
     ReviewBeforeChanging,
+    /// Refactor with behavior-preserving steps only.
     RefactorCarefullyKeepBehavior,
 }
 
 impl CoverageIntelligenceRecommendation {
+    /// Kebab-case wire value of the recommendation.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -128,12 +151,16 @@ impl fmt::Display for CoverageIntelligenceRecommendation {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageIntelligenceConfidence {
+    /// All contributing surfaces agree.
     High,
+    /// Evidence is consistent but incomplete.
     Medium,
+    /// Evidence is sparse or partially conflicting.
     Low,
 }
 
 impl CoverageIntelligenceConfidence {
+    /// Snake-case wire value of the confidence level.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -155,13 +182,17 @@ impl fmt::Display for CoverageIntelligenceConfidence {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageIntelligenceMatchConfidence {
+    /// Surfaces matched on path, function identity, and line.
     PathFunctionLine,
+    /// Surfaces matched on path and line only.
     PathLine,
+    /// Single-surface evidence; no cross-surface join was needed.
     #[default]
     Direct,
 }
 
 impl CoverageIntelligenceMatchConfidence {
+    /// Kebab-case wire value of the match confidence.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -185,6 +216,7 @@ pub struct CoverageIntelligenceAction {
     /// Action identifier, normalized to `type` in JSON output.
     #[serde(rename = "type")]
     pub kind: String,
+    /// Human-readable action description.
     pub description: String,
     /// Whether fallow can apply this action automatically.
     pub auto_fixable: bool,
@@ -194,23 +226,33 @@ pub struct CoverageIntelligenceAction {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceEvidence {
+    /// Test coverage percentage (0-100), when coverage data exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_pct: Option<f64>,
+    /// CRAP score, when complexity and coverage both exist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crap: Option<f64>,
+    /// Runtime-coverage verdict label, e.g. `hot` or `cold`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_verdict: Option<String>,
+    /// Observed runtime invocation count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invocations: Option<u64>,
+    /// Static usage status label, e.g. `unused`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub static_status: Option<String>,
+    /// Static test-coverage status label, e.g. `no-test-path`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_coverage: Option<String>,
+    /// True when the unit is inside the current change scope; omitted when
+    /// false.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub changed: bool,
+    /// Ownership-drift state label, when ownership analysis ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership_state: Option<String>,
+    /// Confidence tier of the cross-surface evidence join.
     pub match_confidence: CoverageIntelligenceMatchConfidence,
 }
 
@@ -228,14 +270,21 @@ pub struct CoverageIntelligenceFinding {
     pub identity: Option<String>,
     /// 1-indexed source line.
     pub line: u32,
+    /// Verdict for this specific unit.
     pub verdict: CoverageIntelligenceVerdict,
+    /// Ordered evidence signals behind the verdict.
     pub signals: Vec<CoverageIntelligenceSignal>,
+    /// Recommended action family.
     pub recommendation: CoverageIntelligenceRecommendation,
+    /// Confidence in the joined evidence.
     pub confidence: CoverageIntelligenceConfidence,
+    /// IDs of related findings from other fallow surfaces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub related_ids: Vec<String>,
+    /// Compact evidence values behind the recommendation.
     pub evidence: CoverageIntelligenceEvidence,
+    /// Machine-actionable follow-up actions.
     pub actions: Vec<CoverageIntelligenceAction>,
 }
 
@@ -243,11 +292,17 @@ pub struct CoverageIntelligenceFinding {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceSummary {
+    /// Total combined findings.
     pub findings: usize,
+    /// Findings with the risky-change verdict.
     pub risky_changes: usize,
+    /// Findings with the high-confidence-delete verdict.
     pub high_confidence_deletes: usize,
+    /// Findings with the review-required verdict.
     pub review_required: usize,
+    /// Findings with the refactor-carefully verdict.
     pub refactor_carefully: usize,
+    /// Candidate joins dropped because the cross-surface match was ambiguous.
     pub skipped_ambiguous_matches: usize,
 }
 
@@ -255,8 +310,13 @@ pub struct CoverageIntelligenceSummary {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceReport {
+    /// Coverage-intelligence block contract version.
     pub schema_version: CoverageIntelligenceSchemaVersion,
+    /// Headline verdict, taken from the highest-ranked finding; `clean` when
+    /// there are none.
     pub verdict: CoverageIntelligenceVerdict,
+    /// Aggregate finding counts.
     pub summary: CoverageIntelligenceSummary,
+    /// Combined findings, one per matched unit.
     pub findings: Vec<CoverageIntelligenceFinding>,
 }

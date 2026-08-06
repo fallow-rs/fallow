@@ -6,6 +6,7 @@
 //! non-CLI consumers can use. Shared selectors such as `OutputFormat` stay in
 //! `fallow-types`; this crate re-exports only the selectors needed to keep
 //! output builders on one contract surface.
+#![warn(missing_docs)]
 #![cfg_attr(
     test,
     allow(
