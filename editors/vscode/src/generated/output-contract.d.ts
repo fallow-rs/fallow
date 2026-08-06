@@ -8786,15 +8786,11 @@ file: string
 /**
  * Whether the module graph can reach the file from an entry point.
  */
-is_reachable?: {
-[k: string]: unknown
-}
+is_reachable?: (boolean | null)
 /**
  * Whether the file is itself an entry point.
  */
-is_entry_point?: {
-[k: string]: unknown
-}
+is_entry_point?: (boolean | null)
 /**
  * Number of exports the file declares.
  */
@@ -8824,27 +8820,19 @@ export_name: string
 /**
  * Whether the containing file is reachable from an entry point.
  */
-file_reachable?: {
-[k: string]: unknown
-}
+file_reachable?: (boolean | null)
 /**
  * Whether the containing file is itself an entry point.
  */
-is_entry_point?: {
-[k: string]: unknown
-}
+is_entry_point?: (boolean | null)
 /**
  * Whether the export has any recorded consumer.
  */
-is_used?: {
-[k: string]: unknown
-}
+is_used?: (boolean | null)
 /**
  * Explanation of the usage verdict, when the graph recorded one.
  */
-reason?: {
-[k: string]: unknown
-}
+reason?: (string | null)
 }
 /**
  * `evidence` block of [`InspectOutput`]: one section per analysis.

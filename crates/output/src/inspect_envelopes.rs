@@ -103,8 +103,10 @@ pub struct InspectFileIdentity {
     /// File path relative to the analysed root.
     pub file: String,
     /// Whether the module graph can reach the file from an entry point.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<bool>"))]
     pub is_reachable: Option<serde_json::Value>,
     /// Whether the file is itself an entry point.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<bool>"))]
     pub is_entry_point: Option<serde_json::Value>,
     /// Number of exports the file declares.
     pub export_count: Option<usize>,
@@ -124,12 +126,16 @@ pub struct InspectSymbolIdentity {
     /// Name of the inspected export.
     pub export_name: String,
     /// Whether the containing file is reachable from an entry point.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<bool>"))]
     pub file_reachable: Option<serde_json::Value>,
     /// Whether the containing file is itself an entry point.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<bool>"))]
     pub is_entry_point: Option<serde_json::Value>,
     /// Whether the export has any recorded consumer.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<bool>"))]
     pub is_used: Option<serde_json::Value>,
     /// Explanation of the usage verdict, when the graph recorded one.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub reason: Option<serde_json::Value>,
 }
 

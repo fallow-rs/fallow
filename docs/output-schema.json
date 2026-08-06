@@ -17101,9 +17101,17 @@
           "description": "File path relative to the analysed root."
         },
         "is_reachable": {
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Whether the module graph can reach the file from an entry point."
         },
         "is_entry_point": {
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Whether the file is itself an entry point."
         },
         "export_count": {
@@ -17201,15 +17209,31 @@
           "description": "Name of the inspected export."
         },
         "file_reachable": {
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Whether the containing file is reachable from an entry point."
         },
         "is_entry_point": {
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Whether the containing file is itself an entry point."
         },
         "is_used": {
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Whether the export has any recorded consumer."
         },
         "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Explanation of the usage verdict, when the graph recorded one."
         }
       },
