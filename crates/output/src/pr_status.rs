@@ -2,24 +2,36 @@ use serde::{Deserialize, Serialize};
 
 use crate::{PrDecisionConclusion, PrDecisionSurface};
 
+/// One commit-status context derived from a [`PrDecisionSurface`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrStatusContext {
+    /// Status context name as shown in the provider UI: `Fallow` for the
+    /// aggregate context, `Fallow / <gate id>` for split contexts.
     pub name: String,
+    /// Conclusion reported for this context.
     pub conclusion: PrDecisionConclusion,
+    /// One-line status description.
     pub summary: String,
 }
 
+/// How a decision surface fans out into commit-status contexts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrStatusMode {
+    /// One combined context for the overall conclusion.
     Aggregate,
+    /// One context per gate.
     Split,
+    /// The aggregate context followed by one context per gate.
     AggregateAndSplit,
 }
 
+/// Per-gate status contexts for `surface`; shorthand for
+/// [`pr_status_contexts_with_mode`] with [`PrStatusMode::Split`].
 pub fn pr_status_contexts(surface: &PrDecisionSurface) -> Vec<PrStatusContext> {
     pr_status_contexts_with_mode(surface, PrStatusMode::Split)
 }
 
+/// Commit-status contexts for `surface`, fanned out according to `mode`.
 pub fn pr_status_contexts_with_mode(
     surface: &PrDecisionSurface,
     mode: PrStatusMode,

@@ -2,44 +2,67 @@
 
 use crate::PrCommentEnvelope;
 
+/// Sticky comment already present on the PR, as found by a provider adapter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExistingPrComment {
+    /// Provider-assigned comment id used for the update call.
     pub id: String,
+    /// Current comment body, compared against the new body to skip no-op posts.
     pub body: String,
 }
 
+/// Inputs for [`plan_pr_comment_post`].
 pub struct PrCommentPostPlanInput<'a> {
+    /// Freshly rendered comment envelope.
     pub envelope: &'a PrCommentEnvelope,
+    /// Existing sticky comment, when the adapter found one by marker.
     pub existing: Option<&'a ExistingPrComment>,
 }
 
+/// What the provider adapter should do with the rendered comment.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrCommentPostAction {
+    /// Post a new comment.
     Create,
+    /// Update the existing sticky comment in place.
     Update,
+    /// Post nothing; see the plan's `skip_reason`.
     Skip,
 }
 
+/// Why a post was skipped.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrCommentPostSkipReason {
+    /// Clean run with no prior comment to update; posting would only add noise.
     CleanNoExistingComment,
+    /// Existing comment body is byte-identical to the new body.
     Unchanged,
 }
 
+/// Posting decision handed to a provider adapter.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct PrCommentPostPlan {
+    /// Action the adapter should take.
     pub action: PrCommentPostAction,
+    /// Identity token of the sticky comment.
     pub marker_id: String,
+    /// Comment id to update; present only for `Update`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_id: Option<String>,
+    /// Skip explanation; present only for `Skip`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_reason: Option<PrCommentPostSkipReason>,
+    /// Body to post; present for `Create` and `Update`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
 }
 
+/// Decide whether the rendered comment should be created, updated, or skipped.
+///
+/// Skips when the body is unchanged, and never creates a first comment for a
+/// clean run.
 #[must_use]
 pub fn plan_pr_comment_post(input: &PrCommentPostPlanInput<'_>) -> PrCommentPostPlan {
     match input.existing {

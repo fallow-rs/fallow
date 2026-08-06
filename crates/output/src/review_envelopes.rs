@@ -98,16 +98,24 @@ pub fn body_matches_review_id(body: &str, review_id: Option<&ReviewId>) -> bool 
     schemars(title = "fallow --format review-github / review-gitlab")
 )]
 pub struct ReviewEnvelopeOutput {
+    /// GitHub review event to submit with; absent for GitLab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<ReviewEnvelopeEvent>,
+    /// Top-level review body markdown.
     pub body: String,
+    /// Sticky summary comment with its own fingerprint.
     #[serde(default = "ReviewEnvelopeSummary::empty_default")]
     pub summary: ReviewEnvelopeSummary,
+    /// Inline review comments, all from the same provider.
     pub comments: Vec<ReviewComment>,
+    /// Regex integrations use to find fallow fingerprint markers in existing
+    /// comment bodies.
     #[serde(default = "default_marker_regex")]
     pub marker_regex: String,
+    /// Regex flags accompanying `marker_regex` (multiline).
     #[serde(default = "default_marker_regex_flags")]
     pub marker_regex_flags: String,
+    /// Schema, provider, and check-conclusion metadata.
     pub meta: ReviewEnvelopeMeta,
 }
 
@@ -238,7 +246,9 @@ pub const MARKER_REGEX_FLAGS_V2: &str = "m";
 #[derive(Debug, Clone, Serialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewEnvelopeSummary {
+    /// Summary comment body markdown.
     pub body: String,
+    /// Stable fingerprint of the summary body, used for sticky updates.
     pub fingerprint: String,
 }
 
@@ -258,6 +268,7 @@ impl ReviewEnvelopeSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ReviewEnvelopeEvent {
+    /// Submit as a non-blocking `COMMENT` review.
     #[serde(rename = "COMMENT")]
     Comment,
 }
@@ -270,7 +281,9 @@ pub enum ReviewEnvelopeEvent {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum ReviewComment {
+    /// GitHub pull-request review comment.
     GitHub(GitHubReviewComment),
+    /// GitLab merge-request discussion comment.
     GitLab(GitLabReviewComment),
 }
 
@@ -278,11 +291,18 @@ pub enum ReviewComment {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GitHubReviewComment {
+    /// File path relative to the repository root.
     pub path: String,
+    /// 1-based line on the new side of the diff.
     pub line: u32,
+    /// Diff side; always `RIGHT` (the new side).
     pub side: GitHubReviewSide,
+    /// Comment body markdown, fingerprint marker included.
     pub body: String,
+    /// Stable finding fingerprint used for comment reconciliation.
     pub fingerprint: String,
+    /// True when the body was cut to fit the provider size limit; omitted
+    /// when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncated: bool,
 }
@@ -291,6 +311,7 @@ pub struct GitHubReviewComment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum GitHubReviewSide {
+    /// New side of the diff; the only side fallow comments on.
     #[serde(rename = "RIGHT")]
     Right,
 }
@@ -299,9 +320,14 @@ pub enum GitHubReviewSide {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GitLabReviewComment {
+    /// Comment body markdown, fingerprint marker included.
     pub body: String,
+    /// Diff position anchoring the discussion.
     pub position: GitLabReviewPosition,
+    /// Stable finding fingerprint used for comment reconciliation.
     pub fingerprint: String,
+    /// True when the body was cut to fit the provider size limit; omitted
+    /// when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncated: bool,
 }
@@ -321,15 +347,23 @@ pub fn is_false(value: &bool) -> bool {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GitLabReviewPosition {
+    /// Merge-base SHA of the MR diff; absent when refs were not supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_sha: Option<String>,
+    /// First commit SHA of the MR diff; absent when refs were not supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_sha: Option<String>,
+    /// Head commit SHA of the MR diff; absent when refs were not supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_sha: Option<String>,
+    /// Position type; always `text`.
     pub position_type: GitLabReviewPositionType,
+    /// Pre-rename path when the diff renamed the file, else the same as
+    /// `new_path`.
     pub old_path: String,
+    /// File path on the new side of the diff.
     pub new_path: String,
+    /// 1-based line on the new side of the diff.
     pub new_line: u32,
 }
 
@@ -338,6 +372,7 @@ pub struct GitLabReviewPosition {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum GitLabReviewPositionType {
+    /// Text-file diff position; the only type fallow emits.
     Text,
 }
 
@@ -345,8 +380,11 @@ pub enum GitLabReviewPositionType {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewEnvelopeMeta {
+    /// Review-envelope schema version tag.
     pub schema: ReviewEnvelopeSchema,
+    /// Provider the envelope was rendered for.
     pub provider: ReviewProvider,
+    /// GitHub Checks conclusion; absent for GitLab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_conclusion: Option<ReviewCheckConclusion>,
 }
@@ -402,25 +440,43 @@ pub enum ReviewCheckConclusion {
     schemars(title = "fallow ci reconcile-review --format json")
 )]
 pub struct ReviewReconcileOutput {
+    /// Reconcile schema version tag.
     pub schema: ReviewReconcileSchema,
+    /// Provider whose comments were reconciled.
     pub provider: ReviewProvider,
+    /// PR / MR reference that was reconciled, when one was resolved.
     pub target: Option<String>,
+    /// True when no provider mutations were performed.
     pub dry_run: bool,
+    /// Inline comments in the review envelope being reconciled.
     pub comments: u32,
+    /// Distinct fingerprints in the current run's findings.
     pub current_fingerprints: u32,
+    /// Distinct fingerprints found in existing comments.
     pub existing_fingerprints: u32,
+    /// Fingerprints present in the current run but not yet commented.
     pub new_fingerprints: u32,
+    /// Fingerprints commented earlier whose findings no longer exist.
     pub stale_fingerprints: u32,
+    /// The new fingerprints themselves.
     pub new: Vec<String>,
+    /// The stale fingerprints themselves.
     pub stale: Vec<String>,
+    /// Non-fatal provider API warning encountered during reconciliation.
     pub provider_warning: Option<String>,
+    /// Resolution replies posted to stale comment threads.
     pub resolution_comments_posted: u32,
+    /// Stale discussion threads resolved (GitLab).
     pub threads_resolved: u32,
+    /// Remediation guidance when the apply loop stopped before finishing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_hint: Option<String>,
+    /// Errors encountered while applying provider mutations.
     pub apply_errors: Vec<String>,
+    /// Fingerprints whose provider mutation failed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failed_fingerprints: Vec<String>,
+    /// Fingerprints left unprocessed after a failure aborted the apply loop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unapplied_fingerprints: Vec<String>,
 }

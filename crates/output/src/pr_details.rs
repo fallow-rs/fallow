@@ -1,27 +1,43 @@
 use serde::{Deserialize, Serialize};
 
+/// Schema discriminator serialized into [`PrDetailsArtifact::schema`].
 pub const PR_DETAILS_SCHEMA: &str = "fallow-pr-details/v1";
 
+/// Full-findings report artifact backing the PR summary comment's details
+/// link, grouped into per-area sections.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrDetailsArtifact {
+    /// Schema discriminator; always [`PR_DETAILS_SCHEMA`].
     pub schema: String,
+    /// Display title of the report.
     pub title: String,
+    /// Per-area finding sections.
     pub sections: Vec<PrDetailsSection>,
 }
 
+/// One findings section inside [`PrDetailsArtifact::sections`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrDetailsSection {
+    /// Stable section identifier, e.g. `findings`.
     pub id: String,
+    /// Display title of the section.
     pub title: String,
+    /// Finding rows in the section.
     pub rows: Vec<PrDetailsRow>,
 }
 
+/// One finding row inside [`PrDetailsSection::rows`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrDetailsRow {
+    /// `path:line` location text.
     pub location: String,
+    /// Rule identifier the finding belongs to.
     pub rule: String,
+    /// Human-readable finding description.
     pub description: String,
+    /// Suggested fix text, when one is known.
     pub fix: Option<String>,
+    /// Stable finding fingerprint for cross-run tracking, when available.
     pub fingerprint: Option<String>,
 }
 

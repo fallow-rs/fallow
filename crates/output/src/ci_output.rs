@@ -15,11 +15,14 @@ use serde_json::Value;
 /// Supported CI review providers for generated comments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CiProvider {
+    /// GitHub pull requests and check runs.
     Github,
+    /// GitLab merge requests and discussions.
     Gitlab,
 }
 
 impl CiProvider {
+    /// Display name of the provider ("GitHub" / "GitLab").
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -47,58 +50,87 @@ pub fn apply_path_prefix(prefix: &str, path: &str) -> String {
 /// Normalized CodeClimate issue used by CI comment renderers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CiIssue {
+    /// Fallow rule identifier, taken from the CodeClimate `check_name`.
     pub rule_id: String,
+    /// Human-readable finding description.
     pub description: String,
+    /// CodeClimate severity string, e.g. `minor` or `major`.
     pub severity: String,
+    /// File path relative to the analysed root.
     pub path: String,
+    /// 1-based line of the finding.
     pub line: u64,
+    /// Stable finding fingerprint used for comment identity.
     pub fingerprint: String,
 }
 
 /// Inputs for rendering a sticky PR/MR summary comment.
 pub struct PrCommentRenderInput<'a> {
+    /// Fallow command the comment reports on, e.g. `audit`.
     pub command: &'a str,
+    /// CI provider whose comment conventions apply.
     pub provider: CiProvider,
+    /// Findings to summarize, pre-sorted by severity and location.
     pub issues: &'a [CiIssue],
+    /// Identity token embedded so reruns update the same sticky comment.
     pub marker_id: String,
+    /// Maximum findings rendered in the comment body.
     pub max_comments: usize,
+    /// Maps a rule id to its display category label.
     pub category_for_rule: &'a dyn Fn(&str) -> &'static str,
 }
 
 /// GitLab diff refs for a review-envelope position.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewGitlabDiffRefs {
+    /// Merge-base SHA of the MR diff.
     pub base_sha: String,
+    /// First commit SHA of the MR diff.
     pub start_sha: String,
+    /// Head commit SHA of the MR diff.
     pub head_sha: String,
 }
 
 /// Truncation signals produced while rendering a review envelope.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ReviewEnvelopeTruncation {
+    /// A comment body hit [`MAX_COMMENT_BODY_BYTES`] and was truncated.
     pub body: bool,
+    /// More findings existed than `max_comments` allowed.
     pub comment_limit: bool,
 }
 
 /// Rendered review envelope plus side-channel signals for CLI telemetry.
 #[derive(Debug)]
 pub struct ReviewEnvelopeRenderResult {
+    /// Provider-ready review envelope.
     pub envelope: ReviewEnvelopeOutput,
+    /// Truncation signals observed while rendering.
     pub truncation: ReviewEnvelopeTruncation,
 }
 
 /// Inputs for rendering a GitHub/GitLab review envelope.
 pub struct ReviewEnvelopeRenderInput<'a> {
+    /// Fallow command the review reports on.
     pub command: &'a str,
+    /// CI provider whose review API shapes the envelope.
     pub provider: CiProvider,
+    /// Findings to turn into review comments.
     pub issues: &'a [CiIssue],
+    /// Diff index used to keep comments on lines the diff actually added.
     pub diff_index: Option<&'a DiffIndex>,
     /// Prepended to every emitted path after diff lookups have run.
     pub path_prefix: &'a str,
+    /// Maximum inline comments to emit.
     pub max_comments: usize,
+    /// Required for GitLab positioned discussions; ignored for GitHub.
     pub gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
+    /// Whether to append per-finding guidance blocks to comment bodies.
     pub include_guidance: bool,
+    /// Produces a provider-specific suggestion block for a finding, when one
+    /// applies.
     pub suggestion_block: &'a dyn Fn(CiProvider, &CiIssue) -> Option<String>,
+    /// Produces a guidance block for a finding, when one applies.
     pub guidance_block: &'a dyn Fn(&CiIssue) -> Option<String>,
 }
 
@@ -108,9 +140,13 @@ pub const MARKER_PREFIX_V2: &str = "<!-- fallow-fingerprint:v2: ";
 /// Closing of the v2 marker, after the fingerprint string.
 pub const MARKER_SUFFIX_V2: &str = " -->";
 
+/// Hard cap on a single review-comment body, matching GitHub's 65 536-char
+/// comment limit; bodies at or over it are truncated with a marker suffix.
 pub const MAX_COMMENT_BODY_BYTES: usize = 65_536;
 const TRUNCATION_SUFFIX: &str = "\n\n<!-- fallow-truncated -->\n> Body truncated by fallow.";
 
+/// Extract normalized CI issues from a raw CodeClimate JSON array, sorted by
+/// severity then location.
 #[must_use]
 pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
     let mut issues = value
@@ -123,6 +159,8 @@ pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
     issues
 }
 
+/// Normalize typed CodeClimate issues into CI issues, sorted by severity then
+/// location.
 #[must_use]
 pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssue> {
     let mut issues = issues
@@ -195,6 +233,8 @@ fn fingerprint_hash(parts: &[&str]) -> String {
     crate::codeclimate_fingerprint_hash(parts)
 }
 
+/// Render the sticky PR/MR summary comment body: identity marker, headline
+/// count, and per-category findings tables.
 #[must_use]
 #[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 pub fn render_pr_comment(input: &PrCommentRenderInput<'_>) -> String {
@@ -246,6 +286,8 @@ pub const PROJECT_LEVEL_RULE_IDS: &[&str] = &[
     "fallow/dev-dependency-in-production",
 ];
 
+/// Whether findings for `rule_id` describe the whole project (e.g. dependency
+/// rules) rather than a specific file location.
 #[must_use]
 pub fn is_project_level_rule(rule_id: &str) -> bool {
     PROJECT_LEVEL_RULE_IDS.contains(&rule_id)
@@ -282,6 +324,8 @@ fn group_by_category<'a>(
     ordered
 }
 
+/// Collapsible-section label for a findings category: appends "showing N"
+/// when the table is capped below the category's total.
 #[must_use]
 pub fn summary_label(category: &str, total: usize, max: usize) -> String {
     if total > max {
@@ -319,6 +363,8 @@ fn render_findings_table(out: &mut String, issues: &[&CiIssue], max: usize, summ
     out.push_str("\n</details>\n\n");
 }
 
+/// Human-readable report title for a fallow command name, e.g. `dupes` maps
+/// to "duplication report".
 #[must_use]
 pub fn command_title(command: &str) -> &'static str {
     match command {
@@ -496,9 +542,13 @@ fn review_summary_verdict(issues: &[CiIssue]) -> &'static str {
     }
 }
 
+/// Review issues grouped per `(path, line)` for one-comment-per-location
+/// rendering.
 #[derive(Debug, PartialEq, Eq)]
 pub struct GroupedReviewIssues<'a> {
+    /// One group per distinct location, in input order.
     pub groups: Vec<Vec<&'a CiIssue>>,
+    /// True when the group cap cut off remaining issues.
     pub truncated: bool,
 }
 
@@ -550,15 +600,24 @@ fn review_comment_truncated(comment: &ReviewComment) -> bool {
     }
 }
 
+/// Inputs for rendering one inline review comment from a location group.
 pub struct ReviewCommentRenderInput<'a, 'group> {
+    /// CI provider whose comment shape to produce.
     pub provider: CiProvider,
+    /// Issues sharing the same `(path, line)`; the first is the representative.
     pub group: &'a [&'group CiIssue],
+    /// Required for GitLab positioned discussions; ignored for GitHub.
     pub gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
+    /// Diff index used to resolve renamed paths for GitLab positions.
     pub diff_index: Option<&'a DiffIndex>,
     /// Prepended to every emitted path after diff lookups have run.
     pub path_prefix: &'a str,
+    /// Whether to append per-finding guidance blocks to the body.
     pub include_guidance: bool,
+    /// Produces a provider-specific suggestion block for a finding, when one
+    /// applies.
     pub suggestion_block: &'a dyn Fn(CiProvider, &CiIssue) -> Option<String>,
+    /// Produces a guidance block for a finding, when one applies.
     pub guidance_block: &'a dyn Fn(&CiIssue) -> Option<String>,
 }
 
@@ -686,6 +745,9 @@ fn build_review_comment(input: ReviewCommentInput<'_>) -> ReviewComment {
     }
 }
 
+/// Append `marker_line` to `content`, truncating `content` on a char boundary
+/// so the whole body stays within [`MAX_COMMENT_BODY_BYTES`]. The marker is
+/// never sacrificed. Returns the body and whether truncation happened.
 #[must_use]
 pub fn cap_body_with_marker(content: &str, marker_line: &str) -> (String, bool) {
     let intact_len = content.len() + marker_line.len();
@@ -708,6 +770,8 @@ pub fn cap_body_with_marker(content: &str, marker_line: &str) -> (String, bool) 
     (out, true)
 }
 
+/// Map a CodeClimate severity name to the review badge label: `error` for
+/// major and above, `warn` otherwise.
 #[must_use]
 pub const fn review_label_from_codeclimate(severity_name: &str) -> &'static str {
     match severity_name.as_bytes() {
@@ -716,6 +780,8 @@ pub const fn review_label_from_codeclimate(severity_name: &str) -> &'static str 
     }
 }
 
+/// GitHub check conclusion for a set of findings: `Failure` when any is major
+/// or above, `Success` when empty, `Neutral` otherwise.
 #[must_use]
 pub fn github_check_conclusion(issues: &[CiIssue]) -> ReviewCheckConclusion {
     if issues
@@ -775,11 +841,15 @@ fn review_markers(fingerprint: &str, review_id: Option<&ReviewId>) -> String {
     }
 }
 
+/// Stable fingerprint for a summary comment body.
 #[must_use]
 pub fn summary_fingerprint(body: &str) -> String {
     fingerprint_hash(&[body])
 }
 
+/// Order-independent fingerprint for a comment merged from several findings:
+/// constituents are sorted before hashing and the result carries a `merged:`
+/// prefix.
 #[must_use]
 pub fn composite_fingerprint(constituents: &[&str]) -> String {
     let mut sorted: Vec<&str> = constituents.to_vec();

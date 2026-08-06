@@ -4,59 +4,98 @@ use std::fmt::Write as _;
 
 use crate::{CiProvider, PrCommentEnvelope, PrCommentTruncation, command_title, escape_md};
 
+/// Per-area gate status shown in the PR summary table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrSummaryStatus {
+    /// Area is within its threshold.
     Pass,
+    /// Area has advisory findings but does not fail the gate.
     Warn,
+    /// Area breaches its threshold and fails the gate.
     Fail,
+    /// Informational area with no gate semantics.
     Info,
 }
 
+/// What slice of the codebase the summarized run analysed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrSummaryScope {
+    /// Whole-project analysis.
     Project,
+    /// Diff-scoped analysis against the PR base.
     Diff,
+    /// Analysis restricted to the files changed in the PR.
     ChangedFiles,
 }
 
+/// One analysis area row in the PR summary table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrSummaryArea {
+    /// Display name of the area, e.g. "Duplication".
     pub name: String,
+    /// Gate status rendered as the row's status icon.
     pub status: PrSummaryStatus,
+    /// Observed result text, e.g. "9.1% on changed code".
     pub result: String,
+    /// Configured threshold text, when the area gates.
     pub threshold: Option<String>,
+    /// Extra context appended to the row, when available.
     pub details: Option<String>,
 }
 
+/// One finding row in the PR summary's top-findings list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrSummaryFinding {
+    /// Severity label, e.g. "error" or "warning".
     pub severity: String,
+    /// Rule identifier the finding belongs to.
     pub rule_id: String,
+    /// `path:line` location text.
     pub location: String,
+    /// Human-readable finding description.
     pub description: String,
+    /// Suggested fix text, when one is known.
     pub fix: Option<String>,
 }
 
+/// Body layout variant for the sticky PR comment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrCommentLayout {
+    /// Area table plus top findings.
     Default,
+    /// Single-line-per-area condensed body.
     Compact,
+    /// Gate outcome only, no per-finding rows.
     GateOnly,
+    /// Same sections as `Default`; consumers may render extra detail around it.
     Details,
 }
 
+/// Inputs for [`render_pr_summary`].
 pub struct PrSummaryInput<'a> {
+    /// Fallow command the summary reports on, e.g. `audit`.
     pub command: &'a str,
+    /// CI provider whose comment conventions apply.
     pub provider: CiProvider,
+    /// Identity token embedded as an HTML marker so reruns update the same
+    /// sticky comment instead of posting a new one.
     pub marker_id: String,
+    /// Analysis scope reported in the header.
     pub scope: PrSummaryScope,
+    /// Area rows for the summary table.
     pub areas: &'a [PrSummaryArea],
+    /// Findings eligible for the top-findings list.
     pub findings: &'a [PrSummaryFinding],
+    /// Maximum findings to render; clamped to at least 1.
     pub max_findings: usize,
+    /// Link to the full report, when hosted output exists.
     pub details_url: Option<&'a str>,
+    /// Body layout variant.
     pub layout: PrCommentLayout,
 }
 
+/// Renders the sticky PR summary comment body, prefixed with its identity
+/// marker and carrying finding-count truncation metadata in the envelope.
 #[must_use]
 pub fn render_pr_summary(input: &PrSummaryInput<'_>) -> PrCommentEnvelope {
     let max_findings = input.max_findings.max(1);
