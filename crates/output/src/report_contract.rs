@@ -23,9 +23,13 @@ pub const SECURITY_DOCS: &str = "https://docs.fallow.tools/cli/security";
 /// Output-facing metadata for one security rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SecurityRuleMeta<'a> {
+    /// Stable rule identifier used as the `_meta.rules` key.
     pub id: &'a str,
+    /// Human-readable rule name.
     pub name: &'a str,
+    /// One-line rule description.
     pub description: &'a str,
+    /// Docs path relative to the docs site root, joined onto the base URL.
     pub docs_path: &'a str,
 }
 

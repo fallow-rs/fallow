@@ -628,7 +628,9 @@ pub struct StylingFinding {
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum StylingFindingSeverity {
+    /// Advisory finding; never fails a gate.
     Warn,
+    /// Gating finding under an error-severity rule.
     Error,
 }
 

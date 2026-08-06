@@ -244,6 +244,8 @@ pub struct EvidenceFunction {
     pub cognitive: u16,
 }
 
+/// One prioritized refactoring recommendation in the health report's
+/// `refactoring_targets` section.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTarget {

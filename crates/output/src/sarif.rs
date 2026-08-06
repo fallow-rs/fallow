@@ -14,54 +14,83 @@ pub const GHAS_SARIF_FINGERPRINT_KEY: &str = "primaryLocationLineHash/v1";
 /// Fields needed to build one SARIF result object.
 #[derive(Debug, Clone, Copy)]
 pub struct SarifResultInput<'a> {
+    /// SARIF rule id the result references, e.g. `fallow/unused-file`.
     pub rule_id: &'a str,
+    /// SARIF level: `error`, `warning`, or `note`.
     pub level: &'a str,
+    /// Human-readable result message text.
     pub message: &'a str,
+    /// Artifact URI relative to the analysed root.
     pub uri: &'a str,
+    /// 1-based `(start_line, start_column)` region, when known.
     pub region: Option<(u32, u32)>,
+    /// Source snippet that feeds the stable fingerprint and region context.
     pub snippet: Option<&'a str>,
 }
 
 /// Normalized finding input for output-owned SARIF result assembly.
 #[derive(Debug, Clone)]
 pub struct SarifFindingInput<'a> {
+    /// Fallow issue code the finding originated from, e.g. `unused-file`.
     pub issue_code: &'a str,
+    /// SARIF rule id the result references.
     pub rule_id: &'a str,
+    /// SARIF level: `error`, `warning`, or `note`.
     pub level: &'a str,
+    /// Human-readable result message text.
     pub message: &'a str,
+    /// Artifact URI relative to the analysed root.
     pub uri: &'a str,
+    /// 1-based `(start_line, start_column)` region, when known.
     pub region: Option<(u32, u32)>,
+    /// Source snippet that feeds the stable fingerprint and region context.
     pub snippet: Option<&'a str>,
+    /// Extra `properties` bag copied onto the SARIF result verbatim.
     pub properties: Option<Value>,
 }
 
 /// Intermediate fields extracted from one issue for SARIF result construction.
 #[derive(Debug, Clone)]
 pub struct SarifFindingFields {
+    /// SARIF rule id the result references.
     pub rule_id: &'static str,
+    /// SARIF level: `error`, `warning`, or `note`.
     pub level: &'static str,
+    /// Human-readable result message text.
     pub message: String,
+    /// Artifact URI relative to the analysed root.
     pub uri: String,
+    /// 1-based `(start_line, start_column)` region, when known.
     pub region: Option<(u32, u32)>,
+    /// Absolute source path used to load the fingerprint snippet.
     pub source_path: Option<PathBuf>,
+    /// Extra `properties` bag copied onto the SARIF result verbatim.
     pub properties: Option<Value>,
 }
 
 /// Fields needed to build one SARIF rule object.
 #[derive(Debug, Clone, Copy)]
 pub struct SarifRuleInput<'a> {
+    /// SARIF rule id, e.g. `fallow/unused-file`.
     pub id: &'a str,
+    /// One-line rule description shown in SARIF viewers.
     pub short_description: &'a str,
+    /// Default SARIF level for the rule's `defaultConfiguration`.
     pub level: &'a str,
+    /// Longer rule description, when the rule has one.
     pub full_description: Option<&'a str>,
+    /// Public documentation URL for the rule.
     pub help_uri: Option<&'a str>,
 }
 
 /// Fields needed to build a SARIF document envelope.
 #[derive(Debug, Clone, Copy)]
 pub struct SarifDocumentInput<'a> {
+    /// Pre-built SARIF result objects for the single run.
     pub results: &'a [Value],
+    /// Pre-built tool-driver rule objects for the single run.
     pub rules: &'a [Value],
+    /// Fallow version reported as the SARIF tool driver version.
     pub tool_version: &'a str,
 }
 

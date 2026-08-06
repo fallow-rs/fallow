@@ -41,6 +41,10 @@ struct DiffParseState {
 }
 
 impl DiffIndex {
+    /// Parse a unified diff into an index of changed files and added lines.
+    ///
+    /// Indexes at most [`MAX_ADDED_LINES`] added lines; totals used by
+    /// [`DiffIndex::net_lines`] keep counting past the cap.
     #[must_use]
     pub fn from_unified_diff(diff: &str) -> Self {
         let mut index = Self::default();
@@ -128,11 +132,14 @@ impl DiffIndex {
         }
     }
 
+    /// Pre-rename path for `head_path`, in the diff's key namespace, when the
+    /// diff renamed it.
     #[must_use]
     pub fn old_path_for(&self, head_path: &str) -> Option<&str> {
         self.rename_pairs.get(head_path).map(String::as_str)
     }
 
+    /// Number of indexed added lines, capped at [`MAX_ADDED_LINES`].
     #[must_use]
     pub fn added_line_count(&self) -> usize {
         self.added_line_count
@@ -170,6 +177,8 @@ impl DiffIndex {
         self.touched_files.contains(path)
     }
 
+    /// Whether any added line in `path` falls inside the inclusive 1-based
+    /// `start..=end` range.
     #[must_use]
     pub fn range_overlaps_added(&self, path: &str, start: u64, end: u64) -> bool {
         if end < start {
@@ -182,6 +191,7 @@ impl DiffIndex {
         added.iter().any(|&line| line >= lo && line <= end)
     }
 
+    /// Whether the 1-based `line` in `path` was added by this diff.
     #[must_use]
     pub fn line_is_added(&self, path: &str, line: u64) -> bool {
         self.added_lines
@@ -189,6 +199,7 @@ impl DiffIndex {
             .is_some_and(|lines| lines.contains(&line))
     }
 
+    /// Whether `line` sits within `radius` lines of any added line in `path`.
     #[must_use]
     pub fn line_within_added_context(&self, path: &str, line: u64, radius: u64) -> bool {
         self.added_lines
@@ -196,6 +207,7 @@ impl DiffIndex {
             .is_some_and(|lines| lines.iter().any(|added| line.abs_diff(*added) <= radius))
     }
 
+    /// Set of 1-based added line numbers for `path`, when the diff added any.
     #[must_use]
     pub fn added_lines_in(&self, path: &str) -> Option<&FxHashSet<u64>> {
         self.added_lines.get(path)
@@ -226,6 +238,8 @@ impl DiffIndex {
         self
     }
 
+    /// Relative path of the analysis root below [`DiffIndex::base`]; empty
+    /// when they coincide.
     #[must_use]
     pub fn root_offset(&self) -> &str {
         &self.root_offset
@@ -259,11 +273,15 @@ impl DiffIndex {
         self.root_relative_from_key(old)
     }
 
+    /// Directory this diff's keys are relative to, when declared via
+    /// [`DiffIndex::with_base`].
     #[must_use]
     pub fn base(&self) -> Option<&Path> {
         self.base.as_deref()
     }
 
+    /// Analyzable head-tree paths this diff touches, in the diff's key
+    /// namespace.
     pub fn touched_files(&self) -> impl Iterator<Item = &str> {
         self.touched_files.iter().map(String::as_str)
     }
@@ -279,6 +297,8 @@ impl DiffIndex {
     }
 }
 
+/// Relativize `path` against `root` with forward slashes, passing an already
+/// relative path through unchanged. `None` for absolute paths outside `root`.
 #[must_use]
 pub fn relative_to_diff_path(path: &Path, root: &Path) -> Option<String> {
     if let Ok(stripped) = path.strip_prefix(root) {
@@ -298,6 +318,7 @@ pub fn strip_path_component_prefix<'a>(path: &'a str, prefix: &str) -> Option<&'
     path.strip_prefix(prefix)?.strip_prefix('/')
 }
 
+/// Parse the new-file start line out of a `@@ -a,b +c,d @@` hunk header.
 pub fn parse_new_hunk_start(header: &str) -> Option<u64> {
     let plus = header.find('+')?;
     let rest = &header[plus + 1..];

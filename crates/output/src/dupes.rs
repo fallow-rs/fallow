@@ -23,15 +23,22 @@ use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_n
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow dupes --format json"))]
 pub struct DupesOutput<Report, Group> {
+    /// Duplication output schema version.
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Duplication report body, flattened into the envelope root.
     #[serde(flatten)]
     pub report: Report,
+    /// Grouping mode when `--group-by` was passed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_by: Option<GroupByMode>,
+    /// Total finding count across all groups; present only in grouped output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_issues: Option<usize>,
+    /// Grouped findings; present only in grouped output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Group>>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
@@ -55,15 +62,25 @@ pub struct DupesOutput<Report, Group> {
 /// details to callers.
 #[derive(Debug, Clone)]
 pub struct DupesOutputInput<Report, Group> {
+    /// Duplication output schema version.
     pub schema_version: u32,
+    /// Fallow CLI version to report.
     pub version: String,
+    /// Wall-clock analysis duration; serialized as whole milliseconds.
     pub elapsed: Duration,
+    /// Duplication report body to flatten into the envelope root.
     pub report: Report,
+    /// Grouping mode when `--group-by` was passed.
     pub grouped_by: Option<GroupByMode>,
+    /// Total finding count across all groups, for grouped output.
     pub total_issues: Option<usize>,
+    /// Grouped findings, for grouped output.
     pub groups: Option<Vec<Group>>,
+    /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Read-only follow-up commands computed from this run's findings.
     pub next_steps: Vec<NextStep>,
 }
 

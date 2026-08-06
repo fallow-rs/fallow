@@ -1045,6 +1045,12 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
     Some(severity)
 }
 
+/// Builds the complete SARIF `run` value for a dead-code analysis.
+///
+/// Emits one SARIF result per finding across every dead-code issue kind,
+/// mapping each configured rule severity to a SARIF level. `rule_builder`
+/// constructs the tool-driver rule object for a `(rule id, name, help URI)`
+/// triple so the caller controls rule metadata.
 #[must_use]
 pub fn build_dead_code_sarif(
     results: &AnalysisResults,

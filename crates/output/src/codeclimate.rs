@@ -21,13 +21,20 @@ pub struct CodeClimateOutput(pub Vec<CodeClimateIssue>);
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CodeClimateIssue {
+    /// CodeClimate `type` discriminator; always `issue`.
     #[serde(rename = "type")]
     pub kind: CodeClimateIssueKind,
+    /// Fallow rule identifier, e.g. `fallow/unused-file`.
     pub check_name: String,
+    /// Human-readable finding description.
     pub description: String,
+    /// CodeClimate category labels, e.g. `Clarity` or `Duplication`.
     pub categories: Vec<String>,
+    /// CodeClimate severity mapped from the configured rule severity.
     pub severity: CodeClimateSeverity,
+    /// Stable finding fingerprint GitLab uses to track issues across pushes.
     pub fingerprint: String,
+    /// File and begin-line location of the finding.
     pub location: CodeClimateLocation,
     /// Optional owner attribution used by grouped dead-code output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -101,12 +108,19 @@ pub struct CodeClimateLines {
 /// shaped into the stable CodeClimate / GitLab Code Quality wire contract.
 #[derive(Debug, Clone, Copy)]
 pub struct CodeClimateIssueInput<'a> {
+    /// Fallow rule identifier for the issue's `check_name`.
     pub check_name: &'a str,
+    /// Human-readable finding description.
     pub description: &'a str,
+    /// CodeClimate severity to report.
     pub severity: CodeClimateSeverity,
+    /// Single CodeClimate category label; wrapped into `categories`.
     pub category: &'a str,
+    /// File path relative to the analysed root.
     pub path: &'a str,
+    /// 1-based begin line; defaults to line 1 when absent.
     pub begin_line: Option<u32>,
+    /// Stable finding fingerprint.
     pub fingerprint: &'a str,
 }
 

@@ -110,11 +110,13 @@ pub fn check_meta() -> Meta {
     }
 }
 
+/// Public docs URL for a dead-code explanation `anchor` on the dead-code page.
 #[must_use]
 pub fn dead_code_docs_url(anchor: &str) -> String {
     format!("{DOCS_BASE}/explanations/dead-code#{anchor}")
 }
 
+/// Public docs URL for a rule's `docs_path` relative to the docs site root.
 #[must_use]
 pub fn rule_docs_url(docs_path: &str) -> String {
     format!("{DOCS_BASE}/{docs_path}")

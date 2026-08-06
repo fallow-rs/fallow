@@ -6,10 +6,15 @@ use serde_json::Value;
 /// Inputs for building `fallow fix --format json`.
 #[derive(Clone, Copy)]
 pub struct FixJsonOutputInput<'a> {
+    /// True when `--dry-run` was passed and no files were modified.
     pub dry_run: bool,
+    /// Per-fix entries as prepared by the fix planner.
     pub fixes: &'a [Value],
+    /// Fixes skipped because file content changed since analysis.
     pub skipped_content_changed: usize,
+    /// Fixes skipped because the file mixes line endings.
     pub skipped_mixed_line_endings: usize,
+    /// Export removals skipped because confidence was below the threshold.
     pub skipped_low_confidence_exports: usize,
 }
 
@@ -18,12 +23,20 @@ pub struct FixJsonOutputInput<'a> {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow fix --format json"))]
 pub struct FixJsonOutput<'a> {
+    /// True when `--dry-run` was passed and no files were modified.
     pub dry_run: bool,
+    /// Per-fix entries, applied and skipped alike.
     pub fixes: &'a [Value],
+    /// Number of entries in `fixes` whose `applied` flag is true.
     pub total_fixed: usize,
+    /// User-facing skipped entries; excludes plan-level skip diagnostics,
+    /// which are reported through the dedicated `skipped_*` counters.
     pub skipped: usize,
+    /// Fixes skipped because file content changed since analysis.
     pub skipped_content_changed: usize,
+    /// Fixes skipped because the file mixes line endings.
     pub skipped_mixed_line_endings: usize,
+    /// Export removals skipped because confidence was below the threshold.
     pub skipped_low_confidence_exports: usize,
 }
 

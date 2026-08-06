@@ -200,6 +200,7 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     pub version: String,
     /// Command discriminator singleton: always `"audit-brief"`.
     pub command: String,
+    /// Stage 0: change-size triage (file/hunk/line counts, risk class, effort).
     pub triage: DiffTriage,
     /// Stage 1: graph orientation facts.
     pub graph_facts: GraphFacts,
@@ -358,8 +359,11 @@ pub struct ReviewBriefWireOutput<
 /// builders are fully command-neutral.
 #[derive(Debug, Clone, Default)]
 pub struct ReviewBriefSubtractSections<DeadCode = Value, Duplication = Value, Complexity = Value> {
+    /// Dead-code subreport, when the CLI produced one for this changeset.
     pub dead_code: Option<DeadCode>,
+    /// Duplication subreport, when the CLI produced one for this changeset.
     pub duplication: Option<Duplication>,
+    /// Complexity subreport, when the CLI produced one for this changeset.
     pub complexity: Option<Complexity>,
 }
 

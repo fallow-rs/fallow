@@ -159,6 +159,8 @@ pub struct CoverageGaps {
 }
 
 impl CoverageGaps {
+    /// True when no untested files or exports were found; callers omit the
+    /// section from output in that case.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.files.is_empty() && self.exports.is_empty()

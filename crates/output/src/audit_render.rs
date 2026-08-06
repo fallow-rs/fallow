@@ -1,26 +1,39 @@
 use crate::CssAnalyticsSummary;
 
+/// Effective severity of an audit rule as shown in rendered output.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuditDisplaySeverity {
+    /// Rule is disabled and never gates or advises.
     Off,
+    /// Rule reports advisory findings without failing the audit.
     Warn,
+    /// Rule findings can fail the audit gate.
     Error,
 }
 
+/// Which findings an audit rule gates on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuditDisplayGate {
+    /// Only findings introduced since the diff base gate; inherited debt stays advisory.
     NewOnly,
+    /// Every finding gates, including pre-existing debt.
     All,
 }
 
+/// Inputs for [`styling_audit_context_label`], describing one styling rule's gate state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AuditStylingContextLabelInput<'a> {
+    /// Configured severity of the styling rule.
     pub severity: AuditDisplaySeverity,
+    /// Config key of the rule, e.g. `rules.css-selector-complexity`.
     pub rule: &'a str,
+    /// Human-readable description of the diff-base state, e.g. "inherited styling debt from HEAD".
     pub base_state: Option<&'a str>,
+    /// Whether the rule gates on new findings only or on all findings.
     pub gate: AuditDisplayGate,
 }
 
+/// Sums every descriptive CSS finding count in `summary`, saturating at `u32::MAX`.
 pub fn styling_candidate_count(summary: &CssAnalyticsSummary) -> u32 {
     [
         summary.tailwind_arbitrary_values,
@@ -39,6 +52,11 @@ pub fn styling_candidate_count(summary: &CssAnalyticsSummary) -> u32 {
     .fold(0u32, u32::saturating_add)
 }
 
+/// Renders the parenthesized gate-context label for a styling audit finding.
+///
+/// The prefix explains why the finding does or does not gate: "gated" for
+/// error-severity findings, "not gated" for inherited debt under a new-only
+/// gate, and "advisory" otherwise.
 pub fn styling_audit_context_label(input: AuditStylingContextLabelInput<'_>) -> String {
     let severity_label = match input.severity {
         AuditDisplaySeverity::Off => "off",
