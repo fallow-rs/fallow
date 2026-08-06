@@ -153,21 +153,72 @@
     },
     "EffectKind": {
       "description": "Internal side-effect taxonomy derived from security catalogue rows.",
-      "type": "string",
-      "enum": [
-        "pure",
-        "read",
-        "write",
-        "network",
-        "storage",
-        "process",
-        "shell",
-        "crypto",
-        "randomness",
-        "dom",
-        "database",
-        "framework-callback",
-        "unknown"
+      "oneOf": [
+        {
+          "description": "No observable side effect.",
+          "type": "string",
+          "const": "pure"
+        },
+        {
+          "description": "Structured-data read/query evaluation (XML external entities, XPath).",
+          "type": "string",
+          "const": "read"
+        },
+        {
+          "description": "In-memory state mutation (mass assignment, prototype pollution).",
+          "type": "string",
+          "const": "write"
+        },
+        {
+          "description": "Network I/O (HTTP clients, request-forgery sinks).",
+          "type": "string",
+          "const": "network"
+        },
+        {
+          "description": "Filesystem access (path traversal, file permission changes).",
+          "type": "string",
+          "const": "storage"
+        },
+        {
+          "description": "In-process code evaluation (`eval`, `Function`, string timers).",
+          "type": "string",
+          "const": "process"
+        },
+        {
+          "description": "OS shell command execution.",
+          "type": "string",
+          "const": "shell"
+        },
+        {
+          "description": "Cryptographic primitives (weak algorithm or key usage).",
+          "type": "string",
+          "const": "crypto"
+        },
+        {
+          "description": "Random-number generation in security-sensitive contexts.",
+          "type": "string",
+          "const": "randomness"
+        },
+        {
+          "description": "DOM injection (`innerHTML`-style XSS sinks).",
+          "type": "string",
+          "const": "dom"
+        },
+        {
+          "description": "Database query execution (SQL/NoSQL injection sinks).",
+          "type": "string",
+          "const": "database"
+        },
+        {
+          "description": "Callback invoked by a framework rather than a direct effect.",
+          "type": "string",
+          "const": "framework-callback"
+        },
+        {
+          "description": "Effect the catalogue cannot classify.",
+          "type": "string",
+          "const": "unknown"
+        }
       ]
     },
     "Severity": {

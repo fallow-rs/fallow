@@ -102,6 +102,7 @@
           "type": "object",
           "properties": {
             "package": {
+              "description": "Exact package name looked up in the project's declared dependencies.",
               "type": "string"
             },
             "type": {
@@ -119,6 +120,7 @@
           "type": "object",
           "properties": {
             "pattern": {
+              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).",
               "type": "string"
             },
             "type": {
@@ -136,6 +138,7 @@
           "type": "object",
           "properties": {
             "conditions": {
+              "description": "Sub-conditions combined with logical AND.",
               "type": "array",
               "items": {
                 "$ref": "#/$defs/PluginDetection"
@@ -156,6 +159,7 @@
           "type": "object",
           "properties": {
             "conditions": {
+              "description": "Sub-conditions combined with logical OR.",
               "type": "array",
               "items": {
                 "$ref": "#/$defs/PluginDetection"

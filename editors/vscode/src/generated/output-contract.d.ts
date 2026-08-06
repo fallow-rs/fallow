@@ -139,6 +139,9 @@ export type AuditVerdict = ("pass" | "warn" | "fail")
  * integer.
  */
 export type ElapsedMs = number
+/**
+ * Value of `audit.gate`: which findings drive the `fallow audit` verdict.
+ */
 export type AuditGate = ("new-only" | "all")
 /**
  * Analysis mode stored with baselines, snapshots, audit sides, and impact data.
@@ -532,7 +535,13 @@ export type UntestedExportActionType = ("add-test-import" | "suppress-file")
  * analysis period.
  */
 export type ChurnTrend = ("accelerating" | "stable" | "cooling")
+/**
+ * Encoding applied to a [`ContributorEntry::identifier`].
+ */
 export type ContributorIdentifierFormat = ("raw" | "handle" | "anonymized" | "hash")
+/**
+ * Ownership lifecycle state of a file.
+ */
 export type OwnershipState = ("active" | "unowned" | "declared_inactive" | "drifting")
 /**
  * Discriminant for [`HotspotAction::kind`].
@@ -706,16 +715,37 @@ export type StylingFindingConfidence = ("high" | "low")
  * Agent handling hint for a [`StylingFinding`].
  */
 export type StylingAgentDisposition = ("fix-confidently" | "verify-first")
+/**
+ * `target` block of [`InspectOutput`], tagged by `type`.
+ */
 export type InspectTargetDescriptor = ({
+/**
+ * File path relative to the analysed root.
+ */
 file: string
 type: "file"
 } | {
+/**
+ * File path relative to the analysed root.
+ */
 file: string
+/**
+ * Name of the inspected export.
+ */
 export_name: string
 type: "symbol"
 })
+/**
+ * `identity` block of [`InspectOutput`]; shape follows the target type.
+ */
 export type InspectIdentity = (InspectFileIdentity | InspectSymbolIdentity)
+/**
+ * Status of an [`InspectEvidenceSection`].
+ */
 export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
+/**
+ * Granularity an [`InspectEvidenceSection`] payload covers.
+ */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
  * Best-effort classification of why a callee did not resolve to an edge.
@@ -762,10 +792,26 @@ export type ReviewId = string
  * Schema-version discriminator for the review reconcile envelope.
  */
 export type ReviewReconcileSchema = "fallow-review-reconcile/v1"
+/**
+ * Schema-version discriminator for [`CoverageSetupOutput`].
+ */
 export type CoverageSetupSchemaVersion = "1"
+/**
+ * Framework detected during coverage setup; drives which instrumentation
+ * guidance is emitted.
+ */
 export type CoverageSetupFramework = ("nextjs" | "nestjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
+/**
+ * Package manager detected from the project's lockfile.
+ */
 export type CoverageSetupPackageManager = ("npm" | "pnpm" | "yarn" | "bun")
+/**
+ * Runtime environment coverage capture must instrument.
+ */
 export type CoverageSetupRuntimeTarget = ("node" | "browser")
+/**
+ * Schema-version discriminator for [`CoverageAnalyzeOutput`].
+ */
 export type CoverageAnalyzeSchemaVersion = "1"
 /**
  * Discovery outcome for a [`LogicalGroup`].
@@ -984,7 +1030,13 @@ schema_version: SchemaVersion
 version: ToolVersion
 command: AuditCommand
 verdict: AuditVerdict
+/**
+ * Number of changed files in the audit scope.
+ */
 changed_files_count: number
+/**
+ * Git ref the change was diffed against.
+ */
 base_ref: string
 /**
  * Human-readable provenance of `base_ref`, e.g. `merge-base with
@@ -994,14 +1046,34 @@ base_ref: string
  * self-describing).
  */
 base_description?: (string | null)
+/**
+ * Commit SHA of the audited head tree, when resolvable.
+ */
 head_sha?: (string | null)
 elapsed_ms: ElapsedMs
+/**
+ * True when base-snapshot analysis was skipped, so new-vs-inherited
+ * attribution could not run.
+ */
 base_snapshot_skipped?: (boolean | null)
 summary: AuditSummary
 attribution: AuditAttribution
+/**
+ * `_meta` block with metric / rule definitions, when `--explain` was
+ * passed.
+ */
 _meta?: (Meta | null)
+/**
+ * Dead-code findings scoped to the audit changeset.
+ */
 dead_code?: (CheckOutput | null)
+/**
+ * Duplication findings scoped to the audit changeset.
+ */
 duplication?: (DupesReportPayload | null)
+/**
+ * Complexity findings scoped to the audit changeset.
+ */
 complexity?: (HealthReport | null)
 /**
  * Read-only follow-up commands computed from this run's findings. See
@@ -1013,10 +1085,26 @@ next_steps?: NextStep[]
  * Per-category summary counts for the audit result.
  */
 export interface AuditSummary {
+/**
+ * Total dead-code issues reported for the changed files.
+ */
 dead_code_issues: number
+/**
+ * Whether any reported dead-code issue has error severity.
+ */
 dead_code_has_errors: boolean
+/**
+ * Total complexity findings reported for the changed files.
+ */
 complexity_findings: number
+/**
+ * Highest cyclomatic complexity among the findings; `None` when there
+ * are no complexity findings.
+ */
 max_cyclomatic?: (number | null)
+/**
+ * Clone groups touching the changed files.
+ */
 duplication_clone_groups: number
 }
 /**
@@ -1024,11 +1112,29 @@ duplication_clone_groups: number
  */
 export interface AuditAttribution {
 gate: AuditGate
+/**
+ * Dead-code findings absent from the base snapshot.
+ */
 dead_code_introduced: number
+/**
+ * Dead-code findings already present in the base snapshot.
+ */
 dead_code_inherited: number
+/**
+ * Complexity findings absent from the base snapshot.
+ */
 complexity_introduced: number
+/**
+ * Complexity findings already present in the base snapshot.
+ */
 complexity_inherited: number
+/**
+ * Clone groups absent from the base snapshot.
+ */
 duplication_introduced: number
+/**
+ * Clone groups already present in the base snapshot.
+ */
 duplication_inherited: number
 styling_introduced: number
 styling_inherited: number
@@ -1958,7 +2064,13 @@ export interface CheckOutput {
 schema_version: SchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
+/**
+ * Total findings across all issue arrays; excludes `next_steps`.
+ */
 total_issues: number
+/**
+ * Entry-point totals per source, when the analysis recorded them.
+ */
 entry_points?: (EntryPoints | null)
 summary: CheckSummary
 /**
@@ -2288,10 +2400,26 @@ thin_wrappers?: ThinWrapperFinding[]
  * enables it.
  */
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
+/**
+ * Count deltas against the matched baseline, in baseline runs.
+ */
 baseline_deltas?: (BaselineDeltas | null)
+/**
+ * Which baseline snapshot was matched, in baseline runs.
+ */
 baseline?: (BaselineMatch | null)
+/**
+ * Regression verdict against the baseline, in `--fail-on-regression` runs.
+ */
 regression?: (RegressionResult | null)
+/**
+ * `_meta` block with docs and rule definitions, when `--explain` was
+ * passed.
+ */
 _meta?: (Meta | null)
+/**
+ * Workspace-discovery diagnostics surfaced during config load.
+ */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
  * Read-only follow-up commands computed from this run's findings, emitted
@@ -5083,13 +5211,37 @@ styling_findings?: StylingFinding[]
  * Wire envelope for a single complexity finding.
  */
 export interface HealthFinding {
+/**
+ * File path relative to the project root.
+ */
 path: string
+/**
+ * Function name, or a synthesized name for anonymous functions.
+ */
 name: string
+/**
+ * 1-based line the function starts on.
+ */
 line: number
+/**
+ * 1-based column the function starts on.
+ */
 col: number
+/**
+ * Cyclomatic complexity of the function.
+ */
 cyclomatic: number
+/**
+ * Cognitive complexity of the function.
+ */
 cognitive: number
+/**
+ * Lines of code in the function body.
+ */
 line_count: number
+/**
+ * Number of declared parameters.
+ */
 param_count: number
 /**
  * Number of React hook calls in this function's body (`useState` /
@@ -5117,11 +5269,30 @@ react_prop_count?: number
 react_hook_profile?: (ReactHookProfile | null)
 exceeded: ExceededThreshold
 severity: FindingSeverity
+/**
+ * CRAP score (change risk anti-pattern), when coverage data exists.
+ */
 crap?: (number | null)
+/**
+ * Test coverage percentage (0-100) backing the CRAP score.
+ */
 coverage_pct?: (number | null)
+/**
+ * Coverage tier bucket derived from `coverage_pct`.
+ */
 coverage_tier?: (CoverageTier | null)
+/**
+ * Provenance of the coverage signal.
+ */
 coverage_source?: (CoverageSource | null)
+/**
+ * Component file the inherited coverage estimate came from, for
+ * component-inherited coverage.
+ */
 inherited_from?: (string | null)
+/**
+ * Aggregate of the enclosing component's findings, when rolled up.
+ */
 component_rollup?: (ComponentRollup | null)
 /**
  * Per-decision-point complexity breakdown explaining WHICH constructs drove
@@ -5192,13 +5363,38 @@ custom: number
  */
 max_effect_dep_arity?: (number | null)
 }
+/**
+ * Component-level aggregate attached to a template complexity finding,
+ * pairing the template's scores with the worst class-side function.
+ */
 export interface ComponentRollup {
+/**
+ * Component name.
+ */
 component: string
+/**
+ * Name of the worst-scoring function in the component class.
+ */
 class_worst_function: string
+/**
+ * Cyclomatic complexity of that worst class function.
+ */
 class_cyclomatic: number
+/**
+ * Cognitive complexity of that worst class function.
+ */
 class_cognitive: number
+/**
+ * Template file path relative to the project root.
+ */
 template_path: string
+/**
+ * Cyclomatic complexity of the template.
+ */
 template_cyclomatic: number
+/**
+ * Cognitive complexity of the template.
+ */
 template_cognitive: number
 }
 /**
@@ -5235,8 +5431,17 @@ nesting: number
  * Resolved thresholds used to evaluate a health finding.
  */
 export interface HealthEffectiveThresholds {
+/**
+ * Effective cyclomatic-complexity ceiling for the matched file.
+ */
 max_cyclomatic: number
+/**
+ * Effective cognitive-complexity ceiling for the matched file.
+ */
 max_cognitive: number
+/**
+ * Effective CRAP-score ceiling for the matched file.
+ */
 max_crap: number
 /**
  * Effective unit-size ceiling (maximum function length in lines) for the
@@ -5311,11 +5516,29 @@ target_path?: (string | null)
  * Summary statistics for the health report.
  */
 export interface HealthSummary {
+/**
+ * Files included in the health analysis.
+ */
 files_analyzed: number
+/**
+ * Functions scored across the analyzed files.
+ */
 functions_analyzed: number
+/**
+ * Functions exceeding at least one complexity or CRAP threshold.
+ */
 functions_above_threshold: number
+/**
+ * Global cyclomatic-complexity ceiling for this run.
+ */
 max_cyclomatic_threshold: number
+/**
+ * Global cognitive-complexity ceiling for this run.
+ */
 max_cognitive_threshold: number
+/**
+ * Global CRAP-score ceiling for this run.
+ */
 max_crap_threshold: number
 /**
  * Effective global unit-size ceiling (`health.maxUnitSize`, maximum
@@ -5325,14 +5548,42 @@ max_crap_threshold: number
  * here; this is the global default.
  */
 max_unit_size_threshold: number
+/**
+ * Files with a computed maintainability score; absent when file scoring
+ * did not run.
+ */
 files_scored?: (number | null)
+/**
+ * Mean maintainability index over scored files (0-100).
+ */
 average_maintainability?: (number | null)
+/**
+ * Coverage model behind the CRAP scores, when coverage was used.
+ */
 coverage_model?: (CoverageModel | null)
+/**
+ * Whether CRAP findings mix coverage sources.
+ */
 coverage_source_consistency?: (CoverageSourceConsistency | null)
+/**
+ * Functions matched against the Istanbul coverage file, in Istanbul mode.
+ */
 istanbul_matched?: (number | null)
+/**
+ * Functions in the Istanbul coverage file, in Istanbul mode.
+ */
 istanbul_total?: (number | null)
+/**
+ * Findings with critical severity.
+ */
 severity_critical_count: number
+/**
+ * Findings with high severity.
+ */
 severity_high_count: number
+/**
+ * Findings with moderate severity.
+ */
 severity_moderate_count: number
 /**
  * Baseline staleness data, present only when a baseline was loaded.
@@ -5388,29 +5639,65 @@ stale: boolean
  */
 export interface ThresholdOverrideState {
 status: ThresholdOverrideStatus
+/**
+ * Index of the entry in the configured `thresholdOverrides` array.
+ */
 override_index: number
+/**
+ * Matched file path, when the override matched one.
+ */
 path?: (string | null)
+/**
+ * Matched function name, for function-scoped overrides.
+ */
 function?: (string | null)
 configured_thresholds: HealthConfiguredThresholds
 effective_thresholds: HealthEffectiveThresholds
+/**
+ * Current complexity metrics of the matched code, when matched.
+ */
 metrics?: (ThresholdOverrideMetrics | null)
+/**
+ * Human-readable explanation of the status.
+ */
 reason?: (string | null)
 }
 /**
  * Threshold values configured by a single override entry.
  */
 export interface HealthConfiguredThresholds {
+/**
+ * Cyclomatic ceiling set by the override, when it sets one.
+ */
 max_cyclomatic?: (number | null)
+/**
+ * Cognitive ceiling set by the override, when it sets one.
+ */
 max_cognitive?: (number | null)
+/**
+ * CRAP ceiling set by the override, when it sets one.
+ */
 max_crap?: (number | null)
+/**
+ * Unit-size ceiling set by the override, when it sets one.
+ */
 max_unit_size?: (number | null)
 }
 /**
  * Current complexity metrics for a matched threshold override entry.
  */
 export interface ThresholdOverrideMetrics {
+/**
+ * Current cyclomatic complexity of the matched function.
+ */
 cyclomatic: number
+/**
+ * Current cognitive complexity of the matched function.
+ */
 cognitive: number
+/**
+ * Current CRAP score, when coverage data exists.
+ */
 crap?: (number | null)
 }
 /**
@@ -5570,11 +5857,30 @@ total_files: number
  * Total number of exports across all files.
  */
 total_exports: number
+/**
+ * Number of unreachable files.
+ */
 dead_files: number
+/**
+ * Number of unused exports.
+ */
 dead_exports: number
+/**
+ * Lines inside detected clones; absent when duplication did not run.
+ */
 duplicated_lines?: (number | null)
+/**
+ * Lines scanned by duplication; absent when duplication did not run.
+ */
 total_lines?: (number | null)
+/**
+ * Files with a computed maintainability score; absent when file scoring
+ * did not run.
+ */
 files_scored?: (number | null)
+/**
+ * Total declared dependencies across manifest sections.
+ */
 total_deps: number
 }
 /**
@@ -5638,9 +5944,21 @@ render_sites: number
  */
 distinct_parents: number
 }
+/**
+ * Overall project health score: 100 minus capped per-category penalties.
+ */
 export interface HealthScore {
+/**
+ * Score formula version; see [`HEALTH_SCORE_FORMULA_VERSION`].
+ */
 formula_version: number
+/**
+ * Health score in `[0, 100]`; higher is healthier.
+ */
 score: number
+/**
+ * Letter grade from [`letter_grade`] (A>=85, B>=70, C>=55, D>=40, F<40).
+ */
 grade: string
 penalties: HealthScorePenalties
 }
@@ -5648,13 +5966,44 @@ penalties: HealthScorePenalties
  * Per-component penalty breakdown for the health score.
  */
 export interface HealthScorePenalties {
+/**
+ * Points subtracted for unreachable files; absent when dead-code data
+ * was not available.
+ */
 dead_files?: (number | null)
+/**
+ * Points subtracted for unused exports; absent when dead-code data was
+ * not available.
+ */
 dead_exports?: (number | null)
+/**
+ * Points subtracted for overall complexity load.
+ */
 complexity: number
+/**
+ * Points subtracted for the complexity tail (v1: p90 cyclomatic; v2:
+ * critical-complexity density).
+ */
 p90_complexity: number
+/**
+ * Points subtracted for low maintainability-index files; absent when
+ * file scores were not computed.
+ */
 maintainability?: (number | null)
+/**
+ * Points subtracted for churn-times-complexity hotspots; absent without
+ * git history.
+ */
 hotspots?: (number | null)
+/**
+ * Points subtracted for unused dependencies; absent when dead-code data
+ * was not available.
+ */
 unused_deps?: (number | null)
+/**
+ * Points subtracted for circular dependency chains; absent when
+ * dead-code data was not available.
+ */
 circular_deps?: (number | null)
 /**
  * Penalty for oversized functions, computed against fixed calibration
@@ -5664,7 +6013,15 @@ circular_deps?: (number | null)
  * penalty. `health.ignore` removes files from the score entirely.
  */
 unit_size?: (number | null)
+/**
+ * Points subtracted for fan-in coupling concentration; absent when the
+ * module graph was not available.
+ */
 coupling?: (number | null)
+/**
+ * Points subtracted for duplicated code; absent when the duplication
+ * pipeline did not run.
+ */
 duplication?: (number | null)
 /**
  * Small capped penalty for prop-drilling chains. `None` unless the opt-in
@@ -5676,17 +6033,53 @@ prop_drilling?: (number | null)
  * Per-file health score combining complexity, coupling, and dead code metrics.
  */
 export interface FileHealthScore {
+/**
+ * File path relative to the project root.
+ */
 path: string
+/**
+ * Modules importing this file.
+ */
 fan_in: number
+/**
+ * Modules this file imports.
+ */
 fan_out: number
+/**
+ * Unused exports as a fraction of the file's exports, in `[0, 1]`.
+ */
 dead_code_ratio: number
+/**
+ * Total cyclomatic complexity per line of code.
+ */
 complexity_density: number
+/**
+ * Maintainability index (0-100); higher is healthier.
+ */
 maintainability_index: number
+/**
+ * Summed cyclomatic complexity over the file's functions.
+ */
 total_cyclomatic: number
+/**
+ * Summed cognitive complexity over the file's functions.
+ */
 total_cognitive: number
+/**
+ * Functions in the file.
+ */
 function_count: number
+/**
+ * Lines of code in the file.
+ */
 lines: number
+/**
+ * Highest CRAP score among the file's functions.
+ */
 crap_max: number
+/**
+ * Functions whose CRAP score exceeds the threshold.
+ */
 crap_above_threshold: number
 }
 /**
@@ -5870,16 +6263,46 @@ comment?: (string | null)
  * test code.
  */
 export interface HotspotFinding {
+/**
+ * File path relative to the project root.
+ */
 path: string
+/**
+ * Churn-times-complexity hotspot score; higher is riskier.
+ */
 score: number
+/**
+ * Commits touching the file in the analysis window.
+ */
 commits: number
+/**
+ * Recency-weighted commit count.
+ */
 weighted_commits: number
+/**
+ * Lines added to the file in the analysis window.
+ */
 lines_added: number
+/**
+ * Lines deleted from the file in the analysis window.
+ */
 lines_deleted: number
+/**
+ * Total cyclomatic complexity per line of code.
+ */
 complexity_density: number
+/**
+ * Modules importing this file.
+ */
 fan_in: number
 trend: ChurnTrend
+/**
+ * Ownership metrics, when ownership analysis ran.
+ */
 ownership?: (OwnershipMetrics | null)
+/**
+ * True for files matched by test-path patterns; omitted when false.
+ */
 is_test_path?: boolean
 /**
  * Machine-actionable refactor and review hints. Always populated;
@@ -5891,23 +6314,67 @@ is_test_path?: boolean
  */
 actions: HotspotAction[]
 }
+/**
+ * Ownership metrics for a hotspot file, derived from git history and
+ * CODEOWNERS declarations.
+ */
 export interface OwnershipMetrics {
+/**
+ * Minimum contributors covering half the file's commits.
+ */
 bus_factor: number
+/**
+ * Distinct contributors touching the file in the window.
+ */
 contributor_count: number
 top_contributor: ContributorEntry
+/**
+ * Contributors active in the recent window; omitted when empty.
+ */
 recent_contributors?: ContributorEntry[]
+/**
+ * Contributors best positioned to review changes; omitted when empty.
+ */
 suggested_reviewers?: ContributorEntry[]
+/**
+ * Owner declared in CODEOWNERS, when one matches the file.
+ */
 declared_owner?: (string | null)
+/**
+ * Whether no owner could be resolved; `null` when ownership resolution
+ * did not run.
+ */
 unowned?: (boolean | null)
 ownership_state: OwnershipState
+/**
+ * True when recent contributions drift away from the declared ownership.
+ */
 drift: boolean
+/**
+ * Human-readable explanation of the drift, when drifting.
+ */
 drift_reason?: (string | null)
 }
+/**
+ * One contributor row in ownership metrics.
+ */
 export interface ContributorEntry {
+/**
+ * Contributor identifier, encoded per `format`.
+ */
 identifier: string
 format: ContributorIdentifierFormat
+/**
+ * Contributor's share of the file's commits, in `[0, 1]`.
+ */
 share: number
+/**
+ * Days since the contributor's last commit to the file.
+ */
 stale_days: number
+/**
+ * Contributor's commits touching the file in the window.
+ */
 commits: number
 }
 /**
@@ -5950,11 +6417,30 @@ suggested_pattern?: (string | null)
  */
 heuristic?: (HotspotActionHeuristic | null)
 }
+/**
+ * Scope metadata for the hotspot analysis.
+ */
 export interface HotspotSummary {
+/**
+ * Start of the churn window, as passed to `git log --since`.
+ */
 since: string
+/**
+ * Minimum commit count for a file to qualify as a hotspot.
+ */
 min_commits: number
+/**
+ * Files with churn data in the window.
+ */
 files_analyzed: number
+/**
+ * Files excluded by test-path and ignore filters.
+ */
 files_excluded: number
+/**
+ * True when the repository is a shallow clone, so churn counts are
+ * truncated.
+ */
 shallow_clone: boolean
 }
 /**
@@ -6107,6 +6593,9 @@ lazy_parse_warning: boolean
  */
 untracked_ratio_percent: number
 }
+/**
+ * One per-function runtime-coverage finding in `runtime_coverage.findings`.
+ */
 export interface RuntimeCoverageFinding {
 /**
  * Per-finding suppression key of the form `fallow:prod:<hash>` (first 8 hex
@@ -6213,6 +6702,9 @@ export interface RuntimeCoverageAction {
  * consumers should treat unknown values as forward-compat extensions.
  */
 type: string
+/**
+ * Human-readable action description.
+ */
 description: string
 /**
  * Whether fallow can apply this action automatically.
@@ -6261,6 +6753,9 @@ min_observation_volume: number
  */
 meets_observation_volume: boolean
 }
+/**
+ * One hot function in `runtime_coverage.hot_paths`, ranked by invocations.
+ */
 export interface RuntimeCoverageHotPath {
 /**
  * Stable content-hash ID of the form `fallow:hot:<hash>`.
@@ -6307,6 +6802,10 @@ percentile: number
  */
 actions?: RuntimeCoverageAction[]
 }
+/**
+ * One blast-radius entry in `runtime_coverage.blast_radius`: how far a
+ * change to the function would ripple.
+ */
 export interface RuntimeCoverageBlastRadiusEntry {
 /**
  * Stable content-hash ID of the form `fallow:blast:<hash>`.
@@ -6345,6 +6844,10 @@ caller_count_weighted_by_traffic: number
 deploys_touched?: (number | null)
 risk_band: RuntimeCoverageRiskBand
 }
+/**
+ * One production-importance entry in `runtime_coverage.importance`, scoring
+ * how much a function matters in production.
+ */
 export interface RuntimeCoverageImportanceEntry {
 /**
  * Stable content-hash ID of the form `fallow:importance:<hash>`.
@@ -6391,7 +6894,13 @@ importance_score: number
  */
 reason: string
 }
+/**
+ * Non-fatal diagnostic emitted while merging runtime coverage.
+ */
 export interface RuntimeCoverageMessage {
+/**
+ * Stable machine-readable warning code.
+ */
 code: string
 /**
  * Human-readable warning message.
@@ -6443,17 +6952,38 @@ export interface CoverageIntelligenceReport {
 schema_version: CoverageIntelligenceSchemaVersion
 verdict: CoverageIntelligenceVerdict
 summary: CoverageIntelligenceSummary
+/**
+ * Combined findings, one per matched unit.
+ */
 findings: CoverageIntelligenceFinding[]
 }
 /**
  * Aggregate metadata for coverage-intelligence output.
  */
 export interface CoverageIntelligenceSummary {
+/**
+ * Total combined findings.
+ */
 findings: number
+/**
+ * Findings with the risky-change verdict.
+ */
 risky_changes: number
+/**
+ * Findings with the high-confidence-delete verdict.
+ */
 high_confidence_deletes: number
+/**
+ * Findings with the review-required verdict.
+ */
 review_required: number
+/**
+ * Findings with the refactor-carefully verdict.
+ */
 refactor_carefully: number
+/**
+ * Candidate joins dropped because the cross-surface match was ambiguous.
+ */
 skipped_ambiguous_matches: number
 }
 /**
@@ -6477,24 +7007,58 @@ identity?: (string | null)
  */
 line: number
 verdict: CoverageIntelligenceVerdict
+/**
+ * Ordered evidence signals behind the verdict.
+ */
 signals: CoverageIntelligenceSignal[]
 recommendation: CoverageIntelligenceRecommendation
 confidence: CoverageIntelligenceConfidence
+/**
+ * IDs of related findings from other fallow surfaces.
+ */
 related_ids?: string[]
 evidence: CoverageIntelligenceEvidence
+/**
+ * Machine-actionable follow-up actions.
+ */
 actions: CoverageIntelligenceAction[]
 }
 /**
  * Compact evidence values that led to a recommendation.
  */
 export interface CoverageIntelligenceEvidence {
+/**
+ * Test coverage percentage (0-100), when coverage data exists.
+ */
 coverage_pct?: (number | null)
+/**
+ * CRAP score, when complexity and coverage both exist.
+ */
 crap?: (number | null)
+/**
+ * Runtime-coverage verdict label, e.g. `hot` or `cold`.
+ */
 runtime_verdict?: (string | null)
+/**
+ * Observed runtime invocation count.
+ */
 invocations?: (number | null)
+/**
+ * Static usage status label, e.g. `unused`.
+ */
 static_status?: (string | null)
+/**
+ * Static test-coverage status label, e.g. `no-test-path`.
+ */
 test_coverage?: (string | null)
+/**
+ * True when the unit is inside the current change scope; omitted when
+ * false.
+ */
 changed?: boolean
+/**
+ * Ownership-drift state label, when ownership analysis ran.
+ */
 ownership_state?: (string | null)
 match_confidence: CoverageIntelligenceMatchConfidence
 }
@@ -6506,6 +7070,9 @@ export interface CoverageIntelligenceAction {
  * Action identifier, normalized to `type` in JSON output.
  */
 type: string
+/**
+ * Human-readable action description.
+ */
 description: string
 /**
  * Whether fallow can apply this action automatically.
@@ -6516,9 +7083,21 @@ auto_fixable: boolean
  * A function exceeding the very-high-risk size threshold (>60 LOC).
  */
 export interface LargeFunctionEntry {
+/**
+ * File path relative to the project root.
+ */
 path: string
+/**
+ * Function name, or a synthesized name for anonymous functions.
+ */
 name: string
+/**
+ * 1-based line the function starts on.
+ */
 line: number
+/**
+ * Lines of code in the function body.
+ */
 line_count: number
 }
 /**
@@ -8011,8 +8590,17 @@ count: number
  * (A>=85, B>=70, C>=55, D>=40, F<40), so the two axes are read on one scale.
  */
 export interface StylingHealth {
+/**
+ * Styling formula version; see [`STYLING_HEALTH_FORMULA_VERSION`].
+ */
 formula_version: number
+/**
+ * Styling-health score in `[0, 100]`; higher is healthier.
+ */
 score: number
+/**
+ * Letter grade from the shared [`letter_grade`] thresholds.
+ */
 grade: string
 penalties: StylingHealthPenalties
 confidence: StylingHealthConfidence
@@ -8141,12 +8729,33 @@ introduced?: (boolean | null)
  * fallow JSON-producing command.
  */
 export interface ExplainOutput {
+/**
+ * Issue-type identifier, e.g. `unused-export`.
+ */
 id: string
+/**
+ * Human-readable issue-type name.
+ */
 name: string
+/**
+ * One-line description of what the issue type reports.
+ */
 summary: string
+/**
+ * Why the issue matters.
+ */
 rationale: string
+/**
+ * Illustrative code example of the issue.
+ */
 example: string
+/**
+ * How to resolve findings of this type.
+ */
 how_to_fix: string
+/**
+ * Public documentation URL for the issue type.
+ */
 docs: string
 }
 /**
@@ -8156,27 +8765,95 @@ export interface InspectOutput {
 target: InspectTargetDescriptor
 identity: InspectIdentity
 evidence: InspectEvidence
+/**
+ * Non-fatal problems encountered while gathering evidence.
+ */
 warnings: string[]
+/**
+ * `_meta` block with type-aware backend info, when applicable.
+ */
 _meta?: (Meta | null)
 }
+/**
+ * Graph identity facts for a file target. `Value`-typed fields carry the
+ * graph's verdict when analysis ran and are `null` when it did not.
+ */
 export interface InspectFileIdentity {
+/**
+ * File path relative to the analysed root.
+ */
 file: string
-is_reachable?: unknown
-is_entry_point?: unknown
+/**
+ * Whether the module graph can reach the file from an entry point.
+ */
+is_reachable?: {
+[k: string]: unknown
+}
+/**
+ * Whether the file is itself an entry point.
+ */
+is_entry_point?: {
+[k: string]: unknown
+}
+/**
+ * Number of exports the file declares.
+ */
 export_count?: (number | null)
+/**
+ * Number of modules the file imports.
+ */
 import_count?: (number | null)
+/**
+ * Number of modules that import the file.
+ */
 imported_by_count?: (number | null)
 }
+/**
+ * Graph identity facts for a symbol target. `Value`-typed fields carry the
+ * graph's verdict when analysis ran and are `null` when it did not.
+ */
 export interface InspectSymbolIdentity {
+/**
+ * File path relative to the analysed root.
+ */
 file: string
+/**
+ * Name of the inspected export.
+ */
 export_name: string
-file_reachable?: unknown
-is_entry_point?: unknown
-is_used?: unknown
-reason?: unknown
+/**
+ * Whether the containing file is reachable from an entry point.
+ */
+file_reachable?: {
+[k: string]: unknown
 }
+/**
+ * Whether the containing file is itself an entry point.
+ */
+is_entry_point?: {
+[k: string]: unknown
+}
+/**
+ * Whether the export has any recorded consumer.
+ */
+is_used?: {
+[k: string]: unknown
+}
+/**
+ * Explanation of the usage verdict, when the graph recorded one.
+ */
+reason?: {
+[k: string]: unknown
+}
+}
+/**
+ * `evidence` block of [`InspectOutput`]: one section per analysis.
+ */
 export interface InspectEvidence {
 trace_file: InspectEvidenceSection
+/**
+ * Export-level usage trace; present only for symbol targets.
+ */
 trace_export?: (InspectEvidenceSection | null)
 dead_code: InspectEvidenceSection
 duplication: InspectEvidenceSection
@@ -8216,11 +8893,23 @@ symbol_impact?: (InspectEvidenceSection | null)
  */
 targeted_tests?: (InspectEvidenceSection | null)
 }
+/**
+ * One evidence section: status, the scope the evidence covers, and either a
+ * data payload or a message explaining its absence.
+ */
 export interface InspectEvidenceSection {
 status: InspectSectionStatus
 scope: InspectEvidenceScope
+/**
+ * Explanation for `error` / `unavailable` sections.
+ */
 message?: (string | null)
-data?: unknown
+/**
+ * Section payload; present when the analysis ran.
+ */
+data?: {
+[k: string]: unknown
+}
 }
 /**
  * Result of tracing an export: why it is considered used or unused.
@@ -8637,27 +9326,59 @@ meta: ReviewEnvelopeMeta
  * Summary block on [`ReviewEnvelopeOutput`].
  */
 export interface ReviewEnvelopeSummary {
+/**
+ * Summary comment body markdown.
+ */
 body: string
+/**
+ * Stable fingerprint of the summary body, used for sticky updates.
+ */
 fingerprint: string
 }
 /**
  * GitHub pull-request review comment.
  */
 export interface GitHubReviewComment {
+/**
+ * File path relative to the repository root.
+ */
 path: string
+/**
+ * 1-based line on the new side of the diff.
+ */
 line: number
 side: GitHubReviewSide
+/**
+ * Comment body markdown, fingerprint marker included.
+ */
 body: string
+/**
+ * Stable finding fingerprint used for comment reconciliation.
+ */
 fingerprint: string
+/**
+ * True when the body was cut to fit the provider size limit; omitted
+ * when false.
+ */
 truncated?: boolean
 }
 /**
  * GitLab merge-request discussion comment.
  */
 export interface GitLabReviewComment {
+/**
+ * Comment body markdown, fingerprint marker included.
+ */
 body: string
 position: GitLabReviewPosition
+/**
+ * Stable finding fingerprint used for comment reconciliation.
+ */
 fingerprint: string
+/**
+ * True when the body was cut to fit the provider size limit; omitted
+ * when false.
+ */
 truncated?: boolean
 }
 /**
@@ -8665,12 +9386,31 @@ truncated?: boolean
  * merge-request discussion-position API.
  */
 export interface GitLabReviewPosition {
+/**
+ * Merge-base SHA of the MR diff; absent when refs were not supplied.
+ */
 base_sha?: (string | null)
+/**
+ * First commit SHA of the MR diff; absent when refs were not supplied.
+ */
 start_sha?: (string | null)
+/**
+ * Head commit SHA of the MR diff; absent when refs were not supplied.
+ */
 head_sha?: (string | null)
 position_type: GitLabReviewPositionType
+/**
+ * Pre-rename path when the diff renamed the file, else the same as
+ * `new_path`.
+ */
 old_path: string
+/**
+ * File path on the new side of the diff.
+ */
 new_path: string
+/**
+ * 1-based line on the new side of the diff.
+ */
 new_line: number
 }
 /**
@@ -8690,21 +9430,69 @@ review_id?: (ReviewId | null)
 export interface ReviewReconcileOutput {
 schema: ReviewReconcileSchema
 provider: ReviewProvider
+/**
+ * PR / MR reference that was reconciled, when one was resolved.
+ */
 target?: (string | null)
+/**
+ * True when no provider mutations were performed.
+ */
 dry_run: boolean
+/**
+ * Inline comments in the review envelope being reconciled.
+ */
 comments: number
+/**
+ * Distinct fingerprints in the current run's findings.
+ */
 current_fingerprints: number
+/**
+ * Distinct fingerprints found in existing comments.
+ */
 existing_fingerprints: number
+/**
+ * Fingerprints present in the current run but not yet commented.
+ */
 new_fingerprints: number
+/**
+ * Fingerprints commented earlier whose findings no longer exist.
+ */
 stale_fingerprints: number
+/**
+ * The new fingerprints themselves.
+ */
 new: string[]
+/**
+ * The stale fingerprints themselves.
+ */
 stale: string[]
+/**
+ * Non-fatal provider API warning encountered during reconciliation.
+ */
 provider_warning?: (string | null)
+/**
+ * Resolution replies posted to stale comment threads.
+ */
 resolution_comments_posted: number
+/**
+ * Stale discussion threads resolved (GitLab).
+ */
 threads_resolved: number
+/**
+ * Remediation guidance when the apply loop stopped before finishing.
+ */
 apply_hint?: (string | null)
+/**
+ * Errors encountered while applying provider mutations.
+ */
 apply_errors: string[]
+/**
+ * Fingerprints whose provider mutation failed.
+ */
 failed_fingerprints?: string[]
+/**
+ * Fingerprints left unprocessed after a failure aborted the apply loop.
+ */
 unapplied_fingerprints?: string[]
 }
 /**
@@ -8713,43 +9501,135 @@ unapplied_fingerprints?: string[]
 export interface CoverageSetupOutput {
 schema_version: CoverageSetupSchemaVersion
 framework_detected: CoverageSetupFramework
+/**
+ * Package manager detected from lockfiles, when one was found.
+ */
 package_manager?: (CoverageSetupPackageManager | null)
+/**
+ * Runtimes the instrumentation must cover at the project root.
+ */
 runtime_targets: CoverageSetupRuntimeTarget[]
+/**
+ * Per-member setup guidance for workspace projects.
+ */
 members: CoverageSetupMember[]
-config_written?: unknown
-commands: string[]
-files_to_edit: CoverageSetupFileToEdit[]
-snippets: CoverageSetupSnippet[]
-dockerfile_snippet?: (string | null)
-next_steps: string[]
-warnings: string[]
-_meta?: unknown
+/**
+ * Coverage config that was written to disk, when setup wrote one.
+ */
+config_written?: {
+[k: string]: unknown
 }
+/**
+ * Shell commands the user should run to complete setup.
+ */
+commands: string[]
+/**
+ * Files the user must edit by hand, with reasons.
+ */
+files_to_edit: CoverageSetupFileToEdit[]
+/**
+ * Ready-to-paste code snippets for the files to edit.
+ */
+snippets: CoverageSetupSnippet[]
+/**
+ * Dockerfile additions needed for containerized capture, when relevant.
+ */
+dockerfile_snippet?: (string | null)
+/**
+ * Ordered human-readable follow-up instructions.
+ */
+next_steps: string[]
+/**
+ * Non-fatal problems encountered during detection.
+ */
+warnings: string[]
+/**
+ * `_meta` block with docs and field definitions, when requested.
+ */
+_meta?: {
+[k: string]: unknown
+}
+}
+/**
+ * Per-workspace-member setup guidance inside [`CoverageSetupOutput::members`].
+ */
 export interface CoverageSetupMember {
+/**
+ * Package name of the workspace member.
+ */
 name: string
+/**
+ * Member path relative to the workspace root.
+ */
 path: string
 framework_detected: CoverageSetupFramework
+/**
+ * Package manager detected for this member, when one was found.
+ */
 package_manager?: (CoverageSetupPackageManager | null)
+/**
+ * Runtimes the instrumentation must cover for this member.
+ */
 runtime_targets: CoverageSetupRuntimeTarget[]
+/**
+ * Files the user must edit by hand, with reasons.
+ */
 files_to_edit: CoverageSetupFileToEdit[]
+/**
+ * Ready-to-paste code snippets for the files to edit.
+ */
 snippets: CoverageSetupSnippet[]
+/**
+ * Dockerfile additions needed for containerized capture, when relevant.
+ */
 dockerfile_snippet?: (string | null)
+/**
+ * Non-fatal problems encountered during detection.
+ */
 warnings: string[]
 }
+/**
+ * One manual edit the user must make to wire up coverage capture.
+ */
 export interface CoverageSetupFileToEdit {
+/**
+ * File path relative to the project root.
+ */
 path: string
+/**
+ * Why the file needs editing.
+ */
 reason: string
 }
+/**
+ * Ready-to-paste code snippet accompanying a file edit.
+ */
 export interface CoverageSetupSnippet {
+/**
+ * Short description of what the snippet does.
+ */
 label: string
+/**
+ * File path the snippet belongs in.
+ */
 path: string
+/**
+ * The snippet source text.
+ */
 content: string
 }
+/**
+ * Envelope emitted by `fallow coverage analyze --format json`.
+ */
 export interface CoverageAnalyzeOutput {
 schema_version: CoverageAnalyzeSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 runtime_coverage: RuntimeCoverageReport
+/**
+ * `_meta` block with docs and metric definitions, when `--explain` was
+ * passed.
+ */
 _meta?: (Meta | null)
 }
 /**
@@ -8765,12 +9645,33 @@ boundaries: BoundariesListing
  * `boundaries` block carried by [`ListBoundariesOutput`].
  */
 export interface BoundariesListing {
+/**
+ * Whether the project configures architecture boundaries at all.
+ */
 configured: boolean
+/**
+ * Number of entries in `zones`.
+ */
 zone_count: number
+/**
+ * Boundary zones after preset and `autoDiscover` expansion.
+ */
 zones: BoundariesListZone[]
+/**
+ * Number of entries in `rules`.
+ */
 rule_count: number
+/**
+ * Import rules operating on expanded zone names.
+ */
 rules: BoundariesListRule[]
+/**
+ * Number of entries in `logical_groups`.
+ */
 logical_group_count: number
+/**
+ * Pre-expansion `autoDiscover` logical groups.
+ */
 logical_groups: BoundariesListLogicalGroup[]
 }
 /**
@@ -8778,8 +9679,17 @@ logical_groups: BoundariesListLogicalGroup[]
  * classifies files into a single zone via glob patterns.
  */
 export interface BoundariesListZone {
+/**
+ * Zone name referenced by rules.
+ */
 name: string
+/**
+ * Glob patterns that classify files into the zone.
+ */
 patterns: string[]
+/**
+ * Number of analyzable files the zone matched.
+ */
 file_count: number
 }
 /**
@@ -8789,7 +9699,13 @@ file_count: number
  * corresponding [`BoundariesListLogicalGroup::authored_rule`].
  */
 export interface BoundariesListRule {
+/**
+ * Zone the rule constrains imports from.
+ */
 from: string
+/**
+ * Zone names the `from` zone may import.
+ */
 allow: string[]
 }
 /**
@@ -8799,16 +9715,46 @@ allow: string[]
  * [`BoundariesListing::zones`].
  */
 export interface BoundariesListLogicalGroup {
+/**
+ * User-authored parent zone name.
+ */
 name: string
+/**
+ * Child zone names produced by discovery.
+ */
 children: string[]
+/**
+ * Authored `autoDiscover` paths.
+ */
 auto_discover: string[]
 status: LogicalGroupStatus
+/**
+ * Index of the authored entry in the pre-expansion `zones[]` config.
+ */
 source_zone_index: number
+/**
+ * Files matched across the group's zones.
+ */
 file_count: number
+/**
+ * User's pre-expansion rule keyed on the parent name, when authored.
+ */
 authored_rule?: (AuthoredRule | null)
+/**
+ * Zone that keeps the parent's own patterns when the parent kept any.
+ */
 fallback_zone?: (string | null)
+/**
+ * `zones[]` indices of duplicate parents merged into this group.
+ */
 merged_from?: (number[] | null)
+/**
+ * Authored parent `root`, when one was declared.
+ */
 original_zone_root?: (string | null)
+/**
+ * Per-child indices into the pre-expansion `zones[]` config.
+ */
 child_source_indices?: number[]
 }
 /**
@@ -9002,9 +9948,21 @@ styling_health?: (StylingHealth | null)
  * run is byte-unchanged.
  */
 styling_findings?: StylingFinding[]
+/**
+ * Grouping mode when `--group-by` was passed.
+ */
 grouped_by?: (GroupByMode | null)
+/**
+ * Per-bucket recomputed metrics; present only in grouped output.
+ */
 groups?: (HealthGroup[] | null)
+/**
+ * `_meta` block with metric definitions, when `--explain` was passed.
+ */
 _meta?: (Meta | null)
+/**
+ * Workspace-discovery diagnostics surfaced during config load.
+ */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
  * Read-only follow-up commands computed from this run's findings. See
@@ -9134,8 +10092,17 @@ clone_families: CloneFamilyFinding[]
  */
 mirrored_directories?: MirroredDirectory[]
 stats: DuplicationStats
+/**
+ * Grouping mode when `--group-by` was passed.
+ */
 grouped_by?: (GroupByMode | null)
+/**
+ * Total finding count across all groups; present only in grouped output.
+ */
 total_issues?: (number | null)
+/**
+ * Grouped findings; present only in grouped output.
+ */
 groups?: (DuplicationGroup[] | null)
 /**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
@@ -9272,8 +10239,18 @@ schema_version: SchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 grouped_by: GroupByMode
+/**
+ * Total findings across all groups.
+ */
 total_issues: number
+/**
+ * One bucket per resolver key.
+ */
 groups: CheckGroupedEntry[]
+/**
+ * `_meta` block with docs and rule definitions, when `--explain` was
+ * passed.
+ */
 _meta?: (Meta | null)
 /**
  * Diagnostics collected for the full analysis before issue grouping.
@@ -9292,8 +10269,17 @@ next_steps?: NextStep[]
  * `AnalysisResults`.
  */
 export interface CheckGroupedEntry {
+/**
+ * Resolver key: team name, directory prefix, package name, or section.
+ */
 key: string
+/**
+ * Owners of a GitLab CODEOWNERS section; present for section grouping.
+ */
 owners?: (string[] | null)
+/**
+ * Findings in this group.
+ */
 total_issues: number
 /**
  * Files not reachable from any entry point. Wrapped in
@@ -9628,10 +10614,23 @@ duplicate_prop_shapes?: DuplicatePropShapeFinding[]
  */
 export interface ImpactReport {
 schema_version: ImpactReportSchemaVersion
+/**
+ * Whether impact tracking is active for this project.
+ */
 enabled: boolean
 enabled_source: EnabledSource
+/**
+ * Number of recorded runs in the store.
+ */
 record_count: number
+/**
+ * `_meta` block with docs and field definitions, when `--explain` was
+ * passed.
+ */
 _meta?: (Meta | null)
+/**
+ * Timestamp of the earliest recorded run; absent with no records.
+ */
 first_recorded?: (string | null)
 /**
  * Git SHA of the most recent recorded run, so a consumer can tell which
@@ -9651,6 +10650,8 @@ latest_git_sha?: (string | null)
 surfacing?: (ImpactCounts | null)
 /**
  * Trend between the two most recent records. None until two records exist.
+ * Trend between the two most recent changed-file records. None until two
+ * records exist.
  */
 trend?: (TrendSummary | null)
 /**
@@ -9666,6 +10667,9 @@ project_surfacing?: (ImpactCounts | null)
  * `trend`. None until two full `fallow` runs exist. v1.6.
  */
 project_trend?: (TrendSummary | null)
+/**
+ * Lifetime count of commit-gate containment events.
+ */
 containment_count: number
 /**
  * Most recent containment events (newest last), capped for display.
@@ -9709,9 +10713,21 @@ explicit_decision: boolean
  * Per-category issue counts captured at a recorded run.
  */
 export interface ImpactCounts {
+/**
+ * Sum of the category counts.
+ */
 total_issues: number
+/**
+ * Dead-code findings.
+ */
 dead_code: number
+/**
+ * Complexity findings.
+ */
 complexity: number
+/**
+ * Duplication findings.
+ */
 duplication: number
 }
 /**
@@ -9723,15 +10739,30 @@ direction: ImpactTrendDirection
  * Signed delta in total issues, current minus previous.
  */
 total_delta: number
+/**
+ * Total issues in the earlier run.
+ */
 previous_total: number
+/**
+ * Total issues in the later run.
+ */
 current_total: number
 }
 /**
  * A commit-gate containment event recorded by `fallow impact`.
  */
 export interface ContainmentEvent {
+/**
+ * Timestamp when the commit gate blocked the commit.
+ */
 blocked_at: string
+/**
+ * Timestamp when a later run passed clean.
+ */
 cleared_at: string
+/**
+ * Abbreviated SHA of the cleared commit, when in a git repo.
+ */
 git_sha?: (string | null)
 blocked_counts: ImpactCounts
 }
@@ -9739,10 +10770,25 @@ blocked_counts: ImpactCounts
  * A resolved or suppressed finding attribution event.
  */
 export interface ResolutionEvent {
+/**
+ * Finding kind that was resolved or suppressed, e.g. `unused-export`.
+ */
 kind: string
+/**
+ * Root-relative path of the resolved finding.
+ */
 path: string
+/**
+ * Symbol name, for symbol-level findings.
+ */
 symbol?: (string | null)
+/**
+ * Abbreviated SHA of the resolving commit, when in a git repo.
+ */
 git_sha?: (string | null)
+/**
+ * Timestamp the resolution was recorded.
+ */
 timestamp: string
 }
 /**
@@ -9765,6 +10811,9 @@ tracked_count: number
  */
 unreadable_count: number
 totals: CrossRepoTotals
+/**
+ * Per-project rows, one for each store with recorded history.
+ */
 projects: CrossRepoProjectEntry[]
 }
 /**
@@ -9772,8 +10821,17 @@ projects: CrossRepoProjectEntry[]
  * longer exists on disk: their past wins still count toward lifetime impact).
  */
 export interface CrossRepoTotals {
+/**
+ * Lifetime genuinely-resolved findings across projects.
+ */
 resolved_total: number
+/**
+ * Lifetime `fallow-ignore` suppressions across projects.
+ */
 suppressed_total: number
+/**
+ * Lifetime commit-gate containment events across projects.
+ */
 containment_count: number
 /**
  * Sum of whole-project issue totals across projects that have a full-run
@@ -9781,6 +10839,9 @@ containment_count: number
  * snapshot).
  */
 project_wide_issues: number
+/**
+ * Projects that have recorded at least one full `fallow` run.
+ */
 projects_with_baseline: number
 }
 /**
@@ -9868,10 +10929,16 @@ categories_include: (string[] | null)
  */
 categories_exclude: (string[] | null)
 }
+/**
+ * Per-rule severity context inside [`SecurityOutputConfig::rules`].
+ */
 export interface SecurityOutputRulesConfig {
 security_client_server_leak: SecurityRuleSeverityConfig
 security_sink: SecurityRuleSeverityConfig
 }
+/**
+ * Configured-versus-effective severity for one security rule.
+ */
 export interface SecurityRuleSeverityConfig {
 configured: Severity
 effective: Severity
@@ -10379,8 +11446,17 @@ top_files_limit: number
  * One sampled unresolved-callee row.
  */
 export interface SecurityUnresolvedCalleeSample {
+/**
+ * File path relative to the analysed root.
+ */
 path: string
+/**
+ * 1-based line of the skipped call site.
+ */
 line: number
+/**
+ * 1-based column of the skipped call site.
+ */
 col: number
 reason: SkippedSecurityCalleeReason
 expression_kind: SkippedSecurityCalleeExpressionKind
@@ -10389,6 +11465,9 @@ expression_kind: SkippedSecurityCalleeExpressionKind
  * Count of unresolved callees in one file.
  */
 export interface SecurityUnresolvedCalleeTopFile {
+/**
+ * File path relative to the analysed root.
+ */
 path: string
 /**
  * Number of unresolved callees in this file.
@@ -10460,31 +11539,79 @@ attack_surface_entries: number
  * Fixed severity counters for summary JSON.
  */
 export interface SecuritySeverityCounts {
+/**
+ * High-severity candidates.
+ */
 high: number
+/**
+ * Medium-severity candidates.
+ */
 medium: number
+/**
+ * Low-severity candidates.
+ */
 low: number
 }
 /**
  * Fixed reachability counters for summary JSON.
  */
 export interface SecurityReachabilityCounts {
+/**
+ * Candidates reachable from an entry point.
+ */
 entry_reachable: number
+/**
+ * Candidates reachable from an untrusted input source.
+ */
 untrusted_source_reachable: number
+/**
+ * Candidates where taint flows through a call argument.
+ */
 arg_level: number
+/**
+ * Candidates where taint is only module-level.
+ */
 module_level: number
+/**
+ * Candidates whose flow crosses a client/server boundary.
+ */
 crosses_boundary: number
+/**
+ * Candidates backed by a concrete taint source.
+ */
 source_backed: number
 }
 /**
  * Fixed runtime coverage counters for summary JSON.
  */
 export interface SecurityRuntimeStateCounts {
+/**
+ * Candidates on frequently executed runtime paths.
+ */
 runtime_hot: number
+/**
+ * Candidates on rarely executed runtime paths.
+ */
 runtime_cold: number
+/**
+ * Candidates on paths never seen executing.
+ */
 never_executed: number
+/**
+ * Candidates on low-traffic paths.
+ */
 low_traffic: number
+/**
+ * Candidates in files runtime coverage did not observe.
+ */
 coverage_unavailable: number
+/**
+ * Candidates whose runtime state could not be classified.
+ */
 runtime_unknown: number
+/**
+ * Candidates analysed without any runtime coverage data.
+ */
 not_collected: number
 }
 /**
@@ -10513,11 +11640,29 @@ needs_human_review: {
  * Aggregate counts for survivor rendering.
  */
 export interface SecuritySurvivorsSummary {
+/**
+ * Candidates in the input security report.
+ */
 candidates: number
+/**
+ * Verifier verdicts supplied.
+ */
 verdicts: number
+/**
+ * Candidates the verifier retained.
+ */
 survivors: number
+/**
+ * Candidates the verifier dismissed.
+ */
 dismissed: number
+/**
+ * Candidates the verifier flagged as ambiguous.
+ */
 needs_human_review: number
+/**
+ * Candidates without any verdict.
+ */
 unverdicted: number
 }
 /**
@@ -10529,7 +11674,13 @@ export interface SecuritySurvivor {
  */
 finding_id: string
 verdict: SecurityVerifierVerdictStatus
+/**
+ * Short machine-oriented verdict reason.
+ */
 reason?: (string | null)
+/**
+ * Longer free-form verdict explanation.
+ */
 rationale?: (string | null)
 /**
  * Optional verifier-provided confidence or review priority.
@@ -10562,8 +11713,17 @@ groups: SecurityBlindSpotGroup[]
  * Aggregate counts for blind-spot output.
  */
 export interface SecurityBlindSpotsSummary {
+/**
+ * Files containing at least one unresolved callee.
+ */
 unresolved_edge_files: number
+/**
+ * Total unresolved callee sites in the analysis.
+ */
 unresolved_callee_sites: number
+/**
+ * Callee sites captured in the bounded diagnostic sample.
+ */
 sampled_callee_sites: number
 }
 /**
@@ -10589,6 +11749,9 @@ suggestion: string
  * One file inside a blind-spot group.
  */
 export interface SecurityBlindSpotFile {
+/**
+ * File path relative to the analysed root.
+ */
 path: string
 /**
  * Count in the bounded diagnostic sample.
@@ -10602,9 +11765,21 @@ export interface CombinedOutput {
 schema_version: SchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
+/**
+ * Per-section `_meta` blocks, when `--explain` was passed.
+ */
 _meta?: (CombinedMeta | null)
+/**
+ * Dead-code section of the combined run.
+ */
 check?: (CheckOutput | null)
+/**
+ * Duplication section of the combined run.
+ */
 dupes?: (DupesReportPayload | null)
+/**
+ * Health section of the combined run.
+ */
 health?: (HealthReport | null)
 /**
  * Read-only follow-up commands aggregated across the combined run's
@@ -10616,9 +11791,21 @@ next_steps?: NextStep[]
  * Optional `_meta` block for [`CombinedOutput`].
  */
 export interface CombinedMeta {
+/**
+ * `_meta` block for the dead-code section.
+ */
 check?: (Meta | null)
+/**
+ * `_meta` block for the duplication section.
+ */
 dupes?: (Meta | null)
+/**
+ * `_meta` block for the health section.
+ */
 health?: (Meta | null)
+/**
+ * Telemetry identifiers for the run.
+ */
 telemetry?: (TelemetryMeta | null)
 }
 /**
@@ -10628,22 +11815,52 @@ export interface FeatureFlagsOutput {
 schema_version: SchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
+/**
+ * Detected feature-flag findings.
+ */
 feature_flags: FeatureFlagFinding[]
+/**
+ * Number of entries in `feature_flags`.
+ */
 total_flags: number
+/**
+ * `_meta` block; see [`FeatureFlagsMeta`].
+ */
 _meta?: (FeatureFlagsMeta | null)
 }
 /**
  * One feature flag finding in JSON output.
  */
 export interface FeatureFlagFinding {
+/**
+ * File path relative to the analysed root.
+ */
 path: string
+/**
+ * Detected flag identifier, e.g. the env var or SDK key name.
+ */
 flag_name: string
 kind: FeatureFlagKind
 confidence: FeatureFlagConfidence
+/**
+ * 1-based line of the flag usage.
+ */
 line: number
+/**
+ * 1-based column of the flag usage.
+ */
 col: number
+/**
+ * Suggested follow-up actions (investigate / suppress).
+ */
 actions: FeatureFlagAction[]
+/**
+ * Flag SDK the call belongs to, for SDK-call findings.
+ */
 sdk_name?: (string | null)
+/**
+ * Overlap with dead-code findings when the flag guards unused exports.
+ */
 dead_code_overlap?: (FeatureFlagDeadCodeOverlap | null)
 }
 /**
@@ -10651,16 +11868,34 @@ dead_code_overlap?: (FeatureFlagDeadCodeOverlap | null)
  */
 export interface FeatureFlagAction {
 type: FeatureFlagActionType
+/**
+ * Whether `fallow fix` can apply the action automatically.
+ */
 auto_fixable: boolean
+/**
+ * Human-readable action description.
+ */
 description: string
+/**
+ * Suppression comment to insert, for suppress actions.
+ */
 comment?: (string | null)
 }
 /**
  * Dead-code overlap block attached when a flag guards unused exports.
  */
 export interface FeatureFlagDeadCodeOverlap {
+/**
+ * Lines inside the flag-guarded region.
+ */
 guarded_lines: number
+/**
+ * Number of unused exports the flag guards.
+ */
 dead_export_count: number
+/**
+ * Names of the unused exports the flag guards.
+ */
 dead_exports: string[]
 }
 /**
@@ -10685,25 +11920,49 @@ telemetry?: (TelemetryMeta | null)
  * Feature flag explanatory metadata.
  */
 export interface FeatureFlagsMetaDetails {
+/**
+ * What the flags command reports.
+ */
 description: string
 kinds: FeatureFlagsKindMeta
 confidence: FeatureFlagsConfidenceMeta
+/**
+ * Public documentation URL for the flags command.
+ */
 docs: string
 }
 /**
  * Feature flag kind explanations.
  */
 export interface FeatureFlagsKindMeta {
+/**
+ * Explanation of the `environment_variable` kind.
+ */
 environment_variable: string
+/**
+ * Explanation of the `sdk_call` kind.
+ */
 sdk_call: string
+/**
+ * Explanation of the `config_object` kind.
+ */
 config_object: string
 }
 /**
  * Feature flag confidence explanations.
  */
 export interface FeatureFlagsConfidenceMeta {
+/**
+ * Explanation of the `high` confidence level.
+ */
 high: string
+/**
+ * Explanation of the `medium` confidence level.
+ */
 medium: string
+/**
+ * Explanation of the `low` confidence level.
+ */
 low: string
 }
 /**
@@ -11664,17 +12923,38 @@ reason_present: boolean
 export interface TypeAwareStatusOutput {
 schema_version: SchemaVersion
 version: ToolVersion
+/**
+ * Whether a usable type-aware companion was found.
+ */
 available: boolean
+/**
+ * How the companion was discovered, e.g. `installed-sibling`.
+ */
 discovery_source?: (string | null)
 /**
  * Root-relative companion path, or only the executable name when the
  * companion lives outside the analyzed project.
  */
 companion_path?: (string | null)
+/**
+ * npm package version of the companion, when known.
+ */
 package_version?: (string | null)
+/**
+ * Type-aware protocol version fallow speaks.
+ */
 protocol_version: number
+/**
+ * Checker backend family, e.g. `typescript-go`.
+ */
 backend_family?: (string | null)
+/**
+ * Version of the checker backend, when known.
+ */
 backend_version?: (string | null)
+/**
+ * How to make the companion available, when it is not.
+ */
 remediation?: (string | null)
 }
 /**
@@ -11682,10 +12962,22 @@ remediation?: (string | null)
  */
 export interface CodeClimateIssue {
 type: CodeClimateIssueKind
+/**
+ * Fallow rule identifier, e.g. `fallow/unused-file`.
+ */
 check_name: string
+/**
+ * Human-readable finding description.
+ */
 description: string
+/**
+ * CodeClimate category labels, e.g. `Clarity` or `Duplication`.
+ */
 categories: string[]
 severity: CodeClimateSeverity
+/**
+ * Stable finding fingerprint GitLab uses to track issues across pushes.
+ */
 fingerprint: string
 location: CodeClimateLocation
 /**

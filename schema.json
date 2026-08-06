@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "FallowConfig",
+  "description": "The user-facing fallow configuration as authored in `.fallowrc.json` /\n`.fallowrc.jsonc` / `fallow.toml` (or the `fallow` key of `package.json`).\n\nEvery field documents its serialized meaning, default, and precedence\nagainst CLI flags and environment variables where they exist.\n`FallowConfig::resolve` compiles the loaded config (globs, regexes,\nplugin and rule-pack discovery) into a [`ResolvedConfig`] for analysis.\nUnknown keys are rejected at load so typos fail loud.",
   "type": "object",
   "properties": {
     "$schema": {
@@ -457,6 +458,7 @@
           "type": "object",
           "properties": {
             "package": {
+              "description": "Exact package name looked up in the project's declared dependencies.",
               "type": "string"
             },
             "type": {
@@ -474,6 +476,7 @@
           "type": "object",
           "properties": {
             "pattern": {
+              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).",
               "type": "string"
             },
             "type": {
@@ -491,6 +494,7 @@
           "type": "object",
           "properties": {
             "conditions": {
+              "description": "Sub-conditions combined with logical AND.",
               "type": "array",
               "items": {
                 "$ref": "#/$defs/PluginDetection"
@@ -511,6 +515,7 @@
           "type": "object",
           "properties": {
             "conditions": {
+              "description": "Sub-conditions combined with logical OR.",
               "type": "array",
               "items": {
                 "$ref": "#/$defs/PluginDetection"
@@ -765,16 +770,20 @@
       ]
     },
     "IgnoreExportsUsedInFileConfig": {
+      "description": "Value of the `ignoreExportsUsedInFile` config key: whether an export\nreferenced elsewhere in its own file is suppressed from `unused-export`.",
       "anyOf": [
         {
+          "description": "Blanket toggle: `true` suppresses any export with a same-file use,\nregardless of kind. The default is `false`.",
           "type": "boolean"
         },
         {
+          "description": "Knip-parity object form restricting the suppression to type-only\nexports.",
           "$ref": "#/$defs/IgnoreExportsUsedInFileByKind"
         }
       ]
     },
     "IgnoreExportsUsedInFileByKind": {
+      "description": "Object form of `ignoreExportsUsedInFile` (`{ \"type\": ..., \"interface\": ... }`),\nrestricting the same-file-use suppression to type-only exports.",
       "type": "object",
       "properties": {
         "type": {
@@ -1188,38 +1197,47 @@
       "type": "object",
       "properties": {
         "unused-files": {
+          "description": "A file reachable from no entry point. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "unused-exports": {
+          "description": "An exported symbol no other module imports. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "unused-types": {
+          "description": "An exported type no other module uses. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "private-type-leaks": {
+          "description": "An exported signature referencing a same-file private type. Opt-in;\ndefaults to `off`.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
         "unused-dependencies": {
+          "description": "A declared `dependencies` entry never observed used. Defaults to\n`error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "unused-dev-dependencies": {
+          "description": "A declared `devDependencies` entry never observed used. Defaults to\n`warn`; production mode forces it to `off`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unused-optional-dependencies": {
+          "description": "A declared `optionalDependencies` entry never observed used. Defaults\nto `warn`; production mode forces it to `off`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unused-enum-members": {
+          "description": "An enum member read nowhere in the project. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "unused-class-members": {
+          "description": "A class member used nowhere; `usedClassMembers` and decorator\nexemptions carve out framework-invoked members. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
@@ -1314,50 +1332,62 @@
           "default": "warn"
         },
         "unresolved-imports": {
+          "description": "An import specifier that resolves to no file or package. Defaults to\n`error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "unlisted-dependencies": {
+          "description": "An imported package not declared in any relevant `package.json`.\nDefaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "duplicate-exports": {
+          "description": "The same export name provided by multiple modules; `ignoreExports`\nexcludes intentional barrel re-exports. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "type-only-dependencies": {
+          "description": "A production dependency imported only via type-only imports (a\n`devDependencies` candidate). Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "test-only-dependencies": {
+          "description": "A production dependency imported only by test files. Defaults to\n`warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "dev-dependencies-in-production": {
+          "description": "A `devDependencies` entry imported by production code, which a\nproduction-only install would omit and break at runtime. Defaults to\n`warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "circular-dependencies": {
+          "description": "A circular import chain between modules. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "re-export-cycle": {
+          "description": "A cycle or self-loop in the re-export subgraph (barrel files\nre-exporting from each other in a loop). Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "boundary-violation": {
+          "description": "An import crossing a forbidden architecture-boundary edge declared in\nthe `boundaries` config. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "coverage-gaps": {
+          "description": "A runtime file or export with no test dependency path. Opt-in;\ndefaults to `off`.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
         "feature-flags": {
+          "description": "A detected feature-flag pattern (tuned via the `flags` config).\nOpt-in; defaults to `off`.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
         "stale-suppressions": {
+          "description": "A `fallow-ignore` comment or `@expected-unused` tag that no longer\nmatches any issue. Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -1367,22 +1397,27 @@
           "default": "off"
         },
         "unused-catalog-entries": {
+          "description": "A `pnpm-workspace.yaml` catalog entry referenced by no workspace\npackage. Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "empty-catalog-groups": {
+          "description": "A named pnpm catalog group declaring no entries. Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unresolved-catalog-references": {
+          "description": "A workspace `package.json` `catalog:` / `catalog:<name>` reference\npointing at a catalog that does not declare the consumed package.\nDefaults to `error`; suppressible only via `ignoreCatalogReferences`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
         "unused-dependency-overrides": {
+          "description": "A pnpm `overrides:` / `pnpm.overrides` entry whose target package no\nworkspace `package.json` declares. Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "misconfigured-dependency-overrides": {
+          "description": "A pnpm `overrides:` / `pnpm.overrides` entry whose key or value cannot\nbe parsed into a valid pnpm shape. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
@@ -1759,6 +1794,7 @@
       "additionalProperties": false
     },
     "FixConfig": {
+      "description": "The `fix` config section: settings for `fallow fix` apply behavior.",
       "type": "object",
       "properties": {
         "catalog": {
@@ -1771,6 +1807,7 @@
       }
     },
     "CatalogFixConfig": {
+      "description": "The `fix.catalog` section: how `fallow fix` cleans up unused\n`pnpm-workspace.yaml` catalog entries.",
       "type": "object",
       "properties": {
         "deletePrecedingComments": {
@@ -1781,11 +1818,23 @@
       }
     },
     "CatalogPrecedingCommentPolicy": {
-      "type": "string",
-      "enum": [
-        "auto",
-        "always",
-        "never"
+      "description": "Value of `fix.catalog.deletePrecedingComments`: what happens to comment\nlines directly above a catalog entry that `fallow fix` removes. A\n`fallow-keep` marker in the block always preserves it regardless of policy.",
+      "oneOf": [
+        {
+          "description": "Delete the adjacent comment block only when heuristics attribute it to\nthe entry (preceded by a blank line or directly under the catalog\nheader) and it is not a section banner. The default.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Always delete the adjacent comment block with the entry.",
+          "type": "string",
+          "const": "always"
+        },
+        {
+          "description": "Never delete preceding comments.",
+          "type": "string",
+          "const": "never"
+        }
       ]
     },
     "ResolveConfig": {
@@ -1802,16 +1851,20 @@
       }
     },
     "ProductionConfig": {
+      "description": "Value of the `production` config key: excludes test/spec/story/dev files\nfrom discovery, either globally or per analysis family.",
       "anyOf": [
         {
+          "description": "Boolean form applying to every analysis. The default is `false`.",
           "type": "boolean"
         },
         {
+          "description": "Object form (`{ deadCode?, health?, dupes? }`) scoping production mode\nper analysis family.",
           "$ref": "#/$defs/PerAnalysisProductionConfig"
         }
       ]
     },
     "PerAnalysisProductionConfig": {
+      "description": "Object form of the `production` config key, scoping production mode to\nindividual analysis families in combined `fallow` and `fallow audit`.",
       "type": "object",
       "properties": {
         "deadCode": {
@@ -1859,6 +1912,7 @@
       "type": "object",
       "properties": {
         "unused-files": {
+          "description": "Optional override for [`RulesConfig::unused_files`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1869,6 +1923,7 @@
           ]
         },
         "unused-exports": {
+          "description": "Optional override for [`RulesConfig::unused_exports`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1879,6 +1934,7 @@
           ]
         },
         "unused-types": {
+          "description": "Optional override for [`RulesConfig::unused_types`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1889,6 +1945,7 @@
           ]
         },
         "private-type-leaks": {
+          "description": "Optional override for [`RulesConfig::private_type_leaks`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1899,6 +1956,7 @@
           ]
         },
         "unused-dependencies": {
+          "description": "Optional override for [`RulesConfig::unused_dependencies`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1909,6 +1967,7 @@
           ]
         },
         "unused-dev-dependencies": {
+          "description": "Optional override for [`RulesConfig::unused_dev_dependencies`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1919,6 +1978,7 @@
           ]
         },
         "unused-optional-dependencies": {
+          "description": "Optional override for [`RulesConfig::unused_optional_dependencies`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1929,6 +1989,7 @@
           ]
         },
         "unused-enum-members": {
+          "description": "Optional override for [`RulesConfig::unused_enum_members`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1939,6 +2000,7 @@
           ]
         },
         "unused-class-members": {
+          "description": "Optional override for [`RulesConfig::unused_class_members`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1949,6 +2011,7 @@
           ]
         },
         "unused-store-members": {
+          "description": "Optional override for [`RulesConfig::unused_store_members`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1959,6 +2022,7 @@
           ]
         },
         "unprovided-injects": {
+          "description": "Optional override for [`RulesConfig::unprovided_injects`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1969,6 +2033,7 @@
           ]
         },
         "unrendered-components": {
+          "description": "Optional override for [`RulesConfig::unrendered_components`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1979,6 +2044,7 @@
           ]
         },
         "unused-component-props": {
+          "description": "Optional override for [`RulesConfig::unused_component_props`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1989,6 +2055,7 @@
           ]
         },
         "unused-component-emits": {
+          "description": "Optional override for [`RulesConfig::unused_component_emits`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1999,6 +2066,7 @@
           ]
         },
         "unused-component-inputs": {
+          "description": "Optional override for [`RulesConfig::unused_component_inputs`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2009,6 +2077,7 @@
           ]
         },
         "unused-component-outputs": {
+          "description": "Optional override for [`RulesConfig::unused_component_outputs`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2019,6 +2088,7 @@
           ]
         },
         "unused-svelte-events": {
+          "description": "Optional override for [`RulesConfig::unused_svelte_events`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2029,6 +2099,7 @@
           ]
         },
         "unused-server-actions": {
+          "description": "Optional override for [`RulesConfig::unused_server_actions`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2039,6 +2110,7 @@
           ]
         },
         "unused-load-data-keys": {
+          "description": "Optional override for [`RulesConfig::unused_load_data_keys`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2049,6 +2121,7 @@
           ]
         },
         "prop-drilling": {
+          "description": "Optional override for [`RulesConfig::prop_drilling`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2059,6 +2132,7 @@
           ]
         },
         "thin-wrapper": {
+          "description": "Optional override for [`RulesConfig::thin_wrapper`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2069,6 +2143,7 @@
           ]
         },
         "duplicate-prop-shape": {
+          "description": "Optional override for [`RulesConfig::duplicate_prop_shape`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2079,6 +2154,7 @@
           ]
         },
         "css-token-drift": {
+          "description": "Optional override for [`RulesConfig::css_token_drift`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2089,6 +2165,7 @@
           ]
         },
         "css-duplicate-block": {
+          "description": "Optional override for [`RulesConfig::css_duplicate_block`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2099,6 +2176,7 @@
           ]
         },
         "css-selector-complexity": {
+          "description": "Optional override for [`RulesConfig::css_selector_complexity`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2109,6 +2187,7 @@
           ]
         },
         "css-dead-surface": {
+          "description": "Optional override for [`RulesConfig::css_dead_surface`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2119,6 +2198,7 @@
           ]
         },
         "css-broken-reference": {
+          "description": "Optional override for [`RulesConfig::css_broken_reference`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2129,6 +2209,7 @@
           ]
         },
         "unresolved-imports": {
+          "description": "Optional override for [`RulesConfig::unresolved_imports`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2139,6 +2220,7 @@
           ]
         },
         "unlisted-dependencies": {
+          "description": "Optional override for [`RulesConfig::unlisted_dependencies`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2149,6 +2231,7 @@
           ]
         },
         "duplicate-exports": {
+          "description": "Optional override for [`RulesConfig::duplicate_exports`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2159,6 +2242,7 @@
           ]
         },
         "type-only-dependencies": {
+          "description": "Optional override for [`RulesConfig::type_only_dependencies`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2169,6 +2253,7 @@
           ]
         },
         "test-only-dependencies": {
+          "description": "Optional override for [`RulesConfig::test_only_dependencies`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2179,6 +2264,7 @@
           ]
         },
         "dev-dependencies-in-production": {
+          "description": "Optional override for [`RulesConfig::dev_dependencies_in_production`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2189,6 +2275,7 @@
           ]
         },
         "circular-dependencies": {
+          "description": "Optional override for [`RulesConfig::circular_dependencies`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2199,6 +2286,7 @@
           ]
         },
         "re-export-cycle": {
+          "description": "Optional override for [`RulesConfig::re_export_cycle`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2209,6 +2297,7 @@
           ]
         },
         "boundary-violation": {
+          "description": "Optional override for [`RulesConfig::boundary_violation`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2219,6 +2308,7 @@
           ]
         },
         "coverage-gaps": {
+          "description": "Optional override for [`RulesConfig::coverage_gaps`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2229,6 +2319,7 @@
           ]
         },
         "feature-flags": {
+          "description": "Optional override for [`RulesConfig::feature_flags`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2239,6 +2330,7 @@
           ]
         },
         "stale-suppressions": {
+          "description": "Optional override for [`RulesConfig::stale_suppressions`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2249,6 +2341,7 @@
           ]
         },
         "require-suppression-reason": {
+          "description": "Optional override for [`RulesConfig::require_suppression_reason`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2259,6 +2352,7 @@
           ]
         },
         "unused-catalog-entries": {
+          "description": "Optional override for [`RulesConfig::unused_catalog_entries`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2269,6 +2363,7 @@
           ]
         },
         "empty-catalog-groups": {
+          "description": "Optional override for [`RulesConfig::empty_catalog_groups`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2279,6 +2374,7 @@
           ]
         },
         "unresolved-catalog-references": {
+          "description": "Optional override for [`RulesConfig::unresolved_catalog_references`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2289,6 +2385,7 @@
           ]
         },
         "unused-dependency-overrides": {
+          "description": "Optional override for [`RulesConfig::unused_dependency_overrides`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2299,6 +2396,7 @@
           ]
         },
         "misconfigured-dependency-overrides": {
+          "description": "Optional override for [`RulesConfig::misconfigured_dependency_overrides`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2309,6 +2407,7 @@
           ]
         },
         "security-client-server-leak": {
+          "description": "Optional override for [`RulesConfig::security_client_server_leak`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2319,6 +2418,7 @@
           ]
         },
         "security-sink": {
+          "description": "Optional override for [`RulesConfig::security_sink`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2329,6 +2429,7 @@
           ]
         },
         "policy-violation": {
+          "description": "Optional override for [`RulesConfig::policy_violation`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2339,6 +2440,7 @@
           ]
         },
         "invalid-client-export": {
+          "description": "Optional override for [`RulesConfig::invalid_client_export`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2349,6 +2451,7 @@
           ]
         },
         "mixed-client-server-barrel": {
+          "description": "Optional override for [`RulesConfig::mixed_client_server_barrel`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2359,6 +2462,7 @@
           ]
         },
         "misplaced-directive": {
+          "description": "Optional override for [`RulesConfig::misplaced_directive`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2369,6 +2473,7 @@
           ]
         },
         "route-collision": {
+          "description": "Optional override for [`RulesConfig::route_collision`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2379,6 +2484,7 @@
           ]
         },
         "dynamic-segment-name-conflict": {
+          "description": "Optional override for [`RulesConfig::dynamic_segment_name_conflict`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2391,6 +2497,7 @@
       }
     },
     "RegressionConfig": {
+      "description": "The `regression` config section holding the saved issue-count baseline for\nthe `--fail-on-regression` gate.",
       "type": "object",
       "properties": {
         "baseline": {
@@ -2407,6 +2514,7 @@
       }
     },
     "RegressionBaseline": {
+      "description": "Saved per-issue-type counts written by `--save-baseline` and compared by\n`--fail-on-regression`. Every count defaults to `0` when its key is missing,\nso hand-trimmed baselines stay loadable.",
       "type": "object",
       "properties": {
         "analysisIdentity": {
@@ -2422,126 +2530,147 @@
           }
         },
         "totalIssues": {
+          "description": "Baseline count across all issue types.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedFiles": {
+          "description": "Baseline count of `unused-files` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedExports": {
+          "description": "Baseline count of `unused-exports` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedTypes": {
+          "description": "Baseline count of `unused-types` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedDependencies": {
+          "description": "Baseline count of `unused-dependencies` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedDevDependencies": {
+          "description": "Baseline count of `unused-dev-dependencies` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedOptionalDependencies": {
+          "description": "Baseline count of `unused-optional-dependencies` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedEnumMembers": {
+          "description": "Baseline count of `unused-enum-members` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unusedClassMembers": {
+          "description": "Baseline count of `unused-class-members` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unresolvedImports": {
+          "description": "Baseline count of `unresolved-imports` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "unlistedDependencies": {
+          "description": "Baseline count of `unlisted-dependencies` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "duplicateExports": {
+          "description": "Baseline count of `duplicate-exports` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "circularDependencies": {
+          "description": "Baseline count of `circular-dependencies` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "reExportCycles": {
+          "description": "Baseline count of `re-export-cycle` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "typeOnlyDependencies": {
+          "description": "Baseline count of `type-only-dependencies` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "testOnlyDependencies": {
+          "description": "Baseline count of `test-only-dependencies` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "devDependenciesInProduction": {
+          "description": "Baseline count of `dev-dependencies-in-production` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "boundaryViolations": {
+          "description": "Baseline count of `boundary-violation` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "boundaryCoverageViolations": {
+          "description": "Baseline count of boundary-coverage-violation findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "boundaryCallViolations": {
+          "description": "Baseline count of boundary-call-violation findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 0
         },
         "policyViolations": {
+          "description": "Baseline count of `policy-violation` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
@@ -2658,6 +2787,7 @@
       ]
     },
     "AuditConfig": {
+      "description": "The `audit` config section: in-repo defaults for `fallow audit`, each\noverridable by its matching CLI flag.",
       "type": "object",
       "properties": {
         "gate": {
@@ -2718,13 +2848,22 @@
       }
     },
     "AuditGate": {
-      "type": "string",
-      "enum": [
-        "new-only",
-        "all"
+      "description": "Value of `audit.gate`: which findings drive the `fallow audit` verdict.",
+      "oneOf": [
+        {
+          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. The default.",
+          "type": "string",
+          "const": "new-only"
+        },
+        {
+          "description": "Fail on every finding in changed files, skipping the attribution pass.",
+          "type": "string",
+          "const": "all"
+        }
       ]
     },
     "CacheConfig": {
+      "description": "The `cache` config section: location and size ceiling of fallow's\npersistent caches (default directory `<root>/.fallow`).",
       "type": "object",
       "properties": {
         "dir": {

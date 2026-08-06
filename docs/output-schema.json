@@ -18,12 +18,15 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Combined output schema version.",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "_meta": {
@@ -34,7 +37,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Per-section `_meta` blocks, when `--explain` was passed."
         },
         "check": {
           "anyOf": [
@@ -44,7 +48,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Dead-code section of the combined run."
         },
         "dupes": {
           "anyOf": [
@@ -54,7 +59,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Duplication section of the combined run."
         },
         "health": {
           "anyOf": [
@@ -64,7 +70,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Health section of the combined run."
         },
         "next_steps": {
           "type": "array",
@@ -86,22 +93,28 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Audit output schema version.",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "command": {
+          "description": "Command discriminator singleton: always `audit`.",
           "$ref": "#/definitions/AuditCommand"
         },
         "verdict": {
+          "description": "Gate verdict for the audited change.",
           "$ref": "#/definitions/AuditVerdict"
         },
         "changed_files_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of changed files in the audit scope."
         },
         "base_ref": {
-          "type": "string"
+          "type": "string",
+          "description": "Git ref the change was diffed against."
         },
         "base_description": {
           "type": [
@@ -114,21 +127,26 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Commit SHA of the audited head tree, when resolvable."
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "base_snapshot_skipped": {
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "description": "True when base-snapshot analysis was skipped, so new-vs-inherited\nattribution could not run."
         },
         "summary": {
+          "description": "Aggregate finding counts for the audited change.",
           "$ref": "#/definitions/AuditSummary"
         },
         "attribution": {
+          "description": "New-vs-inherited attribution of findings against the base.",
           "$ref": "#/definitions/AuditAttribution"
         },
         "_meta": {
@@ -139,7 +157,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block with metric / rule definitions, when `--explain` was\npassed."
         },
         "dead_code": {
           "anyOf": [
@@ -149,7 +168,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Dead-code findings scoped to the audit changeset."
         },
         "duplication": {
           "anyOf": [
@@ -159,7 +179,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Duplication findings scoped to the audit changeset."
         },
         "complexity": {
           "anyOf": [
@@ -169,7 +190,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Complexity findings scoped to the audit changeset."
         },
         "next_steps": {
           "type": "array",
@@ -201,25 +223,32 @@
       "type": "object",
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Issue-type identifier, e.g. `unused-export`."
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable issue-type name."
         },
         "summary": {
-          "type": "string"
+          "type": "string",
+          "description": "One-line description of what the issue type reports."
         },
         "rationale": {
-          "type": "string"
+          "type": "string",
+          "description": "Why the issue matters."
         },
         "example": {
-          "type": "string"
+          "type": "string",
+          "description": "Illustrative code example of the issue."
         },
         "how_to_fix": {
-          "type": "string"
+          "type": "string",
+          "description": "How to resolve findings of this type."
         },
         "docs": {
-          "type": "string"
+          "type": "string",
+          "description": "Public documentation URL for the issue type."
         }
       },
       "required": [
@@ -238,9 +267,11 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Setup output schema version; serialized as the string `\"1\"`.",
           "$ref": "#/definitions/CoverageSetupSchemaVersion"
         },
         "framework_detected": {
+          "description": "Framework detected at the project root.",
           "$ref": "#/definitions/CoverageSetupFramework"
         },
         "package_manager": {
@@ -251,58 +282,71 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Package manager detected from lockfiles, when one was found."
         },
         "runtime_targets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageSetupRuntimeTarget"
-          }
+          },
+          "description": "Runtimes the instrumentation must cover at the project root."
         },
         "members": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageSetupMember"
-          }
+          },
+          "description": "Per-member setup guidance for workspace projects."
         },
-        "config_written": true,
+        "config_written": {
+          "description": "Coverage config that was written to disk, when setup wrote one."
+        },
         "commands": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Shell commands the user should run to complete setup."
         },
         "files_to_edit": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageSetupFileToEdit"
-          }
+          },
+          "description": "Files the user must edit by hand, with reasons."
         },
         "snippets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageSetupSnippet"
-          }
+          },
+          "description": "Ready-to-paste code snippets for the files to edit."
         },
         "dockerfile_snippet": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Dockerfile additions needed for containerized capture, when relevant."
         },
         "next_steps": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Ordered human-readable follow-up instructions."
         },
         "warnings": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Non-fatal problems encountered during detection."
         },
-        "_meta": true
+        "_meta": {
+          "description": "`_meta` block with docs and field definitions, when requested."
+        }
       },
       "required": [
         "schema_version",
@@ -322,12 +366,15 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "Package name of the workspace member."
         },
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "Member path relative to the workspace root."
         },
         "framework_detected": {
+          "description": "Framework detected for this member.",
           "$ref": "#/definitions/CoverageSetupFramework"
         },
         "package_manager": {
@@ -338,37 +385,43 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Package manager detected for this member, when one was found."
         },
         "runtime_targets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageSetupRuntimeTarget"
-          }
+          },
+          "description": "Runtimes the instrumentation must cover for this member."
         },
         "files_to_edit": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageSetupFileToEdit"
-          }
+          },
+          "description": "Files the user must edit by hand, with reasons."
         },
         "snippets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageSetupSnippet"
-          }
+          },
+          "description": "Ready-to-paste code snippets for the files to edit."
         },
         "dockerfile_snippet": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Dockerfile additions needed for containerized capture, when relevant."
         },
         "warnings": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Non-fatal problems encountered during detection."
         }
       },
       "required": [
@@ -379,56 +432,68 @@
         "files_to_edit",
         "snippets",
         "warnings"
-      ]
+      ],
+      "description": "Per-workspace-member setup guidance inside [`CoverageSetupOutput::members`]."
     },
     "CoverageSetupFileToEdit": {
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "reason": {
-          "type": "string"
+          "type": "string",
+          "description": "Why the file needs editing."
         }
       },
       "required": [
         "path",
         "reason"
-      ]
+      ],
+      "description": "One manual edit the user must make to wire up coverage capture."
     },
     "CoverageSetupSnippet": {
       "type": "object",
       "properties": {
         "label": {
-          "type": "string"
+          "type": "string",
+          "description": "Short description of what the snippet does."
         },
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path the snippet belongs in."
         },
         "content": {
-          "type": "string"
+          "type": "string",
+          "description": "The snippet source text."
         }
       },
       "required": [
         "label",
         "path",
         "content"
-      ]
+      ],
+      "description": "Ready-to-paste code snippet accompanying a file edit."
     },
     "CheckOutput": {
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Dead-code output schema version; currently [`CHECK_SCHEMA_VERSION`].",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "total_issues": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total findings across all issue arrays; excludes `next_steps`."
         },
         "entry_points": {
           "anyOf": [
@@ -438,9 +503,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Entry-point totals per source, when the analysis recorded them."
         },
         "summary": {
+          "description": "Per-category finding counts.",
           "$ref": "#/definitions/CheckSummary"
         },
         "unused_files": {
@@ -770,7 +837,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Count deltas against the matched baseline, in baseline runs."
         },
         "baseline": {
           "anyOf": [
@@ -780,7 +848,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Which baseline snapshot was matched, in baseline runs."
         },
         "regression": {
           "anyOf": [
@@ -790,7 +859,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Regression verdict against the baseline, in `--fail-on-regression` runs."
         },
         "_meta": {
           "anyOf": [
@@ -800,13 +870,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
         },
         "workspace_diagnostics": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
-          }
+          },
+          "description": "Workspace-discovery diagnostics surfaced during config load."
         },
         "next_steps": {
           "type": "array",
@@ -844,25 +916,31 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Dead-code output schema version; currently [`CHECK_SCHEMA_VERSION`].",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "grouped_by": {
+          "description": "Resolver the issues were grouped by.",
           "$ref": "#/definitions/GroupByMode"
         },
         "total_issues": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total findings across all groups."
         },
         "groups": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CheckGroupedEntry"
-          }
+          },
+          "description": "One bucket per resolver key."
         },
         "_meta": {
           "anyOf": [
@@ -872,7 +950,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
         },
         "workspace_diagnostics": {
           "type": "array",
@@ -904,7 +983,8 @@
       "type": "object",
       "properties": {
         "key": {
-          "type": "string"
+          "type": "string",
+          "description": "Resolver key: team name, directory prefix, package name, or section."
         },
         "owners": {
           "type": [
@@ -913,10 +993,12 @@
           ],
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Owners of a GitLab CODEOWNERS section; present for section grouping."
         },
         "total_issues": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings in this group."
         },
         "unused_files": {
           "type": "array",
@@ -1262,12 +1344,15 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Health output schema version.",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "findings": {
@@ -1470,7 +1555,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Grouping mode when `--group-by` was passed."
         },
         "groups": {
           "type": [
@@ -1479,7 +1565,8 @@
           ],
           "items": {
             "$ref": "#/definitions/HealthGroup"
-          }
+          },
+          "description": "Per-bucket recomputed metrics; present only in grouped output."
         },
         "_meta": {
           "anyOf": [
@@ -1489,13 +1576,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block with metric definitions, when `--explain` was passed."
         },
         "workspace_diagnostics": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
-          }
+          },
+          "description": "Workspace-discovery diagnostics surfaced during config load."
         },
         "next_steps": {
           "type": "array",
@@ -1733,15 +1822,19 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Analyze output schema version; serialized as the string `\"1\"`.",
           "$ref": "#/definitions/CoverageAnalyzeSchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "runtime_coverage": {
+          "description": "Runtime-coverage report body.",
           "$ref": "#/definitions/RuntimeCoverageReport"
         },
         "_meta": {
@@ -1752,7 +1845,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block with docs and metric definitions, when `--explain` was\npassed."
         }
       },
       "required": [
@@ -1761,7 +1855,8 @@
         "elapsed_ms",
         "runtime_coverage"
       ],
-      "title": "fallow coverage analyze --format json"
+      "title": "fallow coverage analyze --format json",
+      "description": "Envelope emitted by `fallow coverage analyze --format json`."
     },
     "RuntimeCoverageSummary": {
       "type": "object",
@@ -1863,46 +1958,122 @@
       "description": "Quality-of-capture signals emitted by the sidecar so the CLI can explain\nshort-window captures honestly instead of letting users blame the tool."
     },
     "RuntimeCoverageReportVerdict": {
-      "type": "string",
-      "enum": [
-        "clean",
-        "hot-path-touched",
-        "cold-code-detected",
-        "license-expired-grace",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "clean",
+          "description": "No actionable runtime-coverage signal."
+        },
+        {
+          "type": "string",
+          "const": "hot-path-touched",
+          "description": "The current change touches a runtime hot path."
+        },
+        {
+          "type": "string",
+          "const": "cold-code-detected",
+          "description": "Runtime-cold code was detected."
+        },
+        {
+          "type": "string",
+          "const": "license-expired-grace",
+          "description": "The license expired; output is in grace mode."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "No verdict could be derived."
+        }
       ],
       "description": "Top-level verdict for the whole runtime-coverage report. Mirrors\n`fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most\nactionable finding; for the full set of findings see\n[`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`\nabove `cold-code-detected` in PR-review context (when the CLI was\ngiven a change-scope: `--diff-file` or `--changed-since`) because the\ntouched-hot-path is event-tied to the current diff and reviewers need\nit to be the top-line signal. In standalone analysis (no change\nscope), `cold-code-detected` remains primary."
     },
     "RuntimeCoverageVerdict": {
-      "type": "string",
-      "enum": [
-        "safe_to_delete",
-        "review_required",
-        "coverage_unavailable",
-        "low_traffic",
-        "active",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "safe_to_delete",
+          "description": "Statically unused and never invoked; delete candidate."
+        },
+        {
+          "type": "string",
+          "const": "review_required",
+          "description": "Signals conflict; a human should review before acting."
+        },
+        {
+          "type": "string",
+          "const": "coverage_unavailable",
+          "description": "The function could not be tracked, so no runtime verdict exists."
+        },
+        {
+          "type": "string",
+          "const": "low_traffic",
+          "description": "Tracked and invoked, but below the low-traffic threshold."
+        },
+        {
+          "type": "string",
+          "const": "active",
+          "description": "Tracked and actively invoked; omitted from `findings`."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "No verdict could be derived."
+        }
       ],
       "description": "Protocol-level per-function runtime coverage verdict derived from the\ndecision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings`\narray omits `active` entries even though the underlying enum still includes\nit."
     },
     "RuntimeCoverageSignal": {
-      "type": "string",
-      "enum": [
-        "license-expired-grace",
-        "cold-code-detected",
-        "hot-path-touched"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "license-expired-grace",
+          "description": "The license expired; output is in grace mode."
+        },
+        {
+          "type": "string",
+          "const": "cold-code-detected",
+          "description": "Runtime-cold code was detected."
+        },
+        {
+          "type": "string",
+          "const": "hot-path-touched",
+          "description": "The current change touches a runtime hot path."
+        }
       ],
       "description": "Discrete signal captured during runtime-coverage post-processing.\n`verdict` collapses to one summary value; `signals` enumerates ALL\nfindings the report carries so JSON consumers, CI dashboards, and\nagents can reason about them independently of the headline. Order is\nstable: severity-descending so the first entry mirrors a sensible\nnon-PR-context verdict."
     },
     "RuntimeCoverageConfidence": {
-      "type": "string",
-      "enum": [
-        "very_high",
-        "high",
-        "medium",
-        "low",
-        "none",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "very_high",
+          "description": "All evidence agrees and the observation volume is deep."
+        },
+        {
+          "type": "string",
+          "const": "high",
+          "description": "Strong evidence with adequate observation volume."
+        },
+        {
+          "type": "string",
+          "const": "medium",
+          "description": "Evidence is consistent but the observation volume is limited."
+        },
+        {
+          "type": "string",
+          "const": "low",
+          "description": "Sparse or conflicting evidence."
+        },
+        {
+          "type": "string",
+          "const": "none",
+          "description": "No usable evidence for this finding."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "Confidence could not be derived."
+        }
       ],
       "description": "Confidence level for a runtime coverage finding."
     },
@@ -1947,11 +2118,22 @@
       "description": "Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`)."
     },
     "RuntimeCoverageWatermark": {
-      "type": "string",
-      "enum": [
-        "trial-expired",
-        "license-expired-grace",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "trial-expired",
+          "description": "The trial period ended."
+        },
+        {
+          "type": "string",
+          "const": "license-expired-grace",
+          "description": "The license expired but grace-mode output continues."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "Watermark state could not be derived."
+        }
       ],
       "description": "License or trial watermark applied to runtime coverage output."
     },
@@ -1963,7 +2145,8 @@
           "description": "Action identifier, normalized to `type` in JSON output. Known values\nemitted by `fallow coverage analyze`: `delete-cold-code`\n(verdict=safe_to_delete), `review-runtime` (verdict=review_required).\nThe sidecar may emit additional protocol-specific identifiers;\nconsumers should treat unknown values as forward-compat extensions."
         },
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable action description."
         },
         "auto_fixable": {
           "type": "boolean",
@@ -1981,7 +2164,8 @@
       "type": "object",
       "properties": {
         "code": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable machine-readable warning code."
         },
         "message": {
           "type": "string",
@@ -1991,7 +2175,8 @@
       "required": [
         "code",
         "message"
-      ]
+      ],
+      "description": "Non-fatal diagnostic emitted while merging runtime coverage."
     },
     "RuntimeCoverageFinding": {
       "type": "object",
@@ -2027,6 +2212,7 @@
           "description": "1-indexed line number the function starts on."
         },
         "verdict": {
+          "description": "Per-function runtime verdict from the protocol decision table.",
           "$ref": "#/definitions/RuntimeCoverageVerdict"
         },
         "invocations": {
@@ -2037,9 +2223,11 @@
           "description": "Raw V8 invocation count. `None` when the function was untracked\n(lazy-parsed, worker thread, or dynamic code)."
         },
         "confidence": {
+          "description": "Confidence in the verdict.",
           "$ref": "#/definitions/RuntimeCoverageConfidence"
         },
         "evidence": {
+          "description": "Static, test, and tracking evidence behind the verdict.",
           "$ref": "#/definitions/RuntimeCoverageEvidence"
         },
         "actions": {
@@ -2069,7 +2257,8 @@
         "verdict",
         "confidence",
         "evidence"
-      ]
+      ],
+      "description": "One per-function runtime-coverage finding in `runtime_coverage.findings`."
     },
     "RuntimeCoverageHotPath": {
       "type": "object",
@@ -2125,14 +2314,26 @@
         "end_line",
         "invocations",
         "percentile"
-      ]
+      ],
+      "description": "One hot function in `runtime_coverage.hot_paths`, ranked by invocations."
     },
     "RuntimeCoverageRiskBand": {
-      "type": "string",
-      "enum": [
-        "low",
-        "medium",
-        "high"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "low",
+          "description": "Small caller footprint."
+        },
+        {
+          "type": "string",
+          "const": "medium",
+          "description": "Moderate caller footprint."
+        },
+        {
+          "type": "string",
+          "const": "high",
+          "description": "Wide caller footprint; changes ripple far."
+        }
       ],
       "description": "Blast-radius risk band. The current thresholds are high at >=20 static\ncallers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers\nor >=50,000 weighted reach; low otherwise."
     },
@@ -2178,6 +2379,7 @@
           "description": "Distinct deploy SHAs that touched the function in the observation\nwindow. Cloud mode only; omitted in local mode."
         },
         "risk_band": {
+          "description": "Risk band derived from caller counts and traffic-weighted reach.",
           "$ref": "#/definitions/RuntimeCoverageRiskBand"
         }
       },
@@ -2189,7 +2391,8 @@
         "caller_count",
         "caller_count_weighted_by_traffic",
         "risk_band"
-      ]
+      ],
+      "description": "One blast-radius entry in `runtime_coverage.blast_radius`: how far a\nchange to the function would ripple."
     },
     "RuntimeCoverageImportanceEntry": {
       "type": "object",
@@ -2248,7 +2451,8 @@
         "owner_count",
         "importance_score",
         "reason"
-      ]
+      ],
+      "description": "One production-importance entry in `runtime_coverage.importance`, scoring\nhow much a function matters in production."
     },
     "DuplicationReport": {
       "type": "object",
@@ -2492,12 +2696,15 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Duplication output schema version.",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "clone_groups": {
@@ -2533,13 +2740,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Grouping mode when `--group-by` was passed."
         },
         "total_issues": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Total finding count across all groups; present only in grouped output."
         },
         "groups": {
           "type": [
@@ -2548,7 +2757,8 @@
           ],
           "items": {
             "$ref": "#/definitions/DuplicationGroup"
-          }
+          },
+          "description": "Grouped findings; present only in grouped output."
         },
         "_meta": {
           "anyOf": [
@@ -2668,22 +2878,28 @@
       "type": "object",
       "properties": {
         "files_analyzed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Files included in the health analysis."
         },
         "functions_analyzed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Functions scored across the analyzed files."
         },
         "functions_above_threshold": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Functions exceeding at least one complexity or CRAP threshold."
         },
         "max_cyclomatic_threshold": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Global cyclomatic-complexity ceiling for this run."
         },
         "max_cognitive_threshold": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Global cognitive-complexity ceiling for this run."
         },
         "max_crap_threshold": {
-          "type": "number"
+          "type": "number",
+          "description": "Global CRAP-score ceiling for this run."
         },
         "max_unit_size_threshold": {
           "type": "integer",
@@ -2693,13 +2909,15 @@
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Files with a computed maintainability score; absent when file scoring\ndid not run."
         },
         "average_maintainability": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Mean maintainability index over scored files (0-100)."
         },
         "coverage_model": {
           "anyOf": [
@@ -2709,7 +2927,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Coverage model behind the CRAP scores, when coverage was used."
         },
         "coverage_source_consistency": {
           "anyOf": [
@@ -2719,28 +2938,34 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Whether CRAP findings mix coverage sources."
         },
         "istanbul_matched": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Functions matched against the Istanbul coverage file, in Istanbul mode."
         },
         "istanbul_total": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Functions in the Istanbul coverage file, in Istanbul mode."
         },
         "severity_critical_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings with critical severity."
         },
         "severity_high_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings with high severity."
         },
         "severity_moderate_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings with moderate severity."
         },
         "baseline_staleness": {
           "anyOf": [
@@ -2772,28 +2997,36 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "Function name, or a synthesized name for anonymous functions."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based line the function starts on."
         },
         "col": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based column the function starts on."
         },
         "cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cyclomatic complexity of the function."
         },
         "cognitive": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cognitive complexity of the function."
         },
         "line_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines of code in the function body."
         },
         "param_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of declared parameters."
         },
         "react_hook_count": {
           "type": "integer",
@@ -2819,22 +3052,26 @@
           "description": "Per-kind React hook breakdown (state/effect/memo/callback/custom) plus\nthe max `useEffect` dependency-array arity, derived from the cached\n`hook_uses` IR at the health layer. Descriptive refinement of\n`react_hook_count`; present only when at least one component-scope hook\nwas attributed, so non-React findings stay byte-identical."
         },
         "exceeded": {
+          "description": "Which metric crossed its threshold.",
           "$ref": "#/definitions/ExceededThreshold"
         },
         "severity": {
+          "description": "Finding severity derived from how far thresholds were crossed.",
           "$ref": "#/definitions/FindingSeverity"
         },
         "crap": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "CRAP score (change risk anti-pattern), when coverage data exists."
         },
         "coverage_pct": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Test coverage percentage (0-100) backing the CRAP score."
         },
         "coverage_tier": {
           "anyOf": [
@@ -2844,7 +3081,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Coverage tier bucket derived from `coverage_pct`."
         },
         "coverage_source": {
           "anyOf": [
@@ -2854,13 +3092,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Provenance of the coverage signal."
         },
         "inherited_from": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Component file the inherited coverage estimate came from, for\ncomponent-inherited coverage."
         },
         "component_rollup": {
           "anyOf": [
@@ -2870,7 +3110,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Aggregate of the enclosing component's findings, when rolled up."
         },
         "contributions": {
           "type": "array",
@@ -2935,16 +3176,20 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "Function name, or a synthesized name for anonymous functions."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based line the function starts on."
         },
         "line_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines of code in the function body."
         }
       },
       "required": [
@@ -2959,40 +3204,52 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "fan_in": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Modules importing this file."
         },
         "fan_out": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Modules this file imports."
         },
         "dead_code_ratio": {
-          "type": "number"
+          "type": "number",
+          "description": "Unused exports as a fraction of the file's exports, in `[0, 1]`."
         },
         "complexity_density": {
-          "type": "number"
+          "type": "number",
+          "description": "Total cyclomatic complexity per line of code."
         },
         "maintainability_index": {
-          "type": "number"
+          "type": "number",
+          "description": "Maintainability index (0-100); higher is healthier."
         },
         "total_cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Summed cyclomatic complexity over the file's functions."
         },
         "total_cognitive": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Summed cognitive complexity over the file's functions."
         },
         "function_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Functions in the file."
         },
         "lines": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines of code in the file."
         },
         "crap_max": {
-          "type": "number"
+          "type": "number",
+          "description": "Highest CRAP score among the file's functions."
         },
         "crap_above_threshold": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Functions whose CRAP score exceeds the threshold."
         }
       },
       "required": [
@@ -3015,30 +3272,39 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "score": {
-          "type": "number"
+          "type": "number",
+          "description": "Churn-times-complexity hotspot score; higher is riskier."
         },
         "commits": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Commits touching the file in the analysis window."
         },
         "weighted_commits": {
-          "type": "number"
+          "type": "number",
+          "description": "Recency-weighted commit count."
         },
         "lines_added": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines added to the file in the analysis window."
         },
         "lines_deleted": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines deleted from the file in the analysis window."
         },
         "complexity_density": {
-          "type": "number"
+          "type": "number",
+          "description": "Total cyclomatic complexity per line of code."
         },
         "fan_in": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Modules importing this file."
         },
         "trend": {
+          "description": "Whether churn is rising, falling, or steady over the window.",
           "$ref": "#/definitions/ChurnTrend"
         },
         "ownership": {
@@ -3049,10 +3315,12 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Ownership metrics, when ownership analysis ran."
         },
         "is_test_path": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True for files matched by test-path patterns; omitted when false."
         }
       },
       "required": [
@@ -3072,49 +3340,59 @@
       "type": "object",
       "properties": {
         "bus_factor": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Minimum contributors covering half the file's commits."
         },
         "contributor_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Distinct contributors touching the file in the window."
         },
         "top_contributor": {
+          "description": "Contributor with the largest commit share.",
           "$ref": "#/definitions/ContributorEntry"
         },
         "recent_contributors": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/ContributorEntry"
-          }
+          },
+          "description": "Contributors active in the recent window; omitted when empty."
         },
         "suggested_reviewers": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/ContributorEntry"
-          }
+          },
+          "description": "Contributors best positioned to review changes; omitted when empty."
         },
         "declared_owner": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Owner declared in CODEOWNERS, when one matches the file."
         },
         "unowned": {
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "description": "Whether no owner could be resolved; `null` when ownership resolution\ndid not run."
         },
         "ownership_state": {
+          "description": "Ownership lifecycle state.",
           "$ref": "#/definitions/OwnershipState"
         },
         "drift": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when recent contributions drift away from the declared ownership."
         },
         "drift_reason": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Human-readable explanation of the drift, when drifting."
         }
       },
       "required": [
@@ -3123,25 +3401,31 @@
         "top_contributor",
         "ownership_state",
         "drift"
-      ]
+      ],
+      "description": "Ownership metrics for a hotspot file, derived from git history and\nCODEOWNERS declarations."
     },
     "ContributorEntry": {
       "type": "object",
       "properties": {
         "identifier": {
-          "type": "string"
+          "type": "string",
+          "description": "Contributor identifier, encoded per `format`."
         },
         "format": {
+          "description": "How `identifier` is encoded (raw, handle, anonymized, or hash).",
           "$ref": "#/definitions/ContributorIdentifierFormat"
         },
         "share": {
-          "type": "number"
+          "type": "number",
+          "description": "Contributor's share of the file's commits, in `[0, 1]`."
         },
         "stale_days": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Days since the contributor's last commit to the file."
         },
         "commits": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Contributor's commits touching the file in the window."
         }
       },
       "required": [
@@ -3150,25 +3434,31 @@
         "share",
         "stale_days",
         "commits"
-      ]
+      ],
+      "description": "One contributor row in ownership metrics."
     },
     "HotspotSummary": {
       "type": "object",
       "properties": {
         "since": {
-          "type": "string"
+          "type": "string",
+          "description": "Start of the churn window, as passed to `git log --since`."
         },
         "min_commits": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Minimum commit count for a file to qualify as a hotspot."
         },
         "files_analyzed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Files with churn data in the window."
         },
         "files_excluded": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Files excluded by test-path and ignore filters."
         },
         "shallow_clone": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when the repository is a shallow clone, so churn counts are\ntruncated."
         }
       },
       "required": [
@@ -3177,7 +3467,8 @@
         "files_analyzed",
         "files_excluded",
         "shallow_clone"
-      ]
+      ],
+      "description": "Scope metadata for the hotspot analysis."
     },
     "RefactoringTarget": {
       "type": "object",
@@ -3237,7 +3528,8 @@
         "category",
         "effort",
         "confidence"
-      ]
+      ],
+      "description": "One prioritized refactoring recommendation in the health report's\n`refactoring_targets` section."
     },
     "TargetThresholds": {
       "type": "object",
@@ -3500,15 +3792,19 @@
       "type": "object",
       "properties": {
         "formula_version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Score formula version; see [`HEALTH_SCORE_FORMULA_VERSION`]."
         },
         "score": {
-          "type": "number"
+          "type": "number",
+          "description": "Health score in `[0, 100]`; higher is healthier."
         },
         "grade": {
-          "type": "string"
+          "type": "string",
+          "description": "Letter grade from [`letter_grade`] (A>=85, B>=70, C>=55, D>=40, F<40)."
         },
         "penalties": {
+          "description": "Per-component penalty breakdown.",
           "$ref": "#/definitions/HealthScorePenalties"
         }
       },
@@ -3517,7 +3813,8 @@
         "score",
         "grade",
         "penalties"
-      ]
+      ],
+      "description": "Overall project health score: 100 minus capped per-category penalties."
     },
     "HealthScorePenalties": {
       "type": "object",
@@ -3526,43 +3823,51 @@
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for unreachable files; absent when dead-code data\nwas not available."
         },
         "dead_exports": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for unused exports; absent when dead-code data was\nnot available."
         },
         "complexity": {
-          "type": "number"
+          "type": "number",
+          "description": "Points subtracted for overall complexity load."
         },
         "p90_complexity": {
-          "type": "number"
+          "type": "number",
+          "description": "Points subtracted for the complexity tail (v1: p90 cyclomatic; v2:\ncritical-complexity density)."
         },
         "maintainability": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for low maintainability-index files; absent when\nfile scores were not computed."
         },
         "hotspots": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for churn-times-complexity hotspots; absent without\ngit history."
         },
         "unused_deps": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for unused dependencies; absent when dead-code data\nwas not available."
         },
         "circular_deps": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for circular dependency chains; absent when\ndead-code data was not available."
         },
         "unit_size": {
           "type": [
@@ -3575,13 +3880,15 @@
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for fan-in coupling concentration; absent when the\nmodule graph was not available."
         },
         "duplication": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Points subtracted for duplicated code; absent when the duplication\npipeline did not run."
         },
         "prop_drilling": {
           "type": [
@@ -5388,27 +5695,34 @@
       "type": "object",
       "properties": {
         "type": {
+          "description": "CodeClimate `type` discriminator; always `issue`.",
           "$ref": "#/definitions/CodeClimateIssueKind"
         },
         "check_name": {
-          "type": "string"
+          "type": "string",
+          "description": "Fallow rule identifier, e.g. `fallow/unused-file`."
         },
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable finding description."
         },
         "categories": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "CodeClimate category labels, e.g. `Clarity` or `Duplication`."
         },
         "severity": {
+          "description": "CodeClimate severity mapped from the configured rule severity.",
           "$ref": "#/definitions/CodeClimateSeverity"
         },
         "fingerprint": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable finding fingerprint GitLab uses to track issues across pushes."
         },
         "location": {
+          "description": "File and begin-line location of the finding.",
           "$ref": "#/definitions/CodeClimateLocation"
         },
         "owner": {
@@ -5484,22 +5798,28 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the repository root."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based line on the new side of the diff."
         },
         "side": {
+          "description": "Diff side; always `RIGHT` (the new side).",
           "$ref": "#/definitions/GitHubReviewSide"
         },
         "body": {
-          "type": "string"
+          "type": "string",
+          "description": "Comment body markdown, fingerprint marker included."
         },
         "fingerprint": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable finding fingerprint used for comment reconciliation."
         },
         "truncated": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when the body was cut to fit the provider size limit; omitted\nwhen false."
         }
       },
       "required": [
@@ -5515,16 +5835,20 @@
       "type": "object",
       "properties": {
         "body": {
-          "type": "string"
+          "type": "string",
+          "description": "Comment body markdown, fingerprint marker included."
         },
         "position": {
+          "description": "Diff position anchoring the discussion.",
           "$ref": "#/definitions/GitLabReviewPosition"
         },
         "fingerprint": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable finding fingerprint used for comment reconciliation."
         },
         "truncated": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when the body was cut to fit the provider size limit; omitted\nwhen false."
         }
       },
       "required": [
@@ -5541,31 +5865,38 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Merge-base SHA of the MR diff; absent when refs were not supplied."
         },
         "start_sha": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "First commit SHA of the MR diff; absent when refs were not supplied."
         },
         "head_sha": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Head commit SHA of the MR diff; absent when refs were not supplied."
         },
         "position_type": {
+          "description": "Position type; always `text`.",
           "$ref": "#/definitions/GitLabReviewPositionType"
         },
         "old_path": {
-          "type": "string"
+          "type": "string",
+          "description": "Pre-rename path when the diff renamed the file, else the same as\n`new_path`."
         },
         "new_path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path on the new side of the diff."
         },
         "new_line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based line on the new side of the diff."
         }
       },
       "required": [
@@ -5580,82 +5911,100 @@
       "type": "object",
       "properties": {
         "schema": {
+          "description": "Reconcile schema version tag.",
           "$ref": "#/definitions/ReviewReconcileSchema"
         },
         "provider": {
+          "description": "Provider whose comments were reconciled.",
           "$ref": "#/definitions/ReviewProvider"
         },
         "target": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "PR / MR reference that was reconciled, when one was resolved."
         },
         "dry_run": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when no provider mutations were performed."
         },
         "comments": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Inline comments in the review envelope being reconciled."
         },
         "current_fingerprints": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Distinct fingerprints in the current run's findings."
         },
         "existing_fingerprints": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Distinct fingerprints found in existing comments."
         },
         "new_fingerprints": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Fingerprints present in the current run but not yet commented."
         },
         "stale_fingerprints": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Fingerprints commented earlier whose findings no longer exist."
         },
         "new": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The new fingerprints themselves."
         },
         "stale": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The stale fingerprints themselves."
         },
         "provider_warning": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Non-fatal provider API warning encountered during reconciliation."
         },
         "resolution_comments_posted": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Resolution replies posted to stale comment threads."
         },
         "threads_resolved": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Stale discussion threads resolved (GitLab)."
         },
         "apply_hint": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Remediation guidance when the apply loop stopped before finishing."
         },
         "apply_errors": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Errors encountered while applying provider mutations."
         },
         "failed_fingerprints": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Fingerprints whose provider mutation failed."
         },
         "unapplied_fingerprints": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Fingerprints left unprocessed after a failure aborted the apply loop."
         }
       },
       "required": [
@@ -5719,31 +6068,37 @@
           "description": "Total number of exports across all files."
         },
         "dead_files": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of unreachable files."
         },
         "dead_exports": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of unused exports."
         },
         "duplicated_lines": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Lines inside detected clones; absent when duplication did not run."
         },
         "total_lines": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Lines scanned by duplication; absent when duplication did not run."
         },
         "files_scored": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Files with a computed maintainability score; absent when file scoring\ndid not run."
         },
         "total_deps": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total declared dependencies across manifest sections."
         }
       },
       "required": [
@@ -6796,11 +7151,22 @@
       "description": "Single `ignoreExports` rule entry. The fallow config accepts an array of\nthese under the `ignoreExports` key."
     },
     "CoverageModel": {
-      "type": "string",
-      "enum": [
-        "static_binary",
-        "static_estimated",
-        "istanbul"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "static_binary",
+          "description": "Legacy binary tested/untested static model; no longer produced."
+        },
+        {
+          "type": "string",
+          "const": "static_estimated",
+          "description": "Coverage estimated from static test reachability."
+        },
+        {
+          "type": "string",
+          "const": "istanbul",
+          "description": "Coverage measured from Istanbul runtime data."
+        }
       ],
       "description": "Coverage model used for CRAP score computation."
     },
@@ -6865,11 +7231,22 @@
       "description": "Severity tier indicating how far a function exceeds complexity thresholds.\n\nDetermined by the highest tier reached across both cognitive and cyclomatic\nscores. Default thresholds: cognitive 25/40, cyclomatic 30/50."
     },
     "CoverageTier": {
-      "type": "string",
-      "enum": [
-        "none",
-        "partial",
-        "high"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "none",
+          "description": "No test coverage."
+        },
+        {
+          "type": "string",
+          "const": "partial",
+          "description": "Some coverage below the high watermark."
+        },
+        {
+          "type": "string",
+          "const": "high",
+          "description": "Coverage at or above the high watermark (70%)."
+        }
       ],
       "description": "Coverage tier classification for CRAP findings."
     },
@@ -6894,13 +7271,29 @@
       "description": "Churn trend indicator based on comparing recent vs older halves of the\nanalysis period."
     },
     "ContributorIdentifierFormat": {
-      "type": "string",
-      "enum": [
-        "raw",
-        "handle",
-        "anonymized",
-        "hash"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "raw",
+          "description": "Raw git author identity."
+        },
+        {
+          "type": "string",
+          "const": "handle",
+          "description": "Platform handle, e.g. a GitHub username."
+        },
+        {
+          "type": "string",
+          "const": "anonymized",
+          "description": "Anonymized label that stays stable within the report."
+        },
+        {
+          "type": "string",
+          "const": "hash",
+          "description": "One-way hash of the identity."
+        }
+      ],
+      "description": "Encoding applied to a [`ContributorEntry::identifier`]."
     },
     "RecommendationCategory": {
       "oneOf": [
@@ -7212,10 +7605,17 @@
       "description": "Direction of a metric's change, semantically (improving/declining/stable)."
     },
     "RuntimeCoverageDataSource": {
-      "type": "string",
-      "enum": [
-        "local",
-        "cloud"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "local",
+          "description": "Locally supplied runtime coverage artifact."
+        },
+        {
+          "type": "string",
+          "const": "cloud",
+          "description": "Runtime context pulled from fallow.cloud after explicit opt-in."
+        }
       ],
       "description": "Runtime coverage source used to produce the summary."
     },
@@ -7339,9 +7739,12 @@
       "description": "Single-rule definition inside [`Meta::rules`]."
     },
     "AuditCommand": {
-      "type": "string",
-      "enum": [
-        "audit"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "audit",
+          "description": "The only value: `audit`."
+        }
       ],
       "description": "Audit command singleton carried by [`AuditOutput`]."
     },
@@ -7369,22 +7772,27 @@
       "type": "object",
       "properties": {
         "dead_code_issues": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total dead-code issues reported for the changed files."
         },
         "dead_code_has_errors": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether any reported dead-code issue has error severity."
         },
         "complexity_findings": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total complexity findings reported for the changed files."
         },
         "max_cyclomatic": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Highest cyclomatic complexity among the findings; `None` when there\nare no complexity findings."
         },
         "duplication_clone_groups": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Clone groups touching the changed files."
         }
       },
       "required": [
@@ -7399,25 +7807,32 @@
       "type": "object",
       "properties": {
         "gate": {
+          "description": "Configured gate: `new-only` fails only on introduced findings,\n`all` also fails on inherited ones.",
           "$ref": "#/definitions/AuditGate"
         },
         "dead_code_introduced": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Dead-code findings absent from the base snapshot."
         },
         "dead_code_inherited": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Dead-code findings already present in the base snapshot."
         },
         "complexity_introduced": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Complexity findings absent from the base snapshot."
         },
         "complexity_inherited": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Complexity findings already present in the base snapshot."
         },
         "duplication_introduced": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Clone groups absent from the base snapshot."
         },
         "duplication_inherited": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Clone groups already present in the base snapshot."
         },
         "styling_introduced": {
           "type": "integer"
@@ -7440,55 +7855,142 @@
       "description": "New-vs-inherited issue counts for audit."
     },
     "AuditGate": {
-      "type": "string",
-      "enum": [
-        "new-only",
-        "all"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "new-only",
+          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. The default."
+        },
+        {
+          "type": "string",
+          "const": "all",
+          "description": "Fail on every finding in changed files, skipping the attribution pass."
+        }
+      ],
+      "description": "Value of `audit.gate`: which findings drive the `fallow audit` verdict."
     },
     "CoverageSetupSchemaVersion": {
-      "type": "string",
-      "enum": [
-        "1"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the coverage setup format."
+        }
+      ],
+      "description": "Schema-version discriminator for [`CoverageSetupOutput`]."
     },
     "CoverageSetupFramework": {
-      "type": "string",
-      "enum": [
-        "nextjs",
-        "nestjs",
-        "nuxt",
-        "sveltekit",
-        "astro",
-        "remix",
-        "vite",
-        "plain_node",
-        "unknown"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "nextjs",
+          "description": "Next.js application."
+        },
+        {
+          "type": "string",
+          "const": "nestjs",
+          "description": "NestJS application."
+        },
+        {
+          "type": "string",
+          "const": "nuxt",
+          "description": "Nuxt application."
+        },
+        {
+          "type": "string",
+          "const": "sveltekit",
+          "description": "SvelteKit application."
+        },
+        {
+          "type": "string",
+          "const": "astro",
+          "description": "Astro application."
+        },
+        {
+          "type": "string",
+          "const": "remix",
+          "description": "Remix application."
+        },
+        {
+          "type": "string",
+          "const": "vite",
+          "description": "Vite-built application without a detected meta-framework."
+        },
+        {
+          "type": "string",
+          "const": "plain_node",
+          "description": "Node project without a detected framework or bundler."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "No framework signal was found."
+        }
+      ],
+      "description": "Framework detected during coverage setup; drives which instrumentation\nguidance is emitted."
     },
     "CoverageSetupPackageManager": {
-      "type": "string",
-      "enum": [
-        "npm",
-        "pnpm",
-        "yarn",
-        "bun"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "npm",
+          "description": "npm (`package-lock.json`)."
+        },
+        {
+          "type": "string",
+          "const": "pnpm",
+          "description": "pnpm (`pnpm-lock.yaml`)."
+        },
+        {
+          "type": "string",
+          "const": "yarn",
+          "description": "Yarn (`yarn.lock`)."
+        },
+        {
+          "type": "string",
+          "const": "bun",
+          "description": "Bun (`bun.lock` / `bun.lockb`)."
+        }
+      ],
+      "description": "Package manager detected from the project's lockfile."
     },
     "CoverageSetupRuntimeTarget": {
-      "type": "string",
-      "enum": [
-        "node",
-        "browser"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "node",
+          "description": "Server-side Node.js execution."
+        },
+        {
+          "type": "string",
+          "const": "browser",
+          "description": "Client-side browser execution."
+        }
+      ],
+      "description": "Runtime environment coverage capture must instrument."
     },
     "GroupByMode": {
-      "type": "string",
-      "enum": [
-        "owner",
-        "directory",
-        "package",
-        "section"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "owner",
+          "description": "Group by CODEOWNERS team."
+        },
+        {
+          "type": "string",
+          "const": "directory",
+          "description": "Group by top-level directory prefix."
+        },
+        {
+          "type": "string",
+          "const": "package",
+          "description": "Group by workspace package name."
+        },
+        {
+          "type": "string",
+          "const": "section",
+          "description": "Group by GitLab CODEOWNERS `[Section]` header name."
+        }
       ],
       "description": "Resolver mode label for grouped envelopes (dead-code, dupes, health).\n\n`owner` groups by CODEOWNERS team, `directory` groups by top-level\ndirectory prefix, `package` groups by workspace package name, `section`\ngroups by GitLab CODEOWNERS `[Section]` header name."
     },
@@ -7564,34 +8066,45 @@
       "description": "`lines.begin` for [`CodeClimateLocation`]."
     },
     "ReviewEnvelopeEvent": {
-      "type": "string",
-      "enum": [
-        "COMMENT"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "COMMENT",
+          "description": "Submit as a non-blocking `COMMENT` review."
+        }
       ],
       "description": "Singleton GitHub review-event marker."
     },
     "ReviewComment": {
       "anyOf": [
         {
+          "description": "GitHub pull-request review comment.",
           "$ref": "#/definitions/GitHubReviewComment"
         },
         {
+          "description": "GitLab merge-request discussion comment.",
           "$ref": "#/definitions/GitLabReviewComment"
         }
       ],
       "description": "Per-line review comment. Schema is an `anyOf` between GitHub and GitLab\nshapes; at runtime every entry in a single envelope comes from the same\nprovider because the envelope is built from one provider's branch in\n`crates/cli/src/report/ci/review.rs::render_review_envelope`."
     },
     "GitHubReviewSide": {
-      "type": "string",
-      "enum": [
-        "RIGHT"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "RIGHT",
+          "description": "New side of the diff; the only side fallow comments on."
+        }
       ],
       "description": "Singleton side discriminator for [`GitHubReviewComment::side`]."
     },
     "GitLabReviewPositionType": {
-      "type": "string",
-      "enum": [
-        "text"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "text",
+          "description": "Text-file diff position; the only type fallow emits."
+        }
       ],
       "description": "Singleton position-type discriminator for [`GitLabReviewPosition`]."
     },
@@ -7810,28 +8323,34 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "User-authored parent zone name."
         },
         "children": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Child zone names produced by discovery."
         },
         "auto_discover": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Authored `autoDiscover` paths."
         },
         "status": {
+          "description": "Discovery outcome (ok / empty / invalid path).",
           "$ref": "#/definitions/LogicalGroupStatus"
         },
         "source_zone_index": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Index of the authored entry in the pre-expansion `zones[]` config."
         },
         "file_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Files matched across the group's zones."
         },
         "authored_rule": {
           "anyOf": [
@@ -7841,13 +8360,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "User's pre-expansion rule keyed on the parent name, when authored."
         },
         "fallback_zone": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Zone that keeps the parent's own patterns when the parent kept any."
         },
         "merged_from": {
           "type": [
@@ -7856,19 +8377,22 @@
           ],
           "items": {
             "type": "integer"
-          }
+          },
+          "description": "`zones[]` indices of duplicate parents merged into this group."
         },
         "original_zone_root": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Authored parent `root`, when one was declared."
         },
         "child_source_indices": {
           "type": "array",
           "items": {
             "type": "integer"
-          }
+          },
+          "description": "Per-child indices into the pre-expansion `zones[]` config."
         }
       },
       "required": [
@@ -7885,13 +8409,15 @@
       "type": "object",
       "properties": {
         "from": {
-          "type": "string"
+          "type": "string",
+          "description": "Zone the rule constrains imports from."
         },
         "allow": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Zone names the `from` zone may import."
         }
       },
       "required": [
@@ -7904,16 +8430,19 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "Zone name referenced by rules."
         },
         "patterns": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Glob patterns that classify files into the zone."
         },
         "file_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of analyzable files the zone matched."
         }
       },
       "required": [
@@ -7927,34 +8456,41 @@
       "type": "object",
       "properties": {
         "configured": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether the project configures architecture boundaries at all."
         },
         "zone_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of entries in `zones`."
         },
         "zones": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/BoundariesListZone"
-          }
+          },
+          "description": "Boundary zones after preset and `autoDiscover` expansion."
         },
         "rule_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of entries in `rules`."
         },
         "rules": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/BoundariesListRule"
-          }
+          },
+          "description": "Import rules operating on expanded zone names."
         },
         "logical_group_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of entries in `logical_groups`."
         },
         "logical_groups": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/BoundariesListLogicalGroup"
-          }
+          },
+          "description": "Pre-expansion `autoDiscover` logical groups."
         }
       },
       "required": [
@@ -7972,6 +8508,7 @@
       "type": "object",
       "properties": {
         "boundaries": {
+          "description": "Boundary zones, rules, and pre-expansion logical groups.",
           "$ref": "#/definitions/BoundariesListing"
         }
       },
@@ -9638,11 +10175,22 @@
       "description": "Runtime coverage JSON contract version. This is scoped to the\n`runtime_coverage` block and is independent of the top-level fallow\nJSON `schema_version`."
     },
     "CoverageSource": {
-      "type": "string",
-      "enum": [
-        "istanbul",
-        "estimated",
-        "estimated_component_inherited"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "istanbul",
+          "description": "Measured from Istanbul runtime coverage data."
+        },
+        {
+          "type": "string",
+          "const": "estimated",
+          "description": "Estimated from static test reachability."
+        },
+        {
+          "type": "string",
+          "const": "estimated_component_inherited",
+          "description": "Estimated coverage inherited from the enclosing component."
+        }
       ],
       "description": "Provenance of a CRAP finding's coverage signal."
     },
@@ -9650,25 +10198,32 @@
       "type": "object",
       "properties": {
         "component": {
-          "type": "string"
+          "type": "string",
+          "description": "Component name."
         },
         "class_worst_function": {
-          "type": "string"
+          "type": "string",
+          "description": "Name of the worst-scoring function in the component class."
         },
         "class_cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cyclomatic complexity of that worst class function."
         },
         "class_cognitive": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cognitive complexity of that worst class function."
         },
         "template_path": {
-          "type": "string"
+          "type": "string",
+          "description": "Template file path relative to the project root."
         },
         "template_cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cyclomatic complexity of the template."
         },
         "template_cognitive": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cognitive complexity of the template."
         }
       },
       "required": [
@@ -9679,7 +10234,8 @@
         "template_path",
         "template_cyclomatic",
         "template_cognitive"
-      ]
+      ],
+      "description": "Component-level aggregate attached to a template complexity finding,\npairing the template's scores with the worst class-side function."
     },
     "DuplicateExportFinding": {
       "type": "object",
@@ -10017,28 +10573,36 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "Function name, or a synthesized name for anonymous functions."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based line the function starts on."
         },
         "col": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based column the function starts on."
         },
         "cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cyclomatic complexity of the function."
         },
         "cognitive": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cognitive complexity of the function."
         },
         "line_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines of code in the function body."
         },
         "param_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of declared parameters."
         },
         "react_hook_count": {
           "type": "integer",
@@ -10064,22 +10628,26 @@
           "description": "Per-kind React hook breakdown (state/effect/memo/callback/custom) plus\nthe max `useEffect` dependency-array arity, derived from the cached\n`hook_uses` IR at the health layer. Descriptive refinement of\n`react_hook_count`; present only when at least one component-scope hook\nwas attributed, so non-React findings stay byte-identical."
         },
         "exceeded": {
+          "description": "Which metric crossed its threshold.",
           "$ref": "#/definitions/ExceededThreshold"
         },
         "severity": {
+          "description": "Finding severity derived from how far thresholds were crossed.",
           "$ref": "#/definitions/FindingSeverity"
         },
         "crap": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "CRAP score (change risk anti-pattern), when coverage data exists."
         },
         "coverage_pct": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Test coverage percentage (0-100) backing the CRAP score."
         },
         "coverage_tier": {
           "anyOf": [
@@ -10089,7 +10657,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Coverage tier bucket derived from `coverage_pct`."
         },
         "coverage_source": {
           "anyOf": [
@@ -10099,13 +10668,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Provenance of the coverage signal."
         },
         "inherited_from": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Component file the inherited coverage estimate came from, for\ncomponent-inherited coverage."
         },
         "component_rollup": {
           "anyOf": [
@@ -10115,7 +10686,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Aggregate of the enclosing component's findings, when rolled up."
         },
         "contributions": {
           "type": "array",
@@ -10165,30 +10737,39 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "score": {
-          "type": "number"
+          "type": "number",
+          "description": "Churn-times-complexity hotspot score; higher is riskier."
         },
         "commits": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Commits touching the file in the analysis window."
         },
         "weighted_commits": {
-          "type": "number"
+          "type": "number",
+          "description": "Recency-weighted commit count."
         },
         "lines_added": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines added to the file in the analysis window."
         },
         "lines_deleted": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines deleted from the file in the analysis window."
         },
         "complexity_density": {
-          "type": "number"
+          "type": "number",
+          "description": "Total cyclomatic complexity per line of code."
         },
         "fan_in": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Modules importing this file."
         },
         "trend": {
+          "description": "Whether churn is rising, falling, or steady over the window.",
           "$ref": "#/definitions/ChurnTrend"
         },
         "ownership": {
@@ -10199,10 +10780,12 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Ownership metrics, when ownership analysis ran."
         },
         "is_test_path": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True for files matched by test-path patterns; omitted when false."
         },
         "actions": {
           "type": "array",
@@ -10518,10 +11101,14 @@
       "description": "Wire-shape payload for `fallow dupes --format json` (the body that\nflattens into the `DupesOutput` envelope and is also\nemitted under the `dupes` / `duplication` key inside the combined and\naudit envelopes).\n\nMirrors [`DuplicationReport`] field-for-field, except `clone_groups`\nand `clone_families` carry the typed wrapper envelopes instead of bare\nfindings, so the schema (and any TS / agent consumer) sees the typed\n`actions[]` natively."
     },
     "CoverageAnalyzeSchemaVersion": {
-      "type": "string",
-      "enum": [
-        "1"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the coverage analyze format."
+        }
+      ],
+      "description": "Schema-version discriminator for [`CoverageAnalyzeOutput`]."
     },
     "WorkspaceDiagnostic": {
       "type": "object",
@@ -10699,10 +11286,12 @@
       "type": "object",
       "properties": {
         "body": {
-          "type": "string"
+          "type": "string",
+          "description": "Summary comment body markdown."
         },
         "fingerprint": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable fingerprint of the summary body, used for sticky updates."
         }
       },
       "required": [
@@ -10777,7 +11366,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block for the dead-code section."
         },
         "dupes": {
           "anyOf": [
@@ -10787,7 +11377,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block for the duplication section."
         },
         "health": {
           "anyOf": [
@@ -10797,7 +11388,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block for the health section."
         },
         "telemetry": {
           "anyOf": [
@@ -10807,37 +11399,58 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Telemetry identifiers for the run."
         }
       },
       "description": "Optional `_meta` block for [`CombinedOutput`]."
     },
     "OwnershipState": {
-      "type": "string",
-      "enum": [
-        "active",
-        "unowned",
-        "declared_inactive",
-        "drifting"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "active",
+          "description": "A declared or de-facto owner is still actively contributing."
+        },
+        {
+          "type": "string",
+          "const": "unowned",
+          "description": "No owner could be resolved."
+        },
+        {
+          "type": "string",
+          "const": "declared_inactive",
+          "description": "The declared owner has stopped contributing."
+        },
+        {
+          "type": "string",
+          "const": "drifting",
+          "description": "Recent contributions come from outside the declared ownership."
+        }
+      ],
+      "description": "Ownership lifecycle state of a file."
     },
     "CoverageIntelligenceReport": {
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Coverage-intelligence block contract version.",
           "$ref": "#/definitions/CoverageIntelligenceSchemaVersion"
         },
         "verdict": {
+          "description": "Headline verdict, taken from the highest-ranked finding; `clean` when\nthere are none.",
           "$ref": "#/definitions/CoverageIntelligenceVerdict"
         },
         "summary": {
+          "description": "Aggregate finding counts.",
           "$ref": "#/definitions/CoverageIntelligenceSummary"
         },
         "findings": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageIntelligenceFinding"
-          }
+          },
+          "description": "Combined findings, one per matched unit."
         }
       },
       "required": [
@@ -10859,14 +11472,37 @@
       "description": "Coverage-intelligence JSON contract version. Scoped to the\n`coverage_intelligence` block and independent of the top-level fallow\nJSON `schema_version`."
     },
     "CoverageIntelligenceVerdict": {
-      "type": "string",
-      "enum": [
-        "risky-change-detected",
-        "high-confidence-delete",
-        "review-required",
-        "refactor-carefully",
-        "clean",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "risky-change-detected",
+          "description": "A changed hot path lacks test coverage."
+        },
+        {
+          "type": "string",
+          "const": "high-confidence-delete",
+          "description": "Statically unused and runtime-cold; safe delete candidate."
+        },
+        {
+          "type": "string",
+          "const": "review-required",
+          "description": "Evidence conflicts; a human should look before acting."
+        },
+        {
+          "type": "string",
+          "const": "refactor-carefully",
+          "description": "Runtime-reachable but poorly tested; behavior must be preserved."
+        },
+        {
+          "type": "string",
+          "const": "clean",
+          "description": "No combined-signal findings."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "Evidence was insufficient to reach a verdict."
+        }
       ],
       "description": "Headline verdict for the combined coverage-intelligence report."
     },
@@ -10874,22 +11510,28 @@
       "type": "object",
       "properties": {
         "findings": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total combined findings."
         },
         "risky_changes": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings with the risky-change verdict."
         },
         "high_confidence_deletes": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings with the high-confidence-delete verdict."
         },
         "review_required": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings with the review-required verdict."
         },
         "refactor_carefully": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Findings with the refactor-carefully verdict."
         },
         "skipped_ambiguous_matches": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidate joins dropped because the cross-surface match was ambiguous."
         }
       },
       "required": [
@@ -10925,34 +11567,41 @@
           "description": "1-indexed source line."
         },
         "verdict": {
+          "description": "Verdict for this specific unit.",
           "$ref": "#/definitions/CoverageIntelligenceVerdict"
         },
         "signals": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageIntelligenceSignal"
-          }
+          },
+          "description": "Ordered evidence signals behind the verdict."
         },
         "recommendation": {
+          "description": "Recommended action family.",
           "$ref": "#/definitions/CoverageIntelligenceRecommendation"
         },
         "confidence": {
+          "description": "Confidence in the joined evidence.",
           "$ref": "#/definitions/CoverageIntelligenceConfidence"
         },
         "related_ids": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "IDs of related findings from other fallow surfaces."
         },
         "evidence": {
+          "description": "Compact evidence values behind the recommendation.",
           "$ref": "#/definitions/CoverageIntelligenceEvidence"
         },
         "actions": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoverageIntelligenceAction"
-          }
+          },
+          "description": "Machine-actionable follow-up actions."
         }
       },
       "required": [
@@ -10969,37 +11618,102 @@
       "description": "One combined coverage-intelligence finding."
     },
     "CoverageIntelligenceSignal": {
-      "type": "string",
-      "enum": [
-        "changed",
-        "hot_path",
-        "low_test_coverage",
-        "high_crap",
-        "static_unused",
-        "runtime_cold",
-        "no_test_path",
-        "runtime_reachable",
-        "ownership_drift",
-        "test_covered"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "changed",
+          "description": "The unit was changed in the current scope."
+        },
+        {
+          "type": "string",
+          "const": "hot_path",
+          "description": "Runtime coverage shows frequent execution."
+        },
+        {
+          "type": "string",
+          "const": "low_test_coverage",
+          "description": "Test coverage is below the low threshold."
+        },
+        {
+          "type": "string",
+          "const": "high_crap",
+          "description": "CRAP score is above the risk threshold."
+        },
+        {
+          "type": "string",
+          "const": "static_unused",
+          "description": "Static analysis found no consumer."
+        },
+        {
+          "type": "string",
+          "const": "runtime_cold",
+          "description": "Runtime coverage never or rarely saw it execute."
+        },
+        {
+          "type": "string",
+          "const": "no_test_path",
+          "description": "No test dependency path reaches the unit."
+        },
+        {
+          "type": "string",
+          "const": "runtime_reachable",
+          "description": "Runtime coverage saw it execute."
+        },
+        {
+          "type": "string",
+          "const": "ownership_drift",
+          "description": "File ownership drifted from its historic maintainers."
+        },
+        {
+          "type": "string",
+          "const": "test_covered",
+          "description": "A test dependency path reaches the unit."
+        }
       ],
       "description": "Ordered evidence signals behind a coverage-intelligence finding."
     },
     "CoverageIntelligenceRecommendation": {
-      "type": "string",
-      "enum": [
-        "add-test-or-split-before-merge",
-        "delete-after-confirming-owner",
-        "review-before-changing",
-        "refactor-carefully-keep-behavior"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "add-test-or-split-before-merge",
+          "description": "Cover or split the risky change before merging."
+        },
+        {
+          "type": "string",
+          "const": "delete-after-confirming-owner",
+          "description": "Delete the unit once an owner confirms it is dead."
+        },
+        {
+          "type": "string",
+          "const": "review-before-changing",
+          "description": "Have a human review before changing the unit."
+        },
+        {
+          "type": "string",
+          "const": "refactor-carefully-keep-behavior",
+          "description": "Refactor with behavior-preserving steps only."
+        }
       ],
       "description": "Recommended action family for a combined finding."
     },
     "CoverageIntelligenceConfidence": {
-      "type": "string",
-      "enum": [
-        "high",
-        "medium",
-        "low"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "high",
+          "description": "All contributing surfaces agree."
+        },
+        {
+          "type": "string",
+          "const": "medium",
+          "description": "Evidence is consistent but incomplete."
+        },
+        {
+          "type": "string",
+          "const": "low",
+          "description": "Evidence is sparse or partially conflicting."
+        }
       ],
       "description": "Confidence in the joined evidence and resulting recommendation."
     },
@@ -11010,48 +11724,57 @@
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Test coverage percentage (0-100), when coverage data exists."
         },
         "crap": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "CRAP score, when complexity and coverage both exist."
         },
         "runtime_verdict": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Runtime-coverage verdict label, e.g. `hot` or `cold`."
         },
         "invocations": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Observed runtime invocation count."
         },
         "static_status": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Static usage status label, e.g. `unused`."
         },
         "test_coverage": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Static test-coverage status label, e.g. `no-test-path`."
         },
         "changed": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when the unit is inside the current change scope; omitted when\nfalse."
         },
         "ownership_state": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Ownership-drift state label, when ownership analysis ran."
         },
         "match_confidence": {
+          "description": "Confidence tier of the cross-surface evidence join.",
           "$ref": "#/definitions/CoverageIntelligenceMatchConfidence"
         }
       },
@@ -11061,11 +11784,22 @@
       "description": "Compact evidence values that led to a recommendation."
     },
     "CoverageIntelligenceMatchConfidence": {
-      "type": "string",
-      "enum": [
-        "path-function-line",
-        "path-line",
-        "direct"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "path-function-line",
+          "description": "Surfaces matched on path, function identity, and line."
+        },
+        {
+          "type": "string",
+          "const": "path-line",
+          "description": "Surfaces matched on path and line only."
+        },
+        {
+          "type": "string",
+          "const": "direct",
+          "description": "Single-surface evidence; no cross-surface join was needed."
+        }
       ],
       "description": "Confidence tier for the cross-surface evidence match."
     },
@@ -11077,7 +11811,8 @@
           "description": "Action identifier, normalized to `type` in JSON output."
         },
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable action description."
         },
         "auto_fixable": {
           "type": "boolean",
@@ -11095,18 +11830,22 @@
       "type": "object",
       "properties": {
         "blocked_at": {
-          "type": "string"
+          "type": "string",
+          "description": "Timestamp when the commit gate blocked the commit."
         },
         "cleared_at": {
-          "type": "string"
+          "type": "string",
+          "description": "Timestamp when a later run passed clean."
         },
         "git_sha": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Abbreviated SHA of the cleared commit, when in a git repo."
         },
         "blocked_counts": {
+          "description": "Finding counts at the moment the gate blocked.",
           "$ref": "#/definitions/ImpactCounts"
         }
       },
@@ -11121,16 +11860,20 @@
       "type": "object",
       "properties": {
         "total_issues": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Sum of the category counts."
         },
         "dead_code": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Dead-code findings."
         },
         "complexity": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Complexity findings."
         },
         "duplication": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Duplication findings."
         }
       },
       "required": [
@@ -11149,14 +11892,16 @@
           "$ref": "#/definitions/ImpactReportSchemaVersion"
         },
         "enabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether impact tracking is active for this project."
         },
         "enabled_source": {
           "description": "WHY tracking is on or off: `project` (an explicit per-repo enable/disable\ndecision), `user` (the user-global default with no per-repo decision), or\n`default` (off, no per-repo decision and no global default). Combine with\n`explicit_decision` to tell a never-asked off-state (`enabled:false`,\n`explicit_decision:false`, offer to enable) from a declined-here one\n(`enabled:false`, `explicit_decision:true`, do not nag).",
           "$ref": "#/definitions/EnabledSource"
         },
         "record_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of recorded runs in the store."
         },
         "_meta": {
           "anyOf": [
@@ -11166,13 +11911,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block with docs and field definitions, when `--explain` was\npassed."
         },
         "first_recorded": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Timestamp of the earliest recorded run; absent with no records."
         },
         "latest_git_sha": {
           "type": [
@@ -11201,7 +11948,7 @@
               "type": "null"
             }
           ],
-          "description": "Trend between the two most recent records. None until two records exist."
+          "description": "Trend between the two most recent records. None until two records exist.\nTrend between the two most recent changed-file records. None until two\nrecords exist."
         },
         "project_surfacing": {
           "anyOf": [
@@ -11226,7 +11973,8 @@
           "description": "Trend between the two most recent whole-project records. Comparable over\ntime (same whole-project denominator every run), unlike the changed-file\n`trend`. None until two full `fallow` runs exist. v1.6."
         },
         "containment_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lifetime count of commit-gate containment events."
         },
         "recent_containment": {
           "type": "array",
@@ -11304,6 +12052,7 @@
       "type": "object",
       "properties": {
         "direction": {
+          "description": "Trend direction between the two runs.",
           "$ref": "#/definitions/ImpactTrendDirection"
         },
         "total_delta": {
@@ -11311,10 +12060,12 @@
           "description": "Signed delta in total issues, current minus previous."
         },
         "previous_total": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total issues in the earlier run."
         },
         "current_total": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total issues in the later run."
         }
       },
       "required": [
@@ -11339,25 +12090,30 @@
       "type": "object",
       "properties": {
         "kind": {
-          "type": "string"
+          "type": "string",
+          "description": "Finding kind that was resolved or suppressed, e.g. `unused-export`."
         },
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "Root-relative path of the resolved finding."
         },
         "symbol": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Symbol name, for symbol-level findings."
         },
         "git_sha": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Abbreviated SHA of the resolving commit, when in a git repo."
         },
         "timestamp": {
-          "type": "string"
+          "type": "string",
+          "description": "Timestamp the resolution was recorded."
         }
       },
       "required": [
@@ -11368,10 +12124,17 @@
       "description": "A resolved or suppressed finding attribution event."
     },
     "CoverageSourceConsistency": {
-      "type": "string",
-      "enum": [
-        "uniform",
-        "mixed"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "uniform",
+          "description": "Every CRAP finding used the same coverage source."
+        },
+        {
+          "type": "string",
+          "const": "mixed",
+          "description": "CRAP findings mix coverage sources."
+        }
       ],
       "description": "Whether CRAP findings in the report used one coverage-source kind or a mix."
     },
@@ -12066,9 +12829,11 @@
       "type": "object",
       "properties": {
         "mode": {
+          "description": "Gate mode that was selected on the command line.",
           "$ref": "#/definitions/SecurityGateMode"
         },
         "verdict": {
+          "description": "Gate outcome for this run.",
           "$ref": "#/definitions/SecurityGateVerdict"
         },
         "new_count": {
@@ -12604,16 +13369,19 @@
       "type": "object",
       "properties": {
         "security_client_server_leak": {
+          "description": "Severity context for the client-server-leak rule.",
           "$ref": "#/definitions/SecurityRuleSeverityConfig"
         },
         "security_sink": {
+          "description": "Severity context for the security-sink rule.",
           "$ref": "#/definitions/SecurityRuleSeverityConfig"
         }
       },
       "required": [
         "security_client_server_leak",
         "security_sink"
-      ]
+      ],
+      "description": "Per-rule severity context inside [`SecurityOutputConfig::rules`]."
     },
     "SecurityRuleSeverityConfig": {
       "type": "object",
@@ -12630,7 +13398,8 @@
       "required": [
         "configured",
         "effective"
-      ]
+      ],
+      "description": "Configured-versus-effective severity for one security rule."
     },
     "Severity": {
       "oneOf": [
@@ -12762,13 +13531,16 @@
       "type": "object",
       "properties": {
         "high": {
-          "type": "integer"
+          "type": "integer",
+          "description": "High-severity candidates."
         },
         "medium": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Medium-severity candidates."
         },
         "low": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Low-severity candidates."
         }
       },
       "required": [
@@ -12824,6 +13596,7 @@
       "type": "object",
       "properties": {
         "reason": {
+          "description": "Why the callees could not be resolved.",
           "$ref": "#/definitions/SkippedSecurityCalleeReason"
         },
         "count": {
@@ -12841,15 +13614,19 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the analysed root."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based line of the skipped call site."
         },
         "col": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based column of the skipped call site."
         },
         "reason": {
+          "description": "Why the callee could not be resolved.",
           "$ref": "#/definitions/SkippedSecurityCalleeReason"
         },
         "expression_kind": {
@@ -12870,7 +13647,8 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the analysed root."
         },
         "count": {
           "type": "integer",
@@ -12932,22 +13710,28 @@
       "type": "object",
       "properties": {
         "entry_reachable": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates reachable from an entry point."
         },
         "untrusted_source_reachable": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates reachable from an untrusted input source."
         },
         "arg_level": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates where taint flows through a call argument."
         },
         "module_level": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates where taint is only module-level."
         },
         "crosses_boundary": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates whose flow crosses a client/server boundary."
         },
         "source_backed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates backed by a concrete taint source."
         }
       },
       "required": [
@@ -12964,25 +13748,32 @@
       "type": "object",
       "properties": {
         "runtime_hot": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates on frequently executed runtime paths."
         },
         "runtime_cold": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates on rarely executed runtime paths."
         },
         "never_executed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates on paths never seen executing."
         },
         "low_traffic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates on low-traffic paths."
         },
         "coverage_unavailable": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates in files runtime coverage did not observe."
         },
         "runtime_unknown": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates whose runtime state could not be classified."
         },
         "not_collected": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates analysed without any runtime coverage data."
         }
       },
       "required": [
@@ -13322,13 +14113,16 @@
       "type": "object",
       "properties": {
         "max_cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Effective cyclomatic-complexity ceiling for the matched file."
         },
         "max_cognitive": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Effective cognitive-complexity ceiling for the matched file."
         },
         "max_crap": {
-          "type": "number"
+          "type": "number",
+          "description": "Effective CRAP-score ceiling for the matched file."
         },
         "max_unit_size": {
           "type": "integer",
@@ -13344,9 +14138,12 @@
       "description": "Resolved thresholds used to evaluate a health finding."
     },
     "ThresholdSource": {
-      "type": "string",
-      "enum": [
-        "override"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "override",
+          "description": "A `thresholdOverrides` config entry changed at least one ceiling."
+        }
       ],
       "description": "Source for a finding's effective thresholds."
     },
@@ -13354,27 +14151,33 @@
       "type": "object",
       "properties": {
         "status": {
+          "description": "Lifecycle state of the override.",
           "$ref": "#/definitions/ThresholdOverrideStatus"
         },
         "override_index": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Index of the entry in the configured `thresholdOverrides` array."
         },
         "path": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Matched file path, when the override matched one."
         },
         "function": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Matched function name, for function-scoped overrides."
         },
         "configured_thresholds": {
+          "description": "Ceilings the override entry configures.",
           "$ref": "#/definitions/HealthConfiguredThresholds"
         },
         "effective_thresholds": {
+          "description": "Ceilings in effect after applying the override to the defaults.",
           "$ref": "#/definitions/HealthEffectiveThresholds"
         },
         "metrics": {
@@ -13385,13 +14188,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Current complexity metrics of the matched code, when matched."
         },
         "reason": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Human-readable explanation of the status."
         }
       },
       "required": [
@@ -13403,11 +14208,22 @@
       "description": "Report entry describing whether a threshold override is active, stale, or\nno longer matching any analyzed file or function."
     },
     "ThresholdOverrideStatus": {
-      "type": "string",
-      "enum": [
-        "active",
-        "stale",
-        "no_match"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "active",
+          "description": "The override matches a finding that still needs the raised ceiling."
+        },
+        {
+          "type": "string",
+          "const": "stale",
+          "description": "The matched code now passes the global thresholds; the override can go."
+        },
+        {
+          "type": "string",
+          "const": "no_match",
+          "description": "The override matches no analyzed file or function."
+        }
       ],
       "description": "Lifecycle state for a configured threshold override."
     },
@@ -13418,25 +14234,29 @@
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Cyclomatic ceiling set by the override, when it sets one."
         },
         "max_cognitive": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Cognitive ceiling set by the override, when it sets one."
         },
         "max_crap": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "CRAP ceiling set by the override, when it sets one."
         },
         "max_unit_size": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Unit-size ceiling set by the override, when it sets one."
         }
       },
       "description": "Threshold values configured by a single override entry."
@@ -13445,16 +14265,19 @@
       "type": "object",
       "properties": {
         "cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Current cyclomatic complexity of the matched function."
         },
         "cognitive": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Current cognitive complexity of the matched function."
         },
         "crap": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "description": "Current CRAP score, when coverage data exists."
         }
       },
       "required": [
@@ -13516,11 +14339,22 @@
       "description": "Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe\nauto-fix: the export itself may be a legitimate client-component value\nexport that happens to collide with a Next.js server-only name, so removing\nit could break the component. Actions are a manual `move-to-server-module`\nfix (the real remediation) plus a line-level suppress."
     },
     "EnabledSource": {
-      "type": "string",
-      "enum": [
-        "project",
-        "user",
-        "default"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "project",
+          "description": "Explicit per-repo enable/disable decision."
+        },
+        {
+          "type": "string",
+          "const": "user",
+          "description": "User-global default with no per-repo decision."
+        },
+        {
+          "type": "string",
+          "const": "default",
+          "description": "Off: no per-repo decision and no global default."
+        }
       ],
       "description": "Why Impact tracking is (or is not) active for a project. `Project` = an\nexplicit per-repo `enable`; `User` = the user-global default with no per-repo\ndecision; `Default` = off (no per-repo decision and no global default)."
     },
@@ -13627,6 +14461,7 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Cross-repo output schema version; serialized as the string `\"1\"`.",
           "$ref": "#/definitions/CrossRepoImpactSchemaVersion"
         },
         "project_count": {
@@ -13642,13 +14477,15 @@
           "description": "Stores that failed to parse and were skipped (corrupt or newer-schema)."
         },
         "totals": {
+          "description": "Grand totals across every tracked project.",
           "$ref": "#/definitions/CrossRepoTotals"
         },
         "projects": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CrossRepoProjectEntry"
-          }
+          },
+          "description": "Per-project rows, one for each store with recorded history."
         }
       },
       "required": [
@@ -13708,20 +14545,24 @@
       "type": "object",
       "properties": {
         "resolved_total": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lifetime genuinely-resolved findings across projects."
         },
         "suppressed_total": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lifetime `fallow-ignore` suppressions across projects."
         },
         "containment_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lifetime commit-gate containment events across projects."
         },
         "project_wide_issues": {
           "type": "integer",
           "description": "Sum of whole-project issue totals across projects that have a full-run\nbaseline, as of EACH project's last full `fallow` run (not a simultaneous\nsnapshot)."
         },
         "projects_with_baseline": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Projects that have recorded at least one full `fallow` run."
         }
       },
       "required": [
@@ -15695,6 +16536,7 @@
           "$ref": "#/definitions/ElapsedMs"
         },
         "summary": {
+          "description": "Aggregate verdict counts.",
           "$ref": "#/definitions/SecuritySurvivorsSummary"
         },
         "survivors": {
@@ -15736,22 +16578,28 @@
       "type": "object",
       "properties": {
         "candidates": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates in the input security report."
         },
         "verdicts": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Verifier verdicts supplied."
         },
         "survivors": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates the verifier retained."
         },
         "dismissed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates the verifier dismissed."
         },
         "needs_human_review": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates the verifier flagged as ambiguous."
         },
         "unverdicted": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Candidates without any verdict."
         }
       },
       "required": [
@@ -15772,19 +16620,22 @@
           "description": "Stable candidate id from `security_findings[].finding_id`."
         },
         "verdict": {
+          "description": "Verifier's verdict for the candidate.",
           "$ref": "#/definitions/SecurityVerifierVerdictStatus"
         },
         "reason": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Short machine-oriented verdict reason."
         },
         "rationale": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Longer free-form verdict explanation."
         },
         "confidence": {
           "type": [
@@ -15831,19 +16682,22 @@
           "description": "Stable candidate id from `security_findings[].finding_id`."
         },
         "verdict": {
+          "description": "Verifier's verdict for the candidate.",
           "$ref": "#/definitions/SecurityVerifierVerdictStatus"
         },
         "reason": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Short machine-oriented verdict reason."
         },
         "rationale": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Longer free-form verdict explanation."
         },
         "confidence": {
           "type": [
@@ -15944,13 +16798,16 @@
       "type": "object",
       "properties": {
         "unresolved_edge_files": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Files containing at least one unresolved callee."
         },
         "unresolved_callee_sites": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total unresolved callee sites in the analysis."
         },
         "sampled_callee_sites": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Callee sites captured in the bounded diagnostic sample."
         }
       },
       "required": [
@@ -15964,6 +16821,7 @@
       "type": "object",
       "properties": {
         "reason": {
+          "description": "Why the callees in this group could not be resolved.",
           "$ref": "#/definitions/SkippedSecurityCalleeReason"
         },
         "expression_kind": {
@@ -15999,7 +16857,8 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the analysed root."
         },
         "sampled_count": {
           "type": "integer",
@@ -16067,12 +16926,27 @@
       "description": "Status for one framework-specific health detector."
     },
     "FrameworkHealthDetectorStatus": {
-      "type": "string",
-      "enum": [
-        "active",
-        "disabled_by_config",
-        "abstained",
-        "not_checked"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "active",
+          "description": "Detector ran on this analysis."
+        },
+        {
+          "type": "string",
+          "const": "disabled_by_config",
+          "description": "Detector was turned off by configuration."
+        },
+        {
+          "type": "string",
+          "const": "abstained",
+          "description": "Detector ran but declined to report for this project."
+        },
+        {
+          "type": "string",
+          "const": "not_checked",
+          "description": "Detector applicability could not be evaluated."
+        }
       ],
       "description": "Detector status codes for framework health observability."
     },
@@ -16080,6 +16954,7 @@
       "type": "object",
       "properties": {
         "trace_file": {
+          "description": "File-level reachability trace.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "trace_export": {
@@ -16090,18 +16965,23 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Export-level usage trace; present only for symbol targets."
         },
         "dead_code": {
+          "description": "Dead-code findings for the target.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "duplication": {
+          "description": "Duplication findings involving the target file.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "complexity": {
+          "description": "Complexity findings for the target file.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "security": {
+          "description": "Security findings for the target file.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "impact_closure": {
@@ -16182,88 +17062,111 @@
         "complexity",
         "security",
         "impact_closure"
-      ]
+      ],
+      "description": "`evidence` block of [`InspectOutput`]: one section per analysis."
     },
     "InspectEvidenceSection": {
       "type": "object",
       "properties": {
         "status": {
+          "description": "Whether the section's analysis produced usable evidence.",
           "$ref": "#/definitions/InspectSectionStatus"
         },
         "scope": {
+          "description": "Granularity the evidence covers.",
           "$ref": "#/definitions/InspectEvidenceScope"
         },
         "message": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Explanation for `error` / `unavailable` sections."
         },
-        "data": true
+        "data": {
+          "description": "Section payload; present when the analysis ran."
+        }
       },
       "required": [
         "status",
         "scope"
-      ]
+      ],
+      "description": "One evidence section: status, the scope the evidence covers, and either a\ndata payload or a message explaining its absence."
     },
     "InspectFileIdentity": {
       "type": "object",
       "properties": {
         "file": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the analysed root."
         },
-        "is_reachable": true,
-        "is_entry_point": true,
+        "is_reachable": {
+          "description": "Whether the module graph can reach the file from an entry point."
+        },
+        "is_entry_point": {
+          "description": "Whether the file is itself an entry point."
+        },
         "export_count": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Number of exports the file declares."
         },
         "import_count": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Number of modules the file imports."
         },
         "imported_by_count": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Number of modules that import the file."
         }
       },
       "required": [
         "file"
-      ]
+      ],
+      "description": "Graph identity facts for a file target. `Value`-typed fields carry the\ngraph's verdict when analysis ran and are `null` when it did not."
     },
     "InspectIdentity": {
       "anyOf": [
         {
+          "description": "Identity facts for a file target.",
           "$ref": "#/definitions/InspectFileIdentity"
         },
         {
+          "description": "Identity facts for a symbol target.",
           "$ref": "#/definitions/InspectSymbolIdentity"
         }
-      ]
+      ],
+      "description": "`identity` block of [`InspectOutput`]; shape follows the target type."
     },
     "InspectOutput": {
       "type": "object",
       "properties": {
         "target": {
+          "description": "What was inspected: a file or a specific exported symbol.",
           "$ref": "#/definitions/InspectTargetDescriptor"
         },
         "identity": {
+          "description": "Graph identity facts about the target.",
           "$ref": "#/definitions/InspectIdentity"
         },
         "evidence": {
+          "description": "Per-analysis evidence sections for the target.",
           "$ref": "#/definitions/InspectEvidence"
         },
         "warnings": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Non-fatal problems encountered while gathering evidence."
         },
         "_meta": {
           "anyOf": [
@@ -16273,7 +17176,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block with type-aware backend info, when applicable."
         }
       },
       "required": [
@@ -16289,20 +17193,31 @@
       "type": "object",
       "properties": {
         "file": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the analysed root."
         },
         "export_name": {
-          "type": "string"
+          "type": "string",
+          "description": "Name of the inspected export."
         },
-        "file_reachable": true,
-        "is_entry_point": true,
-        "is_used": true,
-        "reason": true
+        "file_reachable": {
+          "description": "Whether the containing file is reachable from an entry point."
+        },
+        "is_entry_point": {
+          "description": "Whether the containing file is itself an entry point."
+        },
+        "is_used": {
+          "description": "Whether the export has any recorded consumer."
+        },
+        "reason": {
+          "description": "Explanation of the usage verdict, when the graph recorded one."
+        }
       },
       "required": [
         "file",
         "export_name"
-      ]
+      ],
+      "description": "Graph identity facts for a symbol target. `Value`-typed fields carry the\ngraph's verdict when analysis ran and are `null` when it did not."
     },
     "InspectTargetDescriptor": {
       "oneOf": [
@@ -16310,7 +17225,8 @@
           "type": "object",
           "properties": {
             "file": {
-              "type": "string"
+              "type": "string",
+              "description": "File path relative to the analysed root."
             },
             "type": {
               "type": "string",
@@ -16320,16 +17236,19 @@
           "required": [
             "type",
             "file"
-          ]
+          ],
+          "description": "A whole file was inspected."
         },
         {
           "type": "object",
           "properties": {
             "file": {
-              "type": "string"
+              "type": "string",
+              "description": "File path relative to the analysed root."
             },
             "export_name": {
-              "type": "string"
+              "type": "string",
+              "description": "Name of the inspected export."
             },
             "type": {
               "type": "string",
@@ -16340,26 +17259,56 @@
             "type",
             "file",
             "export_name"
-          ]
+          ],
+          "description": "One exported symbol was inspected."
         }
-      ]
+      ],
+      "description": "`target` block of [`InspectOutput`], tagged by `type`."
     },
     "InspectEvidenceScope": {
-      "type": "string",
-      "enum": [
-        "symbol",
-        "file",
-        "project_filtered_to_file"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "symbol",
+          "description": "Evidence about the exact inspected symbol."
+        },
+        {
+          "type": "string",
+          "const": "file",
+          "description": "Evidence about the whole target file."
+        },
+        {
+          "type": "string",
+          "const": "project_filtered_to_file",
+          "description": "Project-wide analysis filtered down to entries touching the file."
+        }
+      ],
+      "description": "Granularity an [`InspectEvidenceSection`] payload covers."
     },
     "InspectSectionStatus": {
-      "type": "string",
-      "enum": [
-        "ok",
-        "partial",
-        "unavailable",
-        "error"
-      ]
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "ok",
+          "description": "Analysis ran and the payload is complete."
+        },
+        {
+          "type": "string",
+          "const": "partial",
+          "description": "Analysis ran but the semantic backend reported incomplete coverage."
+        },
+        {
+          "type": "string",
+          "const": "unavailable",
+          "description": "Analysis could not run in this environment."
+        },
+        {
+          "type": "string",
+          "const": "error",
+          "description": "Analysis failed; see `message`."
+        }
+      ],
+      "description": "Status of an [`InspectEvidenceSection`]."
     },
     "ReviewBriefOutput": {
       "type": "object",
@@ -16377,6 +17326,7 @@
           "description": "Command discriminator singleton: always `\"audit-brief\"`."
         },
         "triage": {
+          "description": "Stage 0: change-size triage (file/hunk/line counts, risk class, effort).",
           "$ref": "#/definitions/DiffTriage"
         },
         "graph_facts": {
@@ -17760,34 +18710,42 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the analysed root."
         },
         "flag_name": {
-          "type": "string"
+          "type": "string",
+          "description": "Detected flag identifier, e.g. the env var or SDK key name."
         },
         "kind": {
+          "description": "Detection pattern the flag matched.",
           "$ref": "#/definitions/FeatureFlagKind"
         },
         "confidence": {
+          "description": "How confident the detector is that this is a real feature flag.",
           "$ref": "#/definitions/FeatureFlagConfidence"
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based line of the flag usage."
         },
         "col": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-based column of the flag usage."
         },
         "actions": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/FeatureFlagAction"
-          }
+          },
+          "description": "Suggested follow-up actions (investigate / suppress)."
         },
         "sdk_name": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Flag SDK the call belongs to, for SDK-call findings."
         },
         "dead_code_overlap": {
           "anyOf": [
@@ -17797,7 +18755,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Overlap with dead-code findings when the flag guards unused exports."
         }
       },
       "required": [
@@ -17812,20 +18771,42 @@
       "description": "One feature flag finding in JSON output."
     },
     "FeatureFlagKind": {
-      "type": "string",
-      "enum": [
-        "environment_variable",
-        "sdk_call",
-        "config_object"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "environment_variable",
+          "description": "Environment-variable read used as a toggle."
+        },
+        {
+          "type": "string",
+          "const": "sdk_call",
+          "description": "Feature-flag SDK evaluation call."
+        },
+        {
+          "type": "string",
+          "const": "config_object",
+          "description": "Flag key in a configuration object literal."
+        }
       ],
       "description": "Feature flag kind values emitted in JSON."
     },
     "FeatureFlagConfidence": {
-      "type": "string",
-      "enum": [
-        "high",
-        "medium",
-        "low"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "high",
+          "description": "Strong flag signal, e.g. a known SDK call."
+        },
+        {
+          "type": "string",
+          "const": "medium",
+          "description": "Plausible flag signal with some ambiguity."
+        },
+        {
+          "type": "string",
+          "const": "low",
+          "description": "Weak signal; likely needs human confirmation."
+        }
       ],
       "description": "Feature flag confidence values emitted in JSON."
     },
@@ -17833,19 +18814,23 @@
       "type": "object",
       "properties": {
         "type": {
+          "description": "Action discriminator, serialized as `type`.",
           "$ref": "#/definitions/FeatureFlagActionType"
         },
         "auto_fixable": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether `fallow fix` can apply the action automatically."
         },
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable action description."
         },
         "comment": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Suppression comment to insert, for suppress actions."
         }
       },
       "required": [
@@ -17856,10 +18841,17 @@
       "description": "Per-finding action emitted for feature flag findings."
     },
     "FeatureFlagActionType": {
-      "type": "string",
-      "enum": [
-        "investigate-flag",
-        "suppress-line"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "investigate-flag",
+          "description": "Check whether the flag is still needed."
+        },
+        {
+          "type": "string",
+          "const": "suppress-line",
+          "description": "Suppress the finding with a `fallow-ignore` line comment."
+        }
       ],
       "description": "Feature flag action discriminants."
     },
@@ -17867,16 +18859,19 @@
       "type": "object",
       "properties": {
         "guarded_lines": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lines inside the flag-guarded region."
         },
         "dead_export_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of unused exports the flag guards."
         },
         "dead_exports": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Names of the unused exports the flag guards."
         }
       },
       "required": [
@@ -17918,16 +18913,20 @@
       "type": "object",
       "properties": {
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "What the flags command reports."
         },
         "kinds": {
+          "description": "Explanation of each `kind` value.",
           "$ref": "#/definitions/FeatureFlagsKindMeta"
         },
         "confidence": {
+          "description": "Explanation of each `confidence` value.",
           "$ref": "#/definitions/FeatureFlagsConfidenceMeta"
         },
         "docs": {
-          "type": "string"
+          "type": "string",
+          "description": "Public documentation URL for the flags command."
         }
       },
       "required": [
@@ -17942,13 +18941,16 @@
       "type": "object",
       "properties": {
         "environment_variable": {
-          "type": "string"
+          "type": "string",
+          "description": "Explanation of the `environment_variable` kind."
         },
         "sdk_call": {
-          "type": "string"
+          "type": "string",
+          "description": "Explanation of the `sdk_call` kind."
         },
         "config_object": {
-          "type": "string"
+          "type": "string",
+          "description": "Explanation of the `config_object` kind."
         }
       },
       "required": [
@@ -17962,13 +18964,16 @@
       "type": "object",
       "properties": {
         "high": {
-          "type": "string"
+          "type": "string",
+          "description": "Explanation of the `high` confidence level."
         },
         "medium": {
-          "type": "string"
+          "type": "string",
+          "description": "Explanation of the `medium` confidence level."
         },
         "low": {
-          "type": "string"
+          "type": "string",
+          "description": "Explanation of the `low` confidence level."
         }
       },
       "required": [
@@ -17982,22 +18987,27 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Flags output schema version.",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "feature_flags": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/FeatureFlagFinding"
-          }
+          },
+          "description": "Detected feature-flag findings."
         },
         "total_flags": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of entries in `feature_flags`."
         },
         "_meta": {
           "anyOf": [
@@ -18007,7 +19017,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "`_meta` block; see [`FeatureFlagsMeta`]."
         }
       },
       "required": [
@@ -18123,15 +19134,19 @@
       "type": "object",
       "properties": {
         "formula_version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Styling formula version; see [`STYLING_HEALTH_FORMULA_VERSION`]."
         },
         "score": {
-          "type": "number"
+          "type": "number",
+          "description": "Styling-health score in `[0, 100]`; higher is healthier."
         },
         "grade": {
-          "type": "string"
+          "type": "string",
+          "description": "Letter grade from the shared [`letter_grade`] thresholds."
         },
         "penalties": {
+          "description": "Per-category penalty breakdown.",
           "$ref": "#/definitions/StylingHealthPenalties"
         },
         "confidence": {
@@ -18408,10 +19423,17 @@
       "description": "Agent handling hint for a [`StylingFinding`]."
     },
     "StylingFindingSeverity": {
-      "type": "string",
-      "enum": [
-        "warn",
-        "error"
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "Advisory finding; never fails a gate."
+        },
+        {
+          "type": "string",
+          "const": "error",
+          "description": "Gating finding under an error-severity rule."
+        }
       ],
       "description": "Effective configured severity for a styling finding."
     },
@@ -20402,58 +21424,74 @@
     "TraceOutput": {
       "anyOf": [
         {
+          "description": "Trace of a single export's usage.",
           "$ref": "#/definitions/ExportTrace"
         },
         {
+          "description": "Trace of a single class member's usage.",
           "$ref": "#/definitions/ClassMemberTrace"
         },
         {
+          "description": "Trace of a file's reachability.",
           "$ref": "#/definitions/FileTrace"
         },
         {
+          "description": "Trace of a dependency's usage.",
           "$ref": "#/definitions/DependencyTrace"
         },
         {
+          "description": "Trace of a clone group's instances.",
           "$ref": "#/definitions/CloneTrace"
         },
         {
+          "description": "Transitive impact closure for a changed file set.",
           "$ref": "#/definitions/ImpactClosureTrace"
         },
         {
+          "description": "Symbol-level call chain trace.",
           "$ref": "#/definitions/SymbolChainTrace"
         },
         {
+          "description": "Type-aware semantic symbol trace.",
           "$ref": "#/definitions/SemanticSymbolTrace"
         }
-      ]
+      ],
+      "description": "Union of every `fallow trace` payload shape.\n\nSerialized untagged: the JSON body is exactly one of the trace shapes with\nno discriminant field, so consumers dispatch on structure."
     },
     "ImpactOutput": {
       "anyOf": [
         {
+          "description": "Project-level impact report for a changed file set.",
           "$ref": "#/definitions/ImpactReport"
         },
         {
+          "description": "Type-aware impact for a single semantic symbol.",
           "$ref": "#/definitions/SemanticSymbolImpact"
         }
-      ]
+      ],
+      "description": "Union of `fallow impact` payload shapes, serialized untagged like\n[`TraceOutput`]."
     },
     "TypeAwareStatusOutput": {
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Type-aware status schema version.",
           "$ref": "#/definitions/SchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "available": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether a usable type-aware companion was found."
         },
         "discovery_source": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "How the companion was discovered, e.g. `installed-sibling`."
         },
         "companion_path": {
           "type": [
@@ -20466,28 +21504,33 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "npm package version of the companion, when known."
         },
         "protocol_version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Type-aware protocol version fallow speaks."
         },
         "backend_family": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Checker backend family, e.g. `typescript-go`."
         },
         "backend_version": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Version of the checker backend, when known."
         },
         "remediation": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "How to make the companion available, when it is not."
         }
       },
       "required": [
