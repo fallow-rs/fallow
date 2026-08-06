@@ -6,6 +6,7 @@
 //! CLI-independent option, error, and output contracts so NAPI, future Rust
 //! embedders, and the engine facade can share them without depending on the
 //! CLI crate.
+#![warn(missing_docs)]
 #![cfg_attr(
     test,
     allow(

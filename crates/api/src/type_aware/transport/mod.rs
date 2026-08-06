@@ -108,16 +108,30 @@ impl Drop for ActiveSidecarGuard {
     }
 }
 
+/// Semantic-companion availability report produced by [`status`].
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeAwareStatus {
+    /// True only when the companion was found and its protocol, package,
+    /// and backend versions all match this fallow build exactly.
     pub available: bool,
+    /// How the companion binary was located: `installed-sibling`,
+    /// `environment-override`, or a wrapper marker such as `npm-wrapper`;
+    /// `None` when discovery failed.
     pub discovery_source: Option<&'static str>,
+    /// Discovered companion binary path; `None` when discovery failed.
     #[serde(serialize_with = "fallow_types::serde_path::serialize_option")]
     pub companion_path: Option<PathBuf>,
+    /// `fallow-type-aware` package version the companion reported.
     pub package_version: Option<String>,
+    /// Protocol version: the companion's when it answered, otherwise the
+    /// version this fallow build speaks.
     pub protocol_version: u32,
+    /// Type-checker backend family the companion reported.
     pub backend_family: Option<String>,
+    /// Type-checker backend version the companion reported.
     pub backend_version: Option<String>,
+    /// Remediation instruction when the companion is unavailable or
+    /// mismatched; `None` when `available` is true.
     pub remediation: Option<String>,
 }
 
@@ -237,12 +251,16 @@ pub fn status(root: &Path) -> TypeAwareStatus {
     }
 }
 
+/// Result of a completed type-aware pass.
 #[derive(Debug)]
 pub struct TypeAwareOutcome {
+    /// Pass metadata merged into output envelope `meta` sections.
     pub meta: TypeAwareMeta,
+    /// Non-fatal warnings surfaced to the caller alongside the results.
     pub warnings: Vec<String>,
 }
 
+/// Opaque type-aware transport failure; the message is the full description.
 #[derive(Debug)]
 pub struct TypeAwareError(String);
 

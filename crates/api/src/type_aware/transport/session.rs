@@ -5,12 +5,17 @@ use super::*;
 /// Project-relative changes applied before the next persistent semantic query.
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct TypeAwareFileChanges {
+    /// Project-relative paths whose contents changed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed: Vec<PathBuf>,
+    /// Project-relative paths created since the last query.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub created: Vec<PathBuf>,
+    /// Project-relative paths deleted since the last query.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deleted: Vec<PathBuf>,
+    /// Discard the session's entire semantic state instead of applying the
+    /// per-file lists.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invalidate_all: bool,
 }

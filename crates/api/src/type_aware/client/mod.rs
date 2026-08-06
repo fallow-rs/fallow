@@ -444,7 +444,9 @@ pub struct SemanticDeadCodeOutcome {
 
 /// Coupling report plus shared metadata for report and integration surfaces.
 pub struct SemanticCouplingOutcome {
+    /// Standard metadata consumed by all report surfaces.
     pub type_aware: TypeAwareOutcome,
+    /// The type-coupling analysis report.
     pub report: TypeCouplingReport,
 }
 
@@ -601,6 +603,8 @@ pub fn refine_dead_code_results_in_session(
     outcome
 }
 
+/// Drop findings that only exist pending semantic verification, so a failed
+/// type-aware pass never reports unverified candidates.
 pub fn discard_unverified_semantic_candidates(results: &mut AnalysisResults) {
     results
         .unused_class_members
@@ -929,10 +933,15 @@ fn validate_returned_symbol(
     Ok(())
 }
 
+/// Every semantic inspect section resolved for one symbol.
 pub struct SemanticInspectOutcome {
+    /// Reference trace for the symbol.
     pub trace: SemanticSymbolTrace,
+    /// Package API surface and private-leak analysis around the symbol.
     pub api_surface: ApiSurfaceResult,
+    /// Impact closure of changing the symbol.
     pub impact: SemanticSymbolImpact,
+    /// Standard metadata consumed by all report surfaces.
     pub type_aware: TypeAwareOutcome,
 }
 

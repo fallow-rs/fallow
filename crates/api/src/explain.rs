@@ -10,6 +10,8 @@ const DOCS_BASE: &str = "https://docs.fallow.tools";
 
 /// Rule definition for SARIF `fullDescription` and JSON `_meta`.
 pub struct RuleDef {
+    /// Canonical rule id, such as `fallow/unused-export` or
+    /// `security/sql-injection`; used as the SARIF rule id.
     pub id: &'static str,
     /// Coarse category label used by the sticky PR/MR comment renderer to
     /// group findings into collapsible sections (Dead code, Dependencies,
@@ -18,12 +20,17 @@ pub struct RuleDef {
     /// renderer never drift; a unit test below asserts every RuleDef has
     /// a non-empty category.
     pub category: &'static str,
+    /// Human-readable rule title.
     pub name: &'static str,
+    /// One-line description used as the SARIF `shortDescription`.
     pub short: &'static str,
+    /// Paragraph-length description used as the SARIF `fullDescription`.
     pub full: &'static str,
+    /// Path under the docs site base URL for the rule's `helpUri`.
     pub docs_path: &'static str,
 }
 
+/// Rule definitions for every dead-code family finding.
 pub const CHECK_RULES: &[RuleDef] = &[
     RuleDef {
         id: "fallow/unused-file",
@@ -432,7 +439,9 @@ fn rule_explain_summary(rule: &RuleDef) -> &'static str {
 /// compact while terminal users and agents can ask for worked examples on
 /// demand.
 pub struct RuleGuide {
+    /// Worked code example illustrating the issue.
     pub example: &'static str,
+    /// Step-by-step remediation guidance.
     pub how_to_fix: &'static str,
 }
 
@@ -848,6 +857,8 @@ pub fn serialize_explain_programmatic_json(
     })
 }
 
+/// Structured error for an unrecognized `fallow explain` issue type, with
+/// suggestions matched to whether the token looks security-related.
 #[must_use]
 pub fn unknown_explain_error(issue_type: &str) -> crate::ProgrammaticError {
     let message = if looks_security_explain_token(issue_type) {
@@ -872,6 +883,7 @@ fn looks_security_explain_token(issue_type: &str) -> bool {
         || normalized.contains("injection")
 }
 
+/// Rule definitions for complexity and health findings.
 pub const HEALTH_RULES: &[RuleDef] = &[
     RuleDef {
         id: "fallow/high-cyclomatic-complexity",
@@ -1043,6 +1055,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
 ];
 
+/// Rule definitions for duplication findings.
 pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     id: "fallow/code-duplication",
     category: "Duplication",
@@ -1052,6 +1065,7 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     docs_path: "explanations/duplication#clone-groups",
 }];
 
+/// Rule definitions for feature-flag findings.
 pub const FLAGS_RULES: &[RuleDef] = &[RuleDef {
     id: "fallow/feature-flag",
     category: "Flags",
@@ -1081,6 +1095,8 @@ macro_rules! security_catalogue_rule {
     };
 }
 
+/// Rule definitions for security candidate findings, including the
+/// data-driven tainted-sink catalogue categories.
 pub const SECURITY_RULES: &[RuleDef] = &[
     RuleDef {
         id: "security/tainted-sink",

@@ -6,13 +6,21 @@ use rustc_hash::FxHashSet;
 
 use fallow_types::{discover::DiscoveredFile, extract::ModuleInfo};
 
+/// Editor-boundary alias for the clone-family payload.
 pub type EditorCloneFamily = fallow_types::duplicates::CloneFamily;
+/// Editor-boundary alias for the clone-group payload.
 pub type EditorCloneGroup = fallow_types::duplicates::CloneGroup;
+/// Editor-boundary alias for one clone occurrence within a group.
 pub type EditorCloneInstance = fallow_types::duplicates::CloneInstance;
+/// Editor-boundary alias for the full duplication report.
 pub type EditorDuplicationReport = fallow_types::duplicates::DuplicationReport;
+/// Editor-boundary alias for aggregate duplication statistics.
 pub type EditorDuplicationStats = fallow_types::duplicates::DuplicationStats;
+/// Editor-boundary alias for a mirrored-directory finding.
 pub type EditorMirroredDirectory = fallow_types::duplicates::MirroredDirectory;
+/// Editor-boundary alias for the refactoring-suggestion kind.
 pub type EditorRefactoringKind = fallow_types::duplicates::RefactoringKind;
+/// Editor-boundary alias for a refactoring suggestion.
 pub type EditorRefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
 
 /// Report-scoped clone fingerprint assignment for editor-facing duplication output.
@@ -59,6 +67,8 @@ impl EditorCloneFingerprintSet {
     }
 }
 
+/// Duplication contracts re-exported under their unprefixed names so editor
+/// adapters can import them as a module namespace.
 pub mod editor_duplicates {
     pub use crate::editor::{
         EditorCloneFamily as CloneFamily, EditorCloneFingerprintSet as CloneFingerprintSet,
@@ -149,6 +159,8 @@ pub fn try_get_changed_files_with_toplevel(
         .map_err(ChangedFilesError::from)
 }
 
+/// Per-module extraction facts re-exported for editor adapters that inspect
+/// retained parse artifacts.
 pub mod editor_extract {
     pub use fallow_types::extract::{
         AngularComponentSelector, AngularInputMember, AngularOutputMember,
@@ -173,6 +185,8 @@ pub mod editor_extract {
     };
 }
 
+/// Typed analysis-result and finding contracts re-exported for editor
+/// adapters.
 pub mod editor_results {
     pub use fallow_types::output_dead_code::{
         BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
@@ -217,6 +231,7 @@ pub mod editor_results {
     };
 }
 
+/// Security catalogue lookups exposed at the editor boundary.
 pub mod editor_security {
     /// Return the human-readable security catalogue title for a finding kind.
     #[must_use]
@@ -225,10 +240,12 @@ pub mod editor_security {
     }
 }
 
+/// Inline-suppression contracts re-exported for editor adapters.
 pub mod editor_suppress {
     pub use fallow_types::suppress::{IssueKind, is_suppressed};
 }
 
+/// Editor-boundary alias for the typed dead-code analysis results.
 pub type EditorAnalysisResults = fallow_types::results::AnalysisResults;
 
 /// Dead-code output retained for editor integrations.
@@ -237,8 +254,12 @@ pub type EditorAnalysisResults = fallow_types::results::AnalysisResults;
 /// so LSP and future editor adapters do not depend on engine result structs.
 #[derive(Debug)]
 pub struct EditorDeadCodeAnalysisOutput {
+    /// Typed dead-code findings from the analysis.
     pub results: EditorAnalysisResults,
+    /// Retained per-module parse artifacts; `None` unless the run was asked
+    /// to keep them for follow-up editor features.
     pub modules: Option<Vec<ModuleInfo>>,
+    /// Retained discovered-file records matching `modules`.
     pub files: Option<Vec<DiscoveredFile>>,
 }
 
@@ -259,20 +280,30 @@ impl EditorDeadCodeAnalysisOutput {
 /// need to inspect raw modules directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorInlineComplexityFinding {
+    /// Absolute path of the file declaring the function.
     pub path: PathBuf,
+    /// Function name as extracted from the source.
     pub name: String,
+    /// One-based line of the function declaration.
     pub line: u32,
+    /// Zero-based column of the function declaration.
     pub col: u32,
+    /// Measured cyclomatic complexity.
     pub cyclomatic: u16,
+    /// Measured cognitive complexity.
     pub cognitive: u16,
+    /// Which configured threshold(s) the function exceeded.
     pub exceeded: EditorInlineComplexityExceeded,
 }
 
 /// Which health complexity threshold(s) a function exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorInlineComplexityExceeded {
+    /// Only the cyclomatic threshold was exceeded.
     Cyclomatic,
+    /// Only the cognitive threshold was exceeded.
     Cognitive,
+    /// Both thresholds were exceeded.
     CyclomaticAndCognitive,
 }
 
@@ -526,7 +557,9 @@ impl EditorAnalysisSession {
 /// Dead-code and duplication project output owned by the editor API boundary.
 #[derive(Debug)]
 pub struct EditorProjectAnalysisOutput {
+    /// Dead-code findings plus optionally retained parse artifacts.
     pub dead_code: EditorDeadCodeAnalysisOutput,
+    /// Duplication report for the analyzed project slice.
     pub duplication: EditorDuplicationReport,
 }
 
@@ -542,11 +575,14 @@ impl EditorProjectAnalysisOutput {
 /// Dead-code and duplication output shaped for editor integrations.
 #[derive(Debug, Default)]
 pub struct EditorAnalysisOutput {
+    /// Typed dead-code findings.
     pub results: EditorAnalysisResults,
+    /// Duplication report.
     pub duplication: EditorDuplicationReport,
 }
 
 impl EditorAnalysisOutput {
+    /// Pair dead-code results with a duplication report.
     #[must_use]
     pub const fn new(results: EditorAnalysisResults, duplication: EditorDuplicationReport) -> Self {
         Self {
@@ -555,20 +591,25 @@ impl EditorAnalysisOutput {
         }
     }
 
+    /// Convert a project analysis output, dropping retained parse artifacts.
     #[must_use]
     pub fn from_project_output(output: EditorProjectAnalysisOutput) -> Self {
         Self::new(output.dead_code.results, output.duplication)
     }
 
+    /// Merge another project analysis output into this accumulated output.
     pub fn merge_project_output(&mut self, output: EditorProjectAnalysisOutput) {
         self.merge_results(output.dead_code.results);
         self.merge_duplication(output.duplication);
     }
 
+    /// Merge another dead-code results set into this one.
     pub fn merge_results(&mut self, source: EditorAnalysisResults) {
         self.results.merge_into(source);
     }
 
+    /// Merge another duplication report into this one, summing the aggregate
+    /// stats and recomputing the duplication percentage over the union.
     pub fn merge_duplication(&mut self, source: EditorDuplicationReport) {
         self.duplication.clone_groups.extend(source.clone_groups);
         self.duplication
@@ -596,6 +637,7 @@ impl EditorAnalysisOutput {
         };
     }
 
+    /// Drop findings and clone groups that do not touch any changed file.
     pub fn filter_by_changed_files(&mut self, changed_files: &FxHashSet<PathBuf>, root: &Path) {
         fallow_engine::changed_files::filter_results_by_changed_files(
             &mut self.results,
@@ -608,6 +650,13 @@ impl EditorAnalysisOutput {
         );
     }
 
+    /// Resolve files changed since `git_ref` and filter to them, returning
+    /// how many files changed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a changed-file error when git cannot resolve the ref or
+    /// repository state.
     pub fn filter_by_changed_since(
         &mut self,
         root: &Path,
