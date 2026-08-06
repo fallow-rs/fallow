@@ -8,13 +8,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImpactCounts {
+    /// Sum of the category counts.
     pub total_issues: usize,
+    /// Dead-code findings.
     pub dead_code: usize,
+    /// Complexity findings.
     pub complexity: usize,
+    /// Duplication findings.
     pub duplication: usize,
 }
 
 impl ImpactCounts {
+    /// Counts with `total_issues` derived as the sum of the categories.
     #[must_use]
     pub fn from_combined(dead_code: usize, complexity: usize, duplication: usize) -> Self {
         Self {
@@ -30,10 +35,14 @@ impl ImpactCounts {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContainmentEvent {
+    /// Timestamp when the commit gate blocked the commit.
     pub blocked_at: String,
+    /// Timestamp when a later run passed clean.
     pub cleared_at: String,
+    /// Abbreviated SHA of the cleared commit, when in a git repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_sha: Option<String>,
+    /// Finding counts at the moment the gate blocked.
     pub blocked_counts: ImpactCounts,
 }
 
@@ -41,12 +50,17 @@ pub struct ContainmentEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ResolutionEvent {
+    /// Finding kind that was resolved or suppressed, e.g. `unused-export`.
     pub kind: String,
+    /// Root-relative path of the resolved finding.
     pub path: String,
+    /// Symbol name, for symbol-level findings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
+    /// Abbreviated SHA of the resolving commit, when in a git repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_sha: Option<String>,
+    /// Timestamp the resolution was recorded.
     pub timestamp: String,
 }
 
@@ -57,8 +71,11 @@ pub struct ResolutionEvent {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum EnabledSource {
+    /// Explicit per-repo enable/disable decision.
     Project,
+    /// User-global default with no per-repo decision.
     User,
+    /// Off: no per-repo decision and no global default.
     Default,
 }
 
@@ -79,10 +96,13 @@ pub enum ImpactTrendDirection {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TrendSummary {
+    /// Trend direction between the two runs.
     pub direction: ImpactTrendDirection,
     /// Signed delta in total issues, current minus previous.
     pub total_delta: i64,
+    /// Total issues in the earlier run.
     pub previous_total: usize,
+    /// Total issues in the later run.
     pub current_total: usize,
 }
 
@@ -109,6 +129,7 @@ pub struct ImpactReport {
     /// forward-compat signal independent of the on-disk store version. Always
     /// present; bumped only on a breaking change to this report's wire shape.
     pub schema_version: ImpactReportSchemaVersion,
+    /// Whether impact tracking is active for this project.
     pub enabled: bool,
     /// WHY tracking is on or off: `project` (an explicit per-repo enable/disable
     /// decision), `user` (the user-global default with no per-repo decision), or
@@ -117,9 +138,13 @@ pub struct ImpactReport {
     /// `explicit_decision:false`, offer to enable) from a declined-here one
     /// (`enabled:false`, `explicit_decision:true`, do not nag).
     pub enabled_source: EnabledSource,
+    /// Number of recorded runs in the store.
     pub record_count: usize,
+    /// `_meta` block with docs and field definitions, when `--explain` was
+    /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Timestamp of the earliest recorded run; absent with no records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_recorded: Option<String>,
     /// Git SHA of the most recent recorded run, so a consumer can tell which
@@ -137,6 +162,8 @@ pub struct ImpactReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surfacing: Option<ImpactCounts>,
     /// Trend between the two most recent records. None until two records exist.
+    /// Trend between the two most recent changed-file records. None until two
+    /// records exist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trend: Option<TrendSummary>,
     /// Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
@@ -150,6 +177,7 @@ pub struct ImpactReport {
     /// `trend`. None until two full `fallow` runs exist. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_trend: Option<TrendSummary>,
+    /// Lifetime count of commit-gate containment events.
     pub containment_count: usize,
     /// Most recent containment events (newest last), capped for display.
     pub recent_containment: Vec<ContainmentEvent>,
@@ -192,13 +220,17 @@ pub enum CrossRepoImpactSchemaVersion {
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CrossRepoTotals {
+    /// Lifetime genuinely-resolved findings across projects.
     pub resolved_total: usize,
+    /// Lifetime `fallow-ignore` suppressions across projects.
     pub suppressed_total: usize,
+    /// Lifetime commit-gate containment events across projects.
     pub containment_count: usize,
     /// Sum of whole-project issue totals across projects that have a full-run
     /// baseline, as of EACH project's last full `fallow` run (not a simultaneous
     /// snapshot).
     pub project_wide_issues: usize,
+    /// Projects that have recorded at least one full `fallow` run.
     pub projects_with_baseline: usize,
 }
 
@@ -230,6 +262,7 @@ pub struct CrossRepoProjectEntry {
     schemars(title = "fallow impact --all --format json")
 )]
 pub struct CrossRepoImpactReport {
+    /// Cross-repo output schema version; serialized as the string `"1"`.
     pub schema_version: CrossRepoImpactSchemaVersion,
     /// Per-project stores successfully parsed (add `unreadable_count` for the
     /// total number of store files found in the user config dir).
@@ -239,7 +272,9 @@ pub struct CrossRepoImpactReport {
     pub tracked_count: usize,
     /// Stores that failed to parse and were skipped (corrupt or newer-schema).
     pub unreadable_count: usize,
+    /// Grand totals across every tracked project.
     pub totals: CrossRepoTotals,
+    /// Per-project rows, one for each store with recorded history.
     pub projects: Vec<CrossRepoProjectEntry>,
 }
 

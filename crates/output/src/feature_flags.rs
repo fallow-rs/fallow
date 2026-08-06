@@ -11,11 +11,17 @@ use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_n
 
 /// Inputs for building `fallow flags --format json`.
 pub struct FeatureFlagsOutputInput<'a> {
+    /// Flags output schema version to report.
     pub schema_version: u32,
+    /// Fallow CLI version to report.
     pub version: String,
+    /// Wall-clock analysis duration; serialized as whole milliseconds.
     pub elapsed: Duration,
+    /// Detected flags from the engine.
     pub flags: &'a [FeatureFlag],
+    /// Analysis root paths are relativized against.
     pub root: &'a Path,
+    /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<FeatureFlagsMeta>,
 }
 
@@ -24,11 +30,17 @@ pub struct FeatureFlagsOutputInput<'a> {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow flags --format json"))]
 pub struct FeatureFlagsOutput {
+    /// Flags output schema version.
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Detected feature-flag findings.
     pub feature_flags: Vec<FeatureFlagFinding>,
+    /// Number of entries in `feature_flags`.
     pub total_flags: usize,
+    /// `_meta` block; see [`FeatureFlagsMeta`].
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<FeatureFlagsMeta>,
 }
@@ -37,15 +49,24 @@ pub struct FeatureFlagsOutput {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlagFinding {
+    /// File path relative to the analysed root.
     pub path: String,
+    /// Detected flag identifier, e.g. the env var or SDK key name.
     pub flag_name: String,
+    /// Detection pattern the flag matched.
     pub kind: FeatureFlagKind,
+    /// How confident the detector is that this is a real feature flag.
     pub confidence: FeatureFlagConfidence,
+    /// 1-based line of the flag usage.
     pub line: u32,
+    /// 1-based column of the flag usage.
     pub col: u32,
+    /// Suggested follow-up actions (investigate / suppress).
     pub actions: Vec<FeatureFlagAction>,
+    /// Flag SDK the call belongs to, for SDK-call findings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdk_name: Option<String>,
+    /// Overlap with dead-code findings when the flag guards unused exports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code_overlap: Option<FeatureFlagDeadCodeOverlap>,
 }
@@ -55,8 +76,11 @@ pub struct FeatureFlagFinding {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureFlagKind {
+    /// Environment-variable read used as a toggle.
     EnvironmentVariable,
+    /// Feature-flag SDK evaluation call.
     SdkCall,
+    /// Flag key in a configuration object literal.
     ConfigObject,
 }
 
@@ -65,8 +89,11 @@ pub enum FeatureFlagKind {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum FeatureFlagConfidence {
+    /// Strong flag signal, e.g. a known SDK call.
     High,
+    /// Plausible flag signal with some ambiguity.
     Medium,
+    /// Weak signal; likely needs human confirmation.
     Low,
 }
 
@@ -74,10 +101,14 @@ pub enum FeatureFlagConfidence {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlagAction {
+    /// Action discriminator, serialized as `type`.
     #[serde(rename = "type")]
     pub kind: FeatureFlagActionType,
+    /// Whether `fallow fix` can apply the action automatically.
     pub auto_fixable: bool,
+    /// Human-readable action description.
     pub description: String,
+    /// Suppression comment to insert, for suppress actions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
@@ -87,7 +118,9 @@ pub struct FeatureFlagAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum FeatureFlagActionType {
+    /// Check whether the flag is still needed.
     InvestigateFlag,
+    /// Suppress the finding with a `fallow-ignore` line comment.
     SuppressLine,
 }
 
@@ -95,8 +128,11 @@ pub enum FeatureFlagActionType {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlagDeadCodeOverlap {
+    /// Lines inside the flag-guarded region.
     pub guarded_lines: u32,
+    /// Number of unused exports the flag guards.
     pub dead_export_count: usize,
+    /// Names of the unused exports the flag guards.
     pub dead_exports: Vec<String>,
 }
 
@@ -121,9 +157,13 @@ pub struct FeatureFlagsMeta {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlagsMetaDetails {
+    /// What the flags command reports.
     pub description: &'static str,
+    /// Explanation of each `kind` value.
     pub kinds: FeatureFlagsKindMeta,
+    /// Explanation of each `confidence` value.
     pub confidence: FeatureFlagsConfidenceMeta,
+    /// Public documentation URL for the flags command.
     pub docs: &'static str,
 }
 
@@ -131,8 +171,11 @@ pub struct FeatureFlagsMetaDetails {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlagsKindMeta {
+    /// Explanation of the `environment_variable` kind.
     pub environment_variable: &'static str,
+    /// Explanation of the `sdk_call` kind.
     pub sdk_call: &'static str,
+    /// Explanation of the `config_object` kind.
     pub config_object: &'static str,
 }
 
@@ -140,8 +183,11 @@ pub struct FeatureFlagsKindMeta {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlagsConfidenceMeta {
+    /// Explanation of the `high` confidence level.
     pub high: &'static str,
+    /// Explanation of the `medium` confidence level.
     pub medium: &'static str,
+    /// Explanation of the `low` confidence level.
     pub low: &'static str,
 }
 

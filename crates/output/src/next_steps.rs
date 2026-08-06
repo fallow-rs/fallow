@@ -16,19 +16,28 @@ const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hoo
 /// Local impact digest counters used to render the `impact-report` next step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImpactDigestCounts {
+    /// Commits contained at the gate according to the local impact digest.
     pub containment_count: usize,
+    /// Findings resolved according to the local impact digest.
     pub resolved_total: usize,
 }
 
 /// Runtime-independent inputs for standalone dead-code next steps.
 #[derive(Debug, Clone, Copy)]
 pub struct DeadCodeNextStepsInput<'a> {
+    /// False when `FALLOW_SUGGESTIONS=off`; suppresses all steps.
     pub suggestions_enabled: bool,
+    /// Analysis results the steps are derived from.
     pub results: &'a AnalysisResults,
+    /// Analysis root, used to render trace targets relative.
     pub root: &'a Path,
+    /// Offer the guided-setup pointer because no fallow config exists yet.
     pub offer_setup: bool,
+    /// Local impact digest counters, when a digest is available.
     pub impact_digest: Option<ImpactDigestCounts>,
+    /// Workspace name to scope suggested commands to, when analysing one.
     pub workspace_ref: Option<&'a str>,
+    /// Offer `fallow audit` because the working tree has changed files.
     pub audit_changed: bool,
     /// The project has external plugins declared; when files are also unused,
     /// route the agent to `fallow plugin-check` to verify what they seed.
@@ -38,31 +47,47 @@ pub struct DeadCodeNextStepsInput<'a> {
 /// Runtime-independent inputs for standalone duplication next steps.
 #[derive(Debug, Clone, Copy)]
 pub struct DupesNextStepsInput<'a> {
+    /// False when `FALLOW_SUGGESTIONS=off`; suppresses all steps.
     pub suggestions_enabled: bool,
+    /// Clone fingerprints from this run, used for the suppress example.
     pub clone_fingerprints: &'a [&'a str],
+    /// Offer the guided-setup pointer because no fallow config exists yet.
     pub offer_setup: bool,
+    /// Local impact digest counters, when a digest is available.
     pub impact_digest: Option<ImpactDigestCounts>,
+    /// Offer `fallow audit` because the working tree has changed files.
     pub audit_changed: bool,
 }
 
 /// Deterministic unused-export trace target selected by the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceUnusedExportInput {
+    /// Root-relative path of the file declaring the export.
     pub path: String,
+    /// Name of the unused export to trace.
     pub export_name: String,
 }
 
 /// Runtime-independent inputs for bare `fallow` combined next steps.
 #[derive(Debug, Clone)]
 pub struct CombinedNextStepsInput<'a> {
+    /// False when `FALLOW_SUGGESTIONS=off`; suppresses all steps.
     pub suggestions_enabled: bool,
+    /// The dead-code section reported findings.
     pub has_dead_code_findings: bool,
+    /// Unused-export trace target, when the caller selected one.
     pub trace_unused_export: Option<TraceUnusedExportInput>,
+    /// Workspace name to scope suggested commands to, when analysing one.
     pub workspace_ref: Option<&'a str>,
+    /// Clone fingerprints from this run, used for the suppress example.
     pub clone_fingerprints: &'a [&'a str],
+    /// The health section reported complexity findings.
     pub has_complexity_findings: bool,
+    /// Offer the guided-setup pointer because no fallow config exists yet.
     pub offer_setup: bool,
+    /// Local impact digest counters, when a digest is available.
     pub impact_digest: Option<ImpactDigestCounts>,
+    /// Offer `fallow audit` because the working tree has changed files.
     pub audit_changed: bool,
     /// External plugins are declared for this project.
     pub has_external_plugins: bool,
@@ -73,18 +98,26 @@ pub struct CombinedNextStepsInput<'a> {
 /// Runtime-independent inputs for audit next steps.
 #[derive(Debug, Clone)]
 pub struct AuditNextStepsInput {
+    /// False when `FALLOW_SUGGESTIONS=off`; suppresses all steps.
     pub suggestions_enabled: bool,
+    /// Unused-export trace target, when the caller selected one.
     pub trace_unused_export: Option<TraceUnusedExportInput>,
+    /// The audit reported complexity findings.
     pub has_complexity_findings: bool,
 }
 
 /// Runtime-independent inputs for standalone health next steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HealthNextStepsInput {
+    /// False when `FALLOW_SUGGESTIONS=off`; suppresses all steps.
     pub suggestions_enabled: bool,
+    /// The health report contains findings.
     pub has_findings: bool,
+    /// Offer the guided-setup pointer because no fallow config exists yet.
     pub offer_setup: bool,
+    /// Local impact digest counters, when a digest is available.
     pub impact_digest: Option<ImpactDigestCounts>,
+    /// Offer `fallow audit` because the working tree has changed files.
     pub audit_changed: bool,
 }
 

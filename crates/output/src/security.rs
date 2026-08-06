@@ -56,7 +56,9 @@ pub enum SecurityGateVerdict {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityGate<Mode> {
+    /// Gate mode that was selected on the command line.
     pub mode: Mode,
+    /// Gate outcome for this run.
     pub verdict: SecurityGateVerdict,
     /// Number of candidates matching the selected gate mode.
     pub new_count: usize,
@@ -81,13 +83,17 @@ pub struct SecurityOutputConfig<Severity> {
     pub categories_exclude: Option<Vec<String>>,
 }
 
+/// Per-rule severity context inside [`SecurityOutputConfig::rules`].
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityOutputRulesConfig<Severity> {
+    /// Severity context for the client-server-leak rule.
     pub security_client_server_leak: SecurityRuleSeverityConfig<Severity>,
+    /// Severity context for the security-sink rule.
     pub security_sink: SecurityRuleSeverityConfig<Severity>,
 }
 
+/// Configured-versus-effective severity for one security rule.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityRuleSeverityConfig<Severity> {
@@ -161,9 +167,13 @@ pub struct SecurityUnresolvedCalleeDiagnostics {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeSample {
+    /// File path relative to the analysed root.
     pub path: String,
+    /// 1-based line of the skipped call site.
     pub line: u32,
+    /// 1-based column of the skipped call site.
     pub col: u32,
+    /// Why the callee could not be resolved.
     pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
     /// Compact syntax shape of the skipped callee.
     pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
@@ -173,6 +183,7 @@ pub struct SecurityUnresolvedCalleeSample {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeTopFile {
+    /// File path relative to the analysed root.
     pub path: String,
     /// Number of unresolved callees in this file.
     pub count: usize,
@@ -182,6 +193,7 @@ pub struct SecurityUnresolvedCalleeTopFile {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeReasonCount {
+    /// Why the callees could not be resolved.
     pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
     /// Number of unresolved callees with this reason.
     pub count: usize,
@@ -416,8 +428,11 @@ pub struct SecuritySummary {
 #[derive(Debug, Clone, Copy, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecuritySeverityCounts {
+    /// High-severity candidates.
     pub high: usize,
+    /// Medium-severity candidates.
     pub medium: usize,
+    /// Low-severity candidates.
     pub low: usize,
 }
 
@@ -425,11 +440,17 @@ pub struct SecuritySeverityCounts {
 #[derive(Debug, Clone, Copy, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityReachabilityCounts {
+    /// Candidates reachable from an entry point.
     pub entry_reachable: usize,
+    /// Candidates reachable from an untrusted input source.
     pub untrusted_source_reachable: usize,
+    /// Candidates where taint flows through a call argument.
     pub arg_level: usize,
+    /// Candidates where taint is only module-level.
     pub module_level: usize,
+    /// Candidates whose flow crosses a client/server boundary.
     pub crosses_boundary: usize,
+    /// Candidates backed by a concrete taint source.
     pub source_backed: usize,
 }
 
@@ -437,12 +458,19 @@ pub struct SecurityReachabilityCounts {
 #[derive(Debug, Clone, Copy, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityRuntimeStateCounts {
+    /// Candidates on frequently executed runtime paths.
     pub runtime_hot: usize,
+    /// Candidates on rarely executed runtime paths.
     pub runtime_cold: usize,
+    /// Candidates on paths never seen executing.
     pub never_executed: usize,
+    /// Candidates on low-traffic paths.
     pub low_traffic: usize,
+    /// Candidates in files runtime coverage did not observe.
     pub coverage_unavailable: usize,
+    /// Candidates whose runtime state could not be classified.
     pub runtime_unknown: usize,
+    /// Candidates analysed without any runtime coverage data.
     pub not_collected: usize,
 }
 
@@ -476,9 +504,12 @@ pub struct SecurityVerifierVerdict {
     pub schema_version: String,
     /// Stable candidate id from `security_findings[].finding_id`.
     pub finding_id: String,
+    /// Verifier's verdict for the candidate.
     pub verdict: SecurityVerifierVerdictStatus,
+    /// Short machine-oriented verdict reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Longer free-form verdict explanation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
     /// Optional verifier-provided confidence or review priority.
@@ -502,6 +533,7 @@ pub struct SecuritySurvivorsOutput {
     pub version: ToolVersion,
     /// Wall-clock milliseconds spent producing the report.
     pub elapsed_ms: ElapsedMs,
+    /// Aggregate verdict counts.
     pub summary: SecuritySurvivorsSummary,
     /// Verifier-retained candidates keyed by finding id.
     pub survivors: BTreeMap<String, SecuritySurvivor>,
@@ -514,11 +546,17 @@ pub struct SecuritySurvivorsOutput {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecuritySurvivorsSummary {
+    /// Candidates in the input security report.
     pub candidates: usize,
+    /// Verifier verdicts supplied.
     pub verdicts: usize,
+    /// Candidates the verifier retained.
     pub survivors: usize,
+    /// Candidates the verifier dismissed.
     pub dismissed: usize,
+    /// Candidates the verifier flagged as ambiguous.
     pub needs_human_review: usize,
+    /// Candidates without any verdict.
     pub unverdicted: usize,
 }
 
@@ -528,9 +566,12 @@ pub struct SecuritySurvivorsSummary {
 pub struct SecuritySurvivor {
     /// Stable candidate id from `security_findings[].finding_id`.
     pub finding_id: String,
+    /// Verifier's verdict for the candidate.
     pub verdict: SecurityVerifierVerdictStatus,
+    /// Short machine-oriented verdict reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Longer free-form verdict explanation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
     /// Optional verifier-provided confidence or review priority.
@@ -575,8 +616,11 @@ pub struct SecurityBlindSpotsOutput {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityBlindSpotsSummary {
+    /// Files containing at least one unresolved callee.
     pub unresolved_edge_files: usize,
+    /// Total unresolved callee sites in the analysis.
     pub unresolved_callee_sites: usize,
+    /// Callee sites captured in the bounded diagnostic sample.
     pub sampled_callee_sites: usize,
 }
 
@@ -584,6 +628,7 @@ pub struct SecurityBlindSpotsSummary {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityBlindSpotGroup {
+    /// Why the callees in this group could not be resolved.
     pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
     /// Compact syntax shape of the skipped callee.
     pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
@@ -599,6 +644,7 @@ pub struct SecurityBlindSpotGroup {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityBlindSpotFile {
+    /// File path relative to the analysed root.
     pub path: String,
     /// Count in the bounded diagnostic sample.
     pub sampled_count: usize,

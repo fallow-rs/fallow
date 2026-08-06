@@ -31,23 +31,37 @@ pub const CHECK_SCHEMA_VERSION: u32 = 7;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow dead-code --format json"))]
 pub struct CheckOutput {
+    /// Dead-code output schema version; currently [`CHECK_SCHEMA_VERSION`].
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Total findings across all issue arrays; excludes `next_steps`.
     pub total_issues: usize,
+    /// Entry-point totals per source, when the analysis recorded them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_points: Option<EntryPoints>,
+    /// Per-category finding counts.
     pub summary: CheckSummary,
+    /// Full analysis results, flattened so each issue array sits at the
+    /// envelope root.
     #[serde(flatten)]
     pub results: AnalysisResults,
+    /// Count deltas against the matched baseline, in baseline runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_deltas: Option<BaselineDeltas>,
+    /// Which baseline snapshot was matched, in baseline runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<BaselineMatch>,
+    /// Regression verdict against the baseline, in `--fail-on-regression` runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression: Option<RegressionResult>,
+    /// `_meta` block with docs and rule definitions, when `--explain` was
+    /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
@@ -75,12 +89,20 @@ pub struct CheckOutput {
     )
 )]
 pub struct CheckGroupedOutput {
+    /// Dead-code output schema version; currently [`CHECK_SCHEMA_VERSION`].
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Resolver the issues were grouped by.
     pub grouped_by: GroupByMode,
+    /// Total findings across all groups.
     pub total_issues: usize,
+    /// One bucket per resolver key.
     pub groups: Vec<CheckGroupedEntry>,
+    /// `_meta` block with docs and rule definitions, when `--explain` was
+    /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Diagnostics collected for the full analysis before issue grouping.
@@ -99,10 +121,14 @@ pub struct CheckGroupedOutput {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CheckGroupedEntry {
+    /// Resolver key: team name, directory prefix, package name, or section.
     pub key: String,
+    /// Owners of a GitLab CODEOWNERS section; present for section grouping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owners: Option<Vec<String>>,
+    /// Findings in this group.
     pub total_issues: usize,
+    /// Group-scoped analysis results, flattened like the ungrouped body.
     #[serde(flatten)]
     pub results: AnalysisResults,
 }
@@ -116,21 +142,34 @@ pub struct CheckGroupedEntry {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum GroupByMode {
+    /// Group by CODEOWNERS team.
     Owner,
+    /// Group by top-level directory prefix.
     Directory,
+    /// Group by workspace package name.
     Package,
+    /// Group by GitLab CODEOWNERS `[Section]` header name.
     Section,
 }
 
 /// Inputs for building the dead-code JSON envelope.
 pub struct CheckOutputInput {
+    /// Dead-code output schema version to report.
     pub schema_version: u32,
+    /// Fallow CLI version to report.
     pub version: String,
+    /// Wall-clock analysis duration; serialized as whole milliseconds.
     pub elapsed: Duration,
+    /// Engine analysis results to embed.
     pub results: AnalysisResults,
+    /// Whether duplicate-export findings are fixable via config edits, which
+    /// flips their `config_fixable` action flag.
     pub config_fixable: bool,
+    /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Read-only follow-up commands computed from this run's findings.
     pub next_steps: Vec<NextStep>,
 }
 
@@ -205,6 +244,8 @@ pub fn serialize_check_grouped_json_output(
     serialize_check_family_json_output(output, "dead-code-grouped", mode, analysis_run_id)
 }
 
+/// Mark every duplicate-export finding as fixable through a config edit when
+/// the project's config supports automated fixes.
 pub fn apply_config_fixable_to_duplicate_exports(
     results: &mut AnalysisResults,
     config_fixable: bool,
