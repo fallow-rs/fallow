@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     EngineResult,
-    discover::AnalysisDiscovery,
+    discover::{AnalysisDiscovery, DiscoveredFile, HiddenDirScope},
     engine_error,
     module_graph::RetainedModuleGraph,
     plugins::{PluginEntryPattern, PluginNamedPattern, PluginPathRule, PluginSetupFile},
@@ -25,10 +25,6 @@ pub use fallow_core::plugins::manifest_entries::{
     CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
 };
 pub use fallow_core::plugins::registry::is_external_plugin_active;
-// Test-only: the discover_walk no-drift gate compares its hardcoded
-// config-candidate list against the registry through this adapter.
-#[cfg(test)]
-pub use fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParseMetrics {
@@ -106,6 +102,27 @@ impl DeadCodeBackendPrelude<'_> {
     pub fn finish(&self) {
         self.inner.finish();
     }
+}
+
+/// Run the shared core discovery walk with engine-owned hidden-dir scopes.
+///
+/// The core walk is the single implementation: it derives the config-candidate
+/// basename set live from the plugin registry, so discovery can never drift
+/// behind a new plugin's config patterns.
+pub fn discover_files_and_config_candidates(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
+    let scopes = additional_hidden_dir_scopes
+        .iter()
+        .map(|scope| {
+            fallow_core::discover::HiddenDirScope::new(
+                scope.root().to_path_buf(),
+                scope.dirs().to_vec(),
+            )
+        })
+        .collect::<Vec<_>>();
+    fallow_core::discover::discover_files_and_config_candidates(config, &scopes)
 }
 
 pub fn prepare_dead_code_backend_prelude<'a>(

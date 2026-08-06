@@ -163,12 +163,12 @@ impl HiddenDirScope {
     }
 
     #[must_use]
-    fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.root
     }
 
     #[must_use]
-    fn dirs(&self) -> &[String] {
+    pub(crate) fn dirs(&self) -> &[String] {
         &self.dirs
     }
 }
@@ -870,16 +870,7 @@ pub fn discover_files_and_config_candidates(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
-    let scopes = additional_hidden_dir_scopes
-        .iter()
-        .map(|scope| {
-            crate::discover_walk::HiddenDirScope::new(
-                scope.root().to_path_buf(),
-                scope.dirs().to_vec(),
-            )
-        })
-        .collect::<Vec<_>>();
-    crate::discover_walk::discover_files_and_config_candidates(config, &scopes)
+    crate::core_backend::discover_files_and_config_candidates(config, additional_hidden_dir_scopes)
 }
 
 /// Discover configured and inferred entry points.

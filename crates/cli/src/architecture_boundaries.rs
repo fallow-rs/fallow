@@ -1514,7 +1514,10 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::plugins::PluginRegistry",
         "fallow_core::plugins::manifest_entries",
         "fallow_core::plugins::registry::is_external_plugin_active",
-        "fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames",
+        // The discovery walk has one implementation, in fallow-core, so its
+        // config-candidate basenames stay derived from the plugin registry.
+        "fallow_core::discover::HiddenDirScope",
+        "fallow_core::discover::discover_files_and_config_candidates",
     ];
 
     for line in core_backend.lines() {

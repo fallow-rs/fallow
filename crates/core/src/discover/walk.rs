@@ -309,7 +309,10 @@ pub struct HiddenDirScope {
 }
 
 impl HiddenDirScope {
-    pub(crate) fn new(root: PathBuf, dirs: Vec<String>) -> Self {
+    /// Build a scope rooted at a package directory that admits the given
+    /// hidden directory names during the walk.
+    #[must_use]
+    pub fn new(root: PathBuf, dirs: Vec<String>) -> Self {
         Self { root, dirs }
     }
 

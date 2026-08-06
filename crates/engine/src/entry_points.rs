@@ -6,7 +6,7 @@ use fallow_types::path_util::is_absolute_path_any_platform;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::discover_walk::SOURCE_EXTENSIONS;
+use crate::discover::SOURCE_EXTENSIONS;
 
 /// Known output directory names from exports maps.
 /// When an entry point path is inside one of these directories, we also try

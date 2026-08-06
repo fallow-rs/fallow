@@ -11,8 +11,9 @@ config -> discovery -> extraction -> resolution -> graph -> detection -> output
 
 - `crates/config/` resolves configuration, workspaces, rules, and external
   plugins.
-- `crates/engine/src/discover.rs` and `discover_walk.rs` own the public
-  discovery path.
+- `crates/engine/src/discover.rs` owns the public discovery path; the shared
+  walk lives in `crates/core/src/discover/walk.rs` behind the core backend
+  adapter.
 - `crates/extract/` parses source and produces syntax facts.
 - `crates/graph/` resolves imports and builds reachability and re-export state.
 - `crates/core/src/analyze/` detects dead-code and structural issue families.
