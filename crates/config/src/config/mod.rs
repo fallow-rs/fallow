@@ -52,10 +52,16 @@ use std::path::PathBuf;
 use crate::external_plugin::ExternalPluginDef;
 use crate::workspace::WorkspaceConfig;
 
+/// Value of the `ignoreExportsUsedInFile` config key: whether an export
+/// referenced elsewhere in its own file is suppressed from `unused-export`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged, rename_all = "camelCase")]
 pub enum IgnoreExportsUsedInFileConfig {
+    /// Blanket toggle: `true` suppresses any export with a same-file use,
+    /// regardless of kind. The default is `false`.
     Bool(bool),
+    /// Knip-parity object form restricting the suppression to type-only
+    /// exports.
     ByKind(IgnoreExportsUsedInFileByKind),
 }
 
@@ -78,6 +84,8 @@ impl From<IgnoreExportsUsedInFileByKind> for IgnoreExportsUsedInFileConfig {
 }
 
 impl IgnoreExportsUsedInFileConfig {
+    /// Whether any form of the same-file-use suppression is active (the bool
+    /// form is `true`, or either by-kind field is set).
     #[must_use]
     pub const fn is_enabled(self) -> bool {
         match self {
@@ -86,6 +94,9 @@ impl IgnoreExportsUsedInFileConfig {
         }
     }
 
+    /// Whether an export with a same-file use should be suppressed, given
+    /// whether fallow classified it as type-only. The bool form suppresses
+    /// regardless of kind; the by-kind form suppresses type-only exports only.
     #[must_use]
     pub const fn suppresses(self, is_type_only: bool) -> bool {
         match self {
@@ -95,6 +106,8 @@ impl IgnoreExportsUsedInFileConfig {
     }
 }
 
+/// Object form of `ignoreExportsUsedInFile` (`{ "type": ..., "interface": ... }`),
+/// restricting the same-file-use suppression to type-only exports.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IgnoreExportsUsedInFileByKind {
@@ -131,12 +144,14 @@ pub struct UnusedComponentPropsConfig {
 }
 
 impl UnusedComponentPropsConfig {
+    /// True when no option is set, so serialization can omit the section.
     #[must_use]
     pub fn is_default(&self) -> bool {
         self.ignore_pattern.is_none()
     }
 }
 
+/// The `fix` config section: settings for `fallow fix` apply behavior.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FixConfig {
@@ -145,6 +160,8 @@ pub struct FixConfig {
     pub catalog: CatalogFixConfig,
 }
 
+/// The `fix.catalog` section: how `fallow fix` cleans up unused
+/// `pnpm-workspace.yaml` catalog entries.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogFixConfig {
@@ -153,12 +170,20 @@ pub struct CatalogFixConfig {
     pub delete_preceding_comments: CatalogPrecedingCommentPolicy,
 }
 
+/// Value of `fix.catalog.deletePrecedingComments`: what happens to comment
+/// lines directly above a catalog entry that `fallow fix` removes. A
+/// `fallow-keep` marker in the block always preserves it regardless of policy.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CatalogPrecedingCommentPolicy {
+    /// Delete the adjacent comment block only when heuristics attribute it to
+    /// the entry (preceded by a blank line or directly under the catalog
+    /// header) and it is not a section banner. The default.
     #[default]
     Auto,
+    /// Always delete the adjacent comment block with the entry.
     Always,
+    /// Never delete preceding comments.
     Never,
 }
 
@@ -206,12 +231,22 @@ fn is_default_type_aware_require(value: &TypeAwareRequire) -> bool {
 }
 
 impl TypeAwareConfig {
+    /// True when the section equals its default (disabled, no projects,
+    /// best-effort), so serialization can omit it.
     #[must_use]
     pub fn is_default(&self) -> bool {
         !self.enabled && self.projects.is_empty() && self.require == TypeAwareRequire::BestEffort
     }
 }
 
+/// The user-facing fallow configuration as authored in `.fallowrc.json` /
+/// `.fallowrc.jsonc` / `fallow.toml` (or the `fallow` key of `package.json`).
+///
+/// Every field documents its serialized meaning, default, and precedence
+/// against CLI flags and environment variables where they exist.
+/// `FallowConfig::resolve` compiles the loaded config (globs, regexes,
+/// plugin and rule-pack discovery) into a [`ResolvedConfig`] for analysis.
+/// Unknown keys are rejected at load so typos fail loud.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FallowConfig {
@@ -395,6 +430,9 @@ pub struct SecurityConfig {
 }
 
 impl SecurityConfig {
+    /// The configured `requestReceivers` trimmed, lowercased, and deduplicated
+    /// in first-seen order, with empty entries dropped; the form the matcher
+    /// compares receiver names against (matching is case-insensitive).
     #[must_use]
     pub fn normalized_request_receivers(&self) -> Vec<String> {
         let mut receivers = Vec::new();
@@ -407,6 +445,8 @@ impl SecurityConfig {
         receivers
     }
 
+    /// False when any configured receiver is empty or whitespace-only, which
+    /// config validation reports as an error instead of silently dropping it.
     #[must_use]
     pub fn request_receivers_are_valid(&self) -> bool {
         self.request_receivers
@@ -430,6 +470,8 @@ pub struct SecurityCategories {
     pub exclude: Option<Vec<String>>,
 }
 
+/// The `cache` config section: location and size ceiling of fallow's
+/// persistent caches (default directory `<root>/.fallow`).
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CacheConfig {
@@ -443,23 +485,34 @@ pub struct CacheConfig {
 }
 
 impl CacheConfig {
+    /// True when neither field is set, so serialization can omit the section.
     #[must_use]
     pub fn is_default(&self) -> bool {
         self.dir.is_none() && self.max_size_mb.is_none()
     }
 }
 
+/// The analysis families production mode can be scoped to independently via
+/// the object form of the `production` config key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProductionAnalysis {
+    /// Unused files/exports/dependencies detection.
     DeadCode,
+    /// Complexity and health scoring.
     Health,
+    /// Clone detection.
     Dupes,
 }
 
+/// Value of the `production` config key: excludes test/spec/story/dev files
+/// from discovery, either globally or per analysis family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ProductionConfig {
+    /// Boolean form applying to every analysis. The default is `false`.
     Global(bool),
+    /// Object form (`{ deadCode?, health?, dupes? }`) scoping production mode
+    /// per analysis family.
     PerAnalysis(PerAnalysisProductionConfig),
 }
 
@@ -520,6 +573,7 @@ impl Not for ProductionConfig {
 }
 
 impl ProductionConfig {
+    /// Whether production mode applies to `analysis` under this config.
     #[must_use]
     pub const fn for_analysis(self, analysis: ProductionAnalysis) -> bool {
         match self {
@@ -532,6 +586,8 @@ impl ProductionConfig {
         }
     }
 
+    /// The boolean form's value; `false` for the per-analysis form, which has
+    /// no global toggle.
     #[must_use]
     pub const fn global(self) -> bool {
         match self {
@@ -540,6 +596,7 @@ impl ProductionConfig {
         }
     }
 
+    /// Whether production mode is enabled for at least one analysis family.
     #[must_use]
     pub const fn any_enabled(self) -> bool {
         match self {
@@ -549,6 +606,8 @@ impl ProductionConfig {
     }
 }
 
+/// Object form of the `production` config key, scoping production mode to
+/// individual analysis families in combined `fallow` and `fallow audit`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct PerAnalysisProductionConfig {
@@ -560,6 +619,8 @@ pub struct PerAnalysisProductionConfig {
     pub dupes: bool,
 }
 
+/// The `audit` config section: in-repo defaults for `fallow audit`, each
+/// overridable by its matching CLI flag.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditConfig {
@@ -597,6 +658,7 @@ pub struct AuditConfig {
 }
 
 impl AuditConfig {
+    /// True when every field is unset, so serialization can omit the section.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.gate.is_default()
@@ -610,21 +672,28 @@ impl AuditConfig {
     }
 }
 
+/// Value of `audit.gate`: which findings drive the `fallow audit` verdict.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum AuditGate {
+    /// Fail only on findings the current changeset introduced, determined by
+    /// a base-snapshot attribution pass. The default.
     #[default]
     NewOnly,
+    /// Fail on every finding in changed files, skipping the attribution pass.
     All,
 }
 
 impl AuditGate {
+    /// True for the default `new-only` gate, so serialization can omit it.
     #[must_use]
     pub const fn is_default(&self) -> bool {
         matches!(self, Self::NewOnly)
     }
 }
 
+/// The `regression` config section holding the saved issue-count baseline for
+/// the `--fail-on-regression` gate.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RegressionConfig {
@@ -633,6 +702,9 @@ pub struct RegressionConfig {
     pub baseline: Option<RegressionBaseline>,
 }
 
+/// Saved per-issue-type counts written by `--save-baseline` and compared by
+/// `--fail-on-regression`. Every count defaults to `0` when its key is missing,
+/// so hand-trimmed baselines stay loadable.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RegressionBaseline {
@@ -640,46 +712,67 @@ pub struct RegressionBaseline {
     /// Missing values in existing configs are treated as syntactic.
     #[serde(default)]
     pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
+    /// Baseline count across all issue types.
     #[serde(default)]
     pub total_issues: usize,
+    /// Baseline count of `unused-files` findings.
     #[serde(default)]
     pub unused_files: usize,
+    /// Baseline count of `unused-exports` findings.
     #[serde(default)]
     pub unused_exports: usize,
+    /// Baseline count of `unused-types` findings.
     #[serde(default)]
     pub unused_types: usize,
+    /// Baseline count of `unused-dependencies` findings.
     #[serde(default)]
     pub unused_dependencies: usize,
+    /// Baseline count of `unused-dev-dependencies` findings.
     #[serde(default)]
     pub unused_dev_dependencies: usize,
+    /// Baseline count of `unused-optional-dependencies` findings.
     #[serde(default)]
     pub unused_optional_dependencies: usize,
+    /// Baseline count of `unused-enum-members` findings.
     #[serde(default)]
     pub unused_enum_members: usize,
+    /// Baseline count of `unused-class-members` findings.
     #[serde(default)]
     pub unused_class_members: usize,
+    /// Baseline count of `unresolved-imports` findings.
     #[serde(default)]
     pub unresolved_imports: usize,
+    /// Baseline count of `unlisted-dependencies` findings.
     #[serde(default)]
     pub unlisted_dependencies: usize,
+    /// Baseline count of `duplicate-exports` findings.
     #[serde(default)]
     pub duplicate_exports: usize,
+    /// Baseline count of `circular-dependencies` findings.
     #[serde(default)]
     pub circular_dependencies: usize,
+    /// Baseline count of `re-export-cycle` findings.
     #[serde(default)]
     pub re_export_cycles: usize,
+    /// Baseline count of `type-only-dependencies` findings.
     #[serde(default)]
     pub type_only_dependencies: usize,
+    /// Baseline count of `test-only-dependencies` findings.
     #[serde(default)]
     pub test_only_dependencies: usize,
+    /// Baseline count of `dev-dependencies-in-production` findings.
     #[serde(default)]
     pub dev_dependencies_in_production: usize,
+    /// Baseline count of `boundary-violation` findings.
     #[serde(default)]
     pub boundary_violations: usize,
+    /// Baseline count of boundary-coverage-violation findings.
     #[serde(default)]
     pub boundary_coverage_violations: usize,
+    /// Baseline count of boundary-call-violation findings.
     #[serde(default)]
     pub boundary_call_violations: usize,
+    /// Baseline count of `policy-violation` findings.
     #[serde(default)]
     pub policy_violations: usize,
 }

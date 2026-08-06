@@ -67,7 +67,9 @@ pub struct IgnoreExportRule {
 /// `IgnoreExportRule` with the glob pre-compiled into a matcher.
 #[derive(Debug, Clone)]
 pub struct CompiledIgnoreExportRule {
+    /// Pre-compiled matcher for the rule's `file` glob.
     pub matcher: globset::GlobMatcher,
+    /// Export names to ignore (`*` for all), copied from the raw rule.
     pub exports: Vec<String>,
 }
 
@@ -88,8 +90,12 @@ pub struct IgnoreCatalogReferenceRule {
 /// `IgnoreCatalogReferenceRule` with the optional consumer glob pre-compiled.
 #[derive(Debug, Clone)]
 pub struct CompiledIgnoreCatalogReferenceRule {
+    /// Exact package name the rule suppresses, compared by string equality.
     pub package: String,
+    /// Optional exact catalog-name filter; `None` matches any catalog.
     pub catalog: Option<String>,
+    /// Optional pre-compiled glob over the consuming workspace `package.json`
+    /// path; `None` matches any consumer.
     pub consumer_matcher: Option<globset::GlobMatcher>,
 }
 
@@ -128,7 +134,10 @@ pub struct IgnoreDependencyOverrideRule {
 /// `IgnoreDependencyOverrideRule` ready for matching.
 #[derive(Debug, Clone)]
 pub struct CompiledIgnoreDependencyOverrideRule {
+    /// Exact target package name the rule suppresses.
     pub package: String,
+    /// Optional declaring-file filter (`"pnpm-workspace.yaml"` or
+    /// `"package.json"`); `None` matches either source.
     pub source: Option<String>,
 }
 
@@ -162,7 +171,10 @@ pub struct ConfigOverride {
 /// Resolved override with pre-compiled glob matchers.
 #[derive(Debug, Clone)]
 pub struct ResolvedOverride {
+    /// Pre-compiled matchers for the entry's `files` globs; the override
+    /// applies to a file when any matcher matches.
     pub matchers: Vec<globset::GlobMatcher>,
+    /// Partial severity map applied to matching files.
     pub rules: PartialRulesConfig,
 }
 
@@ -192,34 +204,75 @@ impl AnalysisSnapshot {
 /// Fully resolved configuration with all globs pre-compiled.
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
+    /// Project root every analysis path resolves against.
     pub root: PathBuf,
+    /// Manual entry-point globs from the `entry` config key, matched against
+    /// discovered files on top of plugin- and manifest-derived entries.
     pub entry_patterns: Vec<String>,
+    /// Compiled union of user `ignorePatterns` and the built-in default
+    /// ignores (`node_modules`, `dist`, minified bundles, ...); matching files
+    /// are excluded from discovery entirely.
     pub ignore_patterns: GlobSet,
+    /// Post-analysis finding-path matcher built from `ignoreFindings`; hides
+    /// findings without removing files from the module graph.
     pub ignore_findings: FindingIgnoreMatcher,
+    /// Output format for this run, passed through from the CLI at resolve time.
     pub output: OutputFormat,
+    /// Cache directory: `cache.dir` resolved against the root, or the default
+    /// `<root>/.fallow`.
     pub cache_dir: PathBuf,
+    /// Worker-thread count, passed through from the CLI at resolve time.
     pub threads: usize,
+    /// When true, skip reading and writing the persistent caches for this run.
     pub no_cache: bool,
+    /// Extraction-cache size ceiling in megabytes (`None` = no ceiling), from
+    /// the CLI override, `FALLOW_CACHE_MAX_SIZE`, or `cache.maxSizeMb`.
     pub cache_max_size_mb: Option<u32>,
+    /// Hash over extraction-affecting config (the sorted external plugin
+    /// names), mixed into cache keys so plugin changes invalidate cached
+    /// extractions instead of serving stale results.
     pub cache_config_hash: u64,
+    /// Exact package names excluded from both unused-dependency and
+    /// unlisted-dependency detection.
     pub ignore_dependencies: Vec<String>,
+    /// Compiled globs matched against raw import specifiers (not filesystem
+    /// paths) whose `unresolved-import` findings are suppressed.
     pub ignore_unresolved_imports: Vec<GlobMatcher>,
+    /// Raw `ignoreExports` rules as configured, kept alongside the compiled
+    /// form for surfaces that need the original glob text (config editing,
+    /// diagnostics).
     pub ignore_export_rules: Vec<IgnoreExportRule>,
+    /// `ignoreExports` rules with their file globs pre-compiled for matching.
     pub compiled_ignore_exports: Vec<CompiledIgnoreExportRule>,
+    /// `ignoreCatalogReferences` rules with consumer globs pre-compiled.
     pub compiled_ignore_catalog_references: Vec<CompiledIgnoreCatalogReferenceRule>,
+    /// `ignoreDependencyOverrides` rules ready for matching.
     pub compiled_ignore_dependency_overrides: Vec<CompiledIgnoreDependencyOverrideRule>,
+    /// Same-file-use suppression setting for `unused-export`.
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
+    /// Class-member names, globs, or heritage-scoped rules treated as
+    /// framework-used and exempt from `unused-class-member`.
     pub used_class_members: Vec<UsedClassMemberRule>,
+    /// Decorator names stripped of the automatic `unused-class-member`
+    /// exemption that decorated members otherwise receive.
     pub ignore_decorators: Vec<String>,
     /// Compiled regex matched against each declared component prop's local
     /// destructure binding name; a matching prop is exempted from
     /// `unused-component-props`. `None` when `unusedComponentProps.ignorePattern`
     /// is unset. Compiled from the validated raw pattern in [`Self::resolve`].
     pub unused_component_props_ignore: Option<regex::Regex>,
+    /// Clone-detection settings, passed through unchanged.
     pub duplicates: DuplicatesConfig,
+    /// Health and complexity thresholds, passed through unchanged.
     pub health: HealthConfig,
+    /// TypeScript semantic-analysis opt-in, passed through unchanged.
     pub type_aware: TypeAwareConfig,
+    /// Per-rule severities with production-mode adjustments applied: when
+    /// [`Self::production`] is set, `unused-dev-dependencies` and
+    /// `unused-optional-dependencies` are forced to `off`.
     pub rules: RulesConfig,
+    /// Resolved architecture boundaries: preset expanded (honoring the
+    /// tsconfig `rootDir`), auto-discovered zones added, and rules validated.
     pub boundaries: ResolvedBoundaryConfig,
     /// Rule packs loaded from the `rulePacks` config key, in config order.
     /// Validated at config load (`load_rule_packs` is also the validation
@@ -229,20 +282,50 @@ pub struct ResolvedConfig {
     /// Source paths from the `rulePacks` config key, index-aligned with
     /// [`Self::rule_packs`] when every configured pack loaded successfully.
     pub rule_pack_sources: Vec<PathBuf>,
+    /// Production mode for this analysis pass: test/spec/story/dev files are
+    /// excluded from discovery. Out of [`FallowConfig::resolve`] this is the
+    /// global `production` bool ([`super::ProductionConfig::global`]); the
+    /// per-analysis object form and CLI/env overrides are applied post-resolve.
     pub production: bool,
+    /// Quiet mode from the CLI: suppress non-essential progress and warning
+    /// output.
     pub quiet: bool,
+    /// External plugin definitions: inline `framework` entries plus those
+    /// discovered from `plugins` paths, `.fallow/plugins/`, and root
+    /// `fallow-plugin-*` files (first occurrence of a name wins).
     pub external_plugins: Vec<ExternalPluginDef>,
+    /// Globs for files loaded dynamically at runtime; matching files are
+    /// seeded as entry points so they stay reachable.
     pub dynamically_loaded: Vec<String>,
+    /// Per-file severity overrides with globs pre-compiled, in config order.
     pub overrides: Vec<ResolvedOverride>,
+    /// Saved regression baseline for `--fail-on-regression`, when embedded.
     pub regression: Option<super::RegressionConfig>,
+    /// In-repo `fallow audit` defaults, passed through unchanged.
     pub audit: super::AuditConfig,
+    /// Configured CODEOWNERS path override; `None` probes the standard
+    /// locations.
     pub codeowners: Option<String>,
+    /// Workspace package names (or globs over them) whose public API is
+    /// treated as externally consumed, making their export surface a
+    /// reachability root.
     pub public_packages: Vec<String>,
+    /// Feature-flag detection settings, passed through unchanged.
     pub flags: FlagsConfig,
+    /// Security catalogue scoping with `requestReceivers` normalized
+    /// (trimmed, lowercased, deduplicated).
     pub security: SecurityConfig,
+    /// `fallow fix` behavior settings, passed through unchanged.
     pub fix: super::FixConfig,
+    /// Module-resolver settings (extra `exports` conditions), passed through
+    /// unchanged.
     pub resolve: ResolveConfig,
+    /// When true, entry-point exports are subject to `unused-export`
+    /// detection instead of being auto-credited as used.
     pub include_entry_exports: bool,
+    /// When true, drop Nuxt convention entry-pattern fallbacks that
+    /// `nuxt.config` does not explicitly declare; auto-import graph edges are
+    /// synthesized regardless.
     pub auto_imports: bool,
     /// Source files strictly larger than this many bytes are skipped at
     /// discovery (never read, parsed, or analyzed), guarding against the
