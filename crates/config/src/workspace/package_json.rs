@@ -66,20 +66,28 @@ pub struct PeerDependencyMeta {
     pub optional: bool,
 }
 
+/// The NAPI-RS `napi` block of a `package.json`, used to recognize the
+/// per-platform artifact packages a native addon generates so they are not
+/// reported as unused dependencies. All fields deserialize leniently: a
+/// wrong-typed value becomes `None`/empty instead of failing manifest parsing.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct NapiConfig {
+    /// The `binaryName` field: basename of the generated `.node` binary.
     #[serde(
         default,
         rename = "binaryName",
         deserialize_with = "deserialize_optional_string_lenient"
     )]
     pub binary_name: Option<String>,
+    /// The `packageName` field: base npm package name from which per-platform
+    /// artifact package names (`<name>-<triple>`) are derived.
     #[serde(
         default,
         rename = "packageName",
         deserialize_with = "deserialize_optional_string_lenient"
     )]
     pub package_name: Option<String>,
+    /// The `targets` field: platform triples the addon is built for.
     #[serde(default, deserialize_with = "deserialize_string_array_lenient")]
     pub targets: Vec<String>,
 }
@@ -87,44 +95,80 @@ pub struct NapiConfig {
 /// Parsed package.json with fields relevant to fallow.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PackageJson {
+    /// The `name` field: the package's npm name, used to identify workspace
+    /// packages and match `public_packages` config entries.
     #[serde(default)]
     pub name: Option<String>,
+    /// The `private` field. Non-boolean values become `None` rather than
+    /// failing manifest parsing.
     #[serde(default, deserialize_with = "deserialize_optional_bool_lenient")]
     pub private: Option<bool>,
+    /// The `main` field: CommonJS entry-point path, seeded as an entry point.
     #[serde(default)]
     pub main: Option<String>,
+    /// The `module` field: ESM entry-point path, seeded as an entry point.
     #[serde(default)]
     pub module: Option<String>,
+    /// The `types` field: type-declaration entry-point path.
     #[serde(default)]
     pub types: Option<String>,
+    /// The `typings` field: legacy spelling of `types`.
     #[serde(default)]
     pub typings: Option<String>,
+    /// The `source` field: unbundled source entry point used by bundler-based
+    /// packages (Parcel convention).
     #[serde(default)]
     pub source: Option<String>,
+    /// The `files` field: publish allowlist patterns. Non-array values become
+    /// empty rather than failing manifest parsing.
     #[serde(default, deserialize_with = "deserialize_string_array_lenient")]
     pub files: Vec<String>,
+    /// The `browser` field, kept raw because it is either a string entry point
+    /// or a path-remap object.
     #[serde(default)]
     pub browser: Option<serde_json::Value>,
+    /// The `bin` field, kept raw because it is either a string path or a
+    /// name-to-path object; every referenced file is an entry point.
     #[serde(default)]
     pub bin: Option<serde_json::Value>,
+    /// The `exports` field, kept raw because of its many shapes (string,
+    /// conditions object, subpath map); referenced files are entry points and
+    /// the map drives subpath resolution.
     #[serde(default)]
     pub exports: Option<serde_json::Value>,
+    /// The `imports` field (`#`-prefixed internal subpath map), kept raw and
+    /// consumed by the module resolver.
     #[serde(default)]
     pub imports: Option<serde_json::Value>,
+    /// The `dependencies` map (package name to version range), the base set
+    /// for unused/unlisted-dependency accounting.
     #[serde(default)]
     pub dependencies: Option<StdHashMap<String, String>>,
+    /// The `devDependencies` map, checked by `unused-dev-dependencies` and
+    /// `dev-dependency-in-production`.
     #[serde(default, rename = "devDependencies")]
     pub dev_dependencies: Option<StdHashMap<String, String>>,
+    /// The `peerDependencies` map. Peers are provided by the consumer, so
+    /// they are exempt from unused-dependency reporting.
     #[serde(default, rename = "peerDependencies")]
     pub peer_dependencies: Option<StdHashMap<String, String>>,
+    /// The `peerDependenciesMeta` map, marking which peers are optional.
     #[serde(default, rename = "peerDependenciesMeta")]
     pub peer_dependencies_meta: Option<StdHashMap<String, PeerDependencyMeta>>,
+    /// The `optionalDependencies` map, checked by
+    /// `unused-optional-dependencies`.
     #[serde(default, rename = "optionalDependencies")]
     pub optional_dependencies: Option<StdHashMap<String, String>>,
+    /// The `scripts` map, scanned so packages invoked from scripts count as
+    /// used tooling dependencies.
     #[serde(default)]
     pub scripts: Option<StdHashMap<String, String>>,
+    /// The NAPI-RS `napi` block; see [`NapiConfig`]. Non-object values become
+    /// `None` rather than failing manifest parsing.
     #[serde(default, deserialize_with = "deserialize_optional_napi_config")]
     pub napi: Option<NapiConfig>,
+    /// The `workspaces` field, kept raw because it is either a pattern array
+    /// or an object with a `packages` array; drives workspace discovery.
     #[serde(default)]
     pub workspaces: Option<serde_json::Value>,
     /// The `packageManager` field (e.g. `"pnpm@9.1.0"`), used to determine

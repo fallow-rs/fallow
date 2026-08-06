@@ -176,8 +176,11 @@ pub struct NormalizationConfig {
 /// Resolved normalization flags: mode defaults merged with user overrides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedNormalization {
+    /// Blind all identifiers (variable, function, member names) to one hash.
     pub ignore_identifiers: bool,
+    /// Blind string literal values to one hash.
     pub ignore_string_values: bool,
+    /// Blind numeric literal values to one hash.
     pub ignore_numeric_values: bool,
 }
 

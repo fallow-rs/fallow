@@ -6,14 +6,26 @@ use crate::FallowConfig;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigFixPlan {
     /// A fallow config file exists; append entries in place.
-    Edit { config_path: PathBuf },
+    Edit {
+        /// Path to the existing config file to edit.
+        config_path: PathBuf,
+    },
     /// No fallow config exists, but a workspace marker sits above `root`,
     /// so creating one inside this subpackage would fragment the monorepo.
-    BlockedMonorepo { workspace_root: PathBuf },
+    BlockedMonorepo {
+        /// Directory containing the workspace marker that blocked creation.
+        workspace_root: PathBuf,
+    },
     /// No fallow config exists and config creation was disabled.
-    BlockedNoCreate { target: PathBuf },
+    BlockedNoCreate {
+        /// Path where the config would have been created.
+        target: PathBuf,
+    },
     /// No fallow config exists; the writer can create one at `target`.
-    Create { target: PathBuf },
+    Create {
+        /// Path for the new config file (`<root>/.fallowrc.json`).
+        target: PathBuf,
+    },
 }
 
 /// Classify how config-editing fixes should behave for `root`.

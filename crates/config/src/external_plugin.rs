@@ -64,13 +64,27 @@ pub struct AutoImportRule {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PluginDetection {
     /// Plugin detected if this package is in dependencies.
-    Dependency { package: String },
+    Dependency {
+        /// Exact package name looked up in the project's declared dependencies.
+        package: String,
+    },
     /// Plugin detected if this file pattern matches.
-    FileExists { pattern: String },
+    FileExists {
+        /// Project-root-relative glob; the plugin activates when any
+        /// discovered file matches it. Validated at load like other user
+        /// globs (no absolute paths or `..` segments).
+        pattern: String,
+    },
     /// All conditions must be true.
-    All { conditions: Vec<Self> },
+    All {
+        /// Sub-conditions combined with logical AND.
+        conditions: Vec<Self>,
+    },
     /// Any condition must be true.
-    Any { conditions: Vec<Self> },
+    Any {
+        /// Sub-conditions combined with logical OR.
+        conditions: Vec<Self>,
+    },
 }
 
 /// A declarative plugin definition loaded from a standalone file or inline config.

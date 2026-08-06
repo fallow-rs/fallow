@@ -48,9 +48,19 @@ fn display_relative(root: &Path, path: &Path) -> String {
 #[derive(Debug, Clone)]
 pub enum WorkspaceLoadError {
     /// The project root's `package.json` exists but failed to parse.
-    MalformedRootPackageJson { path: PathBuf, error: String },
+    MalformedRootPackageJson {
+        /// Path to the malformed manifest, shown in the diagnostic.
+        path: PathBuf,
+        /// Parser error message, embedded in the diagnostic.
+        error: String,
+    },
     /// The project root's `deno.json` or `deno.jsonc` exists but failed to parse.
-    MalformedRootDenoConfig { path: PathBuf, error: String },
+    MalformedRootDenoConfig {
+        /// Path to the malformed manifest, shown in the diagnostic.
+        path: PathBuf,
+        /// Parser error message, embedded in the diagnostic.
+        error: String,
+    },
 }
 
 impl std::fmt::Display for WorkspaceLoadError {

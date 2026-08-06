@@ -29,28 +29,39 @@ use super::finding_ignore::FindingIgnoreMatcher;
 pub enum GlobValidationError {
     /// Pattern is an absolute path (`/foo`, `\foo`, `C:\foo`, `\\share`).
     AbsolutePath {
+        /// Config field the pattern came from (e.g. `entry`), named in the error.
         field: &'static str,
+        /// The offending pattern as written in the config.
         pattern: String,
     },
     /// Pattern contains a `..` path segment.
     TraversalSegment {
+        /// Config field the pattern came from, named in the error.
         field: &'static str,
+        /// The offending pattern as written in the config.
         pattern: String,
     },
     /// Pattern is not valid glob syntax.
     InvalidSyntax {
+        /// Config field the pattern came from, named in the error.
         field: &'static str,
+        /// The offending pattern as written in the config.
         pattern: String,
+        /// Underlying glob parse error.
         source: globset::Error,
     },
     /// A finding-ignore exception contains `!` without a pattern body.
     EmptyNegation {
+        /// Config field the pattern came from, named in the error.
         field: &'static str,
+        /// The offending pattern as written in the config.
         pattern: String,
     },
     /// Individually valid patterns cannot be compiled into one matcher.
     PatternSetCompilation {
+        /// Config field whose pattern set failed to build, named in the error.
         field: &'static str,
+        /// Underlying glob-set build error.
         source: globset::Error,
     },
 }

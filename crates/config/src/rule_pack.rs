@@ -35,22 +35,37 @@ pub enum RulePackRuleKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum EffectKind {
+    /// No observable side effect.
     Pure,
+    /// Structured-data read/query evaluation (XML external entities, XPath).
     Read,
+    /// In-memory state mutation (mass assignment, prototype pollution).
     Write,
+    /// Network I/O (HTTP clients, request-forgery sinks).
     Network,
+    /// Filesystem access (path traversal, file permission changes).
     Storage,
+    /// In-process code evaluation (`eval`, `Function`, string timers).
     Process,
+    /// OS shell command execution.
     Shell,
+    /// Cryptographic primitives (weak algorithm or key usage).
     Crypto,
+    /// Random-number generation in security-sensitive contexts.
     Randomness,
+    /// DOM injection (`innerHTML`-style XSS sinks).
     Dom,
+    /// Database query execution (SQL/NoSQL injection sinks).
     Database,
+    /// Callback invoked by a framework rather than a direct effect.
     FrameworkCallback,
+    /// Effect the catalogue cannot classify.
     Unknown,
 }
 
 impl EffectKind {
+    /// The kebab-case identifier used in catalogue rows, rule-pack `effects`
+    /// lists, and diagnostics (matches the serde `rename_all` spelling).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

@@ -79,6 +79,11 @@ impl<'de> Deserialize<'de> for ScopedUsedClassMemberRule {
 }
 
 impl ScopedUsedClassMemberRule {
+    /// Whether a class with the given heritage clause is in this rule's scope.
+    ///
+    /// An unset `extends` / `implements` filter matches any class; a set
+    /// filter requires exact name equality (`implements` matches when any one
+    /// implemented interface equals it). Both set filters must match.
     #[must_use]
     pub fn matches_heritage(
         &self,

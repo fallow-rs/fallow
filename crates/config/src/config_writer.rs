@@ -10,11 +10,20 @@ use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Val
 
 use crate::IgnoreExportRule;
 
+/// Failure while editing a fallow config file in place (`fallow fix` config
+/// actions such as appending `ignoreExports` entries).
 #[derive(Debug)]
 pub enum ConfigWriteError {
+    /// Reading or writing the config file failed.
     Io(std::io::Error),
+    /// The existing JSON/JSONC config could not be parsed, so an edit cannot
+    /// be applied without risking data loss.
     JsonParse(jsonc_parser::errors::ParseError),
+    /// The existing TOML config could not be parsed.
     TomlParse(toml_edit::TomlError),
+    /// The config parsed but a key has a shape the writer cannot edit (e.g.
+    /// a non-object root, or `ignoreExports` that is not an array). The
+    /// message describes the expected shape.
     InvalidShape(String),
 }
 
@@ -46,6 +55,7 @@ impl From<std::io::Error> for ConfigWriteError {
     }
 }
 
+/// Result alias for config-file editing operations.
 pub type ConfigWriteResult<T> = Result<T, ConfigWriteError>;
 
 /// Atomically write content to a file via a temporary file and rename.
