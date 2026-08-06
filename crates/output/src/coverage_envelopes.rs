@@ -11,101 +11,155 @@ use std::time::Duration;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow coverage setup --json"))]
 pub struct CoverageSetupOutput {
+    /// Setup output schema version; serialized as the string `"1"`.
     pub schema_version: CoverageSetupSchemaVersion,
+    /// Framework detected at the project root.
     pub framework_detected: CoverageSetupFramework,
+    /// Package manager detected from lockfiles, when one was found.
     pub package_manager: Option<CoverageSetupPackageManager>,
+    /// Runtimes the instrumentation must cover at the project root.
     pub runtime_targets: Vec<CoverageSetupRuntimeTarget>,
+    /// Per-member setup guidance for workspace projects.
     pub members: Vec<CoverageSetupMember>,
+    /// Coverage config that was written to disk, when setup wrote one.
     pub config_written: Option<serde_json::Value>,
+    /// Shell commands the user should run to complete setup.
     pub commands: Vec<String>,
+    /// Files the user must edit by hand, with reasons.
     pub files_to_edit: Vec<CoverageSetupFileToEdit>,
+    /// Ready-to-paste code snippets for the files to edit.
     pub snippets: Vec<CoverageSetupSnippet>,
+    /// Dockerfile additions needed for containerized capture, when relevant.
     pub dockerfile_snippet: Option<String>,
+    /// Ordered human-readable follow-up instructions.
     pub next_steps: Vec<String>,
+    /// Non-fatal problems encountered during detection.
     pub warnings: Vec<String>,
+    /// `_meta` block with docs and field definitions, when requested.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
 }
 
+/// Schema-version discriminator for [`CoverageSetupOutput`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum CoverageSetupSchemaVersion {
+    /// First release of the coverage setup format.
     #[serde(rename = "1")]
     V1,
 }
 
+/// Framework detected during coverage setup; drives which instrumentation
+/// guidance is emitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageSetupFramework {
+    /// Next.js application.
     #[serde(rename = "nextjs")]
     NextJs,
+    /// NestJS application.
     #[serde(rename = "nestjs")]
     NestJs,
+    /// Nuxt application.
     Nuxt,
+    /// SvelteKit application.
     #[serde(rename = "sveltekit")]
     SvelteKit,
+    /// Astro application.
     Astro,
+    /// Remix application.
     Remix,
+    /// Vite-built application without a detected meta-framework.
     Vite,
+    /// Node project without a detected framework or bundler.
     PlainNode,
+    /// No framework signal was found.
     Unknown,
 }
 
+/// Package manager detected from the project's lockfile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum CoverageSetupPackageManager {
+    /// npm (`package-lock.json`).
     Npm,
+    /// pnpm (`pnpm-lock.yaml`).
     Pnpm,
+    /// Yarn (`yarn.lock`).
     Yarn,
+    /// Bun (`bun.lock` / `bun.lockb`).
     Bun,
 }
 
+/// Runtime environment coverage capture must instrument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum CoverageSetupRuntimeTarget {
+    /// Server-side Node.js execution.
     Node,
+    /// Client-side browser execution.
     Browser,
 }
 
+/// Per-workspace-member setup guidance inside [`CoverageSetupOutput::members`].
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageSetupMember {
+    /// Package name of the workspace member.
     pub name: String,
+    /// Member path relative to the workspace root.
     pub path: String,
+    /// Framework detected for this member.
     pub framework_detected: CoverageSetupFramework,
+    /// Package manager detected for this member, when one was found.
     pub package_manager: Option<CoverageSetupPackageManager>,
+    /// Runtimes the instrumentation must cover for this member.
     pub runtime_targets: Vec<CoverageSetupRuntimeTarget>,
+    /// Files the user must edit by hand, with reasons.
     pub files_to_edit: Vec<CoverageSetupFileToEdit>,
+    /// Ready-to-paste code snippets for the files to edit.
     pub snippets: Vec<CoverageSetupSnippet>,
+    /// Dockerfile additions needed for containerized capture, when relevant.
     pub dockerfile_snippet: Option<String>,
+    /// Non-fatal problems encountered during detection.
     pub warnings: Vec<String>,
 }
 
+/// One manual edit the user must make to wire up coverage capture.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageSetupFileToEdit {
+    /// File path relative to the project root.
     pub path: String,
+    /// Why the file needs editing.
     pub reason: String,
 }
 
+/// Ready-to-paste code snippet accompanying a file edit.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageSetupSnippet {
+    /// Short description of what the snippet does.
     pub label: String,
+    /// File path the snippet belongs in.
     pub path: String,
+    /// The snippet source text.
     pub content: String,
 }
 
+/// Schema-version discriminator for [`CoverageAnalyzeOutput`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum CoverageAnalyzeSchemaVersion {
+    /// First release of the coverage analyze format.
     #[serde(rename = "1")]
     V1,
 }
 
+/// Envelope emitted by `fallow coverage analyze --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -113,10 +167,16 @@ pub enum CoverageAnalyzeSchemaVersion {
     schemars(title = "fallow coverage analyze --format json")
 )]
 pub struct CoverageAnalyzeOutput {
+    /// Analyze output schema version; serialized as the string `"1"`.
     pub schema_version: CoverageAnalyzeSchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Runtime-coverage report body.
     pub runtime_coverage: RuntimeCoverageReport,
+    /// `_meta` block with docs and metric definitions, when `--explain` was
+    /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }

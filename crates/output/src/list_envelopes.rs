@@ -8,22 +8,31 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ListOutput<Boundaries, Diagnostic> {
+    /// Active plugins; present for `--plugins`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugins: Option<Vec<ListPluginOutput>>,
+    /// Number of analyzable files; present for `--files`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_count: Option<usize>,
+    /// Analyzable file paths relative to the root; present for `--files`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<String>>,
+    /// Number of entry points; present for `--entry-points`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_point_count: Option<usize>,
+    /// Detected entry points; present for `--entry-points`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_points: Option<Vec<ListEntryPointOutput>>,
+    /// Boundary listing; present for `--boundaries`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundaries: Option<Boundaries>,
+    /// Number of workspace packages; present for `--workspaces`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_count: Option<usize>,
+    /// Workspace packages; present for `--workspaces`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspaces: Option<Vec<WorkspaceInfo>>,
+    /// Workspace-discovery diagnostics; present for `--workspaces`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_diagnostics: Option<Vec<Diagnostic>>,
 }
@@ -32,6 +41,7 @@ pub struct ListOutput<Boundaries, Diagnostic> {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ListPluginOutput {
+    /// Plugin name, e.g. `nextjs`.
     pub name: String,
 }
 
@@ -39,7 +49,9 @@ pub struct ListPluginOutput {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ListEntryPointOutput {
+    /// File path relative to the analysed root.
     pub path: String,
+    /// What declared the entry point, e.g. a plugin or config pattern.
     pub source: String,
 }
 
@@ -54,6 +66,7 @@ pub struct ListEntryPointOutput {
     schemars(title = "fallow list --boundaries --format json")
 )]
 pub struct ListBoundariesOutput<Status, Rule> {
+    /// Boundary zones, rules, and pre-expansion logical groups.
     pub boundaries: BoundariesListing<Status, Rule>,
 }
 
@@ -95,12 +108,19 @@ pub struct WorkspaceInfo {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundariesListing<Status, Rule> {
+    /// Whether the project configures architecture boundaries at all.
     pub configured: bool,
+    /// Number of entries in `zones`.
     pub zone_count: usize,
+    /// Boundary zones after preset and `autoDiscover` expansion.
     pub zones: Vec<BoundariesListZone>,
+    /// Number of entries in `rules`.
     pub rule_count: usize,
+    /// Import rules operating on expanded zone names.
     pub rules: Vec<BoundariesListRule>,
+    /// Number of entries in `logical_groups`.
     pub logical_group_count: usize,
+    /// Pre-expansion `autoDiscover` logical groups.
     pub logical_groups: Vec<BoundariesListLogicalGroup<Status, Rule>>,
 }
 
@@ -109,8 +129,11 @@ pub struct BoundariesListing<Status, Rule> {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundariesListZone {
+    /// Zone name referenced by rules.
     pub name: String,
+    /// Glob patterns that classify files into the zone.
     pub patterns: Vec<String>,
+    /// Number of analyzable files the zone matched.
     pub file_count: usize,
 }
 
@@ -121,7 +144,9 @@ pub struct BoundariesListZone {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundariesListRule {
+    /// Zone the rule constrains imports from.
     pub from: String,
+    /// Zone names the `from` zone may import.
     pub allow: Vec<String>,
 }
 
@@ -132,20 +157,31 @@ pub struct BoundariesListRule {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundariesListLogicalGroup<Status, Rule> {
+    /// User-authored parent zone name.
     pub name: String,
+    /// Child zone names produced by discovery.
     pub children: Vec<String>,
+    /// Authored `autoDiscover` paths.
     pub auto_discover: Vec<String>,
+    /// Discovery outcome (ok / empty / invalid path).
     pub status: Status,
+    /// Index of the authored entry in the pre-expansion `zones[]` config.
     pub source_zone_index: usize,
+    /// Files matched across the group's zones.
     pub file_count: usize,
+    /// User's pre-expansion rule keyed on the parent name, when authored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_rule: Option<Rule>,
+    /// Zone that keeps the parent's own patterns when the parent kept any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_zone: Option<String>,
+    /// `zones[]` indices of duplicate parents merged into this group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_from: Option<Vec<usize>>,
+    /// Authored parent `root`, when one was declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_zone_root: Option<String>,
+    /// Per-child indices into the pre-expansion `zones[]` config.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub child_source_indices: Vec<usize>,
 }

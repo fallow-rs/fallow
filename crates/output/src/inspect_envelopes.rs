@@ -16,12 +16,19 @@ use serde::Serialize;
     schemars(title = "fallow explain <issue-type> --format json")
 )]
 pub struct ExplainOutput {
+    /// Issue-type identifier, e.g. `unused-export`.
     pub id: String,
+    /// Human-readable issue-type name.
     pub name: String,
+    /// One-line description of what the issue type reports.
     pub summary: String,
+    /// Why the issue matters.
     pub rationale: String,
+    /// Illustrative code example of the issue.
     pub example: String,
+    /// How to resolve findings of this type.
     pub how_to_fix: String,
+    /// Public documentation URL for the issue type.
     pub docs: String,
 }
 
@@ -45,61 +52,103 @@ pub fn serialize_explain_json_output(
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow inspect --format json"))]
 pub struct InspectOutput {
+    /// What was inspected: a file or a specific exported symbol.
     pub target: InspectTargetDescriptor,
+    /// Graph identity facts about the target.
     pub identity: InspectIdentity,
+    /// Per-analysis evidence sections for the target.
     pub evidence: InspectEvidence,
+    /// Non-fatal problems encountered while gathering evidence.
     pub warnings: Vec<String>,
+    /// `_meta` block with type-aware backend info, when applicable.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<fallow_types::envelope::Meta>,
 }
 
+/// `target` block of [`InspectOutput`], tagged by `type`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InspectTargetDescriptor {
-    File { file: String },
-    Symbol { file: String, export_name: String },
+    /// A whole file was inspected.
+    File {
+        /// File path relative to the analysed root.
+        file: String,
+    },
+    /// One exported symbol was inspected.
+    Symbol {
+        /// File path relative to the analysed root.
+        file: String,
+        /// Name of the inspected export.
+        export_name: String,
+    },
 }
 
+/// `identity` block of [`InspectOutput`]; shape follows the target type.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum InspectIdentity {
+    /// Identity facts for a file target.
     File(InspectFileIdentity),
+    /// Identity facts for a symbol target.
     Symbol(InspectSymbolIdentity),
 }
 
+/// Graph identity facts for a file target. `Value`-typed fields carry the
+/// graph's verdict when analysis ran and are `null` when it did not.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InspectFileIdentity {
+    /// File path relative to the analysed root.
     pub file: String,
+    /// Whether the module graph can reach the file from an entry point.
     pub is_reachable: Option<serde_json::Value>,
+    /// Whether the file is itself an entry point.
     pub is_entry_point: Option<serde_json::Value>,
+    /// Number of exports the file declares.
     pub export_count: Option<usize>,
+    /// Number of modules the file imports.
     pub import_count: Option<usize>,
+    /// Number of modules that import the file.
     pub imported_by_count: Option<usize>,
 }
 
+/// Graph identity facts for a symbol target. `Value`-typed fields carry the
+/// graph's verdict when analysis ran and are `null` when it did not.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InspectSymbolIdentity {
+    /// File path relative to the analysed root.
     pub file: String,
+    /// Name of the inspected export.
     pub export_name: String,
+    /// Whether the containing file is reachable from an entry point.
     pub file_reachable: Option<serde_json::Value>,
+    /// Whether the containing file is itself an entry point.
     pub is_entry_point: Option<serde_json::Value>,
+    /// Whether the export has any recorded consumer.
     pub is_used: Option<serde_json::Value>,
+    /// Explanation of the usage verdict, when the graph recorded one.
     pub reason: Option<serde_json::Value>,
 }
 
+/// `evidence` block of [`InspectOutput`]: one section per analysis.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InspectEvidence {
+    /// File-level reachability trace.
     pub trace_file: InspectEvidenceSection,
+    /// Export-level usage trace; present only for symbol targets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_export: Option<InspectEvidenceSection>,
+    /// Dead-code findings for the target.
     pub dead_code: InspectEvidenceSection,
+    /// Duplication findings involving the target file.
     pub duplication: InspectEvidenceSection,
+    /// Complexity findings for the target file.
     pub complexity: InspectEvidenceSection,
+    /// Security findings for the target file.
     pub security: InspectEvidenceSection,
     /// Impact closure scoped to the inspected file as the seed: the transitive
     /// affected-but-not-in-diff set + coordination gap.
@@ -132,18 +181,25 @@ pub struct InspectEvidence {
     pub targeted_tests: Option<InspectEvidenceSection>,
 }
 
+/// One evidence section: status, the scope the evidence covers, and either a
+/// data payload or a message explaining its absence.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InspectEvidenceSection {
+    /// Whether the section's analysis produced usable evidence.
     pub status: InspectSectionStatus,
+    /// Granularity the evidence covers.
     pub scope: InspectEvidenceScope,
+    /// Explanation for `error` / `unavailable` sections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Section payload; present when the analysis ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
 
 impl InspectEvidenceSection {
+    /// Successful section carrying `data`.
     #[must_use]
     pub fn ok(scope: InspectEvidenceScope, data: serde_json::Value) -> Self {
         Self {
@@ -154,6 +210,8 @@ impl InspectEvidenceSection {
         }
     }
 
+    /// Section whose status mirrors the semantic backend's completeness
+    /// verdict while still carrying `data`.
     #[must_use]
     pub fn semantic(
         scope: InspectEvidenceScope,
@@ -175,6 +233,7 @@ impl InspectEvidenceSection {
         }
     }
 
+    /// Failed section carrying only an explanation.
     #[must_use]
     pub fn error(scope: InspectEvidenceScope, message: String) -> Self {
         Self {
@@ -185,6 +244,7 @@ impl InspectEvidenceSection {
         }
     }
 
+    /// Section whose analysis could not run in this environment.
     #[must_use]
     pub fn unavailable(scope: InspectEvidenceScope, message: String) -> Self {
         Self {
@@ -211,22 +271,31 @@ pub fn serialize_inspect_json_output(
     Ok(value)
 }
 
+/// Status of an [`InspectEvidenceSection`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum InspectSectionStatus {
+    /// Analysis ran and the payload is complete.
     Ok,
+    /// Analysis ran but the semantic backend reported incomplete coverage.
     Partial,
+    /// Analysis could not run in this environment.
     Unavailable,
+    /// Analysis failed; see `message`.
     Error,
 }
 
+/// Granularity an [`InspectEvidenceSection`] payload covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum InspectEvidenceScope {
+    /// Evidence about the exact inspected symbol.
     Symbol,
+    /// Evidence about the whole target file.
     File,
+    /// Project-wide analysis filtered down to entries touching the file.
     ProjectFilteredToFile,
 }
 

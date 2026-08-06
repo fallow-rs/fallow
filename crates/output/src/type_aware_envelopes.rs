@@ -12,17 +12,26 @@ use serde::Serialize;
     schemars(title = "fallow type-aware status --format json")
 )]
 pub struct TypeAwareStatusOutput {
+    /// Type-aware status schema version.
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Whether a usable type-aware companion was found.
     pub available: bool,
+    /// How the companion was discovered, e.g. `installed-sibling`.
     pub discovery_source: Option<String>,
     /// Root-relative companion path, or only the executable name when the
     /// companion lives outside the analyzed project.
     pub companion_path: Option<String>,
+    /// npm package version of the companion, when known.
     pub package_version: Option<String>,
+    /// Type-aware protocol version fallow speaks.
     pub protocol_version: u32,
+    /// Checker backend family, e.g. `typescript-go`.
     pub backend_family: Option<String>,
+    /// Version of the checker backend, when known.
     pub backend_version: Option<String>,
+    /// How to make the companion available, when it is not.
     pub remediation: Option<String>,
 }
 

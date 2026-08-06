@@ -7,6 +7,7 @@ use serde::Serialize;
 /// JSON root envelope discriminator policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootEnvelopeMode {
+    /// Emit a top-level `kind` discriminator on the JSON root.
     Tagged,
 }
 
@@ -141,11 +142,17 @@ pub fn attach_telemetry_meta(value: &mut serde_json::Value, analysis_run_id: Opt
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow audit --format json"))]
 pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Complexity> {
+    /// Audit output schema version.
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Command discriminator singleton: always `audit`.
     pub command: AuditCommand,
+    /// Gate verdict for the audited change.
     pub verdict: Verdict,
+    /// Number of changed files in the audit scope.
     pub changed_files_count: u32,
+    /// Git ref the change was diffed against.
     pub base_ref: String,
     /// Human-readable provenance of `base_ref`, e.g. `merge-base with
     /// origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
@@ -154,19 +161,30 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     /// self-describing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_description: Option<String>,
+    /// Commit SHA of the audited head tree, when resolvable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_sha: Option<String>,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// True when base-snapshot analysis was skipped, so new-vs-inherited
+    /// attribution could not run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_snapshot_skipped: Option<bool>,
+    /// Aggregate finding counts for the audited change.
     pub summary: Summary,
+    /// New-vs-inherited attribution of findings against the base.
     pub attribution: Attribution,
+    /// `_meta` block with metric / rule definitions, when `--explain` was
+    /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Dead-code findings scoped to the audit changeset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code: Option<DeadCode>,
+    /// Duplication findings scoped to the audit changeset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplication: Option<Duplication>,
+    /// Complexity findings scoped to the audit changeset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity: Option<Complexity>,
     /// Read-only follow-up commands computed from this run's findings. See
@@ -180,6 +198,7 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AuditCommand {
+    /// The only value: `audit`.
     Audit,
 }
 
@@ -191,15 +210,22 @@ pub enum AuditCommand {
     schemars(title = "fallow --format json (bare, combined)")
 )]
 pub struct CombinedOutput<Check, Dupes, Health> {
+    /// Combined output schema version.
     pub schema_version: SchemaVersion,
+    /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
+    /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Per-section `_meta` blocks, when `--explain` was passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<CombinedMeta>,
+    /// Dead-code section of the combined run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<Check>,
+    /// Duplication section of the combined run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dupes: Option<Dupes>,
+    /// Health section of the combined run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<Health>,
     /// Read-only follow-up commands aggregated across the combined run's
@@ -212,12 +238,16 @@ pub struct CombinedOutput<Check, Dupes, Health> {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CombinedMeta {
+    /// `_meta` block for the dead-code section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<Meta>,
+    /// `_meta` block for the duplication section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dupes: Option<Meta>,
+    /// `_meta` block for the health section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<Meta>,
+    /// Telemetry identifiers for the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryMeta>,
 }
