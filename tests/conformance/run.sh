@@ -92,6 +92,9 @@ trap 'rm -rf "${TMPDIR_CONFORM}"' EXIT
 FALLOW_OUT="${TMPDIR_CONFORM}/fallow.json"
 KNIP_OUT="${TMPDIR_CONFORM}/knip.json"
 
+# knip is pinned so the tracked agreement trend measures fallow changes,
+# not knip releases; bump KNIP_VERSION deliberately and note it in the run.
+
 # Install knip locally in the project if needed (for npx to find it)
 # We use npx which will auto-download if needed
 echo "Running fallow..." >&2
@@ -118,7 +121,7 @@ if [[ ! -d "node_modules" ]]; then
     npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null || true
 fi
 
-npx --yes knip --reporter json > "${KNIP_OUT}" 2>/dev/null || KNIP_EXIT=$?
+npx --yes "knip@${KNIP_VERSION:-6.32.0}" --reporter json > "${KNIP_OUT}" 2>/dev/null || KNIP_EXIT=$?
 
 # knip exits 1 when issues are found (expected), 2 on error
 if [[ ${KNIP_EXIT} -eq 2 ]]; then

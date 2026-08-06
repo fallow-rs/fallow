@@ -165,7 +165,7 @@ run_single_project() {
     # Run knip
     echo "    Running knip..." >&2
     local knip_exit=0
-    (cd "${dir}" && timeout_cmd "${TIMEOUT}" npx --yes knip --reporter json \
+    (cd "${dir}" && timeout_cmd "${TIMEOUT}" npx --yes "knip@${KNIP_VERSION:-6.32.0}" --reporter json \
         > "${knip_out}" 2>/dev/null) || knip_exit=$?
 
     if [[ ${knip_exit} -eq 124 ]]; then
