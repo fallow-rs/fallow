@@ -132,7 +132,7 @@ pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<Discove
 /// - `.well-known` — Standard web convention directory
 /// - `.changeset` — Changesets configuration
 /// - `.github` — GitHub workflows and CI scripts
-const ALLOWED_HIDDEN_DIRS: &[&str] = &[
+pub const ALLOWED_HIDDEN_DIRS: &[&str] = &[
     ".storybook",
     ".vitepress",
     ".well-known",

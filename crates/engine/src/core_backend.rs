@@ -25,6 +25,12 @@ pub use fallow_core::plugins::manifest_entries::{
 };
 pub use fallow_core::plugins::registry::is_external_plugin_active;
 
+// Discovery vocabulary owned by the surviving core walk, re-exported so the
+// engine boundary keeps one definition per constant.
+pub use fallow_core::discover::ALLOWED_HIDDEN_DIRS;
+pub use fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS;
+pub use fallow_core::discover::SOURCE_EXTENSIONS;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ParseMetrics {
     pub parse_ms: f64,

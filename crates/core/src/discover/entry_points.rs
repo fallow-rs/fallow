@@ -3,14 +3,11 @@ use std::path::{Component, Path, PathBuf};
 use super::parse_scripts::extract_script_file_refs;
 use super::walk::SOURCE_EXTENSIONS;
 use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
+use fallow_graph::resolve::OUTPUT_DIRS;
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Known output directory names from exports maps.
-/// When an entry point path is inside one of these directories, we also try
-/// the `src/` equivalent to find the tracked source file.
-const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "esm", "cjs"];
 const SKIPPED_ENTRY_WARNING_PREVIEW: usize = 5;
 
 fn format_skipped_entry_warning(skipped_entries: &FxHashMap<String, usize>) -> Option<String> {

@@ -453,6 +453,7 @@ impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
     }
 }
 
+/// File extensions discovery treats as analyzable source files.
 pub const SOURCE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte", "astro",
     "mdx", "css", "scss", "sass", "less", "html", "graphql", "gql",

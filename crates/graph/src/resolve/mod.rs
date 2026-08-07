@@ -33,7 +33,7 @@ pub use path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
 pub use types::{
-    ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
+    OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
     ResolvedReplacedModuleTarget, ResolvedSourceEdge,
 };
 

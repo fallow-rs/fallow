@@ -9,48 +9,17 @@ use fallow_config::{
     find_undeclared_workspaces_with_ignores,
 };
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+
+/// Discovery vocabulary shared with the analysis backend: file extensions,
+/// production-exclusion globs, and the hidden directories traversal allows.
+pub use crate::core_backend::{
+    ALLOWED_HIDDEN_DIRS, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS,
+};
 use rustc_hash::FxHashSet;
 
 use crate::{EngineError, EngineResult, plugins::PluginRegistry};
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
-
-/// File extensions discovery treats as analyzable source files.
-pub const SOURCE_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte", "astro",
-    "mdx", "css", "scss", "sass", "less", "html", "graphql", "gql",
-];
-
-/// Glob patterns for test/dev/story files excluded in production mode.
-pub const PRODUCTION_EXCLUDE_PATTERNS: &[&str] = &[
-    "**/*.test.*",
-    "**/*.spec.*",
-    "**/*.e2e.*",
-    "**/*.e2e-spec.*",
-    "**/*.bench.*",
-    "**/*.fixture.*",
-    "**/*.stories.*",
-    "**/*.story.*",
-    "**/__tests__/**",
-    "**/__mocks__/**",
-    "**/__snapshots__/**",
-    "**/__fixtures__/**",
-    "**/test/**",
-    "**/tests/**",
-    "*.config.*",
-    "**/.*.js",
-    "**/.*.ts",
-    "**/.*.mjs",
-    "**/.*.cjs",
-];
-
-const ALLOWED_HIDDEN_DIRS: &[&str] = &[
-    ".storybook",
-    ".vitepress",
-    ".well-known",
-    ".changeset",
-    ".github",
-];
 
 const SCRIPT_SCOPE_DENYLIST: &[&str] = &[
     ".git",

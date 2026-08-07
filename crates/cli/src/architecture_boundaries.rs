@@ -1522,6 +1522,10 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::discover::discover_entry_points",
         "fallow_core::discover::discover_workspace_entry_points",
         "fallow_core::discover::discover_plugin_entry_points",
+        // Discovery vocabulary lives with the walk that consumes it.
+        "fallow_core::discover::ALLOWED_HIDDEN_DIRS",
+        "fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS",
+        "fallow_core::discover::SOURCE_EXTENSIONS",
     ];
 
     for line in core_backend.lines() {

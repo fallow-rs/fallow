@@ -6,12 +6,12 @@ use fallow_config::{PackageJson, ResolvedConfig, WorkspaceInfo};
 use fallow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_graph::resolve::OUTPUT_DIRS;
+
 use crate::{
     discover::{EntryPoint, EntryPointSource, SOURCE_EXTENSIONS},
     module_graph::RetainedModuleGraph,
 };
-
-const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "esm", "cjs"];
 
 /// Compute the exports-aware public API entry-point set for a project graph.
 #[must_use]
