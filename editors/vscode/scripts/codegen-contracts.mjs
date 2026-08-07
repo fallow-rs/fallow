@@ -38,6 +38,7 @@ const SCHEMA_VERSION_SOURCE = resolve(
   "report",
   "json.rs",
 );
+const HEALTH_SCHEMA_VERSION_SOURCE = resolve(REPO_ROOT, "crates", "output", "src", "health.rs");
 const OUTPUT_CONTRACT_PATHS = [
   resolve(EXTENSION_ROOT, "src", "generated", "output-contract.d.ts"),
   resolve(REPO_ROOT, "npm", "fallow", "types", "output-contract.d.ts"),
@@ -194,12 +195,13 @@ function flattenRefSiblings(node) {
  * compile error at every call site that branches on the old literal, instead
  * of silently drifting.
  */
-async function readRustSchemaVersion() {
-  const source = await readFile(SCHEMA_VERSION_SOURCE, "utf8");
-  const match = source.match(/const\s+SCHEMA_VERSION:\s*u32\s*=\s*(\d+)\s*;/);
+async function readRustSchemaVersion(sourcePath, constantName) {
+  const source = await readFile(sourcePath, "utf8");
+  const pattern = new RegExp(`const\\s+${constantName}:\\s*u32\\s*=\\s*(\\d+)\\s*;`);
+  const match = source.match(pattern);
   if (!match) {
     throw new Error(
-      `Could not find \`const SCHEMA_VERSION: u32 = N;\` in ${SCHEMA_VERSION_SOURCE}`,
+      `Could not find \`const ${constantName}: u32 = N;\` in ${sourcePath}`,
     );
   }
   return Number(match[1]);
@@ -213,16 +215,16 @@ async function readRustSchemaVersion() {
  * emission shape or the schema's SchemaVersion definition changed; either way
  * the pin is no longer reliable and the build should fail loudly.
  */
-function pinSchemaVersion(contents, version) {
-  const target = "export type SchemaVersion = number";
+function pinSchemaVersion(contents, typeName, version) {
+  const target = `export type ${typeName} = number`;
   if (!contents.includes(target)) {
     throw new Error(
       `pinSchemaVersion: expected to find \`${target}\` in generated output. ` +
-        "Did jstt's emission change, or is `SchemaVersion` no longer a top-level " +
+        `Did jstt's emission change, or is \`${typeName}\` no longer a top-level ` +
         "definition in docs/output-schema.json?",
     );
   }
-  return contents.replace(target, `export type SchemaVersion = ${version}`);
+  return contents.replace(target, `export type ${typeName} = ${version}`);
 }
 
 /**
@@ -812,9 +814,18 @@ async function generateOutputContract(capabilitySchema) {
   // With the root title stripped, jstt uses the second arg as the name of the
   // top-level union type.
   const raw_ts = await compile(parsed, "FallowJsonOutput", OPTIONS);
-  const version = await readRustSchemaVersion();
+  const version = await readRustSchemaVersion(SCHEMA_VERSION_SOURCE, "SCHEMA_VERSION");
+  const healthVersion = await readRustSchemaVersion(
+    HEALTH_SCHEMA_VERSION_SOURCE,
+    "HEALTH_SCHEMA_VERSION",
+  );
+  const pinned = pinSchemaVersion(
+    pinSchemaVersion(raw_ts, "SchemaVersion", version),
+    "HealthSchemaVersion",
+    healthVersion,
+  );
   const final = appendDedupedFlattenAliases(
-    stripTrailingWhitespace(pinSchemaVersion(raw_ts, version)),
+    stripTrailingWhitespace(pinned),
     deadCodeAliases,
   );
   assertAliasesEmitted(final, deadCodeAliases);

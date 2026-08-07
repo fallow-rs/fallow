@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Svelte await-block complexity labels now match the source.** `{#await}`
+  and `{:then}` contributions previously appeared as `if` in health JSON and
+  the VS Code inline breakdown. They now use the explicit `await` and `then`
+  kinds, while `{:catch}` remains `catch` and metric totals are unchanged.
+  The standalone health schema is now version 8, and the shared check,
+  combined, and audit schema is now version 9. Consumers that exhaustively
+  match complexity contribution kinds must handle the two new values or keep
+  an unknown-value fallback.
 - **Complexity findings in framework templates now show which conditions
   caused them.** A `<template>` finding in Vue, Angular, Svelte, or Astro
   reported a cyclomatic and cognitive number with nothing behind it, so the

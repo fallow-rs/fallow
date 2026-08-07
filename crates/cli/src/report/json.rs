@@ -10,7 +10,7 @@ use fallow_api::{
 };
 use fallow_types::duplicates::DuplicationReport;
 #[cfg(test)]
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use fallow_types::envelope::{ElapsedMs, ToolVersion};
 use fallow_types::results::AnalysisResults;
 
 #[cfg(test)]
@@ -470,7 +470,7 @@ fn type_aware_metric(
     clippy::redundant_pub_crate,
     reason = "used through report module re-export by combined.rs, audit.rs, flags.rs"
 )]
-pub(crate) const SCHEMA_VERSION: u32 = 8;
+pub(crate) const SCHEMA_VERSION: u32 = 9;
 
 #[cfg(test)]
 fn api_check_json_document(
@@ -1106,7 +1106,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 8);
+        assert_eq!(output["schema_version"], 9);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -1225,7 +1225,9 @@ mod tests {
             fallow_output::HealthReport,
             fallow_output::HealthGroup,
         > = fallow_output::HealthOutput {
-            schema_version: SchemaVersion(SCHEMA_VERSION),
+            schema_version: fallow_output::HealthSchemaVersion(
+                fallow_output::HEALTH_SCHEMA_VERSION,
+            ),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),
             report,
@@ -1987,7 +1989,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
-        assert_eq!(output["schema_version"], 8);
+        assert_eq!(output["schema_version"], 9);
     }
 
     #[test]
@@ -2186,7 +2188,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 8);
+        assert_eq!(output["schema_version"], 9);
         assert_eq!(output["elapsed_ms"], 99);
     }
 

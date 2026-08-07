@@ -106,7 +106,10 @@ kind: "type-aware-status"
  * optional fields) do NOT bump the version; consumers receive new fields
  * without breaking. BREAKING changes (renamed fields, removed fields, type
  * changes, enum-variant removals, semantic changes to existing fields) DO
- * bump. To detect newly-added fields without a bump, check field presence via
+ * bump. Additions to existing enum-valued required fields bump the affected
+ * envelope version so strict JSON Schema consumers can migrate, while Rust
+ * consumers matching the enum exhaustively must add the new variants. To
+ * detect newly-added fields without a bump, check field presence via
  * JSON-key existence rather than gating on the version. v4 was introduced
  * alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
  * block, renamed summary fields); v5 introduced health_score formula_version 2
@@ -116,13 +119,14 @@ kind: "type-aware-status"
  * (the legacy `ignoreDependencies` etc. variants still emit strings, so
  * consumers that switch on `config_key` keep working unchanged). v8 added the
  * required duplication `spread` field and changed `duplicated_tokens` to count
- * redundant copies, excluding the retained copy in each group. The
+ * redundant copies, excluding the retained copy in each group. v9 added the
+ * `await` and `then` complexity contribution kinds. The
  * runtime-coverage block is extended additively as the protocol evolves
  * (currently 0.3, which adds an optional capture_quality summary field). Other
  * additive examples: dupes --group-by adds optional grouped_by, total_issues,
  * groups fields without bumping.
  */
-export type SchemaVersion = 8
+export type SchemaVersion = 9
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -496,7 +500,7 @@ export type ComplexityMetric = ("cyclomatic" | "cognitive")
  * `Case` means a `case` label carrying a test; a bare `default` adds nothing
  * to cyclomatic complexity and so produces no contribution.
  */
-export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue" | "jsx-depth" | "hook-density" | "prop-count")
+export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue" | "jsx-depth" | "hook-density" | "prop-count" | "await" | "then")
 /**
  * Source for a finding's effective thresholds.
  */
@@ -819,6 +823,11 @@ export type CoverageAnalyzeSchemaVersion = "1"
  * Discovery outcome for a [`LogicalGroup`].
  */
 export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
+/**
+ * Schema version for [`HealthOutput`], versioned independently from the
+ * shared check, combined, and audit envelope.
+ */
+export type HealthSchemaVersion = 8
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
@@ -9835,7 +9844,7 @@ is_internal_dependency: boolean
  * documents the field and serde populates it natively.
  */
 export interface HealthOutput {
-schema_version: SchemaVersion
+schema_version: HealthSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**

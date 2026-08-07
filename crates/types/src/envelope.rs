@@ -26,7 +26,10 @@ use crate::semantic::{
 /// optional fields) do NOT bump the version; consumers receive new fields
 /// without breaking. BREAKING changes (renamed fields, removed fields, type
 /// changes, enum-variant removals, semantic changes to existing fields) DO
-/// bump. To detect newly-added fields without a bump, check field presence via
+/// bump. Additions to existing enum-valued required fields bump the affected
+/// envelope version so strict JSON Schema consumers can migrate, while Rust
+/// consumers matching the enum exhaustively must add the new variants. To
+/// detect newly-added fields without a bump, check field presence via
 /// JSON-key existence rather than gating on the version. v4 was introduced
 /// alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
 /// block, renamed summary fields); v5 introduced health_score formula_version 2
@@ -36,7 +39,8 @@ use crate::semantic::{
 /// (the legacy `ignoreDependencies` etc. variants still emit strings, so
 /// consumers that switch on `config_key` keep working unchanged). v8 added the
 /// required duplication `spread` field and changed `duplicated_tokens` to count
-/// redundant copies, excluding the retained copy in each group. The
+/// redundant copies, excluding the retained copy in each group. v9 added the
+/// `await` and `then` complexity contribution kinds. The
 /// runtime-coverage block is extended additively as the protocol evolves
 /// (currently 0.3, which adds an optional capture_quality summary field). Other
 /// additive examples: dupes --group-by adds optional grouped_by, total_issues,

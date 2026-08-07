@@ -1265,6 +1265,10 @@ pub enum ComplexityContributionKind {
     /// destructuring many props is doing many things; the props beyond the floor
     /// fold into cognitive so a wide-interface component surfaces as a hotspot.
     PropCount,
+    /// A Svelte `{#await}` block.
+    Await,
+    /// A Svelte `{:then}` continuation.
+    Then,
 }
 
 /// A single complexity increment, located at its source line/column.
@@ -4096,6 +4100,8 @@ mod tests {
         assert_eq!(K::JsxDepth, K::JsxDepth);
         assert_eq!(K::HookDensity, K::HookDensity);
         assert_eq!(K::PropCount, K::PropCount);
+        assert_eq!(K::Await, K::Await);
+        assert_eq!(K::Then, K::Then);
         assert_ne!(K::If, K::Else);
         assert_ne!(K::For, K::While);
         assert_ne!(K::Switch, K::Case);

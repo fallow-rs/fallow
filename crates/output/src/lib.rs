@@ -159,8 +159,8 @@ pub use fix::{
     count_reported_fix_skips, serialize_fix_json_output,
 };
 pub use health::{
-    HealthJsonOutputInput, HealthOutput, HealthOutputInput, build_health_output,
-    serialize_health_json_output,
+    HEALTH_SCHEMA_VERSION, HealthJsonOutputInput, HealthOutput, HealthOutputInput,
+    HealthSchemaVersion, build_health_output, serialize_health_json_output,
 };
 pub use health_actions::HealthActionsMeta;
 pub use health_coverage::CoverageModel;

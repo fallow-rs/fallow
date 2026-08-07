@@ -1345,7 +1345,7 @@
       "properties": {
         "schema_version": {
           "description": "Health output schema version.",
-          "$ref": "#/definitions/SchemaVersion"
+          "$ref": "#/definitions/HealthSchemaVersion"
         },
         "version": {
           "description": "Fallow CLI version that produced this output.",
@@ -2868,7 +2868,7 @@
     },
     "SchemaVersion": {
       "type": "integer",
-      "description": "Schema version for this output format (independent of tool version). Bump\npolicy: ADDITIVE changes (new optional top-level fields, new optional struct\nfields, new array entries, new MCP tools, new CLI flags that map to new\noptional fields) do NOT bump the version; consumers receive new fields\nwithout breaking. BREAKING changes (renamed fields, removed fields, type\nchanges, enum-variant removals, semantic changes to existing fields) DO\nbump. To detect newly-added fields without a bump, check field presence via\nJSON-key existence rather than gating on the version. v4 was introduced\nalongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence\nblock, renamed summary fields); v5 introduced health_score formula_version 2\nwith scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`\nfrom a scalar string to `oneOf: [string, array]` so the new `ignoreExports`\naction can carry a paste-ready array of `{ file, exports }` rule objects\n(the legacy `ignoreDependencies` etc. variants still emit strings, so\nconsumers that switch on `config_key` keep working unchanged). v8 added the\nrequired duplication `spread` field and changed `duplicated_tokens` to count\nredundant copies, excluding the retained copy in each group. The\nruntime-coverage block is extended additively as the protocol evolves\n(currently 0.3, which adds an optional capture_quality summary field). Other\nadditive examples: dupes --group-by adds optional grouped_by, total_issues,\ngroups fields without bumping."
+      "description": "Schema version for this output format (independent of tool version). Bump\npolicy: ADDITIVE changes (new optional top-level fields, new optional struct\nfields, new array entries, new MCP tools, new CLI flags that map to new\noptional fields) do NOT bump the version; consumers receive new fields\nwithout breaking. BREAKING changes (renamed fields, removed fields, type\nchanges, enum-variant removals, semantic changes to existing fields) DO\nbump. Additions to existing enum-valued required fields bump the affected\nenvelope version so strict JSON Schema consumers can migrate, while Rust\nconsumers matching the enum exhaustively must add the new variants. To\ndetect newly-added fields without a bump, check field presence via\nJSON-key existence rather than gating on the version. v4 was introduced\nalongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence\nblock, renamed summary fields); v5 introduced health_score formula_version 2\nwith scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`\nfrom a scalar string to `oneOf: [string, array]` so the new `ignoreExports`\naction can carry a paste-ready array of `{ file, exports }` rule objects\n(the legacy `ignoreDependencies` etc. variants still emit strings, so\nconsumers that switch on `config_key` keep working unchanged). v8 added the\nrequired duplication `spread` field and changed `duplicated_tokens` to count\nredundant copies, excluding the retained copy in each group. v9 added the\n`await` and `then` complexity contribution kinds. The\nruntime-coverage block is extended additively as the protocol evolves\n(currently 0.3, which adds an optional capture_quality summary field). Other\nadditive examples: dupes --group-by adds optional grouped_by, total_issues,\ngroups fields without bumping."
     },
     "ToolVersion": {
       "type": "string",
@@ -12732,6 +12732,16 @@
           "type": "string",
           "const": "prop-count",
           "description": "React prop count past the comfortable floor (cognitive only). A component\ndestructuring many props is doing many things; the props beyond the floor\nfold into cognitive so a wide-interface component surfaces as a hotspot."
+        },
+        {
+          "type": "string",
+          "const": "await",
+          "description": "A Svelte `{#await}` block."
+        },
+        {
+          "type": "string",
+          "const": "then",
+          "description": "A Svelte `{:then}` continuation."
         }
       ],
       "description": "The syntactic construct that produced a single complexity increment.\n\nMirrors `SonarSource` cognitive-complexity vocabulary where it overlaps.\n`Case` means a `case` label carrying a test; a bare `default` adds nothing\nto cyclomatic complexity and so produces no contribution."
@@ -22442,6 +22452,10 @@
         "stale"
       ],
       "description": "Staleness of a loaded health baseline.\n\nReports how many saved complexity and CRAP finding entries still matched a\ncurrent finding on this run, so consumers can see a rotting baseline before\nit degrades to zero overlap. Runtime-coverage suppressions and refactoring\ntarget keys carried by the same baseline are not counted here. Present in\nthe summary only when a baseline was loaded."
+    },
+    "HealthSchemaVersion": {
+      "type": "integer",
+      "description": "Schema version for [`HealthOutput`], versioned independently from the\nshared check, combined, and audit envelope."
     }
   }
 }

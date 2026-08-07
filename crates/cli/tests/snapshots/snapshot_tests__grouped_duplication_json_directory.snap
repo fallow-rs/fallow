@@ -4,7 +4,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
 ---
 {
   "kind": "dupes",
-  "schema_version": 8,
+  "schema_version": 9,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "clone_groups": [

@@ -154,10 +154,18 @@ impl<'a> SvelteScanner<'a> {
     fn scan_block_open(&mut self, rest: &str, inner_offset: usize) -> Result<(), ScanError> {
         let (keyword, after) = split_keyword(rest);
         match keyword {
-            // `{#if cond}` / `{#key expr}` / `{#await promise}`: one branch each,
-            // whose whole remainder is the bound expression.
+            // `{#if cond}` / `{#key expr}`: one branch each, whose whole
+            // remainder is the bound expression.
+            //
+            // `{#key}` still uses the closest shared control-flow vocabulary;
+            // `{#await}` has its own public kind because the editor renders it.
             "if" | "key" | "await" => {
-                self.add_control_flow_with_expr(after, inner_offset)?;
+                let kind = if keyword == "await" {
+                    ComplexityContributionKind::Await
+                } else {
+                    ComplexityContributionKind::If
+                };
+                self.add_control_flow_with_expr(after, inner_offset, kind)?;
                 self.nesting = self.nesting.saturating_add(1);
                 Ok(())
             }
@@ -215,7 +223,7 @@ impl<'a> SvelteScanner<'a> {
                 let kind = if keyword == "catch" {
                     ComplexityContributionKind::Catch
                 } else {
-                    ComplexityContributionKind::If
+                    ComplexityContributionKind::Then
                 };
                 self.complexity.inc_cyclomatic(inner_offset, kind);
                 self.complexity.inc_cognitive_flat(inner_offset, kind);
@@ -249,12 +257,10 @@ impl<'a> SvelteScanner<'a> {
         &mut self,
         expr: &str,
         inner_offset: usize,
+        kind: ComplexityContributionKind,
     ) -> Result<(), ScanError> {
-        self.complexity.add_control_flow(
-            inner_offset,
-            ComplexityContributionKind::If,
-            self.nesting,
-        );
+        self.complexity
+            .add_control_flow(inner_offset, kind, self.nesting);
         self.add_expr_slice(expr.trim())
     }
 
@@ -369,6 +375,7 @@ fn after_is_boundary(source: &str, index: usize) -> bool {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::compute_svelte_template_complexity;
+    use fallow_types::extract::{ComplexityContributionKind, ComplexityMetric};
 
     #[test]
     fn each_in_if_with_else_if_counts() {
@@ -410,11 +417,41 @@ mod tests {
     #[test]
     fn await_then_catch_each_count() {
         let complexity = compute_svelte_template_complexity(
-            "{#await promise}<p>loading</p>{:then value}<p>{value}</p>{:catch error}<p>{error}</p>{/await}",
+            "{#await promise}\n<p>loading</p>\n{:then value}\n<p>{value}</p>\n{:catch error}\n<p>{error}</p>\n{/await}",
         )
         .expect("template should have complexity");
         // #await + :then + :catch = 3 branch increments + baseline.
-        assert!(complexity.cyclomatic >= 4, "{complexity:?}");
+        assert_eq!(complexity.cyclomatic, 4, "{complexity:?}");
+        assert_eq!(complexity.cognitive, 3, "{complexity:?}");
+
+        for (line, kind) in [
+            (1, ComplexityContributionKind::Await),
+            (3, ComplexityContributionKind::Then),
+            (5, ComplexityContributionKind::Catch),
+        ] {
+            let contributions: Vec<_> = complexity
+                .contributions
+                .iter()
+                .filter(|contribution| contribution.line == line)
+                .collect();
+            assert_eq!(contributions.len(), 2, "line {line}: {complexity:?}");
+            assert!(
+                contributions
+                    .iter()
+                    .all(|contribution| contribution.kind == kind && contribution.weight == 1),
+                "line {line}: {complexity:?}"
+            );
+            assert!(
+                contributions
+                    .iter()
+                    .any(|contribution| contribution.metric == ComplexityMetric::Cyclomatic)
+            );
+            assert!(
+                contributions
+                    .iter()
+                    .any(|contribution| contribution.metric == ComplexityMetric::Cognitive)
+            );
+        }
     }
 
     #[test]
