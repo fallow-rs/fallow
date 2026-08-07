@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Complexity findings in framework templates now show which conditions
+  caused them.** A `<template>` finding in Vue, Angular, Svelte, or Astro
+  reported a cyclomatic and cognitive number with nothing behind it, so the
+  VS Code inline breakdown and `health --complexity-breakdown` had nothing to
+  display, while the same finding in a script block listed its contributing
+  conditions. Each decision point is now reported at its own line and column
+  with the weight it added: the structural directives (`v-if`, `v-else-if`,
+  `v-for`, `@if`, `@for`, `{#if}`, `{#each}`, and their continuations) plus
+  the logical, ternary, nullish, and optional-chaining operators inside a
+  bound expression, which are attributed at their own columns rather than
+  folded into the directive containing them. Metric totals are unchanged. Two
+  notes: a Svelte block whose condition sits away from the block open can
+  report a different finding line and column than before, and the first
+  analysis after upgrading re-extracts, because caches written by earlier
+  versions hold no breakdown.
 - **One unresolved-import finding per specifier per file, anchored on the
   specifier.** A multi-binding re-export statement
   (`export type { A, B, C } from "./missing.js"`) previously produced one
