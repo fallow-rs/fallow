@@ -1160,7 +1160,6 @@ dependencies = [
  "fallow-output",
  "fallow-security",
  "fallow-types",
- "glob",
  "globset",
  "oxc_allocator",
  "oxc_ast",

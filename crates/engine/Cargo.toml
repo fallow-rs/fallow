@@ -26,7 +26,6 @@ fallow-types = { workspace = true }
 bitcode = { workspace = true }
 colored = { workspace = true }
 dunce = { workspace = true }
-glob = { workspace = true }
 globset = { workspace = true }
 oxc_allocator = { workspace = true }
 oxc_ast = { workspace = true }
