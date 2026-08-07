@@ -4,17 +4,16 @@
 //! `fallow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson, ResolvedConfig};
+use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig};
 use fallow_types::trace::PipelineTimings;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
     EngineResult,
-    discover::{AnalysisDiscovery, DiscoveredFile, HiddenDirScope},
+    discover::{AnalysisDiscovery, DiscoveredFile, EntryPoint, HiddenDirScope},
     engine_error,
     module_graph::RetainedModuleGraph,
-    plugins::{PluginEntryPattern, PluginNamedPattern, PluginPathRule, PluginSetupFile},
     results::AnalysisResults,
     source::ModuleInfo,
 };
@@ -123,6 +122,32 @@ pub fn discover_files_and_config_candidates(
         })
         .collect::<Vec<_>>();
     fallow_core::discover::discover_files_and_config_candidates(config, &scopes)
+}
+
+/// Discover configured and inferred entry points via the shared core implementation.
+///
+/// Entry-point discovery has one implementation, in fallow-core, so the
+/// analysis pipeline and list inventory can never drift apart.
+pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
+    fallow_core::discover::discover_entry_points(config, files)
+}
+
+/// Discover workspace entry points via the shared core implementation.
+pub fn discover_workspace_entry_points(
+    ws_root: &Path,
+    config: &ResolvedConfig,
+    all_files: &[DiscoveredFile],
+) -> Vec<EntryPoint> {
+    fallow_core::discover::discover_workspace_entry_points(ws_root, config, all_files)
+}
+
+/// Discover plugin-derived entry points via the shared core implementation.
+pub fn discover_plugin_entry_points(
+    plugin_result: &BackendAggregatedPluginResult,
+    config: &ResolvedConfig,
+    files: &[DiscoveredFile],
+) -> Vec<EntryPoint> {
+    fallow_core::discover::discover_plugin_entry_points(&plugin_result.inner, config, files)
 }
 
 pub fn prepare_dead_code_backend_prelude<'a>(
@@ -291,89 +316,29 @@ impl BackendPluginRegexValidationError {
 
 #[derive(Debug, Clone, Default)]
 pub struct BackendAggregatedPluginResult {
-    active_plugins: Vec<String>,
-    entry_patterns: Vec<PluginEntryPattern>,
-    support_patterns: Vec<PluginNamedPattern>,
-    setup_files: Vec<PluginSetupFile>,
-    entry_point_roles: FxHashMap<String, EntryPointRole>,
+    inner: fallow_core::plugins::AggregatedPluginResult,
 }
 
 impl BackendAggregatedPluginResult {
     fn from_core(inner: fallow_core::plugins::AggregatedPluginResult) -> Self {
-        let entry_patterns = inner
-            .entry_patterns
-            .iter()
-            .map(|(rule, plugin_name)| PluginEntryPattern {
-                rule: PluginPathRule {
-                    pattern: rule.pattern.clone(),
-                    exclude_globs: rule.exclude_globs.clone(),
-                    exclude_regexes: rule.exclude_regexes.clone(),
-                    exclude_segment_regexes: rule.exclude_segment_regexes.clone(),
-                },
-                plugin_name: plugin_name.clone(),
-            })
-            .collect();
-        let support_patterns = inner
-            .discovered_always_used
-            .iter()
-            .chain(inner.always_used.iter())
-            .chain(inner.fixture_patterns.iter())
-            .map(|(pattern, plugin_name)| PluginNamedPattern {
-                pattern: pattern.clone(),
-                plugin_name: plugin_name.clone(),
-            })
-            .collect();
-        let setup_files = inner
-            .setup_files
-            .iter()
-            .map(|(path, plugin_name)| PluginSetupFile {
-                path: path.clone(),
-                plugin_name: plugin_name.clone(),
-            })
-            .collect();
-        Self {
-            active_plugins: inner.active_plugins,
-            entry_patterns,
-            support_patterns,
-            setup_files,
-            entry_point_roles: inner.entry_point_roles,
-        }
+        Self { inner }
     }
 
     pub fn active_plugins(&self) -> &[String] {
-        &self.active_plugins
+        &self.inner.active_plugins
     }
 
     pub fn merge_active_plugins_from(&mut self, other: &Self) {
-        for plugin_name in &other.active_plugins {
-            if !self.active_plugins.contains(plugin_name) {
-                self.active_plugins.push(plugin_name.clone());
+        for plugin_name in &other.inner.active_plugins {
+            if !self.inner.active_plugins.contains(plugin_name) {
+                self.inner.active_plugins.push(plugin_name.clone());
             }
         }
     }
 
-    pub(crate) fn entry_patterns(&self) -> Vec<PluginEntryPattern> {
-        self.entry_patterns.clone()
-    }
-
-    pub(crate) fn support_patterns(&self) -> Vec<PluginNamedPattern> {
-        self.support_patterns.clone()
-    }
-
-    pub(crate) fn setup_files(&self) -> Vec<PluginSetupFile> {
-        self.setup_files.clone()
-    }
-
-    pub(crate) fn entry_point_role(&self, plugin_name: &str) -> EntryPointRole {
-        self.entry_point_roles
-            .get(plugin_name)
-            .copied()
-            .unwrap_or(EntryPointRole::Support)
-    }
-
     #[cfg(test)]
     pub(crate) fn push_active_plugin_for_test(&mut self, plugin_name: impl Into<String>) {
-        self.active_plugins.push(plugin_name.into());
+        self.inner.active_plugins.push(plugin_name.into());
     }
 }
 

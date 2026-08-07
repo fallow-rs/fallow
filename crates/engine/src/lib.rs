@@ -33,7 +33,6 @@ mod css;
 pub mod dead_code;
 pub mod discover;
 pub mod duplicates;
-mod entry_points;
 mod feature_flags;
 pub mod flags;
 pub(crate) mod graph {

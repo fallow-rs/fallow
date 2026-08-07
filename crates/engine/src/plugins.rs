@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson};
+use fallow_config::{ExternalPluginDef, PackageJson};
 
 use crate::core_backend;
 
@@ -194,47 +194,9 @@ impl AggregatedPluginResult {
         self.inner.merge_active_plugins_from(&other.inner);
     }
 
-    pub(crate) fn entry_patterns(&self) -> Vec<PluginEntryPattern> {
-        self.inner.entry_patterns()
+    pub(crate) fn backend(&self) -> &core_backend::BackendAggregatedPluginResult {
+        &self.inner
     }
-
-    pub(crate) fn support_patterns(&self) -> Vec<PluginNamedPattern> {
-        self.inner.support_patterns()
-    }
-
-    pub(crate) fn setup_files(&self) -> Vec<PluginSetupFile> {
-        self.inner.setup_files()
-    }
-
-    pub(crate) fn entry_point_role(&self, plugin_name: &str) -> EntryPointRole {
-        self.inner.entry_point_role(plugin_name)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PluginPathRule {
-    pub(crate) pattern: String,
-    pub(crate) exclude_globs: Vec<String>,
-    pub(crate) exclude_regexes: Vec<String>,
-    pub(crate) exclude_segment_regexes: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PluginEntryPattern {
-    pub(crate) rule: PluginPathRule,
-    pub(crate) plugin_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PluginNamedPattern {
-    pub(crate) pattern: String,
-    pub(crate) plugin_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PluginSetupFile {
-    pub(crate) path: PathBuf,
-    pub(crate) plugin_name: String,
 }
 
 impl From<core_backend::BackendAggregatedPluginResult> for AggregatedPluginResult {

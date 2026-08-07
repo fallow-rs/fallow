@@ -2191,4 +2191,87 @@ mod tests {
             );
         }
     }
+
+    fn config_for(root: &Path) -> ResolvedConfig {
+        FallowConfig::default().resolve(
+            root.to_path_buf(),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
+    fn discovered(root: &Path, rel: &str, id: u32) -> DiscoveredFile {
+        DiscoveredFile {
+            id: FileId(id),
+            path: root.join(rel),
+            size_bytes: 1,
+        }
+    }
+
+    #[test]
+    fn root_entry_points_use_package_json_scripts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("scripts")).expect("scripts dir");
+        std::fs::write(root.join("scripts/build.ts"), "export const build = true;")
+            .expect("script file");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"scripts":{"build":"tsx scripts/build.ts"}}"#,
+        )
+        .expect("package file");
+        let config = config_for(root);
+        let files = [discovered(root, "scripts/build.ts", 0)];
+
+        let entries = discover_entry_points(&config, &files);
+
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].path.ends_with("scripts/build.ts"));
+        assert!(matches!(
+            entries[0].source,
+            EntryPointSource::PackageJsonScript
+        ));
+    }
+
+    #[test]
+    fn root_entry_points_fall_back_to_default_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("src dir");
+        std::fs::write(root.join("src/index.ts"), "export const main = true;").expect("index file");
+        let config = config_for(root);
+        let files = [discovered(root, "src/index.ts", 0)];
+
+        let entries = discover_entry_points(&config, &files);
+
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].path.ends_with("src/index.ts"));
+        assert!(matches!(entries[0].source, EntryPointSource::DefaultIndex));
+    }
+
+    #[test]
+    fn workspace_entry_points_use_workspace_package_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let ws_root = root.join("packages/app");
+        std::fs::create_dir_all(ws_root.join("src")).expect("workspace src dir");
+        std::fs::write(ws_root.join("src/main.ts"), "export const main = true;")
+            .expect("workspace main");
+        std::fs::write(ws_root.join("package.json"), r#"{"main":"src/main.ts"}"#)
+            .expect("workspace package file");
+        let config = config_for(root);
+        let files = [discovered(root, "packages/app/src/main.ts", 0)];
+
+        let entries = discover_workspace_entry_points(&ws_root, &config, &files);
+
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].path.ends_with("packages/app/src/main.ts"));
+        assert!(matches!(
+            entries[0].source,
+            EntryPointSource::PackageJsonMain
+        ));
+    }
 }

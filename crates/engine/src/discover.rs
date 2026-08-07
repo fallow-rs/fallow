@@ -113,43 +113,6 @@ pub fn discover_workspace_packages_with_diagnostics(
         .map_err(|err| EngineError::new(err.to_string()))
 }
 
-/// Entry points grouped by reachability role.
-#[derive(Debug, Clone, Default)]
-pub struct CategorizedEntryPoints {
-    pub(crate) all: Vec<EntryPoint>,
-    runtime: Vec<EntryPoint>,
-    test: Vec<EntryPoint>,
-}
-
-impl CategorizedEntryPoints {
-    pub(crate) fn push_runtime(&mut self, entry: EntryPoint) {
-        self.runtime.push(entry.clone());
-        self.all.push(entry);
-    }
-
-    pub(crate) fn push_test(&mut self, entry: EntryPoint) {
-        self.test.push(entry.clone());
-        self.all.push(entry);
-    }
-
-    pub(crate) fn push_support(&mut self, entry: EntryPoint) {
-        self.all.push(entry);
-    }
-
-    #[must_use]
-    pub(crate) fn dedup(mut self) -> Self {
-        dedup_entry_paths(&mut self.all);
-        dedup_entry_paths(&mut self.runtime);
-        dedup_entry_paths(&mut self.test);
-        self
-    }
-}
-
-fn dedup_entry_paths(entries: &mut Vec<EntryPoint>) {
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
-    entries.dedup_by(|a, b| a.path == b.path);
-}
-
 /// Package-scoped hidden directories that source discovery should traverse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HiddenDirScope {
@@ -880,7 +843,7 @@ pub(crate) fn discover_entry_points(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
-    crate::entry_points::discover_entry_points(config, files)
+    crate::core_backend::discover_entry_points(config, files)
 }
 
 /// Discover entry points for a workspace package.
@@ -890,7 +853,7 @@ pub(crate) fn discover_workspace_entry_points(
     config: &ResolvedConfig,
     all_files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
-    crate::entry_points::discover_workspace_entry_points(ws_root, config, all_files)
+    crate::core_backend::discover_workspace_entry_points(ws_root, config, all_files)
 }
 
 /// Discover entry points from plugin results.
@@ -900,7 +863,7 @@ pub(crate) fn discover_plugin_entry_points(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
-    crate::entry_points::discover_plugin_entry_points(plugin_result, config, files)
+    crate::core_backend::discover_plugin_entry_points(plugin_result.backend(), config, files)
 }
 
 #[cfg(test)]
@@ -910,9 +873,8 @@ mod tests {
     use fallow_config::PackageJson;
 
     use super::{
-        ALLOWED_HIDDEN_DIRS, CategorizedEntryPoints, EntryPoint, EntryPointSource, HiddenDirScope,
-        collect_hidden_dir_scopes, collect_plugin_hidden_dir_scopes, extract_hidden_segments,
-        is_allowed_hidden_dir,
+        ALLOWED_HIDDEN_DIRS, HiddenDirScope, collect_hidden_dir_scopes,
+        collect_plugin_hidden_dir_scopes, extract_hidden_segments, is_allowed_hidden_dir,
     };
 
     #[test]
@@ -993,24 +955,5 @@ mod tests {
         );
         assert!(extract_hidden_segments("../../.config/eslint.config.js").is_empty());
         assert!(extract_hidden_segments(".env").is_empty());
-    }
-
-    #[test]
-    fn categorized_entry_points_dedups_each_bucket() {
-        let entry = EntryPoint {
-            path: PathBuf::from("/repo/src/index.ts"),
-            source: EntryPointSource::DefaultIndex,
-        };
-        let engine = CategorizedEntryPoints {
-            all: vec![entry.clone(), entry.clone()],
-            runtime: vec![entry.clone(), entry.clone()],
-            test: Vec::new(),
-        }
-        .dedup();
-
-        assert_eq!(engine.all.len(), 1);
-        assert_eq!(engine.runtime.len(), 1);
-        assert_eq!(engine.test.len(), 0);
-        assert_eq!(engine.all[0].path, entry.path);
     }
 }

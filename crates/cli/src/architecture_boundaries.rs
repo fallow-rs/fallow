@@ -1518,6 +1518,10 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         // config-candidate basenames stay derived from the plugin registry.
         "fallow_core::discover::HiddenDirScope",
         "fallow_core::discover::discover_files_and_config_candidates",
+        // Entry-point discovery has one implementation, in fallow-core.
+        "fallow_core::discover::discover_entry_points",
+        "fallow_core::discover::discover_workspace_entry_points",
+        "fallow_core::discover::discover_plugin_entry_points",
     ];
 
     for line in core_backend.lines() {
