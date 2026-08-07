@@ -310,6 +310,7 @@ mod tests {
             ],
             token_count: 20,
             line_count: 8,
+            similarity: None,
         };
         DupesReportPayload::from_report(&DuplicationReport {
             clone_groups: vec![group],

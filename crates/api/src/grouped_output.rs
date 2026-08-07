@@ -434,6 +434,7 @@ where
         primary_owner,
         token_count: group.token_count,
         line_count: group.line_count,
+        similarity: group.similarity,
         instances,
     }
 }
@@ -478,6 +479,7 @@ fn duplication_subset_report(
                     .collect(),
                 token_count: group.token_count,
                 line_count: group.line_count,
+                similarity: group.similarity,
             })
             .collect(),
         clone_families: Vec::new(),
@@ -492,7 +494,11 @@ fn duplication_subset_report(
             clone_groups: 0,
             clone_instances: 0,
             duplication_percentage: 0.0,
-            clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
+            // Filtering and bounded-work counters are report-scoped and cannot
+            // be attributed reliably to one grouped bucket.
+            clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     }
 }

@@ -212,6 +212,7 @@ fn build_clone_group(
         instances,
         token_count: rg.length,
         line_count,
+        similarity: None,
     })
 }
 
@@ -602,6 +603,7 @@ mod tests {
             hashed_tokens: vec![],
             file_tokens: FileTokens {
                 tokens: vec![],
+                function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
                 source: source.to_string(),
                 line_count: source.lines().count().max(1),
@@ -676,6 +678,7 @@ mod tests {
             hashed_tokens: hashed,
             file_tokens: FileTokens {
                 tokens,
+                function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
                 source: source.to_string(),
                 line_count: source.lines().count().max(1),
@@ -798,6 +801,7 @@ mod tests {
                 .collect(),
             token_count,
             line_count: 0, // not used by remove_line_subsets
+            similarity: None,
         }
     }
 

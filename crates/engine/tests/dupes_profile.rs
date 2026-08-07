@@ -50,6 +50,7 @@ fn make_file_tokens_for(count: usize) -> FileTokens {
     let line_count = source.lines().count().max(1);
     FileTokens {
         tokens,
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source,
         line_count,

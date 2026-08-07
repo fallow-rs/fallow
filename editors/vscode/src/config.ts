@@ -115,6 +115,9 @@ export const getDuplicationModeOverride = (): DuplicationMode | undefined => {
   return value !== undefined && DUPLICATION_MODES.has(value) ? value : undefined;
 };
 
+export const getDuplicationNearOverride = (): boolean | undefined =>
+  getConfiguredValue<boolean>("duplication.near");
+
 export const getDuplicationMinOccurrencesOverride = (): number | undefined => {
   const value = getConfiguredValue<number>("duplication.minOccurrences");
   return value === undefined ? undefined : clampMinOccurrences(value);

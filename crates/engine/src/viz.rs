@@ -1036,6 +1036,7 @@ mod tests {
             instances,
             token_count: 12,
             line_count: 3,
+            similarity: None,
         }
     }
 

@@ -139,6 +139,7 @@ vi.mock("../src/config.js", () => ({
   getProductionOverride: () => mockProductionOverride,
   getTypeAwareSettings: () => mockTypeAwareSettings,
   getDuplicationModeOverride: () => mockDuplicationMode,
+  getDuplicationNearOverride: () => undefined,
   getDuplicationThresholdOverride: () => mockDuplicationThreshold,
   getDuplicationMinTokensOverride: () => mockDuplicationMinTokens,
   getDuplicationMinLinesOverride: () => mockDuplicationMinLines,

@@ -886,7 +886,10 @@ pub(super) const CACHE_VERSION: u32 = 253;
 /// (zero-unit collapse `0px`/`0em`/`0%` -> `0`, hex-color expansion `#fff` ->
 /// `#ffffff`) so near-miss / value-drifted CSS clones match. Warm v8 caches carry
 /// the un-canonicalized CSS token stream and must invalidate.
-pub const DUPES_CACHE_VERSION: u32 = 9;
+///
+/// Bumped to 10: cached duplicate token payloads now preserve function-like
+/// source spans for opt-in near-miss detection.
+pub const DUPES_CACHE_VERSION: u32 = 10;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.

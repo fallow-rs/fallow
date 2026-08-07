@@ -1090,10 +1090,10 @@ fn dupes_family_entry(family: &Value) -> String {
         num(family, "total_duplicated_lines"),
         arr(family, "groups").count(),
     );
-    if let Some(first_group) = arr(family, "groups").next()
-        && arr(first_group, "instances").next().is_some()
+    if let Some(best_group) = best_clone_group(family)
+        && arr(best_group, "instances").next().is_some()
     {
-        let locations = arr(first_group, "instances")
+        let locations = arr(best_group, "instances")
             .map(instance_location)
             .collect::<Vec<_>>()
             .join(", ");
@@ -1124,17 +1124,79 @@ fn instance_location(instance: &Value) -> String {
     ))
 }
 
-/// jq: `sort_by([line_count, token_count]) | reverse` (stable sort then full
-/// reverse, so ties land in reverse input order).
+type CloneGroupJsonRankKey = (
+    std::cmp::Reverse<u128>,
+    std::cmp::Reverse<u64>,
+    std::cmp::Reverse<u64>,
+    std::cmp::Reverse<usize>,
+    std::cmp::Reverse<u64>,
+    String,
+    u64,
+);
+
+fn clone_group_rank_key(group: &Value) -> CloneGroupJsonRankKey {
+    const WEIGHTS: [u64; 9] = [
+        1_000_000_000,
+        1_047_319_732,
+        1_075_000_000,
+        1_094_639_463,
+        1_109_873_014,
+        1_122_319_732,
+        1_132_843_281,
+        1_141_959_195,
+        1_150_000_000,
+    ];
+    let spread = u(group, "spread");
+    let token_count = u(group, "token_count");
+    let instances: Vec<&Value> = arr(group, "instances").collect();
+    let first = instances
+        .iter()
+        .min_by_key(|instance| (s(instance, "file").to_string(), u(instance, "start_line")));
+    let weight = WEIGHTS[usize::try_from(spread.min(8)).unwrap_or(8)];
+    let score = u128::from(token_count)
+        .saturating_mul(u128::try_from(instances.len()).unwrap_or(u128::MAX))
+        .saturating_mul(u128::from(weight));
+    (
+        std::cmp::Reverse(score),
+        std::cmp::Reverse(spread),
+        std::cmp::Reverse(token_count),
+        std::cmp::Reverse(instances.len()),
+        std::cmp::Reverse(u(group, "line_count")),
+        first.map_or_else(String::new, |instance| s(instance, "file").to_string()),
+        first.map_or(0, |instance| u(instance, "start_line")),
+    )
+}
+
+/// Reapply the engine's canonical clone ranking from public JSON fields.
 fn sorted_clone_groups(env: &Value) -> Vec<&Value> {
     let mut groups: Vec<&Value> = arr(env, "clone_groups").collect();
-    groups.sort_by_key(|group| (u(group, "line_count"), u(group, "token_count")));
-    groups.reverse();
+    groups.sort_by_cached_key(|group| clone_group_rank_key(group));
     groups
 }
 
+fn best_clone_group(family: &Value) -> Option<&Value> {
+    arr(family, "groups").min_by_key(|group| clone_group_rank_key(group))
+}
+
+type CloneFamilyJsonRankKey = (bool, Option<CloneGroupJsonRankKey>, Vec<String>);
+
+fn clone_family_rank_key(family: &Value) -> CloneFamilyJsonRankKey {
+    let best_group = best_clone_group(family).map(clone_group_rank_key);
+    let files = arr(family, "files")
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    (best_group.is_none(), best_group, files)
+}
+
+fn sorted_clone_families(env: &Value) -> Vec<&Value> {
+    let mut families: Vec<&Value> = arr(env, "clone_families").collect();
+    families.sort_by_cached_key(|family| clone_family_rank_key(family));
+    families
+}
+
 fn dupes_details(env: &Value) -> String {
-    let families: Vec<&Value> = arr(env, "clone_families").collect();
+    let families = sorted_clone_families(env);
     if families.is_empty() {
         let groups = sorted_clone_groups(env);
         let rows = groups

@@ -158,6 +158,7 @@ By default, `fallow dupes` skips generated framework output matching `**/.next/*
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--mode` | `strict\|mild\|weak\|semantic` | - | Detection mode |
+| `--near` | `bool` | `false` | Enable function-scoped near-miss clone detection |
 | `--min-tokens` | `string` | - | Minimum token count for a clone |
 | `--min-lines` | `string` | - | Minimum line count for a clone |
 | `--min-occurrences` | `string` | - | Minimum number of occurrences before a clone group is reported (must be ≥ 2). Raise to skip pair-only clones and focus on widespread copy-paste worth refactoring. `fallow init` writes `minOccurrences: 3` into new projects. |
@@ -1708,6 +1709,7 @@ Available on all commands:
 | `--only` | `dead-code\|dupes\|health` | - | Run only specific analyses (e.g., `--only dead-code,dupes`). Values: `dead-code` (alias: `check`), `dupes`, `health` |
 | `--skip` | `dead-code\|dupes\|health` | - | Skip specific analyses (e.g., `--skip health`). Values: `dead-code` (alias: `check`), `dupes`, `health` |
 | `--dupes-mode` | `strict\|mild\|weak\|semantic` | - | Override duplication detection mode in combined mode |
+| `--dupes-near` | `bool` | `false` | Enable function-scoped near-miss clone detection in combined mode |
 | `--dupes-threshold` | `string` | - | Override duplication threshold in combined mode |
 | `--dupes-min-tokens` | `string` | - | Override the minimum token count for clones in combined mode |
 | `--dupes-min-lines` | `string` | - | Override the minimum line count for clones in combined mode |

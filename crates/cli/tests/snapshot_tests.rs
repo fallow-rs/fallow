@@ -3266,6 +3266,7 @@ fn sample_duplication_report(root: &Path) -> DuplicationReport {
             ],
             token_count: 25,
             line_count: 11,
+            similarity: None,
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
@@ -3280,6 +3281,8 @@ fn sample_duplication_report(root: &Path) -> DuplicationReport {
             clone_instances: 2,
             duplication_percentage: 0.22,
             clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     }
 }
@@ -3351,6 +3354,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
                 ],
                 token_count: 25,
                 line_count: 11,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![
@@ -3373,6 +3377,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
                 ],
                 token_count: 18,
                 line_count: 8,
+                similarity: None,
             },
         ],
         clone_families: vec![],
@@ -3388,6 +3393,8 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
             clone_instances: 5,
             duplication_percentage: 0.7,
             clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     }
 }

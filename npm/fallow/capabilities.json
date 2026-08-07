@@ -368,6 +368,16 @@
       ]
     },
     {
+      "name": "--dupes-near",
+      "type": "bool",
+      "required": false,
+      "description": "Enable function-scoped near-miss clone detection in combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--dupes-threshold",
       "type": "string",
       "required": false,
@@ -1206,6 +1216,16 @@
           ]
         },
         {
+          "name": "--near",
+          "type": "bool",
+          "required": false,
+          "description": "Enable function-scoped near-miss clone detection",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "--min-tokens",
           "type": "string",
           "required": false,
@@ -1273,7 +1293,7 @@
           "name": "--top",
           "type": "string",
           "required": false,
-          "description": "Show only the N most-duplicated clone groups (sorted by instance count descending, then line count descending)"
+          "description": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread"
         },
         {
           "name": "--trace",

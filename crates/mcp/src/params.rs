@@ -139,6 +139,8 @@ pub struct CombinedParams {
 
     pub dupes_mode: Option<String>,
 
+    pub dupes_near: Option<bool>,
+
     pub dupes_min_tokens: Option<u32>,
 
     pub dupes_min_lines: Option<u32>,
@@ -272,6 +274,9 @@ pub struct FindDupesParams {
     pub workspace: Option<String>,
 
     pub mode: Option<String>,
+
+    /// Detect function-scoped near-miss clones in addition to exact clones.
+    pub near: Option<bool>,
 
     pub min_tokens: Option<u32>,
 
@@ -697,6 +702,9 @@ pub struct TraceCloneParams {
     pub workspace: Option<String>,
 
     pub mode: Option<String>,
+
+    /// Detect function-scoped near-miss clones before resolving the trace.
+    pub near: Option<bool>,
 
     pub min_tokens: Option<u32>,
 

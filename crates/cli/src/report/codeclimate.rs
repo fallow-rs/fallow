@@ -2837,6 +2837,7 @@ mod tests {
                 ],
                 token_count: 20,
                 line_count: 10,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -2874,6 +2875,7 @@ mod tests {
                     }],
                     token_count: 5,
                     line_count: 8,
+                    similarity: None,
                 },
                 CloneGroup {
                     instances: vec![CloneInstance {
@@ -2886,6 +2888,7 @@ mod tests {
                     }],
                     token_count: 3,
                     line_count: 6,
+                    similarity: None,
                 },
             ],
             clone_families: vec![],
@@ -2950,6 +2953,7 @@ mod tests {
                 ],
                 token_count: 5,
                 line_count: 4,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],

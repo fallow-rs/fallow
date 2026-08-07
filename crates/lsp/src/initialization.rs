@@ -108,6 +108,7 @@ pub fn initialization_config_path(
 #[serde(rename_all = "camelCase")]
 pub struct LspDuplicationOptions {
     pub mode: Option<DetectionMode>,
+    pub near: Option<bool>,
     pub threshold: Option<f64>,
     pub min_tokens: Option<usize>,
     pub min_lines: Option<usize>,
@@ -122,6 +123,7 @@ impl LspDuplicationOptions {
         DuplicatesConfig {
             enabled: config.enabled,
             mode: self.mode.unwrap_or(config.mode),
+            near: self.near.unwrap_or(config.near),
             min_tokens: self.min_tokens.unwrap_or(config.min_tokens),
             min_lines: self.min_lines.unwrap_or(config.min_lines),
             min_occurrences: self
@@ -130,6 +132,7 @@ impl LspDuplicationOptions {
                 .unwrap_or(config.min_occurrences),
             threshold: self.threshold.unwrap_or(config.threshold),
             ignore: config.ignore.clone(),
+            ignored_clones: config.ignored_clones.clone(),
             ignore_defaults: config.ignore_defaults,
             skip_local: self.skip_local.unwrap_or(config.skip_local),
             cross_language: self.cross_language.unwrap_or(config.cross_language),

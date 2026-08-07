@@ -513,6 +513,10 @@ struct Cli {
     #[arg(hide_short_help = true, long = "dupes-mode", global = true)]
     dupes_mode: Option<DupesMode>,
 
+    /// Enable function-scoped near-miss clone detection in combined mode.
+    #[arg(hide_short_help = true, long = "dupes-near", global = true)]
+    dupes_near: bool,
+
     /// Override duplication threshold in combined mode.
     #[arg(hide_short_help = true, long = "dupes-threshold", global = true)]
     dupes_threshold: Option<f64>,
@@ -1040,6 +1044,10 @@ enum Command {
         #[arg(long)]
         mode: Option<DupesMode>,
 
+        /// Enable function-scoped near-miss clone detection.
+        #[arg(long)]
+        near: bool,
+
         /// Minimum token count for a clone
         /// (defaults to the value in `.fallowrc.jsonc`, or `50` if unset).
         #[arg(long)]
@@ -1081,8 +1089,8 @@ enum Command {
         #[arg(long, conflicts_with = "ignore_imports")]
         no_ignore_imports: bool,
 
-        /// Show only the N most-duplicated clone groups (sorted by instance
-        /// count descending, then line count descending)
+        /// Show only the N highest-ranked clone groups. Ranking combines clone
+        /// size, occurrence count, and capped directory or line spread.
         #[arg(long)]
         top: Option<usize>,
 
@@ -3046,6 +3054,7 @@ fn run_bare_combined(
         run_dupes: analyses.run_dupes,
         run_health: analyses.run_health,
         dupes_mode: cli.dupes_mode,
+        dupes_near: cli.dupes_near,
         dupes_threshold: cli.dupes_threshold,
         dupes_min_tokens: cli.dupes_min_tokens,
         dupes_min_lines: cli.dupes_min_lines,
@@ -3777,6 +3786,7 @@ fn validate_security_blind_spots_flags(flags: &SecurityDerivedFlagState<'_>) -> 
 fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     let Command::Dupes {
         mode,
+        near,
         min_tokens,
         min_lines,
         min_occurrences,
@@ -3796,6 +3806,7 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         dispatch,
         &DupesDispatchArgs {
             mode,
+            near,
             min_tokens,
             min_lines,
             min_occurrences,
@@ -4866,6 +4877,7 @@ fn resolve_ignore_imports(ignore_imports: bool, no_ignore_imports: bool) -> Opti
 
 struct DupesDispatchArgs {
     mode: Option<DupesMode>,
+    near: bool,
     min_tokens: Option<usize>,
     min_lines: Option<usize>,
     min_occurrences: Option<usize>,
@@ -4896,6 +4908,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         quiet,
         allow_remote_extends: cli.allow_remote_extends,
         mode: args.mode,
+        near: args.near,
         min_tokens: args.min_tokens,
         min_lines: args.min_lines,
         min_occurrences: args.min_occurrences,

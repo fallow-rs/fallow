@@ -4,7 +4,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
 ---
 {
   "kind": "dupes",
-  "schema_version": 7,
+  "schema_version": 8,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "clone_groups": [
@@ -37,7 +37,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ],
       "token_count": 25,
       "line_count": 11,
-      "fingerprint": "dup:77353011",
+      "fingerprint": "dup:77dc5951",
+      "spread": 2,
       "actions": [
         {
           "type": "extract-shared",
@@ -73,7 +74,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ],
       "token_count": 18,
       "line_count": 8,
-      "fingerprint": "dup:71c373ff",
+      "fingerprint": "dup:58a0b88d",
+      "spread": 0,
       "actions": [
         {
           "type": "extract-shared",
@@ -106,7 +108,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "next_steps": [
     {
       "id": "trace-clone",
-      "command": "fallow dupes --trace dup:71c373ff",
+      "command": "fallow dupes --trace dup:58a0b88d",
       "reason": "see sibling locations and an extract-function suggestion"
     }
   ],
@@ -119,7 +121,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         "total_lines": 5000,
         "duplicated_lines": 16,
         "total_tokens": 25000,
-        "duplicated_tokens": 36,
+        "duplicated_tokens": 18,
         "clone_groups": 1,
         "clone_instances": 2,
         "duplication_percentage": 0.32
@@ -149,7 +151,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "owner": "lib"
             }
           ],
-          "fingerprint": "dup:71c373ff",
+          "fingerprint": "dup:58a0b88d",
+          "spread": 0,
           "actions": [
             {
               "type": "extract-shared",
@@ -175,7 +178,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         "total_lines": 5000,
         "duplicated_lines": 33,
         "total_tokens": 25000,
-        "duplicated_tokens": 75,
+        "duplicated_tokens": 50,
         "clone_groups": 1,
         "clone_instances": 3,
         "duplication_percentage": 0.66
@@ -214,7 +217,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "owner": "lib"
             }
           ],
-          "fingerprint": "dup:77353011",
+          "fingerprint": "dup:77dc5951",
+          "spread": 2,
           "actions": [
             {
               "type": "extract-shared",

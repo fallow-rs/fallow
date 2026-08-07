@@ -466,6 +466,7 @@ mod tests {
                 ],
                 token_count: 40,
                 line_count: 12,
+                similarity: None,
             }],
             ..DuplicationReport::default()
         };

@@ -16,6 +16,7 @@ use super::token_types::{
 /// AST visitor that extracts a flat sequence of normalized tokens.
 pub(super) struct TokenExtractor {
     pub(super) tokens: Vec<SourceToken>,
+    pub(super) function_spans: Vec<Span>,
     pub(super) atomic_invocation_spans: Vec<Span>,
     /// When true, skip TypeScript type annotations, interfaces, and type aliases
     /// to enable cross-language clone detection between .ts and .js files.
@@ -29,6 +30,7 @@ impl TokenExtractor {
     pub(super) const fn new(strip_types: bool, skip_imports: bool) -> Self {
         Self {
             tokens: Vec::new(),
+            function_spans: Vec::new(),
             atomic_invocation_spans: Vec::new(),
             strip_types,
             skip_imports,
@@ -492,6 +494,7 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        self.function_spans.push(expr.span);
         if expr.r#async {
             self.push_keyword(KeywordType::Async, expr.span);
         }
@@ -534,6 +537,7 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        self.function_spans.push(func.span);
         if func.r#async {
             self.push_keyword(KeywordType::Async, func.span);
         }

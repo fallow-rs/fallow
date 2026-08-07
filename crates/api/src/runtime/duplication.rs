@@ -22,7 +22,7 @@ use crate::{
 
 use super::{ProgrammaticResult, root_envelope_mode};
 
-pub(super) const SCHEMA_VERSION: u32 = 1;
+pub(super) const SCHEMA_VERSION: u32 = 2;
 
 /// Run duplication analysis and return typed API output before serialization.
 ///
@@ -173,11 +173,13 @@ pub(super) fn build_dupes_config(
     DuplicatesConfig {
         enabled: true,
         mode: options.mode.map_or(config.mode, duplication_mode_to_config),
+        near: options.near.unwrap_or(config.near),
         min_tokens: options.min_tokens.unwrap_or(config.min_tokens),
         min_lines: options.min_lines.unwrap_or(config.min_lines),
         min_occurrences: options.min_occurrences.unwrap_or(config.min_occurrences),
         threshold: options.threshold.unwrap_or(config.threshold),
         ignore: config.ignore.clone(),
+        ignored_clones: config.ignored_clones.clone(),
         ignore_defaults: config.ignore_defaults,
         skip_local: options.skip_local.unwrap_or(config.skip_local),
         cross_language: options.cross_language.unwrap_or(config.cross_language),
@@ -194,5 +196,28 @@ const fn duplication_mode_to_config(mode: DuplicationMode) -> DetectionMode {
         DuplicationMode::Mild => DetectionMode::Mild,
         DuplicationMode::Weak => DetectionMode::Weak,
         DuplicationMode::Semantic => DetectionMode::Semantic,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplication_options_override_near_and_preserve_reviewed_clones() {
+        let config = DuplicatesConfig {
+            near: true,
+            ignored_clones: vec!["dup:12345678:2".to_string()],
+            ..DuplicatesConfig::default()
+        };
+        let options = DuplicationOptions {
+            near: Some(false),
+            ..DuplicationOptions::default()
+        };
+
+        let merged = build_dupes_config(&options, &config);
+
+        assert!(!merged.near);
+        assert_eq!(merged.ignored_clones, config.ignored_clones);
     }
 }

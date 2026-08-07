@@ -19,6 +19,11 @@ def dead_code_docs: "https://docs.fallow.tools/explanations/dead-code";
 def docs(anchor): dead_code_docs + "#" + anchor;
 def health_docs: "https://docs.fallow.tools/explanations/health";
 def dupes_docs: "https://docs.fallow.tools/explanations/duplication";
+def clone_rank:
+  (.spread // 0) as $spread |
+  ([1000000000, 1047319732, 1075000000, 1094639463, 1109873014, 1122319732, 1132843281, 1141959195, 1150000000][([$spread, 8] | min)]) as $weight |
+  ((.instances // []) | sort_by([(.file // ""), (.start_line // 0)]) | first // {}) as $first |
+  [-((.token_count // 0) * ((.instances // []) | length) * $weight), -$spread, -(.token_count // 0), -((.instances // []) | length), -(.line_count // 0), ($first.file // ""), ($first.start_line // 0)];
 def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
 def metric_delta(name):
   (.health.health_trend.metrics // []) | map(select(.name == name)) | first // null;
@@ -174,7 +179,7 @@ else
 
   # Duplication breakdown
   (if $dupes > 0 then
-    ((.dupes.clone_groups // []) | sort_by([(.line_count // 0), (.token_count // 0)]) | reverse) as $groups |
+    ((.dupes.clone_groups // []) | sort_by(clone_rank)) as $groups |
     ($dupes_stats.files_with_clones // 0) as $files_with_clones |
     "<details>\n<summary><strong><a href=\"\(dupes_docs)\">Duplication</a> (\($dupes) \(if $dupes == 1 then "group" else "groups" end) · \($dupes_stats.duplicated_lines // 0) lines · \(pct($dupes_stats.duplication_percentage // 0))%)</strong></summary>\n\n" +
     "| Locations | Lines | Tokens |\n|:----------|------:|-------:|\n" +

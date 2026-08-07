@@ -31,6 +31,75 @@ fn tokenize_arrow_function() {
 }
 
 #[test]
+fn records_all_function_like_spans_and_nested_functions() {
+    let source = r"
+function declared() {
+  const expression = function () { return 1; };
+  const arrow = () => 2;
+  const object = { method() { return 3; } };
+  class Example { method() { return 4; } }
+}
+";
+    let file = tokenize_file(&PathBuf::from("test.ts"), source, false);
+    let fragments = file
+        .function_spans
+        .iter()
+        .map(|span| &source[span.start as usize..span.end as usize])
+        .collect::<Vec<_>>();
+
+    assert!(
+        fragments
+            .iter()
+            .any(|fragment| fragment.starts_with("function declared"))
+    );
+    assert!(
+        fragments
+            .iter()
+            .any(|fragment| fragment.starts_with("function ()"))
+    );
+    assert!(
+        fragments
+            .iter()
+            .any(|fragment| fragment.starts_with("() => 2"))
+    );
+    assert!(
+        fragments
+            .iter()
+            .filter(|fragment| fragment.contains("return 3") || fragment.contains("return 4"))
+            .count()
+            >= 2
+    );
+}
+
+#[test]
+fn offsets_function_spans_in_sfc_sections_and_excludes_mdx() {
+    let sfc_source = "<template><div /></template>\n<script>\nconst nested = () => 1;\n</script>";
+    let sfc = tokenize_file(&PathBuf::from("component.vue"), sfc_source, false);
+    assert_eq!(sfc.function_spans.len(), 1);
+    let span = sfc.function_spans[0];
+    assert_eq!(
+        &sfc_source[span.start as usize..span.end as usize],
+        "() => 1"
+    );
+
+    let astro_source = "---\nconst nested = () => 2;\n---\n<div />";
+    let astro = tokenize_file(&PathBuf::from("component.astro"), astro_source, false);
+    assert_eq!(astro.function_spans.len(), 1);
+    let span = astro.function_spans[0];
+    assert_eq!(
+        &astro_source[span.start as usize..span.end as usize],
+        "() => 2"
+    );
+
+    let mdx = tokenize_file(
+        &PathBuf::from("page.mdx"),
+        "export const render = () => 1\n\n# Title\n",
+        false,
+    );
+    assert!(mdx.function_spans.is_empty());
+}
+
+#[test]
 fn tokenize_if_else() {
     let tokens = tokenize("if (x) { y; } else { z; }");
     assert!(!tokens.is_empty());

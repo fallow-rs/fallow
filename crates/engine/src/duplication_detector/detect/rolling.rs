@@ -837,6 +837,7 @@ mod tests {
                         span: Span::new((index * 2) as u32, (index * 2 + 1) as u32),
                     })
                     .collect(),
+                function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
                 source,
                 line_count: hashes.len(),

@@ -33,6 +33,7 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   "--dupes-skip-local": "2.88.3",
   "--dupes-cross-language": "2.88.3",
   "--dupes-ignore-imports": "2.88.3",
+  "--dupes-near": "3.15.0",
   // Opt-out of the default import exclusion (#1224). On older binaries
   // (< 2.96.0) the dupes default was already "count imports", so omitting the
   // flag yields the same behavior the user is asking for; degrade silently.
@@ -62,6 +63,7 @@ interface AnalysisArgsOptions {
   readonly configPath: string;
   readonly typeAware?: TypeAwareArgsOptions;
   readonly dupesMode: DuplicationMode | undefined;
+  readonly dupesNear: boolean | undefined;
   readonly dupesThreshold: number | undefined;
   readonly dupesMinTokens: number | undefined;
   readonly dupesMinLines: number | undefined;
@@ -126,6 +128,10 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
 
   if (options.dupesMode !== undefined) {
     args.push("--dupes-mode", options.dupesMode);
+  }
+
+  if (options.dupesNear === true) {
+    pushVersionGatedFlag(args, skipped, "--dupes-near", options.cliVersion);
   }
 
   if (options.dupesThreshold !== undefined) {

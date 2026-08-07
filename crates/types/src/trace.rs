@@ -262,6 +262,12 @@ pub struct TracedCloneGroup {
     pub token_count: usize,
     /// Number of lines in the duplicated block.
     pub line_count: usize,
+    /// Maximum directory-tree or same-file line distance between instances.
+    pub spread: usize,
+    /// Lowest all-pairs similarity for a near-miss clone group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "f64"))]
+    pub similarity: Option<f64>,
     /// Root-relative clone instances in this group.
     pub instances: Vec<CloneInstance>,
     /// Group-level refactoring suggestion.

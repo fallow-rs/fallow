@@ -264,6 +264,7 @@ mod tests {
             instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
             token_count: 30,
             line_count: 10,
+            similarity: None,
         }];
 
         let families = group_into_families(&groups, &root());
@@ -280,11 +281,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 20, 30), instance("src/b.ts", 20, 30)],
                 token_count: 30,
                 line_count: 11,
+                similarity: None,
             },
         ];
 
@@ -301,11 +304,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/c.ts", 1, 10), instance("src/d.ts", 1, 10)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
         ];
 
@@ -320,11 +325,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 5), instance("src/b.ts", 1, 5)],
                 token_count: 15,
                 line_count: 5,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/c.ts", 1, 20), instance("src/d.ts", 1, 20)],
                 token_count: 60,
                 line_count: 20,
+                similarity: None,
             },
         ];
 
@@ -341,11 +348,13 @@ mod tests {
                 instances: vec![instance("src/c.ts", 1, 10), instance("src/d.ts", 1, 10)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
         ];
 
@@ -361,11 +370,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 30), instance("lib/b.ts", 1, 30)],
                 token_count: 100,
                 line_count: 30,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 40, 65), instance("lib/b.ts", 40, 65)],
                 token_count: 80,
                 line_count: 26,
+                similarity: None,
             },
         ];
 
@@ -384,6 +395,7 @@ mod tests {
             instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
             token_count: 30,
             line_count: 10,
+            similarity: None,
         }];
 
         let families = group_into_families(&groups, &root());
@@ -405,6 +417,7 @@ mod tests {
             ],
             token_count: 30,
             line_count: 10,
+            similarity: None,
         }];
 
         let families = group_into_families(&groups, &root());
@@ -419,11 +432,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 30), instance("lib/b.ts", 1, 30)],
                 token_count: 100,
                 line_count: 30,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 40, 65), instance("lib/b.ts", 40, 65)],
                 token_count: 80,
                 line_count: 26,
+                similarity: None,
             },
         ];
 
@@ -442,6 +457,7 @@ mod tests {
                 ],
                 token_count: 100,
                 line_count: 30,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![
@@ -450,6 +466,7 @@ mod tests {
                 ],
                 token_count: 80,
                 line_count: 26,
+                similarity: None,
             },
         ];
 
@@ -474,11 +491,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 30), instance("lib/b.ts", 1, 30)],
                 token_count: 100,
                 line_count: 30,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 40, 65), instance("lib/b.ts", 40, 65)],
                 token_count: 80,
                 line_count: 26,
+                similarity: None,
             },
         ];
 
@@ -499,11 +518,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 20, 30), instance("src/b.ts", 20, 30)],
                 token_count: 45,
                 line_count: 11,
+                similarity: None,
             },
         ];
 
@@ -519,11 +540,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 20, 30), instance("src/b.ts", 20, 30)],
                 token_count: 30,
                 line_count: 11,
+                similarity: None,
             },
         ];
 
@@ -544,6 +567,7 @@ mod tests {
             instances: vec![instance("src/a.ts", 1, 10)],
             token_count: 30,
             line_count: 10,
+            similarity: None,
         }];
 
         let families = group_into_families(&groups, &root());
@@ -561,6 +585,7 @@ mod tests {
                 ],
                 token_count: 100,
                 line_count: 30,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![
@@ -569,6 +594,7 @@ mod tests {
                 ],
                 token_count: 80,
                 line_count: 26,
+                similarity: None,
             },
         ];
 

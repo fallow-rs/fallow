@@ -628,6 +628,8 @@ impl EditorAnalysisOutput {
         self.duplication.stats.duplicated_tokens += source.stats.duplicated_tokens;
         self.duplication.stats.clone_groups_below_min_occurrences +=
             source.stats.clone_groups_below_min_occurrences;
+        self.duplication.stats.clone_groups_ignored += source.stats.clone_groups_ignored;
+        self.duplication.stats.near_candidates_skipped += source.stats.near_candidates_skipped;
         self.duplication.stats.duplication_percentage = if self.duplication.stats.total_lines > 0 {
             (self.duplication.stats.duplicated_lines as f64
                 / self.duplication.stats.total_lines as f64)
@@ -691,6 +693,7 @@ mod tests {
                     }],
                     token_count: 8,
                     line_count: 4,
+                    similarity: None,
                 }],
                 clone_families: Vec::new(),
                 mirrored_directories: Vec::new(),
@@ -705,6 +708,8 @@ mod tests {
                     duplicated_tokens: 8,
                     duplication_percentage: 20.0,
                     clone_groups_below_min_occurrences: 1,
+                    clone_groups_ignored: 1,
+                    near_candidates_skipped: 2,
                 },
             },
             ..Default::default()
@@ -725,6 +730,8 @@ mod tests {
                 duplicated_tokens: 12,
                 duplication_percentage: 20.0,
                 clone_groups_below_min_occurrences: 2,
+                clone_groups_ignored: 3,
+                near_candidates_skipped: 4,
             },
         });
 
@@ -734,6 +741,8 @@ mod tests {
             output.duplication.stats.clone_groups_below_min_occurrences,
             3
         );
+        assert_eq!(output.duplication.stats.clone_groups_ignored, 4);
+        assert_eq!(output.duplication.stats.near_candidates_skipped, 6);
         assert!((output.duplication.stats.duplication_percentage - 20.0).abs() < f64::EPSILON);
     }
 

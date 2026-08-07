@@ -34,7 +34,9 @@ use crate::semantic::{
 /// from a scalar string to `oneOf: [string, array]` so the new `ignoreExports`
 /// action can carry a paste-ready array of `{ file, exports }` rule objects
 /// (the legacy `ignoreDependencies` etc. variants still emit strings, so
-/// consumers that switch on `config_key` keep working unchanged). The
+/// consumers that switch on `config_key` keep working unchanged). v8 added the
+/// required duplication `spread` field and changed `duplicated_tokens` to count
+/// redundant copies, excluding the retained copy in each group. The
 /// runtime-coverage block is extended additively as the protocol evolves
 /// (currently 0.3, which adds an optional capture_quality summary field). Other
 /// additive examples: dupes --group-by adds optional grouped_by, total_issues,

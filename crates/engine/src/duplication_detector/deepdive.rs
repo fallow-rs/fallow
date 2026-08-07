@@ -8,10 +8,11 @@
 //! and `trace_clone`) computes the same values without storing a field on the
 //! core [`CloneGroup`] struct.
 
-use std::path::PathBuf;
+use std::path::Path;
 
+use fallow_config::DetectionMode;
 use rustc_hash::{FxHashMap, FxHashSet};
-use xxhash_rust::xxh3::xxh3_64;
+use xxhash_rust::xxh3::{Xxh3, xxh3_64};
 
 use super::types::{CloneGroup, CloneInstance, RefactoringKind, RefactoringSuggestion};
 
@@ -20,42 +21,37 @@ pub const FINGERPRINT_PREFIX: &str = "dup:";
 
 /// Canonical identity for a clone group when assigning report-scoped handles.
 ///
-/// The representative fragment keeps the handle content-derived. The structural
-/// and location fields make otherwise identical wrappers addressable when tests
-/// or future grouping modes present them as separate report entries.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Compact digests of canonically sorted fragments and locations make report
+/// entries addressable and provide a report-order-independent collision-suffix
+/// order without retaining a second copy of every source fragment and path.
+/// The separately hashed, sorted, deduplicated normalized instance sequences
+/// provide the public content identity.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CloneFingerprintKey {
-    representative_fragment: String,
+    fragments_digest: u128,
+    locations_digest: u128,
     token_count: usize,
     line_count: usize,
     instance_count: usize,
-    first_file: Option<PathBuf>,
-    first_start_line: usize,
-    first_end_line: usize,
 }
+
+const _: () = assert!(std::mem::size_of::<CloneFingerprintKey>() <= 64);
 
 impl CloneFingerprintKey {
     /// Build a fingerprint key from clone-group parts.
     #[must_use]
     fn from_parts(instances: &[CloneInstance], token_count: usize, line_count: usize) -> Self {
-        let first = instances.first();
         Self {
-            representative_fragment: first.map_or_else(String::new, |inst| inst.fragment.clone()),
+            fragments_digest: hash_distinct_fragments(instances),
+            locations_digest: hash_sorted_locations(instances),
             token_count,
             line_count,
             instance_count: instances.len(),
-            first_file: first.map(|inst| inst.file.clone()),
-            first_start_line: first.map_or(0, |inst| inst.start_line),
-            first_end_line: first.map_or(0, |inst| inst.end_line),
         }
     }
 
     fn from_group(group: &CloneGroup) -> Self {
         Self::from_parts(&group.instances, group.token_count, group.line_count)
-    }
-
-    fn representative_fragment(&self) -> &str {
-        &self.representative_fragment
     }
 }
 
@@ -79,7 +75,7 @@ impl CloneFingerprintSet {
             .iter()
             .map(|group| {
                 let key = CloneFingerprintKey::from_group(group);
-                let hash = hash_fragment(key.representative_fragment());
+                let hash = hash_instances(&group.instances);
                 (key, hash)
             })
             .collect();
@@ -89,7 +85,20 @@ impl CloneFingerprintSet {
     /// Return the assigned fingerprint for a clone group.
     #[must_use]
     pub fn fingerprint_for_group(&self, group: &CloneGroup) -> String {
-        self.fingerprint_for_key(&CloneFingerprintKey::from_group(group))
+        self.by_key
+            .get(&CloneFingerprintKey::from_group(group))
+            .cloned()
+            .unwrap_or_else(|| clone_fingerprint(&group.instances))
+    }
+
+    /// Return the config key used by `duplicates.ignoredClones` for a group.
+    #[must_use]
+    pub fn ignored_clone_key_for_group(&self, group: &CloneGroup) -> String {
+        format!(
+            "{}:{}",
+            self.fingerprint_for_group(group),
+            group.instances.len()
+        )
     }
 
     /// Return the assigned fingerprint for clone-group parts.
@@ -100,21 +109,11 @@ impl CloneFingerprintSet {
         token_count: usize,
         line_count: usize,
     ) -> String {
-        self.fingerprint_for_key(&CloneFingerprintKey::from_parts(
-            instances,
-            token_count,
-            line_count,
-        ))
-    }
-
-    /// Return the assigned fingerprint for a key, falling back to the legacy
-    /// short content handle when the key was not present in this report.
-    #[must_use]
-    fn fingerprint_for_key(&self, key: &CloneFingerprintKey) -> String {
+        let key = CloneFingerprintKey::from_parts(instances, token_count, line_count);
         self.by_key
-            .get(key)
+            .get(&key)
             .cloned()
-            .unwrap_or_else(|| fingerprint_for_fragment(key.representative_fragment.as_str()))
+            .unwrap_or_else(|| clone_fingerprint(instances))
     }
 
     /// Find the group addressed by an assigned fingerprint.
@@ -142,12 +141,19 @@ impl CloneFingerprintSet {
             *full_counts.entry(*hash).or_insert(0) += 1;
         }
 
+        let mut sorted_entries = entries.to_vec();
+        sorted_entries.sort_unstable_by(|(left_key, left_hash), (right_key, right_hash)| {
+            left_key
+                .cmp(right_key)
+                .then_with(|| left_hash.cmp(right_hash))
+        });
+
         let mut full_ordinals: FxHashMap<u64, usize> = FxHashMap::default();
         let mut ambiguous_short_handles: FxHashSet<String> = FxHashSet::default();
         let mut by_key = FxHashMap::default();
         let mut key_by_fingerprint = FxHashMap::default();
 
-        for (key, hash) in entries {
+        for (key, hash) in &sorted_entries {
             let short = *hash as u32;
             let short_handle = format!("{FINGERPRINT_PREFIX}{short:08x}");
             let fingerprint = if short_counts.get(&short).copied().unwrap_or(0) == 1 {
@@ -179,17 +185,14 @@ impl CloneFingerprintSet {
     }
 }
 
-/// Compute the legacy short content fingerprint for a clone group from its
-/// instances.
+/// Compute a mode-independent normalized short content fingerprint for a clone
+/// group from all distinct instance token sequences.
 ///
-/// The fingerprint is derived from the representative instance's raw source
-/// fragment (the first instance after [`super::types::DuplicationReport::sort`],
-/// which orders instances by `(file, line)`), so it is:
-///
-/// - content-derived, not line-derived (moving a clone down a file does not
-///   change it),
-/// - sibling-stable (editing one clone group never changes another group's
-///   fingerprint, since each hashes only its own content),
+/// Whitespace, comments, and line endings are absent from the normalized token
+/// hashes. Sorting and deduplicating sequences makes the fingerprint independent
+/// of instance order while ensuring a token edit in any distinct instance
+/// changes the group identity. Instance count is deliberately excluded and is
+/// appended separately by [`CloneFingerprintSet::ignored_clone_key_for_group`].
 ///
 /// Use [`CloneFingerprintSet`] for user-facing report output, since it widens
 /// only the rare colliding handles while preserving this short form for the
@@ -200,8 +203,7 @@ impl CloneFingerprintSet {
 /// `dup:<8hex>` handle.
 #[must_use]
 pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
-    let representative = instances.first().map_or("", |inst| inst.fragment.as_str());
-    fingerprint_for_fragment(representative)
+    fingerprint_for_hash(hash_instances(instances))
 }
 
 /// Compute the fingerprint directly from a representative source fragment.
@@ -211,24 +213,155 @@ pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
 /// fingerprint matches the top-level `clone_groups[].fingerprint` for the clone.
 #[must_use]
 pub fn fingerprint_for_fragment(fragment: &str) -> String {
-    let hash = hash_fragment(fragment);
-    format!("{FINGERPRINT_PREFIX}{:08x}", hash as u32)
+    let sequence = normalized_fragment_sequence(Path::new("fragment.ts"), fragment);
+    fingerprint_for_hash(hash_normalized_sequences(&[sequence]))
 }
 
-/// Hash a representative fragment, normalizing CRLF to LF first.
-///
-/// A clone group must get the same `dup:` fingerprint whether its source was
-/// checked out with Windows (`\r\n`) or Unix (`\n`) line endings; otherwise the
-/// same code yields different handles on a Windows dev machine versus a Linux CI
-/// runner, breaking `dupes --trace dup:<id>` and any fingerprint-keyed baseline
-/// across platforms. Stripping `\r` is a no-op on Unix-checkout fragments, so
-/// existing fingerprints are unchanged.
-fn hash_fragment(fragment: &str) -> u64 {
-    if fragment.as_bytes().contains(&b'\r') {
-        xxh3_64(fragment.replace('\r', "").as_bytes())
-    } else {
-        xxh3_64(fragment.as_bytes())
+fn hash_distinct_fragments(instances: &[CloneInstance]) -> u128 {
+    let mut fragments = instances
+        .iter()
+        .map(|instance| instance.fragment.as_str())
+        .collect::<Vec<_>>();
+    fragments.sort_unstable();
+    fragments.dedup();
+
+    let mut hasher = Xxh3::new();
+    for fragment in fragments {
+        update_hash_bytes(&mut hasher, fragment.as_bytes());
     }
+    hasher.digest128()
+}
+
+fn hash_sorted_locations(instances: &[CloneInstance]) -> u128 {
+    let mut locations = instances
+        .iter()
+        .map(|instance| {
+            (
+                instance.file.as_path(),
+                instance.start_line,
+                instance.end_line,
+            )
+        })
+        .collect::<Vec<_>>();
+    locations.sort_unstable();
+
+    let mut hasher = Xxh3::new();
+    for (path, start_line, end_line) in locations {
+        update_hash_bytes(&mut hasher, path.as_os_str().as_encoded_bytes());
+        hasher.update(&start_line.to_le_bytes());
+        hasher.update(&end_line.to_le_bytes());
+    }
+    hasher.digest128()
+}
+
+fn update_hash_bytes(hasher: &mut Xxh3, bytes: &[u8]) {
+    hasher.update(&bytes.len().to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn hash_instances(instances: &[CloneInstance]) -> u64 {
+    let mut sequences = distinct_fragment_inputs(instances)
+        .into_iter()
+        .map(|(kind, fragment)| normalized_fragment_sequence(kind.path(), fragment))
+        .collect::<Vec<_>>();
+    sequences.sort_unstable();
+    sequences.dedup();
+    hash_normalized_sequences(&sequences)
+}
+
+fn distinct_fragment_inputs(instances: &[CloneInstance]) -> Vec<(FragmentTokenizationKind, &str)> {
+    let mut fragments = instances
+        .iter()
+        .map(|instance| {
+            (
+                fragment_tokenization_kind(&instance.file),
+                instance.fragment.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    fragments.sort_unstable();
+    fragments.dedup();
+    fragments
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum FragmentTokenizationKind {
+    JavaScript,
+    Jsx,
+    Mjs,
+    Cjs,
+    TypeScript,
+    Tsx,
+    Mts,
+    Cts,
+    Css,
+    Scss,
+    Sass,
+    Less,
+}
+
+impl FragmentTokenizationKind {
+    fn path(self) -> &'static Path {
+        Path::new(match self {
+            Self::JavaScript => "fragment.js",
+            Self::Jsx => "fragment.jsx",
+            Self::Mjs => "fragment.mjs",
+            Self::Cjs => "fragment.cjs",
+            Self::TypeScript => "fragment.ts",
+            Self::Tsx => "fragment.tsx",
+            Self::Mts => "fragment.mts",
+            Self::Cts => "fragment.cts",
+            Self::Css => "fragment.css",
+            Self::Scss => "fragment.scss",
+            Self::Sass => "fragment.sass",
+            Self::Less => "fragment.less",
+        })
+    }
+}
+
+fn fragment_tokenization_kind(path: &Path) -> FragmentTokenizationKind {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("js") => FragmentTokenizationKind::JavaScript,
+        Some("jsx") => FragmentTokenizationKind::Jsx,
+        Some("mjs") => FragmentTokenizationKind::Mjs,
+        Some("cjs") => FragmentTokenizationKind::Cjs,
+        Some("tsx") => FragmentTokenizationKind::Tsx,
+        Some("mts") => FragmentTokenizationKind::Mts,
+        Some("cts") => FragmentTokenizationKind::Cts,
+        Some("css") => FragmentTokenizationKind::Css,
+        Some("scss") => FragmentTokenizationKind::Scss,
+        Some("sass") => FragmentTokenizationKind::Sass,
+        Some("less") => FragmentTokenizationKind::Less,
+        _ => FragmentTokenizationKind::TypeScript,
+    }
+}
+
+fn normalized_fragment_sequence(path: &Path, fragment: &str) -> Vec<u64> {
+    let tokens = super::tokenize::tokenize_file(path, fragment, false);
+    super::normalize::normalize_and_hash(&tokens.tokens, DetectionMode::Strict)
+        .into_iter()
+        .map(|token| token.hash)
+        .collect()
+}
+
+fn hash_normalized_sequences(sequences: &[Vec<u64>]) -> u64 {
+    let byte_len = sequences
+        .iter()
+        .map(|sequence| sequence.len().saturating_add(1))
+        .sum::<usize>()
+        .saturating_mul(std::mem::size_of::<u64>());
+    let mut bytes = Vec::with_capacity(byte_len);
+    for sequence in sequences {
+        bytes.extend_from_slice(&(sequence.len() as u64).to_le_bytes());
+        for hash in sequence {
+            bytes.extend_from_slice(&hash.to_le_bytes());
+        }
+    }
+    xxh3_64(&bytes)
+}
+
+fn fingerprint_for_hash(hash: u64) -> String {
+    format!("{FINGERPRINT_PREFIX}{:08x}", hash as u32)
 }
 
 /// Build a per-group `ExtractFunction` refactoring suggestion.
@@ -521,6 +654,7 @@ mod tests {
             instances: fragments.iter().map(|f| instance(f)).collect(),
             token_count: 40,
             line_count,
+            similarity: None,
         }
     }
 
@@ -532,6 +666,38 @@ mod tests {
         assert_eq!(fp1, fp2);
         assert!(fp1.starts_with("dup:"));
         assert_eq!(fp1.len(), "dup:".len() + 8);
+    }
+
+    #[test]
+    fn compact_fingerprint_key_is_independent_of_instance_order() {
+        let mut original = group(&["alpha()", "beta()"], 3);
+        original.instances[0].file = PathBuf::from("src/a.ts");
+        original.instances[0].start_line = 2;
+        original.instances[1].file = PathBuf::from("src/b.ts");
+        original.instances[1].start_line = 8;
+        let mut reordered = original.clone();
+        reordered.instances.reverse();
+
+        assert_eq!(
+            CloneFingerprintKey::from_group(&original),
+            CloneFingerprintKey::from_group(&reordered)
+        );
+    }
+
+    #[test]
+    fn duplicate_fragments_are_deduplicated_before_tokenization() {
+        let mut clones = group(&["alpha()", "alpha()", "alpha()"], 2);
+        clones.instances[0].file = PathBuf::from("src/a.ts");
+        clones.instances[1].file = PathBuf::from("src/b.ts");
+        clones.instances[2].file = PathBuf::from("src/c.ts");
+        assert_eq!(distinct_fragment_inputs(&clones.instances).len(), 1);
+
+        clones.instances[2].file = PathBuf::from("src/c.css");
+        assert_eq!(
+            distinct_fragment_inputs(&clones.instances).len(),
+            2,
+            "equal source still needs separate tokenization when syntax differs"
+        );
     }
 
     #[test]
@@ -550,6 +716,55 @@ mod tests {
         assert_ne!(
             clone_fingerprint(&a.instances),
             clone_fingerprint(&b.instances)
+        );
+    }
+
+    #[test]
+    fn fingerprint_ignores_formatting_comments_and_line_endings() {
+        let compact = group(
+            &["const total = left + right;", "const total = left + right;"],
+            2,
+        );
+        let formatted = group(
+            &[
+                "const  total=left + right; // reviewed\r\n",
+                "/* reviewed */\nconst total = left + right;",
+            ],
+            3,
+        );
+
+        assert_eq!(
+            clone_fingerprint(&compact.instances),
+            clone_fingerprint(&formatted.instances)
+        );
+    }
+
+    #[test]
+    fn fingerprint_changes_when_any_distinct_instance_changes_tokens() {
+        let reviewed = group(&["alpha()", "alpha()"], 2);
+        let edited = group(&["alpha()", "beta()"], 2);
+
+        assert_ne!(
+            clone_fingerprint(&reviewed.instances),
+            clone_fingerprint(&edited.instances)
+        );
+    }
+
+    #[test]
+    fn fingerprint_is_independent_of_instance_order_and_count() {
+        let two = group(&["alpha()", "beta()"], 2);
+        let three_reordered = group(&["beta()", "alpha()", "alpha()"], 2);
+
+        assert_eq!(
+            clone_fingerprint(&two.instances),
+            clone_fingerprint(&three_reordered.instances)
+        );
+
+        let two_set = CloneFingerprintSet::from_groups(std::slice::from_ref(&two));
+        let three_set = CloneFingerprintSet::from_groups(std::slice::from_ref(&three_reordered));
+        assert_ne!(
+            two_set.ignored_clone_key_for_group(&two),
+            three_set.ignored_clone_key_for_group(&three_reordered)
         );
     }
 
@@ -602,7 +817,7 @@ mod tests {
     fn fingerprint_set_suffixes_full_hash_collisions() {
         let a = group(&["alpha()"], 2);
         let b = group(&["beta()"], 2);
-        let entries = vec![
+        let mut entries = vec![
             (
                 CloneFingerprintKey::from_group(&a),
                 0x0000_0001_1234_5678_u64,
@@ -614,14 +829,24 @@ mod tests {
         ];
 
         let fingerprints = CloneFingerprintSet::from_hashed_entries(&entries);
+        entries.reverse();
+        let reversed_fingerprints = CloneFingerprintSet::from_hashed_entries(&entries);
 
+        let a_fingerprint = fingerprints.fingerprint_for_group(&a);
+        let b_fingerprint = fingerprints.fingerprint_for_group(&b);
         assert_eq!(
-            fingerprints.fingerprint_for_group(&a),
-            "dup:0000000112345678-1"
+            a_fingerprint,
+            reversed_fingerprints.fingerprint_for_group(&a)
         );
         assert_eq!(
-            fingerprints.fingerprint_for_group(&b),
-            "dup:0000000112345678-2"
+            b_fingerprint,
+            reversed_fingerprints.fingerprint_for_group(&b)
+        );
+        let mut assigned = vec![a_fingerprint, b_fingerprint];
+        assigned.sort_unstable();
+        assert_eq!(
+            assigned,
+            ["dup:0000000112345678-1", "dup:0000000112345678-2"]
         );
         assert!(
             fingerprints

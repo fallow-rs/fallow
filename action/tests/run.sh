@@ -1355,6 +1355,55 @@ assert_contains "$OUT" "clone groups" "mentions clone groups"
 assert_contains "$OUT" "Duplicated lines" "shows duplication stats"
 assert_contains "$OUT" "content-parser.ts:27-50" "shows clone instance line range"
 
+OUT_FAMILY_RANK=$(jq -n '{
+  elapsed_ms: 1,
+  stats: {
+    total_files: 4, files_with_clones: 4, clone_groups: 2,
+    clone_instances: 4, duplicated_lines: 20, total_lines: 100,
+    duplication_percentage: 20
+  },
+  clone_groups: [],
+  clone_families: [
+    {
+      files: ["a-local.ts", "b-local.ts"],
+      total_duplicated_lines: 10,
+      groups: [{
+        line_count: 10, token_count: 110, spread: 0,
+        instances: [
+          {file: "a-local.ts", start_line: 1, end_line: 10},
+          {file: "b-local.ts", start_line: 1, end_line: 10}
+        ]
+      }],
+      suggestions: []
+    },
+    {
+      files: ["z-distant-a.ts", "z-distant-b.ts"],
+      total_duplicated_lines: 10,
+      groups: [
+        {
+          line_count: 2, token_count: 5, spread: 0,
+          instances: [
+            {file: "ignored-first-a.ts", start_line: 1, end_line: 2},
+            {file: "ignored-first-b.ts", start_line: 1, end_line: 2}
+          ]
+        },
+        {
+          line_count: 10, token_count: 100, spread: 8,
+          instances: [
+            {file: "z-distant-a.ts", start_line: 1, end_line: 10},
+            {file: "z-distant-b.ts", start_line: 1, end_line: 10}
+          ]
+        }
+      ],
+      suggestions: []
+    }
+  ]
+}' | jq -r -f "$JQ_DIR/summary-dupes.jq" 2>&1)
+FIRST_RANKED_FAMILY=$(printf '%s\n' "$OUT_FAMILY_RANK" | grep '^- \*\*' | head -1)
+assert_contains "$FIRST_RANKED_FAMILY" "z-distant-a.ts" "families use their best spread-aware group rank"
+FIRST_RANKED_INSTANCE=$(printf '%s\n' "$OUT_FAMILY_RANK" | grep '^  -' | head -1)
+assert_contains "$FIRST_RANKED_INSTANCE" "z-distant-a.ts:1-10" "families show their best-ranked group"
+
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No code duplication" "clean: no duplication"
 

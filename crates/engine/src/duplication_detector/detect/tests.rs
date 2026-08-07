@@ -34,6 +34,7 @@ fn make_source_tokens(count: usize) -> Vec<SourceToken> {
 fn make_file_tokens(source: &str, count: usize) -> FileTokens {
     FileTokens {
         tokens: make_source_tokens(count),
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source: source.to_string(),
         line_count: source.lines().count().max(1),
@@ -57,6 +58,7 @@ fn make_boundary_test_file(path: &str, has_boundary: bool) -> FileData {
                 kind,
                 span: Span::new(0, 1),
             }],
+            function_spans: Vec::new(),
             atomic_invocation_spans: Vec::new(),
             source: "x".to_string(),
             line_count: 1,
@@ -267,6 +269,7 @@ fn stats_computation() {
         ],
         token_count: 50,
         line_count: 5,
+        similarity: None,
     }];
 
     let stats = statistics::compute_stats(&groups, 10, 200, 1000);
@@ -1032,6 +1035,7 @@ fn stats_zero_total_lines() {
         ],
         token_count: 10,
         line_count: 1,
+        similarity: None,
     }];
 
     let stats = statistics::compute_stats(&groups, 2, 0, 100);
@@ -1071,6 +1075,7 @@ fn stats_duplicated_tokens_capped() {
         ],
         token_count: 100,
         line_count: 10,
+        similarity: None,
     }];
 
     let stats = statistics::compute_stats(&groups, 3, 30, 50);
@@ -1106,6 +1111,7 @@ fn stats_multiple_groups_same_file() {
             ],
             token_count: 20,
             line_count: 5,
+            similarity: None,
         },
         CloneGroup {
             instances: vec![
@@ -1128,6 +1134,7 @@ fn stats_multiple_groups_same_file() {
             ],
             token_count: 30,
             line_count: 6,
+            similarity: None,
         },
     ];
 
@@ -1153,6 +1160,7 @@ fn stats_single_instance_no_duplicated_tokens() {
         }],
         token_count: 50,
         line_count: 5,
+        similarity: None,
     }];
 
     let stats = statistics::compute_stats(&groups, 1, 100, 500);

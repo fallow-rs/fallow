@@ -444,15 +444,21 @@ fn push_clone_group_lines(
     trace: &CloneTrace,
     root: &Path,
 ) {
+    let similarity = group
+        .similarity
+        .map(|value| format!(", {:.0}% similar", value * 100.0))
+        .unwrap_or_default();
     lines.push(String::new());
     lines.push(format!(
-        "  {}  {} ({} lines, {} tokens, {} instance{})",
+        "  {}  {} ({} lines, {} tokens, {} instance{}, spread {}{})",
         format!("Clone group {}", index + 1).bold(),
         group.fingerprint.dimmed(),
         group.line_count,
         group.token_count,
         group.instances.len(),
-        plural(group.instances.len())
+        plural(group.instances.len()),
+        group.spread,
+        similarity,
     ));
     for instance in &group.instances {
         let relative = relative_path(&instance.file, root);
@@ -642,6 +648,8 @@ mod tests {
                 fingerprint: "dup:abc123".to_string(),
                 token_count: 42,
                 line_count: 3,
+                spread: 0,
+                similarity: None,
                 instances: vec![
                     matched,
                     clone_instance("/repo/src/b.ts", 20, 22, "const x = 1;\nreturn x;"),

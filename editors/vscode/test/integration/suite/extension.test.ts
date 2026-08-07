@@ -144,6 +144,7 @@ describe("Fallow VS Code extension", () => {
     const config = vscode.workspace.getConfiguration("fallow");
     for (const key of [
       "duplication.mode",
+      "duplication.near",
       "duplication.threshold",
       "duplication.minTokens",
       "duplication.minLines",
@@ -226,6 +227,7 @@ describe("Fallow VS Code extension", () => {
   it("forwards duplication settings to the CLI analysis path", async () => {
     const config = vscode.workspace.getConfiguration("fallow");
     await config.update("duplication.mode", "mild", vscode.ConfigurationTarget.Workspace);
+    await config.update("duplication.near", true, vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.threshold", 0, vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.minTokens", 80, vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.minLines", 8, vscode.ConfigurationTarget.Workspace);
@@ -239,7 +241,7 @@ describe("Fallow VS Code extension", () => {
       analysisCalls.some(
         (entry) =>
           entry.args.join(" ") ===
-          "--format json --quiet --skip health --dupes-mode mild --dupes-threshold 0 --dupes-min-tokens 80 --dupes-min-lines 8 --dupes-min-occurrences 3 --dupes-skip-local --dupes-cross-language --dupes-ignore-imports",
+          "--format json --quiet --skip health --dupes-mode mild --dupes-near --dupes-threshold 0 --dupes-min-tokens 80 --dupes-min-lines 8 --dupes-min-occurrences 3 --dupes-skip-local --dupes-cross-language --dupes-ignore-imports",
       ),
       "combined analysis should include configured duplication settings",
     );

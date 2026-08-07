@@ -699,6 +699,8 @@ fn build_traced_group(
         fingerprint: fingerprints.fingerprint_for_group(group),
         token_count: group.token_count,
         line_count: group.line_count,
+        spread: group.spread(),
+        similarity: group.similarity,
         instances: group
             .instances
             .iter()
@@ -1470,6 +1472,7 @@ mod tests {
                 ],
                 token_count: 60,
                 line_count: 11,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1484,6 +1487,8 @@ mod tests {
                 clone_instances: 2,
                 duplication_percentage: 22.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 15);
@@ -1521,6 +1526,7 @@ mod tests {
                 ],
                 token_count: 60,
                 line_count: 11,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1554,6 +1560,7 @@ mod tests {
                 }],
                 token_count: 60,
                 line_count: 11,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1568,6 +1575,8 @@ mod tests {
                 clone_instances: 1,
                 duplication_percentage: 22.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 25);
@@ -1600,6 +1609,7 @@ mod tests {
                 ],
                 token_count: 50,
                 line_count: 11,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1614,6 +1624,8 @@ mod tests {
                 clone_instances: 2,
                 duplication_percentage: 22.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
         let root = Path::new("/project");
@@ -1659,6 +1671,7 @@ mod tests {
                 ],
                 token_count: 50,
                 line_count: 10,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1673,6 +1686,8 @@ mod tests {
                 clone_instances: 2,
                 duplication_percentage: 40.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 5);

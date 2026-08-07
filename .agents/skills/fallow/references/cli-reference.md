@@ -144,8 +144,9 @@ By default, `fallow dupes` skips generated framework output matching `**/.next/*
 |------|------|---------|-------------|
 | `--format` | `human\|json\|sarif\|compact\|markdown\|codeclimate\|gitlab-codequality\|pr-comment-github\|pr-comment-gitlab\|review-github\|review-gitlab` | `human` | Output format |
 | `--quiet` | bool | `false` | Suppress progress bars |
-| `--top` | number | — | Show only the N most-duplicated clone groups (sorted by instance count desc, tiebreak: line count desc, then path/line). Summary stats reflect the full project. |
+| `--top` | number | - | Show only the N highest-ranked clone groups. Ranking multiplies token count and occurrences, then adds a capped spread boost for distant files or same-file locations. Summary stats reflect the scoped project. |
 | `--mode` | `strict\|mild\|weak\|semantic` | `mild` | Detection mode |
+| `--near` | bool | `false` | Also detect function-scoped near-miss clones with small structural edits. Near matching always uses semantic shingles while exact matching keeps the selected mode. |
 | `--min-tokens` | number | `50` | Minimum token count for a clone |
 | `--min-lines` | number | `5` | Minimum line count for a clone |
 | `--min-occurrences` | number | `2` | Minimum number of occurrences before a clone group is reported (must be ≥ 2). Raise to skip pair-only clones and focus on widespread copy-paste worth refactoring. `fallow init` writes `minOccurrences: 3` into new projects. |
@@ -170,6 +171,9 @@ By default, `fallow dupes` skips generated framework output matching `**/.next/*
 | `mild` | Syntax normalized (whitespace, semicolons) |
 | `weak` | Different literal values treated as equivalent |
 | `semantic` | Renamed variables also treated as equivalent |
+
+Near-miss detection is an independent opt-in, not another normalization mode.
+Near groups include `similarity`; every clone-group finding includes `spread`.
 
 ### Examples
 
@@ -1734,12 +1738,14 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Duplication settings
   "duplicates": {
     "mode": "mild",
+    "near": false,
     "minTokens": 50,
     "minLines": 5,
     "threshold": 0,
     "ignoreDefaults": true,
+    "ignoredClones": ["dup:6f12ab34:2"],
     "skipLocal": false,
-    "ignorePatterns": ["**/*.generated.ts"]
+    "ignore": ["**/*.generated.ts"]
   },
 
   // Architecture boundaries (preset, custom zones/rules, or auto-discovered feature zones)
@@ -1814,9 +1820,11 @@ unused-types = "off"
 
 [duplicates]
 mode = "mild"
+near = false
 minTokens = 50
 minLines = 5
 ignoreDefaults = true
+ignoredClones = ["dup:6f12ab34:2"]
 
 [[overrides]]
 files = ["*.test.ts"]

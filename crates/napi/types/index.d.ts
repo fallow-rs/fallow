@@ -44,6 +44,7 @@ export type DuplicationMode = 'strict' | 'mild' | 'weak' | 'semantic';
 
 export interface DuplicationOptions extends AnalysisOptions {
   mode?: DuplicationMode;
+  near?: boolean;
   minTokens?: number;
   minLines?: number;
   threshold?: number;
@@ -303,6 +304,8 @@ export interface CloneGroup {
   instances: CloneInstance[];
   token_count: number;
   line_count: number;
+  spread: number;
+  similarity?: number;
   actions?: AnalysisAction[];
   [key: string]: unknown;
 }
@@ -317,6 +320,8 @@ export interface DuplicationStats {
   clone_groups: number;
   clone_instances: number;
   duplication_percentage: number;
+  clone_groups_ignored?: number;
+  near_candidates_skipped?: number;
 }
 
 export interface DuplicationReport {

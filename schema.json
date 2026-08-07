@@ -122,16 +122,18 @@
       "default": []
     },
     "duplicates": {
-      "description": "Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoreDefaults` (true, merge built-in generated-file ignores), `skipLocal` (only report cross-directory clones), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`). Raise `minOccurrences` to focus on widespread copy-paste, or set `mode` to `semantic` to catch renamed-variable clones.",
+      "description": "Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in generated-file ignores), `skipLocal` (only report cross-directory clones), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.",
       "$ref": "#/$defs/DuplicatesConfig",
       "default": {
         "enabled": true,
         "mode": "mild",
+        "near": false,
         "minTokens": 50,
         "minLines": 5,
         "minOccurrences": 2,
         "threshold": 0.0,
         "ignore": [],
+        "ignoredClones": [],
         "ignoreDefaults": true,
         "skipLocal": false,
         "crossLanguage": false,
@@ -812,6 +814,11 @@
           "$ref": "#/$defs/DetectionMode",
           "default": "mild"
         },
+        "near": {
+          "description": "Detect structurally similar function bodies with small edits.",
+          "type": "boolean",
+          "default": false
+        },
         "minTokens": {
           "description": "Minimum number of tokens for a clone.",
           "type": "integer",
@@ -844,6 +851,15 @@
           "type": "array",
           "items": {
             "type": "string"
+          },
+          "default": []
+        },
+        "ignoredClones": {
+          "description": "Reviewed clone groups to omit from duplication results.\n\nEach entry is `<fingerprint>:<instance_count>`, for example\n`dup:6f12ab34:2`. A content or occurrence-count change produces a new key\nand makes the group reportable again.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^dup:(?:[0-9a-f]{8}|[0-9a-f]{16}(?:-[1-9][0-9]*)?):(?:[2-9]|[1-9][0-9]+)$"
           },
           "default": []
         },

@@ -123,8 +123,7 @@ impl DuplicationHumanBuilder<'_> {
             return self.lines;
         }
 
-        let mut sorted_groups: Vec<&CloneGroup> = self.report.clone_groups.iter().collect();
-        sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.line_count));
+        let sorted_groups: Vec<&CloneGroup> = self.report.clone_groups.iter().collect();
         let fingerprints = CloneFingerprintSet::from_groups(&self.report.clone_groups);
 
         self.push_clone_header(sorted_groups.len());
@@ -166,6 +165,20 @@ impl DuplicationHumanBuilder<'_> {
 
     fn push_clone_group(&mut self, group: &CloneGroup, fingerprints: &CloneFingerprintSet) {
         let instance_count = group.instances.len();
+        let spread = group.spread();
+        let spread_label = if spread > 0 {
+            format!("  spread {spread}").dimmed().to_string()
+        } else {
+            String::new()
+        };
+        let similarity_label = group
+            .similarity
+            .map(|similarity| {
+                format!("  {:.0}% similar", similarity * 100.0)
+                    .dimmed()
+                    .to_string()
+            })
+            .unwrap_or_default();
         let lc = group.line_count;
         let lc_str = format!("{:>5}", thousands(lc));
         let lc_colored = if lc > 1000 {
@@ -177,10 +190,12 @@ impl DuplicationHumanBuilder<'_> {
         };
 
         self.lines.push(format!(
-            "  {} lines  {} instance{}  {}",
+            "  {} lines  {} instance{}{}{}  {}",
             lc_colored,
             instance_count,
             plural(instance_count),
+            spread_label,
+            similarity_label,
             fingerprints.fingerprint_for_group(group).dimmed(),
         ));
 
@@ -211,7 +226,7 @@ impl DuplicationHumanBuilder<'_> {
         }
         self.lines.push(format!(
             "  {}",
-            format!("Identical code blocks detected via suffix-array analysis \u{2014} {DOCS_DUPLICATION}#clone-groups").dimmed()
+            format!("Duplicate code blocks - {DOCS_DUPLICATION}#clone-groups").dimmed()
         ));
         self.lines.push(String::new());
     }
@@ -568,10 +583,7 @@ fn print_grouped_duplication_bucket(bucket: &DuplicationGroup, root: &Path) {
     outln!();
 
     let shown = total_groups.min(MAX_CLONE_GROUPS);
-    let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
-    sorted.sort_by_key(|cg| std::cmp::Reverse(cg.group.line_count));
-
-    for finding in &sorted[..shown] {
+    for finding in &bucket.clone_groups[..shown] {
         print_grouped_duplication_finding(bucket, root, finding);
     }
     print_grouped_duplication_bucket_overflow(total_groups);
@@ -585,11 +597,22 @@ fn print_grouped_duplication_finding(
     finding: &AttributedCloneGroupFinding,
 ) {
     let cg = &finding.group;
+    let spread_label = format!("  spread {}", finding.spread).dimmed().to_string();
+    let similarity_label = cg
+        .similarity
+        .map(|similarity| {
+            format!("  {:.0}% similar", similarity * 100.0)
+                .dimmed()
+                .to_string()
+        })
+        .unwrap_or_default();
     outln!(
-        "  {} lines  {} instance{}",
+        "  {} lines  {} instance{}{}{}",
         colored_clone_line_count(cg.line_count),
         cg.instances.len(),
         plural(cg.instances.len()),
+        spread_label,
+        similarity_label,
     );
     for inst in &cg.instances {
         let path_str = crate::report::format_display_path(&inst.instance.file, root);
@@ -731,6 +754,7 @@ mod tests {
                 ],
                 token_count: 50,
                 line_count: 10,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -766,6 +790,7 @@ mod tests {
                 }],
                 token_count: 50,
                 line_count: 10,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -784,6 +809,7 @@ mod tests {
             instances: vec![],
             token_count: 30,
             line_count: 5,
+            similarity: None,
         };
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
@@ -797,6 +823,7 @@ mod tests {
                 }],
                 token_count: 30,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![CloneFamily {
                 files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
@@ -826,6 +853,7 @@ mod tests {
             instances: vec![],
             token_count: 30,
             line_count: 5,
+            similarity: None,
         };
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
@@ -839,6 +867,7 @@ mod tests {
                 }],
                 token_count: 30,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![CloneFamily {
                 files: vec![root.join("src/a.ts")],
@@ -875,6 +904,7 @@ mod tests {
                 }],
                 token_count: 30,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![CloneFamily {
                 files: vec![root.join("src/a.ts")],
@@ -882,6 +912,7 @@ mod tests {
                     instances: vec![],
                     token_count: 30,
                     line_count: 5,
+                    similarity: None,
                 }],
                 total_duplicated_lines: 5,
                 total_duplicated_tokens: 30,
@@ -902,6 +933,7 @@ mod tests {
             instances: vec![],
             token_count: 30,
             line_count: 5,
+            similarity: None,
         };
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
@@ -915,6 +947,7 @@ mod tests {
                 }],
                 token_count: 30,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![CloneFamily {
                 files: vec![root.join("src/a.ts")],
@@ -946,6 +979,7 @@ mod tests {
                 }],
                 token_count: 50,
                 line_count: 10,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -956,6 +990,44 @@ mod tests {
         assert!(!text.contains("\u{2514}\u{2500}"));
         assert!(!text.contains("\u{251c}\u{2500}"));
         assert!(text.contains("a.ts:1-10"));
+    }
+
+    #[test]
+    fn duplication_human_output_uses_spread_ranking() {
+        let root = PathBuf::from("/project");
+        let instance = |path: &str| CloneInstance {
+            file: root.join(path),
+            start_line: 1,
+            end_line: 10,
+            start_col: 0,
+            end_col: 0,
+            fragment: String::new(),
+        };
+        let mut report = DuplicationReport {
+            clone_groups: vec![
+                CloneGroup {
+                    instances: vec![instance("src/a.ts"), instance("src/b.ts")],
+                    token_count: 100,
+                    line_count: 10,
+                    similarity: None,
+                },
+                CloneGroup {
+                    instances: vec![instance("packages/a/a.ts"), instance("packages/b/b.ts")],
+                    token_count: 100,
+                    line_count: 10,
+                    similarity: None,
+                },
+            ],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        };
+        report.sort();
+
+        let text = plain(&build_duplication_human_lines(&report, &root));
+        let distant = text.find("packages/a/a.ts").unwrap();
+        let local = text.find("src/a.ts").unwrap();
+        assert!(distant < local);
     }
 
     #[test]
@@ -972,6 +1044,7 @@ mod tests {
             }],
             token_count: line_count * 5,
             line_count,
+            similarity: None,
         };
         let mirror_family = |name: &str| CloneFamily {
             files: vec![
@@ -1020,6 +1093,7 @@ mod tests {
                     instances: vec![],
                     token_count: 100,
                     line_count: 50,
+                    similarity: None,
                 }],
                 total_duplicated_lines: 50,
                 total_duplicated_tokens: 100,

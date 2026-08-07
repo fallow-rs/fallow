@@ -4301,6 +4301,7 @@ mod tests {
                 .collect(),
             token_count: 10,
             line_count: 5,
+            similarity: None,
         }
     }
 

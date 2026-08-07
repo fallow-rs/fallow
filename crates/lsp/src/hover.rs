@@ -1583,6 +1583,7 @@ mod tests {
                 ],
                 token_count: 50,
                 line_count: 6,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1597,6 +1598,8 @@ mod tests {
                 clone_instances: 2,
                 duplication_percentage: 12.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
 
@@ -1634,6 +1637,7 @@ mod tests {
                 }],
                 token_count: 30,
                 line_count: 6,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1648,6 +1652,8 @@ mod tests {
                 clone_instances: 1,
                 duplication_percentage: 12.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
 
@@ -1792,6 +1798,7 @@ mod tests {
                 ],
                 token_count: 30,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -1806,6 +1813,8 @@ mod tests {
                 clone_instances: 3,
                 duplication_percentage: 15.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
 
@@ -2067,6 +2076,7 @@ mod tests {
                 instances,
                 token_count: 30,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -3071,6 +3081,7 @@ mod tests {
                 ],
                 token_count: 20,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -3085,6 +3096,8 @@ mod tests {
                 clone_instances: 2,
                 duplication_percentage: 20.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
 
@@ -3134,6 +3147,7 @@ mod tests {
                 instances,
                 token_count: 30,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
@@ -3148,6 +3162,8 @@ mod tests {
                 clone_instances: 13,
                 duplication_percentage: 32.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
 

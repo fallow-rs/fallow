@@ -503,6 +503,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
         duplication_options: DuplicationOptions {
             mode: combined_duplication_mode(params.dupes_mode.as_deref())?,
+            near: params.dupes_near,
             min_tokens: params.dupes_min_tokens.map(|value| value as usize),
             min_lines: params.dupes_min_lines.map(|value| value as usize),
             min_occurrences: params.dupes_min_occurrences.map(|value| value as usize),
@@ -576,6 +577,9 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
 
 fn push_combined_duplication_args(args: &mut Vec<String>, params: &CombinedParams) {
     push_opt_arg(args, "--dupes-mode", params.dupes_mode.as_deref());
+    if params.dupes_near == Some(true) {
+        args.push("--dupes-near".to_string());
+    }
     push_opt_arg(
         args,
         "--dupes-min-tokens",
@@ -705,6 +709,19 @@ mod tests {
         assert!(options.health_options.hotspots);
         assert!(options.health_options.targets);
         assert!(!options.health_options.score);
+    }
+
+    #[test]
+    fn combined_forwards_near_detection() {
+        let params = CombinedParams {
+            dupes_near: Some(true),
+            ..CombinedParams::default()
+        };
+        let options = combined_options_from_params(&params).expect("combined options");
+        let args = build_combined_args(&params);
+
+        assert_eq!(options.duplication_options.near, Some(true));
+        assert!(args.contains(&"--dupes-near".to_string()));
     }
 
     #[test]

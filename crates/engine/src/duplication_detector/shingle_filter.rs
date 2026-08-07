@@ -180,6 +180,7 @@ mod tests {
                 .collect(),
             file_tokens: FileTokens {
                 tokens: Vec::new(),
+                function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
                 source: String::new(),
                 line_count: 1,

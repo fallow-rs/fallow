@@ -222,6 +222,7 @@ fn subset_duplication_report(
                 instances,
                 token_count: group.token_count,
                 line_count: group.line_count,
+                similarity: group.similarity,
             })
         })
         .collect::<Vec<_>>();
@@ -275,6 +276,8 @@ fn subset_duplication_stats(
             0.0
         },
         clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
+        clone_groups_ignored: report.stats.clone_groups_ignored,
+        near_candidates_skipped: report.stats.near_candidates_skipped,
     }
 }
 

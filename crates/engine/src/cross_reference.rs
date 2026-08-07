@@ -179,6 +179,7 @@ mod tests {
                 instances,
                 token_count: 50,
                 line_count: 10,
+                similarity: None,
             }],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),

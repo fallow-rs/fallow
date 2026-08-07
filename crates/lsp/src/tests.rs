@@ -1087,6 +1087,7 @@ fn parse_initialization_options_reads_full_payload() {
         "production": true,
         "duplication": {
             "mode": "semantic",
+            "near": true,
             "minTokens": 64
         },
         "health": {
@@ -1166,6 +1167,7 @@ fn initialization_duplication_options_reads_vscode_payload() {
     let opts = json!({
         "duplication": {
             "mode": "semantic",
+            "near": true,
             "threshold": 7.5,
             "minTokens": 64,
             "minLines": 8,
@@ -1180,6 +1182,7 @@ fn initialization_duplication_options_reads_vscode_payload() {
         initialization_duplication_options(&opts).expect("duplication options should parse");
 
     assert_eq!(parsed.mode, Some(DetectionMode::Semantic));
+    assert_eq!(parsed.near, Some(true));
     assert_eq!(parsed.threshold, Some(7.5));
     assert_eq!(parsed.min_tokens, Some(64));
     assert_eq!(parsed.min_lines, Some(8));
@@ -1193,6 +1196,7 @@ fn initialization_duplication_options_reads_vscode_payload() {
 fn lsp_duplication_options_override_project_config() {
     let project = DuplicatesConfig {
         mode: DetectionMode::Weak,
+        near: true,
         min_tokens: 50,
         min_lines: 5,
         min_occurrences: 4,
@@ -1201,10 +1205,12 @@ fn lsp_duplication_options_override_project_config() {
         cross_language: false,
         ignore_imports: false,
         ignore: vec!["generated/**".to_string()],
+        ignored_clones: vec!["dup:12345678:2".to_string()],
         ..DuplicatesConfig::default()
     };
     let options = LspDuplicationOptions {
         mode: Some(DetectionMode::Semantic),
+        near: Some(false),
         threshold: Some(10.0),
         min_tokens: Some(80),
         min_lines: Some(9),
@@ -1217,6 +1223,7 @@ fn lsp_duplication_options_override_project_config() {
     let merged = options.merge_with(&project);
 
     assert_eq!(merged.mode, DetectionMode::Semantic);
+    assert!(!merged.near);
     assert!((merged.threshold - 10.0).abs() < f64::EPSILON);
     assert_eq!(merged.min_tokens, 80);
     assert_eq!(merged.min_lines, 9);
@@ -1225,6 +1232,7 @@ fn lsp_duplication_options_override_project_config() {
     assert!(merged.cross_language);
     assert!(merged.ignore_imports);
     assert_eq!(merged.ignore, vec!["generated/**".to_string()]);
+    assert_eq!(merged.ignored_clones, vec!["dup:12345678:2".to_string()]);
 }
 
 #[test]
@@ -2525,6 +2533,7 @@ fn merge_duplication_into_empty_target() {
             }],
             token_count: 20,
             line_count: 5,
+            similarity: None,
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
@@ -2539,6 +2548,8 @@ fn merge_duplication_into_empty_target() {
             clone_instances: 1,
             duplication_percentage: 10.0,
             clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     };
 
@@ -2568,6 +2579,8 @@ fn merge_duplication_recomputes_percentage() {
             clone_instances: 2,
             duplication_percentage: 10.0, // 20/200 * 100
             clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     };
     let source = DuplicationReport {
@@ -2585,6 +2598,8 @@ fn merge_duplication_recomputes_percentage() {
             clone_instances: 4,
             duplication_percentage: 20.0, // 60/300 * 100
             clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     };
 
@@ -2619,6 +2634,7 @@ fn merge_duplication_with_empty_source() {
             instances: vec![],
             token_count: 10,
             line_count: 3,
+            similarity: None,
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
@@ -2633,6 +2649,8 @@ fn merge_duplication_with_empty_source() {
             clone_instances: 1,
             duplication_percentage: 10.0,
             clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     };
 
@@ -4051,6 +4069,7 @@ fn lsp_duplication_options_min_occurrences_below_2_defers_to_config() {
 fn lsp_duplication_options_all_none_preserves_project_config() {
     let project = DuplicatesConfig {
         mode: DetectionMode::Semantic,
+        near: true,
         min_tokens: 99,
         min_lines: 7,
         min_occurrences: 4,
@@ -4064,6 +4083,7 @@ fn lsp_duplication_options_all_none_preserves_project_config() {
 
     let merged = options.merge_with(&project);
     assert_eq!(merged.mode, DetectionMode::Semantic);
+    assert!(merged.near);
     assert_eq!(merged.min_tokens, 99);
     assert_eq!(merged.min_lines, 7);
     assert_eq!(merged.min_occurrences, 4);

@@ -225,6 +225,10 @@ fallow dupes --format json --quiet --mode semantic
 
 `semantic` mode produces the most findings but may include false positives where similar structure is coincidental.
 
+Use `--near` separately when you want function-level clones with small inserted,
+removed, or changed regions. Exact detection still follows `--mode`; near
+detection uses semantic shingles and reports a `similarity` value.
+
 ---
 
 ## Workspace Flag Scopes Output, Not Analysis

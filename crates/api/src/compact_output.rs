@@ -1030,6 +1030,7 @@ mod tests {
                 }],
                 token_count: 12,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),

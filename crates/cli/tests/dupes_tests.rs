@@ -91,6 +91,7 @@ fn dupes_json_output_has_clone_groups() {
         !groups.is_empty(),
         "duplicate-code fixture should have clone groups"
     );
+    assert!(groups.iter().all(|group| group["spread"].is_number()));
 }
 
 #[test]
@@ -127,6 +128,100 @@ fn dupes_mild_mode_accepted() {
     assert!(
         output.code == 0 || output.code == 1,
         "dupes --mode mild should not crash"
+    );
+}
+
+#[test]
+fn dupes_near_reports_gapped_function_similarity() {
+    let dir = tempdir().expect("temp dir");
+    let shared_prefix = "export function calculate(input: number): number {\n  const doubled = input * 2;\n  const normalized = doubled + input;\n";
+    let shared_suffix = "\n  const bounded = Math.max(adjusted, 0);\n  const rounded = Math.round(bounded);\n  const weighted = rounded * normalized;\n  const clamped = Math.min(weighted, 1000);\n  const staged = clamped + doubled;\n  const balanced = staged - input;\n  const projected = balanced * 2;\n  const limited = Math.min(projected, 2000);\n  const restored = limited + normalized;\n  const checked = Math.max(restored, doubled);\n  const combined = checked + bounded;\n  const smoothed = Math.round(combined / 2);\n  const finalized = smoothed + staged;\n  return finalized + normalized;\n}\n";
+    let first = format!("{shared_prefix}  const adjusted = normalized + 2;{shared_suffix}");
+    let second = format!(
+        "{shared_prefix}  const offset = normalized > 10 ? 3 : 2;\n  const adjusted = normalized + offset;{shared_suffix}"
+    );
+    std::fs::write(dir.path().join("a.ts"), first).expect("write first");
+    std::fs::write(dir.path().join("b.ts"), second).expect("write second");
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &[
+            "--near",
+            "--min-tokens",
+            "20",
+            "--min-lines",
+            "3",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&output);
+
+    assert!(json["clone_groups"].as_array().is_some_and(|groups| {
+        groups
+            .iter()
+            .any(|group| group["similarity"].as_f64().is_some())
+    }));
+}
+
+#[test]
+fn dupes_config_ignored_clone_resurfaces_after_added_copy() {
+    let dir = tempdir().expect("temp dir");
+    let source = "export function shared(value: number): number {\n  const doubled = value * 2;\n  const shifted = doubled + 3;\n  return shifted * 4;\n}\n";
+    std::fs::write(dir.path().join("a.ts"), source).expect("write first");
+    std::fs::write(dir.path().join("b.ts"), source).expect("write second");
+    let args = [
+        "--min-tokens",
+        "5",
+        "--min-lines",
+        "2",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ];
+    let initial = parse_json(&run_fallow_in_root("dupes", dir.path(), &args));
+    let group = initial["clone_groups"]
+        .as_array()
+        .and_then(|groups| groups.first())
+        .expect("initial clone group");
+    let fingerprint = group["fingerprint"].as_str().expect("fingerprint");
+    let ignored_key = format!("{fingerprint}:2");
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        serde_json::json!({ "duplicates": { "ignoredClones": [ignored_key] } }).to_string(),
+    )
+    .expect("write config");
+
+    let ignored = parse_json(&run_fallow_in_root("dupes", dir.path(), &args));
+    assert!(
+        ignored["clone_groups"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
+    assert_eq!(ignored["stats"]["clone_groups_ignored"], 1);
+
+    let human = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &["--min-tokens", "5", "--min-lines", "2", "--no-cache"],
+    );
+    assert!(
+        human
+            .stderr
+            .contains("hid 1 reviewed clone group from duplicates.ignoredClones")
+    );
+    assert!(human.stderr.contains("No code duplication found"));
+
+    std::fs::write(dir.path().join("c.ts"), source).expect("write added copy");
+    let resurfaced = parse_json(&run_fallow_in_root("dupes", dir.path(), &args));
+    assert!(
+        resurfaced["clone_groups"]
+            .as_array()
+            .is_some_and(|groups| !groups.is_empty())
     );
 }
 

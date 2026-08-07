@@ -309,6 +309,7 @@ describe("package.json duplication settings", () => {
 
     for (const key of [
       "fallow.duplication.mode",
+      "fallow.duplication.near",
       "fallow.duplication.threshold",
       "fallow.duplication.minTokens",
       "fallow.duplication.minLines",
@@ -327,6 +328,7 @@ describe("package.json duplication settings", () => {
     const properties = pkg.contributes.configuration.properties;
 
     expect(properties["fallow.duplication.mode"]).toBeDefined();
+    expect(properties["fallow.duplication.near"]).toBeDefined();
     expect(properties["fallow.duplication.threshold"]).toBeDefined();
     expect(properties["fallow.duplication.minLines"]).toBeDefined();
     expect(properties["fallow.duplication.minOccurrences"]).toBeDefined();

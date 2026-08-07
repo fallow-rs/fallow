@@ -341,6 +341,7 @@ fn subset_precomputed_duplication_report(
                 instances,
                 token_count: group.token_count,
                 line_count: group.line_count,
+                similarity: group.similarity,
             })
         })
         .collect::<Vec<_>>();
@@ -402,6 +403,8 @@ fn subset_precomputed_duplication_stats(
             0.0
         },
         clone_groups_below_min_occurrences: original.clone_groups_below_min_occurrences,
+        clone_groups_ignored: original.clone_groups_ignored,
+        near_candidates_skipped: original.near_candidates_skipped,
     }
 }
 
@@ -470,6 +473,7 @@ mod tests {
             instances: vec![clone_instance(&path_a), clone_instance(&path_b)],
             token_count: 25,
             line_count: 3,
+            similarity: None,
         }];
         let mut candidate_paths = FxHashSet::default();
         candidate_paths.insert(path_a);

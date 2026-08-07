@@ -84,6 +84,7 @@ pub struct DuplicationOptions {
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
     pub mode: Option<String>,
+    pub near: Option<bool>,
     pub min_tokens: Option<u32>,
     pub min_lines: Option<u32>,
     /// Minimum occurrences before a clone group is reported. Must be >= 2.
@@ -399,6 +400,7 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
                 type_aware: None,
             })?,
             mode: parse_duplication_mode(value.mode)?,
+            near: value.near,
             min_tokens: value.min_tokens.map(|n| n as usize),
             min_lines: value.min_lines.map(|n| n as usize),
             min_occurrences: match value.min_occurrences {
@@ -1040,6 +1042,7 @@ mod tests {
     fn duplication_options_map_modes_thresholds_and_flags() {
         let options = api::DuplicationOptions::try_from(DuplicationOptions {
             mode: Some(" SEMANTIC ".to_string()),
+            near: Some(true),
             min_tokens: Some(30),
             min_lines: Some(4),
             min_occurrences: Some(3),
@@ -1053,6 +1056,7 @@ mod tests {
         .expect("options should map");
 
         assert!(matches!(options.mode, Some(api::DuplicationMode::Semantic)));
+        assert_eq!(options.near, Some(true));
         assert_eq!(options.min_tokens, Some(30));
         assert_eq!(options.min_lines, Some(4));
         assert_eq!(options.min_occurrences, Some(3));

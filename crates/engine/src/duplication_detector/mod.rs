@@ -9,6 +9,7 @@ mod cache;
 pub mod deepdive;
 pub mod detect;
 pub mod families;
+mod near;
 /// Token normalization and rolling-hash computation for detection modes that
 /// ignore identifier names and literal values.
 pub mod normalize;
@@ -76,6 +77,10 @@ pub(super) struct TokenizedFile {
 struct IgnoreSet {
     all: GlobSet,
     defaults: Vec<&'static str>,
+}
+
+pub(super) fn refresh_near_group_metrics(group: &mut types::CloneGroup) {
+    near::refresh_near_group_metrics(group);
 }
 
 enum IgnoreMatch {
@@ -285,6 +290,21 @@ fn detect_and_postprocess(
     corpus_totals: detect::CorpusTotals,
     focus_files: Option<&FxHashSet<PathBuf>>,
 ) -> DuplicationReport {
+    let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
+        .iter()
+        .filter(|file| !file.suppressions.is_empty())
+        .map(|file| (file.path.clone(), file.suppressions.clone()))
+        .collect();
+    let mut near_result = config.near.then(|| {
+        near::detect_near_clones(&near::NearDetectionInput {
+            files: &file_data,
+            min_tokens: config.min_tokens,
+            min_lines: config.min_lines,
+            skip_local: config.skip_local,
+            focus_files,
+        })
+    });
+
     if file_data.len() >= config.min_corpus_size_for_shingle_filter {
         if let Some(focus_files) = focus_files {
             shingle_filter::filter_to_focus_candidates(
@@ -296,12 +316,6 @@ fn detect_and_postprocess(
             shingle_filter::filter_to_duplicate_candidates(&mut file_data, config.min_tokens);
         }
     }
-
-    let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
-        .iter()
-        .filter(|file| !file.suppressions.is_empty())
-        .map(|file| (file.path.clone(), file.suppressions.clone()))
-        .collect();
 
     let detector_data: Vec<(PathBuf, Vec<normalize::HashedToken>, tokenize::FileTokens)> =
         file_data
@@ -316,10 +330,19 @@ fn detect_and_postprocess(
         detector.detect_with_totals(detector_data, corpus_totals)
     };
 
-    if !suppressions_by_file.is_empty() {
-        apply_line_suppressions(&mut report, &suppressions_by_file);
+    if let Some(result) = near_result.as_mut() {
+        near::suppress_exact_covered_near_groups(&mut result.clone_groups, &report.clone_groups);
+        report.clone_groups.append(&mut result.clone_groups);
+        report.stats.near_candidates_skipped = result.skipped_candidates;
+        report.stats = crate::duplicates::recompute_stats(&report);
     }
 
+    if !suppressions_by_file.is_empty() {
+        apply_line_suppressions(&mut report, &suppressions_by_file);
+        report.stats = crate::duplicates::recompute_stats(&report);
+    }
+
+    apply_ignored_clones_filter(&mut report, &config.ignored_clones);
     apply_min_occurrences_filter(&mut report, config.min_occurrences);
 
     report.clone_families = families::group_into_families(&report.clone_groups, root);
@@ -327,6 +350,26 @@ fn detect_and_postprocess(
         families::detect_mirrored_directories(&report.clone_families, root);
     report.sort();
     report
+}
+
+fn apply_ignored_clones_filter(report: &mut DuplicationReport, ignored: &[String]) {
+    if ignored.is_empty() || report.clone_groups.is_empty() {
+        return;
+    }
+
+    let ignored = ignored.iter().map(String::as_str).collect::<FxHashSet<_>>();
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
+    let before = report.clone_groups.len();
+    report.clone_groups.retain(|group| {
+        !ignored.contains(fingerprints.ignored_clone_key_for_group(group).as_str())
+    });
+    let hidden = before.saturating_sub(report.clone_groups.len());
+    if hidden == 0 {
+        return;
+    }
+
+    report.stats.clone_groups_ignored = report.stats.clone_groups_ignored.saturating_add(hidden);
+    report.stats = crate::duplicates::recompute_stats(report);
 }
 
 fn find_duplicates_inner(
@@ -543,6 +586,7 @@ fn apply_line_suppressions(
     suppressions_by_file: &FxHashMap<PathBuf, Vec<Suppression>>,
 ) {
     report.clone_groups.retain_mut(|group| {
+        let before = group.instances.len();
         group.instances.retain(|instance| {
             if let Some(supps) = suppressions_by_file.get(&instance.file) {
                 for line in instance.start_line..=instance.end_line {
@@ -553,7 +597,13 @@ fn apply_line_suppressions(
             }
             true
         });
-        group.instances.len() >= 2
+        if group.instances.len() < 2 {
+            return false;
+        }
+        if group.instances.len() != before {
+            near::refresh_near_group_metrics(group);
+        }
+        true
     });
 }
 
@@ -627,6 +677,50 @@ mod tests {
         assert!(report.clone_groups.is_empty());
         assert!(report.clone_families.is_empty());
         assert_eq!(report.stats.total_files, 0);
+    }
+
+    #[test]
+    fn ignored_clone_resurfaces_when_an_instance_is_added() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let source = "export function shared(value: number): number {\n  const doubled = value * 2;\n  const shifted = doubled + 3;\n  return shifted * 4;\n}\n";
+        let mut files = Vec::new();
+        for (index, name) in ["a.ts", "b.ts"].into_iter().enumerate() {
+            let path = dir.path().join(name);
+            std::fs::write(&path, source).expect("write clone");
+            files.push(DiscoveredFile {
+                id: FileId(index as u32),
+                path,
+                size_bytes: source.len() as u64,
+            });
+        }
+        let base_config = DuplicatesConfig {
+            min_tokens: 5,
+            min_lines: 2,
+            ..DuplicatesConfig::default()
+        };
+        let first = find_duplicates(dir.path(), &files, &base_config);
+        let group = first.clone_groups.first().expect("clone group");
+        let fingerprints = CloneFingerprintSet::from_groups(&first.clone_groups);
+        let ignored_key = fingerprints.ignored_clone_key_for_group(group);
+
+        let ignored_config = DuplicatesConfig {
+            ignored_clones: vec![ignored_key],
+            ..base_config
+        };
+        let ignored = find_duplicates(dir.path(), &files, &ignored_config);
+        assert!(ignored.clone_groups.is_empty());
+        assert_eq!(ignored.stats.clone_groups_ignored, 1);
+
+        let third_path = dir.path().join("c.ts");
+        std::fs::write(&third_path, source).expect("write added clone");
+        files.push(DiscoveredFile {
+            id: FileId(2),
+            path: third_path,
+            size_bytes: source.len() as u64,
+        });
+        let resurfaced = find_duplicates(dir.path(), &files, &ignored_config);
+        assert!(!resurfaced.clone_groups.is_empty());
+        assert_eq!(resurfaced.stats.clone_groups_ignored, 0);
     }
 
     #[test]

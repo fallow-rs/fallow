@@ -2348,6 +2348,7 @@ fn build_audit_dupes_options<'a>(
         quiet: opts.quiet,
         allow_remote_extends: opts.allow_remote_extends,
         mode: Some(DupesMode::from(dupes_cfg.mode)),
+        near: dupes_cfg.near,
         min_tokens: Some(dupes_cfg.min_tokens),
         min_lines: Some(dupes_cfg.min_lines),
         min_occurrences: Some(dupes_cfg.min_occurrences),

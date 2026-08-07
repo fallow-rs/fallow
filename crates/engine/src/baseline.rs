@@ -1527,27 +1527,31 @@ pub fn filter_new_issues(
 /// Baseline data for duplication comparison.
 ///
 /// New baselines key every clone group by `<fingerprint>:<instance count>` in
-/// `clone_fingerprints`. The fingerprint hashes the clone's source content, so
-/// an unrelated edit that shifts a clone down a file keeps it matched, while an
-/// extra copy in another file changes the instance count and is reported as a
-/// new finding.
+/// `normalized_clone_fingerprints`. The fingerprint hashes normalized clone
+/// content, so an unrelated line shift or formatting-only edit keeps it matched,
+/// while a token edit or extra copy reports a new finding.
 ///
-/// `clone_groups` keeps the legacy location keys (sorted
-/// `file:start_line-end_line` per group) so baselines written by older versions
-/// still filter, and baselines written now stay readable by those versions.
+/// `clone_groups` keeps the oldest location keys, while `clone_fingerprints`
+/// keeps the raw-fragment keys expected by older binaries. New readers prefer
+/// the normalized field. This makes baselines readable in both directions.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct DuplicationBaselineData {
     /// Legacy clone group keys: sorted list of `file:start-end` per group.
     #[serde(default)]
     pub clone_groups: Vec<String>,
-    /// Content keys: `<clone fingerprint>:<instance count>` per group.
+    /// Legacy raw-fragment keys expected by older binaries.
     #[serde(default)]
     pub clone_fingerprints: Vec<String>,
+    /// Normalized content keys used by current binaries.
+    #[serde(default)]
+    pub normalized_clone_fingerprints: Vec<String>,
 }
 
 impl DuplicationBaselineData {
     /// Build a duplication baseline from the current report.
     pub fn from_report(report: &DuplicationReport, root: &Path) -> Self {
+        let fingerprints =
+            crate::duplicates::CloneFingerprintSet::from_groups(&report.clone_groups);
         Self {
             clone_groups: report
                 .clone_groups
@@ -1557,7 +1561,12 @@ impl DuplicationBaselineData {
             clone_fingerprints: report
                 .clone_groups
                 .iter()
-                .map(clone_group_fingerprint_key)
+                .map(legacy_clone_group_fingerprint_key)
+                .collect(),
+            normalized_clone_fingerprints: report
+                .clone_groups
+                .iter()
+                .map(|group| clone_group_fingerprint_key(group, &fingerprints))
                 .collect(),
         }
     }
@@ -1565,10 +1574,12 @@ impl DuplicationBaselineData {
     /// Number of baseline entries actually used for comparison.
     #[must_use]
     pub fn entry_count(&self) -> usize {
-        if self.clone_fingerprints.is_empty() {
-            self.clone_groups.len()
-        } else {
+        if !self.normalized_clone_fingerprints.is_empty() {
+            self.normalized_clone_fingerprints.len()
+        } else if !self.clone_fingerprints.is_empty() {
             self.clone_fingerprints.len()
+        } else {
+            self.clone_groups.len()
         }
     }
 }
@@ -1591,35 +1602,67 @@ fn clone_group_key(group: &crate::duplicates::CloneGroup, root: &Path) -> String
     parts.join("|")
 }
 
-/// Generate a location-independent key for a clone group.
-///
-/// The fingerprint hashes the representative instance's source fragment, where
-/// the representative is the instance that sorts first on `(file, start_line)`.
-/// Renaming the file holding the representative can therefore change the key for
-/// a group whose instances do not share a byte-identical fragment.
-fn clone_group_fingerprint_key(group: &crate::duplicates::CloneGroup) -> String {
+/// Generate the normalized, location-independent key written by new baselines.
+fn clone_group_fingerprint_key(
+    group: &crate::duplicates::CloneGroup,
+    fingerprints: &crate::duplicates::CloneFingerprintSet,
+) -> String {
+    fingerprints.ignored_clone_key_for_group(group)
+}
+
+/// Recreate the raw-fragment key written by baseline versions before normalized
+/// clone identity. Kept only as a read fallback during migration.
+fn legacy_clone_group_fingerprint_key(group: &crate::duplicates::CloneGroup) -> String {
     let representative = group
         .instances
         .iter()
         .min_by(|a, b| (a.file.as_path(), a.start_line).cmp(&(b.file.as_path(), b.start_line)))
         .map_or("", |i| i.fragment.as_str());
+    let hash = if representative.as_bytes().contains(&b'\r') {
+        xxhash_rust::xxh3::xxh3_64(representative.replace('\r', "").as_bytes())
+    } else {
+        xxhash_rust::xxh3::xxh3_64(representative.as_bytes())
+    };
     format!(
-        "{}:{}",
-        crate::duplicates::fingerprint_for_fragment(representative),
+        "{}{:08x}:{}",
+        crate::duplicates::FINGERPRINT_PREFIX,
+        hash as u32,
         group.instances.len()
     )
 }
 
+fn consume_baseline_key(remaining: &mut FxHashMap<&str, usize>, key: &str) -> bool {
+    match remaining.get_mut(key) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Filter a duplication report to only include clone groups not present in the baseline.
 ///
-/// Baselines carrying `clone_fingerprints` compare on content plus instance
-/// count. Baselines without that field fall back to the legacy location keys.
+/// Baselines carrying `normalized_clone_fingerprints` compare on normalized
+/// content plus instance count. Older raw fingerprints and location keys remain
+/// supported as fallbacks.
 pub fn filter_new_clone_groups(
     mut report: DuplicationReport,
     baseline: &DuplicationBaselineData,
     root: &Path,
 ) -> DuplicationReport {
-    if baseline.clone_fingerprints.is_empty() {
+    if !baseline.normalized_clone_fingerprints.is_empty() {
+        let fingerprints =
+            crate::duplicates::CloneFingerprintSet::from_groups(&report.clone_groups);
+        let mut remaining: FxHashMap<&str, usize> = FxHashMap::default();
+        for key in &baseline.normalized_clone_fingerprints {
+            *remaining.entry(key.as_str()).or_insert(0) += 1;
+        }
+        report.clone_groups.retain(|group| {
+            let key = clone_group_fingerprint_key(group, &fingerprints);
+            !consume_baseline_key(&mut remaining, &key)
+        });
+    } else if baseline.clone_fingerprints.is_empty() {
         let baseline_keys: FxHashSet<&str> =
             baseline.clone_groups.iter().map(String::as_str).collect();
         report.clone_groups.retain(|g| {
@@ -1631,15 +1674,9 @@ pub fn filter_new_clone_groups(
         for key in &baseline.clone_fingerprints {
             *remaining.entry(key.as_str()).or_insert(0) += 1;
         }
-        report.clone_groups.retain(|g| {
-            let key = clone_group_fingerprint_key(g);
-            match remaining.get_mut(key.as_str()) {
-                Some(count) if *count > 0 => {
-                    *count -= 1;
-                    false
-                }
-                _ => true,
-            }
+        report.clone_groups.retain(|group| {
+            let key = legacy_clone_group_fingerprint_key(group);
+            !consume_baseline_key(&mut remaining, &key)
         });
     }
 
@@ -2716,7 +2753,7 @@ mod tests {
     fn make_clone_group(instances: Vec<(&str, usize, usize)>) -> CloneGroup {
         let mut files: Vec<&str> = instances.iter().map(|(file, _, _)| *file).collect();
         files.sort_unstable();
-        let fragment = format!("shared body of {}", files.join(","));
+        let fragment = format!("const source = '{}';", files.join(","));
         make_clone_group_with_fragment(&fragment, instances)
     }
 
@@ -2738,6 +2775,7 @@ mod tests {
                 .collect(),
             token_count: 50,
             line_count: 10,
+            similarity: None,
         }
     }
 
@@ -2757,8 +2795,16 @@ mod tests {
                 clone_instances: 2,
                 duplication_percentage: 10.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         }
+    }
+
+    fn normalized_clone_group_key(group: &CloneGroup) -> String {
+        let fingerprints =
+            crate::duplicates::CloneFingerprintSet::from_groups(std::slice::from_ref(group));
+        clone_group_fingerprint_key(group, &fingerprints)
     }
 
     #[test]
@@ -2805,9 +2851,13 @@ mod tests {
         assert_eq!(deserialized.clone_groups, baseline.clone_groups);
         assert_eq!(deserialized.clone_fingerprints, baseline.clone_fingerprints);
         assert_eq!(
-            baseline.clone_fingerprints.len(),
+            deserialized.normalized_clone_fingerprints,
+            baseline.normalized_clone_fingerprints
+        );
+        assert_eq!(
+            baseline.normalized_clone_fingerprints.len(),
             1,
-            "a saved baseline carries a fingerprint key per clone group"
+            "a saved baseline carries a normalized key per clone group"
         );
     }
 
@@ -2901,14 +2951,14 @@ mod tests {
             ],
         );
         assert_eq!(
-            clone_group_fingerprint_key(&before),
-            clone_group_fingerprint_key(&after),
+            normalized_clone_group_key(&before),
+            normalized_clone_group_key(&after),
             "renaming a file must not resurface a baselined clone"
         );
     }
 
     #[test]
-    fn clone_group_fingerprint_key_follows_representative_on_rename() {
+    fn clone_group_fingerprint_key_does_not_follow_representative_order() {
         let mut before = make_clone_group_with_fragment(
             "const total = a + b;",
             vec![("/project/src/a.ts", 10, 20), ("/project/src/b.ts", 30, 40)],
@@ -2918,11 +2968,60 @@ mod tests {
         let mut after = before.clone();
         after.instances[0].file = PathBuf::from("/project/src/z.ts");
 
+        assert_eq!(
+            normalized_clone_group_key(&before),
+            normalized_clone_group_key(&after),
+            "normalized group identity is independent of representative order"
+        );
+    }
+
+    #[test]
+    fn filter_new_clone_groups_matches_legacy_raw_fingerprint_key() {
+        let root = Path::new("/project");
+        let group = make_clone_group_with_fragment(
+            "const total = a + b;",
+            vec![("/project/src/a.ts", 10, 20), ("/project/src/b.ts", 30, 40)],
+        );
+        let legacy_key = legacy_clone_group_fingerprint_key(&group);
+        let baseline = DuplicationBaselineData {
+            clone_groups: Vec::new(),
+            clone_fingerprints: vec![legacy_key.clone()],
+            normalized_clone_fingerprints: Vec::new(),
+        };
+
+        let filtered = filter_new_clone_groups(
+            make_duplication_report(vec![group.clone()]),
+            &baseline,
+            root,
+        );
+        assert!(filtered.clone_groups.is_empty());
+
+        let current =
+            DuplicationBaselineData::from_report(&make_duplication_report(vec![group]), root);
+        assert_eq!(current.clone_fingerprints, vec![legacy_key]);
         assert_ne!(
-            clone_group_fingerprint_key(&before),
-            clone_group_fingerprint_key(&after),
-            "the representative sorts on (file, line), so a rename past a \
-             sibling instance rekeys a group whose fragments differ"
+            current.normalized_clone_fingerprints,
+            current.clone_fingerprints
+        );
+    }
+
+    #[test]
+    fn normalized_baseline_survives_formatting_only_edits() {
+        let root = Path::new("/project");
+        let baseline_report = make_duplication_report(vec![make_clone_group_with_fragment(
+            "const total = left + right;",
+            vec![("/project/src/a.ts", 10, 20), ("/project/src/b.ts", 30, 40)],
+        )]);
+        let baseline = DuplicationBaselineData::from_report(&baseline_report, root);
+
+        let formatted = make_duplication_report(vec![make_clone_group_with_fragment(
+            "/* reviewed */\r\nconst  total=left + right;",
+            vec![("/project/src/a.ts", 18, 28), ("/project/src/b.ts", 35, 45)],
+        )]);
+        assert!(
+            filter_new_clone_groups(formatted, &baseline, root)
+                .clone_groups
+                .is_empty()
         );
     }
 
@@ -3003,6 +3102,8 @@ mod tests {
                 clone_instances: 0,
                 duplication_percentage: 0.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
         let stats = super::recompute_stats(&report);

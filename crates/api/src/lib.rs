@@ -613,6 +613,9 @@ pub struct DuplicationOptions {
     pub analysis: AnalysisOptions,
     /// Detection mode; `None` defers to the project config.
     pub mode: Option<DuplicationMode>,
+    /// Detect function-scoped near-miss clones in addition to exact clones.
+    /// `None` defers to the project config.
+    pub near: Option<bool>,
     /// Minimum number of tokens for a clone.
     pub min_tokens: Option<usize>,
     /// Minimum number of lines for a clone.

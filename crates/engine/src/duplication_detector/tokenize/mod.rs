@@ -107,10 +107,11 @@ fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
         }
     }
 
-    let (all_tokens, atomic_invocation_spans) = merge_sections(sections);
+    let (all_tokens, function_spans, atomic_invocation_spans) = merge_sections(sections);
 
     FileTokens {
         tokens: all_tokens,
+        function_spans,
         atomic_invocation_spans,
         source: source.to_string(),
         line_count: source.lines().count().max(1),
@@ -147,9 +148,10 @@ fn tokenize_astro(
                 region.byte_offset,
             ));
         }
-        let (tokens, atomic_invocation_spans) = merge_sections(sections);
+        let (tokens, function_spans, atomic_invocation_spans) = merge_sections(sections);
         return FileTokens {
             tokens,
+            function_spans,
             atomic_invocation_spans,
             source: source.to_string(),
             line_count: source.lines().count().max(1),
@@ -170,9 +172,10 @@ fn tokenize_astro(
             region.byte_offset,
         ));
     }
-    let (tokens, atomic_invocation_spans) = merge_sections(sections);
+    let (tokens, function_spans, atomic_invocation_spans) = merge_sections(sections);
     FileTokens {
         tokens,
+        function_spans,
         atomic_invocation_spans,
         source: source.to_string(),
         line_count: source.lines().count().max(1),
@@ -196,6 +199,9 @@ fn tokenize_mdx(
 
         return FileTokens {
             tokens: extractor.tokens,
+            // MDX statements are compacted before parsing, so their spans do
+            // not map back to the original source yet.
+            function_spans: Vec::new(),
             atomic_invocation_spans: extractor.atomic_invocation_spans,
             source: source.to_string(),
             line_count: source.lines().count().max(1),
@@ -208,6 +214,7 @@ fn tokenize_mdx(
 fn empty_tokens(source: &str) -> FileTokens {
     FileTokens {
         tokens: Vec::new(),
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source: source.to_string(),
         line_count: source.lines().count().max(1),
@@ -220,6 +227,7 @@ fn tokenize_style_source(source: &str) -> FileTokens {
     tokens.extend(lexical::tokenize_lexical_region(source, 0, true));
     FileTokens {
         tokens,
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source: source.to_string(),
         line_count: source.lines().count().max(1),
@@ -230,6 +238,7 @@ struct TokenSection {
     name: &'static str,
     start: usize,
     tokens: Vec<SourceToken>,
+    function_spans: Vec<Span>,
     atomic_invocation_spans: Vec<Span>,
 }
 
@@ -251,6 +260,9 @@ fn tokenize_js_section(
     for token in &mut extractor.tokens {
         token.span = Span::new(token.span.start + offset, token.span.end + offset);
     }
+    for span in &mut extractor.function_spans {
+        *span = Span::new(span.start + offset, span.end + offset);
+    }
     for span in &mut extractor.atomic_invocation_spans {
         *span = Span::new(span.start + offset, span.end + offset);
     }
@@ -259,6 +271,7 @@ fn tokenize_js_section(
         name,
         start: byte_offset,
         tokens: extractor.tokens,
+        function_spans: extractor.function_spans,
         atomic_invocation_spans: extractor.atomic_invocation_spans,
     }
 }
@@ -271,24 +284,27 @@ fn tokenize_lexical_section(name: &'static str, source: &str, byte_offset: usize
         name,
         start: byte_offset,
         tokens: lexical::tokenize_lexical_region(source, byte_offset, css),
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
     }
 }
 
-fn merge_sections(mut sections: Vec<TokenSection>) -> (Vec<SourceToken>, Vec<Span>) {
+fn merge_sections(mut sections: Vec<TokenSection>) -> (Vec<SourceToken>, Vec<Span>, Vec<Span>) {
     sections.retain(|section| !section.tokens.is_empty());
     sections.sort_by_key(|section| section.start);
 
     let mut tokens = Vec::new();
+    let mut function_spans = Vec::new();
     let mut atomic_invocation_spans = Vec::new();
 
     for section in sections {
         tokens.push(lexical::boundary_token(section.name, section.start));
         tokens.extend(section.tokens);
+        function_spans.extend(section.function_spans);
         atomic_invocation_spans.extend(section.atomic_invocation_spans);
     }
 
-    (tokens, atomic_invocation_spans)
+    (tokens, function_spans, atomic_invocation_spans)
 }
 
 /// Tokenize a standard JS/TS file, with JSX fallback for parse errors.
@@ -325,6 +341,7 @@ fn tokenize_js_ts(path: &Path, source: &str, strip_types: bool, skip_imports: bo
 
     FileTokens {
         tokens: extractor.tokens,
+        function_spans: extractor.function_spans,
         atomic_invocation_spans: extractor.atomic_invocation_spans,
         source: source.to_string(),
         line_count: source.lines().count().max(1),

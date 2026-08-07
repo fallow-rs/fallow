@@ -114,13 +114,15 @@ kind: "type-aware-status"
  * from a scalar string to `oneOf: [string, array]` so the new `ignoreExports`
  * action can carry a paste-ready array of `{ file, exports }` rule objects
  * (the legacy `ignoreDependencies` etc. variants still emit strings, so
- * consumers that switch on `config_key` keep working unchanged). The
+ * consumers that switch on `config_key` keep working unchanged). v8 added the
+ * required duplication `spread` field and changed `duplicated_tokens` to count
+ * redundant copies, excluding the retained copy in each group. The
  * runtime-coverage block is extended additively as the protocol evolves
  * (currently 0.3, which adds an optional capture_quality summary field). Other
  * additive examples: dupes --group-by adds optional grouped_by, total_issues,
  * groups fields without bumping.
  */
-export type SchemaVersion = 7
+export type SchemaVersion = 8
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -4837,12 +4839,21 @@ token_count: number
  */
 line_count: number
 /**
+ * Lowest all-pairs similarity for a near-miss clone group. Exact clone
+ * groups omit this field.
+ */
+similarity?: number
+/**
  * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
  * report collisions. Addressable via `fallow dupes --trace dup:<fp>` (and
  * the `trace_clone` MCP tool) to deep-dive this group; shown alongside
  * each group in the human listing.
  */
 fingerprint: string
+/**
+ * Maximum directory-tree or same-file line distance between instances.
+ */
+spread: number
 /**
  * Best-effort human-readable name for the clone: the dominant repeated
  * identifier across the duplicated fragment (e.g. a shared `parseCsv`
@@ -5052,34 +5063,38 @@ duplicated_lines: number
  */
 total_tokens: number
 /**
- * Tokens that are part of at least one clone.
+ * Tokens in redundant clone copies, excluding one retained copy per group.
  */
 duplicated_tokens: number
 /**
- * Number of clone groups in the reported `clone_groups[]` array.
- * Matches `clone_groups[].length` post `minOccurrences` filtering; the
- * count of groups hidden by the filter is exposed in
- * `clone_groups_below_min_occurrences`.
+ * Number of clone groups in the reported `clone_groups[]` array after
+ * filtering and optional `--top` truncation.
  */
 clone_groups: number
 /**
- * Total clone instances across all reported groups. Matches the sum of
- * `clone_groups[].locations[].length` post `minOccurrences` filtering.
+ * Total clone instances across all reported groups after filtering and
+ * optional `--top` truncation.
  */
 clone_instances: number
 /**
- * Percentage of duplicated lines (0.0 to 100.0). Always reflects the FULL
- * corpus, computed BEFORE the `minOccurrences` filter so trend lines and
- * `threshold` gates stay stable when the filter changes.
+ * Percentage of duplicated lines (0.0 to 100.0). `--top` does not change
+ * this scoped corpus metric.
  */
 duplication_percentage: number
 /**
  * Number of clone groups hidden by `duplicates.minOccurrences`. Absent (or
  * `0`) when the filter is at its default of `2` and nothing was hidden.
- * Pre-filter clone group count = `clone_groups +
- * clone_groups_below_min_occurrences`.
+ * This counter covers only the minimum-occurrence filter.
  */
 clone_groups_below_min_occurrences?: number
+/**
+ * Number of clone groups hidden by `duplicates.ignoredClones`.
+ */
+clone_groups_ignored?: number
+/**
+ * Near-miss candidate comparisons skipped by bounded-work limits.
+ */
+near_candidates_skipped?: number
 }
 /**
  * Result of complexity analysis for reporting.
@@ -9168,6 +9183,14 @@ token_count: number
  */
 line_count: number
 /**
+ * Maximum directory-tree or same-file line distance between instances.
+ */
+spread: number
+/**
+ * Lowest all-pairs similarity for a near-miss clone group.
+ */
+similarity?: number
+/**
  * Root-relative clone instances in this group.
  */
 instances: CloneInstance[]
@@ -10158,6 +10181,10 @@ token_count: number
  */
 line_count: number
 /**
+ * Lowest all-pairs similarity for a near-miss clone group.
+ */
+similarity?: number
+/**
  * Each instance carries its own `owner` field alongside the standard
  * CloneInstance shape.
  */
@@ -10169,6 +10196,10 @@ instances: AttributedInstance[]
  * `clone_groups[].fingerprint` for the same clone.
  */
 fingerprint: string
+/**
+ * Maximum directory-tree or same-file line distance between instances.
+ */
+spread: number
 /**
  * Suggested next steps. Always emitted.
  */

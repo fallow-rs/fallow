@@ -4,13 +4,13 @@ expression: redacted
 ---
 ● Duplicates (2 clone groups)
 
-     27 lines  2 instances  dup:16773053
+     27 lines  2 instances  dup:6f87acd9
     src/copy1.ts:1-27
     src/original.ts:1-27
 
-     21 lines  3 instances  dup:94b2bdeb
+     21 lines  3 instances  dup:8a6ebe05
     src/copy1.ts:1-21
     src/original.ts:1-21
     src/partial.ts:2-17
 
-  Identical code blocks detected via suffix-array analysis — https://docs.fallow.tools/explanations/duplication#clone-groups
+  Duplicate code blocks - https://docs.fallow.tools/explanations/duplication#clone-groups

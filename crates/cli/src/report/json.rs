@@ -470,7 +470,7 @@ fn type_aware_metric(
     clippy::redundant_pub_crate,
     reason = "used through report module re-export by combined.rs, audit.rs, flags.rs"
 )]
-pub(crate) const SCHEMA_VERSION: u32 = 7;
+pub(crate) const SCHEMA_VERSION: u32 = 8;
 
 #[cfg(test)]
 fn api_check_json_document(
@@ -1106,7 +1106,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 7);
+        assert_eq!(output["schema_version"], 8);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -1987,7 +1987,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
-        assert_eq!(output["schema_version"], 7);
+        assert_eq!(output["schema_version"], 8);
     }
 
     #[test]
@@ -2186,7 +2186,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 7);
+        assert_eq!(output["schema_version"], 8);
         assert_eq!(output["elapsed_ms"], 99);
     }
 

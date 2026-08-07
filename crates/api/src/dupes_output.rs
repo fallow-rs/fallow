@@ -12,7 +12,7 @@ use fallow_output::{
 };
 use fallow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
-    RefactoringSuggestion,
+    RefactoringSuggestion, clone_group_spread,
 };
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
@@ -48,6 +48,10 @@ pub struct AttributedCloneGroup {
     pub token_count: usize,
     /// Number of source lines in the clone group.
     pub line_count: usize,
+    /// Lowest all-pairs similarity for a near-miss clone group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "f64"))]
+    pub similarity: Option<f64>,
     /// Each instance carries its own `owner` field alongside the standard
     /// CloneInstance shape.
     pub instances: Vec<AttributedInstance>,
@@ -82,6 +86,8 @@ pub struct AttributedCloneGroupFinding {
     /// Computed from the group's instances, so it matches the top-level
     /// `clone_groups[].fingerprint` for the same clone.
     pub fingerprint: String,
+    /// Maximum directory-tree or same-file line distance between instances.
+    pub spread: usize,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<CloneGroupAction>,
 }
@@ -104,10 +110,18 @@ impl AttributedCloneGroupFinding {
     /// Build the wrapper with a precomputed report-scoped fingerprint.
     #[must_use]
     pub fn with_fingerprint(group: AttributedCloneGroup, fingerprint: String) -> Self {
+        let spread = clone_group_spread(
+            &group
+                .instances
+                .iter()
+                .map(|instance| instance.instance.clone())
+                .collect::<Vec<_>>(),
+        );
         let actions = clone_group_actions(group.line_count, group.instances.len());
         Self {
             group,
             fingerprint,
+            spread,
             actions,
         }
     }
@@ -159,6 +173,8 @@ pub struct CloneGroupFinding {
     /// the `trace_clone` MCP tool) to deep-dive this group; shown alongside
     /// each group in the human listing.
     pub fingerprint: String,
+    /// Maximum directory-tree or same-file line distance between instances.
+    pub spread: usize,
     /// Best-effort human-readable name for the clone: the dominant repeated
     /// identifier across the duplicated fragment (e.g. a shared `parseCsv`
     /// function). `None` when the clone has no clear dominant name (generic or
@@ -192,10 +208,12 @@ impl CloneGroupFinding {
     /// Build the wrapper with a precomputed report-scoped fingerprint.
     #[must_use]
     pub fn with_fingerprint(group: CloneGroup, fingerprint: String) -> Self {
+        let spread = group.spread();
         let suggested_name = dominant_identifier(&group);
         let actions = clone_group_actions(group.line_count, group.instances.len());
         Self {
             fingerprint,
+            spread,
             suggested_name,
             group,
             actions,
@@ -443,6 +461,7 @@ mod tests {
                 .collect(),
             token_count: 100,
             line_count: 20,
+            similarity: None,
         }
     }
 
@@ -461,6 +480,7 @@ mod tests {
             primary_owner: "src".to_string(),
             token_count: 100,
             line_count: 20,
+            similarity: None,
             instances: vec![
                 AttributedInstance {
                     instance: instance("/root/src/a.ts"),
@@ -502,6 +522,7 @@ mod tests {
             ],
             token_count: 100,
             line_count: 3,
+            similarity: None,
         };
         let finding = CloneGroupFinding::with_actions(g);
         assert_eq!(finding.suggested_name.as_deref(), Some("parseCsv"));
@@ -622,6 +643,7 @@ mod tests {
                 }],
                 token_count: 42,
                 line_count: 5,
+                similarity: None,
             }],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),

@@ -615,6 +615,69 @@ fn github_summary_dupes_snapshot() {
     insta::assert_snapshot!("github_summary_dupes", rendered);
 }
 
+#[test]
+fn github_summary_dupes_ranks_families_by_their_best_group() {
+    let rendered = render_summary(
+        EnvelopeKind::Dupes,
+        &json!({
+            "kind": "dupes",
+            "elapsed_ms": 5,
+            "stats": {
+                "total_files": 4, "files_with_clones": 4, "clone_groups": 2,
+                "clone_instances": 4, "duplicated_lines": 20, "total_lines": 100,
+                "duplication_percentage": 20.0
+            },
+            "clone_groups": [],
+            "clone_families": [
+                {
+                    "files": ["a-local.ts", "b-local.ts"],
+                    "total_duplicated_lines": 10,
+                    "groups": [{
+                        "line_count": 10, "token_count": 110, "spread": 0,
+                        "instances": [
+                            { "file": "a-local.ts", "start_line": 1, "end_line": 10 },
+                            { "file": "b-local.ts", "start_line": 1, "end_line": 10 }
+                        ]
+                    }],
+                    "suggestions": []
+                },
+                {
+                    "files": ["z-distant-a.ts", "z-distant-b.ts"],
+                    "total_duplicated_lines": 10,
+                    "groups": [
+                        {
+                            "line_count": 2, "token_count": 5, "spread": 0,
+                            "instances": [
+                                { "file": "ignored-first-a.ts", "start_line": 1, "end_line": 2 },
+                                { "file": "ignored-first-b.ts", "start_line": 1, "end_line": 2 }
+                            ]
+                        },
+                        {
+                            "line_count": 10, "token_count": 100, "spread": 8,
+                            "instances": [
+                                { "file": "z-distant-a.ts", "start_line": 1, "end_line": 10 },
+                                { "file": "z-distant-b.ts", "start_line": 1, "end_line": 10 }
+                            ]
+                        }
+                    ],
+                    "suggestions": []
+                }
+            ]
+        }),
+        &LinkContext::default(),
+    );
+    let distant = rendered.find("z-distant-a.ts").expect("distant family");
+    let local = rendered.find("a-local.ts").expect("local family");
+    assert!(
+        distant < local,
+        "spread-aware family must render first: {rendered}"
+    );
+    assert!(
+        rendered.contains("\n  - `z-distant-a.ts:1-10`"),
+        "family details must show the best-ranked group: {rendered}"
+    );
+}
+
 /// Clone-family identifier cells render as code spans: file names with
 /// underscores and suggestion prose with parentheses must reach the summary
 /// without markdown escape backslashes.

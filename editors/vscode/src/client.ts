@@ -26,6 +26,7 @@ import {
   getDuplicationMinOccurrencesOverride,
   getDuplicationMinTokensOverride,
   getDuplicationModeOverride,
+  getDuplicationNearOverride,
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
   getMutedDiagnosticCategories,
@@ -82,6 +83,7 @@ export const createInitializationOptions = (
     // avoids a double lens in VS Code without removing the editor-agnostic path.
     duplication: {
       mode: getDuplicationModeOverride(),
+      near: getDuplicationNearOverride(),
       threshold: getDuplicationThresholdOverride(),
       minTokens: getDuplicationMinTokensOverride(),
       minLines: getDuplicationMinLinesOverride(),

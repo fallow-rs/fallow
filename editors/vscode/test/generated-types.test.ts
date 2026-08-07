@@ -35,6 +35,7 @@ describe("generated/output-contract.d.ts", () => {
         minOccurrences: 3,
         minTokens: 80,
         mode: "semantic",
+        near: true,
         skipLocal: true,
         threshold: 8,
       },

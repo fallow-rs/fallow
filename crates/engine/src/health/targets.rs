@@ -1062,6 +1062,7 @@ mod tests {
                 ],
                 token_count: 8,
                 line_count: 5,
+                similarity: None,
             }],
             ..Default::default()
         };

@@ -66,7 +66,7 @@ cargo install fallow-cli        # build from source
 |---------|---------|-----------|
 | `fallow` | Run full codebase analysis: cleanup + duplication + health (default) | `--only`, `--skip`, `--production`, `--production-dead-code`, `--production-health`, `--production-dupes`, `--ci`, `--fail-on-issues`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--score`, `--trend`, `--save-snapshot`, `--include-entry-exports` |
 | `dead-code` | Dead code analysis (`check` is an alias) | `--unused-exports`, `--changed-since`, `--changed-workspaces`, `--production`, `--file`, `--include-entry-exports`, `--stale-suppressions`, `--ci`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
-| `dupes` | Code duplication detection | `--mode`, `--threshold`, `--top`, `--changed-since`, `--workspace`, `--changed-workspaces`, `--skip-local`, `--cross-language`, `--ignore-imports`, `--explain-skipped`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
+| `dupes` | Code duplication detection | `--mode`, `--near`, `--threshold`, `--top`, `--changed-since`, `--workspace`, `--changed-workspaces`, `--skip-local`, `--cross-language`, `--ignore-imports`, `--explain-skipped`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
 | `fix` | Auto-remove unused exports/deps | `--dry-run`, `--yes` (required in non-TTY) |
 | `init` | Generate config file or pre-commit hook | `--toml`, `--hooks`, `--branch` |
 | `migrate` | Convert knip/jscpd config | `--dry-run`, `--from PATH` |
@@ -117,7 +117,7 @@ When using fallow via MCP (`fallow-mcp`), the following tools are available:
 |------|-------------|
 | `analyze` | Full dead code analysis (unused files/exports/types/dependencies/members + circular dependencies + re-export cycles (barrel files that form a structural loop, silently breaking re-exports) + boundary violations + stale suppressions). Private type leaks are an opt-in API hygiene check via `issue_types: ["private-type-leaks"]`. Set `boundary_violations: true` as a convenience alias for `issue_types: ["boundary-violations"]`. Set `group_by` to `"owner"`, `"directory"`, `"package"`, or `"section"` to partition results. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group |
 | `check_changed` | Incremental analysis of files changed since a git ref |
-| `find_dupes` | Code duplication detection. Set `changed_since` to scope to changed files since a git ref. Set `min_occurrences` (≥ 2, default 2) to hide pair-only clones and focus on widespread copy-paste; JSON gains `stats.clone_groups_below_min_occurrences` when the filter hides anything. Each `clone_groups[]` entry carries a stable `fingerprint`, usually `dup:<8hex>` and widened only on rare report collisions; pass it to `trace_clone` to deep-dive that group |
+| `find_dupes` | Code duplication detection. Set `near: true` for function-level clones with small structural edits. Set `changed_since` to scope to changed files since a git ref. Set `min_occurrences` (at least 2, default 2) to hide pair-only clones. Each `clone_groups[]` entry carries a normalized `fingerprint` and `spread`; near groups also carry `similarity`. Pass the fingerprint to `trace_clone` to inspect the group. |
 | `fix_preview` | Dry-run auto-fix preview |
 | `fix_apply` | Apply auto-fixes (destructive) |
 | `check_health` | Complexity metrics, health scores, hotspots, and refactoring targets. Optional `runtime_coverage` merges a V8 or Istanbul dump; tune it with `min_invocations_hot` (default 100), `min_observation_volume` (default 5000), and `low_traffic_threshold` (default 0.001). When runtime evidence combines with static usage, test coverage, CRAP/complexity, ownership, or change scope, read `coverage_intelligence` for stable `fallow:coverage-intel:<hash>` recommendations. Set `group_by` to `owner`, `directory`, `package`, or `section` for per-group `vital_signs` / `health_score`; SARIF results gain `properties.group`, CodeClimate issues gain a top-level `group` field |
@@ -207,9 +207,10 @@ Returns a pass/warn/fail verdict for issues introduced by the PR. Only analyzes 
 ```bash
 fallow dupes --format json --quiet
 fallow dupes --format json --quiet --mode semantic
+fallow dupes --format json --quiet --near
 ```
 
-The `semantic` mode detects renamed variables. Other modes: `strict` (exact), `mild` (default, syntax normalized), `weak` (different literals).
+The `semantic` mode detects renamed variables. Other modes: `strict` (exact), `mild` (default, syntax normalized), `weak` (different literals). `--near` is separate and adds function-level gapped clones.
 
 ### Safe auto-fix cycle
 

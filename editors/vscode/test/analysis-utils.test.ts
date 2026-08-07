@@ -17,6 +17,7 @@ const baseOptions = {
   workspace: "",
   configPath: "",
   dupesMode: undefined,
+  dupesNear: undefined,
   dupesThreshold: undefined,
   dupesMinTokens: undefined,
   dupesMinLines: undefined,
@@ -108,6 +109,7 @@ describe("buildAnalysisArgs", () => {
     const { args, skipped } = buildAnalysisArgs({
       ...baseOptions,
       dupesMode: "mild",
+      dupesNear: true,
       dupesThreshold: 0,
       dupesMinTokens: 80,
       dupesMinLines: 8,
@@ -115,7 +117,7 @@ describe("buildAnalysisArgs", () => {
       dupesSkipLocal: true,
       dupesCrossLanguage: true,
       dupesIgnoreImports: true,
-      cliVersion: "2.88.3",
+      cliVersion: "3.15.0",
     });
 
     expect(args).toEqual([
@@ -126,6 +128,7 @@ describe("buildAnalysisArgs", () => {
       "health",
       "--dupes-mode",
       "mild",
+      "--dupes-near",
       "--dupes-threshold",
       "0",
       "--dupes-min-tokens",
@@ -139,6 +142,19 @@ describe("buildAnalysisArgs", () => {
       "--dupes-ignore-imports",
     ]);
     expect(skipped).toEqual([]);
+  });
+
+  it("omits near detection for older CLI versions", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesNear: true,
+      cliVersion: "3.14.0",
+    });
+
+    expect(args).not.toContain("--dupes-near");
+    expect(skipped).toEqual([
+      { flag: "--dupes-near", requires: "3.15.0", cliVersion: "3.14.0" },
+    ]);
   });
 
   it("forwards --dupes-no-ignore-imports when the user opts out (false) on a new CLI", () => {

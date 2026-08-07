@@ -123,6 +123,7 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
             ..AnalysisOptions::default()
         },
         mode: duplication_mode_from_param(params.mode.as_deref())?,
+        near: params.near,
         min_tokens: params.min_tokens.map(|value| value as usize),
         min_lines: params.min_lines.map(|value| value as usize),
         min_occurrences: min_occurrences_from_param(params.min_occurrences)?,
@@ -196,6 +197,9 @@ fn push_dupes_detection_flags(
 /// Push the boolean toggle flags (`--skip-local`, `--cross-language`,
 /// ignore-imports, `--explain-skipped`, `--top`) for `find_dupes`.
 fn push_dupes_toggle_flags(args: &mut Vec<String>, params: &FindDupesParams) {
+    if params.near == Some(true) {
+        args.push("--near".to_string());
+    }
     if params.skip_local == Some(true) {
         args.push("--skip-local".to_string());
     }
@@ -227,6 +231,7 @@ mod tests {
             root: Some(String::new()),
             config: Some(String::new()),
             mode: Some("semantic".to_string()),
+            near: Some(true),
             workspace: Some("apps/web".to_string()),
             min_tokens: Some(12),
             min_lines: Some(3),
@@ -254,6 +259,7 @@ mod tests {
         assert!(options.analysis.no_cache);
         assert_eq!(options.analysis.threads, Some(2));
         assert!(matches!(options.mode, Some(DuplicationMode::Semantic)));
+        assert_eq!(options.near, Some(true));
         assert_eq!(options.min_tokens, Some(12));
         assert_eq!(options.min_lines, Some(3));
         assert_eq!(options.min_occurrences, Some(4));
@@ -306,6 +312,17 @@ mod tests {
         ] {
             assert!(requires_cli_fallback(&params));
         }
+    }
+
+    #[test]
+    fn cli_arguments_forward_near_detection() {
+        let args = build_find_dupes_args(&FindDupesParams {
+            near: Some(true),
+            ..FindDupesParams::default()
+        })
+        .expect("dupes args");
+
+        assert!(args.contains(&"--near".to_string()));
     }
 
     #[tokio::test]

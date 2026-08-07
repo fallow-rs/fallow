@@ -80,14 +80,30 @@ pub fn dupes_meta() -> Meta {
 }
 
 fn dupes_metrics() -> BTreeMap<String, MetaMetric> {
-    BTreeMap::from([
+    dupes_size_metrics()
+        .into_iter()
+        .chain(dupes_triage_metrics())
+        .collect()
+}
+
+fn dupes_size_metrics() -> [(String, MetaMetric); 6] {
+    [
         (
             "duplication_percentage".to_string(),
             metric(
                 "Duplication Percentage",
-                "Fraction of total source tokens that appear in at least one clone group. Computed over the full analyzed file set.",
+                "Percentage of source lines that overlap at least one reported clone instance. Computed over the full analyzed file set.",
                 Some("[0, 100]"),
                 "lower is better",
+            ),
+        ),
+        (
+            "duplicated_tokens".to_string(),
+            metric(
+                "Duplicated Tokens",
+                "Number of tokens in redundant clone copies, excluding one retained copy per clone group.",
+                Some("[0, ∞)"),
+                "higher values indicate more code that can be removed by consolidating clones",
             ),
         ),
         (
@@ -109,6 +125,29 @@ fn dupes_metrics() -> BTreeMap<String, MetaMetric> {
             ),
         ),
         (
+            "spread".to_string(),
+            metric(
+                "Clone Spread",
+                "Maximum directory-tree distance between files in a clone group, or the same-file line gap measured in 250-line steps.",
+                Some("[0, ∞)"),
+                "higher values indicate clones that are harder to discover and coordinate",
+            ),
+        ),
+        (
+            "similarity".to_string(),
+            metric(
+                "Clone Similarity",
+                "Lowest all-pairs Jaccard similarity in a near-miss clone group. Omitted for exact clone groups.",
+                Some("[0, 1]"),
+                "values closer to 1 are more structurally alike",
+            ),
+        ),
+    ]
+}
+
+fn dupes_triage_metrics() -> [(String, MetaMetric); 5] {
+    [
+        (
             "clone_groups".to_string(),
             metric(
                 "Clone Groups",
@@ -127,6 +166,24 @@ fn dupes_metrics() -> BTreeMap<String, MetaMetric> {
             ),
         ),
         (
+            "clone_groups_ignored".to_string(),
+            metric(
+                "Ignored Clone Groups",
+                "Number of clone groups hidden by `duplicates.ignoredClones` in this run.",
+                Some("[0, ∞)"),
+                "nonzero values show reviewed clone groups omitted from the report",
+            ),
+        ),
+        (
+            "near_candidates_skipped".to_string(),
+            metric(
+                "Skipped Near Candidates",
+                "Number of near-miss candidate comparisons skipped by bounded-work limits.",
+                Some("[0, ∞)"),
+                "nonzero values mean near-miss detection intentionally limited candidate work",
+            ),
+        ),
+        (
             "clone_families".to_string(),
             metric(
                 "Clone Families",
@@ -135,7 +192,7 @@ fn dupes_metrics() -> BTreeMap<String, MetaMetric> {
                 "families suggest extract-module refactoring opportunities",
             ),
         ),
-    ])
+    ]
 }
 
 /// Build the `_meta` object for `fallow coverage setup --json --explain`.
@@ -669,6 +726,20 @@ mod tests {
             meta.metrics
                 .contains_key("clone_groups_below_min_occurrences")
         );
+        for key in [
+            "duplicated_tokens",
+            "spread",
+            "similarity",
+            "clone_groups_ignored",
+            "near_candidates_skipped",
+        ] {
+            let metric = meta.metrics.get(key).expect("duplication metric");
+            assert!(metric.range.is_some(), "{key} must document its range");
+            assert!(
+                metric.interpretation.is_some(),
+                "{key} must document its interpretation"
+            );
+        }
     }
 
     #[test]

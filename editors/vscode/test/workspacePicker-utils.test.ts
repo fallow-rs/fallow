@@ -26,6 +26,7 @@ const baseArgsOptions = {
   workspace: "",
   configPath: "",
   dupesMode: "mild" as const,
+  dupesNear: false,
   dupesThreshold: 0,
   dupesMinTokens: 50,
   dupesMinLines: 5,

@@ -33,6 +33,60 @@ where
     Ok(value)
 }
 
+fn deserialize_ignored_clones<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<String>::deserialize(deserializer)?;
+    for (index, value) in values.iter().enumerate() {
+        if !is_valid_ignored_clone_key(value) {
+            return Err(serde::de::Error::custom(format!(
+                "ignoredClones[{index}] must use <fingerprint>:<instance_count> (for example dup:6f12ab34:2); got {value:?}"
+            )));
+        }
+    }
+    Ok(values)
+}
+
+fn is_valid_ignored_clone_key(value: &str) -> bool {
+    let Some((fingerprint, count)) = value.rsplit_once(':') else {
+        return false;
+    };
+    if count.is_empty() || count.starts_with('0') {
+        return false;
+    }
+    let Ok(count) = count.parse::<usize>() else {
+        return false;
+    };
+    if count < 2 {
+        return false;
+    }
+
+    let Some(identifier) = fingerprint.strip_prefix("dup:") else {
+        return false;
+    };
+    let (hex, suffix) = identifier
+        .split_once('-')
+        .map_or((identifier, None), |(hex, suffix)| (hex, Some(suffix)));
+    if !matches!(hex.len(), 8 | 16)
+        || !hex
+            .as_bytes()
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    {
+        return false;
+    }
+
+    match suffix {
+        None => true,
+        Some(suffix) => {
+            hex.len() == 16
+                && !suffix.starts_with('0')
+                && suffix.parse::<usize>().is_ok_and(|ordinal| ordinal > 0)
+        }
+    }
+}
+
 const fn default_min_corpus_size_for_shingle_filter() -> usize {
     1024
 }
@@ -52,6 +106,10 @@ pub struct DuplicatesConfig {
     /// Detection mode: strict, mild, weak, or semantic.
     #[serde(default)]
     pub mode: DetectionMode,
+
+    /// Detect structurally similar function bodies with small edits.
+    #[serde(default)]
+    pub near: bool,
 
     /// Minimum number of tokens for a clone.
     #[serde(default = "default_min_tokens")]
@@ -79,6 +137,17 @@ pub struct DuplicatesConfig {
     /// Additional ignore patterns for duplication analysis.
     #[serde(default)]
     pub ignore: Vec<String>,
+
+    /// Reviewed clone groups to omit from duplication results.
+    ///
+    /// Each entry is `<fingerprint>:<instance_count>`, for example
+    /// `dup:6f12ab34:2`. A content or occurrence-count change produces a new key
+    /// and makes the group reportable again.
+    #[serde(default, deserialize_with = "deserialize_ignored_clones")]
+    #[schemars(inner(regex(
+        pattern = r"^dup:(?:[0-9a-f]{8}|[0-9a-f]{16}(?:-[1-9][0-9]*)?):(?:[2-9]|[1-9][0-9]+)$"
+    )))]
+    pub ignored_clones: Vec<String>,
 
     /// Merge built-in generated-framework ignore patterns with `ignore`.
     ///
@@ -133,11 +202,13 @@ impl Default for DuplicatesConfig {
         Self {
             enabled: true,
             mode: DetectionMode::default(),
+            near: false,
             min_tokens: default_min_tokens(),
             min_lines: default_min_lines(),
             min_occurrences: default_min_occurrences(),
             threshold: 0.0,
             ignore: vec![],
+            ignored_clones: vec![],
             ignore_defaults: true,
             skip_local: false,
             cross_language: false,
@@ -403,11 +474,13 @@ mod tests {
         let json = r#"{
             "enabled": false,
             "mode": "semantic",
+            "near": true,
             "minTokens": 100,
             "minLines": 10,
             "minOccurrences": 3,
             "threshold": 5.0,
             "ignore": ["**/vendor/**"],
+            "ignoredClones": ["dup:6f12ab34:2", "dup:0123456789abcdef-1:3"],
             "ignoreDefaults": false,
             "skipLocal": true,
             "crossLanguage": true,
@@ -416,11 +489,16 @@ mod tests {
         let config: DuplicatesConfig = serde_json::from_str(json).unwrap();
         assert!(!config.enabled);
         assert_eq!(config.mode, DetectionMode::Semantic);
+        assert!(config.near);
         assert_eq!(config.min_tokens, 100);
         assert_eq!(config.min_lines, 10);
         assert_eq!(config.min_occurrences, 3);
         assert!((config.threshold - 5.0).abs() < f64::EPSILON);
         assert_eq!(config.ignore, vec!["**/vendor/**"]);
+        assert_eq!(
+            config.ignored_clones,
+            vec!["dup:6f12ab34:2", "dup:0123456789abcdef-1:3"]
+        );
         assert!(!config.ignore_defaults);
         assert!(config.skip_local);
         assert!(config.cross_language);
@@ -435,6 +513,7 @@ mod tests {
         assert_eq!(config.mode, DetectionMode::Weak);
         assert_eq!(config.min_tokens, 50); // default
         assert_eq!(config.min_lines, 5); // default
+        assert!(config.ignored_clones.is_empty());
         assert!(config.ignore_defaults);
     }
 
@@ -444,6 +523,27 @@ mod tests {
         let config: DuplicatesConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.ignore, vec!["**/foo/**"]);
         assert!(config.ignore_defaults);
+    }
+
+    #[test]
+    fn ignored_clones_rejects_malformed_keys() {
+        for key in [
+            "6f12ab34:2",
+            "dup:6f12ab3:2",
+            "dup:6F12AB34:2",
+            "dup:6f12ab34:1",
+            "dup:6f12ab34:02",
+            "dup:0123456789abcdef-0:2",
+            "dup:0123456789abcdef-01:2",
+            "dup:0123456789abcdef-extra:2",
+        ] {
+            let json = serde_json::json!({ "ignoredClones": [key] });
+            let error = serde_json::from_value::<DuplicatesConfig>(json).unwrap_err();
+            assert!(
+                error.to_string().contains("ignoredClones[0]"),
+                "unexpected error for {key}: {error}"
+            );
+        }
     }
 
     #[test]
@@ -482,11 +582,13 @@ mod tests {
         let toml_str = r#"
 enabled = false
 mode = "weak"
+near = true
 minTokens = 75
 minLines = 8
 minOccurrences = 3
 threshold = 3.0
 ignore = ["vendor/**"]
+ignoredClones = ["dup:6f12ab34:2"]
 skipLocal = true
 crossLanguage = true
 ignoreImports = true
@@ -499,11 +601,13 @@ ignoreNumericValues = false
         let config: DuplicatesConfig = toml::from_str(toml_str).unwrap();
         assert!(!config.enabled);
         assert_eq!(config.mode, DetectionMode::Weak);
+        assert!(config.near);
         assert_eq!(config.min_tokens, 75);
         assert_eq!(config.min_lines, 8);
         assert_eq!(config.min_occurrences, 3);
         assert!((config.threshold - 3.0).abs() < f64::EPSILON);
         assert_eq!(config.ignore, vec!["vendor/**"]);
+        assert_eq!(config.ignored_clones, vec!["dup:6f12ab34:2"]);
         assert!(config.skip_local);
         assert!(config.cross_language);
         assert!(config.ignore_imports);
@@ -591,11 +695,13 @@ ignoreNumericValues = false
         let config = DuplicatesConfig {
             enabled: false,
             mode: DetectionMode::Semantic,
+            near: true,
             min_tokens: 100,
             min_lines: 10,
             min_occurrences: 4,
             threshold: 5.5,
             ignore: vec!["test/**".to_string()],
+            ignored_clones: vec!["dup:6f12ab34:2".to_string()],
             ignore_defaults: false,
             skip_local: true,
             cross_language: true,
@@ -612,11 +718,13 @@ ignoreNumericValues = false
         let restored: DuplicatesConfig = serde_json::from_str(&json).unwrap();
         assert!(!restored.enabled);
         assert_eq!(restored.mode, DetectionMode::Semantic);
+        assert!(restored.near);
         assert_eq!(restored.min_tokens, 100);
         assert_eq!(restored.min_lines, 10);
         assert_eq!(restored.min_occurrences, 4);
         assert!((restored.threshold - 5.5).abs() < f64::EPSILON);
         assert!(!restored.ignore_defaults);
+        assert_eq!(restored.ignored_clones, vec!["dup:6f12ab34:2"]);
         assert!(restored.skip_local);
         assert!(restored.cross_language);
         assert_eq!(restored.min_corpus_size_for_shingle_filter, 2048);

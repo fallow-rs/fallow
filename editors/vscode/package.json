@@ -474,6 +474,12 @@
             "Renames variables for semantic matching"
           ]
         },
+        "fallow.duplication.near": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": false,
+          "description": "Detect function-scoped near-miss clones with small structural edits in addition to exact clones."
+        },
         "fallow.duplication.skipLocal": {
           "scope": "resource",
           "type": "boolean",

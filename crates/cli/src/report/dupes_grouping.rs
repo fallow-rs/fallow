@@ -70,6 +70,7 @@ mod tests {
             instances,
             token_count: 50,
             line_count: 10,
+            similarity: None,
         }
     }
 

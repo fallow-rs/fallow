@@ -13,6 +13,7 @@ export type LspDuplicationMode = "strict" | "mild" | "weak" | "semantic";
 
 export interface LspDuplicationOptions {
   readonly mode: LspDuplicationMode | undefined;
+  readonly near: boolean | undefined;
   readonly threshold: number | undefined;
   readonly minTokens: number | undefined;
   readonly minLines: number | undefined;

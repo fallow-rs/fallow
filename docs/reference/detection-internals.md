@@ -69,6 +69,15 @@ error by suppressing a downstream detector.
 - Styling and CSS-in-JS extraction must preserve source line mapping.
 - Duplication token or normalization changes require the duplication cache
   version to move with the changed semantics.
+- Exact duplication uses the configured strict, mild, weak, or semantic token
+  normalization. The opt-in `duplicates.near` pass is orthogonal: it compares
+  function-like spans with semantic shingles while retaining exact results from
+  the configured mode. Candidate generation is deterministically bounded and
+  reports skipped comparisons instead of hiding incomplete work.
+- Clone fingerprints are based on normalized token sequences, not raw source
+  text. Formatting, comments, and line endings therefore preserve identity.
+  Reviewed clone keys append the surviving instance count so token changes and
+  added or removed copies trigger review again.
 - Extraction changes that alter `ModuleInfo` semantics require the parse cache
   version to move with the changed semantics.
 - Security findings are verification candidates until an agent or human

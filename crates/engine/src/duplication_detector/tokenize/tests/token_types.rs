@@ -59,6 +59,7 @@ fn file_tokens_direct_construction() {
     ];
     let ft = FileTokens {
         tokens,
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source: "const x".to_string(),
         line_count: 1,
@@ -72,6 +73,7 @@ fn file_tokens_direct_construction() {
 fn file_tokens_empty_construction() {
     let ft = FileTokens {
         tokens: Vec::new(),
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source: String::new(),
         line_count: 0,
@@ -88,6 +90,7 @@ fn file_tokens_clone() {
             kind: TokenKind::NullLiteral,
             span: Span::new(0, 4),
         }],
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source: "null".to_string(),
         line_count: 1,

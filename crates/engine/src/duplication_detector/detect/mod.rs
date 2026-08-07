@@ -454,6 +454,8 @@ const fn empty_report(totals: CorpusTotals) -> DuplicationReport {
             clone_instances: 0,
             duplication_percentage: 0.0,
             clone_groups_below_min_occurrences: 0,
+            clone_groups_ignored: 0,
+            near_candidates_skipped: 0,
         },
     }
 }

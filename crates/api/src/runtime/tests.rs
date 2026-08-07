@@ -695,6 +695,7 @@ fn run_duplication_returns_typed_output_before_json() {
 
     let _: &crate::DuplicationOutput = &run.output;
     assert_eq!(run.output.schema_version.0, duplication::SCHEMA_VERSION);
+    assert_eq!(run.output.schema_version.0, 2);
     assert!(run.clone_groups().is_empty());
     assert!(run.clone_families().is_empty());
     assert!(run.groups().is_none());
@@ -1179,6 +1180,7 @@ fn group(instances: Vec<CloneInstance>) -> fallow_types::duplicates::CloneGroup 
         instances,
         token_count: 10,
         line_count: 3,
+        similarity: None,
     }
 }
 

@@ -101,6 +101,7 @@ vi.mock("../src/config.js", () => ({
   getDuplicationMinOccurrencesOverride: () => undefined,
   getDuplicationMinTokensOverride: () => undefined,
   getDuplicationModeOverride: () => undefined,
+  getDuplicationNearOverride: () => undefined,
   getDuplicationSkipLocalOverride: () => undefined,
   getDuplicationThresholdOverride: () => undefined,
   getHealthHotspots: () => true,

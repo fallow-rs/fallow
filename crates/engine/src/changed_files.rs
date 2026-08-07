@@ -1161,6 +1161,7 @@ mod tests {
                     ],
                     token_count: 20,
                     line_count: 5,
+                    similarity: None,
                 },
                 CloneGroup {
                     instances: vec![
@@ -1183,6 +1184,7 @@ mod tests {
                     ],
                     token_count: 20,
                     line_count: 5,
+                    similarity: None,
                 },
             ],
             clone_families: Vec::new(),
@@ -1198,6 +1200,8 @@ mod tests {
                 clone_instances: 4,
                 duplication_percentage: 20.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         };
 

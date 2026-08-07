@@ -16,7 +16,7 @@ use crate::HealthReport;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for the dead-code/check JSON envelope.
-pub const CHECK_SCHEMA_VERSION: u32 = 7;
+pub const CHECK_SCHEMA_VERSION: u32 = 8;
 
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).

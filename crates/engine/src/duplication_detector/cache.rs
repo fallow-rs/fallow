@@ -39,6 +39,7 @@ struct CachedTokenFile {
     hashed_tokens: Vec<CachedHashedToken>,
     token_kinds: Vec<TokenKind>,
     token_spans: Vec<CachedSpan>,
+    function_spans: Vec<CachedSpan>,
     atomic_invocation_spans: Vec<CachedSpan>,
     source: String,
     line_count: u64,
@@ -260,6 +261,11 @@ impl CachedTokenFile {
                 .iter()
                 .map(|token| cached_span(token.span))
                 .collect(),
+            function_spans: file_tokens
+                .function_spans
+                .iter()
+                .map(|span| cached_span(*span))
+                .collect(),
             atomic_invocation_spans: file_tokens
                 .atomic_invocation_spans
                 .iter()
@@ -281,6 +287,11 @@ impl CachedTokenFile {
                     kind: kind.clone(),
                     span: Span::new(span.start, span.end),
                 })
+                .collect(),
+            function_spans: self
+                .function_spans
+                .iter()
+                .map(|span| Span::new(span.start, span.end))
                 .collect(),
             atomic_invocation_spans: self
                 .atomic_invocation_spans
@@ -393,6 +404,7 @@ mod tests {
                     kind: TokenKind::Identifier("value".to_string()),
                     span: Span::new(0, 5),
                 }],
+                function_spans: vec![Span::new(0, 5)],
                 atomic_invocation_spans: Vec::new(),
                 source: source.to_owned(),
                 line_count: 1,
@@ -439,6 +451,7 @@ mod tests {
         assert_eq!(hit.hashed_tokens[0].hash, 42);
         assert_eq!(hit.file_tokens.source, "const value = 1;\n");
         assert_eq!(hit.file_tokens.tokens[0].span.start, 0);
+        assert_eq!(hit.file_tokens.function_spans, vec![Span::new(0, 5)]);
         assert!(matches!(
             &hit.file_tokens.tokens[0].kind,
             TokenKind::Identifier(name) if name == "value"

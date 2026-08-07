@@ -269,6 +269,9 @@ fn push_trace_clone_options(
 ) -> Result<(), String> {
     push_trace_clone_mode(args, params)?;
     push_trace_clone_numeric_options(args, params)?;
+    if params.near == Some(true) {
+        args.push("--near".to_string());
+    }
     if params.skip_local == Some(true) {
         args.push("--skip-local".to_string());
     }
@@ -395,6 +398,7 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
                 ..AnalysisOptions::default()
             },
             mode: duplication_mode_from_param(params.mode.as_deref())?,
+            near: params.near,
             min_tokens: params.min_tokens.map(|value| value as usize),
             min_lines: params.min_lines.map(|value| value as usize),
             min_occurrences: min_occurrences_from_param(params.min_occurrences)?,
@@ -503,6 +507,25 @@ fn min_occurrences_from_param(value: Option<u32>) -> Result<Option<usize>, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trace_clone_forwards_near_detection() {
+        let params = TraceCloneParams {
+            fingerprint: Some("dup:12345678".to_string()),
+            near: Some(true),
+            ..TraceCloneParams::default()
+        };
+        let args = build_trace_clone_args(&params).expect("trace clone args");
+
+        assert!(args.contains(&"--near".to_string()));
+        assert_eq!(
+            trace_clone_options_from_params(&params)
+                .expect("trace clone options")
+                .duplication
+                .near,
+            Some(true)
+        );
+    }
 
     #[test]
     fn typed_dead_code_traces_forward_remote_extends_opt_in() {

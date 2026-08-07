@@ -40,6 +40,8 @@ pub struct DupesOptions<'a> {
     /// CLI override for detection mode. `None` falls back to the value from
     /// the config file (or its default if unspecified there).
     pub mode: Option<DupesMode>,
+    /// Enable function-scoped near-miss clone detection.
+    pub near: bool,
     /// CLI override for minimum token count. `None` falls back to config.
     pub min_tokens: Option<usize>,
     /// CLI override for minimum line count. `None` falls back to config.
@@ -157,11 +159,13 @@ fn build_dupes_config(
     fallow_config::DuplicatesConfig {
         enabled: true,
         mode,
+        near: opts.near || toml_dupes.near,
         min_tokens: opts.min_tokens.unwrap_or(toml_dupes.min_tokens),
         min_lines: opts.min_lines.unwrap_or(toml_dupes.min_lines),
         min_occurrences: opts.min_occurrences.unwrap_or(toml_dupes.min_occurrences),
         threshold: opts.threshold.unwrap_or(toml_dupes.threshold),
         ignore: toml_dupes.ignore.clone(),
+        ignored_clones: toml_dupes.ignored_clones.clone(),
         ignore_defaults: toml_dupes.ignore_defaults,
         skip_local: opts.skip_local || toml_dupes.skip_local,
         cross_language: opts.cross_language || toml_dupes.cross_language,
@@ -546,30 +550,9 @@ fn resolve_changed_since(
     get_changed_files(opts.root, git_ref)
 }
 
-/// Keep only the `n` clone groups with the highest instance count.
-///
-/// Sort by instance count desc (most-duplicated first), then by line count
-/// desc (largest blocks first), then by deterministic path/line order so
-/// ties don't shift between runs. Without this, the raw vector is
-/// path-sorted alphabetically, so `--top 20` returned 20 arbitrary clone
-/// groups instead of the 20 most-duplicated. Re-applies `DuplicationReport::sort()`
-/// after truncation so user-facing render order stays deterministic.
+/// Keep only the `n` highest-ranked clone groups.
 fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
-    report.clone_groups.sort_by(|a, b| {
-        b.instances
-            .len()
-            .cmp(&a.instances.len())
-            .then(b.line_count.cmp(&a.line_count))
-            .then_with(|| match (a.instances.first(), b.instances.first()) {
-                (Some(ai), Some(bi)) => ai
-                    .file
-                    .cmp(&bi.file)
-                    .then(ai.start_line.cmp(&bi.start_line)),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            })
-    });
+    report.sort();
     report.clone_groups.truncate(n);
     fallow_engine::duplicates::refresh_clone_families(report, root);
     report.stats.clone_groups = report.clone_groups.len();
@@ -770,6 +753,8 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     };
     print_default_ignore_note(result, input.quiet);
     print_min_occurrences_note(result, input.quiet);
+    print_reviewed_clones_note(result, input.quiet);
+    print_near_candidates_skipped_note(result, input.quiet);
     print_ignore_imports_note(result, input.quiet);
     let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
     if report_code != ExitCode::SUCCESS {
@@ -859,6 +844,48 @@ pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
     );
 }
 
+fn reviewed_clones_note(hidden: usize) -> Option<String> {
+    if hidden == 0 {
+        return None;
+    }
+    let noun = if hidden == 1 { "group" } else { "groups" };
+    Some(format!(
+        "note: hid {hidden} reviewed clone {noun} from duplicates.ignoredClones (remove a key to review it again)"
+    ))
+}
+
+fn print_reviewed_clones_note(result: &DupesResult, quiet: bool) {
+    if quiet || !matches!(result.config.output, OutputFormat::Human) {
+        return;
+    }
+    if let Some(note) = reviewed_clones_note(result.report.stats.clone_groups_ignored) {
+        eprintln!("{note}");
+    }
+}
+
+fn near_candidates_skipped_note(skipped: usize) -> Option<String> {
+    if skipped == 0 {
+        return None;
+    }
+    let noun = if skipped == 1 {
+        "comparison"
+    } else {
+        "comparisons"
+    };
+    Some(format!(
+        "warning: near-miss results may be incomplete: skipped {skipped} candidate {noun} to stay within work limits (narrow with --workspace or --changed-since)"
+    ))
+}
+
+fn print_near_candidates_skipped_note(result: &DupesResult, quiet: bool) {
+    if quiet || !matches!(result.config.output, OutputFormat::Human) {
+        return;
+    }
+    if let Some(note) = near_candidates_skipped_note(result.report.stats.near_candidates_skipped) {
+        eprintln!("{note}");
+    }
+}
+
 /// Emit a stderr note when module wiring was excluded from clone detection.
 /// Human-format only, so machine readers never see decorative stderr noise.
 /// Fires only when clone groups were reported, so a clean run stays quiet; it
@@ -902,7 +929,7 @@ mod tests {
             end_line: end,
             start_col: 0,
             end_col: 0,
-            fragment: format!("// clone body of {file}"),
+            fragment: format!("const cloneBody = {file:?};"),
         }
     }
 
@@ -911,6 +938,7 @@ mod tests {
             instances,
             token_count: tokens,
             line_count: lines,
+            similarity: None,
         }
     }
 
@@ -935,6 +963,8 @@ mod tests {
                 clone_instances,
                 duplication_percentage: 0.0,
                 clone_groups_below_min_occurrences: 0,
+                clone_groups_ignored: 0,
+                near_candidates_skipped: 0,
             },
         }
     }
@@ -956,6 +986,7 @@ mod tests {
             quiet: true,
             allow_remote_extends: false,
             mode: Some(mode),
+            near: false,
             min_tokens: Some(50),
             min_lines: Some(5),
             min_occurrences: Some(2),
@@ -988,6 +1019,35 @@ mod tests {
         let (file, line) = parse_trace_spec("src/utils.ts:42").unwrap();
         assert_eq!(file, "src/utils.ts");
         assert_eq!(line, 42);
+    }
+
+    #[test]
+    fn reviewed_clones_note_pluralizes_and_explains_resurfacing() {
+        assert_eq!(
+            reviewed_clones_note(1).as_deref(),
+            Some(
+                "note: hid 1 reviewed clone group from duplicates.ignoredClones (remove a key to review it again)"
+            )
+        );
+        assert!(
+            reviewed_clones_note(2)
+                .unwrap()
+                .contains("2 reviewed clone groups")
+        );
+        assert!(reviewed_clones_note(0).is_none());
+    }
+
+    #[test]
+    fn near_candidates_skipped_note_pluralizes_and_gives_next_step() {
+        assert!(
+            near_candidates_skipped_note(1)
+                .unwrap()
+                .contains("skipped 1 candidate comparison")
+        );
+        let plural = near_candidates_skipped_note(2).unwrap();
+        assert!(plural.contains("skipped 2 candidate comparisons"));
+        assert!(plural.contains("--workspace or --changed-since"));
+        assert!(near_candidates_skipped_note(0).is_none());
     }
 
     #[test]
@@ -1089,7 +1149,7 @@ mod tests {
             make_group(vec![instance("b-pair.ts", 1, 10); 2], 50, 10),
         ];
         let mut report = make_report(groups, 5, 100);
-        report.sort(); // Path-sort first, mirroring the call site.
+        report.sort();
 
         apply_top(&mut report, 3, Path::new("/project"));
 
@@ -1111,6 +1171,34 @@ mod tests {
             !kept_sizes.contains(&2),
             "2-instance pairs must be dropped by top-3"
         );
+    }
+
+    #[test]
+    fn apply_top_prefers_spread_when_base_scores_match() {
+        let groups = vec![
+            make_group(
+                vec![
+                    instance("/project/src/a.ts", 1, 10),
+                    instance("/project/src/b.ts", 1, 10),
+                ],
+                100,
+                10,
+            ),
+            make_group(
+                vec![
+                    instance("/project/packages/a/a.ts", 1, 10),
+                    instance("/project/packages/b/b.ts", 1, 10),
+                ],
+                100,
+                10,
+            ),
+        ];
+        let mut report = make_report(groups, 4, 100);
+
+        apply_top(&mut report, 1, Path::new("/project"));
+
+        assert_eq!(report.clone_groups.len(), 1);
+        assert_eq!(report.clone_groups[0].spread(), 2);
     }
 
     #[test]
@@ -1189,6 +1277,22 @@ mod tests {
         };
         let config = build_dupes_config(&opts, &toml);
         assert!(config.enabled);
+    }
+
+    #[test]
+    fn build_config_merges_near_and_preserves_reviewed_clones() {
+        let root = PathBuf::from("/project");
+        let opts = default_opts_for_config(&root, DupesMode::Mild);
+        let toml = DuplicatesConfig {
+            near: true,
+            ignored_clones: vec!["dup:12345678:2".to_string()],
+            ..DuplicatesConfig::default()
+        };
+
+        let config = build_dupes_config(&opts, &toml);
+
+        assert!(config.near);
+        assert_eq!(config.ignored_clones, toml.ignored_clones);
     }
 
     #[test]
@@ -1591,7 +1695,7 @@ mod tests {
         assert_eq!(stats.clone_groups, 2);
         assert_eq!(stats.clone_instances, 4);
         assert_eq!(stats.duplicated_lines, 32);
-        assert_eq!(stats.duplicated_tokens, 160);
+        assert_eq!(stats.duplicated_tokens, 80);
         assert_eq!(stats.files_with_clones, 4);
         assert!((stats.duplication_percentage - 6.4).abs() < f64::EPSILON);
     }
@@ -1966,7 +2070,7 @@ mod tests {
     }
 
     #[test]
-    fn recompute_stats_counts_tokens_per_instance() {
+    fn recompute_stats_counts_redundant_token_copies() {
         let group = make_group(
             vec![
                 instance("/project/src/a.ts", 1, 5),
@@ -1978,7 +2082,8 @@ mod tests {
         );
         let mut report = make_report(vec![group], 10, 100);
         report.stats.total_lines = 100;
+        report.stats.total_tokens = 500;
         let stats = recompute_stats(&report);
-        assert_eq!(stats.duplicated_tokens, 120);
+        assert_eq!(stats.duplicated_tokens, 80);
     }
 }

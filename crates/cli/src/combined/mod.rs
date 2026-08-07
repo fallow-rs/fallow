@@ -55,6 +55,7 @@ pub struct CombinedOptions<'a> {
     pub run_dupes: bool,
     pub run_health: bool,
     pub dupes_mode: Option<DupesMode>,
+    pub dupes_near: bool,
     pub dupes_threshold: Option<f64>,
     pub dupes_min_tokens: Option<usize>,
     pub dupes_min_lines: Option<usize>,
@@ -471,6 +472,7 @@ fn build_combined_dupes_options<'a>(
             opts.dupes_mode
                 .unwrap_or_else(|| DupesMode::from(dupes_cfg.mode)),
         ),
+        near: opts.dupes_near || dupes_cfg.near,
         min_tokens: Some(opts.dupes_min_tokens.unwrap_or(dupes_cfg.min_tokens)),
         min_lines: Some(opts.dupes_min_lines.unwrap_or(dupes_cfg.min_lines)),
         min_occurrences: Some(
@@ -691,6 +693,7 @@ mod tests {
             run_dupes: true,
             run_health: true,
             dupes_mode: None,
+            dupes_near: false,
             dupes_threshold: None,
             dupes_min_tokens: None,
             dupes_min_lines: None,

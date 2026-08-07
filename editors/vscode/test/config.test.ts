@@ -38,6 +38,7 @@ import {
   getDuplicationMinOccurrencesOverride,
   getDuplicationMinTokensOverride,
   getDuplicationModeOverride,
+  getDuplicationNearOverride,
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
   getDiagnosticSeverity,
@@ -58,6 +59,7 @@ describe("duplication setting overrides", () => {
   it("ignores package defaults so project config can win", () => {
     inspected = {
       "duplication.mode": { defaultValue: "mild" },
+      "duplication.near": { defaultValue: false },
       "duplication.threshold": { defaultValue: 0 },
       "duplication.minTokens": { defaultValue: 50 },
       "duplication.minLines": { defaultValue: 5 },
@@ -68,6 +70,7 @@ describe("duplication setting overrides", () => {
     };
 
     expect(getDuplicationModeOverride()).toBeUndefined();
+    expect(getDuplicationNearOverride()).toBeUndefined();
     expect(getDuplicationThresholdOverride()).toBeUndefined();
     expect(getDuplicationMinTokensOverride()).toBeUndefined();
     expect(getDuplicationMinLinesOverride()).toBeUndefined();
@@ -80,6 +83,7 @@ describe("duplication setting overrides", () => {
   it("returns explicit configured values, including defaults used as overrides", () => {
     inspected = {
       "duplication.mode": { workspaceValue: "mild" },
+      "duplication.near": { workspaceValue: true },
       "duplication.threshold": { workspaceValue: 0 },
       "duplication.minTokens": { workspaceValue: 50 },
       "duplication.minLines": { workspaceValue: 5 },
@@ -90,6 +94,7 @@ describe("duplication setting overrides", () => {
     };
 
     expect(getDuplicationModeOverride()).toBe("mild");
+    expect(getDuplicationNearOverride()).toBe(true);
     expect(getDuplicationThresholdOverride()).toBe(0);
     expect(getDuplicationMinTokensOverride()).toBe(50);
     expect(getDuplicationMinLinesOverride()).toBe(5);

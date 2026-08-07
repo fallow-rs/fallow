@@ -49,6 +49,7 @@ fn make_file_tokens_for(count: usize) -> fallow_engine::duplicates::tokenize::Fi
     let line_count = source.lines().count().max(1);
     FileTokens {
         tokens,
+        function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
         source,
         line_count,
@@ -138,6 +139,7 @@ fn make_family_grouping_report(family_count: usize, groups_per_family: usize) ->
                 ],
                 token_count: 30,
                 line_count: 6,
+                similarity: None,
             });
         }
     }

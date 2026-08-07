@@ -283,6 +283,9 @@ pub enum PunctuationType {
 pub struct FileTokens {
     /// The extracted token sequence.
     pub tokens: Vec<SourceToken>,
+    /// Source spans for function-like regions eligible for near-miss clone
+    /// detection. Includes declarations, expressions, arrows, and methods.
+    pub function_spans: Vec<Span>,
     /// Source spans for invocation-shaped expressions that should not be
     /// reported as actionable duplicate code when the whole clone fits inside
     /// one of these spans.

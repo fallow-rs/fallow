@@ -47,6 +47,12 @@ pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
         detector::families::detect_mirrored_directories(&report.clone_families, root);
 }
 
+/// Refresh near-clone metrics after a caller filters group instances.
+#[doc(hidden)]
+pub fn refresh_clone_group_metrics(group: &mut CloneGroup) {
+    detector::refresh_near_group_metrics(group);
+}
+
 /// Recompute duplication statistics after clone groups have been filtered.
 ///
 /// Uses per-file line deduplication, matching the detector's stats model, so
@@ -67,7 +73,7 @@ pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
                 lines.insert(line);
             }
         }
-        duplicated_tokens += group.token_count * group.instances.len();
+        duplicated_tokens += group.token_count * group.instances.len().saturating_sub(1);
     }
 
     let duplicated_lines: usize = file_dup_lines.values().map(FxHashSet::len).sum();
@@ -78,7 +84,7 @@ pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
         total_lines: report.stats.total_lines,
         duplicated_lines,
         total_tokens: report.stats.total_tokens,
-        duplicated_tokens,
+        duplicated_tokens: duplicated_tokens.min(report.stats.total_tokens),
         clone_groups: report.clone_groups.len(),
         clone_instances,
         duplication_percentage: if report.stats.total_lines > 0 {
@@ -87,6 +93,8 @@ pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
             0.0
         },
         clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
+        clone_groups_ignored: report.stats.clone_groups_ignored,
+        near_candidates_skipped: report.stats.near_candidates_skipped,
     }
 }
 
@@ -221,11 +229,13 @@ mod tests {
                 instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 20, 24)],
                 token_count: 30,
                 line_count: 10,
+                similarity: None,
             },
             CloneGroup {
                 instances: vec![instance("src/a.ts", 5, 12), instance("src/c.ts", 40, 44)],
                 token_count: 20,
                 line_count: 8,
+                similarity: None,
             },
         ]);
 
@@ -236,7 +246,7 @@ mod tests {
         assert_eq!(stats.total_lines, 100);
         assert_eq!(stats.duplicated_lines, 22);
         assert_eq!(stats.total_tokens, 1_000);
-        assert_eq!(stats.duplicated_tokens, 100);
+        assert_eq!(stats.duplicated_tokens, 50);
         assert_eq!(stats.clone_groups, 2);
         assert_eq!(stats.clone_instances, 4);
         assert!((stats.duplication_percentage - 22.0).abs() < f64::EPSILON);
@@ -249,6 +259,7 @@ mod tests {
             instances: vec![instance("src/a.ts", 1, 1)],
             token_count: 5,
             line_count: 1,
+            similarity: None,
         }]);
         report.stats.total_lines = 0;
 
@@ -273,6 +284,7 @@ mod tests {
             ],
             token_count: 5,
             line_count: 1,
+            similarity: None,
         }];
         let fingerprints = CloneFingerprintSet::from_groups(&groups);
         let fingerprint = fingerprints.fingerprint_for_group(&groups[0]);

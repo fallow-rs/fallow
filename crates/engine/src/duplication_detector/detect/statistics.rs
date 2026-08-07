@@ -52,5 +52,7 @@ pub(super) fn compute_stats(
         clone_instances,
         duplication_percentage,
         clone_groups_below_min_occurrences: 0,
+        clone_groups_ignored: 0,
+        near_candidates_skipped: 0,
     }
 }
