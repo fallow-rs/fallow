@@ -50,7 +50,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("exposes CombinedOutput with optional check/dupes/health branches", () => {
     const sample: CombinedOutput = {
-      schema_version: 8,
+      schema_version: 9,
       version: "0.0.0-test",
       elapsed_ms: 0,
     };
@@ -61,7 +61,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("requires the schema_version / version / elapsed_ms / total_issues envelope on CheckOutput", () => {
     const sample: CheckOutput = {
-      schema_version: 8,
+      schema_version: 9,
       version: "0.0.0-test",
       elapsed_ms: 0,
       total_issues: 0,
