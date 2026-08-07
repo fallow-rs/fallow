@@ -29,7 +29,7 @@ const baseOptions = {
 };
 
 const emptyCheck = (): FallowCheckResult => ({
-  schema_version: 7,
+  schema_version: 8,
   version: "0.0.0-test",
   elapsed_ms: 0,
   total_issues: 0,
