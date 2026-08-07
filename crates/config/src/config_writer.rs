@@ -83,6 +83,7 @@ pub fn preserve_target_mode(temp: &Path, target: &Path) {
     let _ = std::fs::set_permissions(temp, std::fs::Permissions::from_mode(mode & 0o7777));
 }
 
+/// Copy the target file's existing permissions onto the temp file.
 #[cfg(not(unix))]
 pub fn preserve_target_mode(_temp: &Path, _target: &Path) {
     // File-mode bits are a Unix concept; Windows ACLs persist with the existing file.
