@@ -1319,7 +1319,7 @@ mod tests {
             .expect("health should run through programmatic health boundary");
 
         assert_eq!(json["kind"], "health");
-        assert_eq!(json["schema_version"], 9);
+        assert_eq!(json["schema_version"], 10);
         assert!(json.get("health_score").is_some());
     }
 

@@ -8,6 +8,6 @@ expression: redacted
   CRAP scores are estimated from export references; run `fallow health --coverage <coverage-final.json>` for exact scores.
   src/complex.ts
     :1 classify CRITICAL
-          13 cyclomatic   13 cognitive   15 lines
-         182.0 CRAP
+          13 ! cyclomatic   13   cognitive   15 lines
+         182.0 ! CRAP
   Functions exceeding cyclomatic, cognitive, or CRAP thresholds (https://docs.fallow.tools/explanations/health#complexity-metrics)

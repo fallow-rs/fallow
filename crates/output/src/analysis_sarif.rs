@@ -366,23 +366,29 @@ fn append_complexity_sarif_results(
     }
 }
 
+/// Build the SARIF rule id and message for a complexity finding.
+///
+/// Thresholds come from the finding's resolved ceilings, so an override-affected
+/// finding is never described against a ceiling it was not evaluated with
+/// (issue #2163).
 fn health_complexity_sarif_message(
     finding: &crate::ComplexityViolation,
     report: &HealthReport,
 ) -> (&'static str, String) {
+    let thresholds = finding.resolved_thresholds(&report.summary);
     match finding.exceeded {
         ExceededThreshold::Cyclomatic => (
             "fallow/high-cyclomatic-complexity",
             format!(
                 "'{}' has cyclomatic complexity {} (threshold: {})",
-                finding.name, finding.cyclomatic, report.summary.max_cyclomatic_threshold,
+                finding.name, finding.cyclomatic, thresholds.max_cyclomatic,
             ),
         ),
         ExceededThreshold::Cognitive => (
             "fallow/high-cognitive-complexity",
             format!(
                 "'{}' has cognitive complexity {} (threshold: {})",
-                finding.name, finding.cognitive, report.summary.max_cognitive_threshold,
+                finding.name, finding.cognitive, thresholds.max_cognitive,
             ),
         ),
         ExceededThreshold::Both => (
@@ -391,9 +397,9 @@ fn health_complexity_sarif_message(
                 "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
                 finding.name,
                 finding.cyclomatic,
-                report.summary.max_cyclomatic_threshold,
+                thresholds.max_cyclomatic,
                 finding.cognitive,
-                report.summary.max_cognitive_threshold,
+                thresholds.max_cognitive,
             ),
         ),
         ExceededThreshold::Crap
@@ -409,11 +415,7 @@ fn health_complexity_sarif_message(
                 "fallow/high-crap-score",
                 format!(
                     "'{}' has CRAP score {:.1} (threshold: {:.1}, cyclomatic {}{})",
-                    finding.name,
-                    crap,
-                    report.summary.max_crap_threshold,
-                    finding.cyclomatic,
-                    coverage,
+                    finding.name, crap, thresholds.max_crap, finding.cyclomatic, coverage,
                 ),
             )
         }
@@ -682,5 +684,76 @@ mod tests {
                 ["uri"],
             "src/a.ts"
         );
+    }
+
+    fn sarif_message_violation(
+        exceeded: ExceededThreshold,
+        effective: Option<crate::HealthEffectiveThresholds>,
+    ) -> crate::ComplexityViolation {
+        crate::ComplexityViolation {
+            path: PathBuf::from("src/Widget.svelte"),
+            name: "<template>".to_string(),
+            line: 5,
+            col: 0,
+            cyclomatic: 25,
+            cognitive: 21,
+            line_count: 13,
+            param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded,
+            severity: crate::FindingSeverity::High,
+            crap: Some(90.0),
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: effective,
+            threshold_source: effective.map(|_| crate::ThresholdSource::Override),
+        }
+    }
+
+    #[test]
+    fn sarif_message_uses_the_override_ceiling_not_the_global_one() {
+        let report = HealthReport::default();
+        let overridden = crate::HealthEffectiveThresholds {
+            max_cyclomatic: 500,
+            max_cognitive: 500,
+            max_crap: 500.0,
+            max_unit_size: 60,
+        };
+
+        let (global_rule, global_message) = health_complexity_sarif_message(
+            &sarif_message_violation(ExceededThreshold::Cyclomatic, None),
+            &report,
+        );
+        assert_eq!(global_rule, "fallow/high-cyclomatic-complexity");
+        assert!(
+            global_message.contains(&format!(
+                "threshold: {}",
+                report.summary.max_cyclomatic_threshold
+            )),
+            "{global_message}"
+        );
+
+        let (_, override_message) = health_complexity_sarif_message(
+            &sarif_message_violation(ExceededThreshold::Cyclomatic, Some(overridden)),
+            &report,
+        );
+        assert!(
+            override_message.contains("threshold: 500"),
+            "an override-affected finding must not be described against the global ceiling: {override_message}"
+        );
+
+        let (crap_rule, crap_message) = health_complexity_sarif_message(
+            &sarif_message_violation(ExceededThreshold::Crap, Some(overridden)),
+            &report,
+        );
+        assert_eq!(crap_rule, "fallow/high-crap-score");
+        assert!(crap_message.contains("threshold: 500.0"), "{crap_message}");
     }
 }

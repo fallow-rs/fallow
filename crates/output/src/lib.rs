@@ -193,7 +193,8 @@ pub use health_diagnostics::{
 };
 pub use health_findings::{
     HealthActionContext, HealthActionOptions, HealthFinding, HotspotFinding,
-    RefactoringTargetFinding, build_health_finding_actions,
+    RefactoringTargetFinding, SFC_TEMPLATE_SUPPRESS_COMMENT, SFC_TEMPLATE_SUPPRESS_DESCRIPTION,
+    build_health_finding_actions,
 };
 pub use health_grouped::{HealthGroup, HealthGrouping};
 pub use health_report::HealthReport;
@@ -216,8 +217,9 @@ pub use health_scores::{
     HealthScorePenalties, HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry,
     MI_DENSITY_MIN_LINES, OwnershipMetrics, OwnershipState, ReactHookProfile,
     STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthConfidence, StylingHealthPenalties,
-    ThresholdOverrideMetrics, ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource,
-    compute_finding_severity, letter_grade, summarize_coverage_source_consistency,
+    ThresholdOverrideDimension, ThresholdOverrideMetrics, ThresholdOverrideState,
+    ThresholdOverrideStatus, ThresholdSource, compute_finding_severity, letter_grade,
+    summarize_coverage_source_consistency,
 };
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,

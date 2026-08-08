@@ -249,44 +249,64 @@ fn component_refactor_copy(violation: &ComplexityViolation) -> (String, &'static
     )
 }
 
+/// Suppression comment recommended for single-file-component markup templates
+/// (`.svelte`, `.vue`, `.astro`). The `//` form is not markup syntax there and
+/// would render into the DOM as visible text.
+pub const SFC_TEMPLATE_SUPPRESS_COMMENT: &str = "<!-- fallow-ignore-next-line complexity -->";
+
+/// Description of the SFC template suppression action. Names the reported line
+/// rather than the top of the template because the synthetic `<template>` unit
+/// is anchored at its first contributing construct.
+pub const SFC_TEMPLATE_SUPPRESS_DESCRIPTION: &str =
+    "Suppress with an HTML comment on the line immediately preceding the reported line";
+
+const DEFAULT_SUPPRESS_COMMENT: &str = "// fallow-ignore-next-line complexity";
+
 fn build_suppress_action(
     violation: &ComplexityViolation,
     is_template: bool,
     is_component: bool,
 ) -> HealthFindingAction {
-    if is_template && is_standalone_template_path(&violation.path) {
+    let extension = violation.path.extension().and_then(|ext| ext.to_str());
+    if is_template && extension.is_some_and(|ext| ext.eq_ignore_ascii_case("html")) {
         return suppress_file_action(
             "Suppress with an HTML comment at the top of the template",
             "<!-- fallow-ignore-file complexity -->",
             "top-of-template",
         );
     }
+    if is_template
+        && extension.is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("svelte")
+                || ext.eq_ignore_ascii_case("vue")
+                || ext.eq_ignore_ascii_case("astro")
+        })
+    {
+        return suppress_line_action(
+            SFC_TEMPLATE_SUPPRESS_DESCRIPTION,
+            SFC_TEMPLATE_SUPPRESS_COMMENT,
+            "above-template-anchor-line",
+        );
+    }
     if is_template {
         return suppress_line_action(
             "Suppress with an inline comment above the Angular decorator",
+            DEFAULT_SUPPRESS_COMMENT,
             "above-angular-decorator",
         );
     }
     if is_component {
         return suppress_line_action(
             "Suppress with an inline comment above the worst class method (the rollup is anchored at that method's line, so a comment above it hides both the function finding and the rollup)",
+            DEFAULT_SUPPRESS_COMMENT,
             "above-component-worst-method",
         );
     }
     suppress_line_action(
         "Suppress with an inline comment above the function declaration",
+        DEFAULT_SUPPRESS_COMMENT,
         "above-function-declaration",
     )
-}
-
-fn is_standalone_template_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            ["html", "svelte", "vue", "astro"]
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
 }
 
 fn suppress_file_action(description: &str, comment: &str, placement: &str) -> HealthFindingAction {
@@ -301,13 +321,13 @@ fn suppress_file_action(description: &str, comment: &str, placement: &str) -> He
     }
 }
 
-fn suppress_line_action(description: &str, placement: &str) -> HealthFindingAction {
+fn suppress_line_action(description: &str, comment: &str, placement: &str) -> HealthFindingAction {
     HealthFindingAction {
         kind: HealthFindingActionType::SuppressLine,
         auto_fixable: false,
         description: description.to_string(),
         note: None,
-        comment: Some("// fallow-ignore-next-line complexity".to_string()),
+        comment: Some(comment.to_string()),
         placement: Some(placement.to_string()),
         target_path: None,
     }
@@ -338,6 +358,27 @@ fn build_crap_coverage_action(
             comment: None,
             placement: None,
             target_path: Some(owner_str),
+        });
+    }
+
+    // A synthetic `<template>` unit is exercised only through its component, so
+    // its coverage term is fixed at zero and CRAP collapses to CC^2 + CC. No
+    // test the user can write against this unit moves the number, which makes
+    // the generic add-tests advice un-actionable (issue #2163). Angular `.html`
+    // templates are already redirected above through `inherited_from`.
+    if name == "<template>" {
+        return Some(HealthFindingAction {
+            kind: HealthFindingActionType::RefactorFunction,
+            auto_fixable: false,
+            description: format!(
+                "Reduce branching in `{name}` or raise `maxCrap` for this file (a template carries no direct test coverage, so tests cannot lower its CRAP score)"
+            ),
+            note: Some(
+                "CRAP = CC^2 * (1 - cov/100)^3 + CC; a template's coverage term is fixed at zero, so its CRAP is a pure function of branch count. The levers are removing template branches or a health.thresholdOverrides entry setting maxCrap for this file".to_string(),
+            ),
+            comment: None,
+            placement: None,
+            target_path: None,
         });
     }
 
@@ -1067,5 +1108,40 @@ mod hotspot_target_tests {
                 "category_snake_case for {cat:?} drifted from serde rename_all",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod crap_action_tests {
+    use super::*;
+
+    #[test]
+    fn synthetic_template_never_gets_add_tests() {
+        let action = build_crap_coverage_action("<template>", None, true, None)
+            .expect("a CRAP-contributing template gets an action");
+        assert!(
+            !matches!(action.kind, HealthFindingActionType::AddTests),
+            "a template has no unit to test, so add-tests cannot lower its CRAP: {action:?}"
+        );
+        assert!(action.description.contains("maxCrap"));
+    }
+
+    #[test]
+    fn angular_inherited_template_still_redirects_to_the_owning_component() {
+        let owner = Path::new("src/host.component.ts");
+        let action = build_crap_coverage_action("<template>", None, true, Some(owner))
+            .expect("an inherited template gets an action");
+        assert!(matches!(
+            action.kind,
+            HealthFindingActionType::IncreaseCoverage
+        ));
+        assert_eq!(action.target_path.as_deref(), Some("src/host.component.ts"));
+    }
+
+    #[test]
+    fn a_real_function_with_no_coverage_still_gets_add_tests() {
+        let action = build_crap_coverage_action("parseExpression", None, true, None)
+            .expect("an untested function gets an action");
+        assert!(matches!(action.kind, HealthFindingActionType::AddTests));
     }
 }

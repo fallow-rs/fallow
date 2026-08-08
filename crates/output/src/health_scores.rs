@@ -459,6 +459,26 @@ pub struct ComplexityViolation {
     pub threshold_source: Option<ThresholdSource>,
 }
 
+impl ComplexityViolation {
+    /// Ceilings this finding was actually evaluated against: the per-file
+    /// `thresholdOverrides` result when an override matched, otherwise the
+    /// run's global summary ceilings.
+    ///
+    /// Every renderer that prints or compares a threshold must go through this
+    /// so a finding is never described against a ceiling it was not measured
+    /// with.
+    #[must_use]
+    pub fn resolved_thresholds(&self, summary: &HealthSummary) -> HealthEffectiveThresholds {
+        self.effective_thresholds
+            .unwrap_or(HealthEffectiveThresholds {
+                max_cyclomatic: summary.max_cyclomatic_threshold,
+                max_cognitive: summary.max_cognitive_threshold,
+                max_crap: summary.max_crap_threshold,
+                max_unit_size: summary.max_unit_size_threshold,
+            })
+    }
+}
+
 /// Default unit-size ceiling (`health.maxUnitSize`): functions over 60 lines of
 /// code are reported as oversized. Mirrors the config crate's default so
 /// renderers can fill an effective-thresholds fallback without a config handle.
@@ -524,8 +544,29 @@ pub enum ThresholdOverrideStatus {
     Active,
     /// The matched code now passes the global thresholds; the override can go.
     Stale,
+    /// The override raises the ceiling for this dimension but the matched code
+    /// still exceeds the raised value, so the finding survives the override.
+    /// Without this state the row was dropped entirely and a user saw no
+    /// feedback at all on an override that was in force (issue #2163).
+    Insufficient,
     /// The override matches no analyzed file or function.
     NoMatch,
+}
+
+/// Which threshold dimension a `thresholdOverrides` state row describes.
+///
+/// One configured override produces one row per dimension it participates in,
+/// because the complexity ceilings and the CRAP ceiling are evaluated
+/// independently: raising `maxCyclomatic` says nothing about whether the unit
+/// still breaches `maxCrap`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ThresholdOverrideDimension {
+    /// The cyclomatic and cognitive ceilings.
+    Complexity,
+    /// The CRAP-score ceiling.
+    Crap,
 }
 
 /// Current complexity metrics for a matched threshold override entry.
@@ -549,7 +590,17 @@ pub struct ThresholdOverrideState {
     /// Lifecycle state of the override.
     pub status: ThresholdOverrideStatus,
     /// Index of the entry in the configured `thresholdOverrides` array.
+    /// Several rows can share one index when the override participates in more
+    /// than one dimension; group on this to count configured overrides.
     pub override_index: usize,
+    /// Threshold dimension this row describes.
+    pub dimension: ThresholdOverrideDimension,
+    /// Dimensions on which the matched unit still produces a finding despite
+    /// this override. Non-empty means a finding survived; the listed dimensions
+    /// are the ones that breached, whether or not this override configures
+    /// their ceilings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outstanding: Vec<ThresholdOverrideDimension>,
     /// Matched file path, when the override matched one.
     #[serde(
         default,

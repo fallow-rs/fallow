@@ -1,0 +1,17 @@
+---
+const rows: Array<{ id: string; cells: string[]; active: boolean }> = [];
+const mode = 'grid';
+---
+<div class="board">
+  {rows.map((row) => (
+    <div class="row">
+      {row.active && row.cells.map((cell) => (
+        <span class={cell.length > 3 ? 'wide' : cell.length > 1 ? 'mid' : 'thin'}>
+          {cell ?? '-'}
+        </span>
+      ))}
+      {!row.active && mode === 'grid' && <span class="empty">grid</span>}
+      {!row.active && mode !== 'grid' && <span class="empty">list</span>}
+    </div>
+  ))}
+</div>

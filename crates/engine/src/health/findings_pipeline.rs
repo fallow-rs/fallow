@@ -112,6 +112,7 @@ pub(super) fn prepare_health_findings(
             input.diff_index,
         ),
     );
+    annotate_outstanding_dimensions(&mut threshold_state_tracker, &collected.findings);
 
     Ok(HealthFindingsData {
         findings: collected.findings,
@@ -203,6 +204,62 @@ fn apply_optional_crap_findings(
     );
 }
 
+/// Fill each matched override row's `outstanding` list: every dimension the
+/// unit still breaches after the override applied.
+///
+/// The list is not filtered by what the entry configures. An override that
+/// raises `maxCrap` too little, or that raises `maxCyclomatic` while the unit
+/// breaches on cognitive, still leaves a live finding, and suppressing the
+/// disclosure in those cases is what made issue #2163 look like a
+/// threshold-resolution bug.
+///
+/// This cannot be derived inside the tracker. `record_complexity` runs during
+/// collection, before the CRAP merge, so at record time it is unknown whether a
+/// finding survives at all, let alone on which dimension.
+pub(super) fn annotate_outstanding_dimensions(
+    tracker: &mut ThresholdOverrideStateTracker,
+    findings: &[ComplexityViolation],
+) {
+    // Both sides carry the discovery path: the tracker records the same
+    // `path` value the finding is built from, so no relativization is needed.
+    let mut exceeded_by_unit: rustc_hash::FxHashMap<
+        (&std::path::Path, &str),
+        fallow_output::ExceededThreshold,
+    > = rustc_hash::FxHashMap::default();
+    for finding in findings {
+        exceeded_by_unit.insert(
+            (finding.path.as_path(), finding.name.as_str()),
+            finding.exceeded,
+        );
+    }
+
+    for state in tracker.states_mut() {
+        let (Some(path), Some(function)) = (state.path.as_deref(), state.function.as_deref())
+        else {
+            continue;
+        };
+        let Some(exceeded) = exceeded_by_unit.get(&(path, function)).copied() else {
+            continue;
+        };
+        if exceeded.includes_cyclomatic() || exceeded.includes_cognitive() {
+            state
+                .outstanding
+                .push(fallow_output::ThresholdOverrideDimension::Complexity);
+        }
+        if exceeded.includes_crap() {
+            state
+                .outstanding
+                .push(fallow_output::ThresholdOverrideDimension::Crap);
+        }
+    }
+}
+
+/// `no_match` rows are the only feedback a user gets that an override glob
+/// matched nothing, so a full-repo run must emit them. The `diff_index`
+/// parameter is the RESOLVED index, so a run that actually loaded a shared diff
+/// is already excluded by the `diff_index.is_none()` clause; gating on the
+/// `use_shared_diff_index` request instead made the rows unreachable from every
+/// CLI entry point (issue #2163).
 fn should_emit_no_match_threshold_overrides(
     opts: &HealthOptions<'_>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -211,7 +268,6 @@ fn should_emit_no_match_threshold_overrides(
 ) -> bool {
     opts.changed_since.is_none()
         && opts.diff_index.is_none()
-        && !opts.use_shared_diff_index
         && opts.workspace.is_none()
         && opts.changed_workspaces.is_none()
         && changed_files.is_none()

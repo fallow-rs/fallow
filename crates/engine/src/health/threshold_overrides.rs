@@ -150,11 +150,7 @@ impl ThresholdOverrideResolver {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ThresholdOverrideDimension {
-    Complexity,
-    Crap,
-}
+use fallow_output::ThresholdOverrideDimension;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ThresholdOverrideStateKey {
@@ -217,7 +213,7 @@ impl ThresholdOverrideStateTracker {
             } else if !global_exceeded {
                 fallow_output::ThresholdOverrideStatus::Stale
             } else {
-                continue;
+                fallow_output::ThresholdOverrideStatus::Insufficient
             };
             self.push_state(ThresholdOverrideStateInput {
                 status,
@@ -255,7 +251,7 @@ impl ThresholdOverrideStateTracker {
             } else if metrics.crap < global.crap {
                 fallow_output::ThresholdOverrideStatus::Stale
             } else {
-                continue;
+                fallow_output::ThresholdOverrideStatus::Insufficient
             };
             self.push_state(ThresholdOverrideStateInput {
                 status,
@@ -315,12 +311,21 @@ impl ThresholdOverrideStateTracker {
         }
     }
 
+    /// Mutable access to the accumulated rows so the findings pipeline can
+    /// annotate `outstanding` once the findings vector is final. The tracker
+    /// itself records during collection, before the CRAP merge, so it cannot
+    /// know which dimension ultimately kept a finding alive.
+    pub(super) fn states_mut(&mut self) -> &mut [fallow_output::ThresholdOverrideState] {
+        &mut self.states
+    }
+
     pub(super) fn into_states(mut self) -> Vec<fallow_output::ThresholdOverrideState> {
         self.states.sort_by(|a, b| {
             a.override_index
                 .cmp(&b.override_index)
                 .then(a.path.cmp(&b.path))
                 .then(a.function.cmp(&b.function))
+                .then(a.dimension.cmp(&b.dimension))
         });
         self.states
     }
@@ -329,6 +334,7 @@ impl ThresholdOverrideStateTracker {
         let status_key = match input.status {
             fallow_output::ThresholdOverrideStatus::Active => "active",
             fallow_output::ThresholdOverrideStatus::Stale => "stale",
+            fallow_output::ThresholdOverrideStatus::Insufficient => "insufficient",
             fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let key = ThresholdOverrideStateKey {
@@ -344,6 +350,8 @@ impl ThresholdOverrideStateTracker {
         self.states.push(fallow_output::ThresholdOverrideState {
             status: input.status,
             override_index: input.override_index,
+            dimension: input.dimension,
+            outstanding: Vec::new(),
             path: input.path,
             function: input.function,
             configured_thresholds: input.configured_thresholds,

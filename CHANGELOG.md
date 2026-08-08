@@ -19,6 +19,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CheckSchemaVersion`, `HealthSchemaVersion`, or the corresponding envelope
   type. The legacy `SchemaVersion` export remains an alias of
   `CheckSchemaVersion` for source compatibility.
+- **Health JSON schema version 10: `threshold_overrides[]` rows carry a
+  `dimension`.** One configured `health.thresholdOverrides` entry now emits one
+  row per threshold dimension it participates in (`complexity` for the
+  cyclomatic and cognitive ceilings, `crap` for the CRAP ceiling), because
+  raising `maxCyclomatic` says nothing about whether the unit still breaches
+  `maxCrap`. `dimension` is required and always present, so the rows are not
+  byte-identical for an unchanged consumer path and the health
+  `schema_version` moves from 9 to 10. `status` gains a fourth value,
+  `insufficient`, for an override that raises a ceiling the code still exceeds;
+  such an override previously emitted no row at all. A new optional
+  `outstanding[]` lists the dimensions a matched unit still breaches after the
+  override applied. Migration: group rows on `override_index` to count
+  configured overrides, and treat `insufficient` as "override in force, finding
+  survives".
+- **Two `--format compact` health line grammars gained fields.** The
+  `high-complexity:` line gained a trailing `exceeded=<dimension>` field
+  between `severity=` and `crap=`, and the `threshold-override:` line gained a
+  dimension segment after the override index plus an optional trailing
+  `outstanding=` field. Consumers that split these lines positionally past
+  `severity` or past the index need to adapt; consumers that parse
+  `key=value` pairs are unaffected.
 - **Malformed config shapes now fail loud instead of being silently
   dropped.** Three previously-tolerated shapes are rejected at config load:
   a malformed `extends` value (must be a string or an array of strings), an
@@ -42,12 +63,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   label both the await frame and its continuation, including when both labels
   share one VS Code decoration and hover; explicit continuation totals are
   unchanged. Standalone Svelte, Vue, and Astro template findings now also emit
-  a valid file-level HTML suppression instead of an Angular decorator hint.
+  a valid HTML-comment suppression anchored at the reported line instead of
+  an Angular decorator hint.
   Regex literals inside template expressions no longer hide the selected await
   state or logical operators that follow the regex.
   Standalone health, combined, and audit output are version 9; dead-code and
   unrelated output formats keep their existing versions. JSON consumers must
   handle the two new values.
+- **A complexity finding now names the dimension that fired, so a
+  `thresholdOverrides` entry that did not silence it is diagnosable**
+  ([#2163](https://github.com/fallow-rs/fallow/issues/2163)). Raising
+  `maxCyclomatic` and `maxCognitive` on a framework `<template>` left the
+  finding in place because it fired on CRAP, and nothing in the output said
+  so: the human report printed the cyclomatic and cognitive numbers with no
+  marker, and the override section reported the entry as `active` next to the
+  surviving finding. Human output now marks the breaching metric, prints the
+  ceilings in force under an override-affected finding, and labels each
+  override row with its dimension, its status (including the new
+  `insufficient`), and the dimensions the unit still breaches. `--format
+  compact` and `--format markdown` carry the same information, and SARIF
+  interpolates the finding's own resolved ceiling instead of the run's global
+  one.
+- **Suppression advice for `<template>` findings matches the file's
+  framework.** Every synthetic template finding recommended
+  `// fallow-ignore-next-line complexity` above an `@Component` decorator,
+  including in `.svelte`, `.vue`, and `.astro` files that have no decorator.
+  Single-file components now get `<!-- fallow-ignore-next-line complexity -->`
+  on the line above the reported line (`placement` value
+  `above-template-anchor-line`), `.html` templates get the HTML comment form,
+  and only inline templates in a component class keep the Angular decorator
+  wording. A template finding no longer suggests adding tests to lower its
+  CRAP score: a template carries no direct coverage, so its CRAP is driven by
+  branching alone. `fallow explain` for the complexity metrics describes all
+  four template dialects instead of Angular only.
+- **`thresholdOverrides` entries whose glob matches nothing are reported
+  again.** The `no_match` row was gated on a flag that is set on every CLI
+  entry point, so a typo in an override path produced silence rather than a
+  row saying it matched nothing.
 - **Complexity findings in framework templates now show which conditions
   caused them.** A `<template>` finding in Vue, Angular, Svelte, or Astro
   reported a cyclomatic and cognitive number with nothing behind it, so the

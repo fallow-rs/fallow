@@ -11,7 +11,11 @@ use crate::{
 };
 
 /// Current schema version for the standalone health JSON envelope.
-pub const HEALTH_SCHEMA_VERSION: u32 = 9;
+///
+/// Version 10 adds the required `dimension` field to `threshold_overrides[]`
+/// rows and the `insufficient` status value, so the rows are no longer
+/// byte-identical for an unchanged consumer path (issue #2163).
+pub const HEALTH_SCHEMA_VERSION: u32 = 10;
 
 /// Exact schema version for [`HealthOutput`].
 #[cfg(feature = "schema")]
