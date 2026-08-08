@@ -5,7 +5,13 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::{SourceType, Span};
 
+mod fragment;
 mod lexical;
+
+pub(crate) use fragment::{
+    FragmentTokenizationKind, FragmentTokenizationStrategy, fragment_tokenization_kind,
+    tokenize_fragment,
+};
 
 #[cfg(test)]
 pub use super::token_types::KeywordType;

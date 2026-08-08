@@ -14,6 +14,9 @@ use fallow_config::DetectionMode;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::{Xxh3, xxh3_64};
 
+use super::tokenize::{
+    FragmentTokenizationKind, FragmentTokenizationStrategy, fragment_tokenization_kind,
+};
 use super::types::{CloneGroup, CloneInstance, RefactoringKind, RefactoringSuggestion};
 
 /// Prefix marking a clone-group fingerprint addressable via `--trace`.
@@ -274,7 +277,10 @@ fn distinct_fragment_inputs(instances: &[CloneInstance]) -> Vec<(FragmentTokeniz
         .iter()
         .map(|instance| {
             (
-                fragment_tokenization_kind(&instance.file),
+                fragment_tokenization_kind(
+                    &instance.file,
+                    FragmentTokenizationStrategy::Fingerprint,
+                ),
                 instance.fragment.as_str(),
             )
         })
@@ -282,58 +288,6 @@ fn distinct_fragment_inputs(instances: &[CloneInstance]) -> Vec<(FragmentTokeniz
     fragments.sort_unstable();
     fragments.dedup();
     fragments
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum FragmentTokenizationKind {
-    JavaScript,
-    Jsx,
-    Mjs,
-    Cjs,
-    TypeScript,
-    Tsx,
-    Mts,
-    Cts,
-    Css,
-    Scss,
-    Sass,
-    Less,
-}
-
-impl FragmentTokenizationKind {
-    fn path(self) -> &'static Path {
-        Path::new(match self {
-            Self::JavaScript => "fragment.js",
-            Self::Jsx => "fragment.jsx",
-            Self::Mjs => "fragment.mjs",
-            Self::Cjs => "fragment.cjs",
-            Self::TypeScript => "fragment.ts",
-            Self::Tsx => "fragment.tsx",
-            Self::Mts => "fragment.mts",
-            Self::Cts => "fragment.cts",
-            Self::Css => "fragment.css",
-            Self::Scss => "fragment.scss",
-            Self::Sass => "fragment.sass",
-            Self::Less => "fragment.less",
-        })
-    }
-}
-
-fn fragment_tokenization_kind(path: &Path) -> FragmentTokenizationKind {
-    match path.extension().and_then(|extension| extension.to_str()) {
-        Some("js") => FragmentTokenizationKind::JavaScript,
-        Some("jsx") => FragmentTokenizationKind::Jsx,
-        Some("mjs") => FragmentTokenizationKind::Mjs,
-        Some("cjs") => FragmentTokenizationKind::Cjs,
-        Some("tsx") => FragmentTokenizationKind::Tsx,
-        Some("mts") => FragmentTokenizationKind::Mts,
-        Some("cts") => FragmentTokenizationKind::Cts,
-        Some("css") => FragmentTokenizationKind::Css,
-        Some("scss") => FragmentTokenizationKind::Scss,
-        Some("sass") => FragmentTokenizationKind::Sass,
-        Some("less") => FragmentTokenizationKind::Less,
-        _ => FragmentTokenizationKind::TypeScript,
-    }
 }
 
 fn normalized_fragment_sequence(path: &Path, fragment: &str) -> Vec<u64> {

@@ -74,6 +74,15 @@ error by suppressing a downstream detector.
   function-like spans with semantic shingles while retaining exact results from
   the configured mode. Candidate generation is deterministically bounded and
   reports skipped comparisons instead of hiding incomplete work.
+- Near groups carry a required similarity inside the engine and convert to the
+  shared output type only at the detector boundary. `CloneGroup::kind()` is the
+  canonical way to distinguish exact and near groups after that conversion.
+- Extracted-fragment language selection is centralized in the duplication
+  tokenizer. Fingerprints preserve extension-specific tokenization, while
+  function fragments use the closest JavaScript parser mode for their source.
+- Clone-group spread is the exact maximum of same-file interval distance and
+  lexical parent-directory tree distance. Its implementation must remain
+  equivalent to the pairwise definition without doing pairwise path work.
 - Clone fingerprints are based on normalized token sequences, not raw source
   text. Formatting, comments, and line endings therefore preserve identity.
   Reviewed clone keys append the surviving instance count so token changes and

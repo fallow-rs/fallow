@@ -1,7 +1,7 @@
 //! Shared duplicate-code output contracts.
 
 use std::cmp::{Ordering, Reverse};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -44,7 +44,32 @@ pub struct CloneGroup {
     pub similarity: Option<f64>,
 }
 
+/// Whether a clone group is exact or a near-miss match.
+///
+/// This is derived from the serialized clone-group fields and does not add a
+/// separate discriminator to the output contract.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum CloneGroupKind {
+    /// An exact or normalization-equivalent clone group.
+    Exact,
+    /// A near-miss group and its lowest all-pairs similarity.
+    Near {
+        /// Lowest all-pairs similarity for the group.
+        similarity: f64,
+    },
+}
+
 impl CloneGroup {
+    /// Return the semantic kind represented by this clone group.
+    #[must_use]
+    pub fn kind(&self) -> CloneGroupKind {
+        self.similarity
+            .map_or(CloneGroupKind::Exact, |similarity| CloneGroupKind::Near {
+                similarity,
+            })
+    }
+
     /// Maximum directory-tree or same-file line distance between instances.
     #[must_use]
     pub fn spread(&self) -> usize {
@@ -73,13 +98,41 @@ const SPREAD_RANK_WEIGHTS: [u64; MAX_RANKED_SPREAD + 1] = [
 /// 250-line steps. The returned value is not capped; only ranking caps spread.
 #[must_use]
 pub fn clone_group_spread(instances: &[CloneInstance]) -> usize {
-    let mut spread = 0;
-    for (index, left) in instances.iter().enumerate() {
-        for right in &instances[index + 1..] {
-            spread = spread.max(instance_pair_spread(left, right));
-        }
+    if instances.len() < 2 {
+        return 0;
     }
-    spread
+
+    let mut by_file = instances.iter().collect::<Vec<_>>();
+    by_file.sort_unstable_by(|left, right| left.file.cmp(&right.file));
+
+    let mut same_file_max = 0;
+    let mut parent_components = Vec::new();
+    let mut start = 0;
+    while start < by_file.len() {
+        let mut end = start + 1;
+        while end < by_file.len() && by_file[end].file == by_file[start].file {
+            end += 1;
+        }
+
+        parent_components.push(path_parent_components(&by_file[start].file));
+        if end - start >= 2 {
+            let min_end = by_file[start..end]
+                .iter()
+                .map(|instance| instance.end_line)
+                .min()
+                .unwrap_or(0);
+            let max_start = by_file[start..end]
+                .iter()
+                .map(|instance| instance.start_line)
+                .max()
+                .unwrap_or(0);
+            let gap = max_start.saturating_sub(min_end).saturating_sub(1);
+            same_file_max = same_file_max.max(gap.div_ceil(SAME_FILE_SPREAD_STEP));
+        }
+        start = end;
+    }
+
+    same_file_max.max(directory_tree_diameter(&parent_components))
 }
 
 /// Compare clone groups in shared spread-aware priority order.
@@ -88,6 +141,7 @@ pub fn compare_clone_groups(left: &CloneGroup, right: &CloneGroup) -> Ordering {
     clone_group_rank_key(left).cmp(&clone_group_rank_key(right))
 }
 
+#[cfg(test)]
 fn instance_pair_spread(left: &CloneInstance, right: &CloneInstance) -> usize {
     if left.file == right.file {
         return same_file_spread(left, right);
@@ -95,6 +149,7 @@ fn instance_pair_spread(left: &CloneInstance, right: &CloneInstance) -> usize {
     directory_distance(&left.file, &right.file)
 }
 
+#[cfg(test)]
 fn same_file_spread(left: &CloneInstance, right: &CloneInstance) -> usize {
     let gap = if left.end_line < right.start_line {
         right
@@ -111,26 +166,48 @@ fn same_file_spread(left: &CloneInstance, right: &CloneInstance) -> usize {
     gap.div_ceil(SAME_FILE_SPREAD_STEP)
 }
 
-fn directory_distance(left: &Path, right: &Path) -> usize {
-    let left_components: Vec<_> = left
-        .parent()
+fn path_parent_components(path: &Path) -> Vec<Component<'_>> {
+    path.parent()
         .unwrap_or_else(|| Path::new(""))
         .components()
-        .collect();
-    let right_components: Vec<_> = right
-        .parent()
-        .unwrap_or_else(|| Path::new(""))
-        .components()
-        .collect();
-    let shared = left_components
+        .collect()
+}
+
+fn directory_tree_diameter(paths: &[Vec<Component<'_>>]) -> usize {
+    if paths.len() < 2 {
+        return 0;
+    }
+
+    let endpoint = farthest_path(paths, 0).0;
+    farthest_path(paths, endpoint).1
+}
+
+fn farthest_path(paths: &[Vec<Component<'_>>], origin: usize) -> (usize, usize) {
+    paths
         .iter()
-        .zip(&right_components)
+        .enumerate()
+        .map(|(index, path)| (index, component_distance(&paths[origin], path)))
+        .max_by_key(|&(index, distance)| (distance, index))
+        .unwrap_or((origin, 0))
+}
+
+fn component_distance(left: &[Component<'_>], right: &[Component<'_>]) -> usize {
+    let shared = left
+        .iter()
+        .zip(right)
         .take_while(|(left, right)| left == right)
         .count();
-    left_components
-        .len()
+    left.len()
         .saturating_sub(shared)
-        .saturating_add(right_components.len().saturating_sub(shared))
+        .saturating_add(right.len().saturating_sub(shared))
+}
+
+#[cfg(test)]
+fn directory_distance(left: &Path, right: &Path) -> usize {
+    component_distance(
+        &path_parent_components(left),
+        &path_parent_components(right),
+    )
 }
 
 type CloneGroupRankKey = (
@@ -340,6 +417,17 @@ const fn is_zero_usize(value: &usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    fn pairwise_clone_group_spread(instances: &[CloneInstance]) -> usize {
+        let mut spread = 0;
+        for (index, left) in instances.iter().enumerate() {
+            for right in &instances[index + 1..] {
+                spread = spread.max(instance_pair_spread(left, right));
+            }
+        }
+        spread
+    }
 
     fn instance(file: &str, start_line: usize, end_line: usize) -> CloneInstance {
         CloneInstance {
@@ -428,6 +516,74 @@ mod tests {
             20,
         );
         assert_eq!(clone.spread(), 0);
+    }
+
+    #[test]
+    fn directory_diameter_handles_ties_and_mixed_roots() {
+        let instances = vec![
+            instance("src/a.ts", 1, 10),
+            instance("packages/a/b.ts", 1, 10),
+            instance("packages/c/d.ts", 1, 10),
+            instance("/repo/src/e.ts", 1, 10),
+        ];
+
+        assert_eq!(
+            clone_group_spread(&instances),
+            pairwise_clone_group_spread(&instances)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn directory_diameter_handles_windows_prefixes() {
+        let instances = vec![
+            instance(r"C:\repo\src\a.ts", 1, 10),
+            instance(r"C:\repo\packages\b.ts", 1, 10),
+            instance(r"D:\other\c.ts", 1, 10),
+        ];
+
+        assert_eq!(
+            clone_group_spread(&instances),
+            pairwise_clone_group_spread(&instances)
+        );
+    }
+
+    #[test]
+    fn clone_group_kind_does_not_change_serialized_contract() {
+        let mut clone = group(vec![instance("src/a.ts", 1, 10)], 20, 10);
+        assert_eq!(clone.kind(), CloneGroupKind::Exact);
+        assert!(serde_json::to_value(&clone).unwrap()["similarity"].is_null());
+
+        clone.similarity = Some(0.85);
+        assert_eq!(clone.kind(), CloneGroupKind::Near { similarity: 0.85 });
+        assert_eq!(serde_json::to_value(&clone).unwrap()["similarity"], 0.85);
+    }
+
+    proptest! {
+        #[test]
+        fn optimized_spread_matches_pairwise_reference(
+            entries in prop::collection::vec((0_u8..8, 1_usize..4_000, 1_usize..500), 0..80)
+        ) {
+            let paths = [
+                "src/a.ts",
+                "src/b.ts",
+                "packages/a/src/c.ts",
+                "packages/b/src/d.ts",
+                "packages/b/test/e.ts",
+                "/repo/apps/web/f.ts",
+                "/repo/crates/core/g.ts",
+                "h.ts",
+            ];
+            let instances = entries
+                .into_iter()
+                .map(|(path, start, len)| instance(paths[usize::from(path)], start, start + len))
+                .collect::<Vec<_>>();
+
+            prop_assert_eq!(
+                clone_group_spread(&instances),
+                pairwise_clone_group_spread(&instances)
+            );
+        }
     }
 
     #[test]

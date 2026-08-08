@@ -22,6 +22,8 @@ pub use detector::{detect, normalize, tokenize};
 
 /// Engine alias for [`fallow_types::duplicates::CloneGroup`].
 pub type CloneGroup = fallow_types::duplicates::CloneGroup;
+/// Engine alias for [`fallow_types::duplicates::CloneGroupKind`].
+pub type CloneGroupKind = fallow_types::duplicates::CloneGroupKind;
 /// Engine alias for [`fallow_types::duplicates::CloneInstance`].
 pub type CloneInstance = fallow_types::duplicates::CloneInstance;
 /// Engine alias for [`fallow_types::duplicates::DefaultIgnoreSkips`].

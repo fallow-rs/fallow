@@ -332,7 +332,12 @@ fn detect_and_postprocess(
 
     if let Some(result) = near_result.as_mut() {
         near::suppress_exact_covered_near_groups(&mut result.clone_groups, &report.clone_groups);
-        report.clone_groups.append(&mut result.clone_groups);
+        report.clone_groups.extend(
+            result
+                .clone_groups
+                .drain(..)
+                .map(near::NearCloneGroup::into_clone_group),
+        );
         report.stats.near_candidates_skipped = result.skipped_candidates;
         report.stats = crate::duplicates::recompute_stats(&report);
     }

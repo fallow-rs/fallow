@@ -9,7 +9,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::TokenizedFile;
 use super::normalize::normalize_and_hash_resolved;
-use super::types::{CloneGroup, CloneInstance};
+use super::tokenize::{FragmentTokenizationStrategy, tokenize_fragment};
+use super::types::{CloneGroup, CloneGroupKind, CloneInstance};
 
 const SHINGLE_TOKENS: usize = 7;
 const SHINGLE_BASE: u64 = 1_000_003;
@@ -36,8 +37,27 @@ pub(super) struct NearDetectionInput<'a> {
 
 /// Bounded near-miss results plus visible truncation metadata.
 pub(super) struct NearDetectionResult {
-    pub(super) clone_groups: Vec<CloneGroup>,
+    pub(super) clone_groups: Vec<NearCloneGroup>,
     pub(super) skipped_candidates: usize,
+}
+
+/// Internal near-clone representation with a required similarity invariant.
+pub(super) struct NearCloneGroup {
+    instances: Vec<CloneInstance>,
+    token_count: usize,
+    line_count: usize,
+    similarity: f64,
+}
+
+impl NearCloneGroup {
+    pub(super) fn into_clone_group(self) -> CloneGroup {
+        CloneGroup {
+            instances: self.instances,
+            token_count: self.token_count,
+            line_count: self.line_count,
+            similarity: Some(self.similarity),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -505,7 +525,7 @@ fn complete_link_clusters(
 
 /// Recompute the derived metrics of a near group after instance filtering.
 pub(super) fn refresh_near_group_metrics(group: &mut CloneGroup) {
-    if group.similarity.is_none() || group.instances.len() < 2 {
+    if !matches!(group.kind(), CloneGroupKind::Near { .. }) || group.instances.len() < 2 {
         return;
     }
 
@@ -515,10 +535,10 @@ pub(super) fn refresh_near_group_metrics(group: &mut CloneGroup) {
         .instances
         .iter()
         .map(|instance| {
-            let tokens = super::tokenize::tokenize_file(
-                function_fragment_path(&instance.file),
+            let tokens = tokenize_fragment(
+                &instance.file,
                 &instance.fragment,
-                false,
+                FragmentTokenizationStrategy::Function,
             );
             normalize_and_hash_resolved(&tokens.tokens, semantic)
                 .into_iter()
@@ -554,15 +574,6 @@ pub(super) fn refresh_near_group_metrics(group: &mut CloneGroup) {
         .reduce(f64::min);
 }
 
-fn function_fragment_path(path: &Path) -> &'static Path {
-    match path.extension().and_then(|extension| extension.to_str()) {
-        Some("js" | "mjs" | "cjs") => Path::new("fragment.js"),
-        Some("jsx") => Path::new("fragment.jsx"),
-        Some("ts" | "mts" | "cts") => Path::new("fragment.ts"),
-        _ => Path::new("fragment.tsx"),
-    }
-}
-
 fn remove_nested_members(mut members: Vec<usize>, candidates: &[FunctionCandidate]) -> Vec<usize> {
     members.sort_by_key(|&id| (Reverse(candidates[id].semantic_tokens.len()), id));
     let mut kept = Vec::new();
@@ -583,7 +594,7 @@ fn build_clone_group(
     candidates: &[FunctionCandidate],
     similarities: &FxHashMap<(usize, usize), f64>,
     skip_local: bool,
-) -> Option<CloneGroup> {
+) -> Option<NearCloneGroup> {
     if skip_local {
         let directories = cluster
             .iter()
@@ -633,15 +644,15 @@ fn build_clone_group(
             }
         })
         .collect();
-    Some(CloneGroup {
+    Some(NearCloneGroup {
         instances,
         token_count,
         line_count,
-        similarity: Some(similarity),
+        similarity,
     })
 }
 
-fn sort_groups(groups: &mut [CloneGroup]) {
+fn sort_groups(groups: &mut [NearCloneGroup]) {
     groups.sort_by(
         |left, right| match (left.instances.first(), right.instances.first()) {
             (Some(left), Some(right)) => left
@@ -659,7 +670,7 @@ fn sort_groups(groups: &mut [CloneGroup]) {
 /// Remove near groups already represented by one exact group covering every
 /// near instance. Partial exact sub-clones do not suppress a gapped function.
 pub(super) fn suppress_exact_covered_near_groups(
-    near_groups: &mut Vec<CloneGroup>,
+    near_groups: &mut Vec<NearCloneGroup>,
     exact_groups: &[CloneGroup],
 ) {
     near_groups.retain(|near| {
@@ -740,11 +751,7 @@ mod tests {
         assert_eq!(result.clone_groups.len(), 1);
         let group = &result.clone_groups[0];
         assert_eq!(group.instances.len(), 2);
-        assert!(
-            group
-                .similarity
-                .is_some_and(|value| value >= MIN_SIMILARITY)
-        );
+        assert!(group.similarity >= MIN_SIMILARITY);
     }
 
     #[test]
@@ -927,11 +934,11 @@ mod tests {
             end_col: 20,
             fragment: String::new(),
         };
-        let near = CloneGroup {
+        let near = NearCloneGroup {
             instances: vec![instance("a.ts", 2, 8), instance("b.ts", 12, 18)],
             token_count: 30,
             line_count: 7,
-            similarity: Some(0.9),
+            similarity: 0.9,
         };
         let partial = CloneGroup {
             instances: vec![instance("a.ts", 2, 8), instance("b.ts", 13, 18)],

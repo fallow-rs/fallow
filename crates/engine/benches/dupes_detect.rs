@@ -293,6 +293,25 @@ fn clone_family_grouping_1000x3(c: &mut Criterion) {
     });
 }
 
+fn clone_group_spread_high_occurrence(c: &mut Criterion) {
+    let instances = (0..4_096)
+        .map(|index| CloneInstance {
+            file: PathBuf::from(format!("packages/{}/src/module-{index}.ts", index % 64)),
+            start_line: index * 300 + 1,
+            end_line: index * 300 + 40,
+            start_col: 0,
+            end_col: 0,
+            fragment: String::new(),
+        })
+        .collect::<Vec<_>>();
+
+    c.bench_function("clone_group_spread_high_occurrence", |bencher| {
+        bencher.iter(|| {
+            std::hint::black_box(fallow_types::duplicates::clone_group_spread(&instances))
+        });
+    });
+}
+
 criterion_group!(
     benches,
     dupe_detect_2x500_identical,
@@ -303,6 +322,7 @@ criterion_group!(
     dupe_detect_100x200_mixed_focused,
     dupe_detect_80x20x80_interval_pressure,
     dupe_detect_2x5000_identical,
-    clone_family_grouping_1000x3
+    clone_family_grouping_1000x3,
+    clone_group_spread_high_occurrence
 );
 criterion_main!(benches);

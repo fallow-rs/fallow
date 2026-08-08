@@ -2,8 +2,9 @@
 pub use fallow_config::DetectionMode;
 pub use fallow_config::DuplicatesConfig;
 pub use fallow_types::duplicates::{
-    CloneFamily, CloneGroup, CloneInstance, DefaultIgnoreSkipCount, DefaultIgnoreSkips,
-    DuplicationReport, DuplicationStats, MirroredDirectory, RefactoringKind, RefactoringSuggestion,
+    CloneFamily, CloneGroup, CloneGroupKind, CloneInstance, DefaultIgnoreSkipCount,
+    DefaultIgnoreSkips, DuplicationReport, DuplicationStats, MirroredDirectory, RefactoringKind,
+    RefactoringSuggestion,
 };
 
 #[cfg(test)]
