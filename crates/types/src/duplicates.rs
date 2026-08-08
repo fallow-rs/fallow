@@ -559,30 +559,34 @@ mod tests {
         assert_eq!(serde_json::to_value(&clone).unwrap()["similarity"], 0.85);
     }
 
-    proptest! {
-        #[test]
-        fn optimized_spread_matches_pairwise_reference(
-            entries in prop::collection::vec((0_u8..8, 1_usize..4_000, 1_usize..500), 0..80)
-        ) {
-            let paths = [
-                "src/a.ts",
-                "src/b.ts",
-                "packages/a/src/c.ts",
-                "packages/b/src/d.ts",
-                "packages/b/test/e.ts",
-                "/repo/apps/web/f.ts",
-                "/repo/crates/core/g.ts",
-                "h.ts",
-            ];
-            let instances = entries
-                .into_iter()
-                .map(|(path, start, len)| instance(paths[usize::from(path)], start, start + len))
-                .collect::<Vec<_>>();
+    mod proptests {
+        use super::*;
 
-            prop_assert_eq!(
-                clone_group_spread(&instances),
-                pairwise_clone_group_spread(&instances)
-            );
+        proptest! {
+            #[test]
+            fn optimized_spread_matches_pairwise_reference(
+                entries in prop::collection::vec((0_u8..8, 1_usize..4_000, 1_usize..500), 0..80)
+            ) {
+                let paths = [
+                    "src/a.ts",
+                    "src/b.ts",
+                    "packages/a/src/c.ts",
+                    "packages/b/src/d.ts",
+                    "packages/b/test/e.ts",
+                    "/repo/apps/web/f.ts",
+                    "/repo/crates/core/g.ts",
+                    "h.ts",
+                ];
+                let instances = entries
+                    .into_iter()
+                    .map(|(path, start, len)| instance(paths[usize::from(path)], start, start + len))
+                    .collect::<Vec<_>>();
+
+                prop_assert_eq!(
+                    clone_group_spread(&instances),
+                    pairwise_clone_group_spread(&instances)
+                );
+            }
         }
     }
 
