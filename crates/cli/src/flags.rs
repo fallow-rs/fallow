@@ -655,7 +655,7 @@ fn print_flags_json(
 ) {
     let output =
         fallow_output::build_feature_flags_output(fallow_output::FeatureFlagsOutputInput {
-            schema_version: crate::report::SCHEMA_VERSION,
+            schema_version: fallow_output::FEATURE_FLAGS_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed,
             flags,

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The public complexity contribution kind is now non-exhaustive.** Rust
+  consumers must keep a wildcard arm when matching
+  `ComplexityContributionKind`. This one-time source-compatibility break is
+  queued for the next major release, so later analyzer vocabulary can grow
+  without breaking exhaustive matches again.
+- **TypeScript output versions are envelope-specific.** At the next major
+  boundary, the former global `SchemaVersion` literal widens from `8` to
+  `number`. Each output field now references its own exact literal alias, so
+  version-gated consumers should use `CheckSchemaVersion`,
+  `HealthSchemaVersion`, or the corresponding envelope type.
 - **Malformed config shapes now fail loud instead of being silently
   dropped.** Three previously-tolerated shapes are rejected at config load:
   a malformed `extends` value (must be a string or an array of strings), an
@@ -28,10 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `{:then}` contributions previously appeared as `if` in health JSON and
   the VS Code inline breakdown. They now use the explicit `await` and `then`
   kinds, while `{:catch}` remains `catch` and metric totals are unchanged.
-  The standalone health schema is now version 8, and the shared check,
-  combined, and audit schema is now version 9. Consumers that exhaustively
-  match complexity contribution kinds must handle the two new values or keep
-  an unknown-value fallback.
+  The standalone health schema is now version 8. Combined and audit output are
+  version 9 because they embed health; dead-code and unrelated output formats
+  keep their existing versions. JSON consumers must handle the two new values;
+  Rust consumers must keep the wildcard fallback required by the now
+  non-exhaustive enum.
 - **Complexity findings in framework templates now show which conditions
   caused them.** A `<template>` finding in Vue, Angular, Svelte, or Astro
   reported a cyclomatic and cognitive number with nothing behind it, so the

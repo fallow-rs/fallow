@@ -3282,7 +3282,9 @@ fn type_aware_status_output(
         )
     });
     fallow_output::TypeAwareStatusOutput {
-        schema_version: fallow_types::envelope::SchemaVersion(report::SCHEMA_VERSION),
+        schema_version: fallow_types::envelope::SchemaVersion(
+            fallow_output::TYPE_AWARE_STATUS_SCHEMA_VERSION,
+        ),
         version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         available: status.available,
         discovery_source: status.discovery_source.map(str::to_string),
@@ -6244,6 +6246,10 @@ mod tests {
             },
         );
 
+        assert_eq!(
+            output.schema_version.0,
+            fallow_output::TYPE_AWARE_STATUS_SCHEMA_VERSION
+        );
         assert_eq!(output.companion_path.as_deref(), Some("fallow-type-aware"));
         let remediation = output.remediation.expect("remediation");
         assert!(!remediation.contains("/private/"));

@@ -4,8 +4,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CombinedMeta, CombinedOutput, HealthReport, RootEnvelopeMode, check_meta,
-    dupes_meta, harmonize_dead_code_health_suppress_line_actions, health_meta,
+    COMBINED_SCHEMA_VERSION, CombinedMeta, CombinedOutput, HealthReport, RootEnvelopeMode,
+    check_meta, dupes_meta, harmonize_dead_code_health_suppress_line_actions, health_meta,
     serialize_combined_json_output, strip_root_prefix,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
@@ -100,7 +100,7 @@ pub fn serialize_combined_json(
     }
 
     let output = CombinedOutput {
-        schema_version: SchemaVersion(CHECK_SCHEMA_VERSION),
+        schema_version: SchemaVersion(COMBINED_SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed_ms_for_output(input.elapsed)),
         meta,

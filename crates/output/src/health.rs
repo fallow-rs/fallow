@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
+use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
 use serde::Serialize;
 
@@ -13,11 +13,12 @@ use crate::{
 /// Current schema version for the standalone health JSON envelope.
 pub const HEALTH_SCHEMA_VERSION: u32 = 8;
 
-/// Schema version for [`HealthOutput`], versioned independently from the
-/// shared check, combined, and audit envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct HealthSchemaVersion(pub u32);
+/// Exact schema version for [`HealthOutput`].
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = HEALTH_SCHEMA_VERSION))]
+struct HealthSchemaVersion(u32);
 
 /// Envelope emitted by `fallow health --format json` (plus the `health` block
 /// inside the combined and audit envelopes).
@@ -35,7 +36,8 @@ pub struct HealthSchemaVersion(pub u32);
 #[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]
 pub struct HealthOutput<Report, Group> {
     /// Health output schema version.
-    pub schema_version: HealthSchemaVersion,
+    #[cfg_attr(feature = "schema", schemars(with = "HealthSchemaVersion"))]
+    pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
     /// Wall-clock analysis duration in milliseconds.
@@ -104,7 +106,7 @@ pub fn build_health_output<Report, Group>(
     input: HealthOutputInput<Report, Group>,
 ) -> HealthOutput<Report, Group> {
     HealthOutput {
-        schema_version: HealthSchemaVersion(input.schema_version),
+        schema_version: SchemaVersion(input.schema_version),
         version: ToolVersion(input.version),
         elapsed_ms: ElapsedMs(input.elapsed.as_millis() as u64),
         report: input.report,

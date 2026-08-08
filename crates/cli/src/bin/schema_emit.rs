@@ -337,6 +337,13 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "Meta",
     "RegressionResult",
     "SchemaVersion",
+    "AuditSchemaVersion",
+    "CheckSchemaVersion",
+    "CombinedSchemaVersion",
+    "DupesSchemaVersion",
+    "FeatureFlagsSchemaVersion",
+    "HealthSchemaVersion",
+    "TypeAwareStatusSchemaVersion",
     "ToolVersion",
     "RuntimeCoverageAction",
     "RuntimeCoverageBlastRadiusEntry",
@@ -1484,6 +1491,74 @@ mod drift_tests {
                 "no derived schema for `{name}`: either the type lacks `#[cfg_attr(feature = \"schema\", derive(schemars::JsonSchema))]`, or the call to `generator.subschema_for::<{name}>()` is missing in `derived_definitions()`."
             );
         }
+    }
+
+    #[test]
+    fn envelope_schema_versions_are_exact_and_independent() {
+        let derived = derived_definitions_for_drift();
+        let expected = [
+            ("AuditSchemaVersion", fallow_output::AUDIT_SCHEMA_VERSION),
+            ("CheckSchemaVersion", fallow_output::CHECK_SCHEMA_VERSION),
+            (
+                "CombinedSchemaVersion",
+                fallow_output::COMBINED_SCHEMA_VERSION,
+            ),
+            (
+                "FeatureFlagsSchemaVersion",
+                fallow_output::FEATURE_FLAGS_SCHEMA_VERSION,
+            ),
+            ("HealthSchemaVersion", fallow_output::HEALTH_SCHEMA_VERSION),
+            (
+                "TypeAwareStatusSchemaVersion",
+                fallow_output::TYPE_AWARE_STATUS_SCHEMA_VERSION,
+            ),
+        ];
+
+        for (name, version) in expected {
+            assert_eq!(
+                derived.get(name).and_then(|schema| schema.get("const")),
+                Some(&Value::from(version)),
+                "{name} must pin its owning envelope version"
+            );
+        }
+        assert_eq!(
+            derived
+                .get("DupesSchemaVersion")
+                .and_then(|schema| schema.get("enum")),
+            Some(&serde_json::json!([
+                fallow_output::DUPES_PROGRAMMATIC_SCHEMA_VERSION,
+                fallow_output::DUPES_SCHEMA_VERSION,
+            ])),
+            "DupesSchemaVersion must cover its CLI and programmatic lineages"
+        );
+        let envelope_refs = [
+            ("AuditOutput", "AuditSchemaVersion"),
+            ("CheckGroupedOutput", "CheckSchemaVersion"),
+            ("CheckOutput", "CheckSchemaVersion"),
+            ("CombinedOutput", "CombinedSchemaVersion"),
+            ("DupesOutput", "DupesSchemaVersion"),
+            ("FeatureFlagsOutput", "FeatureFlagsSchemaVersion"),
+            ("HealthOutput", "HealthSchemaVersion"),
+            ("TypeAwareStatusOutput", "TypeAwareStatusSchemaVersion"),
+        ];
+        for (envelope, version_type) in envelope_refs {
+            let expected_ref = format!("#/definitions/{version_type}");
+            assert_eq!(
+                derived
+                    .get(envelope)
+                    .and_then(|schema| schema.pointer("/properties/schema_version/$ref"))
+                    .and_then(Value::as_str),
+                Some(expected_ref.as_str()),
+                "{envelope} must reference its owning version type"
+            );
+        }
+        assert!(
+            derived
+                .get("SchemaVersion")
+                .and_then(|schema| schema.get("const"))
+                .is_none(),
+            "the shared SchemaVersion type spans independently versioned envelopes"
+        );
     }
 
     /// Ensure every `FallowOutput` variant stays registered.

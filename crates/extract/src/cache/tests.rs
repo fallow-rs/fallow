@@ -3454,7 +3454,9 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
     reason = "test fixture; linear setup/assert, length is not a maintainability concern"
 )]
 fn module_to_cached_roundtrip_complexity() {
-    use fallow_types::extract::FunctionComplexity;
+    use fallow_types::extract::{
+        ComplexityContribution, ComplexityContributionKind, ComplexityMetric, FunctionComplexity,
+    };
 
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -3490,7 +3492,24 @@ fn module_to_cached_roundtrip_complexity() {
                 react_jsx_max_depth: 0,
                 react_prop_count: 0,
                 source_hash: Some("0123456789abcdef".to_string()),
-                contributions: Vec::new(),
+                contributions: vec![
+                    ComplexityContribution {
+                        line: 6,
+                        col: 2,
+                        metric: ComplexityMetric::Cyclomatic,
+                        kind: ComplexityContributionKind::Await,
+                        weight: 1,
+                        nesting: 0,
+                    },
+                    ComplexityContribution {
+                        line: 8,
+                        col: 2,
+                        metric: ComplexityMetric::Cognitive,
+                        kind: ComplexityContributionKind::Then,
+                        weight: 1,
+                        nesting: 0,
+                    },
+                ],
             },
             FunctionComplexity {
                 name: "simple".to_string(),
@@ -3572,6 +3591,17 @@ fn module_to_cached_roundtrip_complexity() {
     assert_eq!(restored.complexity[0].cyclomatic, 8);
     assert_eq!(restored.complexity[0].cognitive, 15);
     assert_eq!(restored.complexity[0].line_count, 20);
+    assert_eq!(
+        restored.complexity[0]
+            .contributions
+            .iter()
+            .map(|contribution| contribution.kind)
+            .collect::<Vec<_>>(),
+        [
+            ComplexityContributionKind::Await,
+            ComplexityContributionKind::Then,
+        ]
+    );
     assert_eq!(restored.complexity[1].name, "simple");
     assert_eq!(restored.complexity[1].cyclomatic, 1);
     assert_eq!(restored.complexity[1].cognitive, 0);

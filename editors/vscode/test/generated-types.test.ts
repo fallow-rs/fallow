@@ -10,19 +10,38 @@
  * Drift between Rust and the schema is enforced by the schema-driven test
  * in `crates/cli/src/report/json.rs` and by `pnpm run check:contracts`.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
+  AuditSchemaVersion,
   CheckOutput,
+  CheckSchemaVersion,
   CombinedOutput,
+  CombinedSchemaVersion,
+  DupesSchemaVersion,
   DupesOutput,
+  FeatureFlagsSchemaVersion,
+  HealthSchemaVersion,
   HealthOutput,
   IssueAction,
+  SchemaVersion,
+  TypeAwareStatusSchemaVersion,
   UnusedFileFinding,
 } from "../src/generated/output-contract.js";
 import type { LspInitializationOptions } from "../src/generated/lsp-initialization-options.js";
 import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 
 describe("generated/output-contract.d.ts", () => {
+  it("pins each independently versioned envelope from JSON Schema", () => {
+    expectTypeOf<SchemaVersion>().toEqualTypeOf<number>();
+    expectTypeOf<AuditSchemaVersion>().toEqualTypeOf<9>();
+    expectTypeOf<CheckSchemaVersion>().toEqualTypeOf<8>();
+    expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<9>();
+    expectTypeOf<DupesSchemaVersion>().toEqualTypeOf<2 | 8>();
+    expectTypeOf<FeatureFlagsSchemaVersion>().toEqualTypeOf<8>();
+    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<8>();
+    expectTypeOf<TypeAwareStatusSchemaVersion>().toEqualTypeOf<8>();
+  });
+
   it("exposes the LSP initializationOptions contract sent by the extension", () => {
     const sample: LspInitializationOptions = {
       allowRemoteExtends: false,
@@ -61,7 +80,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("requires the schema_version / version / elapsed_ms / total_issues envelope on CheckOutput", () => {
     const sample: CheckOutput = {
-      schema_version: 9,
+      schema_version: 8,
       version: "0.0.0-test",
       elapsed_ms: 0,
       total_issues: 0,

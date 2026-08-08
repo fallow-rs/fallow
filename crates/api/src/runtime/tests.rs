@@ -694,8 +694,10 @@ fn run_duplication_returns_typed_output_before_json() {
     .expect("duplication succeeds");
 
     let _: &crate::DuplicationOutput = &run.output;
-    assert_eq!(run.output.schema_version.0, duplication::SCHEMA_VERSION);
-    assert_eq!(run.output.schema_version.0, 2);
+    assert_eq!(
+        run.output.schema_version.0,
+        fallow_output::DUPES_PROGRAMMATIC_SCHEMA_VERSION
+    );
     assert!(run.clone_groups().is_empty());
     assert!(run.clone_families().is_empty());
     assert!(run.groups().is_none());
@@ -732,7 +734,10 @@ fn run_feature_flags_returns_typed_output_before_json() {
     })
     .expect("feature flags succeeds");
 
-    assert_eq!(run.output.schema_version.0, CHECK_SCHEMA_VERSION);
+    assert_eq!(
+        run.output.schema_version.0,
+        fallow_output::FEATURE_FLAGS_SCHEMA_VERSION
+    );
     assert_eq!(run.output.total_flags, 1);
     assert_eq!(run.output.feature_flags[0].flag_name, "FEATURE_ALPHA");
     assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);

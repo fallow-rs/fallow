@@ -4,6 +4,16 @@ use crate::root_envelopes::{RootEnvelopeMode, serialize_named_json_output};
 use fallow_types::envelope::{SchemaVersion, ToolVersion};
 use serde::Serialize;
 
+/// Current schema version for type-aware status JSON output.
+pub const TYPE_AWARE_STATUS_SCHEMA_VERSION: u32 = 8;
+
+/// Schema projection for the type-aware status envelope's exact version.
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = TYPE_AWARE_STATUS_SCHEMA_VERSION))]
+struct TypeAwareStatusSchemaVersion(u32);
+
 /// Envelope emitted by `fallow type-aware status --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -13,6 +23,7 @@ use serde::Serialize;
 )]
 pub struct TypeAwareStatusOutput {
     /// Type-aware status schema version.
+    #[cfg_attr(feature = "schema", schemars(with = "TypeAwareStatusSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,

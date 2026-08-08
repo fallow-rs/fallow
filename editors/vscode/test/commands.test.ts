@@ -178,7 +178,7 @@ beforeEach(() => {
 });
 
 const emptyCheck = {
-  schema_version: 9,
+  schema_version: 8,
   version: "0.0.0-test",
   elapsed_ms: 0,
   total_issues: 0,

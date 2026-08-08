@@ -1212,6 +1212,7 @@ pub enum ComplexityMetric {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum ComplexityContributionKind {
     /// An `if` condition.
     If,

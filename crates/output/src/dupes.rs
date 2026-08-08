@@ -14,6 +14,22 @@ use serde::Serialize;
 use crate::GroupByMode;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
+/// Current schema version for `fallow dupes --format json`.
+pub const DUPES_SCHEMA_VERSION: u32 = 8;
+
+/// Current schema version for programmatic duplication JSON.
+pub const DUPES_PROGRAMMATIC_SCHEMA_VERSION: u32 = 2;
+
+/// Schema projection for the duplication envelope's CLI and programmatic
+/// version lineages.
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend(
+    "enum" = [DUPES_PROGRAMMATIC_SCHEMA_VERSION, DUPES_SCHEMA_VERSION]
+))]
+struct DupesSchemaVersion(u32);
+
 /// Envelope emitted by `fallow dupes --format json`.
 ///
 /// `Report` and `Group` are generic so the envelope can live in
@@ -24,6 +40,7 @@ use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_n
 #[cfg_attr(feature = "schema", schemars(title = "fallow dupes --format json"))]
 pub struct DupesOutput<Report, Group> {
     /// Duplication output schema version.
+    #[cfg_attr(feature = "schema", schemars(with = "DupesSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,

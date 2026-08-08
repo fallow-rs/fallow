@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutput, GroupByMode, RootEnvelopeMode,
+    AUDIT_SCHEMA_VERSION, CheckOutput, GroupByMode, RootEnvelopeMode,
     build_decision_surface_output, serialize_check_json_output,
     serialize_decision_surface_json_output, serialize_dupes_json_output,
     serialize_feature_flags_json_output, strip_root_prefix,
@@ -131,7 +131,7 @@ pub fn serialize_audit_programmatic_json(
     crate::serialize_audit_json(
         crate::AuditJsonOutputInput {
             header: crate::AuditJsonHeaderInput {
-                schema_version: SchemaVersion(CHECK_SCHEMA_VERSION),
+                schema_version: SchemaVersion(AUDIT_SCHEMA_VERSION),
                 version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
                 verdict: output.verdict,
                 changed_files_count: u32::try_from(output.changed_files_count).unwrap_or(u32::MAX),

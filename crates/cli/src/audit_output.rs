@@ -8,7 +8,8 @@ use fallow_api::{
 };
 use fallow_config::{AuditGate, OutputFormat, RulesConfig, Severity};
 use fallow_output::{
-    AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput, PrDecisionConclusion,
+    AUDIT_SCHEMA_VERSION, AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput,
+    PrDecisionConclusion,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
@@ -772,7 +773,7 @@ fn changed_files_count_for_output(changed_files_count: usize) -> u32 {
 
 pub fn audit_json_header_input(result: &AuditResult) -> AuditJsonHeaderInput {
     AuditJsonHeaderInput {
-        schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
+        schema_version: SchemaVersion(AUDIT_SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         verdict: result.verdict,
         changed_files_count: changed_files_count_for_output(result.changed_files_count),
