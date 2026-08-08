@@ -3,12 +3,13 @@
 `fallow-core` is an internal implementation crate. Starting with 2.76.0, the
 top-level `fallow_core::analyze*` entry points plus the detector helpers under
 `fallow_core::analyze::*` emit deprecation warnings. `fallow-core` is published
-only because `fallow-engine` uses it as a private detector backend; it is not
-the supported Rust embedder surface. Use the published `fallow-api` facade or
-the typed `fallow-engine` layer instead.
+only because `fallow-engine` uses it as a private detector backend. Within the
+workspace, use the `fallow-api` facade or the typed `fallow-engine` layer
+instead. These Rust crate APIs are integration seams for Fallow's own adapters,
+not semver-stable external consumer surfaces.
 
-Use the supported embedder API in `fallow_api`. New Rust consumers should call
-the typed `run_*` functions (`run_dead_code`, `run_duplication`,
+Use the preferred workspace facade in `fallow_api`. Product adapters should
+call the typed `run_*` functions (`run_dead_code`, `run_duplication`,
 `run_feature_flags`, `run_health`, `run_circular_dependencies`,
 `run_boundary_violations`) and serialize only at their own protocol boundary
 via the matching `serialize_*_programmatic_json` function.
@@ -52,15 +53,15 @@ Use these boundaries when adding new product flows:
   banned exports, banned calls, and framework-aware facts are the preferred
   extension path before a general arbitrary-code plugin runtime.
 - **Core stays backend-only**: `fallow-core` may keep private detector
-  implementation details and compatibility shims, but public or product
-  surfaces should depend on `fallow-engine` or `fallow-api`, not `fallow-core`.
+  implementation details and compatibility shims, but product surfaces should
+  depend on `fallow-engine` or `fallow-api`, not `fallow-core`.
 
 ## Function mapping
 
 | Deprecated `fallow_core` function | Replacement |
 | --- | --- |
 | `fallow_core::analyze`, `analyze_with_usages`, `analyze_with_trace`, `analyze_retaining_modules` | `fallow_api::run_dead_code` for typed output before serialization, or `fallow_engine` for lower-level in-process analysis |
-| Removed top-level wrappers such as `analyze_with_parse_result` and `analyze_project` | Use `fallow_engine::AnalysisSession` internally, or `fallow_api` for supported programmatic surfaces |
+| Removed top-level wrappers such as `analyze_with_parse_result` and `analyze_project` | Use `fallow_engine::AnalysisSession` internally, or `fallow_api` for workspace programmatic flows |
 | `fallow_core::analyze::find_dead_code_full` | `fallow_api::run_dead_code` |
 | `find_unused_files` | `fallow_api::run_dead_code` |
 | `find_unused_exports` | `fallow_api::run_dead_code` |

@@ -65,10 +65,10 @@ if (!validate(fallowOutput)) {
 
 For TypeScript types generated from the schema, see `npm/fallow/types/output-contract.d.ts` (mirrored to `editors/vscode/src/generated/output-contract.d.ts`). The npm package also exposes `fallow/capabilities.json`, a version-matched copy of `fallow schema` with CLI capability metadata, and `fallow/issue-registry.json`, a narrow issue registry export derived from the same source. Regenerate the full bundle with `npm run generate:contracts`.
 
-At the v4 boundary, the generic TypeScript `SchemaVersion` alias widens from
-the former global literal `8` to `number`. Version-gated consumers should use
-the concrete envelope's `schema_version` field or its specific generated alias,
-such as `HealthSchemaVersion` or `CombinedSchemaVersion`.
+The legacy TypeScript `SchemaVersion` alias remains equivalent to
+`CheckSchemaVersion` for source compatibility. Version-gated consumers should
+use the concrete envelope's `schema_version` field or its specific generated
+alias, such as `HealthSchemaVersion` or `CombinedSchemaVersion`.
 
 #### TypeScript bare-name backwards-compat aliases
 
@@ -77,23 +77,6 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 `json-schema-to-typescript` drops the orphan inner definitions when every field is subsumed by a flattening parent (even with `unreachableDefinitions: true`), so the bare names disappear from the generated `.d.ts` unless they are aliased back explicitly. The npm-published `fallow/types` subpath (`npm/fallow/types/output-contract.d.ts`) carries an alias for every wrapper so external consumers importing the bare names continue to compile. The full list lives at the end of the generated file under the `// Backwards-compat aliases` section, with per-alias JSDoc explaining the migration history.
 
 **Stability commitment**: legacy output aliases remain supported throughout v3. Removing them requires an explicit deprecation period and a future major release. New code that consumes fallow's JSON output should import the `*Finding` wrapper names directly.
-
-### Rust programmatic API
-
-- **Primary API crate**: `fallow-api` owns programmatic option, error, typed output, and JSON serialization contracts. Rust embedders should call the typed `run_*` entry points (`run_dead_code`, `run_duplication`, `run_circular_dependencies`, `run_boundary_violations`, `run_feature_flags`, `run_health`) and serialize only at their own protocol boundary via the matching `serialize_*_programmatic_json` function when needed.
-- **JSON protocol serializers**: `serialize_*_programmatic_json` functions remain exported from `fallow-api` for CLI, MCP, NAPI, and custom protocol adapters. They are serializers over typed `run_*` contracts, not alternate Rust runtime entry points.
-- **No Rust compatibility adapter crate**: `fallow-programmatic-cli` has been removed. New and existing Rust embedders should depend on `fallow-api` directly.
-- **Open analyzer vocabularies**: `ComplexityContributionKind` is
-  non-exhaustive. Rust consumers must include a wildcard arm instead of
-  assuming that the current set of source constructs is closed. Making this
-  previously exhaustive enum non-exhaustive is reserved for the next major
-  release; after that boundary, adding a kind is source-compatible.
-
-#### Compatibility removal gates
-
-The following surfaces are intentional bridges, not architecture boundaries to build new features on:
-
-- `fallow-api::runtime_json`: keep JSON protocol serializers only. New command families must expose typed `run_*` output first and add JSON only at protocol boundaries.
 
 ### CLI interface
 
@@ -154,7 +137,13 @@ These are explicitly **not** covered by the stability guarantee:
 - **Performance characteristics**: timing, memory usage, parallelism
 - **SARIF output details**: beyond what the SARIF spec requires
 - **LSP protocol details**: diagnostics, code actions, Code Lens behavior
-- **Internal crate APIs**: `fallow-core`, `fallow-config`, etc. are not public API
+- **Rust crate APIs**: all workspace crates, including `fallow-api`, are
+  integration surfaces for Fallow's own CLI, MCP, NAPI, and editor adapters,
+  not supported external semver APIs. Their Rust types and functions may change
+  in a minor release. Stable consumers should use the versioned JSON, CLI,
+  npm, or protocol surfaces documented above. `fallow-api::runtime_json`
+  remains an internal protocol bridge; new command families expose typed
+  `run_*` output before adding JSON at protocol boundaries.
 
 ## Deprecation process
 

@@ -13059,9 +13059,9 @@ exit_code: number
 
 
 /**
- * Generic schema version for cross-envelope helpers. Since v4, envelope fields use their exact version aliases.
+ * @deprecated Legacy alias for the dead-code/check schema version. Use the exact envelope-specific alias instead.
  */
-export type SchemaVersion = number;
+export type SchemaVersion = CheckSchemaVersion;
 /**
  * Inner complexity-violation payload, flattened into `HealthFinding`
  * on the wire via `#[serde(flatten)]`. Exposed here because

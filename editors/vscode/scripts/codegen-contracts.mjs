@@ -178,19 +178,24 @@ function flattenRefSiblings(node) {
 }
 
 /**
- * Preserve the generic alias when no root envelope references it.
- * Exact envelope versions come from their JSON Schema `const` definitions;
- * this alias intentionally remains the unconstrained shared integer type.
+ * Preserve the legacy generic alias when no root envelope references it.
+ * Existing TypeScript consumers imported `SchemaVersion` when every primary
+ * envelope shared the dead-code/check version. Keep that alias source-compatible
+ * while new code uses the exact envelope aliases derived from JSON Schema.
  */
-function appendSharedSchemaVersionAlias(contents, schema) {
+function appendLegacySchemaVersionAlias(contents, schema) {
   if (/^export type SchemaVersion\b/m.test(contents)) return contents;
-  const definition = schema.definitions?.SchemaVersion;
-  if (definition?.type !== "integer" || "const" in definition) {
+  const sharedDefinition = schema.definitions?.SchemaVersion;
+  const checkDefinition = schema.definitions?.CheckSchemaVersion;
+  if (sharedDefinition?.type !== "integer" || "const" in sharedDefinition) {
     throw new Error(
       "SchemaVersion must remain an unconstrained integer definition in the output schema",
     );
   }
-  return `${contents}\n\n/**\n * Generic schema version for cross-envelope helpers. Since v4, envelope fields use their exact version aliases.\n */\nexport type SchemaVersion = number;`;
+  if (!Number.isInteger(checkDefinition?.const)) {
+    throw new Error("CheckSchemaVersion must remain an exact integer definition");
+  }
+  return `${contents}\n\n/**\n * @deprecated Legacy alias for the dead-code/check schema version. Use the exact envelope-specific alias instead.\n */\nexport type SchemaVersion = CheckSchemaVersion;`;
 }
 
 /**
@@ -781,12 +786,14 @@ async function generateOutputContract(capabilitySchema) {
   // top-level union type.
   const raw_ts = await compile(parsed, "FallowJsonOutput", OPTIONS);
   const final = appendDedupedFlattenAliases(
-    appendSharedSchemaVersionAlias(stripTrailingWhitespace(raw_ts), parsed),
+    appendLegacySchemaVersionAlias(stripTrailingWhitespace(raw_ts), parsed),
     deadCodeAliases,
   );
   assertAliasesEmitted(final, deadCodeAliases);
-  if (!/^export type SchemaVersion = number;?$/m.test(final)) {
-    throw new Error("generated output must preserve `SchemaVersion = number`");
+  if (!/^export type SchemaVersion = CheckSchemaVersion;?$/m.test(final)) {
+    throw new Error(
+      "generated output must preserve the legacy `SchemaVersion = CheckSchemaVersion` alias",
+    );
   }
   return final;
 }

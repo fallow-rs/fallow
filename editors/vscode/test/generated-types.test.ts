@@ -32,7 +32,8 @@ import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 
 describe("generated/output-contract.d.ts", () => {
   it("pins each independently versioned envelope from JSON Schema", () => {
-    expectTypeOf<SchemaVersion>().toEqualTypeOf<number>();
+    expectTypeOf<SchemaVersion>().toEqualTypeOf<CheckSchemaVersion>();
+    expectTypeOf<SchemaVersion>().toEqualTypeOf<8>();
     expectTypeOf<AuditSchemaVersion>().toEqualTypeOf<9>();
     expectTypeOf<CheckSchemaVersion>().toEqualTypeOf<8>();
     expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<9>();

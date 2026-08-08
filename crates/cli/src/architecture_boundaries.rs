@@ -136,7 +136,7 @@ fn contributor_architecture_map_and_roadmap_track_current_ownership() {
         "Internal detector backend used by `fallow-engine`",
         "Analysis sessions, discovery, parsing, graph construction",
         "Shared output contracts",
-        "Supported Rust facade",
+        "Workspace Rust facade",
         "CLI protocol adapter",
         "LSP adapter",
         "MCP adapter",
