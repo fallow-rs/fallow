@@ -2,7 +2,8 @@ use std::time::Instant;
 
 use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
+    FEATURE_FLAGS_SCHEMA_VERSION, FeatureFlagsOutputInput, build_feature_flags_output,
+    feature_flags_meta,
 };
 use fallow_types::output_format::OutputFormat;
 use fallow_types::results::FeatureFlag;
@@ -48,7 +49,7 @@ fn run_feature_flags_inner(
     sort_and_limit_feature_flags(&mut flags, options.top);
 
     let output = build_feature_flags_output(FeatureFlagsOutputInput {
-        schema_version: CHECK_SCHEMA_VERSION,
+        schema_version: FEATURE_FLAGS_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: start.elapsed(),
         flags: &flags,

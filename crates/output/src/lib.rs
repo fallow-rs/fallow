@@ -139,8 +139,9 @@ pub use diff::{
 };
 pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
-    DUPES_SUPPRESS_COMMENT, DUPES_SUPPRESS_DESCRIPTION, DupesOutput, DupesOutputInput,
-    build_dupes_output, clone_family_actions, clone_group_actions, serialize_dupes_json_output,
+    DUPES_PROGRAMMATIC_SCHEMA_VERSION, DUPES_SCHEMA_VERSION, DUPES_SUPPRESS_COMMENT,
+    DUPES_SUPPRESS_DESCRIPTION, DupesOutput, DupesOutputInput, build_dupes_output,
+    clone_family_actions, clone_group_actions, serialize_dupes_json_output,
 };
 pub use error_envelope::ErrorOutput;
 pub use fallow_types::envelope;
@@ -149,18 +150,19 @@ pub use fallow_types::output_dead_code;
 pub use fallow_types::output_format::OutputFormat;
 pub use fallow_types::output_health;
 pub use feature_flags::{
-    FeatureFlagAction, FeatureFlagActionType, FeatureFlagConfidence, FeatureFlagDeadCodeOverlap,
-    FeatureFlagFinding, FeatureFlagKind, FeatureFlagsConfidenceMeta, FeatureFlagsKindMeta,
-    FeatureFlagsMeta, FeatureFlagsMetaDetails, FeatureFlagsOutput, FeatureFlagsOutputInput,
-    build_feature_flags_output, feature_flags_meta, serialize_feature_flags_json_output,
+    FEATURE_FLAGS_SCHEMA_VERSION, FeatureFlagAction, FeatureFlagActionType, FeatureFlagConfidence,
+    FeatureFlagDeadCodeOverlap, FeatureFlagFinding, FeatureFlagKind, FeatureFlagsConfidenceMeta,
+    FeatureFlagsKindMeta, FeatureFlagsMeta, FeatureFlagsMetaDetails, FeatureFlagsOutput,
+    FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
+    serialize_feature_flags_json_output,
 };
 pub use fix::{
     FixJsonOutput, FixJsonOutputInput, build_fix_json_output, count_applied_fixes,
     count_reported_fix_skips, serialize_fix_json_output,
 };
 pub use health::{
-    HealthJsonOutputInput, HealthOutput, HealthOutputInput, build_health_output,
-    serialize_health_json_output,
+    HEALTH_SCHEMA_VERSION, HealthJsonOutputInput, HealthOutput, HealthOutputInput,
+    build_health_output, serialize_health_json_output,
 };
 pub use health_actions::HealthActionsMeta;
 pub use health_coverage::CoverageModel;
@@ -291,9 +293,10 @@ pub use review_envelopes::{
     validate_review_body_scope,
 };
 pub use root_envelopes::{
-    AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,
-    apply_root_kind, attach_telemetry_meta, serialize_audit_json_output,
-    serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
+    AUDIT_SCHEMA_VERSION, AuditCommand, AuditOutput, COMBINED_SCHEMA_VERSION, CombinedMeta,
+    CombinedOutput, FallowOutput, RootEnvelopeMode, apply_root_kind, attach_telemetry_meta,
+    serialize_audit_json_output, serialize_combined_json_output, serialize_json_root_output,
+    serialize_named_json_output,
 };
 pub use sarif::{
     GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingFields,
@@ -323,7 +326,10 @@ pub use suppressions::{
     build_suppression_inventory_output, serialize_suppression_inventory_json_output,
 };
 pub use trace_envelopes::serialize_trace_json_output;
-pub use type_aware_envelopes::{TypeAwareStatusOutput, serialize_type_aware_status_json_output};
+pub use type_aware_envelopes::{
+    TYPE_AWARE_STATUS_SCHEMA_VERSION, TypeAwareStatusOutput,
+    serialize_type_aware_status_json_output,
+};
 pub use walkthrough_render::{
     MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_names, clean_decision_fact,
     visible_stage_units,

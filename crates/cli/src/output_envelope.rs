@@ -19,6 +19,7 @@ fn serialize_root_output_with_mode(
 }
 #[cfg(test)]
 mod tests {
+    use fallow_output::COMBINED_SCHEMA_VERSION;
     use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
 
     use super::*;
@@ -47,7 +48,7 @@ mod tests {
 
     fn combined_output() -> CombinedOutput {
         CombinedOutput {
-            schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
+            schema_version: SchemaVersion(COMBINED_SCHEMA_VERSION),
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
             meta: None,
@@ -68,7 +69,7 @@ mod tests {
         .expect("combined root should serialize");
 
         assert_eq!(value["kind"], serde_json::Value::String("combined".into()));
-        assert_eq!(value["schema_version"], crate::report::SCHEMA_VERSION);
+        assert_eq!(value["schema_version"], COMBINED_SCHEMA_VERSION);
     }
 
     #[test]

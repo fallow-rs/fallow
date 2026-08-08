@@ -27,7 +27,7 @@ These interfaces are covered by semver , breaking changes only happen in major v
 - **Top-level structure**: `schema_version`, `version`, `elapsed_ms`, `total_issues`, and all issue arrays
 - **Issue type arrays**: `unused_files`, `unused_exports`, `unused_types`, `private_type_leaks`, `unused_dependencies`, `unused_dev_dependencies`, `unused_enum_members`, `unused_class_members`, `unresolved_imports`, `unlisted_dependencies`, `duplicate_exports`, `type_only_dependencies`, `circular_dependencies`, `re_export_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`
 - **Issue object fields**: all fields documented in `docs/output-schema.json`
-- **Schema version**: the `schema_version` field follows its own versioning (independent of the tool version). The schema version is bumped when an EXISTING wire field is renamed, removed, or its type changes, OR when a `required` field is added to a previously-documented finding. Additive optional fields (new fields with `#[serde(skip_serializing_if = ...)]` that are absent on the wire by default, or new finding types added to brand-new issue-type arrays) do NOT bump `schema_version`: existing consumers see a byte-identical wire shape on the unchanged path.
+- **Schema version**: each output envelope versions independently from the tool and from sibling envelopes. The affected envelope is bumped when an EXISTING wire field is renamed, removed, or its type changes, when a value is added to an existing enum-valued required field, OR when a `required` field is added to a previously-documented finding. An envelope that embeds the changed contract bumps too; unrelated envelopes do not. Additive optional fields (new fields with `#[serde(skip_serializing_if = ...)]` that are absent on the wire by default, or new finding types added to brand-new issue-type arrays) do NOT bump `schema_version`: existing consumers see a byte-identical wire shape on the unchanged path. Exact envelope versions are encoded as numeric `const` values in `docs/output-schema.json`; a shared CLI/programmatic shape with separate version lineages encodes the closed numeric set. The generated TypeScript contract derives its literal types from those schema definitions.
 - **Audit styling fields**: `fallow audit` includes styling analytics by default. The nested health block may contain `css_analytics`, `styling_health`, and `styling_findings` for CSS, Sass/Less, CSS Modules, Tailwind/shadcn/CVA, StyleX/PandaCSS, vanilla-extract, styled-components, and Emotion projects. Under `gate: new-only`, styling findings carry the same optional `introduced` marker as other findings and the attribution block includes `styling_introduced` / `styling_inherited` totals. These fields are additive JSON output, and styling findings are verdict-neutral unless the corresponding rule is configured to `error`; they do not require a `schema_version` bump under the additive-field policy. Snapshot-diffing consumers can set `audit.css: false` or pass `--no-css` to suppress styling entirely.
 - **Document-root structure**: every object-shaped `--format json` envelope covered by the typed root schema (`FallowOutput`) carries a top-level `kind` discriminator. Consumers should branch on `kind` instead of probing for unique field presence. The authoritative set of typed root kinds lives in `docs/output-schema.json`; the factual list below is checked against that schema manifest:
   <!-- fallow-output-kind-list:start -->
@@ -65,6 +65,11 @@ if (!validate(fallowOutput)) {
 
 For TypeScript types generated from the schema, see `npm/fallow/types/output-contract.d.ts` (mirrored to `editors/vscode/src/generated/output-contract.d.ts`). The npm package also exposes `fallow/capabilities.json`, a version-matched copy of `fallow schema` with CLI capability metadata, and `fallow/issue-registry.json`, a narrow issue registry export derived from the same source. Regenerate the full bundle with `npm run generate:contracts`.
 
+The legacy TypeScript `SchemaVersion` alias remains equivalent to
+`CheckSchemaVersion` for source compatibility. Version-gated consumers should
+use the concrete envelope's `schema_version` field or its specific generated
+alias, such as `HealthSchemaVersion` or `CombinedSchemaVersion`.
+
 #### TypeScript bare-name backwards-compat aliases
 
 The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384), [#408](https://github.com/fallow-rs/fallow/issues/408), [#409](https://github.com/fallow-rs/fallow/issues/409)) wrapped every bare finding type in a `*Finding` envelope (`UnusedExport` to `UnusedExportFinding`, `CloneGroup` to `CloneGroupFinding`, etc.). The wrappers flatten the bare finding's fields via Rust's `#[serde(flatten)]` and add `actions[]` (and, where the wrapper participates in `fallow audit` attribution, the optional `introduced` flag), so the JSON wire shape is byte-identical.
@@ -72,18 +77,6 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 `json-schema-to-typescript` drops the orphan inner definitions when every field is subsumed by a flattening parent (even with `unreachableDefinitions: true`), so the bare names disappear from the generated `.d.ts` unless they are aliased back explicitly. The npm-published `fallow/types` subpath (`npm/fallow/types/output-contract.d.ts`) carries an alias for every wrapper so external consumers importing the bare names continue to compile. The full list lives at the end of the generated file under the `// Backwards-compat aliases` section, with per-alias JSDoc explaining the migration history.
 
 **Stability commitment**: legacy output aliases remain supported throughout v3. Removing them requires an explicit deprecation period and a future major release. New code that consumes fallow's JSON output should import the `*Finding` wrapper names directly.
-
-### Rust programmatic API
-
-- **Primary API crate**: `fallow-api` owns programmatic option, error, typed output, and JSON serialization contracts. Rust embedders should call the typed `run_*` entry points (`run_dead_code`, `run_duplication`, `run_circular_dependencies`, `run_boundary_violations`, `run_feature_flags`, `run_health`) and serialize only at their own protocol boundary via the matching `serialize_*_programmatic_json` function when needed.
-- **JSON protocol serializers**: `serialize_*_programmatic_json` functions remain exported from `fallow-api` for CLI, MCP, NAPI, and custom protocol adapters. They are serializers over typed `run_*` contracts, not alternate Rust runtime entry points.
-- **No Rust compatibility adapter crate**: `fallow-programmatic-cli` has been removed. New and existing Rust embedders should depend on `fallow-api` directly.
-
-#### Compatibility removal gates
-
-The following surfaces are intentional bridges, not architecture boundaries to build new features on:
-
-- `fallow-api::runtime_json`: keep JSON protocol serializers only. New command families must expose typed `run_*` output first and add JSON only at protocol boundaries.
 
 ### CLI interface
 
@@ -144,7 +137,13 @@ These are explicitly **not** covered by the stability guarantee:
 - **Performance characteristics**: timing, memory usage, parallelism
 - **SARIF output details**: beyond what the SARIF spec requires
 - **LSP protocol details**: diagnostics, code actions, Code Lens behavior
-- **Internal crate APIs**: `fallow-core`, `fallow-config`, etc. are not public API
+- **Rust crate APIs**: all workspace crates, including `fallow-api`, are
+  integration surfaces for Fallow's own CLI, MCP, NAPI, and editor adapters,
+  not supported external semver APIs. Their Rust types and functions may change
+  in a minor release. Stable consumers should use the versioned JSON, CLI,
+  npm, or protocol surfaces documented above. `fallow-api::runtime_json`
+  remains an internal protocol bridge; new command families expose typed
+  `run_*` output before adding JSON at protocol boundaries.
 
 ## Deprecation process
 
@@ -158,7 +157,7 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
-- **Duplication findings use spread-aware order and normalized fingerprints** ([#2155](https://github.com/fallow-rs/fallow/issues/2155)). Clone groups are ranked by size, occurrences, and capped directory or line spread. Formatting-only edits no longer change clone fingerprints. Existing saved baselines keep matching through a legacy raw-fingerprint fallback, while newly saved baselines use normalized keys. The global JSON schema is version 8 and the standalone programmatic duplication schema is version 2 because clone-group findings now require `spread` and `duplicated_tokens` now counts redundant copies; near-miss groups add optional `similarity`.
+- **Duplication findings use spread-aware order and normalized fingerprints** ([#2155](https://github.com/fallow-rs/fallow/issues/2155)). Clone groups are ranked by size, occurrences, and capped directory or line spread. Formatting-only edits no longer change clone fingerprints. Existing saved baselines keep matching through a legacy raw-fingerprint fallback, while newly saved baselines use normalized keys. CLI duplication uses schema version 8 and programmatic duplication uses its independent version 2 because clone-group findings now require `spread` and `duplicated_tokens` now counts redundant copies; near-miss groups add optional `similarity`. Combined and audit output advance independently when an embedded contract changes.
 
 - **CI-facing formats emit repository-root-relative paths when `--root` is a subdirectory** ([#1808](https://github.com/fallow-rs/fallow/pull/1808)). `codeclimate`, `review-github`, and `review-gitlab` used to address files relative to `--root`, which GitLab's Code Quality widget and the GitHub/GitLab review APIs rejected for package-subdirectory roots; they now rebase onto the git toplevel like `github-annotations`. Single-package repositories are unaffected. Wrapper scripts that prepended the offset themselves should drop that step, or pass `--report-path-prefix ''` to restore the old output. `--annotations-path-prefix` was renamed to `--report-path-prefix` with the old name kept as an alias.
 

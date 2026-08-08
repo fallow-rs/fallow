@@ -698,6 +698,64 @@ fn health_complexity_breakdown_gates_and_reconstructs_contributions() {
 }
 
 #[test]
+fn health_svelte_await_breakdown_uses_source_kinds() {
+    let dir = tempdir().expect("create temp dir");
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"svelte-await-complexity","dependencies":{"svelte":"latest"}}"#,
+    );
+    write_file(
+        &dir.path().join("src/App.svelte"),
+        "{#await promise}\n<p>loading</p>\n{:then value}\n<p>{value}</p>\n{:catch error}\n<p>{error}</p>\n{/await}\n",
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--complexity-breakdown",
+            "--max-cyclomatic",
+            "1",
+            "--max-cognitive",
+            "1",
+            "--report-only",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let template = json["findings"]
+        .as_array()
+        .and_then(|findings| {
+            findings
+                .iter()
+                .find(|finding| finding["name"] == "<template>")
+        })
+        .expect("Svelte template complexity finding");
+    let contributions = template["contributions"]
+        .as_array()
+        .expect("complexity contributions");
+    let kinds_on_line = |line: u64| -> Vec<&str> {
+        contributions
+            .iter()
+            .filter(|contribution| contribution["line"] == line)
+            .filter_map(|contribution| contribution["kind"].as_str())
+            .collect()
+    };
+
+    assert_eq!(kinds_on_line(1), vec!["await", "await"]);
+    assert_eq!(kinds_on_line(3), vec!["then", "then"]);
+    assert_eq!(kinds_on_line(5), vec!["catch", "catch"]);
+    assert_eq!(template["cyclomatic"], 4);
+    assert_eq!(template["cognitive"], 3);
+}
+
+#[test]
 fn health_reports_angular_template_complexity() {
     let output = run_fallow(
         "health",

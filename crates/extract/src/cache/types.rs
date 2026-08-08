@@ -866,7 +866,11 @@ use crate::MemberKind;
 /// per-construct contributions for Angular, Vue, Svelte, and Astro. The metric
 /// totals are unchanged, but warm 252 caches hold an empty breakdown, so an
 /// unedited template would keep rendering a finding with no explanation.
-pub(super) const CACHE_VERSION: u32 = 253;
+///
+/// Bumped to 254 for issue #2158: Svelte `{#await}` and `{:then}` complexity
+/// contributions now retain their source constructs instead of being cached as
+/// `If`.
+pub(super) const CACHE_VERSION: u32 = 254;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

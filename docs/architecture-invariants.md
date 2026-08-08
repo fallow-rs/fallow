@@ -26,7 +26,7 @@ The core crates are:
 | `fallow-core` | Internal detector backend used by `fallow-engine` for private detector phases. |
 | `fallow-engine` | Session, discovery, parsing, graph construction, and typed analysis orchestration. |
 | `fallow-output` | Shared output contracts, action builders, summaries, SARIF builders, and reusable formatter pieces. |
-| `fallow-api` | Supported Rust facade and programmatic workflow adapters. |
+| `fallow-api` | Workspace Rust facade and programmatic workflow adapters. |
 
 The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
 `fallow-node`. They should translate options, call `fallow-api` or
@@ -128,8 +128,9 @@ as user-visible behavior.
 These are final ownership rules:
 
 - `fallow-core` can contain private detector mechanics and compatibility
-  shims, but public Rust consumers should use `fallow-api` or typed
-  `fallow-engine` contracts.
+  shims, but product Rust adapters should use `fallow-api` or typed
+  `fallow-engine` contracts. Workspace crate APIs are not semver-stable
+  external consumer surfaces.
 - Protocol-specific prose can remain local when it is intentionally
   audience-specific. Factual inventories must come from manifests, schemas, or
   drift-tested registries.

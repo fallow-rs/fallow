@@ -10,6 +10,16 @@ use crate::{
     GroupByMode, RootEnvelopeMode, apply_root_kind, attach_telemetry_meta, strip_root_prefix,
 };
 
+/// Current schema version for the standalone health JSON envelope.
+pub const HEALTH_SCHEMA_VERSION: u32 = 8;
+
+/// Exact schema version for [`HealthOutput`].
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = HEALTH_SCHEMA_VERSION))]
+struct HealthSchemaVersion(u32);
+
 /// Envelope emitted by `fallow health --format json` (plus the `health` block
 /// inside the combined and audit envelopes).
 ///
@@ -26,6 +36,7 @@ use crate::{
 #[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]
 pub struct HealthOutput<Report, Group> {
     /// Health output schema version.
+    #[cfg_attr(feature = "schema", schemars(with = "HealthSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,

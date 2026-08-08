@@ -435,9 +435,10 @@ fn audit_json_has_verdict_and_schema() {
         Some("audit"),
         "command should be 'audit'"
     );
-    assert!(
-        json.get("schema_version").is_some(),
-        "audit JSON should have schema_version"
+    assert_eq!(
+        json["schema_version"].as_u64(),
+        Some(u64::from(fallow_output::AUDIT_SCHEMA_VERSION)),
+        "audit JSON should use the audit envelope version"
     );
 }
 

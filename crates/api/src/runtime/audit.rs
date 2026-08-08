@@ -928,6 +928,7 @@ mod tests {
         assert!(output.base_snapshot.is_some());
 
         let json = crate::serialize_audit_programmatic_json(output).expect("audit json");
+        assert_eq!(json["schema_version"], fallow_output::AUDIT_SCHEMA_VERSION);
         assert_eq!(
             json["dead_code"]["unused_files"][0]["path"],
             "src/feature.ts"

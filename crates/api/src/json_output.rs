@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
-    DupesOutput, DupesOutputInput, GroupByMode, RootEnvelopeMode,
+    DUPES_SCHEMA_VERSION, DupesOutput, DupesOutputInput, GroupByMode, RootEnvelopeMode,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     harmonize_multi_kind_suppress_line_actions as harmonize_typed_suppress_line_actions,
     strip_root_prefix,
@@ -259,7 +259,7 @@ pub fn serialize_duplication_json(
     let payload = DupesReportPayload::from_report(input.report);
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
-            schema_version: CHECK_SCHEMA_VERSION,
+            schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
             report: payload,
@@ -292,7 +292,7 @@ pub fn serialize_grouped_duplication_json(
     let payload = DupesReportPayload::from_report(input.report);
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
-            schema_version: CHECK_SCHEMA_VERSION,
+            schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
             report: payload,

@@ -4,6 +4,26 @@ use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, Tool
 use fallow_types::output::NextStep;
 use serde::Serialize;
 
+/// Current schema version for `fallow audit --format json`.
+pub const AUDIT_SCHEMA_VERSION: u32 = 9;
+
+/// Current schema version for bare combined JSON output.
+pub const COMBINED_SCHEMA_VERSION: u32 = 9;
+
+/// Schema projection for the audit envelope's exact version.
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = AUDIT_SCHEMA_VERSION))]
+struct AuditSchemaVersion(u32);
+
+/// Schema projection for the combined envelope's exact version.
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = COMBINED_SCHEMA_VERSION))]
+struct CombinedSchemaVersion(u32);
+
 /// JSON root envelope discriminator policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootEnvelopeMode {
@@ -143,6 +163,7 @@ pub fn attach_telemetry_meta(value: &mut serde_json::Value, analysis_run_id: Opt
 #[cfg_attr(feature = "schema", schemars(title = "fallow audit --format json"))]
 pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Complexity> {
     /// Audit output schema version.
+    #[cfg_attr(feature = "schema", schemars(with = "AuditSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
@@ -211,6 +232,7 @@ pub enum AuditCommand {
 )]
 pub struct CombinedOutput<Check, Dupes, Health> {
     /// Combined output schema version.
+    #[cfg_attr(feature = "schema", schemars(with = "CombinedSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,

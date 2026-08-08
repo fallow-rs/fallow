@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+pub use fallow_output::HEALTH_SCHEMA_VERSION;
 use fallow_output::{
     CheckOutput, DupesOutput, FeatureFlagFinding, FeatureFlagsOutput as FeatureFlagsOutputContract,
     GroupByMode, HealthGroup, HealthGrouping, HealthJsonOutputInput, HealthOutputInput,
@@ -18,9 +19,6 @@ use rustc_hash::FxHashSet;
 
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload, DuplicationGroup};
-
-/// Schema version stamped into health JSON envelopes built through this API.
-pub const HEALTH_SCHEMA_VERSION: u32 = 7;
 
 /// Concrete dead-code output contract returned by typed programmatic runs.
 pub type DeadCodeOutput = CheckOutput;

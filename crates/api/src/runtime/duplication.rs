@@ -3,8 +3,8 @@ use std::time::Instant;
 use fallow_config::{DetectionMode, DuplicatesConfig};
 use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
 use fallow_output::{
-    DupesNextStepsInput, DupesOutput, DupesOutputInput, build_dupes_next_steps, build_dupes_output,
-    dupes_meta,
+    DUPES_PROGRAMMATIC_SCHEMA_VERSION, DupesNextStepsInput, DupesOutput, DupesOutputInput,
+    build_dupes_next_steps, build_dupes_output, dupes_meta,
 };
 use fallow_types::output_format::OutputFormat;
 use rustc_hash::FxHashSet;
@@ -21,8 +21,6 @@ use crate::{
 };
 
 use super::{ProgrammaticResult, root_envelope_mode};
-
-pub(super) const SCHEMA_VERSION: u32 = 2;
 
 /// Run duplication analysis and return typed API output before serialization.
 ///
@@ -109,7 +107,7 @@ pub(super) fn run_duplication_report_with_session(
     });
     let output: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
-            schema_version: SCHEMA_VERSION,
+            schema_version: DUPES_PROGRAMMATIC_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: start.elapsed(),
             report: payload,

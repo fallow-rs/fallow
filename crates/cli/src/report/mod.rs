@@ -1013,11 +1013,6 @@ pub use fallow_api::build_health_markdown;
 pub use fallow_api::build_markdown;
 #[allow(
     clippy::redundant_pub_crate,
-    reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
-)]
-pub(crate) use json::SCHEMA_VERSION;
-#[allow(
-    clippy::redundant_pub_crate,
     reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
 )]
 pub(crate) use json::api_check_json_payload_with_config_fixable;

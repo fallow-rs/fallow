@@ -18,12 +18,12 @@ Use this file for a fast architectural map before editing or reviewing.
   security orchestration, and typed results.
 - `crates/output/`: typed output contracts, envelopes, schemas, and integration
   helpers.
-- `crates/api/`: public programmatic API and typed run entry points.
+- `crates/api/`: workspace programmatic facade and typed run entry points.
 - `crates/cli/`: CLI commands, fixes, terminal output, and format dispatch.
 - `crates/lsp/`: diagnostics, code actions, code lens, and hover.
 - `crates/mcp/`: agent-facing MCP tools over shared APIs with explicit CLI
   fallbacks.
-- `crates/napi/`: Node.js bindings over the public programmatic API.
+- `crates/napi/`: Node.js bindings over the workspace programmatic facade.
 - `crates/multicall/`: packaged binary entry that dispatches CLI, LSP, and MCP
   modes.
 - `crates/license/`: offline license verification and feature entitlements.

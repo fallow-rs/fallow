@@ -22,7 +22,7 @@ import { resolveFilePath } from "./treeView-utils.js";
  */
 
 /** Human label for each contribution kind, mirroring SonarSource vocabulary. */
-const KIND_LABELS: Record<ComplexityContributionKind, string> = {
+const KIND_LABELS: Record<Exclude<ComplexityContributionKind, "then">, string> = {
   if: "if",
   else: "else",
   "else-if": "else if",
@@ -45,9 +45,13 @@ const KIND_LABELS: Record<ComplexityContributionKind, string> = {
   "jsx-depth": "JSX depth",
   "hook-density": "hook density",
   "prop-count": "prop count",
+  await: "await",
 };
 
-const kindLabel = (kind: ComplexityContributionKind): string => KIND_LABELS[kind] ?? kind;
+// Oxlint's no-thenable rule rejects a `then` property even when its value is a
+// string. Exclude keeps every other contract kind exhaustive.
+const kindLabel = (kind: ComplexityContributionKind): string =>
+  kind === "then" ? "then" : (KIND_LABELS[kind] ?? kind);
 
 const roundTo = (value: number, places: number): number => {
   const factor = 10 ** places;

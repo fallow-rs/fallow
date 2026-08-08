@@ -18,6 +18,13 @@ use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_n
 /// Current schema version for the dead-code/check JSON envelope.
 pub const CHECK_SCHEMA_VERSION: u32 = 8;
 
+/// Schema projection for the dead-code envelope's exact version.
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = CHECK_SCHEMA_VERSION))]
+struct CheckSchemaVersion(u32);
+
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).
 ///
@@ -32,6 +39,7 @@ pub const CHECK_SCHEMA_VERSION: u32 = 8;
 #[cfg_attr(feature = "schema", schemars(title = "fallow dead-code --format json"))]
 pub struct CheckOutput {
     /// Dead-code output schema version; currently [`CHECK_SCHEMA_VERSION`].
+    #[cfg_attr(feature = "schema", schemars(with = "CheckSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
@@ -90,6 +98,7 @@ pub struct CheckOutput {
 )]
 pub struct CheckGroupedOutput {
     /// Dead-code output schema version; currently [`CHECK_SCHEMA_VERSION`].
+    #[cfg_attr(feature = "schema", schemars(with = "CheckSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,

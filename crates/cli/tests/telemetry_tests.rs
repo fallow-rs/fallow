@@ -116,7 +116,7 @@ fn telemetry_inspect_preserves_command_stdout_json() {
     assert_eq!(output.code, 0, "analysis should exit 0: {}", output.stderr);
     let json = parse_json(&output);
     assert_eq!(json["kind"].as_str(), Some("combined"));
-    assert_eq!(json["schema_version"].as_u64(), Some(8));
+    assert_eq!(json["schema_version"].as_u64(), Some(9));
 
     let event_start = output
         .stderr

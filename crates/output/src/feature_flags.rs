@@ -9,6 +9,16 @@ use serde::Serialize;
 
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
+/// Current schema version for feature-flag JSON output.
+pub const FEATURE_FLAGS_SCHEMA_VERSION: u32 = 8;
+
+/// Schema projection for the feature-flags envelope's exact version.
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = FEATURE_FLAGS_SCHEMA_VERSION))]
+struct FeatureFlagsSchemaVersion(u32);
+
 /// Inputs for building `fallow flags --format json`.
 pub struct FeatureFlagsOutputInput<'a> {
     /// Flags output schema version to report.
@@ -31,6 +41,7 @@ pub struct FeatureFlagsOutputInput<'a> {
 #[cfg_attr(feature = "schema", schemars(title = "fallow flags --format json"))]
 pub struct FeatureFlagsOutput {
     /// Flags output schema version.
+    #[cfg_attr(feature = "schema", schemars(with = "FeatureFlagsSchemaVersion"))]
     pub schema_version: SchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,

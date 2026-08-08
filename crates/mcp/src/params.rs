@@ -767,10 +767,10 @@ pub struct HealthParams {
 
     /// Include the per-decision-point complexity breakdown (`contributions[]`) on
     /// each complexity finding. Each entry names the construct (if, else-if,
-    /// loop, boolean operator, React hook density, wide prop count, ...) and its
-    /// cyclomatic/cognitive weight, so the agent can explain WHY a function
-    /// scored high and which lines to refactor. JSX depth remains descriptive
-    /// `react_jsx_max_depth` context, not a contribution. Forwards
+    /// Svelte await/then, loop, boolean operator, React hook density, wide prop
+    /// count, ...) and its cyclomatic/cognitive weight, so the agent can explain
+    /// WHY a function scored high and which lines to refactor. JSX depth remains
+    /// descriptive `react_jsx_max_depth` context, not a contribution. Forwards
     /// `--complexity-breakdown`. Off by default to keep output lean.
     pub complexity_breakdown: Option<bool>,
 

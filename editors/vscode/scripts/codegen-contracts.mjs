@@ -30,14 +30,6 @@ const SCHEMA_PATH = process.env.FALLOW_CODEGEN_OUTPUT_SCHEMA
 // Optional test hook: provide a captured `fallow schema` JSON file instead of
 // invoking Cargo while keeping normal codegen on the live capability manifest.
 const CAPABILITY_SCHEMA_PATH_ENV = "FALLOW_CODEGEN_CAPABILITY_SCHEMA";
-const SCHEMA_VERSION_SOURCE = resolve(
-  REPO_ROOT,
-  "crates",
-  "cli",
-  "src",
-  "report",
-  "json.rs",
-);
 const OUTPUT_CONTRACT_PATHS = [
   resolve(EXTENSION_ROOT, "src", "generated", "output-contract.d.ts"),
   resolve(REPO_ROOT, "npm", "fallow", "types", "output-contract.d.ts"),
@@ -186,43 +178,24 @@ function flattenRefSiblings(node) {
 }
 
 /**
- * Read `const SCHEMA_VERSION: u32 = N;` from the canonical Rust source so the
- * generated TS pins `SchemaVersion` to the literal N (not bare `number`).
- *
- * Pinning lets downstream consumers gate on the schema version with a literal
- * type comparison: a major bump that changes the constant in Rust produces a
- * compile error at every call site that branches on the old literal, instead
- * of silently drifting.
+ * Preserve the legacy generic alias when no root envelope references it.
+ * Existing TypeScript consumers imported `SchemaVersion` when every primary
+ * envelope shared the dead-code/check version. Keep that alias source-compatible
+ * while new code uses the exact envelope aliases derived from JSON Schema.
  */
-async function readRustSchemaVersion() {
-  const source = await readFile(SCHEMA_VERSION_SOURCE, "utf8");
-  const match = source.match(/const\s+SCHEMA_VERSION:\s*u32\s*=\s*(\d+)\s*;/);
-  if (!match) {
+function appendLegacySchemaVersionAlias(contents, schema) {
+  if (/^export type SchemaVersion\b/m.test(contents)) return contents;
+  const sharedDefinition = schema.definitions?.SchemaVersion;
+  const checkDefinition = schema.definitions?.CheckSchemaVersion;
+  if (sharedDefinition?.type !== "integer" || "const" in sharedDefinition) {
     throw new Error(
-      `Could not find \`const SCHEMA_VERSION: u32 = N;\` in ${SCHEMA_VERSION_SOURCE}`,
+      "SchemaVersion must remain an unconstrained integer definition in the output schema",
     );
   }
-  return Number(match[1]);
-}
-
-/**
- * Post-process jstt's output to replace the bare `number` alias for
- * `SchemaVersion` with the literal pulled from Rust.
- *
- * Throws if the bare alias is missing: that would mean either jstt changed its
- * emission shape or the schema's SchemaVersion definition changed; either way
- * the pin is no longer reliable and the build should fail loudly.
- */
-function pinSchemaVersion(contents, version) {
-  const target = "export type SchemaVersion = number";
-  if (!contents.includes(target)) {
-    throw new Error(
-      `pinSchemaVersion: expected to find \`${target}\` in generated output. ` +
-        "Did jstt's emission change, or is `SchemaVersion` no longer a top-level " +
-        "definition in docs/output-schema.json?",
-    );
+  if (!Number.isInteger(checkDefinition?.const)) {
+    throw new Error("CheckSchemaVersion must remain an exact integer definition");
   }
-  return contents.replace(target, `export type SchemaVersion = ${version}`);
+  return `${contents}\n\n/**\n * @deprecated Legacy alias for the dead-code/check schema version. Use the exact envelope-specific alias instead.\n */\nexport type SchemaVersion = CheckSchemaVersion;`;
 }
 
 /**
@@ -812,12 +785,16 @@ async function generateOutputContract(capabilitySchema) {
   // With the root title stripped, jstt uses the second arg as the name of the
   // top-level union type.
   const raw_ts = await compile(parsed, "FallowJsonOutput", OPTIONS);
-  const version = await readRustSchemaVersion();
   const final = appendDedupedFlattenAliases(
-    stripTrailingWhitespace(pinSchemaVersion(raw_ts, version)),
+    appendLegacySchemaVersionAlias(stripTrailingWhitespace(raw_ts), parsed),
     deadCodeAliases,
   );
   assertAliasesEmitted(final, deadCodeAliases);
+  if (!/^export type SchemaVersion = CheckSchemaVersion;?$/m.test(final)) {
+    throw new Error(
+      "generated output must preserve the legacy `SchemaVersion = CheckSchemaVersion` alias",
+    );
+  }
   return final;
 }
 

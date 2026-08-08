@@ -466,12 +466,6 @@ fn type_aware_metric(
     }
 }
 
-#[allow(
-    clippy::redundant_pub_crate,
-    reason = "used through report module re-export by combined.rs, audit.rs, flags.rs"
-)]
-pub(crate) const SCHEMA_VERSION: u32 = 8;
-
 #[cfg(test)]
 fn api_check_json_document(
     results: &AnalysisResults,
@@ -1225,7 +1219,7 @@ mod tests {
             fallow_output::HealthReport,
             fallow_output::HealthGroup,
         > = fallow_output::HealthOutput {
-            schema_version: SchemaVersion(SCHEMA_VERSION),
+            schema_version: SchemaVersion(fallow_output::HEALTH_SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),
             report,
@@ -1986,7 +1980,10 @@ mod tests {
         let elapsed = Duration::from_millis(0);
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], SCHEMA_VERSION);
+        assert_eq!(
+            output["schema_version"],
+            fallow_output::CHECK_SCHEMA_VERSION
+        );
         assert_eq!(output["schema_version"], 8);
     }
 

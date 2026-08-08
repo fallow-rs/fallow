@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The complexity contribution kind is now non-exhaustive.** Rust workspace
+  consumers should keep a wildcard arm when matching
+  `ComplexityContributionKind`, so later analyzer vocabulary can grow without
+  another exhaustive-match break. Rust crate APIs are workspace integration
+  surfaces and are not part of Fallow's semver-stable consumer contract.
+- **TypeScript output versions are envelope-specific.** Each output field now
+  references its own exact literal alias, so version-gated consumers should use
+  `CheckSchemaVersion`, `HealthSchemaVersion`, or the corresponding envelope
+  type. The legacy `SchemaVersion` export remains an alias of
+  `CheckSchemaVersion` for source compatibility.
 - **Malformed config shapes now fail loud instead of being silently
   dropped.** Three previously-tolerated shapes are rejected at config load:
   a malformed `extends` value (must be a string or an array of strings), an
@@ -24,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Svelte await-block complexity labels now match the source.** `{#await}`
+  and `{:then}` contributions previously appeared as `if` in health JSON and
+  the VS Code inline breakdown. They now use the explicit `await` and `then`
+  kinds, while `{:catch}` remains `catch` and metric totals are unchanged.
+  The standalone health schema is now version 8. Combined and audit output are
+  version 9 because they embed health; dead-code and unrelated output formats
+  keep their existing versions. JSON consumers must handle the two new values.
 - **Complexity findings in framework templates now show which conditions
   caused them.** A `<template>` finding in Vue, Angular, Svelte, or Astro
   reported a cyclomatic and cognitive number with nothing behind it, so the

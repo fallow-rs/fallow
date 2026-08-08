@@ -100,29 +100,9 @@ kind: "suppression-inventory"
 kind: "type-aware-status"
 }))
 /**
- * Schema version for this output format (independent of tool version). Bump
- * policy: ADDITIVE changes (new optional top-level fields, new optional struct
- * fields, new array entries, new MCP tools, new CLI flags that map to new
- * optional fields) do NOT bump the version; consumers receive new fields
- * without breaking. BREAKING changes (renamed fields, removed fields, type
- * changes, enum-variant removals, semantic changes to existing fields) DO
- * bump. To detect newly-added fields without a bump, check field presence via
- * JSON-key existence rather than gating on the version. v4 was introduced
- * alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
- * block, renamed summary fields); v5 introduced health_score formula_version 2
- * with scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`
- * from a scalar string to `oneOf: [string, array]` so the new `ignoreExports`
- * action can carry a paste-ready array of `{ file, exports }` rule objects
- * (the legacy `ignoreDependencies` etc. variants still emit strings, so
- * consumers that switch on `config_key` keep working unchanged). v8 added the
- * required duplication `spread` field and changed `duplicated_tokens` to count
- * redundant copies, excluding the retained copy in each group. The
- * runtime-coverage block is extended additively as the protocol evolves
- * (currently 0.3, which adds an optional capture_quality summary field). Other
- * additive examples: dupes --group-by adds optional grouped_by, total_issues,
- * groups fields without bumping.
+ * Schema projection for the audit envelope's exact version.
  */
-export type SchemaVersion = 8
+export type AuditSchemaVersion = 9
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -201,6 +181,10 @@ export type TypeAwareInvalidationKind = ("full" | "incremental" | "none")
  * Closed set of reasons for retaining a candidate without semantic scanning.
  */
 export type TypeAwareAbstentionReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics")
+/**
+ * Schema projection for the dead-code envelope's exact version.
+ */
+export type CheckSchemaVersion = 8
 /**
  * A suggested action attached to a finding in the JSON output. Each finding
  * carries an `actions` array; consumers (agents, IDE clients, CI bots) can
@@ -496,7 +480,7 @@ export type ComplexityMetric = ("cyclomatic" | "cognitive")
  * `Case` means a `case` label carrying a test; a bare `default` adds nothing
  * to cyclomatic complexity and so produces no contribution.
  */
-export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue" | "jsx-depth" | "hook-density" | "prop-count")
+export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue" | "jsx-depth" | "hook-density" | "prop-count" | "await" | "then")
 /**
  * Source for a finding's effective thresholds.
  */
@@ -820,6 +804,10 @@ export type CoverageAnalyzeSchemaVersion = "1"
  */
 export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 /**
+ * Exact schema version for [`HealthOutput`].
+ */
+export type HealthSchemaVersion = 8
+/**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
  * `owner` groups by CODEOWNERS team, `directory` groups by top-level
@@ -827,6 +815,11 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
  * groups by GitLab CODEOWNERS `[Section]` header name.
  */
 export type GroupByMode = ("owner" | "directory" | "package" | "section")
+/**
+ * Schema projection for the duplication envelope's CLI and programmatic
+ * version lineages.
+ */
+export type DupesSchemaVersion = (2 | 8)
 /**
  * Wire-version discriminator for [`ImpactReport`]. Independent from the global
  * `SchemaVersion` (the impact report versions on its own cadence) and from the
@@ -936,6 +929,14 @@ export type SecurityVerifierVerdictStatus = ("survivor" | "dismissed" | "needs-h
  */
 export type SecurityBlindSpotsSchemaVersion = "1"
 /**
+ * Schema projection for the combined envelope's exact version.
+ */
+export type CombinedSchemaVersion = 9
+/**
+ * Schema projection for the feature-flags envelope's exact version.
+ */
+export type FeatureFlagsSchemaVersion = 8
+/**
  * Feature flag kind values emitted in JSON.
  */
 export type FeatureFlagKind = ("environment_variable" | "sdk_call" | "config_object")
@@ -1010,6 +1011,10 @@ export type SuppressionInventoryLevel = ("file" | "line")
  */
 export type SuppressionInventoryOrigin = "comment"
 /**
+ * Schema projection for the type-aware status envelope's exact version.
+ */
+export type TypeAwareStatusSchemaVersion = 8
+/**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
 export type CodeClimateIssueKind = "issue"
@@ -1028,7 +1033,7 @@ export type CodeClimateOutput = CodeClimateIssue[]
  * `fallow audit --format json` envelope.
  */
 export interface AuditOutput {
-schema_version: SchemaVersion
+schema_version: AuditSchemaVersion
 version: ToolVersion
 command: AuditCommand
 verdict: AuditVerdict
@@ -2063,7 +2068,7 @@ docs?: (string | null)
  * JSON layer always emits.
  */
 export interface CheckOutput {
-schema_version: SchemaVersion
+schema_version: CheckSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
@@ -9835,7 +9840,7 @@ is_internal_dependency: boolean
  * documents the field and serde populates it natively.
  */
 export interface HealthOutput {
-schema_version: SchemaVersion
+schema_version: HealthSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
@@ -10081,7 +10086,7 @@ actions_meta?: (HealthActionsMeta | null)
  * internals continue to migrate out of CLI/API-specific crates.
  */
 export interface DupesOutput {
-schema_version: SchemaVersion
+schema_version: DupesSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
@@ -10254,7 +10259,7 @@ owner: string
  * `CheckOutput` body, plus per-group `key` / `owners` / `total_issues`.
  */
 export interface CheckGroupedOutput {
-schema_version: SchemaVersion
+schema_version: CheckSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 grouped_by: GroupByMode
@@ -11781,7 +11786,7 @@ sampled_count: number
  * Bare `fallow --format json` envelope.
  */
 export interface CombinedOutput {
-schema_version: SchemaVersion
+schema_version: CombinedSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
@@ -11831,7 +11836,7 @@ telemetry?: (TelemetryMeta | null)
  * Envelope emitted by `fallow flags --format json`.
  */
 export interface FeatureFlagsOutput {
-schema_version: SchemaVersion
+schema_version: FeatureFlagsSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
@@ -12940,7 +12945,7 @@ reason_present: boolean
  * Envelope emitted by `fallow type-aware status --format json`.
  */
 export interface TypeAwareStatusOutput {
-schema_version: SchemaVersion
+schema_version: TypeAwareStatusSchemaVersion
 version: ToolVersion
 /**
  * Whether a usable type-aware companion was found.
@@ -13052,6 +13057,11 @@ message: string
 exit_code: number
 }
 
+
+/**
+ * @deprecated Legacy alias for the dead-code/check schema version. Use the exact envelope-specific alias instead.
+ */
+export type SchemaVersion = CheckSchemaVersion;
 /**
  * Inner complexity-violation payload, flattened into `HealthFinding`
  * on the wire via `#[serde(flatten)]`. Exposed here because
