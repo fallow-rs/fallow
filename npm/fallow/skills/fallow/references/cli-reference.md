@@ -167,7 +167,7 @@ By default, `fallow dupes` skips generated framework output matching `**/.next/*
 | `--cross-language` | `bool` | `false` | Strip type annotations for TS↔JS matching |
 | `--ignore-imports` | `bool` | `false` | Exclude module wiring from clone detection |
 | `--no-ignore-imports` | `bool` | `false` | Count module wiring as clone candidates (opt out of the default exclusion) |
-| `--top` | `string` | - | Show only the N most-duplicated clone groups (sorted by instance count desc, tiebreak: line count desc, then path/line). Summary stats reflect the full project. |
+| `--top` | `string` | - | Show only the N highest-ranked clone groups. Ranking multiplies token count and occurrences, then adds a capped spread boost for distant files or same-file locations. Summary stats reflect the scoped project. |
 | `--trace` | `string` | - | Deep-dive clones. `FILE:LINE` traces all clones at a location; `dup:<id>` traces a clone group by the stable fingerprint shown in the listing and on `clone_groups[].fingerprint` in JSON. Fingerprints are usually `dup:<8hex>` and widen only on rare report collisions. Trace output adds an extract-function suggestion, estimated savings, and a best-effort proposed name per group |
 
 Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags), [`--changed-since`](#global-flags), [`--baseline`](#global-flags), [`--save-baseline`](#global-flags), [`--workspace`](#global-flags), [`--changed-workspaces`](#global-flags), [`--group-by`](#global-flags), [`--explain-skipped`](#global-flags).
@@ -180,6 +180,9 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `mild` | Syntax normalized (whitespace, semicolons) |
 | `weak` | Different literal values treated as equivalent |
 | `semantic` | Renamed variables also treated as equivalent |
+
+Near-miss detection is an independent opt-in, not another normalization mode.
+Near groups include `similarity`; every clone-group finding includes `spread`.
 
 ### Examples
 
@@ -2196,10 +2199,12 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Duplication settings
   "duplicates": {
     "mode": "mild",
+    "near": false,
     "minTokens": 50,
     "minLines": 5,
     "threshold": 0,
     "ignoreDefaults": true,
+    "ignoredClones": ["dup:6f12ab34:2"],
     "skipLocal": false,
     "ignorePatterns": ["**/*.generated.ts"]
   },
@@ -2282,9 +2287,11 @@ unused-types = "off"
 
 [duplicates]
 mode = "mild"
+near = false
 minTokens = 50
 minLines = 5
 ignoreDefaults = true
+ignoredClones = ["dup:6f12ab34:2"]
 
 [[overrides]]
 files = ["*.test.ts"]

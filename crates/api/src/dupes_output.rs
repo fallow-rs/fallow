@@ -12,7 +12,7 @@ use fallow_output::{
 };
 use fallow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
-    RefactoringSuggestion, clone_group_spread,
+    RefactoringSuggestion, clone_location_spread,
 };
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
@@ -110,13 +110,13 @@ impl AttributedCloneGroupFinding {
     /// Build the wrapper with a precomputed report-scoped fingerprint.
     #[must_use]
     pub fn with_fingerprint(group: AttributedCloneGroup, fingerprint: String) -> Self {
-        let spread = clone_group_spread(
-            &group
-                .instances
-                .iter()
-                .map(|instance| instance.instance.clone())
-                .collect::<Vec<_>>(),
-        );
+        let spread = clone_location_spread(group.instances.iter().map(|instance| {
+            (
+                instance.instance.file.as_path(),
+                instance.instance.start_line,
+                instance.instance.end_line,
+            )
+        }));
         let actions = clone_group_actions(group.line_count, group.instances.len());
         Self {
             group,

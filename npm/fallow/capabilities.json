@@ -6556,6 +6556,7 @@
         "cli_command": "fallow dupes --format json --quiet",
         "key_params": [
           "mode",
+          "near",
           "min_tokens",
           "min_occurrences",
           "top",
@@ -6909,7 +6910,9 @@
         "key_params": [
           "file",
           "line",
-          "fingerprint"
+          "fingerprint",
+          "near",
+          "min_occurrences"
         ],
         "license": "free",
         "license_note": null,

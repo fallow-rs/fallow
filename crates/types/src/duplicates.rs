@@ -98,12 +98,36 @@ const SPREAD_RANK_WEIGHTS: [u64; MAX_RANKED_SPREAD + 1] = [
 /// 250-line steps. The returned value is not capped; only ranking caps spread.
 #[must_use]
 pub fn clone_group_spread(instances: &[CloneInstance]) -> usize {
-    if instances.len() < 2 {
+    clone_location_spread(instances.iter().map(|instance| {
+        (
+            instance.file.as_path(),
+            instance.start_line,
+            instance.end_line,
+        )
+    }))
+}
+
+/// Compute clone spread from borrowed file and line locations.
+///
+/// This is equivalent to [`clone_group_spread`] without requiring callers
+/// that wrap clone instances to clone their source fragments.
+#[must_use]
+pub fn clone_location_spread<'a>(
+    locations: impl IntoIterator<Item = (&'a Path, usize, usize)>,
+) -> usize {
+    let mut by_file = locations
+        .into_iter()
+        .map(|(file, start_line, end_line)| CloneLocation {
+            file,
+            start_line,
+            end_line,
+        })
+        .collect::<Vec<_>>();
+    if by_file.len() < 2 {
         return 0;
     }
 
-    let mut by_file = instances.iter().collect::<Vec<_>>();
-    by_file.sort_unstable_by(|left, right| left.file.cmp(&right.file));
+    by_file.sort_unstable_by(|left, right| left.file.cmp(right.file));
 
     let mut same_file_max = 0;
     let mut parent_components = Vec::new();
@@ -114,7 +138,7 @@ pub fn clone_group_spread(instances: &[CloneInstance]) -> usize {
             end += 1;
         }
 
-        parent_components.push(path_parent_components(&by_file[start].file));
+        parent_components.push(path_parent_components(by_file[start].file));
         if end - start >= 2 {
             let min_end = by_file[start..end]
                 .iter()
@@ -133,6 +157,13 @@ pub fn clone_group_spread(instances: &[CloneInstance]) -> usize {
     }
 
     same_file_max.max(directory_tree_diameter(&parent_components))
+}
+
+#[derive(Clone, Copy)]
+struct CloneLocation<'a> {
+    file: &'a Path,
+    start_line: usize,
+    end_line: usize,
 }
 
 /// Compare clone groups in shared spread-aware priority order.
