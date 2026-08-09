@@ -92,9 +92,9 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             "rule_pack_schema_command": "fallow rule-pack-schema",
             "rule_pack_schema_note": "JSON Schema for a declarative rule pack referenced from rulePacks.",
             "plugin_schema_command": "fallow plugin-schema",
-            "plugin_schema_note": "JSON Schema for a user-authored external plugin (fallow-plugin-*.jsonc). Teach fallow about an unsupported framework declaratively: detection, entryPoints, alwaysUsed, usedExports, usedClassMembers, and manifestEntries (derive entry points from per-package manifest files).",
+            "plugin_schema_note": "JSON Schema for a user-authored external plugin (fallow-plugin-*.jsonc). Teach fallow about an unsupported framework declaratively: detection, entryPoints, alwaysUsed, usedExports, usedClassMembers, and manifestEntries (derive entry points from per-package manifest files, including typed [*] traversal and exists predicates).",
             "plugin_check_command": "fallow plugin-check",
-            "plugin_check_note": "Read-only dry-run of your external plugins: reports which activated, which manifests each manifestEntries rule matched, what it seeded (with path-exists), and typed warnings (manifests-matched-none, when-excluded-all, field-path-unresolved, entries-empty, manifest-parse-failed, entry-outside-root, seeded-paths-missing). Run it after authoring a fallow-plugin-*.jsonc to verify it before a full analysis.",
+            "plugin_check_note": "Read-only dry-run of your external plugins: reports which activated, which manifests each manifestEntries rule matched, what it seeded (with path-exists), and typed warnings (manifests-matched-none, when-excluded-all, field-path-unresolved, entries-empty, manifest-parse-failed, field-values-limit-exceeded, entry-expansion-limit-exceeded, entry-outside-root, seeded-paths-missing). Run it after authoring a fallow-plugin-*.jsonc to verify it before a full analysis.",
             "config_files": [".fallowrc.json", ".fallowrc.jsonc", "fallow.toml", ".fallow.toml"]
         },
         "boundary_presets": crate::onboarding::boundary_presets_schema(),
