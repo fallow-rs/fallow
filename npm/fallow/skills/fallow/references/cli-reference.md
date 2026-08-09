@@ -12,7 +12,7 @@ Complete command and flag specifications for all fallow CLI commands.
 - [`list`: Project Introspection](#list-project-introspection)
 - [`init`: Config Generation](#init-config-generation)
 - [`migrate`: Config Migration](#migrate-config-migration)
-- [`health`: Function Complexity Analysis](#health-function-complexity-analysis)
+- [`health`: Function Complexity and File Health Analysis](#health-function-complexity-and-file-health-analysis)
 - [`audit`: Changed-File Quality Gate](#audit-changed-file-quality-gate)
 - [`flags`: Feature Flag Detection](#flags-feature-flag-detection)
 - [`security`: Security Candidate Detection](#security-security-candidate-detection)
@@ -20,7 +20,7 @@ Complete command and flag specifications for all fallow CLI commands.
 - [`trace`: Symbol Call Chains](#trace-symbol-call-chains)
 - [`decision-surface`: Structural Decisions](#decision-surface-structural-decisions)
 - [`explain`: Rule Explanation](#explain-rule-explanation)
-- [`schema`: CLI Introspection](#schema-cli-introspection)
+- [`schema`: Capability Manifest](#schema-capability-manifest)
 - [`config-schema`: Config JSON Schema](#config-schema-config-json-schema)
 - [`plugin-schema`: Plugin JSON Schema](#plugin-schema-plugin-json-schema)
 - [`plugin-check`: Verify external plugins](#plugin-check-verify-external-plugins)
@@ -65,7 +65,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-exports` | Unused exports |
 | `--unused-deps` | Unused dependencies, devDependencies, optionalDependencies, type-only production deps, and test-only production deps |
 | `--unused-types` | Unused types |
-| `--private-type-leaks` | Opt-in API hygiene check (default `off`) for exported signatures that reference same-file private types. Storybook `*.stories.*` story files and framework routing convention files (Next.js App + Pages Router, Gatsby, Remix v2, TanStack Router, Expo Router) are skipped to avoid noise. Enable via this flag or `private-type-leaks: "warn"` / `"error"` in [`rules`](#rules-configuration). |
+| `--private-type-leaks` | Opt-in API hygiene check (default `off`) for exported signatures that reference same-file private types. Storybook `*.stories.*` story files and framework routing convention files (Next.js App + Pages Router, Gatsby, Remix v2, TanStack Router, Expo Router) are skipped to avoid noise. Enable via this flag or `private-type-leaks: "warn"` / `"error"` in [`rules`](#configuration-file-format). |
 | `--unused-enum-members` | Unused enum members |
 | `--unused-class-members` | Unused class members |
 | `--unused-store-members` | Unused Pinia store members |
@@ -382,7 +382,7 @@ fallow migrate --from knip.jsonc
 
 ---
 
-## `health`: Function Complexity & File Health Analysis
+## `health`: Function Complexity and File Health Analysis
 
 Analyzes function complexity across the project using cyclomatic and cognitive complexity metrics. By default all sections are included (health score, complexity findings, file scores, hotspots, and refactoring targets). Use `--complexity`, `--file-scores`, `--hotspots`, `--targets`, or `--score` to show only specific sections.
 
