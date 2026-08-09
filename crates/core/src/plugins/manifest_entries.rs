@@ -457,13 +457,14 @@ fn emit_report_warnings(plugin_name: &str, report: &RuleReport) {
             ),
             WarningKind::ManifestParseFailed => tracing::warn!(
                 "Plugin '{plugin_name}': manifestEntries skipped manifest '{}' (glob '{}') because \
-                 it could not be read or parsed.",
+                 it could not be read or parsed using the rule's declared format.",
                 warning.manifest.as_deref().unwrap_or(""),
                 report.manifests
             ),
             WarningKind::FieldValuesLimitExceeded => tracing::warn!(
                 "Plugin '{plugin_name}': manifestEntries field path '{}' in manifest '{}' exceeded \
-                 the traversal value limit of {}. No entries were seeded from the affected rule.",
+                 the traversal value limit of {}. The affected gate or template was skipped without \
+                 partial seeding.",
                 warning.field_path.as_deref().unwrap_or(""),
                 warning.manifest.as_deref().unwrap_or(""),
                 warning

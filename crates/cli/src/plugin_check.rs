@@ -378,8 +378,8 @@ fn human_warning(warning: &Value) -> String {
             slot("glob")
         ),
         "manifest-parse-failed" => format!(
-            "manifest-parse-failed: manifest '{}' could not be read or parsed (check it is valid \
-             JSON/JSONC).",
+            "manifest-parse-failed: manifest '{}' could not be read or parsed using the rule's \
+             declared format.",
             slot("manifest")
         ),
         "field-values-limit-exceeded" => format!(
