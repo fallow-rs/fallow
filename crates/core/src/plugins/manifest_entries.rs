@@ -26,8 +26,9 @@ use serde_json::Value;
 use super::PathRule;
 use super::config_parser::normalize_config_path;
 
-/// Maximum number of scalar values one interpolation field may contribute.
-/// This bounds a single large manifest array before cartesian expansion begins.
+/// Maximum number of values one field traversal may retain at any step.
+/// This bounds large manifest arrays before scalar conversion or cartesian
+/// expansion begins.
 const MAX_MANIFEST_FIELD_VALUES: usize = 1_024;
 
 /// Maximum number of concrete paths one entry template may produce per manifest.
@@ -578,8 +579,8 @@ fn expand_interpolations(
     Ok(expanded)
 }
 
-/// The path-segment string values a dotted field yields: a string or number
-/// yields one; an array yields one per scalar element; anything else yields none.
+/// The path-segment string values a field yields: a string or number yields
+/// one; a final array yields one per scalar element; anything else yields none.
 fn field_segment_values(
     manifest: &Value,
     field: &ManifestFieldPath,
