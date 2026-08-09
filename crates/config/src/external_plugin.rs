@@ -1113,6 +1113,16 @@ exports = ["default"]
                 }]
             }"#,
             r#"{
+                "name": "bad-entry-condition",
+                "manifestEntries": [{
+                    "manifests": "**/manifest.json",
+                    "entries": [{
+                        "path": "index.ts",
+                        "when": { "plugin..browser": true }
+                    }]
+                }]
+            }"#,
+            r#"{
                 "name": "unterminated-template",
                 "manifestEntries": [{
                     "manifests": "**/manifest.json",

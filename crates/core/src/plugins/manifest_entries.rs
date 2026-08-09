@@ -810,9 +810,19 @@ mod tests {
         );
         assert!(field_values(&m, &field("absent.field")).unwrap().is_empty());
 
-        let m = json(r#"{"content_scripts":[{"js":["a.js","b.js"]},{"js":["c.js"]},{"css":[]}]}"#);
+        let m = json(
+            r#"{"content_scripts":[{"js":["a.js","b.js"]},null,{"js":["c.js"]},"invalid",{"css":[]}]}"#,
+        );
         assert_eq!(
             field_segment_values(&m, &field("content_scripts[*].js")).unwrap(),
+            vec!["a.js", "b.js", "c.js"]
+        );
+
+        let nested = json(
+            r#"{"groups":[{"entries":[{"path":"a.js"},{"path":"b.js"}]},{"entries":[{"path":"c.js"}]}]}"#,
+        );
+        assert_eq!(
+            field_segment_values(&nested, &field("groups[*].entries[*].path")).unwrap(),
             vec!["a.js", "b.js", "c.js"]
         );
     }
@@ -859,8 +869,16 @@ mod tests {
 
     #[test]
     fn exists_conditions_test_presence_without_truthiness() {
-        let manifest = json(r#"{"presentFalse":false,"presentNull":null,"items":[]}"#);
-        for path in ["presentFalse", "presentNull", "items"] {
+        let manifest = json(
+            r#"{"presentFalse":false,"presentNull":null,"presentEmpty":"","presentObject":{},"items":[]}"#,
+        );
+        for path in [
+            "presentFalse",
+            "presentNull",
+            "presentEmpty",
+            "presentObject",
+            "items",
+        ] {
             assert!(
                 when_matches(&manifest, &BTreeMap::from([exists(path, true)])).unwrap(),
                 "{path} is present regardless of its value"
@@ -1252,7 +1270,7 @@ mod tests {
         let ext = plugin_with(vec![rule(
             "**/manifest.json",
             &[],
-            vec![seed("${entries}/index.ts", &[])],
+            vec![seed("static.ts", &[]), seed("${entries}/index.ts", &[])],
         )]);
 
         let reports = check_manifest_entries(&ext, root);
@@ -1270,7 +1288,11 @@ mod tests {
             warning.kind.expansion_limit(),
             Some(MAX_MANIFEST_FIELD_VALUES)
         );
-        assert!(reports[0].matched[0].seeded.is_empty());
+        assert_eq!(
+            reports[0].matched[0].seeded,
+            vec!["plugins/alpha/static.ts"],
+            "a limited template must not suppress valid sibling seeds"
+        );
     }
 
     #[test]

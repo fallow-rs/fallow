@@ -517,6 +517,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_warning_points_to_the_declared_format() {
+        let warning = warning_value(&CheckWarning {
+            kind: WarningKind::ManifestParseFailed,
+            glob: None,
+            field_path: None,
+            manifest: Some("extension/manifest.json".to_string()),
+            entry: None,
+        });
+
+        assert_eq!(
+            human_warning(&warning),
+            "manifest-parse-failed: manifest 'extension/manifest.json' could not be read or parsed using the rule's declared format."
+        );
+    }
+
+    #[test]
     fn plugin_check_json_respects_explicit_style() {
         let doc = json!({"kind": "plugin-check", "plugins": []});
         let compact = render_plugin_check_json(&doc, crate::json_style::JsonStyle::Compact)
