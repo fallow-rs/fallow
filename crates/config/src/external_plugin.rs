@@ -416,15 +416,15 @@ impl<'de> Deserialize<'de> for ManifestPathTemplate {
 
 /// A typed condition used by a manifest entry gate.
 ///
-/// Plain scalar JSON values retain strict equality semantics. The reserved
+/// Plain JSON values retain strict equality semantics. The reserved
 /// `{ "exists": bool }` object tests field presence without truthiness.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ManifestCondition {
     /// Require the field path to resolve (`true`) or not resolve (`false`).
     Exists(ManifestExistsPredicate),
-    /// Require at least one yielded value to equal this scalar exactly.
-    Equals(ManifestScalarValue),
+    /// Require at least one yielded value to equal this JSON value exactly.
+    Equals(serde_json::Value),
 }
 
 /// The explicit field-presence predicate accepted by [`ManifestCondition`].
@@ -433,36 +433,6 @@ pub enum ManifestCondition {
 pub struct ManifestExistsPredicate {
     /// Whether the field path must resolve to at least one value.
     pub exists: bool,
-}
-
-/// A scalar JSON value accepted by a strict-equality manifest condition.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(untagged)]
-pub enum ManifestScalarValue {
-    /// A JSON boolean.
-    Boolean(bool),
-    /// A JSON number.
-    Number(serde_json::Number),
-    /// A JSON string.
-    String(String),
-    /// JSON `null`.
-    Null(()),
-}
-
-impl TryFrom<serde_json::Value> for ManifestScalarValue {
-    type Error = String;
-
-    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        match value {
-            serde_json::Value::Bool(value) => Ok(Self::Boolean(value)),
-            serde_json::Value::Number(value) => Ok(Self::Number(value)),
-            serde_json::Value::String(value) => Ok(Self::String(value)),
-            serde_json::Value::Null => Ok(Self::Null(())),
-            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-                Err("manifest equality conditions must be scalar JSON values".to_string())
-            }
-        }
-    }
 }
 
 /// A rule that seeds entry points DERIVED from framework manifest files.
@@ -493,8 +463,8 @@ pub struct ManifestEntryRule {
     #[serde(default)]
     pub format: ManifestFormat,
 
-    /// Manifest-level gate: a map of field path to a scalar expectation or an
-    /// explicit `exists` predicate. Paths use dotted object keys and may
+    /// Manifest-level gate: a map of field path to an equality expectation or
+    /// an explicit `exists` predicate. Paths use dotted object keys and may
     /// traverse arrays with `[*]`. ALL entries must match; a wildcard equality
     /// matches when any yielded value equals the expectation. An empty map
     /// matches every manifest.
@@ -1205,13 +1175,11 @@ exports = ["default"]
         );
         assert_eq!(
             when.get(&"enabled".parse().unwrap()),
-            Some(&ManifestCondition::Equals(ManifestScalarValue::Boolean(
-                false
-            )))
+            Some(&ManifestCondition::Equals(serde_json::Value::Bool(false)))
         );
         assert_eq!(
             when.get(&"metadata".parse().unwrap()),
-            Some(&ManifestCondition::Equals(ManifestScalarValue::Null(())))
+            Some(&ManifestCondition::Equals(serde_json::Value::Null))
         );
 
         let serialized = serde_json::to_value(plugin).unwrap();
@@ -1222,22 +1190,29 @@ exports = ["default"]
     }
 
     #[test]
-    fn manifest_conditions_reject_untyped_objects_and_arrays() {
-        for condition in [
-            serde_json::json!({ "exists": "yes" }),
+    fn manifest_conditions_preserve_non_operator_json_equality_values() {
+        let expected = [
+            serde_json::json!({ "exists": "not-an-operator" }),
             serde_json::json!({ "exists": true, "extra": true }),
             serde_json::json!({ "other": true }),
             serde_json::json!(["worker"]),
-        ] {
+        ];
+        for condition in expected {
             let source = serde_json::json!({
-                "name": "bad-condition",
+                "name": "equality-condition",
                 "manifestEntries": [{
                     "manifests": "**/manifest.json",
-                    "when": { "field": condition },
+                    "when": { "field": condition.clone() },
                     "entries": [{ "path": "index.ts" }]
                 }]
             });
-            assert!(serde_json::from_value::<ExternalPluginDef>(source).is_err());
+            let plugin: ExternalPluginDef = serde_json::from_value(source).unwrap();
+            assert_eq!(
+                plugin.manifest_entries[0]
+                    .when
+                    .get(&"field".parse().unwrap()),
+                Some(&ManifestCondition::Equals(condition))
+            );
         }
     }
 

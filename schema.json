@@ -569,7 +569,7 @@
           "default": "jsonc"
         },
         "when": {
-          "description": "Manifest-level gate: a map of field path to a scalar expectation or an\nexplicit `exists` predicate. Paths use dotted object keys and may\ntraverse arrays with `[*]`. ALL entries must match; a wildcard equality\nmatches when any yielded value equals the expectation. An empty map\nmatches every manifest.",
+          "description": "Manifest-level gate: a map of field path to an equality expectation or\nan explicit `exists` predicate. Paths use dotted object keys and may\ntraverse arrays with `[*]`. ALL entries must match; a wildcard equality\nmatches when any yielded value equals the expectation. An empty map\nmatches every manifest.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/ManifestCondition"
@@ -605,15 +605,14 @@
       ]
     },
     "ManifestCondition": {
-      "description": "A typed condition used by a manifest entry gate.\n\nPlain scalar JSON values retain strict equality semantics. The reserved\n`{ \"exists\": bool }` object tests field presence without truthiness.",
+      "description": "A typed condition used by a manifest entry gate.\n\nPlain JSON values retain strict equality semantics. The reserved\n`{ \"exists\": bool }` object tests field presence without truthiness.",
       "anyOf": [
         {
           "description": "Require the field path to resolve (`true`) or not resolve (`false`).",
           "$ref": "#/$defs/ManifestExistsPredicate"
         },
         {
-          "description": "Require at least one yielded value to equal this scalar exactly.",
-          "$ref": "#/$defs/ManifestScalarValue"
+          "description": "Require at least one yielded value to equal this JSON value exactly."
         }
       ]
     },
@@ -629,27 +628,6 @@
       "additionalProperties": false,
       "required": [
         "exists"
-      ]
-    },
-    "ManifestScalarValue": {
-      "description": "A scalar JSON value accepted by a strict-equality manifest condition.",
-      "anyOf": [
-        {
-          "description": "A JSON boolean.",
-          "type": "boolean"
-        },
-        {
-          "description": "A JSON number.",
-          "type": "number"
-        },
-        {
-          "description": "A JSON string.",
-          "type": "string"
-        },
-        {
-          "description": "JSON `null`.",
-          "type": "null"
-        }
       ]
     },
     "ManifestSeedRule": {

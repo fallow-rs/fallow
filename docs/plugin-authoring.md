@@ -146,10 +146,11 @@ Use `[*]` to traverse every object in a manifest array. For example,
 extension content-script object. The same syntax works in `when`; a wildcard
 condition passes when any yielded value equals the expected value.
 
-Each `when` value is either a scalar compared by strict equality or an explicit
-presence predicate. `{ "exists": true }` matches false, null, empty arrays, and
-any other present value; `{ "exists": false }` matches only when the path yields
-no value. Presence checks never use truthiness.
+Each `when` value is either a JSON value compared by strict equality or an
+explicit presence predicate. The exact `{ "exists": true }` shape matches
+false, null, empty arrays, and any other present value; `{ "exists": false }`
+matches only when the path yields no value. Presence checks never use
+truthiness. Other objects and arrays retain their existing equality behavior.
 
 ```jsonc
 {

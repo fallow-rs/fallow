@@ -20,7 +20,6 @@ use std::path::{Path, PathBuf};
 use fallow_config::{
     ExternalPluginDef, ManifestCondition, ManifestEntryRule, ManifestFieldPath,
     ManifestFieldSegment, ManifestFormat, ManifestPathPart, ManifestPathTemplate,
-    ManifestScalarValue,
 };
 use serde_json::Value;
 
@@ -633,9 +632,7 @@ fn when_matches(
     for (path, condition) in when {
         let values = field_values(manifest, path)?;
         let matches = match condition {
-            ManifestCondition::Equals(expected) => values
-                .iter()
-                .any(|actual| scalar_condition_matches(actual, expected)),
+            ManifestCondition::Equals(expected) => values.contains(&expected),
             ManifestCondition::Exists(predicate) => values.is_empty() != predicate.exists,
         };
         if !matches {
@@ -643,16 +640,6 @@ fn when_matches(
         }
     }
     Ok(true)
-}
-
-fn scalar_condition_matches(actual: &Value, expected: &ManifestScalarValue) -> bool {
-    match (actual, expected) {
-        (Value::Bool(actual), ManifestScalarValue::Boolean(expected)) => actual == expected,
-        (Value::Number(actual), ManifestScalarValue::Number(expected)) => actual == expected,
-        (Value::String(actual), ManifestScalarValue::String(expected)) => actual == expected,
-        (Value::Null, ManifestScalarValue::Null(())) => true,
-        _ => false,
-    }
 }
 
 fn condition_requires_present_value(condition: &ManifestCondition) -> bool {
@@ -793,12 +780,7 @@ mod tests {
 
     fn conditions(when: &[(&str, Value)]) -> BTreeMap<ManifestFieldPath, ManifestCondition> {
         when.iter()
-            .map(|(path, expected)| {
-                (
-                    field(path),
-                    ManifestCondition::Equals(expected.clone().try_into().unwrap()),
-                )
-            })
+            .map(|(path, expected)| (field(path), ManifestCondition::Equals(expected.clone())))
             .collect()
     }
 
@@ -840,7 +822,7 @@ mod tests {
         let mut when = BTreeMap::new();
         when.insert(
             field("type"),
-            ManifestCondition::Equals(ManifestScalarValue::String("plugin".into())),
+            ManifestCondition::Equals(Value::String("plugin".into())),
         );
         assert!(when_matches(&m, &when).unwrap());
 
@@ -849,7 +831,7 @@ mod tests {
         let mut when_browser = BTreeMap::new();
         when_browser.insert(
             field("plugin.browser"),
-            ManifestCondition::Equals(ManifestScalarValue::Boolean(true)),
+            ManifestCondition::Equals(Value::Bool(true)),
         );
         assert!(!when_matches(&m, &when_browser).unwrap());
 
@@ -859,6 +841,19 @@ mod tests {
         let manifest = json(r#"{"plugins":[{"kind":"worker"},{"kind":"browser"}]}"#);
         let wildcard = conditions(&[("plugins[*].kind", Value::String("browser".into()))]);
         assert!(when_matches(&manifest, &wildcard).unwrap());
+
+        let structured = json(r#"{"array":["worker"],"object":{"kind":"browser"}}"#);
+        let structured_when = BTreeMap::from([
+            (
+                field("array"),
+                ManifestCondition::Equals(json(r#"["worker"]"#)),
+            ),
+            (
+                field("object"),
+                ManifestCondition::Equals(json(r#"{"kind":"browser"}"#)),
+            ),
+        ]);
+        assert!(when_matches(&structured, &structured_when).unwrap());
     }
 
     #[test]
