@@ -136,7 +136,10 @@ Derives entry points from matching JSON or JSONC manifest files. Each rule
 selects manifests, can require exact field values through `when`, and resolves
 its `entries` relative to the manifest directory. Entry paths may interpolate a
 dotted manifest field. A string creates one path and an array creates one path
-per value.
+per value. A field may contribute at most 1,024 scalar values, and one entry
+template may expand to at most 4,096 concrete paths per manifest. Fallow skips
+an over-limit template and reports a structured `plugin-check` warning instead
+of returning a partial result.
 
 ```jsonc
 {

@@ -26,6 +26,13 @@ use serde_json::Value;
 use super::PathRule;
 use super::config_parser::normalize_config_path;
 
+/// Maximum number of scalar values one interpolation field may contribute.
+/// This bounds a single large manifest array before cartesian expansion begins.
+const MAX_MANIFEST_FIELD_VALUES: usize = 1_024;
+
+/// Maximum number of concrete paths one entry template may produce per manifest.
+const MAX_MANIFEST_ENTRY_EXPANSIONS: usize = 4_096;
+
 /// A kind of `manifestEntries` diagnostic, kebab-serialized for agents that
 /// branch on it. Centralizes the vocabulary shared by the production warn path
 /// (`evaluate_manifest_entries`) and the agent-facing check path
@@ -42,6 +49,10 @@ pub enum WarningKind {
     EntriesEmpty,
     /// One or more matched manifests could not be read or parsed.
     ManifestParseFailed,
+    /// An interpolation field yielded more scalar values than the evaluator permits.
+    FieldValuesLimitExceeded,
+    /// An entry template's interpolation product exceeded the evaluator limit.
+    EntryExpansionLimitExceeded,
     /// An entry resolved outside the project root and was skipped.
     EntryOutsideRoot,
     /// A rule seeded entries but none of the seeded paths exist on disk.
@@ -59,8 +70,20 @@ impl WarningKind {
             Self::FieldPathUnresolved => "field-path-unresolved",
             Self::EntriesEmpty => "entries-empty",
             Self::ManifestParseFailed => "manifest-parse-failed",
+            Self::FieldValuesLimitExceeded => "field-values-limit-exceeded",
+            Self::EntryExpansionLimitExceeded => "entry-expansion-limit-exceeded",
             Self::EntryOutsideRoot => "entry-outside-root",
             Self::SeededPathsMissing => "seeded-paths-missing",
+        }
+    }
+
+    /// The enforced ceiling for warnings caused by bounded expansion.
+    #[must_use]
+    pub fn expansion_limit(self) -> Option<usize> {
+        match self {
+            Self::FieldValuesLimitExceeded => Some(MAX_MANIFEST_FIELD_VALUES),
+            Self::EntryExpansionLimitExceeded => Some(MAX_MANIFEST_ENTRY_EXPANSIONS),
+            _ => None,
         }
     }
 }
@@ -111,6 +134,33 @@ impl CheckWarning {
             field_path: None,
             manifest: Some(manifest),
             entry: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExpansionError {
+    FieldValues { field_path: String },
+    EntryPaths { template: String },
+}
+
+impl ExpansionError {
+    fn into_warning(self, manifest: Option<String>) -> CheckWarning {
+        match self {
+            Self::FieldValues { field_path } => CheckWarning {
+                kind: WarningKind::FieldValuesLimitExceeded,
+                glob: None,
+                field_path: Some(field_path),
+                manifest,
+                entry: None,
+            },
+            Self::EntryPaths { template } => CheckWarning {
+                kind: WarningKind::EntryExpansionLimitExceeded,
+                glob: None,
+                field_path: None,
+                manifest,
+                entry: Some(template),
+            },
         }
     }
 }
@@ -344,7 +394,14 @@ fn seed_rule_entries(
         if !when_matches(manifest, &seed.when) {
             continue;
         }
-        for concrete in expand_interpolations(&seed.path, manifest) {
+        let concretes = match expand_interpolations(&seed.path, manifest) {
+            Ok(concretes) => concretes,
+            Err(error) => {
+                warnings.push(error.into_warning(rel_manifest.clone()));
+                continue;
+            }
+        };
+        for concrete in concretes {
             match normalize_config_path(&concrete, manifest_path, root) {
                 Some(rel) => seeded.push(rel),
                 None => warnings.push(CheckWarning {
@@ -379,6 +436,26 @@ fn emit_report_warnings(plugin_name: &str, report: &RuleReport) {
                  it could not be read or parsed.",
                 warning.manifest.as_deref().unwrap_or(""),
                 report.manifests
+            ),
+            WarningKind::FieldValuesLimitExceeded => tracing::warn!(
+                "Plugin '{plugin_name}': manifestEntries field path '{}' in manifest '{}' exceeded \
+                 the interpolation value limit of {}. No entries were seeded from that template.",
+                warning.field_path.as_deref().unwrap_or(""),
+                warning.manifest.as_deref().unwrap_or(""),
+                warning
+                    .kind
+                    .expansion_limit()
+                    .unwrap_or(MAX_MANIFEST_FIELD_VALUES)
+            ),
+            WarningKind::EntryExpansionLimitExceeded => tracing::warn!(
+                "Plugin '{plugin_name}': manifestEntries template '{}' in manifest '{}' exceeded \
+                 the concrete entry limit of {}. No entries were seeded from that template.",
+                warning.entry.as_deref().unwrap_or(""),
+                warning.manifest.as_deref().unwrap_or(""),
+                warning
+                    .kind
+                    .expansion_limit()
+                    .unwrap_or(MAX_MANIFEST_ENTRY_EXPANSIONS)
             ),
             WarningKind::WhenExcludedAll => tracing::warn!(
                 "Plugin '{plugin_name}': manifestEntries 'when' gate excluded all matched \
@@ -421,7 +498,10 @@ fn referenced_field_paths(rule: &ManifestEntryRule) -> Vec<ManifestFieldPath> {
 /// Expand `${dotted.field}` interpolations in a path against a manifest, fanning
 /// out over string / array field values. Returns an empty vec when any
 /// interpolation resolves to nothing (a missing field seeds nothing).
-fn expand_interpolations(path: &ManifestPathTemplate, manifest: &Value) -> Vec<String> {
+fn expand_interpolations(
+    path: &ManifestPathTemplate,
+    manifest: &Value,
+) -> Result<Vec<String>, ExpansionError> {
     let mut expanded = vec![String::new()];
     for part in path.parts() {
         match part {
@@ -431,12 +511,23 @@ fn expand_interpolations(path: &ManifestPathTemplate, manifest: &Value) -> Vec<S
                 }
             }
             ManifestPathPart::Field(field) => {
-                let values = field_segment_values(manifest, field);
+                let values = field_segment_values(manifest, field)?;
                 if values.is_empty() {
-                    return Vec::new();
+                    return Ok(Vec::new());
                 }
 
-                let mut next = Vec::with_capacity(expanded.len().saturating_mul(values.len()));
+                let Some(next_len) = expanded.len().checked_mul(values.len()) else {
+                    return Err(ExpansionError::EntryPaths {
+                        template: path.as_str().to_string(),
+                    });
+                };
+                if next_len > MAX_MANIFEST_ENTRY_EXPANSIONS {
+                    return Err(ExpansionError::EntryPaths {
+                        template: path.as_str().to_string(),
+                    });
+                }
+
+                let mut next = Vec::with_capacity(next_len);
                 for prefix in &expanded {
                     for value in &values {
                         let mut concrete = String::with_capacity(prefix.len() + value.len());
@@ -449,18 +540,31 @@ fn expand_interpolations(path: &ManifestPathTemplate, manifest: &Value) -> Vec<S
             }
         }
     }
-    expanded
+    Ok(expanded)
 }
 
 /// The path-segment string values a dotted field yields: a string or number
 /// yields one; an array yields one per scalar element; anything else yields none.
-fn field_segment_values(manifest: &Value, field: &ManifestFieldPath) -> Vec<String> {
-    match field_value(manifest, field) {
+fn field_segment_values(
+    manifest: &Value,
+    field: &ManifestFieldPath,
+) -> Result<Vec<String>, ExpansionError> {
+    let values = match field_value(manifest, field) {
         Some(Value::String(s)) if !s.is_empty() => vec![s.clone()],
         Some(Value::Number(n)) => vec![n.to_string()],
-        Some(Value::Array(items)) => items.iter().filter_map(scalar_segment).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(scalar_segment)
+            .take(MAX_MANIFEST_FIELD_VALUES + 1)
+            .collect(),
         _ => Vec::new(),
+    };
+    if values.len() > MAX_MANIFEST_FIELD_VALUES {
+        return Err(ExpansionError::FieldValues {
+            field_path: field.as_str().to_string(),
+        });
     }
+    Ok(values)
 }
 
 fn scalar_segment(value: &Value) -> Option<String> {
@@ -626,20 +730,50 @@ mod tests {
         let m = json(r#"{"plugin": {"extraPublicDirs": ["common", "types"], "id": "actions"}}"#);
         // string field -> one entry
         assert_eq!(
-            expand_interpolations(&template("${plugin.id}/index.ts"), &m),
+            expand_interpolations(&template("${plugin.id}/index.ts"), &m).unwrap(),
             vec!["actions/index.ts"]
         );
         // array field -> one entry per element
         assert_eq!(
-            expand_interpolations(&template("${plugin.extraPublicDirs}/index.{ts,tsx}"), &m),
+            expand_interpolations(&template("${plugin.extraPublicDirs}/index.{ts,tsx}"), &m)
+                .unwrap(),
             vec!["common/index.{ts,tsx}", "types/index.{ts,tsx}"]
         );
         // missing field -> nothing seeded
-        assert!(expand_interpolations(&template("${plugin.absent}/index.ts"), &m).is_empty());
+        assert!(
+            expand_interpolations(&template("${plugin.absent}/index.ts"), &m)
+                .unwrap()
+                .is_empty()
+        );
         // no interpolation -> passthrough
         assert_eq!(
-            expand_interpolations(&template("public/index.{ts,tsx}"), &m),
+            expand_interpolations(&template("public/index.{ts,tsx}"), &m).unwrap(),
             vec!["public/index.{ts,tsx}"]
+        );
+    }
+
+    #[test]
+    fn interpolation_limits_are_explicit_errors() {
+        let too_many: Vec<Value> = (0..=MAX_MANIFEST_FIELD_VALUES)
+            .map(|index| Value::String(index.to_string()))
+            .collect();
+        let manifest = serde_json::json!({ "values": too_many });
+        assert_eq!(
+            expand_interpolations(&template("${values}/index.ts"), &manifest),
+            Err(ExpansionError::FieldValues {
+                field_path: "values".to_string(),
+            })
+        );
+
+        let factors = (0..65)
+            .map(|index| Value::String(index.to_string()))
+            .collect::<Vec<_>>();
+        let manifest = serde_json::json!({ "left": factors, "right": factors });
+        assert_eq!(
+            expand_interpolations(&template("${left}/${right}/index.ts"), &manifest),
+            Err(ExpansionError::EntryPaths {
+                template: "${left}/${right}/index.ts".to_string(),
+            })
         );
     }
 
@@ -890,6 +1024,42 @@ mod tests {
             .find(|w| w.kind == WarningKind::FieldPathUnresolved)
             .expect("field-path-unresolved warning");
         assert_eq!(warn.field_path.as_deref(), Some("plugin.extarPublicDirs"));
+    }
+
+    #[test]
+    fn check_reports_interpolation_limits_without_partial_seeding() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let values = (0..=MAX_MANIFEST_FIELD_VALUES)
+            .map(|index| index.to_string())
+            .collect::<Vec<_>>();
+        write_manifest(
+            root,
+            "plugins/alpha/manifest.json",
+            &serde_json::json!({ "entries": values }).to_string(),
+        );
+        let ext = plugin_with(vec![rule(
+            "**/manifest.json",
+            &[],
+            vec![seed("${entries}/index.ts", &[])],
+        )]);
+
+        let reports = check_manifest_entries(&ext, root);
+        let warning = reports[0]
+            .warnings
+            .iter()
+            .find(|warning| warning.kind == WarningKind::FieldValuesLimitExceeded)
+            .expect("field-values-limit-exceeded warning");
+        assert_eq!(warning.field_path.as_deref(), Some("entries"));
+        assert_eq!(
+            warning.manifest.as_deref(),
+            Some("plugins/alpha/manifest.json")
+        );
+        assert_eq!(
+            warning.kind.expansion_limit(),
+            Some(MAX_MANIFEST_FIELD_VALUES)
+        );
+        assert!(reports[0].matched[0].seeded.is_empty());
     }
 
     #[test]

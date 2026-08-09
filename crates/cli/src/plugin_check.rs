@@ -189,6 +189,9 @@ fn warning_value(warning: &CheckWarning) -> Value {
     if let Some(entry) = &warning.entry {
         value["entry"] = json!(entry);
     }
+    if let Some(limit) = warning.kind.expansion_limit() {
+        value["limit"] = json!(limit);
+    }
     value
 }
 
@@ -379,6 +382,20 @@ fn human_warning(warning: &Value) -> String {
              JSON/JSONC).",
             slot("manifest")
         ),
+        "field-values-limit-exceeded" => format!(
+            "field-values-limit-exceeded: field path '{}' in manifest '{}' exceeded the value \
+             limit of {}; reduce the manifest array or split the rule.",
+            slot("field_path"),
+            slot("manifest"),
+            warning.get("limit").and_then(Value::as_u64).unwrap_or(0)
+        ),
+        "entry-expansion-limit-exceeded" => format!(
+            "entry-expansion-limit-exceeded: template '{}' in manifest '{}' exceeded the concrete \
+             entry limit of {}; reduce its interpolation fan-out.",
+            slot("entry"),
+            slot("manifest"),
+            warning.get("limit").and_then(Value::as_u64).unwrap_or(0)
+        ),
         "entry-outside-root" => format!(
             "entry-outside-root: entry '{}' (from '{}') resolved outside the project root and was \
              skipped.",
@@ -449,6 +466,8 @@ mod tests {
                     | WarningKind::FieldPathUnresolved
                     | WarningKind::EntriesEmpty
                     | WarningKind::ManifestParseFailed
+                    | WarningKind::FieldValuesLimitExceeded
+                    | WarningKind::EntryExpansionLimitExceeded
                     | WarningKind::EntryOutsideRoot
                     | WarningKind::SeededPathsMissing => {}
                 }
@@ -459,6 +478,8 @@ mod tests {
                 WarningKind::FieldPathUnresolved,
                 WarningKind::EntriesEmpty,
                 WarningKind::ManifestParseFailed,
+                WarningKind::FieldValuesLimitExceeded,
+                WarningKind::EntryExpansionLimitExceeded,
                 WarningKind::EntryOutsideRoot,
                 WarningKind::SeededPathsMissing,
             ]
