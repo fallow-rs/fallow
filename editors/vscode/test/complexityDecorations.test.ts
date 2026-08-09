@@ -131,16 +131,18 @@ describe("buildComplexityDecorations", () => {
     expect(after).toContain("else if");
   });
 
-  it("renders Svelte await and then contributions with source labels", () => {
+  it("renders Svelte await, then, and catch contributions with source labels", () => {
     const f = finding({
       contributions: [
         contribution(8, "cognitive", "await", 1),
         contribution(10, "cognitive", "then", 1),
+        contribution(12, "cognitive", "catch", 1),
       ],
     });
     const result = buildComplexityDecorations([f], docPath, root, all);
     expect(result[0]?.afterText).toContain("await");
     expect(result[1]?.afterText).toContain("then");
+    expect(result[2]?.afterText).toContain("catch");
   });
 });
 
@@ -170,10 +172,15 @@ describe("hoverForLine", () => {
     expect(md?.value).toContain("for loop");
   });
 
-  it("uses the Svelte continuation label in the hover", () => {
-    const f = finding({ contributions: [contribution(12, "cognitive", "then", 1)] });
-    const md = hoverForLine([f], 12);
-    expect(md?.value).toContain("then · +1 cognitive");
+  it("uses the Svelte state labels in the hover", () => {
+    const f = finding({
+      contributions: [
+        contribution(12, "cognitive", "then", 1),
+        contribution(13, "cognitive", "catch", 1),
+      ],
+    });
+    expect(hoverForLine([f], 12)?.value).toContain("then · +1 cognitive");
+    expect(hoverForLine([f], 13)?.value).toContain("catch · +1 cognitive");
   });
 
   it("returns undefined on a line with neither a function nor a contribution", () => {
