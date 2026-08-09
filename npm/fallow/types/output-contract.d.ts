@@ -806,7 +806,7 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 /**
  * Exact schema version for [`HealthOutput`].
  */
-export type HealthSchemaVersion = 8
+export type HealthSchemaVersion = 9
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *

@@ -39,7 +39,7 @@ describe("generated/output-contract.d.ts", () => {
     expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<9>();
     expectTypeOf<DupesSchemaVersion>().toEqualTypeOf<2 | 8>();
     expectTypeOf<FeatureFlagsSchemaVersion>().toEqualTypeOf<8>();
-    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<8>();
+    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<9>();
     expectTypeOf<TypeAwareStatusSchemaVersion>().toEqualTypeOf<8>();
   });
 

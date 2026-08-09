@@ -18,7 +18,10 @@ use std::sync::LazyLock;
 use fallow_types::extract::{ComplexityContributionKind, FunctionComplexity};
 
 use super::build_template_complexity;
-use super::engine::{ScanError, TemplateComplexity, skip_quoted};
+use super::engine::{
+    RegexContext, ScanError, TemplateComplexity, read_identifier, skip_block_comment,
+    skip_line_comment, skip_number_literal, skip_quoted, skip_regex_literal,
+};
 
 static MASK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(
@@ -155,17 +158,35 @@ impl<'a> SvelteScanner<'a> {
         let (keyword, after) = split_keyword(rest);
         match keyword {
             // `{#if cond}` / `{#key expr}`: one branch each, whose whole
-            // remainder is the bound expression.
-            //
-            // `{#key}` still uses the closest shared control-flow vocabulary;
-            // `{#await}` has its own public kind because the editor renders it.
-            "if" | "key" | "await" => {
-                let kind = if keyword == "await" {
-                    ComplexityContributionKind::Await
-                } else {
-                    ComplexityContributionKind::If
-                };
-                self.add_control_flow_with_expr(after, inner_offset, kind)?;
+            // remainder is the bound expression. `{#key}` uses the closest
+            // shared control-flow vocabulary.
+            "if" | "key" => {
+                self.add_control_flow_with_expr(
+                    after,
+                    inner_offset,
+                    ComplexityContributionKind::If,
+                )?;
+                self.nesting = self.nesting.saturating_add(1);
+                Ok(())
+            }
+            // Await blocks can omit the pending branch with
+            // `{#await expression then binding}` or
+            // `{#await expression catch binding}`. Score the promise expression
+            // separately from the binding and record the selected state as the
+            // same flat continuation used by `{:then}` / `{:catch}`.
+            "await" => {
+                let shorthand = split_await_shorthand(after)?;
+                self.complexity.add_control_flow(
+                    inner_offset,
+                    ComplexityContributionKind::Await,
+                    self.nesting,
+                );
+                self.add_expr_slice(shorthand.expression)?;
+                if let Some(state) = shorthand.state {
+                    let state_offset = self.offset_of(state.keyword);
+                    self.complexity.inc_cyclomatic(state_offset, state.kind);
+                    self.complexity.inc_cognitive_flat(state_offset, state.kind);
+                }
                 self.nesting = self.nesting.saturating_add(1);
                 Ok(())
             }
@@ -298,17 +319,54 @@ impl<'a> SvelteScanner<'a> {
 }
 
 /// Find the `}` that closes the `{` at `open`, honoring nested `{ }`, quoted
-/// strings, and template literals so a `}` inside a string or nested object
-/// does not end the section early. Byte-safe over multibyte text.
+/// strings, template literals, comments, and regex literals. Byte-safe over
+/// multibyte text.
 fn find_matching_curly(source: &str, open: usize) -> Result<usize, ScanError> {
     let mut offset = open + 1;
     let mut depth = 1_u16;
+    let mut regex = RegexContext::expression_start();
+    let mut at_start = true;
+    let mut directive_keyword_pending = false;
     while offset < source.len() {
         match source.as_bytes()[offset] {
-            b'\'' | b'"' | b'`' => offset = skip_quoted(source, offset)?,
+            byte if byte.is_ascii_whitespace() => offset += 1,
+            b'#' | b':' | b'@' if at_start => {
+                at_start = false;
+                directive_keyword_pending = true;
+                regex.after_operator();
+                offset += 1;
+            }
+            b'/' if offset == open + 1 && starts_block_close(source, offset) => {
+                at_start = false;
+                regex.after_operator();
+                offset += 1;
+            }
+            b'\'' | b'"' | b'`' => {
+                at_start = false;
+                offset = skip_quoted(source, offset)?;
+                regex.after_value();
+            }
+            b'/' if source.as_bytes().get(offset + 1) == Some(&b'/') => {
+                offset = skip_line_comment(source, offset);
+            }
+            b'/' if source.as_bytes().get(offset + 1) == Some(&b'*') => {
+                offset = skip_block_comment(source, offset)?;
+            }
+            b'/' if regex.can_start() => {
+                at_start = false;
+                offset = skip_regex_literal(source, offset)?;
+                regex.after_value();
+            }
+            b'/' => {
+                at_start = false;
+                offset += usize::from(source.as_bytes().get(offset + 1) == Some(&b'=')) + 1;
+                regex.after_operator();
+            }
             b'{' => {
+                at_start = false;
                 depth = depth.saturating_add(1);
                 offset += 1;
+                regex.after_operator();
             }
             b'}' => {
                 depth -= 1;
@@ -316,11 +374,61 @@ fn find_matching_curly(source: &str, open: usize) -> Result<usize, ScanError> {
                     return Ok(offset);
                 }
                 offset += 1;
+                regex.after_value();
             }
-            _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
+            byte if byte == b'_' || byte == b'$' || byte.is_ascii_alphabetic() => {
+                at_start = false;
+                let (identifier, end) = read_identifier(source, offset).ok_or(ScanError)?;
+                if directive_keyword_pending {
+                    directive_keyword_pending = identifier == "else";
+                    regex.after_operator();
+                } else {
+                    regex.after_identifier(identifier);
+                }
+                offset = end;
+            }
+            byte if byte.is_ascii_digit() => {
+                at_start = false;
+                offset = skip_number_literal(source, offset);
+                regex.after_value();
+            }
+            _ if source[offset..].starts_with("?.") => {
+                at_start = false;
+                offset += 2;
+                regex.after_property_access();
+            }
+            b'.' if source[offset..].starts_with("...") => {
+                at_start = false;
+                offset += 3;
+                regex.after_operator();
+            }
+            b'.' => {
+                at_start = false;
+                offset += 1;
+                regex.after_property_access();
+            }
+            b'+' | b'-'
+                if source.as_bytes().get(offset + 1) == Some(&source.as_bytes()[offset]) =>
+            {
+                at_start = false;
+                offset += 2;
+            }
+            _ => {
+                at_start = false;
+                let character = source[offset..].chars().next().ok_or(ScanError)?;
+                offset += character.len_utf8();
+                regex.after_character(character);
+            }
         }
     }
     Err(ScanError)
+}
+
+fn starts_block_close(source: &str, slash: usize) -> bool {
+    read_identifier(source, slash + 1).is_some_and(|(keyword, end)| {
+        matches!(keyword, "if" | "each" | "await" | "key" | "snippet")
+            && source.as_bytes().get(end) == Some(&b'}')
+    })
 }
 
 /// Split a block body into its leading keyword (`if`, `each`, `else`, ...) and
@@ -330,6 +438,125 @@ fn split_keyword(body: &str) -> (&str, &str) {
         Some(index) => (&body[..index], &body[index..]),
         None => (body, ""),
     }
+}
+
+/// Split an await body into its promise expression and optional shorthand
+/// state keyword. Svelte permits both `{#await expression then binding}` and
+/// `{#await expression catch binding}`. Only a top-level keyword begins the
+/// shorthand state, so nested calls, object literals, strings, and comments
+/// remain part of the promise expression.
+struct AwaitShorthand<'a> {
+    expression: &'a str,
+    state: Option<AwaitShorthandState<'a>>,
+}
+
+#[derive(Clone, Copy)]
+struct AwaitShorthandState<'a> {
+    keyword: &'a str,
+    kind: ComplexityContributionKind,
+}
+
+fn split_await_shorthand(after: &str) -> Result<AwaitShorthand<'_>, ScanError> {
+    let trimmed = after.trim_start();
+    let bytes = trimmed.as_bytes();
+    let mut index = 0;
+    let mut depth = 0_u16;
+    let mut regex = RegexContext::expression_start();
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\'' | b'"' | b'`' => {
+                index = skip_quoted(trimmed, index)?;
+                regex.after_value();
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index = skip_line_comment(trimmed, index);
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index = skip_block_comment(trimmed, index)?;
+            }
+            b'/' if regex.can_start() => {
+                index = skip_regex_literal(trimmed, index)?;
+                regex.after_value();
+            }
+            b'/' => {
+                index += usize::from(bytes.get(index + 1) == Some(&b'=')) + 1;
+                regex.after_operator();
+            }
+            b'(' | b'[' | b'{' => {
+                depth = depth.saturating_add(1);
+                index += 1;
+                regex.after_operator();
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                index += 1;
+                regex.after_value();
+            }
+            byte if byte == b'_' || byte == b'$' || byte.is_ascii_alphabetic() => {
+                let Some((identifier, identifier_end)) = read_identifier(trimmed, index) else {
+                    return Err(ScanError);
+                };
+                let kind = match identifier {
+                    "then" => Some(ComplexityContributionKind::Then),
+                    "catch" => Some(ComplexityContributionKind::Catch),
+                    _ => None,
+                };
+                if depth == 0
+                    && let Some(kind) = kind
+                {
+                    let binding = trimmed[identifier_end..].trim_start();
+                    if before_is_boundary(trimmed, index)
+                        && after_is_boundary(trimmed, identifier_end)
+                        && starts_binding(binding)
+                    {
+                        return Ok(AwaitShorthand {
+                            expression: trimmed[..index].trim_end(),
+                            state: Some(AwaitShorthandState {
+                                keyword: identifier,
+                                kind,
+                            }),
+                        });
+                    }
+                }
+                regex.after_identifier(identifier);
+                index = identifier_end;
+            }
+            byte if byte.is_ascii_digit() => {
+                index = skip_number_literal(trimmed, index);
+                regex.after_value();
+            }
+            b'.' if trimmed[index..].starts_with("...") => {
+                index += 3;
+                regex.after_operator();
+            }
+            b'.' => {
+                index += 1;
+                regex.after_property_access();
+            }
+            b'+' | b'-' if bytes.get(index + 1) == Some(&bytes[index]) => {
+                index += 2;
+            }
+            byte if byte.is_ascii_whitespace() => index += 1,
+            _ => {
+                let character = trimmed[index..].chars().next().ok_or(ScanError)?;
+                index += character.len_utf8();
+                regex.after_character(character);
+            }
+        }
+    }
+
+    Ok(AwaitShorthand {
+        expression: trimmed,
+        state: None,
+    })
+}
+
+fn starts_binding(binding: &str) -> bool {
+    binding
+        .chars()
+        .next()
+        .is_some_and(|first| matches!(first, '{' | '[' | '_' | '$') || first.is_alphabetic())
 }
 
 /// Extract the iterable expression from an `{#each ...}` body remainder. The
@@ -455,6 +682,194 @@ mod tests {
     }
 
     #[test]
+    fn await_shorthand_counts_the_selected_state() {
+        for (source, state_kind) in [
+            (
+                "{#await import('./Component.svelte') then { default: Component }}<Component />{/await}",
+                ComplexityContributionKind::Then,
+            ),
+            (
+                "{#await load() catch error}<p>{error}</p>{/await}",
+                ComplexityContributionKind::Catch,
+            ),
+            (
+                "{#await load() then { value = choose('catch error') }}<p>{value}</p>{/await}",
+                ComplexityContributionKind::Then,
+            ),
+        ] {
+            let complexity = compute_svelte_template_complexity(source)
+                .expect("shorthand await block should have complexity");
+            assert_eq!(complexity.cyclomatic, 3, "{source}: {complexity:?}");
+            assert_eq!(complexity.cognitive, 2, "{source}: {complexity:?}");
+
+            for kind in [ComplexityContributionKind::Await, state_kind] {
+                let contributions: Vec<_> = complexity
+                    .contributions
+                    .iter()
+                    .filter(|contribution| contribution.kind == kind)
+                    .collect();
+                assert_eq!(contributions.len(), 2, "{source}: {complexity:?}");
+                assert!(
+                    contributions
+                        .iter()
+                        .all(|contribution| contribution.weight == 1),
+                    "{source}: {complexity:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn await_shorthand_splits_only_the_top_level_state_keyword() {
+        let complexity = compute_svelte_template_complexity(
+            r#"{#await resolve({ then: "catch" }).then(load) && ready then value}<p>{value}</p>{/await}"#,
+        )
+        .expect("shorthand await block should have complexity");
+
+        assert_eq!(complexity.cyclomatic, 4, "{complexity:?}");
+        assert_eq!(complexity.cognitive, 3, "{complexity:?}");
+        assert_eq!(
+            complexity
+                .contributions
+                .iter()
+                .filter(|contribution| contribution.kind == ComplexityContributionKind::Then)
+                .count(),
+            2,
+            "{complexity:?}"
+        );
+    }
+
+    #[test]
+    fn await_regex_contents_do_not_start_shorthand() {
+        for (source, state_kind, state_line) in [
+            (
+                "{#await / then value /.test(input)}\n<p>loading</p>\n{:then result}\n<p>{result}</p>\n{/await}",
+                ComplexityContributionKind::Then,
+                3,
+            ),
+            (
+                "{#await / catch error /.test(input)}\n<p>loading</p>\n{:catch error}\n<p>{error}</p>\n{/await}",
+                ComplexityContributionKind::Catch,
+                3,
+            ),
+        ] {
+            let complexity = compute_svelte_template_complexity(source)
+                .expect("regex await expression should have complexity");
+            assert_eq!(complexity.cyclomatic, 3, "{source}: {complexity:?}");
+            assert_eq!(complexity.cognitive, 2, "{source}: {complexity:?}");
+            assert!(
+                complexity
+                    .contributions
+                    .iter()
+                    .filter(|contribution| contribution.kind == state_kind)
+                    .all(|contribution| contribution.line == state_line),
+                "{source}: {complexity:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn await_regex_and_division_expressions_keep_real_shorthand() {
+        for (source, state_kind) in [
+            (
+                "{#await / then value /.test(input) then result}<p>{result}</p>{/await}",
+                ComplexityContributionKind::Then,
+            ),
+            (
+                "{#await / catch error /.test(input) catch error}<p>{error}</p>{/await}",
+                ComplexityContributionKind::Catch,
+            ),
+            (
+                "{#await total / divisor then result}<p>{result}</p>{/await}",
+                ComplexityContributionKind::Then,
+            ),
+            (
+                "{#await of / divisor then result}<p>{result}</p>{/await}",
+                ComplexityContributionKind::Then,
+            ),
+            (
+                "{#await values.of / divisor then result}<p>{result}</p>{/await}",
+                ComplexityContributionKind::Then,
+            ),
+        ] {
+            let complexity = compute_svelte_template_complexity(source)
+                .unwrap_or_else(|| panic!("await shorthand should have complexity: {source}"));
+            assert_eq!(complexity.cyclomatic, 3, "{source}: {complexity:?}");
+            assert_eq!(complexity.cognitive, 2, "{source}: {complexity:?}");
+            assert_eq!(
+                complexity
+                    .contributions
+                    .iter()
+                    .filter(|contribution| contribution.kind == state_kind)
+                    .count(),
+                2,
+                "{source}: {complexity:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn await_regex_after_return_scores_expression_and_real_shorthand() {
+        let source = "{#await (() => { return /[))] then fake/; })() && ready\nthen result}<p>{result}</p>{/await}";
+        let complexity = compute_svelte_template_complexity(source)
+            .expect("valid regex expression should preserve await complexity");
+
+        assert_eq!(complexity.cyclomatic, 4, "{complexity:?}");
+        assert_eq!(complexity.cognitive, 3, "{complexity:?}");
+        assert!(
+            complexity
+                .contributions
+                .iter()
+                .filter(|contribution| { contribution.kind == ComplexityContributionKind::Then })
+                .all(|contribution| contribution.line == 2),
+            "{complexity:?}"
+        );
+        assert_eq!(
+            complexity
+                .contributions
+                .iter()
+                .filter(|contribution| {
+                    contribution.kind == ComplexityContributionKind::LogicalAnd
+                })
+                .count(),
+            2,
+            "{complexity:?}"
+        );
+    }
+
+    #[test]
+    fn if_regex_contents_are_ignored_and_following_operators_are_scored() {
+        let source = "{#if /[?():{}&|]+/.test(input) && ready}<p>ready</p>{/if}";
+        let complexity = compute_svelte_template_complexity(source)
+            .expect("valid regex condition should preserve template complexity");
+
+        assert_eq!(complexity.cyclomatic, 3, "{complexity:?}");
+        assert_eq!(complexity.cognitive, 2, "{complexity:?}");
+        assert_eq!(
+            complexity
+                .contributions
+                .iter()
+                .filter(|contribution| {
+                    contribution.kind == ComplexityContributionKind::LogicalAnd
+                })
+                .count(),
+            2,
+            "{complexity:?}"
+        );
+    }
+
+    #[test]
+    fn await_bindingless_continuations_count() {
+        let complexity = compute_svelte_template_complexity(
+            "{#await load()}<p>loading</p>{:then}<p>done</p>{:catch}<p>failed</p>{/await}",
+        )
+        .expect("bindingless continuations should have complexity");
+
+        assert_eq!(complexity.cyclomatic, 4, "{complexity:?}");
+        assert_eq!(complexity.cognitive, 3, "{complexity:?}");
+    }
+
+    #[test]
     fn key_block_counts() {
         let complexity = compute_svelte_template_complexity("{#key selectedId}<Child />{/key}")
             .expect("template should have complexity");
@@ -498,6 +913,8 @@ for (const i of items) { use(i); }
         assert!(compute_svelte_template_complexity("{#if a && ").is_none());
         // Logical with no RHS inside an interpolation.
         assert!(compute_svelte_template_complexity("<p>{a && }</p>").is_none());
+        // Shorthand await expression with no logical RHS.
+        assert!(compute_svelte_template_complexity("{#await a && then value}{/await}").is_none());
         // Unterminated curly.
         assert!(compute_svelte_template_complexity("<p>{ a && b").is_none());
     }

@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// Current schema version for the standalone health JSON envelope.
-pub const HEALTH_SCHEMA_VERSION: u32 = 8;
+pub const HEALTH_SCHEMA_VERSION: u32 = 9;
 
 /// Exact schema version for [`HealthOutput`].
 #[cfg(feature = "schema")]

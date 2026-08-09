@@ -254,12 +254,7 @@ fn build_suppress_action(
     is_template: bool,
     is_component: bool,
 ) -> HealthFindingAction {
-    if is_template
-        && violation
-            .path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
-    {
+    if is_template && is_standalone_template_path(&violation.path) {
         return suppress_file_action(
             "Suppress with an HTML comment at the top of the template",
             "<!-- fallow-ignore-file complexity -->",
@@ -282,6 +277,16 @@ fn build_suppress_action(
         "Suppress with an inline comment above the function declaration",
         "above-function-declaration",
     )
+}
+
+fn is_standalone_template_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["html", "svelte", "vue", "astro"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
 }
 
 fn suppress_file_action(description: &str, comment: &str, placement: &str) -> HealthFindingAction {

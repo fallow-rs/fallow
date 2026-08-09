@@ -870,7 +870,12 @@ use crate::MemberKind;
 /// Bumped to 254 for issue #2158: Svelte `{#await}` and `{:then}` complexity
 /// contributions now retain their source constructs instead of being cached as
 /// `If`.
-pub(super) const CACHE_VERSION: u32 = 254;
+///
+/// Bumped to 255 for issue #2158 follow-up: inline Svelte await continuations
+/// (`{#await promise then value}` / `{#await promise catch error}`) now retain
+/// their continuation contribution instead of being cached with only `Await`,
+/// and template-expression regex literals no longer hide later contributions.
+pub(super) const CACHE_VERSION: u32 = 255;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

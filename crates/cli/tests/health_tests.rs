@@ -756,6 +756,102 @@ fn health_svelte_await_breakdown_uses_source_kinds() {
 }
 
 #[test]
+fn health_svelte_await_then_shorthand_counts_both_states() {
+    let dir = tempdir().expect("create temp dir");
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"svelte-await-shorthand-complexity","dependencies":{"svelte":"latest"}}"#,
+    );
+    write_file(
+        &dir.path().join("src/App.svelte"),
+        "{#await load() then value}\n<p>{value}</p>\n{/await}\n",
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--complexity-breakdown",
+            "--max-cyclomatic",
+            "1",
+            "--max-cognitive",
+            "1",
+            "--report-only",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let template = json["findings"]
+        .as_array()
+        .and_then(|findings| {
+            findings
+                .iter()
+                .find(|finding| finding["name"] == "<template>")
+        })
+        .expect("Svelte template complexity finding");
+    let kinds: Vec<&str> = template["contributions"]
+        .as_array()
+        .expect("complexity contributions")
+        .iter()
+        .filter_map(|contribution| contribution["kind"].as_str())
+        .collect();
+
+    assert_eq!(kinds, vec!["await", "await", "then", "then"]);
+    assert_eq!(template["cyclomatic"], 3);
+    assert_eq!(template["cognitive"], 2);
+
+    let suppress = template["actions"]
+        .as_array()
+        .and_then(|actions| {
+            actions
+                .iter()
+                .find(|action| action["type"] == "suppress-file")
+        })
+        .expect("standalone Svelte template suppress action");
+    assert_eq!(
+        suppress["comment"],
+        "<!-- fallow-ignore-file complexity -->"
+    );
+    assert_eq!(suppress["placement"], "top-of-template");
+
+    write_file(
+        &dir.path().join("src/App.svelte"),
+        "<!-- fallow-ignore-file complexity -->\n{#await load() then value}\n<p>{value}</p>\n{/await}\n",
+    );
+    let suppressed = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "1",
+            "--max-cognitive",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(suppressed.code, 0, "stderr: {}", suppressed.stderr);
+    let suppressed_json = parse_json(&suppressed);
+    assert!(
+        suppressed_json["findings"]
+            .as_array()
+            .is_none_or(|findings| findings
+                .iter()
+                .all(|finding| finding["name"] != "<template>")),
+        "suppressed Svelte template should not emit a finding: {suppressed_json:#?}"
+    );
+}
+
+#[test]
 fn health_reports_angular_template_complexity() {
     let output = run_fallow(
         "health",

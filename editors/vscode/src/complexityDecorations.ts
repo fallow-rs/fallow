@@ -141,15 +141,33 @@ const dominantKind = (
   return best.kind;
 };
 
+const isContinuationKind = (kind: ComplexityContributionKind): boolean =>
+  kind === "then" || kind === "catch";
+
+const extraKindSuffix = (
+  kinds: ReadonlySet<ComplexityContributionKind>,
+  dominant: ComplexityContributionKind,
+): string => {
+  const secondary = [...kinds].filter((kind) => kind !== dominant);
+  if (secondary.length === 0) {
+    return "";
+  }
+  const continuation = secondary.find(isContinuationKind);
+  if (!continuation) {
+    return ` +${secondary.length}`;
+  }
+  const remaining = secondary.length - 1;
+  return ` + ${kindLabel(continuation)}${remaining > 0 ? ` +${remaining}` : ""}`;
+};
+
 const inlineToken = (aggregate: LineAggregate): string => {
   // Cognitive is the nesting-sensitive "how hard to follow" headline; fall back
   // to cyclomatic for lines that only add independent paths (a case label, a
   // logical-assignment, an optional-chain link).
   const headline = aggregate.cognitive > 0 ? aggregate.cognitive : aggregate.cyclomatic;
   const kinds = new Set(aggregate.contributions.map((c) => c.kind));
-  const label = kindLabel(dominantKind(aggregate.contributions));
-  const extra = kinds.size > 1 ? ` +${kinds.size - 1}` : "";
-  return `+${headline} ${label}${extra}`;
+  const dominant = dominantKind(aggregate.contributions);
+  return `+${headline} ${kindLabel(dominant)}${extraKindSuffix(kinds, dominant)}`;
 };
 
 const lineHover = (aggregate: LineAggregate): vscode.MarkdownString => {
@@ -193,19 +211,24 @@ export const complexityKey = (findingPath: string, line: number): string =>
 /**
  * The hover markdown for a 1-based source line: the function summary + CRAP
  * when the line is a complex function's signature, the per-kind contribution
- * list when it is a decision-point line, `undefined` otherwise. Pure (the
- * markdown type is the only VS Code dependency), so it is unit-testable
- * independently of an open editor.
+ * list when it is a decision-point line, or both when those are the same line.
+ * Returns `undefined` otherwise. Pure (the markdown type is the only VS Code
+ * dependency), so it is unit-testable independently of an open editor.
  */
 export const hoverForLine = (
   matched: readonly HealthFinding[],
   line1Based: number,
 ): vscode.MarkdownString | undefined => {
   const fn = matched.find((f) => f.line === line1Based);
+  const aggregate = aggregateByLine(matched).get(line1Based);
+  if (fn && aggregate) {
+    const md = functionHover(fn);
+    md.appendMarkdown(`\n${lineHover(aggregate).value}`);
+    return md;
+  }
   if (fn) {
     return functionHover(fn);
   }
-  const aggregate = aggregateByLine(matched).get(line1Based);
   if (aggregate) {
     return lineHover(aggregate);
   }
