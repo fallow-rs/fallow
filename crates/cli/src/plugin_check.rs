@@ -607,4 +607,83 @@ mod tests {
             plugin["activation_requirement"]
         );
     }
+
+    #[test]
+    fn doc_reports_wildcard_entries_and_exists_gates_end_to_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"extension","dependencies":{"web-ext":"1.0.0"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("fallow-plugin-web-ext.jsonc"),
+            r#"{
+                "name": "web-ext-manifest",
+                "enablers": ["web-ext"],
+                "entryPointRole": "runtime",
+                "manifestEntries": [{
+                    "manifests": "**/manifest.json",
+                    "format": "json",
+                    "when": {
+                        "manifest_version": 3,
+                        "background.service_worker": { "exists": true }
+                    },
+                    "entries": [
+                        { "path": "${background.service_worker}" },
+                        { "path": "${content_scripts[*].js}" }
+                    ]
+                }]
+            }"#,
+        )
+        .unwrap();
+        let extension = root.join("extension");
+        std::fs::create_dir_all(extension.join("content")).unwrap();
+        std::fs::write(
+            extension.join("manifest.json"),
+            r#"{
+                "manifest_version": 3,
+                "background": { "service_worker": "background.js" },
+                "content_scripts": [
+                    { "js": ["content/a.js", "content/b.js"] },
+                    { "js": ["content/c.js"] }
+                ]
+            }"#,
+        )
+        .unwrap();
+        for path in [
+            "background.js",
+            "content/a.js",
+            "content/b.js",
+            "content/c.js",
+        ] {
+            std::fs::write(extension.join(path), "export {};").unwrap();
+        }
+
+        let doc = build_plugin_check_doc(root).expect("build plugin-check document");
+        let plugin = doc["plugins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|plugin| plugin["name"] == "web-ext-manifest")
+            .expect("external plugin report");
+        assert_eq!(plugin["active"], true);
+        let rule = &plugin["manifest_rules"][0];
+        assert!(rule["warnings"].as_array().unwrap().is_empty());
+        let seeded = rule["matched"][0]["seeded"].as_array().unwrap();
+        assert_eq!(
+            seeded
+                .iter()
+                .map(|entry| entry["path"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                "extension/background.js",
+                "extension/content/a.js",
+                "extension/content/b.js",
+                "extension/content/c.js",
+            ]
+        );
+        assert!(seeded.iter().all(|entry| entry["path_exists"] == true));
+    }
 }
