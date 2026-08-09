@@ -1621,14 +1621,6 @@ fn is_sfc_template_extension(ext: &str) -> bool {
         || ext.eq_ignore_ascii_case("astro")
 }
 
-/// True when the extension names a file whose template can only be an inline
-/// Angular `@Component({ template: ... })` literal.
-fn is_angular_inline_template_extension(ext: &str) -> bool {
-    ["ts", "js", "mts", "cts"]
-        .iter()
-        .any(|candidate| ext.eq_ignore_ascii_case(candidate))
-}
-
 fn template_finding_extension(finding: &fallow_output::ComplexityViolation) -> Option<&str> {
     if finding.name != "<template>" {
         return None;
@@ -1654,13 +1646,22 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::Hea
         .findings
         .iter()
         .any(|finding| template_finding_extension(finding).is_some_and(is_sfc_template_extension));
+    // Exact complement of the `above-angular-decorator` fallthrough in
+    // `fallow_output::build_suppress_action`: every template that is neither
+    // `.html` nor SFC markup gets the Angular hint there, so narrowing this to an
+    // extension allowlist would leave the human surface silent while JSON still
+    // advertises the action. Keep the `<template>` guard explicit rather than
+    // routing through `template_finding_extension`, whose `None` also covers
+    // ordinary function findings.
     let has_inline_template = report.findings.iter().any(|finding| {
         finding.name == "<template>"
             && finding
                 .path
                 .extension()
                 .and_then(|ext| ext.to_str())
-                .is_none_or(is_angular_inline_template_extension)
+                .is_none_or(|ext| {
+                    !ext.eq_ignore_ascii_case("html") && !is_sfc_template_extension(ext)
+                })
     });
     let has_component_rollup = report
         .findings
@@ -1757,7 +1758,7 @@ fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport
     };
     lines.push(format!(
         "  {}",
-        format!("{scope} exceeding cyclomatic, cognitive, or CRAP thresholds ({DOCS_HEALTH}#complexity-metrics)")
+        format!("{scope} exceeding cyclomatic, cognitive, or CRAP thresholds; ! marks the dimension that breached ({DOCS_HEALTH}#complexity-metrics)")
             .dimmed()
     ));
     append_suppression_hints(lines, report);
@@ -2986,8 +2987,30 @@ mod tests {
         assert!(text.contains("90.0 ! CRAP"), "{text}");
     }
 
+    /// A colour-free reader has no other way to learn what `!` means, and the
+    /// footer is the only line in the section that can carry the legend.
     #[test]
-    fn benign_crap_is_not_marked_on_a_cyclomatic_only_breach() {
+    fn findings_footer_explains_the_breach_marker() {
+        let root = PathBuf::from("/project");
+        let report = disclosure_report(vec![disclosure_violation(
+            root.join("src/a.ts"),
+            "parse",
+            fallow_output::ExceededThreshold::All,
+        )]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(
+            text.contains("! marks the dimension that breached"),
+            "{text}"
+        );
+    }
+
+    /// The renderer's styling rule is contract-tested against `exceeded` alone
+    /// and deliberately does not assume the engine's current attach-on-breach
+    /// behavior, so this input pairs an attached `crap` with an `exceeded` that
+    /// omits it. The producing invariant is pinned in the engine instead.
+    #[test]
+    fn crap_is_dimmed_when_exceeded_does_not_include_crap() {
         let root = PathBuf::from("/project");
         let mut finding = disclosure_violation(
             root.join("src/a.ts"),
@@ -3071,15 +3094,75 @@ mod tests {
     #[test]
     fn inline_angular_template_findings_keep_decorator_hint() {
         let root = PathBuf::from("/project");
-        let report = disclosure_report(vec![disclosure_violation(
-            root.join("src/host.component.ts"),
-            "<template>",
-            fallow_output::ExceededThreshold::Crap,
-        )]);
+        for file in [
+            "src/host.component.ts",
+            "src/host.component.tsx",
+            "src/host.component.mjs",
+            "src/host.component.gts",
+        ] {
+            let report = disclosure_report(vec![disclosure_violation(
+                root.join(file),
+                "<template>",
+                fallow_output::ExceededThreshold::Crap,
+            )]);
 
-        let text = plain(&build_health_human_lines(&report, &root));
-        assert!(text.contains("above @Component"), "{text}");
-        assert!(!text.contains("To suppress SFC templates"), "{text}");
+            let text = plain(&build_health_human_lines(&report, &root));
+            assert!(text.contains("above @Component"), "{file}: {text}");
+            assert!(
+                !text.contains("To suppress SFC templates"),
+                "{file}: {text}"
+            );
+        }
+    }
+
+    /// The human hint and the JSON `suppress-line` action are one contract: any
+    /// finding routed to `above-angular-decorator` must also produce the human
+    /// decorator hint. Narrowing either side to an extension allowlist silently
+    /// splits them (issue #2163 follow-up).
+    #[test]
+    fn angular_decorator_action_and_human_hint_stay_in_lockstep() {
+        let root = PathBuf::from("/project");
+        let ctx = fallow_output::HealthActionContext {
+            opts: fallow_output::HealthActionOptions::default(),
+            max_cyclomatic_threshold: 20,
+            max_cognitive_threshold: 15,
+            max_crap_threshold: 30.0,
+            crap_refactor_band: 5,
+        };
+        for file in [
+            "src/host.component.ts",
+            "src/host.component.js",
+            "src/host.component.mts",
+            "src/host.component.cts",
+            "src/host.component.mjs",
+            "src/host.component.cjs",
+            "src/host.component.tsx",
+            "src/host.component.jsx",
+            "src/host.component.gts",
+            "src/host.component.gjs",
+            "src/host.component.html",
+            "src/Widget.svelte",
+            "src/Panel.vue",
+            "src/Board.astro",
+        ] {
+            let violation = disclosure_violation(
+                root.join(file),
+                "<template>",
+                fallow_output::ExceededThreshold::Crap,
+            );
+            let is_angular = fallow_output::build_health_finding_actions(&violation, &ctx)
+                .iter()
+                .any(|action| action.placement.as_deref() == Some("above-angular-decorator"));
+            let text = plain(&build_health_human_lines(
+                &disclosure_report(vec![violation]),
+                &root,
+            ));
+            assert_eq!(
+                is_angular,
+                text.contains("above @Component"),
+                "{file}: JSON action and human hint disagree: {text}"
+            );
+        }
     }
 
     #[test]

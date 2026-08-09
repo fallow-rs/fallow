@@ -102,6 +102,7 @@ pub(super) fn prepare_health_findings(
         &mut collected.findings,
         input.diff_index,
         is_change_scoped(&input),
+        &mut threshold_state_tracker,
     )?;
     threshold_state_tracker.record_no_match_entries(
         &threshold_resolver,
@@ -112,7 +113,6 @@ pub(super) fn prepare_health_findings(
             input.diff_index,
         ),
     );
-    annotate_outstanding_dimensions(&mut threshold_state_tracker, &collected.findings);
 
     Ok(HealthFindingsData {
         findings: collected.findings,
@@ -296,7 +296,14 @@ fn finalize_health_findings(
     findings: &mut Vec<ComplexityViolation>,
     diff_index: Option<&fallow_output::DiffIndex>,
     change_scoped: bool,
+    threshold_state_tracker: &mut ThresholdOverrideStateTracker,
 ) -> Result<HealthFindingFinalizeResult, HealthError> {
+    // Runs before every downstream narrowing. The override rows were recorded
+    // over the whole collection pass, while `--diff-file`/`--diff-stdin`,
+    // `--baseline` and `--top` all narrow the findings list for DISPLAY, so
+    // annotating after any of them leaves an `insufficient` row with an empty
+    // `outstanding`: the one contradiction a CI gate cannot detect.
+    annotate_outstanding_dimensions(threshold_state_tracker, findings);
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
     }

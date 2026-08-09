@@ -286,6 +286,135 @@ fn threshold_override_tracker_reports_no_match_only_when_requested() {
     ));
 }
 
+/// Every renderer decides whether to highlight CRAP from `exceeded`, never from
+/// the presence of `crap`. That is only safe because the merge gate attaches a
+/// CRAP value exactly when the CRAP bit is set; a future change that attached it
+/// unconditionally would silently restore the issue-2163 red-on-benign-CRAP bug.
+#[test]
+fn an_attached_crap_value_always_carries_the_crap_bit_in_exceeded() {
+    let positioned = |name: &str, line: u32, col: u32, cyclomatic: u16| FunctionComplexity {
+        line,
+        col,
+        ..make_fc(name, cyclomatic, 0, 20)
+    };
+    let path = PathBuf::from("/project/src/mixed.ts");
+    let functions = vec![
+        positioned("cyclomaticOnly", 1, 0, 25),
+        positioned("crapOnly", 20, 0, 5),
+        positioned("both", 40, 0, 25),
+        positioned("clean", 60, 0, 2),
+    ];
+    let crap_by_line = [(1u32, 5.0), (20, 90.0), (40, 90.0), (60, 1.0)];
+
+    let modules = vec![make_module(FileId(0), functions)];
+    let mut file_paths: FxHashMap<FileId, &PathBuf> = FxHashMap::default();
+    file_paths.insert(FileId(0), &path);
+    let resolver = threshold_resolver(&[]);
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    let mut collect_input = CollectFindingsInput {
+        modules: &modules,
+        file_paths: &file_paths,
+        config_root: Path::new("/project"),
+        ignore_set: &globset::GlobSet::empty(),
+        changed_files: None,
+        ws_roots: None,
+        threshold_resolver: &resolver,
+        threshold_state_tracker: &mut tracker,
+        complexity_breakdown: false,
+    };
+    let (mut findings, _, _) = collect_findings_with_resolver(&mut collect_input);
+
+    let mut per_function_crap: FxHashMap<PathBuf, Vec<scoring::PerFunctionCrap>> =
+        FxHashMap::default();
+    per_function_crap.insert(
+        path.clone(),
+        crap_by_line
+            .iter()
+            .map(|&(line, crap)| scoring::PerFunctionCrap {
+                line,
+                col: 0,
+                crap,
+                coverage_pct: None,
+                coverage_tier: fallow_output::CoverageTier::None,
+                coverage_source: fallow_output::CoverageSource::Estimated,
+            })
+            .collect(),
+    );
+    let mut merge_input = CrapFindingMergeInput {
+        modules: &modules,
+        file_paths: &file_paths,
+        config_root: Path::new("/project"),
+        ignore_set: &globset::GlobSet::empty(),
+        changed_files: None,
+        ws_roots: None,
+        per_function_crap: &per_function_crap,
+        template_inherit_provenance: &FxHashMap::default(),
+        complexity_breakdown: false,
+        threshold_resolver: &resolver,
+        threshold_state_tracker: &mut tracker,
+    };
+    merge_crap_findings(&mut findings, &mut merge_input);
+
+    let mut names: Vec<&str> = findings.iter().map(|f| f.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec!["both", "crapOnly", "cyclomaticOnly"],
+        "the fixture must cover a CRAP-only, a complexity-only and a combined finding"
+    );
+    for finding in &findings {
+        assert_eq!(
+            finding.crap.is_some(),
+            finding.exceeded.includes_crap(),
+            "{}: an attached crap value and the CRAP bit must agree: {finding:#?}",
+            finding.name
+        );
+    }
+}
+
+/// A `no_match` row has no measured function to derive a dimension from, so it
+/// has to be labelled from the ceilings the entry configures. Hardcoding
+/// `complexity` shipped a definitionally wrong value on a required schema field
+/// for crap-only entries (issue #2163 follow-up).
+#[test]
+fn no_match_rows_name_the_dimensions_the_entry_configures() {
+    let entry = |max_cyclomatic, max_crap, max_unit_size| fallow_config::HealthThresholdOverride {
+        files: vec!["src/missing.ts".to_string()],
+        functions: Vec::new(),
+        max_cyclomatic,
+        max_cognitive: None,
+        max_crap,
+        max_unit_size,
+        reason: None,
+    };
+    let dimensions = |overrides: &[fallow_config::HealthThresholdOverride]| {
+        let resolver = threshold_resolver(overrides);
+        let mut tracker = ThresholdOverrideStateTracker::default();
+        tracker.record_no_match_entries(&resolver, true);
+        tracker
+            .into_states()
+            .iter()
+            .map(|state| state.dimension)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        dimensions(&[entry(None, Some(500.0), None)]),
+        vec![fallow_output::ThresholdOverrideDimension::Crap]
+    );
+    assert_eq!(
+        dimensions(&[entry(Some(500), Some(500.0), None)]),
+        vec![
+            fallow_output::ThresholdOverrideDimension::Complexity,
+            fallow_output::ThresholdOverrideDimension::Crap
+        ]
+    );
+    assert_eq!(
+        dimensions(&[entry(None, None, Some(500))]),
+        vec![fallow_output::ThresholdOverrideDimension::Complexity]
+    );
+}
+
 #[test]
 fn build_ignore_set_empty_patterns() {
     let set = build_ignore_set(&[]);

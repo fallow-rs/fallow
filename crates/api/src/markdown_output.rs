@@ -1647,6 +1647,7 @@ fn write_findings_section(out: &mut String, report: &fallow_output::HealthReport
     }
 
     let s = &report.summary;
+    out.push_str("\n**!** marks the dimension that breached.\n");
     let _ = write!(
         out,
         "\n**{files}** files, **{funcs}** functions analyzed \

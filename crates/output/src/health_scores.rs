@@ -563,9 +563,10 @@ pub enum ThresholdOverrideStatus {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ThresholdOverrideDimension {
-    /// The cyclomatic and cognitive ceilings.
+    /// The structural ceilings: `maxCyclomatic`, `maxCognitive` and
+    /// `maxUnitSize`.
     Complexity,
-    /// The CRAP-score ceiling.
+    /// The `maxCrap` ceiling, and only that ceiling.
     Crap,
 }
 

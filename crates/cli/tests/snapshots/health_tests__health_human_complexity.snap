@@ -10,4 +10,4 @@ expression: redacted
     :1 classify CRITICAL
           13 ! cyclomatic   13   cognitive   15 lines
          182.0 ! CRAP
-  Functions exceeding cyclomatic, cognitive, or CRAP thresholds (https://docs.fallow.tools/explanations/health#complexity-metrics)
+  Functions exceeding cyclomatic, cognitive, or CRAP thresholds; ! marks the dimension that breached (https://docs.fallow.tools/explanations/health#complexity-metrics)
