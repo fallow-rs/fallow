@@ -206,12 +206,22 @@ pub enum ManifestFormat {
 
 /// A validated field path into a manifest document.
 ///
-/// Field paths use dotted object keys. The parsed segments are retained so
-/// evaluators do not repeatedly interpret user-authored path strings.
+/// Field paths use dotted object keys and an exact `[*]` segment for array
+/// traversal. The parsed segments are retained so evaluators do not repeatedly
+/// interpret user-authored path strings.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ManifestFieldPath {
     raw: String,
-    segments: Vec<String>,
+    segments: Vec<ManifestFieldSegment>,
+}
+
+/// One validated traversal step in a [`ManifestFieldPath`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ManifestFieldSegment {
+    /// Read one named key from each current JSON object.
+    Key(String),
+    /// Visit every item in each current JSON array.
+    Each,
 }
 
 impl ManifestFieldPath {
@@ -221,9 +231,10 @@ impl ManifestFieldPath {
         &self.raw
     }
 
-    /// Parsed object-key segments in traversal order.
-    pub fn segments(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.segments.iter().map(String::as_str)
+    /// Parsed object-key and array traversal segments in source order.
+    #[must_use]
+    pub fn segments(&self) -> &[ManifestFieldSegment] {
+        &self.segments
     }
 
     fn parse(raw: String) -> Result<Self, String> {
@@ -232,18 +243,32 @@ impl ManifestFieldPath {
         }
 
         let mut segments = Vec::new();
-        for segment in raw.split('.') {
-            if segment.is_empty() {
+        for component in raw.split('.') {
+            if component.is_empty() {
                 return Err(format!(
                     "manifest field path '{raw}' contains an empty segment"
                 ));
             }
-            if segment.contains(['[', ']', '{', '}']) {
+
+            let key_end = component.find('[').unwrap_or(component.len());
+            let key = &component[..key_end];
+            if key.is_empty() || key.contains(['{', '}', ']']) {
                 return Err(format!(
                     "manifest field path '{raw}' contains unsupported bracket syntax"
                 ));
             }
-            segments.push(segment.to_string());
+            segments.push(ManifestFieldSegment::Key(key.to_string()));
+
+            let mut suffix = &component[key_end..];
+            while !suffix.is_empty() {
+                let Some(rest) = suffix.strip_prefix("[*]") else {
+                    return Err(format!(
+                        "manifest field path '{raw}' only supports exact '[*]' array traversal"
+                    ));
+                };
+                segments.push(ManifestFieldSegment::Each);
+                suffix = rest;
+            }
         }
 
         Ok(Self { raw, segments })
@@ -417,9 +442,10 @@ pub struct ManifestEntryRule {
     #[serde(default)]
     pub format: ManifestFormat,
 
-    /// Manifest-level gate: a map of dotted field path to an expected scalar
-    /// value. ALL entries must match by STRICT EQUALITY for the manifest to be
-    /// processed. An empty map matches every manifest.
+    /// Manifest-level gate: a map of field path to an expected value. Paths use
+    /// dotted object keys and may traverse arrays with `[*]`. ALL entries must
+    /// match by STRICT EQUALITY; a wildcard path matches when any yielded value
+    /// equals the expectation. An empty map matches every manifest.
     #[serde(default)]
     #[schemars(with = "BTreeMap<String, serde_json::Value>")]
     pub when: BTreeMap<ManifestFieldPath, serde_json::Value>,
@@ -435,15 +461,16 @@ pub struct ManifestEntryRule {
 pub struct ManifestSeedRule {
     /// Entry glob relative to the manifest directory. May contain
     /// `${dotted.field}` interpolation that fans out over string / array
-    /// manifest field values (a missing or empty field seeds nothing). The glob
-    /// must encode its own extension (e.g. `public/index.{ts,tsx}`); glob entry
-    /// patterns are matched literally against discovered files without
+    /// manifest field values; `[*]` traverses object arrays. A missing or empty
+    /// field seeds nothing. The glob must encode its own extension, such as
+    /// `public/index.{ts,tsx}`. Glob entry patterns are matched literally
+    /// against discovered files without
     /// source-extension probing.
     #[schemars(with = "String")]
     pub path: ManifestPathTemplate,
 
-    /// Per-entry gate (strict equality), evaluated against the same manifest.
-    /// An empty map always passes.
+    /// Per-entry gate, using the same strict equality and `[*]` traversal as the
+    /// manifest-level gate. An empty map always passes.
     #[serde(default)]
     #[schemars(with = "BTreeMap<String, serde_json::Value>")]
     pub when: BTreeMap<ManifestFieldPath, serde_json::Value>,
@@ -1016,8 +1043,11 @@ exports = ["default"]
         let rule = &plugin.manifest_entries[0];
         let condition_path = rule.when.keys().next().unwrap();
         assert_eq!(
-            condition_path.segments().collect::<Vec<_>>(),
-            vec!["plugin", "browser"]
+            condition_path.segments(),
+            &[
+                ManifestFieldSegment::Key("plugin".to_string()),
+                ManifestFieldSegment::Key("browser".to_string()),
+            ]
         );
         assert_eq!(
             rule.entries[0].path.as_str(),
@@ -1069,6 +1099,30 @@ exports = ["default"]
             }"#,
         ] {
             assert!(serde_json::from_str::<ExternalPluginDef>(source).is_err());
+        }
+    }
+
+    #[test]
+    fn manifest_field_paths_support_only_explicit_array_traversal() {
+        let path: ManifestFieldPath = "content_scripts[*].js[*]".parse().unwrap();
+        assert_eq!(
+            path.segments(),
+            &[
+                ManifestFieldSegment::Key("content_scripts".to_string()),
+                ManifestFieldSegment::Each,
+                ManifestFieldSegment::Key("js".to_string()),
+                ManifestFieldSegment::Each,
+            ]
+        );
+
+        for invalid in [
+            "content_scripts[0].js",
+            "content_scripts[].js",
+            "content_scripts[foo].js",
+            "content_scripts[*x].js",
+            "[*].js",
+        ] {
+            assert!(invalid.parse::<ManifestFieldPath>().is_err(), "{invalid}");
         }
     }
 

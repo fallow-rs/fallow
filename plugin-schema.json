@@ -211,7 +211,7 @@
           "default": "jsonc"
         },
         "when": {
-          "description": "Manifest-level gate: a map of dotted field path to an expected scalar\nvalue. ALL entries must match by STRICT EQUALITY for the manifest to be\nprocessed. An empty map matches every manifest.",
+          "description": "Manifest-level gate: a map of field path to an expected value. Paths use\ndotted object keys and may traverse arrays with `[*]`. ALL entries must\nmatch by STRICT EQUALITY; a wildcard path matches when any yielded value\nequals the expectation. An empty map matches every manifest.",
           "type": "object",
           "additionalProperties": true,
           "default": {}
@@ -249,11 +249,11 @@
       "type": "object",
       "properties": {
         "path": {
-          "description": "Entry glob relative to the manifest directory. May contain\n`${dotted.field}` interpolation that fans out over string / array\nmanifest field values (a missing or empty field seeds nothing). The glob\nmust encode its own extension (e.g. `public/index.{ts,tsx}`); glob entry\npatterns are matched literally against discovered files without\nsource-extension probing.",
+          "description": "Entry glob relative to the manifest directory. May contain\n`${dotted.field}` interpolation that fans out over string / array\nmanifest field values; `[*]` traverses object arrays. A missing or empty\nfield seeds nothing. The glob must encode its own extension, such as\n`public/index.{ts,tsx}`. Glob entry patterns are matched literally\nagainst discovered files without\nsource-extension probing.",
           "type": "string"
         },
         "when": {
-          "description": "Per-entry gate (strict equality), evaluated against the same manifest.\nAn empty map always passes.",
+          "description": "Per-entry gate, using the same strict equality and `[*]` traversal as the\nmanifest-level gate. An empty map always passes.",
           "type": "object",
           "additionalProperties": true,
           "default": {}

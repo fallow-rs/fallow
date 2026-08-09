@@ -141,6 +141,11 @@ template may expand to at most 4,096 concrete paths per manifest. Fallow skips
 an over-limit template and reports a structured `plugin-check` warning instead
 of returning a partial result.
 
+Use `[*]` to traverse every object in a manifest array. For example,
+`${content_scripts[*].js}` emits every JavaScript path from every browser
+extension content-script object. The same syntax works in `when`; a wildcard
+condition passes when any yielded value equals the expected value.
+
 ```jsonc
 {
   "entryPointRole": "runtime",

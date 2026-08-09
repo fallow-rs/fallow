@@ -5,7 +5,7 @@
 //! second walk, because manifests are config files and are NOT in the
 //! source-discovery set), parses each one, and for every manifest that passes
 //! the rule-level `when` gate resolves each `entries[].path` relative to that
-//! manifest's directory (with `${dotted.field}` interpolation) into a
+//! manifest's directory (with `${dotted.field}` and `[*]` interpolation) into a
 //! root-relative entry pattern.
 //!
 //! The dominant failure mode is silent-none across a large manifest set (a typo
@@ -18,8 +18,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    ExternalPluginDef, ManifestEntryRule, ManifestFieldPath, ManifestFormat, ManifestPathPart,
-    ManifestPathTemplate,
+    ExternalPluginDef, ManifestEntryRule, ManifestFieldPath, ManifestFieldSegment, ManifestFormat,
+    ManifestPathPart, ManifestPathTemplate,
 };
 use serde_json::Value;
 
@@ -49,7 +49,7 @@ pub enum WarningKind {
     EntriesEmpty,
     /// One or more matched manifests could not be read or parsed.
     ManifestParseFailed,
-    /// An interpolation field yielded more scalar values than the evaluator permits.
+    /// A field path yielded more values than the evaluator permits.
     FieldValuesLimitExceeded,
     /// An entry template's interpolation product exceeded the evaluator limit.
     EntryExpansionLimitExceeded,
@@ -90,16 +90,16 @@ impl WarningKind {
 
 /// A single `manifestEntries` diagnostic with typed payload slots (agents read
 /// the slot their `kind` implies rather than parsing prose).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckWarning {
     pub kind: WarningKind,
     /// The offending `manifests` glob (for `manifests-matched-none`).
     pub glob: Option<String>,
-    /// The offending dotted field path (for `field-path-unresolved`).
+    /// The offending field path (for unresolved or value-limit warnings).
     pub field_path: Option<String>,
     /// The manifest a per-manifest warning relates to (root-relative).
     pub manifest: Option<String>,
-    /// The offending resolved entry (for `entry-outside-root`).
+    /// The offending entry or template (for entry-path warnings).
     pub entry: Option<String>,
 }
 
@@ -263,6 +263,7 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
         referenced.iter().map(|p| (p.as_str(), false)).collect();
     let mut passed = 0usize;
     let mut parsed = 0usize;
+    let mut gate_errors = 0usize;
 
     for file in discover_manifest_paths(root, &matcher) {
         let rel_manifest = root_relative_forward_slash(&file, root)
@@ -286,14 +287,27 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
         };
         parsed += 1;
 
-        let when_passed = when_matches(&manifest, &rule.when);
+        let when_passed = match when_matches(&manifest, &rule.when) {
+            Ok(passed) => passed,
+            Err(error) => {
+                gate_errors += 1;
+                report
+                    .warnings
+                    .push(error.into_warning(Some(rel_manifest.clone())));
+                false
+            }
+        };
         let mut seeded = Vec::new();
         if when_passed {
             passed += 1;
             for path in &referenced {
-                if field_value(&manifest, path).is_some()
-                    && let Some(flag) = resolved.get_mut(path.as_str())
-                {
+                let path_resolved = match field_values(&manifest, path) {
+                    Ok(values) => !values.is_empty(),
+                    // The path resolved; its fan-out is the problem. Evaluation
+                    // emits the more precise limit warning below.
+                    Err(_) => true,
+                };
+                if path_resolved && let Some(flag) = resolved.get_mut(path.as_str()) {
                     *flag = true;
                 }
             }
@@ -313,6 +327,7 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
         report.manifests_matched.len(),
         parsed,
         passed,
+        gate_errors,
         &resolved,
     ));
 
@@ -329,6 +344,7 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
             .then_with(|| a.entry.cmp(&b.entry))
             .then_with(|| a.field_path.cmp(&b.field_path))
     });
+    report.warnings.dedup();
     report
 }
 
@@ -342,12 +358,15 @@ fn parse_manifest(source: &str, format: ManifestFormat) -> Option<Value> {
 /// Assemble the RULE-LEVEL diagnostics (matched-none / when-excluded-all /
 /// field-path-unresolved) from the walk tallies. Per-manifest diagnostics
 /// (parse-failed, entry-outside-root) are pushed during the walk. `parsed` is
-/// the count of manifests that read + parsed; `passed` cleared the `when` gate.
+/// the count of manifests that read + parsed; `passed` cleared the `when` gate;
+/// `gate_errors` could not be evaluated because their traversal exceeded a
+/// declared bound.
 fn rule_level_warnings(
     manifests: &str,
     matched: usize,
     parsed: usize,
     passed: usize,
+    gate_errors: usize,
     resolved: &BTreeMap<&str, bool>,
 ) -> Vec<CheckWarning> {
     let mut out = Vec::new();
@@ -361,7 +380,7 @@ fn rule_level_warnings(
     // Only claim the `when` gate excluded everything when there WERE parseable
     // manifests for it to gate; if all failed to parse, the per-file
     // parse-failed warnings already explain the zero seed.
-    if parsed > 0 && passed == 0 {
+    if parsed > 0 && passed == 0 && gate_errors == 0 {
         out.push(CheckWarning::glob(WarningKind::WhenExcludedAll, manifests));
         return out;
     }
@@ -391,8 +410,13 @@ fn seed_rule_entries(
     let mut seeded = Vec::new();
     let mut warnings = Vec::new();
     for seed in &rule.entries {
-        if !when_matches(manifest, &seed.when) {
-            continue;
+        match when_matches(manifest, &seed.when) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                warnings.push(error.into_warning(rel_manifest.clone()));
+                continue;
+            }
         }
         let concretes = match expand_interpolations(&seed.path, manifest) {
             Ok(concretes) => concretes,
@@ -439,7 +463,7 @@ fn emit_report_warnings(plugin_name: &str, report: &RuleReport) {
             ),
             WarningKind::FieldValuesLimitExceeded => tracing::warn!(
                 "Plugin '{plugin_name}': manifestEntries field path '{}' in manifest '{}' exceeded \
-                 the interpolation value limit of {}. No entries were seeded from that template.",
+                 the traversal value limit of {}. No entries were seeded from the affected rule.",
                 warning.field_path.as_deref().unwrap_or(""),
                 warning.manifest.as_deref().unwrap_or(""),
                 warning
@@ -549,22 +573,36 @@ fn field_segment_values(
     manifest: &Value,
     field: &ManifestFieldPath,
 ) -> Result<Vec<String>, ExpansionError> {
-    let values = match field_value(manifest, field) {
-        Some(Value::String(s)) if !s.is_empty() => vec![s.clone()],
-        Some(Value::Number(n)) => vec![n.to_string()],
-        Some(Value::Array(items)) => items
-            .iter()
-            .filter_map(scalar_segment)
-            .take(MAX_MANIFEST_FIELD_VALUES + 1)
-            .collect(),
-        _ => Vec::new(),
-    };
-    if values.len() > MAX_MANIFEST_FIELD_VALUES {
+    let mut values = Vec::new();
+    for value in field_values(manifest, field)? {
+        match value {
+            Value::Array(items) => {
+                for item in items.iter().filter_map(scalar_segment) {
+                    push_field_segment(&mut values, item, field)?;
+                }
+            }
+            value => {
+                if let Some(segment) = scalar_segment(value) {
+                    push_field_segment(&mut values, segment, field)?;
+                }
+            }
+        }
+    }
+    Ok(values)
+}
+
+fn push_field_segment(
+    values: &mut Vec<String>,
+    value: String,
+    field: &ManifestFieldPath,
+) -> Result<(), ExpansionError> {
+    if values.len() == MAX_MANIFEST_FIELD_VALUES {
         return Err(ExpansionError::FieldValues {
             field_path: field.as_str().to_string(),
         });
     }
-    Ok(values)
+    values.push(value);
+    Ok(())
 }
 
 fn scalar_segment(value: &Value) -> Option<String> {
@@ -577,18 +615,59 @@ fn scalar_segment(value: &Value) -> Option<String> {
 
 /// Whether every `(dotted-path, expected)` pair in `when` matches the manifest
 /// by strict equality. An empty map always matches.
-fn when_matches(manifest: &Value, when: &BTreeMap<ManifestFieldPath, Value>) -> bool {
-    when.iter()
-        .all(|(path, expected)| field_value(manifest, path) == Some(expected))
+fn when_matches(
+    manifest: &Value,
+    when: &BTreeMap<ManifestFieldPath, Value>,
+) -> Result<bool, ExpansionError> {
+    for (path, expected) in when {
+        if !field_values(manifest, path)?.contains(&expected) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
-/// Look up a dotted field path (`plugin.browser`) in a JSON value.
-fn field_value<'a>(value: &'a Value, path: &ManifestFieldPath) -> Option<&'a Value> {
-    let mut current = value;
+/// Evaluate a typed manifest field path, including explicit `[*]` traversal.
+fn field_values<'a>(
+    value: &'a Value,
+    path: &ManifestFieldPath,
+) -> Result<Vec<&'a Value>, ExpansionError> {
+    let mut current = vec![value];
     for segment in path.segments() {
-        current = current.get(segment)?;
+        let mut next = Vec::new();
+        for value in current {
+            match segment {
+                ManifestFieldSegment::Key(key) => {
+                    if let Some(child) = value.get(key) {
+                        push_field_value(&mut next, child, path)?;
+                    }
+                }
+                ManifestFieldSegment::Each => {
+                    if let Value::Array(items) = value {
+                        for item in items {
+                            push_field_value(&mut next, item, path)?;
+                        }
+                    }
+                }
+            }
+        }
+        current = next;
     }
-    Some(current)
+    Ok(current)
+}
+
+fn push_field_value<'a>(
+    values: &mut Vec<&'a Value>,
+    value: &'a Value,
+    path: &ManifestFieldPath,
+) -> Result<(), ExpansionError> {
+    if values.len() == MAX_MANIFEST_FIELD_VALUES {
+        return Err(ExpansionError::FieldValues {
+            field_path: path.as_str().to_string(),
+        });
+    }
+    values.push(value);
+    Ok(())
 }
 
 /// Walk `root` (respecting `.gitignore`, skipping `node_modules`) and return the
@@ -682,18 +761,28 @@ mod tests {
     }
 
     #[test]
-    fn field_value_traverses_nested_fields() {
+    fn field_values_traverse_nested_fields_and_object_arrays() {
         let m = json(r#"{"plugin": {"browser": true, "id": "actions"}}"#);
         assert_eq!(
-            field_value(&m, &field("plugin.browser")),
-            Some(&Value::Bool(true))
+            field_values(&m, &field("plugin.browser")).unwrap(),
+            vec![&Value::Bool(true)]
         );
         assert_eq!(
-            field_value(&m, &field("plugin.id")),
-            Some(&Value::String("actions".into()))
+            field_values(&m, &field("plugin.id")).unwrap(),
+            vec![&Value::String("actions".into())]
         );
-        assert_eq!(field_value(&m, &field("plugin.missing")), None);
-        assert_eq!(field_value(&m, &field("absent.field")), None);
+        assert!(
+            field_values(&m, &field("plugin.missing"))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(field_values(&m, &field("absent.field")).unwrap().is_empty());
+
+        let m = json(r#"{"content_scripts":[{"js":["a.js","b.js"]},{"js":["c.js"]},{"css":[]}]}"#);
+        assert_eq!(
+            field_segment_values(&m, &field("content_scripts[*].js")).unwrap(),
+            vec!["a.js", "b.js", "c.js"]
+        );
     }
 
     #[test]
@@ -701,16 +790,20 @@ mod tests {
         let m = json(r#"{"type": "plugin", "plugin": {"browser": false}}"#);
         let mut when = BTreeMap::new();
         when.insert(field("type"), Value::String("plugin".into()));
-        assert!(when_matches(&m, &when));
+        assert!(when_matches(&m, &when).unwrap());
 
         // browser is present but false: matching against `true` must FAIL
         // (strict equality, no presence overload).
         let mut when_browser = BTreeMap::new();
         when_browser.insert(field("plugin.browser"), Value::Bool(true));
-        assert!(!when_matches(&m, &when_browser));
+        assert!(!when_matches(&m, &when_browser).unwrap());
 
         // empty when always matches
-        assert!(when_matches(&m, &BTreeMap::new()));
+        assert!(when_matches(&m, &BTreeMap::new()).unwrap());
+
+        let manifest = json(r#"{"plugins":[{"kind":"worker"},{"kind":"browser"}]}"#);
+        let wildcard = conditions(&[("plugins[*].kind", Value::String("browser".into()))]);
+        assert!(when_matches(&manifest, &wildcard).unwrap());
     }
 
     #[test]
@@ -833,6 +926,39 @@ mod tests {
         assert!(
             !paths.iter().any(|p| p.contains("server/index")),
             "server:false must not seed the server entry, got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn evaluate_fans_out_over_object_array_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_manifest(
+            root,
+            "extension/manifest.json",
+            r#"{
+                "manifest_version": 3,
+                "content_scripts": [
+                    { "matches": ["https://a.example/*"], "js": ["content/a.js", "content/b.js"] },
+                    { "matches": ["https://b.example/*"], "js": ["content/c.js"] }
+                ]
+            }"#,
+        );
+        let ext = plugin_with(vec![rule(
+            "**/manifest.json",
+            &[("manifest_version", Value::Number(3.into()))],
+            vec![seed("${content_scripts[*].js}", &[])],
+        )]);
+
+        let reports = check_manifest_entries(&ext, root);
+        assert!(reports[0].warnings.is_empty());
+        assert_eq!(
+            reports[0].matched[0].seeded,
+            vec![
+                "extension/content/a.js",
+                "extension/content/b.js",
+                "extension/content/c.js",
+            ]
         );
     }
 
@@ -1060,6 +1186,36 @@ mod tests {
             Some(MAX_MANIFEST_FIELD_VALUES)
         );
         assert!(reports[0].matched[0].seeded.is_empty());
+    }
+
+    #[test]
+    fn check_reports_wildcard_gate_limits_without_a_false_exclusion_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let items = std::iter::repeat_with(|| serde_json::json!({ "enabled": true }))
+            .take(MAX_MANIFEST_FIELD_VALUES + 1)
+            .collect::<Vec<_>>();
+        write_manifest(
+            root,
+            "plugins/alpha/manifest.json",
+            &serde_json::json!({ "items": items }).to_string(),
+        );
+        let ext = plugin_with(vec![rule(
+            "**/manifest.json",
+            &[("items[*].enabled", Value::Bool(true))],
+            vec![seed("index.ts", &[])],
+        )]);
+
+        let reports = check_manifest_entries(&ext, root);
+        assert!(
+            kinds(&reports).contains(&WarningKind::FieldValuesLimitExceeded),
+            "wildcard fan-out must report its explicit bound"
+        );
+        assert!(
+            !kinds(&reports).contains(&WarningKind::WhenExcludedAll),
+            "an evaluation limit is not a false 'when' result"
+        );
+        assert!(!reports[0].matched[0].when_passed);
     }
 
     #[test]
