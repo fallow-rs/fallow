@@ -414,6 +414,57 @@ impl<'de> Deserialize<'de> for ManifestPathTemplate {
     }
 }
 
+/// A typed condition used by a manifest entry gate.
+///
+/// Plain scalar JSON values retain strict equality semantics. The reserved
+/// `{ "exists": bool }` object tests field presence without truthiness.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ManifestCondition {
+    /// Require the field path to resolve (`true`) or not resolve (`false`).
+    Exists(ManifestExistsPredicate),
+    /// Require at least one yielded value to equal this scalar exactly.
+    Equals(ManifestScalarValue),
+}
+
+/// The explicit field-presence predicate accepted by [`ManifestCondition`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestExistsPredicate {
+    /// Whether the field path must resolve to at least one value.
+    pub exists: bool,
+}
+
+/// A scalar JSON value accepted by a strict-equality manifest condition.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ManifestScalarValue {
+    /// A JSON boolean.
+    Boolean(bool),
+    /// A JSON number.
+    Number(serde_json::Number),
+    /// A JSON string.
+    String(String),
+    /// JSON `null`.
+    Null(()),
+}
+
+impl TryFrom<serde_json::Value> for ManifestScalarValue {
+    type Error = String;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        match value {
+            serde_json::Value::Bool(value) => Ok(Self::Boolean(value)),
+            serde_json::Value::Number(value) => Ok(Self::Number(value)),
+            serde_json::Value::String(value) => Ok(Self::String(value)),
+            serde_json::Value::Null => Ok(Self::Null(())),
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                Err("manifest equality conditions must be scalar JSON values".to_string())
+            }
+        }
+    }
+}
+
 /// A rule that seeds entry points DERIVED from framework manifest files.
 ///
 /// For every file matching `manifests` (a recursive glob) that passes the
@@ -442,13 +493,14 @@ pub struct ManifestEntryRule {
     #[serde(default)]
     pub format: ManifestFormat,
 
-    /// Manifest-level gate: a map of field path to an expected value. Paths use
-    /// dotted object keys and may traverse arrays with `[*]`. ALL entries must
-    /// match by STRICT EQUALITY; a wildcard path matches when any yielded value
-    /// equals the expectation. An empty map matches every manifest.
+    /// Manifest-level gate: a map of field path to a scalar expectation or an
+    /// explicit `exists` predicate. Paths use dotted object keys and may
+    /// traverse arrays with `[*]`. ALL entries must match; a wildcard equality
+    /// matches when any yielded value equals the expectation. An empty map
+    /// matches every manifest.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
-    pub when: BTreeMap<ManifestFieldPath, serde_json::Value>,
+    #[schemars(with = "BTreeMap<String, ManifestCondition>")]
+    pub when: BTreeMap<ManifestFieldPath, ManifestCondition>,
 
     /// Entry rules seeded per matching manifest.
     pub entries: Vec<ManifestSeedRule>,
@@ -472,8 +524,8 @@ pub struct ManifestSeedRule {
     /// Per-entry gate, using the same strict equality and `[*]` traversal as the
     /// manifest-level gate. An empty map always passes.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
-    pub when: BTreeMap<ManifestFieldPath, serde_json::Value>,
+    #[schemars(with = "BTreeMap<String, ManifestCondition>")]
+    pub when: BTreeMap<ManifestFieldPath, ManifestCondition>,
 }
 
 fn default_external_entry_point_role() -> EntryPointRole {
@@ -1124,6 +1176,94 @@ exports = ["default"]
         ] {
             assert!(invalid.parse::<ManifestFieldPath>().is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn manifest_conditions_distinguish_scalar_equality_from_presence() {
+        let source = r#"{
+            "name": "condition-plugin",
+            "manifestEntries": [{
+                "manifests": "**/manifest.json",
+                "when": {
+                    "main": { "exists": true },
+                    "enabled": false,
+                    "mode": "worker",
+                    "version": 3,
+                    "metadata": null
+                },
+                "entries": [{ "path": "index.ts" }]
+            }]
+        }"#;
+        let plugin: ExternalPluginDef = serde_json::from_str(source).unwrap();
+        let when = &plugin.manifest_entries[0].when;
+
+        assert_eq!(
+            when.get(&"main".parse().unwrap()),
+            Some(&ManifestCondition::Exists(ManifestExistsPredicate {
+                exists: true,
+            }))
+        );
+        assert_eq!(
+            when.get(&"enabled".parse().unwrap()),
+            Some(&ManifestCondition::Equals(ManifestScalarValue::Boolean(
+                false
+            )))
+        );
+        assert_eq!(
+            when.get(&"metadata".parse().unwrap()),
+            Some(&ManifestCondition::Equals(ManifestScalarValue::Null(())))
+        );
+
+        let serialized = serde_json::to_value(plugin).unwrap();
+        assert_eq!(
+            serialized["manifestEntries"][0]["when"]["main"],
+            serde_json::json!({ "exists": true })
+        );
+    }
+
+    #[test]
+    fn manifest_conditions_reject_untyped_objects_and_arrays() {
+        for condition in [
+            serde_json::json!({ "exists": "yes" }),
+            serde_json::json!({ "exists": true, "extra": true }),
+            serde_json::json!({ "other": true }),
+            serde_json::json!(["worker"]),
+        ] {
+            let source = serde_json::json!({
+                "name": "bad-condition",
+                "manifestEntries": [{
+                    "manifests": "**/manifest.json",
+                    "when": { "field": condition },
+                    "entries": [{ "path": "index.ts" }]
+                }]
+            });
+            assert!(serde_json::from_value::<ExternalPluginDef>(source).is_err());
+        }
+    }
+
+    #[test]
+    fn manifest_exists_conditions_deserialize_from_toml() {
+        let source = r#"
+name = "condition-plugin"
+
+[[manifestEntries]]
+manifests = "**/manifest.json"
+
+[manifestEntries.when.main]
+exists = true
+
+[[manifestEntries.entries]]
+path = "index.ts"
+"#;
+        let plugin: ExternalPluginDef = toml::from_str(source).unwrap();
+        assert_eq!(
+            plugin.manifest_entries[0]
+                .when
+                .get(&"main".parse().unwrap()),
+            Some(&ManifestCondition::Exists(ManifestExistsPredicate {
+                exists: true,
+            }))
+        );
     }
 
     #[test]

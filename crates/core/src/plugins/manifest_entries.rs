@@ -18,8 +18,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    ExternalPluginDef, ManifestEntryRule, ManifestFieldPath, ManifestFieldSegment, ManifestFormat,
-    ManifestPathPart, ManifestPathTemplate,
+    ExternalPluginDef, ManifestCondition, ManifestEntryRule, ManifestFieldPath,
+    ManifestFieldSegment, ManifestFormat, ManifestPathPart, ManifestPathTemplate,
+    ManifestScalarValue,
 };
 use serde_json::Value;
 
@@ -506,9 +507,19 @@ fn emit_report_warnings(plugin_name: &str, report: &RuleReport) {
 /// Collect every field path a rule references (rule-level `when` keys, per-seed
 /// `when` keys, and `${...}` interpolations in seed paths) for typo diagnostics.
 fn referenced_field_paths(rule: &ManifestEntryRule) -> Vec<ManifestFieldPath> {
-    let mut paths: Vec<ManifestFieldPath> = rule.when.keys().cloned().collect();
+    let mut paths: Vec<ManifestFieldPath> = rule
+        .when
+        .iter()
+        .filter(|(_, condition)| condition_requires_present_value(condition))
+        .map(|(path, _)| path.clone())
+        .collect();
     for seed in &rule.entries {
-        paths.extend(seed.when.keys().cloned());
+        paths.extend(
+            seed.when
+                .iter()
+                .filter(|(_, condition)| condition_requires_present_value(condition))
+                .map(|(path, _)| path.clone()),
+        );
         paths.extend(seed.path.parts().iter().filter_map(|part| match part {
             ManifestPathPart::Field(path) => Some(path.clone()),
             ManifestPathPart::Literal(_) => None,
@@ -617,14 +628,38 @@ fn scalar_segment(value: &Value) -> Option<String> {
 /// by strict equality. An empty map always matches.
 fn when_matches(
     manifest: &Value,
-    when: &BTreeMap<ManifestFieldPath, Value>,
+    when: &BTreeMap<ManifestFieldPath, ManifestCondition>,
 ) -> Result<bool, ExpansionError> {
-    for (path, expected) in when {
-        if !field_values(manifest, path)?.contains(&expected) {
+    for (path, condition) in when {
+        let values = field_values(manifest, path)?;
+        let matches = match condition {
+            ManifestCondition::Equals(expected) => values
+                .iter()
+                .any(|actual| scalar_condition_matches(actual, expected)),
+            ManifestCondition::Exists(predicate) => values.is_empty() != predicate.exists,
+        };
+        if !matches {
             return Ok(false);
         }
     }
     Ok(true)
+}
+
+fn scalar_condition_matches(actual: &Value, expected: &ManifestScalarValue) -> bool {
+    match (actual, expected) {
+        (Value::Bool(actual), ManifestScalarValue::Boolean(expected)) => actual == expected,
+        (Value::Number(actual), ManifestScalarValue::Number(expected)) => actual == expected,
+        (Value::String(actual), ManifestScalarValue::String(expected)) => actual == expected,
+        (Value::Null, ManifestScalarValue::Null(())) => true,
+        _ => false,
+    }
+}
+
+fn condition_requires_present_value(condition: &ManifestCondition) -> bool {
+    match condition {
+        ManifestCondition::Equals(_) => true,
+        ManifestCondition::Exists(predicate) => predicate.exists,
+    }
 }
 
 /// Evaluate a typed manifest field path, including explicit `[*]` traversal.
@@ -733,7 +768,9 @@ fn root_relative_forward_slash(file: &Path, root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::{EntryPointRole, ManifestFormat, ManifestSeedRule};
+    use fallow_config::{
+        EntryPointRole, ManifestExistsPredicate, ManifestFormat, ManifestSeedRule,
+    };
 
     fn json(text: &str) -> Value {
         serde_json::from_str(text).unwrap()
@@ -754,10 +791,22 @@ mod tests {
         path.parse().unwrap()
     }
 
-    fn conditions(when: &[(&str, Value)]) -> BTreeMap<ManifestFieldPath, Value> {
+    fn conditions(when: &[(&str, Value)]) -> BTreeMap<ManifestFieldPath, ManifestCondition> {
         when.iter()
-            .map(|(path, expected)| (field(path), expected.clone()))
+            .map(|(path, expected)| {
+                (
+                    field(path),
+                    ManifestCondition::Equals(expected.clone().try_into().unwrap()),
+                )
+            })
             .collect()
+    }
+
+    fn exists(path: &str, expected: bool) -> (ManifestFieldPath, ManifestCondition) {
+        (
+            field(path),
+            ManifestCondition::Exists(ManifestExistsPredicate { exists: expected }),
+        )
     }
 
     #[test]
@@ -789,13 +838,19 @@ mod tests {
     fn when_matches_is_strict_equality_and_presence_is_not_matched() {
         let m = json(r#"{"type": "plugin", "plugin": {"browser": false}}"#);
         let mut when = BTreeMap::new();
-        when.insert(field("type"), Value::String("plugin".into()));
+        when.insert(
+            field("type"),
+            ManifestCondition::Equals(ManifestScalarValue::String("plugin".into())),
+        );
         assert!(when_matches(&m, &when).unwrap());
 
         // browser is present but false: matching against `true` must FAIL
         // (strict equality, no presence overload).
         let mut when_browser = BTreeMap::new();
-        when_browser.insert(field("plugin.browser"), Value::Bool(true));
+        when_browser.insert(
+            field("plugin.browser"),
+            ManifestCondition::Equals(ManifestScalarValue::Boolean(true)),
+        );
         assert!(!when_matches(&m, &when_browser).unwrap());
 
         // empty when always matches
@@ -804,6 +859,40 @@ mod tests {
         let manifest = json(r#"{"plugins":[{"kind":"worker"},{"kind":"browser"}]}"#);
         let wildcard = conditions(&[("plugins[*].kind", Value::String("browser".into()))]);
         assert!(when_matches(&manifest, &wildcard).unwrap());
+    }
+
+    #[test]
+    fn exists_conditions_test_presence_without_truthiness() {
+        let manifest = json(r#"{"presentFalse":false,"presentNull":null,"items":[]}"#);
+        for path in ["presentFalse", "presentNull", "items"] {
+            assert!(
+                when_matches(&manifest, &BTreeMap::from([exists(path, true)])).unwrap(),
+                "{path} is present regardless of its value"
+            );
+        }
+        assert!(when_matches(&manifest, &BTreeMap::from([exists("missing", false)])).unwrap());
+        assert!(!when_matches(&manifest, &BTreeMap::from([exists("missing", true)])).unwrap());
+        assert!(
+            when_matches(
+                &manifest,
+                &BTreeMap::from([exists("items[*].value", false)])
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn exists_false_can_gate_a_rule_without_an_unresolved_path_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_manifest(root, "plugins/alpha/manifest.json", r#"{"name":"alpha"}"#);
+        let mut manifest_rule = rule("**/manifest.json", &[], vec![seed("index.ts", &[])]);
+        manifest_rule.when = BTreeMap::from([exists("main", false)]);
+
+        let reports = check_manifest_entries(&plugin_with(vec![manifest_rule]), root);
+        assert!(reports[0].warnings.is_empty());
+        assert!(reports[0].matched[0].when_passed);
+        assert_eq!(reports[0].matched[0].seeded, vec!["plugins/alpha/index.ts"]);
     }
 
     #[test]

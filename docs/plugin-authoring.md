@@ -146,6 +146,21 @@ Use `[*]` to traverse every object in a manifest array. For example,
 extension content-script object. The same syntax works in `when`; a wildcard
 condition passes when any yielded value equals the expected value.
 
+Each `when` value is either a scalar compared by strict equality or an explicit
+presence predicate. `{ "exists": true }` matches false, null, empty arrays, and
+any other present value; `{ "exists": false }` matches only when the path yields
+no value. Presence checks never use truthiness.
+
+```jsonc
+{
+  "when": {
+    "main": { "exists": true },
+    "content_scripts[*].js": { "exists": true },
+    "enabled": false
+  }
+}
+```
+
 ```jsonc
 {
   "entryPointRole": "runtime",
