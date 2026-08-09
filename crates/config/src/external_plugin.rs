@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 use crate::config::UsedClassMemberRule;
 
@@ -202,6 +204,191 @@ pub enum ManifestFormat {
     Json,
 }
 
+/// A validated field path into a manifest document.
+///
+/// Field paths use dotted object keys. The parsed segments are retained so
+/// evaluators do not repeatedly interpret user-authored path strings.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ManifestFieldPath {
+    raw: String,
+    segments: Vec<String>,
+}
+
+impl ManifestFieldPath {
+    /// The original validated path, used in diagnostics and serialization.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
+
+    /// Parsed object-key segments in traversal order.
+    pub fn segments(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.segments.iter().map(String::as_str)
+    }
+
+    fn parse(raw: String) -> Result<Self, String> {
+        if raw.is_empty() {
+            return Err("manifest field path must not be empty".to_string());
+        }
+
+        let mut segments = Vec::new();
+        for segment in raw.split('.') {
+            if segment.is_empty() {
+                return Err(format!(
+                    "manifest field path '{raw}' contains an empty segment"
+                ));
+            }
+            if segment.contains(['[', ']', '{', '}']) {
+                return Err(format!(
+                    "manifest field path '{raw}' contains unsupported bracket syntax"
+                ));
+            }
+            segments.push(segment.to_string());
+        }
+
+        Ok(Self { raw, segments })
+    }
+}
+
+impl FromStr for ManifestFieldPath {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::parse(raw.to_string())
+    }
+}
+
+impl fmt::Display for ManifestFieldPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.raw)
+    }
+}
+
+impl Serialize for ManifestFieldPath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.raw)
+    }
+}
+
+impl<'de> Deserialize<'de> for ManifestFieldPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(raw).map_err(D::Error::custom)
+    }
+}
+
+/// One parsed part of a manifest entry path template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestPathPart {
+    /// Literal path text copied without interpretation.
+    Literal(String),
+    /// A manifest field whose scalar values are interpolated.
+    Field(ManifestFieldPath),
+}
+
+/// A validated manifest-relative entry path with parsed `${field.path}` parts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestPathTemplate {
+    raw: String,
+    parts: Vec<ManifestPathPart>,
+}
+
+impl ManifestPathTemplate {
+    /// The original template used for serialization and diagnostics.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
+
+    /// Parsed literal and field parts in source order.
+    #[must_use]
+    pub fn parts(&self) -> &[ManifestPathPart] {
+        &self.parts
+    }
+
+    /// Replace field interpolations with a safe segment for glob validation.
+    #[must_use]
+    pub fn validation_pattern(&self) -> String {
+        let mut pattern = String::with_capacity(self.raw.len());
+        for part in &self.parts {
+            match part {
+                ManifestPathPart::Literal(literal) => pattern.push_str(literal),
+                ManifestPathPart::Field(_) => pattern.push_str("fallowinterp"),
+            }
+        }
+        pattern
+    }
+
+    fn parse(raw: String) -> Result<Self, String> {
+        let mut parts = Vec::new();
+        let mut rest = raw.as_str();
+
+        while let Some(start) = rest.find("${") {
+            if start > 0 {
+                parts.push(ManifestPathPart::Literal(rest[..start].to_string()));
+            }
+
+            let after = &rest[start + 2..];
+            let Some(end) = after.find('}') else {
+                return Err(format!(
+                    "manifest entry path '{raw}' contains an unterminated interpolation"
+                ));
+            };
+            let field = after[..end].parse::<ManifestFieldPath>()?;
+            parts.push(ManifestPathPart::Field(field));
+            rest = &after[end + 1..];
+        }
+
+        if !rest.is_empty() {
+            parts.push(ManifestPathPart::Literal(rest.to_string()));
+        }
+        if parts.is_empty() {
+            parts.push(ManifestPathPart::Literal(String::new()));
+        }
+
+        Ok(Self { raw, parts })
+    }
+}
+
+impl FromStr for ManifestPathTemplate {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::parse(raw.to_string())
+    }
+}
+
+impl fmt::Display for ManifestPathTemplate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.raw)
+    }
+}
+
+impl Serialize for ManifestPathTemplate {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.raw)
+    }
+}
+
+impl<'de> Deserialize<'de> for ManifestPathTemplate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(raw).map_err(D::Error::custom)
+    }
+}
+
 /// A rule that seeds entry points DERIVED from framework manifest files.
 ///
 /// For every file matching `manifests` (a recursive glob) that passes the
@@ -234,7 +421,8 @@ pub struct ManifestEntryRule {
     /// value. ALL entries must match by STRICT EQUALITY for the manifest to be
     /// processed. An empty map matches every manifest.
     #[serde(default)]
-    pub when: BTreeMap<String, serde_json::Value>,
+    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
+    pub when: BTreeMap<ManifestFieldPath, serde_json::Value>,
 
     /// Entry rules seeded per matching manifest.
     pub entries: Vec<ManifestSeedRule>,
@@ -251,12 +439,14 @@ pub struct ManifestSeedRule {
     /// must encode its own extension (e.g. `public/index.{ts,tsx}`); glob entry
     /// patterns are matched literally against discovered files without
     /// source-extension probing.
-    pub path: String,
+    #[schemars(with = "String")]
+    pub path: ManifestPathTemplate,
 
     /// Per-entry gate (strict equality), evaluated against the same manifest.
     /// An empty map always passes.
     #[serde(default)]
-    pub when: BTreeMap<String, serde_json::Value>,
+    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
+    pub when: BTreeMap<ManifestFieldPath, serde_json::Value>,
 }
 
 fn default_external_entry_point_role() -> EntryPointRole {
@@ -310,7 +500,7 @@ impl ExternalPluginDef {
             for seed in &rule.entries {
                 // Substitute `${...}` interpolation with a placeholder segment so
                 // the surrounding glob (e.g. `${x}/index.{ts,tsx}`) validates.
-                let probe = substitute_interpolation_placeholder(&seed.path);
+                let probe = seed.path.validation_pattern();
                 if let Err(e) =
                     compile_user_glob(&probe, "framework[].manifestEntries[].entries[].path")
                 {
@@ -327,27 +517,6 @@ impl ExternalPluginDef {
             Err(errors)
         }
     }
-}
-
-/// Replace every `${...}` interpolation span with a placeholder path segment so
-/// the surrounding glob can be validated. Used only for validation; the actual
-/// interpolation happens at evaluation time in the core crate. An unterminated
-/// `${` is left intact so it fails glob validation as a loud error.
-fn substitute_interpolation_placeholder(path: &str) -> String {
-    let mut out = String::with_capacity(path.len());
-    let mut rest = path;
-    while let Some(start) = rest.find("${") {
-        out.push_str(&rest[..start]);
-        if let Some(end_rel) = rest[start + 2..].find('}') {
-            out.push_str("fallowinterp");
-            rest = &rest[start + 2 + end_rel + 1..];
-        } else {
-            out.push_str(&rest[start..]);
-            return out;
-        }
-    }
-    out.push_str(rest);
-    out
 }
 
 /// Recursively validate `FileExists.pattern` fields inside a `PluginDetection`
@@ -827,6 +996,80 @@ exports = ["default"]
         assert_eq!(plugin.tooling_dependencies, vec!["my-cli"]);
         assert_eq!(plugin.used_exports.len(), 1);
         assert_eq!(plugin.used_exports[0].exports, vec!["default"]);
+    }
+
+    #[test]
+    fn manifest_field_paths_and_templates_are_parsed_once_and_round_trip() {
+        let source = r#"{
+            "name": "manifest-plugin",
+            "manifestEntries": [{
+                "manifests": "**/manifest.json",
+                "when": { "plugin.browser": true },
+                "entries": [{
+                    "path": "${plugin.entry}/index.{ts,tsx}",
+                    "when": { "type": "plugin" }
+                }]
+            }]
+        }"#;
+
+        let plugin: ExternalPluginDef = serde_json::from_str(source).unwrap();
+        let rule = &plugin.manifest_entries[0];
+        let condition_path = rule.when.keys().next().unwrap();
+        assert_eq!(
+            condition_path.segments().collect::<Vec<_>>(),
+            vec!["plugin", "browser"]
+        );
+        assert_eq!(
+            rule.entries[0].path.as_str(),
+            "${plugin.entry}/index.{ts,tsx}"
+        );
+        assert_eq!(
+            rule.entries[0].path.parts(),
+            &[
+                ManifestPathPart::Field("plugin.entry".parse().unwrap()),
+                ManifestPathPart::Literal("/index.{ts,tsx}".to_string()),
+            ]
+        );
+
+        let serialized = serde_json::to_value(&plugin).unwrap();
+        assert_eq!(
+            serialized["manifestEntries"][0]["when"]["plugin.browser"],
+            true
+        );
+        assert_eq!(
+            serialized["manifestEntries"][0]["entries"][0]["path"],
+            "${plugin.entry}/index.{ts,tsx}"
+        );
+    }
+
+    #[test]
+    fn invalid_manifest_field_paths_and_templates_are_rejected() {
+        for source in [
+            r#"{
+                "name": "bad-condition",
+                "manifestEntries": [{
+                    "manifests": "**/manifest.json",
+                    "when": { "plugin..browser": true },
+                    "entries": [{ "path": "index.ts" }]
+                }]
+            }"#,
+            r#"{
+                "name": "bad-template-field",
+                "manifestEntries": [{
+                    "manifests": "**/manifest.json",
+                    "entries": [{ "path": "${plugin..entry}/index.ts" }]
+                }]
+            }"#,
+            r#"{
+                "name": "unterminated-template",
+                "manifestEntries": [{
+                    "manifests": "**/manifest.json",
+                    "entries": [{ "path": "${plugin.entry/index.ts" }]
+                }]
+            }"#,
+        ] {
+            assert!(serde_json::from_str::<ExternalPluginDef>(source).is_err());
+        }
     }
 
     #[test]

@@ -17,7 +17,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ExternalPluginDef, ManifestEntryRule, ManifestFormat};
+use fallow_config::{
+    ExternalPluginDef, ManifestEntryRule, ManifestFieldPath, ManifestFormat, ManifestPathPart,
+    ManifestPathTemplate,
+};
 use serde_json::Value;
 
 use super::PathRule;
@@ -238,7 +241,7 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
         if when_passed {
             passed += 1;
             for path in &referenced {
-                if dotted_lookup(&manifest, path).is_some()
+                if field_value(&manifest, path).is_some()
                     && let Some(flag) = resolved.get_mut(path.as_str())
                 {
                     *flag = true;
@@ -401,67 +404,58 @@ fn emit_report_warnings(plugin_name: &str, report: &RuleReport) {
 
 /// Collect every field path a rule references (rule-level `when` keys, per-seed
 /// `when` keys, and `${...}` interpolations in seed paths) for typo diagnostics.
-fn referenced_field_paths(rule: &ManifestEntryRule) -> Vec<String> {
-    let mut paths: Vec<String> = rule.when.keys().cloned().collect();
+fn referenced_field_paths(rule: &ManifestEntryRule) -> Vec<ManifestFieldPath> {
+    let mut paths: Vec<ManifestFieldPath> = rule.when.keys().cloned().collect();
     for seed in &rule.entries {
         paths.extend(seed.when.keys().cloned());
-        paths.extend(interpolation_field_paths(&seed.path));
+        paths.extend(seed.path.parts().iter().filter_map(|part| match part {
+            ManifestPathPart::Field(path) => Some(path.clone()),
+            ManifestPathPart::Literal(_) => None,
+        }));
     }
     paths.sort();
     paths.dedup();
     paths
 }
 
-/// Extract the dotted field paths named by `${...}` interpolations in a path.
-fn interpolation_field_paths(path: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut rest = path;
-    while let Some(start) = rest.find("${") {
-        let after = &rest[start + 2..];
-        if let Some(end) = after.find('}') {
-            out.push(after[..end].to_string());
-            rest = &after[end + 1..];
-        } else {
-            break;
-        }
-    }
-    out
-}
-
 /// Expand `${dotted.field}` interpolations in a path against a manifest, fanning
 /// out over string / array field values. Returns an empty vec when any
 /// interpolation resolves to nothing (a missing field seeds nothing).
-fn expand_interpolations(path: &str, manifest: &Value) -> Vec<String> {
-    let Some(start) = path.find("${") else {
-        return vec![path.to_string()];
-    };
-    let prefix = &path[..start];
-    let after = &path[start + 2..];
-    let Some(end) = after.find('}') else {
-        // Unterminated interpolation: not a valid template, seed nothing.
-        return Vec::new();
-    };
-    let field = &after[..end];
-    let suffix = &after[end + 1..];
+fn expand_interpolations(path: &ManifestPathTemplate, manifest: &Value) -> Vec<String> {
+    let mut expanded = vec![String::new()];
+    for part in path.parts() {
+        match part {
+            ManifestPathPart::Literal(literal) => {
+                for value in &mut expanded {
+                    value.push_str(literal);
+                }
+            }
+            ManifestPathPart::Field(field) => {
+                let values = field_segment_values(manifest, field);
+                if values.is_empty() {
+                    return Vec::new();
+                }
 
-    // Recurse on the SUFFIX only (strictly shorter, so termination is
-    // guaranteed) and cartesian-combine with this field's values. A substituted
-    // value is treated as a literal segment, never re-scanned for `${...}`, so a
-    // manifest whose field value contains `${...}` cannot cause runaway recursion.
-    let mut out = Vec::new();
-    let tails = expand_interpolations(suffix, manifest);
-    for value in field_segment_values(manifest, field) {
-        for tail in &tails {
-            out.push(format!("{prefix}{value}{tail}"));
+                let mut next = Vec::with_capacity(expanded.len().saturating_mul(values.len()));
+                for prefix in &expanded {
+                    for value in &values {
+                        let mut concrete = String::with_capacity(prefix.len() + value.len());
+                        concrete.push_str(prefix);
+                        concrete.push_str(value);
+                        next.push(concrete);
+                    }
+                }
+                expanded = next;
+            }
         }
     }
-    out
+    expanded
 }
 
 /// The path-segment string values a dotted field yields: a string or number
 /// yields one; an array yields one per scalar element; anything else yields none.
-fn field_segment_values(manifest: &Value, field: &str) -> Vec<String> {
-    match dotted_lookup(manifest, field) {
+fn field_segment_values(manifest: &Value, field: &ManifestFieldPath) -> Vec<String> {
+    match field_value(manifest, field) {
         Some(Value::String(s)) if !s.is_empty() => vec![s.clone()],
         Some(Value::Number(n)) => vec![n.to_string()],
         Some(Value::Array(items)) => items.iter().filter_map(scalar_segment).collect(),
@@ -479,15 +473,15 @@ fn scalar_segment(value: &Value) -> Option<String> {
 
 /// Whether every `(dotted-path, expected)` pair in `when` matches the manifest
 /// by strict equality. An empty map always matches.
-fn when_matches(manifest: &Value, when: &BTreeMap<String, Value>) -> bool {
+fn when_matches(manifest: &Value, when: &BTreeMap<ManifestFieldPath, Value>) -> bool {
     when.iter()
-        .all(|(path, expected)| dotted_lookup(manifest, path) == Some(expected))
+        .all(|(path, expected)| field_value(manifest, path) == Some(expected))
 }
 
 /// Look up a dotted field path (`plugin.browser`) in a JSON value.
-fn dotted_lookup<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+fn field_value<'a>(value: &'a Value, path: &ManifestFieldPath) -> Option<&'a Value> {
     let mut current = value;
-    for segment in path.split('.') {
+    for segment in path.segments() {
         current = current.get(segment)?;
     }
     Some(current)
@@ -564,40 +558,51 @@ mod tests {
 
     fn seed(path: &str, when: &[(&str, Value)]) -> ManifestSeedRule {
         ManifestSeedRule {
-            path: path.to_string(),
-            when: when
-                .iter()
-                .map(|(k, v)| ((*k).to_string(), v.clone()))
-                .collect(),
+            path: path.parse().unwrap(),
+            when: conditions(when),
         }
     }
 
+    fn field(path: &str) -> ManifestFieldPath {
+        path.parse().unwrap()
+    }
+
+    fn template(path: &str) -> ManifestPathTemplate {
+        path.parse().unwrap()
+    }
+
+    fn conditions(when: &[(&str, Value)]) -> BTreeMap<ManifestFieldPath, Value> {
+        when.iter()
+            .map(|(path, expected)| (field(path), expected.clone()))
+            .collect()
+    }
+
     #[test]
-    fn dotted_lookup_traverses_nested_fields() {
+    fn field_value_traverses_nested_fields() {
         let m = json(r#"{"plugin": {"browser": true, "id": "actions"}}"#);
         assert_eq!(
-            dotted_lookup(&m, "plugin.browser"),
+            field_value(&m, &field("plugin.browser")),
             Some(&Value::Bool(true))
         );
         assert_eq!(
-            dotted_lookup(&m, "plugin.id"),
+            field_value(&m, &field("plugin.id")),
             Some(&Value::String("actions".into()))
         );
-        assert_eq!(dotted_lookup(&m, "plugin.missing"), None);
-        assert_eq!(dotted_lookup(&m, "absent.field"), None);
+        assert_eq!(field_value(&m, &field("plugin.missing")), None);
+        assert_eq!(field_value(&m, &field("absent.field")), None);
     }
 
     #[test]
     fn when_matches_is_strict_equality_and_presence_is_not_matched() {
         let m = json(r#"{"type": "plugin", "plugin": {"browser": false}}"#);
         let mut when = BTreeMap::new();
-        when.insert("type".to_string(), Value::String("plugin".into()));
+        when.insert(field("type"), Value::String("plugin".into()));
         assert!(when_matches(&m, &when));
 
         // browser is present but false: matching against `true` must FAIL
         // (strict equality, no presence overload).
         let mut when_browser = BTreeMap::new();
-        when_browser.insert("plugin.browser".to_string(), Value::Bool(true));
+        when_browser.insert(field("plugin.browser"), Value::Bool(true));
         assert!(!when_matches(&m, &when_browser));
 
         // empty when always matches
@@ -621,19 +626,19 @@ mod tests {
         let m = json(r#"{"plugin": {"extraPublicDirs": ["common", "types"], "id": "actions"}}"#);
         // string field -> one entry
         assert_eq!(
-            expand_interpolations("${plugin.id}/index.ts", &m),
+            expand_interpolations(&template("${plugin.id}/index.ts"), &m),
             vec!["actions/index.ts"]
         );
         // array field -> one entry per element
         assert_eq!(
-            expand_interpolations("${plugin.extraPublicDirs}/index.{ts,tsx}", &m),
+            expand_interpolations(&template("${plugin.extraPublicDirs}/index.{ts,tsx}"), &m),
             vec!["common/index.{ts,tsx}", "types/index.{ts,tsx}"]
         );
         // missing field -> nothing seeded
-        assert!(expand_interpolations("${plugin.absent}/index.ts", &m).is_empty());
+        assert!(expand_interpolations(&template("${plugin.absent}/index.ts"), &m).is_empty());
         // no interpolation -> passthrough
         assert_eq!(
-            expand_interpolations("public/index.{ts,tsx}", &m),
+            expand_interpolations(&template("public/index.{ts,tsx}"), &m),
             vec!["public/index.{ts,tsx}"]
         );
     }
@@ -665,7 +670,7 @@ mod tests {
             manifest_entries: vec![ManifestEntryRule {
                 manifests: "**/kibana.jsonc".to_string(),
                 format: ManifestFormat::Jsonc,
-                when: BTreeMap::from([("type".to_string(), Value::String("plugin".into()))]),
+                when: conditions(&[("type", Value::String("plugin".into()))]),
                 entries: vec![
                     seed(
                         "public/index.{ts,tsx}",
@@ -722,10 +727,7 @@ mod tests {
         ManifestEntryRule {
             manifests: manifests.to_string(),
             format: ManifestFormat::Jsonc,
-            when: when
-                .iter()
-                .map(|(k, v)| ((*k).to_string(), v.clone()))
-                .collect(),
+            when: conditions(when),
             entries,
         }
     }
