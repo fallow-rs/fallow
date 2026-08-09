@@ -3118,7 +3118,9 @@ mod tests {
     /// The human hint and the JSON `suppress-line` action are one contract: any
     /// finding routed to `above-angular-decorator` must also produce the human
     /// decorator hint. Narrowing either side to an extension allowlist silently
-    /// splits them (issue #2163 follow-up).
+    /// splits them (issue #2163 follow-up). The lockstep holds for the default
+    /// action options asserted here; `health.suggestInlineSuppression: false`
+    /// drops both surfaces together, which is why this pins the default.
     #[test]
     fn angular_decorator_action_and_human_hint_stay_in_lockstep() {
         let root = PathBuf::from("/project");

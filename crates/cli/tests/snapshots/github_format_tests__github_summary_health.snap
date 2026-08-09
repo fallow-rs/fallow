@@ -30,4 +30,6 @@ expression: rendered
 |:-----|:---------|------------:|-----------:|
 | `src/hot.ts:2` | `handleRequest` | 91234 | 99 |
 
+**!** marks the dimension that breached.
+
 **210** files, **1400** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30)

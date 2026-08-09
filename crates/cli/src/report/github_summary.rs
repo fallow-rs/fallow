@@ -1371,7 +1371,7 @@ const COMPLEXITY_TABLE_HEADER: &str = "| File | Function | Severity | Cyclomatic
 fn health_thresholds_footer(env: &Value) -> String {
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     format!(
-        "\n\n**{}** files, **{}** functions analyzed (thresholds: cyclomatic > {}, cognitive > {}, CRAP >= {})",
+        "\n\n**!** marks the dimension that breached.\n\n**{}** files, **{}** functions analyzed (thresholds: cyclomatic > {}, cognitive > {}, CRAP >= {})",
         num(&summary, "files_analyzed"),
         num(&summary, "functions_analyzed"),
         num(&summary, "max_cyclomatic_threshold"),

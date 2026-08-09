@@ -203,7 +203,7 @@ else
     ([$findings[:5][] |
       "| `\(.path | rel_path):\(.line)` | `\(.name)` | \(.severity // "moderate") | \(.cyclomatic)\(if (.exceeded // "") | test("cyclomatic|both|all") then " **!**" else "" end) | \(.cognitive)\(if (.exceeded // "") | test("cognitive|both|all") then " **!**" else "" end)\(if $show_crap then " | \(if .crap == null then "-" else (.crap | tostring) + (if (.exceeded // "") | test("crap|all") then " **!**" else "" end) end)" else "" end) | \(.line_count) |"
     ] | join("\n")) +
-    "\n\n**\($summary.files_analyzed // "unknown")** files, **\($summary.functions_analyzed // "unknown")** functions analyzed (thresholds: cyclomatic > \($cyc_t), cognitive > \($cog_t)\(if $show_crap then ", CRAP >= \($crap_t)" else "" end))\n\n</details>\n\n"
+    "\n\n**!** marks the dimension that breached.\n\n**\($summary.files_analyzed // "unknown")** files, **\($summary.functions_analyzed // "unknown")** functions analyzed (thresholds: cyclomatic > \($cyc_t), cognitive > \($cog_t)\(if $show_crap then ", CRAP >= \($crap_t)" else "" end))\n\n</details>\n\n"
   else "" end) +
 
   (if $prod_failing > 0 or $prod_advisory > 0 or $hot_paths > 0 then

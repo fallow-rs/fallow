@@ -54,7 +54,7 @@ if $prod == 0 and $hot == 0 then
       "| `\(.path):\(.line)` | `\(.name)` | \(.severity // "moderate") | \(.cyclomatic)\(if (.exceeded // "") | test("cyclomatic|both|all") then " **!**" else "" end) | \(.cognitive)\(if (.exceeded // "") | test("cognitive|both|all") then " **!**" else "" end) | \(if .crap == null then "-" else (.crap | tostring) + (if (.exceeded // "") | test("crap|all") then " **!**" else "" end) end) | \(.line_count) |"
     ] | join("\n")) +
     (if $complex > 25 then "\n\n> \($complex - 25) more \u2014 run `fallow health` locally for the full list" else "" end) +
-    "\n\n**\(.summary.files_analyzed)** files, **\(.summary.functions_analyzed)** functions analyzed (thresholds: cyclomatic > \(.summary.max_cyclomatic_threshold), cognitive > \(.summary.max_cognitive_threshold), CRAP >= \(.summary.max_crap_threshold // 30))"
+    "\n\n**!** marks the dimension that breached.\n\n**\(.summary.files_analyzed)** files, **\(.summary.functions_analyzed)** functions analyzed (thresholds: cyclomatic > \(.summary.max_cyclomatic_threshold), cognitive > \(.summary.max_cognitive_threshold), CRAP >= \(.summary.max_crap_threshold // 30))"
   end
 else
   "## Fallow \u2014 Health\n\n" +
@@ -90,7 +90,7 @@ else
     (if $hot > 10 then "\n\n> \($hot - 10) more hot paths in the full report" else "" end)
   else "" end) +
   (if $complex > 0 then
-    "\n\n**\(.summary.files_analyzed)** files, **\(.summary.functions_analyzed)** functions analyzed (thresholds: cyclomatic > \(.summary.max_cyclomatic_threshold), cognitive > \(.summary.max_cognitive_threshold), CRAP >= \(.summary.max_crap_threshold // 30))"
+    "\n\n**!** marks the dimension that breached.\n\n**\(.summary.files_analyzed)** files, **\(.summary.functions_analyzed)** functions analyzed (thresholds: cyclomatic > \(.summary.max_cyclomatic_threshold), cognitive > \(.summary.max_cognitive_threshold), CRAP >= \(.summary.max_crap_threshold // 30))"
   elif $prod > 0 then
     "\n\n**\(production_summary.functions_tracked // 0)** tracked functions, **\(production_summary.functions_hit // 0)** hit, **\(production_summary.functions_unhit // 0)** unhit, **\(production_summary.functions_untracked // 0)** untracked"
   else
