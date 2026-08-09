@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ExternalPluginDef, ManifestEntryRule};
+use fallow_config::{ExternalPluginDef, ManifestEntryRule, ManifestFormat};
 use serde_json::Value;
 
 use super::PathRule;
@@ -218,7 +218,7 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
 
         let manifest: Value = match std::fs::read_to_string(&file)
             .ok()
-            .and_then(|source| fallow_config::jsonc::parse_to_value(&source).ok())
+            .and_then(|source| parse_manifest(&source, rule.format))
         {
             Some(value) => value,
             None => {
@@ -277,6 +277,13 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
             .then_with(|| a.field_path.cmp(&b.field_path))
     });
     report
+}
+
+fn parse_manifest(source: &str, format: ManifestFormat) -> Option<Value> {
+    match format {
+        ManifestFormat::Jsonc => fallow_config::jsonc::parse_to_value(source).ok(),
+        ManifestFormat::Json => serde_json::from_str(source).ok(),
+    }
 }
 
 /// Assemble the RULE-LEVEL diagnostics (matched-none / when-excluded-all /
@@ -595,6 +602,18 @@ mod tests {
 
         // empty when always matches
         assert!(when_matches(&m, &BTreeMap::new()));
+    }
+
+    #[test]
+    fn parse_manifest_honors_the_declared_format() {
+        let jsonc_only = r#"{
+            // JSONC comment
+            "type": "plugin",
+        }"#;
+
+        assert!(parse_manifest(jsonc_only, ManifestFormat::Jsonc).is_some());
+        assert!(parse_manifest(jsonc_only, ManifestFormat::Json).is_none());
+        assert!(parse_manifest(r#"{"type":"plugin"}"#, ManifestFormat::Json).is_some());
     }
 
     #[test]
