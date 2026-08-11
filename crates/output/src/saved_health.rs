@@ -50,6 +50,13 @@ struct SavedHealthFinding {
     coverage_pct: Option<f64>,
     #[serde(default)]
     introduced: Option<bool>,
+    /// Carried through so a `report --from` re-render describes the finding
+    /// against the ceiling it was measured with. Absent in envelopes written by
+    /// an older fallow, which then fall back to the summary (issue #2163).
+    #[serde(default)]
+    effective_thresholds: Option<crate::HealthEffectiveThresholds>,
+    #[serde(default)]
+    threshold_source: Option<crate::ThresholdSource>,
 }
 
 #[derive(Default, Deserialize)]
@@ -64,6 +71,8 @@ struct SavedHealthSummary {
     max_cognitive_threshold: u16,
     #[serde(default = "default_max_crap")]
     max_crap_threshold: f64,
+    #[serde(default = "default_max_unit_size")]
+    max_unit_size_threshold: u32,
 }
 
 const fn default_max_cyclomatic() -> u16 {
@@ -76,6 +85,10 @@ const fn default_max_cognitive() -> u16 {
 
 fn default_max_crap() -> f64 {
     30.0
+}
+
+const fn default_max_unit_size() -> u32 {
+    crate::DEFAULT_MAX_UNIT_SIZE
 }
 
 #[derive(Deserialize)]
@@ -238,8 +251,8 @@ impl From<SavedHealthFinding> for HealthFinding {
                 inherited_from: None,
                 component_rollup: None,
                 contributions: Vec::new(),
-                effective_thresholds: None,
-                threshold_source: None,
+                effective_thresholds: saved.effective_thresholds,
+                threshold_source: saved.threshold_source,
             },
             Vec::new(),
             saved.introduced,
@@ -253,6 +266,7 @@ impl From<SavedHealthSummary> for HealthSummary {
             max_cyclomatic_threshold: saved.max_cyclomatic_threshold,
             max_cognitive_threshold: saved.max_cognitive_threshold,
             max_crap_threshold: saved.max_crap_threshold,
+            max_unit_size_threshold: saved.max_unit_size_threshold,
             ..Self::default()
         }
     }
@@ -402,5 +416,62 @@ impl From<SavedStylingFinding> for StylingFinding {
             fix_hint: None,
             actions: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::health_report_from_saved_value;
+
+    fn envelope(extra: &str) -> serde_json::Value {
+        serde_json::from_str(&format!(
+            r#"{{
+              "summary": {{ "max_crap_threshold": 30.0 }},
+              "findings": [{{
+                "path": "src/Board.astro",
+                "name": "<template>",
+                "line": 6,
+                "col": 3,
+                "cyclomatic": 11,
+                "cognitive": 4,
+                "line_count": 20,
+                "param_count": 0,
+                "exceeded": "crap",
+                "severity": "critical",
+                "crap": 132.0{extra}
+              }}]
+            }}"#
+        ))
+        .expect("envelope fixture parses")
+    }
+
+    /// A `report --from` re-render must describe the finding against the
+    /// ceiling it was measured with, matching a direct render (issue #2163).
+    #[test]
+    fn saved_findings_keep_their_override_thresholds() {
+        let report = health_report_from_saved_value(&envelope(
+            r#", "threshold_source": "override",
+                "effective_thresholds": {
+                  "max_cyclomatic": 20,
+                  "max_cognitive": 15,
+                  "max_crap": 100.0,
+                  "max_unit_size": 60
+                }"#,
+        ))
+        .expect("saved envelope rehydrates");
+
+        let thresholds = report.findings[0].resolved_thresholds(&report.summary);
+        assert!((thresholds.max_crap - 100.0).abs() < f64::EPSILON);
+    }
+
+    /// Envelopes written by an older fallow carry no `effective_thresholds`.
+    #[test]
+    fn saved_findings_without_thresholds_fall_back_to_the_summary() {
+        let report =
+            health_report_from_saved_value(&envelope("")).expect("saved envelope rehydrates");
+
+        let thresholds = report.findings[0].resolved_thresholds(&report.summary);
+        assert!((thresholds.max_crap - 30.0).abs() < f64::EPSILON);
+        assert_eq!(thresholds.max_unit_size, crate::DEFAULT_MAX_UNIT_SIZE);
     }
 }

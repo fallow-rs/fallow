@@ -9,7 +9,9 @@ mod common;
 
 use common::{
     fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+    run_fallow_raw,
 };
+use std::fmt::Write as _;
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -6957,7 +6959,7 @@ fn health_override_discloses_the_crap_dimension_that_kept_the_finding() {
         human.stdout
     );
     assert!(
-        human.stdout.contains("(finding still fires on: CRAP)"),
+        human.stdout.contains("(still breaches: CRAP)"),
         "the override row must not read as unqualified success: {}",
         human.stdout
     );
@@ -7077,9 +7079,7 @@ fn health_partly_configured_complexity_override_names_the_surviving_dimension() 
 
     let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
     assert!(
-        human
-            .stdout
-            .contains("(finding still fires on: complexity)"),
+        human.stdout.contains("(still breaches: complexity)"),
         "the human rows must disclose the surviving dimension: {}",
         human.stdout
     );
@@ -7319,10 +7319,8 @@ fn health_override_outstanding_survives_a_diff_filter() {
     human_args.extend_from_slice(&["--diff-file", diff_path.to_str().expect("utf8 path")]);
     let human = run_fallow_in_root("health", dir.path(), &human_args);
     assert!(
-        human
-            .stdout
-            .contains("(finding still fires on: complexity, CRAP)")
-            && human.stdout.contains("(finding still fires on: CRAP)"),
+        human.stdout.contains("(still breaches: complexity, CRAP)")
+            && human.stdout.contains("(still breaches: CRAP)"),
         "an insufficient row must never render without the dimensions it failed to clear: {}",
         human.stdout
     );
@@ -7417,5 +7415,529 @@ fn health_markdown_findings_table_explains_the_breach_marker() {
             && output.stdout.contains("marks the dimension that breached"),
         "the markdown findings table must gloss its breach marker: {}",
         output.stdout
+    );
+}
+
+/// One function whose cyclomatic and cognitive complexity clear the global
+/// ceilings by a wide margin, so every dimension of an override is exercised.
+fn dense_branch_source(name: &str, branches: usize) -> String {
+    let mut src = String::from("export function ");
+    src.push_str(name);
+    src.push_str("(input) {\n  let score = 0;\n");
+    push_branches(&mut src, branches, "  ");
+    src.push_str("  return score;\n}\n");
+    src
+}
+
+fn push_branches(src: &mut String, branches: usize, indent: &str) {
+    for index in 0..branches {
+        src.push_str(indent);
+        src.push_str("if (input > ");
+        src.push_str(&index.to_string());
+        src.push_str(") score += 1;\n");
+    }
+}
+
+/// Two classes in one file, each with a method named `handler`, so the pair
+/// shares a name inside a single file.
+fn same_named_handlers_source(first_branches: usize, second_branches: usize) -> String {
+    let mut src = String::new();
+    for (class_name, branches) in [("Alpha", first_branches), ("Beta", second_branches)] {
+        src.push_str("export class ");
+        src.push_str(class_name);
+        src.push_str(" {\n  handler(input) {\n    let score = 0;\n");
+        push_branches(&mut src, branches, "    ");
+        src.push_str("    return score;\n  }\n}\n\n");
+    }
+    src
+}
+
+fn threshold_override_rows(json: &serde_json::Value) -> &Vec<serde_json::Value> {
+    json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array")
+}
+
+/// `insufficient` states that the finding survived the override, so a row that
+/// claims it while `outstanding` is empty asserts a finding no other part of
+/// the report can show. That contradiction is invisible to a CI gate, so it is
+/// asserted directly (issue #2163).
+fn assert_no_insufficient_row_without_outstanding(json: &serde_json::Value) {
+    for row in threshold_override_rows(json) {
+        if row["status"].as_str() == Some("insufficient") {
+            assert!(
+                row["outstanding"]
+                    .as_array()
+                    .is_some_and(|dimensions| !dimensions.is_empty()),
+                "an insufficient row must name the dimension that still fires: {row:#?}"
+            );
+        }
+    }
+}
+
+/// A later entry raises the ceiling past the metric; the earlier, narrower
+/// entry does not. The finding is emitted against the resolved ceiling, so the
+/// earlier row must not claim a finding that never fires.
+#[test]
+fn health_override_superseded_by_a_later_entry_reports_active() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"overlapping-overrides","type":"module","main":"src/hot.js"}"#,
+    );
+    write_file(&root.join("src/hot.js"), &dense_branch_source("hot", 29));
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/**"], "maxCyclomatic": 25 },
+      { "files": ["src/hot.js"], "maxCyclomatic": 100, "maxCognitive": 100, "maxCrap": 5000 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    assert!(
+        json["findings"].as_array().is_none_or(Vec::is_empty),
+        "the resolved ceilings clear every dimension: {json:#?}"
+    );
+    assert_no_insufficient_row_without_outstanding(&json);
+    let superseded = threshold_override_rows(&json)
+        .iter()
+        .find(|row| row["override_index"].as_u64() == Some(0))
+        .expect("a row for the superseded entry");
+    assert_eq!(
+        superseded["status"].as_str(),
+        Some("active"),
+        "{superseded:#?}"
+    );
+    assert_eq!(
+        superseded["effective_thresholds"]["max_cyclomatic"].as_u64(),
+        Some(100),
+        "a row must publish the ceiling in force, not its own configured value: {superseded:#?}"
+    );
+}
+
+/// A `fallow-ignore` comment already hides the finding, so the raised ceiling
+/// buys nothing and the row reads `stale`. The entry must still count as
+/// matched rather than falling through to a `no_match` row.
+#[test]
+fn health_override_on_a_suppressed_unit_reports_stale() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"suppressed-override","type":"module","main":"src/supp.js"}"#,
+    );
+    write_file(
+        &root.join("src/supp.js"),
+        &format!(
+            "// fallow-ignore-next-line complexity\n{}",
+            dense_branch_source("legacyParse", 29)
+        ),
+    );
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/supp.js"], "maxCyclomatic": 25, "maxCrap": 100 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    assert!(
+        json["findings"].as_array().is_none_or(Vec::is_empty),
+        "the suppression comment hides the finding: {json:#?}"
+    );
+    assert_no_insufficient_row_without_outstanding(&json);
+    let rows = threshold_override_rows(&json);
+    assert!(
+        rows.iter()
+            .all(|row| row["status"].as_str() != Some("no_match")),
+        "the glob matched a real unit, so no row may claim it matched nothing: {rows:#?}"
+    );
+    let crap_row = rows
+        .iter()
+        .find(|row| row["dimension"].as_str() == Some("crap"))
+        .expect("a crap row for the matched unit");
+    assert_eq!(crap_row["status"].as_str(), Some("stale"), "{crap_row:#?}");
+}
+
+fn write_same_named_handler_fixture(root: &Path, first: usize, second: usize) {
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"same-named-handlers","type":"module","main":"src/handlers.js"}"#,
+    );
+    write_file(
+        &root.join("src/handlers.js"),
+        &same_named_handlers_source(first, second),
+    );
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/**"], "functions": ["handler"], "maxCyclomatic": 25 }
+    ]
+  }
+}
+"#,
+    );
+}
+
+fn override_row_by_cyclomatic(json: &serde_json::Value, cyclomatic: u64) -> &serde_json::Value {
+    threshold_override_rows(json)
+        .iter()
+        .find(|row| row["metrics"]["cyclomatic"].as_u64() == Some(cyclomatic))
+        .unwrap_or_else(|| panic!("a row measuring cyclomatic {cyclomatic}: {json:#?}"))
+}
+
+/// A name is not an identity. Keying the join on it let the last-written
+/// same-named unit hand its `exceeded` to every other row, so a row advised
+/// raising `maxCrap` while the finding it describes fires on cyclomatic too.
+#[test]
+fn health_override_outstanding_is_not_stolen_by_a_same_named_unit() {
+    let dir = tempdir().expect("create temp dir");
+    write_same_named_handler_fixture(dir.path(), 29, 11);
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    let breaching = override_row_by_cyclomatic(&json, 30);
+    assert_eq!(breaching["status"].as_str(), Some("insufficient"));
+    assert_eq!(
+        breaching["outstanding"].as_array().map(Vec::len),
+        Some(2),
+        "the unit breaches both dimensions: {breaching:#?}"
+    );
+    let quiet = override_row_by_cyclomatic(&json, 12);
+    assert_eq!(
+        quiet["outstanding"].as_array().map(|dimensions| dimensions
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>()),
+        Some(vec!["crap"]),
+        "{quiet:#?}"
+    );
+    assert_no_insufficient_row_without_outstanding(&json);
+}
+
+/// Two same-named units that land on the same status used to collapse into one
+/// row, dropping the other unit's metrics from the report entirely.
+#[test]
+fn health_override_rows_do_not_collapse_across_same_named_units() {
+    let dir = tempdir().expect("create temp dir");
+    write_same_named_handler_fixture(dir.path(), 29, 27);
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    let insufficient: Vec<_> = threshold_override_rows(&json)
+        .iter()
+        .filter(|row| {
+            row["status"].as_str() == Some("insufficient")
+                && row["dimension"].as_str() == Some("complexity")
+        })
+        .collect();
+    assert_eq!(insufficient.len(), 2, "{json:#?}");
+    let lines: Vec<_> = insufficient
+        .iter()
+        .filter_map(|row| row["line"].as_u64())
+        .collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "both rows carry a position: {insufficient:#?}"
+    );
+    assert_ne!(lines[0], lines[1], "{insufficient:#?}");
+    let metrics: Vec<_> = insufficient
+        .iter()
+        .filter_map(|row| row["metrics"]["cyclomatic"].as_u64())
+        .collect();
+    assert!(
+        metrics.contains(&30) && metrics.contains(&28),
+        "each row keeps its own unit's metrics: {insufficient:#?}"
+    );
+}
+
+fn board_astro_override_root(root: &Path) {
+    copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/Board.astro"], "maxCrap": 100 }
+    ]
+  }
+}
+"#,
+    );
+}
+
+fn board_astro_codeclimate_description(text: &str) -> String {
+    let issues: Vec<serde_json::Value> =
+        serde_json::from_str(text).unwrap_or_else(|error| panic!("codeclimate JSON: {error}"));
+    issues
+        .iter()
+        .find(|issue| {
+            issue["location"]["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("Board.astro"))
+        })
+        .and_then(|issue| issue["description"].as_str())
+        .unwrap_or_else(|| panic!("a Board.astro codeclimate issue: {text}"))
+        .to_owned()
+}
+
+fn board_astro_sarif_message(text: &str) -> String {
+    let sarif: serde_json::Value =
+        serde_json::from_str(text).unwrap_or_else(|error| panic!("sarif JSON: {error}"));
+    sarif["runs"][0]["results"]
+        .as_array()
+        .expect("sarif results")
+        .iter()
+        .find(|result| {
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                .as_str()
+                .is_some_and(|uri| uri.ends_with("Board.astro"))
+        })
+        .and_then(|result| result["message"]["text"].as_str())
+        .unwrap_or_else(|| panic!("a Board.astro sarif result: {text}"))
+        .to_owned()
+}
+
+fn board_astro_comment_row(text: &str) -> String {
+    text.lines()
+        .find(|line| line.contains("Board.astro") && line.contains("CRAP score"))
+        .unwrap_or_else(|| panic!("a Board.astro comment row: {text}"))
+        .to_owned()
+}
+
+/// The ceiling a reader sees must be the one the finding was measured with, in
+/// every format and on both the direct and the `report --from` path. SARIF and
+/// the CodeClimate-derived comment formats used to disagree inside one run.
+#[test]
+fn health_formats_agree_on_an_override_affected_ceiling() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    board_astro_override_root(root);
+
+    let json = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "json"],
+    );
+    let saved = root.join("health.json");
+    write_file(&saved, &json.stdout);
+
+    let direct_sarif = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "sarif"],
+    );
+    let saved_sarif = run_fallow_raw(&[
+        "report",
+        "--from",
+        saved.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--quiet",
+        "--format",
+        "sarif",
+    ]);
+    let codeclimate = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "codeclimate"],
+    );
+    let comment = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "pr-comment-github"],
+    );
+
+    for (label, row) in [
+        (
+            "direct sarif",
+            board_astro_sarif_message(&direct_sarif.stdout),
+        ),
+        (
+            "saved sarif",
+            board_astro_sarif_message(&saved_sarif.stdout),
+        ),
+        (
+            "codeclimate",
+            board_astro_codeclimate_description(&codeclimate.stdout),
+        ),
+        (
+            "pr-comment-github",
+            board_astro_comment_row(&comment.stdout),
+        ),
+    ] {
+        assert!(
+            row.contains("threshold: 100.0"),
+            "{label} must quote the override ceiling: {row}"
+        );
+        assert!(
+            !row.contains("threshold: 30.0"),
+            "{label} must not quote the global ceiling: {row}"
+        );
+    }
+}
+
+/// A long but complexity-clean function, so the only ceiling it can breach is
+/// `maxUnitSize`.
+fn long_clean_source(name: &str, lines: usize) -> String {
+    let mut src = format!("export function {name}(n) {{\n  let total = 0;\n");
+    for step in 0..lines {
+        let _ = writeln!(src, "  total += n * {step};");
+    }
+    src.push_str("  return total;\n}\n");
+    src
+}
+
+/// `maxUnitSize` breaches never reach the findings list, so the row's
+/// `outstanding` has to be seeded by the recorder. Without it a unit-size-only
+/// entry that raised the ceiling without clearing it read `insufficient` with
+/// nothing outstanding, the same contradiction the status vocabulary exists to
+/// prevent (issue #2163).
+#[test]
+fn health_unit_size_only_override_that_still_breaches_names_its_dimension() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"unit-size-override","type":"module","main":"src/long.js"}"#,
+    );
+    write_file(&root.join("src/long.js"), &long_clean_source("longFn", 100));
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/long.js"], "maxUnitSize": 80 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    assert_no_insufficient_row_without_outstanding(&json);
+    let row = threshold_override_rows(&json)
+        .iter()
+        .find(|row| row["function"].as_str() == Some("longFn"))
+        .unwrap_or_else(|| panic!("a row for the matched unit: {json:#?}"));
+    assert_eq!(row["status"].as_str(), Some("insufficient"), "{row:#?}");
+    assert_eq!(
+        row["outstanding"].as_array().map(|dimensions| dimensions
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>()),
+        Some(vec!["complexity"]),
+        "103 lines still exceed the raised 80: {row:#?}"
+    );
+}
+
+/// `functions: ["<component>"]` is the documented way to scope an entry to the
+/// synthetic Angular rollup. Resolving the rollup's ceilings without recording
+/// the match reported `no_match`, the user's only signal that a glob is wrong,
+/// about the entry that had just removed a finding (issue #2163).
+#[test]
+fn health_component_scoped_override_reaches_the_rollup_and_is_disclosed() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    copy_dir_recursive(&fixture_path("angular-component-rollup"), root);
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/host-game.component.ts"],
+        "functions": ["<component>"],
+        "maxCyclomatic": 500,
+        "maxCognitive": 500
+      }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+
+    let findings = json["findings"].as_array().expect("findings array");
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["name"] == "handleClick"),
+        "the entry is scoped to the rollup, so class findings stay: {findings:#?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["name"] != "<component>"),
+        "the raised ceilings reach the rollup: {findings:#?}"
+    );
+    let rows = threshold_override_rows(&json);
+    assert!(
+        rows.iter()
+            .all(|row| row["status"].as_str() != Some("no_match")),
+        "the entry changed the finding set, so no row may claim it matched nothing: {rows:#?}"
+    );
+    let row = rows
+        .iter()
+        .find(|row| row["function"].as_str() == Some("<component>"))
+        .unwrap_or_else(|| panic!("a row for the rollup: {rows:#?}"));
+    assert_eq!(row["status"].as_str(), Some("active"), "{row:#?}");
+    assert!(
+        row["line"].as_u64().is_some(),
+        "the row carries the rollup's anchor position: {row:#?}"
     );
 }

@@ -14211,7 +14211,7 @@
           "items": {
             "$ref": "#/definitions/ThresholdOverrideDimension"
           },
-          "description": "Dimensions on which the matched unit still produces a finding despite\nthis override. Non-empty means a finding survived; the listed dimensions\nare the ones that breached, whether or not this override configures\ntheir ceilings."
+          "description": "Dimensions the matched unit still breaches despite this override,\nwhether or not this override configures their ceilings. Non-empty means\nraising the ceiling did not settle the matter: a complexity or CRAP\nfinding survived, or the unit is still longer than the resolved\n`maxUnitSize`, which keeps it in the large-function list without\nemitting a finding of its own."
         },
         "path": {
           "type": [
@@ -14226,6 +14226,20 @@
             "null"
           ],
           "description": "Matched function name, for function-scoped overrides."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the matched unit. Absent on `no_match` rows, which\ndescribe an entry that matched nothing. Name alone is not an identity:\none file can hold several units sharing a name, so this pairs with\n`col` to keep their rows distinct (issue #2163)."
+        },
+        "col": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "0-based byte column of the matched unit. Absent on `no_match` rows."
         },
         "configured_thresholds": {
           "description": "Ceilings the override entry configures.",
@@ -14273,7 +14287,7 @@
         {
           "type": "string",
           "const": "stale",
-          "description": "The matched code now passes the global thresholds; the override can go."
+          "description": "The override is not what keeps the matched unit quiet, so it can go:\neither the unit passes the global thresholds on its own, or an inline\nsuppression already covers it."
         },
         {
           "type": "string",

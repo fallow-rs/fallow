@@ -2103,13 +2103,7 @@ fn render_threshold_overrides(
         let outstanding = threshold_override_outstanding_suffix(&entry.outstanding);
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
-            |path| {
-                let display = crate::report::format_display_path(path, root);
-                entry
-                    .function
-                    .as_ref()
-                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
-            },
+            |path| entry.target_label(&crate::report::format_display_path(path, root)),
         );
         let metrics = entry.metrics.map_or(String::new(), |metrics| {
             let crap = metrics
@@ -2150,7 +2144,10 @@ fn threshold_override_outstanding_suffix(
             fallow_output::ThresholdOverrideDimension::Crap => "CRAP",
         })
         .collect();
-    format!(" (finding still fires on: {})", names.join(", "))
+    // "still breaches", not "finding still fires": the complexity dimension
+    // covers `maxUnitSize`, which keeps a unit in the large-function list
+    // without ever emitting a finding of its own.
+    format!(" (still breaches: {})", names.join(", "))
 }
 
 fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
@@ -3041,6 +3038,8 @@ mod tests {
             outstanding: vec![fallow_output::ThresholdOverrideDimension::Crap],
             path: Some(PathBuf::from("src/Widget.svelte")),
             function: Some("<template>".to_string()),
+            line: Some(7),
+            col: Some(0),
             configured_thresholds: fallow_output::HealthConfiguredThresholds {
                 max_cyclomatic: Some(500),
                 max_cognitive: Some(500),
@@ -3071,7 +3070,7 @@ mod tests {
         assert!(text.contains("Health threshold overrides (1)"), "{text}");
         assert!(text.contains("#0 complexity active"), "{text}");
         assert!(text.contains("#0 crap active"), "{text}");
-        assert!(text.contains("(finding still fires on: CRAP)"), "{text}");
+        assert!(text.contains("(still breaches: CRAP)"), "{text}");
     }
 
     #[test]

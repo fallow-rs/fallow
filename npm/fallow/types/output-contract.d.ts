@@ -5684,10 +5684,12 @@ status: ThresholdOverrideStatus
 override_index: number
 dimension: ThresholdOverrideDimension
 /**
- * Dimensions on which the matched unit still produces a finding despite
- * this override. Non-empty means a finding survived; the listed dimensions
- * are the ones that breached, whether or not this override configures
- * their ceilings.
+ * Dimensions the matched unit still breaches despite this override,
+ * whether or not this override configures their ceilings. Non-empty means
+ * raising the ceiling did not settle the matter: a complexity or CRAP
+ * finding survived, or the unit is still longer than the resolved
+ * `maxUnitSize`, which keeps it in the large-function list without
+ * emitting a finding of its own.
  */
 outstanding?: ThresholdOverrideDimension[]
 /**
@@ -5698,6 +5700,17 @@ path?: (string | null)
  * Matched function name, for function-scoped overrides.
  */
 function?: (string | null)
+/**
+ * 1-based line of the matched unit. Absent on `no_match` rows, which
+ * describe an entry that matched nothing. Name alone is not an identity:
+ * one file can hold several units sharing a name, so this pairs with
+ * `col` to keep their rows distinct (issue #2163).
+ */
+line?: (number | null)
+/**
+ * 0-based byte column of the matched unit. Absent on `no_match` rows.
+ */
+col?: (number | null)
 configured_thresholds: HealthConfiguredThresholds
 effective_thresholds: HealthEffectiveThresholds
 /**

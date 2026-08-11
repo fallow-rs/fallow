@@ -1029,6 +1029,26 @@ struct ComplexityThresholds {
     crap: String,
 }
 
+/// Ceilings a single finding was evaluated against: its `effective_thresholds`
+/// when a `thresholdOverrides` entry moved them, otherwise the run's global
+/// summary ceilings. The `Value`-side mirror of
+/// `ComplexityViolation::resolved_thresholds`, which this renderer cannot call
+/// because it works over the serialized envelope (issue #2163).
+fn finding_thresholds(finding: &Value, run: &ComplexityThresholds) -> ComplexityThresholds {
+    let effective = finding.get("effective_thresholds");
+    let pick = |key: &str, fallback: &str| {
+        effective
+            .and_then(|thresholds| thresholds.get(key))
+            .filter(|value| !value.is_null())
+            .map_or_else(|| fallback.to_owned(), fmt_num)
+    };
+    ComplexityThresholds {
+        cyclomatic: pick("max_cyclomatic", &run.cyclomatic),
+        cognitive: pick("max_cognitive", &run.cognitive),
+        crap: pick("max_crap", &run.crap),
+    }
+}
+
 fn complexity_annotation(finding: &Value, ctx: &ComplexityThresholds) -> (String, String) {
     let severity = finding
         .get("severity")
@@ -1093,7 +1113,7 @@ fn collect_health(env: &Value, out: &mut Vec<Annotation>) {
             .get("severity")
             .and_then(Value::as_str)
             .unwrap_or("moderate");
-        let (title, message) = complexity_annotation(finding, &ctx);
+        let (title, message) = complexity_annotation(finding, &finding_thresholds(finding, &ctx));
         push(
             out,
             complexity_level(severity),

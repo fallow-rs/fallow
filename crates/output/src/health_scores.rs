@@ -485,7 +485,7 @@ impl ComplexityViolation {
 pub const DEFAULT_MAX_UNIT_SIZE: u32 = 60;
 
 /// Resolved thresholds used to evaluate a health finding.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
     clippy::struct_field_names,
@@ -527,7 +527,7 @@ pub struct HealthConfiguredThresholds {
 }
 
 /// Source for a finding's effective thresholds.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ThresholdSource {
@@ -542,7 +542,9 @@ pub enum ThresholdSource {
 pub enum ThresholdOverrideStatus {
     /// The override matches a finding that still needs the raised ceiling.
     Active,
-    /// The matched code now passes the global thresholds; the override can go.
+    /// The override is not what keeps the matched unit quiet, so it can go:
+    /// either the unit passes the global thresholds on its own, or an inline
+    /// suppression already covers it.
     Stale,
     /// The override raises the ceiling for this dimension but the matched code
     /// still exceeds the raised value, so the finding survives the override.
@@ -596,10 +598,12 @@ pub struct ThresholdOverrideState {
     pub override_index: usize,
     /// Threshold dimension this row describes.
     pub dimension: ThresholdOverrideDimension,
-    /// Dimensions on which the matched unit still produces a finding despite
-    /// this override. Non-empty means a finding survived; the listed dimensions
-    /// are the ones that breached, whether or not this override configures
-    /// their ceilings.
+    /// Dimensions the matched unit still breaches despite this override,
+    /// whether or not this override configures their ceilings. Non-empty means
+    /// raising the ceiling did not settle the matter: a complexity or CRAP
+    /// finding survived, or the unit is still longer than the resolved
+    /// `maxUnitSize`, which keeps it in the large-function list without
+    /// emitting a finding of its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outstanding: Vec<ThresholdOverrideDimension>,
     /// Matched file path, when the override matched one.
@@ -612,6 +616,15 @@ pub struct ThresholdOverrideState {
     /// Matched function name, for function-scoped overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub function: Option<String>,
+    /// 1-based line of the matched unit. Absent on `no_match` rows, which
+    /// describe an entry that matched nothing. Name alone is not an identity:
+    /// one file can hold several units sharing a name, so this pairs with
+    /// `col` to keep their rows distinct (issue #2163).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// 0-based byte column of the matched unit. Absent on `no_match` rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub col: Option<u32>,
     /// Ceilings the override entry configures.
     pub configured_thresholds: HealthConfiguredThresholds,
     /// Ceilings in effect after applying the override to the defaults.
@@ -622,6 +635,25 @@ pub struct ThresholdOverrideState {
     /// Human-readable explanation of the status.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+impl ThresholdOverrideState {
+    /// Render the matched unit as `path:line:function`, given the path already
+    /// formatted for the target surface.
+    ///
+    /// Every renderer must go through this: two units sharing a name in one
+    /// file produce two rows, and without the position they print as the same
+    /// line (issue #2163).
+    #[must_use]
+    pub fn target_label(&self, display: &str) -> String {
+        let Some(name) = self.function.as_deref() else {
+            return display.to_owned();
+        };
+        self.line.map_or_else(
+            || format!("{display}:{name}"),
+            |line| format!("{display}:{line}:{name}"),
+        )
+    }
 }
 
 /// Component-level aggregate attached to a template complexity finding,

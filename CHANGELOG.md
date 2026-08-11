@@ -33,16 +33,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `insufficient`, for an override that raises a ceiling the code still exceeds;
   such an override previously emitted no row at all. A new optional
   `outstanding[]` lists the dimensions a matched unit still breaches after the
-  override applied. Migration: group rows on `override_index` to count
+  override applied. Matched rows also carry the unit's optional `line` and
+  `col`, because a file can hold several units sharing a name and those rows
+  must stay distinct. Migration: group rows on `override_index` to count
   configured overrides, and treat `insufficient` as "override in force, finding
   survives".
 - **Two `--format compact` health line grammars gained fields.** The
   `high-complexity:` line gained a trailing `exceeded=<dimension>` field
   between `severity=` and `crap=`, and the `threshold-override:` line gained a
   dimension segment after the override index plus an optional trailing
-  `outstanding=` field. Consumers that split these lines positionally past
-  `severity` or past the index need to adapt; consumers that parse
-  `key=value` pairs are unaffected.
+  `outstanding=` field. A matched `threshold-override:` target is now
+  `<path>:<line>:<function>` rather than `<path>:<function>`, matching the
+  `high-complexity:` target grammar. Consumers that split these lines
+  positionally past `severity` or past the index need to adapt; consumers that
+  parse `key=value` pairs are unaffected.
+- **The human override row's surviving-dimension suffix reads `(still
+  breaches: ...)`.** It used to read `(finding still fires on: ...)`, which
+  overstates the `maxUnitSize` case: unit size is part of the `complexity`
+  dimension but keeps a unit in the large-function list without emitting a
+  finding of its own. The JSON `outstanding[]` field is unchanged.
 - **Malformed config shapes now fail loud instead of being silently
   dropped.** Three previously-tolerated shapes are rejected at config load:
   a malformed `extends` value (must be a string or an array of strings), an
@@ -85,9 +94,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceilings in force under an override-affected finding, and labels each
   override row with its dimension, its status (including the new
   `insufficient`), and the dimensions the unit still breaches. `--format
-  compact` and `--format markdown` carry the same information, and SARIF
-  interpolates the finding's own resolved ceiling instead of the run's global
-  one.
+  compact` and `--format markdown` carry the same information, and every
+  format that prints or compares a ceiling now interpolates the finding's own
+  resolved one instead of the run's global one: SARIF, human, markdown,
+  CodeClimate (and the `pr-comment-*` and `review-*` formats derived from it),
+  GitHub annotations from both the native renderer and the Action's jq filter,
+  and a `fallow report --from` re-render of a saved envelope, which previously
+  dropped `effective_thresholds` on the way back in. A single run no longer
+  contradicts itself across formats. The synthetic `<component>` rollup is
+  measured against the owning file's resolved ceilings too, and publishes them,
+  so an override that raises `maxCognitive` for the file both stops the rollup
+  reporting a cognitive breach and stops every renderer describing it against
+  the global ceiling. An entry that reaches the rollup now emits a matched
+  `threshold_overrides[]` row for the `<component>` unit, so an entry scoped
+  with `functions: ["<component>"]`, the documented way to address the rollup,
+  is no longer reported `no_match` while it silently removes the rollup
+  finding; a file-scoped entry on a component file gains that row alongside its
+  per-method and `<template>` rows. An
+  entry that configures only `maxUnitSize` now emits a
+  `complexity` row when it matches, instead of being silent when in force and
+  loud (`no_match`) only when its glob was a typo; when the raised unit-size
+  ceiling is still breached, that row names `complexity` in `outstanding`,
+  since a unit-size breach keeps the unit in the large-function list without
+  emitting a finding of its own. An override row's `status`
+  and `outstanding` are now derived from one dimension predicate, so a row can
+  no longer read `active` next to "still breaches: complexity", and a
+  row on a unit whose finding is already hidden by a `fallow-ignore` comment
+  reads `stale` rather than `insufficient` with nothing outstanding. Rows are
+  keyed on the matched unit's position as well as its name, so two units that
+  share a name in one file keep their own metrics and their own surviving
+  dimensions instead of collapsing into one row and trading answers.
 - **Suppression advice for `<template>` findings matches the file's
   framework.** Every synthetic template finding recommended
   `// fallow-ignore-next-line complexity` above an `@Component` decorator,

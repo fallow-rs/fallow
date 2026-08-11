@@ -80,8 +80,6 @@ pub(super) fn prepare_health_findings(
         ignore_set: input.ignore_set,
         changed_files: input.changed_files,
         ws_roots: input.ws_roots,
-        max_cyclomatic: input.max_cyclomatic,
-        max_cognitive: input.max_cognitive,
         enforce_crap: input.enforce_crap,
         score_output: input.score_output,
         config_root: &input.config.root,
@@ -163,8 +161,6 @@ struct HealthCrapMergeContext<'a> {
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    max_cyclomatic: u16,
-    max_cognitive: u16,
     enforce_crap: bool,
     score_output: Option<&'a scoring::FileScoreOutput>,
     config_root: &'a std::path::Path,
@@ -199,13 +195,14 @@ fn apply_optional_crap_findings(
         findings,
         ctx.score_output
             .map(|output| &output.template_inherit_provenance),
-        ctx.max_cyclomatic,
-        ctx.max_cognitive,
+        ctx.threshold_resolver,
+        ctx.config_root,
+        ctx.threshold_state_tracker,
     );
 }
 
-/// Fill each matched override row's `outstanding` list: every dimension the
-/// unit still breaches after the override applied.
+/// Complete each matched override row's `outstanding` list with every dimension
+/// on which the unit still has a live finding.
 ///
 /// The list is not filtered by what the entry configures. An override that
 /// raises `maxCrap` too little, or that raises `maxCyclomatic` while the unit
@@ -213,40 +210,67 @@ fn apply_optional_crap_findings(
 /// disclosure in those cases is what made issue #2163 look like a
 /// threshold-resolution bug.
 ///
-/// This cannot be derived inside the tracker. `record_complexity` runs during
-/// collection, before the CRAP merge, so at record time it is unknown whether a
-/// finding survives at all, let alone on which dimension.
+/// The finding-backed dimensions cannot be derived inside the tracker.
+/// `record_complexity` runs during collection, before the CRAP merge, so at
+/// record time it is unknown whether a finding survives at all, let alone on
+/// which dimension. The unit-size term is the mirror image and is seeded by the
+/// tracker instead, because it never produces a finding to read back here.
 pub(super) fn annotate_outstanding_dimensions(
     tracker: &mut ThresholdOverrideStateTracker,
     findings: &[ComplexityViolation],
 ) {
-    // Both sides carry the discovery path: the tracker records the same
-    // `path` value the finding is built from, so no relativization is needed.
+    // Both sides carry the discovery path and the same `(line, col)` the
+    // finding is built from, so no relativization is needed. Name and position
+    // are BOTH part of the key, and neither alone is an identity: one file can
+    // hold several units sharing a name, and the synthetic `<component>` rollup
+    // is deliberately anchored at the worst class method's exact `(path, line,
+    // col)` while that method keeps its own finding, so keying on either half
+    // alone let one unit overwrite the other's `exceeded` (issue #2163).
     let mut exceeded_by_unit: rustc_hash::FxHashMap<
-        (&std::path::Path, &str),
+        (&std::path::Path, u32, u32, &str),
         fallow_output::ExceededThreshold,
     > = rustc_hash::FxHashMap::default();
     for finding in findings {
         exceeded_by_unit.insert(
-            (finding.path.as_path(), finding.name.as_str()),
+            (
+                finding.path.as_path(),
+                finding.line,
+                finding.col,
+                finding.name.as_str(),
+            ),
             finding.exceeded,
         );
     }
 
     for state in tracker.states_mut() {
-        let (Some(path), Some(function)) = (state.path.as_deref(), state.function.as_deref())
-        else {
+        let (Some(path), Some(line), Some(col), Some(function)) = (
+            state.path.as_deref(),
+            state.line,
+            state.col,
+            state.function.as_deref(),
+        ) else {
             continue;
         };
-        let Some(exceeded) = exceeded_by_unit.get(&(path, function)).copied() else {
+        let Some(exceeded) = exceeded_by_unit.get(&(path, line, col, function)).copied() else {
             continue;
         };
-        if exceeded.includes_cyclomatic() || exceeded.includes_cognitive() {
+        // `record_complexity` may already have seeded `Complexity` for a
+        // surviving unit-size breach, which produces no finding of its own, so
+        // the dimension is added only when it is not there yet.
+        if (exceeded.includes_cyclomatic() || exceeded.includes_cognitive())
+            && !state
+                .outstanding
+                .contains(&fallow_output::ThresholdOverrideDimension::Complexity)
+        {
             state
                 .outstanding
                 .push(fallow_output::ThresholdOverrideDimension::Complexity);
         }
-        if exceeded.includes_crap() {
+        if exceeded.includes_crap()
+            && !state
+                .outstanding
+                .contains(&fallow_output::ThresholdOverrideDimension::Crap)
+        {
             state
                 .outstanding
                 .push(fallow_output::ThresholdOverrideDimension::Crap);

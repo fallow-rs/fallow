@@ -609,13 +609,7 @@ fn push_threshold_overrides_compact(
         };
         let target = entry.path.as_ref().map_or_else(
             || "no-match".to_string(),
-            |path| {
-                let display = health_compact_path(path, root);
-                entry
-                    .function
-                    .as_ref()
-                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
-            },
+            |path| entry.target_label(&health_compact_path(path, root)),
         );
         let dimension = threshold_override_dimension_label(entry.dimension);
         let metrics = entry.metrics.map_or(String::new(), |metrics| {

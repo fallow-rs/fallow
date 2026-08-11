@@ -1772,11 +1772,9 @@ fn write_threshold_overrides_section(
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
             |path| {
-                let display = normalize_uri(&relative_path(path, root).display().to_string());
-                entry
-                    .function
-                    .as_ref()
-                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
+                entry.target_label(&normalize_uri(
+                    &relative_path(path, root).display().to_string(),
+                ))
             },
         );
         let metrics = entry.metrics.map_or_else(

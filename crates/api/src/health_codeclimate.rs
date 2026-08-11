@@ -5,16 +5,17 @@ use std::path::Path;
 use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, ComplexityViolation,
     CoverageIntelligenceFinding, CoverageIntelligenceRecommendation, CoverageIntelligenceVerdict,
-    ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageFinding,
+    ExceededThreshold, FindingSeverity, HealthReport, HealthSummary, RuntimeCoverageFinding,
     RuntimeCoverageVerdict, StylingFinding, StylingFindingSeverity, UntestedExportFinding,
     UntestedFileFinding, build_codeclimate_issue, codeclimate_fingerprint_hash, normalize_uri,
 };
 
 struct HealthCodeClimateContext<'a> {
     root: &'a Path,
-    cyc_t: u16,
-    cog_t: u16,
-    crap_t: f64,
+    /// Held instead of the three run-global ceilings so every description
+    /// resolves per finding: an override-affected finding must never be
+    /// described against a ceiling it was not measured with (issue #2163).
+    summary: &'a HealthSummary,
 }
 
 impl HealthCodeClimateContext<'_> {
@@ -58,18 +59,23 @@ impl HealthCodeClimateContext<'_> {
     }
 
     fn complexity_description(&self, finding: &ComplexityViolation) -> String {
+        let thresholds = finding.resolved_thresholds(self.summary);
         match finding.exceeded {
             ExceededThreshold::Both => format!(
                 "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
-                finding.name, finding.cyclomatic, self.cyc_t, finding.cognitive, self.cog_t
+                finding.name,
+                finding.cyclomatic,
+                thresholds.max_cyclomatic,
+                finding.cognitive,
+                thresholds.max_cognitive
             ),
             ExceededThreshold::Cyclomatic => format!(
                 "'{}' has cyclomatic complexity {} (threshold: {})",
-                finding.name, finding.cyclomatic, self.cyc_t
+                finding.name, finding.cyclomatic, thresholds.max_cyclomatic
             ),
             ExceededThreshold::Cognitive => format!(
                 "'{}' has cognitive complexity {} (threshold: {})",
-                finding.name, finding.cognitive, self.cog_t
+                finding.name, finding.cognitive, thresholds.max_cognitive
             ),
             ExceededThreshold::Crap
             | ExceededThreshold::CyclomaticCrap
@@ -82,7 +88,7 @@ impl HealthCodeClimateContext<'_> {
                     .unwrap_or_default();
                 format!(
                     "'{}' has CRAP score {crap:.1} (threshold: {:.1}, cyclomatic {}{coverage})",
-                    finding.name, self.crap_t, finding.cyclomatic,
+                    finding.name, thresholds.max_crap, finding.cyclomatic,
                 )
             }
         }
@@ -202,9 +208,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
     let mut issues = Vec::new();
     let ctx = HealthCodeClimateContext {
         root,
-        cyc_t: report.summary.max_cyclomatic_threshold,
-        cog_t: report.summary.max_cognitive_threshold,
-        crap_t: report.summary.max_crap_threshold,
+        summary: &report.summary,
     };
 
     for finding in &report.findings {
@@ -418,5 +422,88 @@ mod tests {
         assert_eq!(issue.location.path, "src/styles.css");
         assert_eq!(issue.location.lines.begin, 4);
         assert_eq!(issue.severity, CodeClimateSeverity::Major);
+    }
+
+    fn crap_violation(
+        effective_thresholds: Option<fallow_output::HealthEffectiveThresholds>,
+    ) -> ComplexityViolation {
+        ComplexityViolation {
+            path: PathBuf::from("/root/src/Board.astro"),
+            name: "<template>".to_string(),
+            line: 6,
+            col: 3,
+            cyclomatic: 11,
+            cognitive: 4,
+            line_count: 20,
+            param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded: ExceededThreshold::Crap,
+            severity: FindingSeverity::Critical,
+            coverage_pct: None,
+            crap: Some(132.0),
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            threshold_source: effective_thresholds
+                .map(|_| fallow_output::ThresholdSource::Override),
+            effective_thresholds,
+        }
+    }
+
+    fn crap_report(
+        effective_thresholds: Option<fallow_output::HealthEffectiveThresholds>,
+    ) -> HealthReport {
+        HealthReport {
+            summary: HealthSummary {
+                max_crap_threshold: 30.0,
+                ..HealthSummary::default()
+            },
+            findings: vec![crap_violation(effective_thresholds).into()],
+            ..HealthReport::default()
+        }
+    }
+
+    /// The CodeClimate description feeds `pr-comment-*` and `review-*` too, so
+    /// it must quote the ceiling the finding was measured with, matching SARIF
+    /// (issue #2163).
+    #[test]
+    fn codeclimate_description_uses_the_override_ceiling_not_the_global_one() {
+        let report = crap_report(Some(fallow_output::HealthEffectiveThresholds {
+            max_cyclomatic: 20,
+            max_cognitive: 15,
+            max_crap: 100.0,
+            max_unit_size: 60,
+        }));
+
+        let issues = build_health_codeclimate(&report, Path::new("/root"));
+
+        assert_eq!(issues.len(), 1);
+        assert!(
+            issues[0].description.contains("threshold: 100.0"),
+            "{}",
+            issues[0].description
+        );
+        assert!(
+            !issues[0].description.contains("threshold: 30.0"),
+            "{}",
+            issues[0].description
+        );
+    }
+
+    #[test]
+    fn codeclimate_description_falls_back_to_the_global_ceiling() {
+        let issues = build_health_codeclimate(&crap_report(None), Path::new("/root"));
+
+        assert_eq!(issues.len(), 1);
+        assert!(
+            issues[0].description.contains("threshold: 30.0"),
+            "{}",
+            issues[0].description
+        );
     }
 }

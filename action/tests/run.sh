@@ -1784,6 +1784,13 @@ assert_contains "$OUT" "parseContentBlocks" "includes function name"
 OUT_ESCAPED_PATH=$(jq '.findings[0].path = "src/a%,b:c\r\nd.ts"' "$FIXTURES/health.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
 assert_contains "$OUT_ESCAPED_PATH" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "health annotation escapes workflow-command properties"
 
+# An override-affected finding is described against the ceiling it was measured
+# with, not the run-global summary ceiling. Mirrors the native renderer test
+# `annotations_use_the_finding_effective_threshold` (issue #2163).
+OUT_OVERRIDE=$(jq '.findings = [{"path":"src/Board.astro","name":"<template>","line":6,"col":3,"cyclomatic":11,"cognitive":4,"line_count":20,"param_count":0,"exceeded":"crap","severity":"critical","crap":132.0,"threshold_source":"override","effective_thresholds":{"max_cyclomatic":20,"max_cognitive":15,"max_crap":100,"max_unit_size":60}}]' "$FIXTURES/health.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
+assert_contains "$OUT_OVERRIDE" "threshold: 100" "health annotation uses the finding's override ceiling"
+assert_not_contains "$OUT_OVERRIDE" "threshold: 30" "health annotation drops the global ceiling under an override"
+
 OUT_PROD_ANN=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]},{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"untracked","untracked_reason":"lazy_parsed"}}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
 assert_contains "$OUT_PROD_ANN" "Runtime coverage" "prod annotation: title present"
 assert_contains "$OUT_PROD_ANN" "coldPath" "prod annotation: function name present"

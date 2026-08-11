@@ -29,7 +29,6 @@ pub(super) struct CompiledThresholdOverride {
 
 pub(super) struct ThresholdOverrideMatch<'a> {
     entry: &'a CompiledThresholdOverride,
-    effective: fallow_output::HealthEffectiveThresholds,
 }
 
 pub(super) struct ThresholdOverrideResolver {
@@ -113,7 +112,7 @@ impl ThresholdOverrideResolver {
             if let Some(max_unit_size) = entry.configured.max_unit_size {
                 effective.max_unit_size = max_unit_size;
             }
-            matches.push(ThresholdOverrideMatch { entry, effective });
+            matches.push(ThresholdOverrideMatch { entry });
         }
 
         (
@@ -157,6 +156,8 @@ struct ThresholdOverrideStateKey {
     override_index: usize,
     path: Option<PathBuf>,
     function: Option<String>,
+    line: Option<u32>,
+    col: Option<u32>,
     dimension: ThresholdOverrideDimension,
 }
 
@@ -198,38 +199,73 @@ fn configured_dimensions(
 }
 
 impl ThresholdOverrideStateTracker {
+    /// `effective` is the ceiling set resolved across every matching entry, not
+    /// the entry's own configured value. A later entry can supersede an earlier
+    /// one, and the finding is emitted against the resolved value, so measuring
+    /// the row against anything else lets `insufficient` claim a finding that
+    /// never fires (issue #2163).
     pub(super) fn record_complexity(
         &mut self,
         function: ComplexityFunctionContext<'_>,
         matches: &[ThresholdOverrideMatch<'_>],
         global: GlobalHealthThresholds,
+        effective: fallow_output::HealthEffectiveThresholds,
     ) {
         let ComplexityFunctionContext {
             path,
             function,
+            line,
+            col,
             cyclomatic,
             cognitive,
+            line_count,
         } = function;
         for matched in matches {
-            self.matched_indexes.insert(matched.entry.index);
             let configured = matched.entry.configured;
-            let has_complexity_threshold =
-                configured.max_cyclomatic.is_some() || configured.max_cognitive.is_some();
+            // `maxUnitSize` belongs to the complexity dimension, per
+            // `configured_dimensions` and the `ThresholdOverrideDimension`
+            // contract. Leaving it out made a unit-size-only entry emit no row
+            // at all when it matched, while the same entry pointed at a typo
+            // glob still emitted `no_match`: silent when in force, loud when
+            // inert (issue #2163).
+            let touches_unit_size = configured.max_unit_size.is_some();
+            let has_complexity_threshold = configured.max_cyclomatic.is_some()
+                || configured.max_cognitive.is_some()
+                || touches_unit_size;
             if !has_complexity_threshold {
                 continue;
             }
-            let global_exceeded = configured
-                .max_cyclomatic
-                .is_some_and(|_| cyclomatic > global.cyclomatic)
-                || configured
-                    .max_cognitive
-                    .is_some_and(|_| cognitive > global.cognitive);
-            let local_exceeded = configured
-                .max_cyclomatic
-                .is_some_and(|threshold| cyclomatic > threshold)
-                || configured
-                    .max_cognitive
-                    .is_some_and(|threshold| cognitive > threshold);
+            // Marked only once this recorder is committed to emitting a row.
+            // Marking on entry made an index count as matched while no recorder
+            // produced anything for it, which excluded it from
+            // `record_no_match_entries` too: a `maxCrap`-only entry scoped to
+            // `<component>` went silent on both paths (issue #2163).
+            self.matched_indexes.insert(matched.entry.index);
+            // Both sides run the SAME dimension predicate, once against the
+            // global ceilings and once against the resolved ones, so `active`,
+            // `stale` and `insufficient` all describe the complexity dimension
+            // as a whole and agree with the `outstanding` list. Scoring each
+            // ceiling in isolation let one row claim the dimension was satisfied
+            // while `outstanding` said it still fires (issue #2163): an entry
+            // raising only `maxCyclomatic` on a unit that breaches cognitive
+            // read `active`, and a `maxUnitSize`-only entry on a unit breaching
+            // cyclomatic read `stale`.
+            //
+            // Unit size is the one narrowed term. It emits no complexity
+            // finding, so folding an unrelated long function into the predicate
+            // would flip a cyclomatic-only override to `insufficient` with
+            // nothing outstanding to point at.
+            let breaches = |max_cyclomatic: u16, max_cognitive: u16, max_unit_size: u32| {
+                cyclomatic > max_cyclomatic
+                    || cognitive > max_cognitive
+                    || (touches_unit_size && line_count > max_unit_size)
+            };
+            let global_exceeded = breaches(global.cyclomatic, global.cognitive, global.unit_size);
+            let local_exceeded = breaches(
+                effective.max_cyclomatic,
+                effective.max_cognitive,
+                effective.max_unit_size,
+            );
             let status = if global_exceeded && !local_exceeded {
                 fallow_output::ThresholdOverrideStatus::Active
             } else if !global_exceeded {
@@ -237,13 +273,27 @@ impl ThresholdOverrideStateTracker {
             } else {
                 fallow_output::ThresholdOverrideStatus::Insufficient
             };
+            // A surviving unit-size breach has to be seeded here, because
+            // `annotate_outstanding_dimensions` derives `outstanding` from the
+            // findings list and unit size emits no finding. Without it a
+            // unit-size-only entry that raised the ceiling without clearing it
+            // read `insufficient` with an empty `outstanding`, the one
+            // contradiction a CI gate cannot detect (issue #2163).
+            let outstanding = if touches_unit_size && line_count > effective.max_unit_size {
+                vec![ThresholdOverrideDimension::Complexity]
+            } else {
+                Vec::new()
+            };
             self.push_state(ThresholdOverrideStateInput {
                 status,
                 override_index: matched.entry.index,
+                outstanding,
                 path: Some(path.to_path_buf()),
                 function: Some(function.to_string()),
+                line: Some(line),
+                col: Some(col),
                 configured_thresholds: configured,
-                effective_thresholds: matched.effective,
+                effective_thresholds: effective,
                 metrics: Some(fallow_output::ThresholdOverrideMetrics {
                     cyclomatic,
                     cognitive,
@@ -255,33 +305,47 @@ impl ThresholdOverrideStateTracker {
         }
     }
 
+    /// `effective` is the resolved CRAP ceiling across every matching entry, for
+    /// the same reason as [`record_complexity`](Self::record_complexity): the
+    /// finding is emitted against the resolved value, so the row has to be
+    /// scored against it too (issue #2163).
     pub(super) fn record_crap(
         &mut self,
-        path: &Path,
-        function: &str,
+        function: CrapFunctionContext<'_>,
         metrics: MeasuredThresholdMetrics,
         matches: &[ThresholdOverrideMatch<'_>],
         global: GlobalHealthThresholds,
+        effective: fallow_output::HealthEffectiveThresholds,
     ) {
+        let CrapFunctionContext {
+            path,
+            function,
+            line,
+            col,
+            suppressed,
+        } = function;
         for matched in matches {
-            self.matched_indexes.insert(matched.entry.index);
-            let Some(max_crap) = matched.entry.configured.max_crap else {
+            if matched.entry.configured.max_crap.is_none() {
                 continue;
-            };
-            let status = if metrics.crap >= global.crap && metrics.crap < max_crap {
-                fallow_output::ThresholdOverrideStatus::Active
-            } else if metrics.crap < global.crap {
+            }
+            self.matched_indexes.insert(matched.entry.index);
+            let status = if suppressed || metrics.crap < global.crap {
                 fallow_output::ThresholdOverrideStatus::Stale
+            } else if metrics.crap < effective.max_crap {
+                fallow_output::ThresholdOverrideStatus::Active
             } else {
                 fallow_output::ThresholdOverrideStatus::Insufficient
             };
             self.push_state(ThresholdOverrideStateInput {
                 status,
                 override_index: matched.entry.index,
+                outstanding: Vec::new(),
                 path: Some(path.to_path_buf()),
                 function: Some(function.to_string()),
+                line: Some(line),
+                col: Some(col),
                 configured_thresholds: matched.entry.configured,
-                effective_thresholds: matched.effective,
+                effective_thresholds: effective,
                 metrics: Some(fallow_output::ThresholdOverrideMetrics {
                     cyclomatic: metrics.cyclomatic,
                     cognitive: metrics.cognitive,
@@ -324,8 +388,11 @@ impl ThresholdOverrideStateTracker {
                 self.push_state(ThresholdOverrideStateInput {
                     status: fallow_output::ThresholdOverrideStatus::NoMatch,
                     override_index: entry.index,
+                    outstanding: Vec::new(),
                     path: None,
                     function: None,
+                    line: None,
+                    col: None,
                     configured_thresholds: entry.configured,
                     effective_thresholds: effective,
                     metrics: None,
@@ -350,6 +417,8 @@ impl ThresholdOverrideStateTracker {
                 .cmp(&b.override_index)
                 .then(a.path.cmp(&b.path))
                 .then(a.function.cmp(&b.function))
+                .then(a.line.cmp(&b.line))
+                .then(a.col.cmp(&b.col))
                 .then(a.dimension.cmp(&b.dimension))
         });
         self.states
@@ -367,6 +436,8 @@ impl ThresholdOverrideStateTracker {
             override_index: input.override_index,
             path: input.path.clone(),
             function: input.function.clone(),
+            line: input.line,
+            col: input.col,
             dimension: input.dimension,
         };
         if !self.seen.insert(key) {
@@ -376,9 +447,11 @@ impl ThresholdOverrideStateTracker {
             status: input.status,
             override_index: input.override_index,
             dimension: input.dimension,
-            outstanding: Vec::new(),
+            outstanding: input.outstanding,
             path: input.path,
             function: input.function,
+            line: input.line,
+            col: input.col,
             configured_thresholds: input.configured_thresholds,
             effective_thresholds: input.effective_thresholds,
             metrics: input.metrics,
@@ -387,22 +460,52 @@ impl ThresholdOverrideStateTracker {
     }
 }
 
-/// One function's identity (path + name) and measured complexity metrics,
-/// bundled so `record_complexity` takes the function descriptor as a single
-/// parameter instead of four.
+/// One function's identity (path, name and position) and measured complexity
+/// metrics, bundled so `record_complexity` takes the function descriptor as a
+/// single parameter instead of seven.
+///
+/// `line_count` is here because `maxUnitSize` is part of the complexity
+/// dimension: without it a unit-size-only entry has nothing to score its row
+/// against.
 #[derive(Clone, Copy)]
 pub(super) struct ComplexityFunctionContext<'a> {
     pub(super) path: &'a Path,
     pub(super) function: &'a str,
+    pub(super) line: u32,
+    pub(super) col: u32,
     pub(super) cyclomatic: u16,
     pub(super) cognitive: u16,
+    pub(super) line_count: u32,
+}
+
+/// One function's identity and suppression state for the CRAP recorder.
+///
+/// Position matters: several units in one file can share a name, and the row
+/// must stay distinct per unit. `suppressed` reports whether a
+/// `fallow-ignore-*` comment already hides the CRAP finding; a suppressed unit
+/// emits no finding, so the raised ceiling buys nothing and the row reads
+/// `stale`. Without it the row claimed `insufficient` while `outstanding`
+/// stayed empty, the one contradiction a CI gate cannot detect (issue #2163).
+#[derive(Clone, Copy)]
+pub(super) struct CrapFunctionContext<'a> {
+    pub(super) path: &'a Path,
+    pub(super) function: &'a str,
+    pub(super) line: u32,
+    pub(super) col: u32,
+    pub(super) suppressed: bool,
 }
 
 struct ThresholdOverrideStateInput {
     status: fallow_output::ThresholdOverrideStatus,
     override_index: usize,
+    /// Dimensions the recorder already knows still breach. Only the unit-size
+    /// term lands here; everything else is filled in later from the findings
+    /// list by `annotate_outstanding_dimensions`.
+    outstanding: Vec<ThresholdOverrideDimension>,
     path: Option<PathBuf>,
     function: Option<String>,
+    line: Option<u32>,
+    col: Option<u32>,
     configured_thresholds: fallow_output::HealthConfiguredThresholds,
     effective_thresholds: fallow_output::HealthEffectiveThresholds,
     metrics: Option<fallow_output::ThresholdOverrideMetrics>,
