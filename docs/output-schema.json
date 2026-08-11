@@ -8245,7 +8245,7 @@
         {
           "type": "string",
           "const": "suppress-line",
-          "description": "Suppress with an inline `// fallow-ignore-next-line complexity`\ncomment above the function or Angular decorator."
+          "description": "Suppress with a next-line comment above the reported line: the\ninline `// fallow-ignore-next-line complexity` form above a function\nor Angular decorator, or the markup\n`<!-- fallow-ignore-next-line complexity -->` form for synthetic\n`<template>` findings in `.svelte`, `.vue`, and `.astro` files."
         }
       ],
       "description": "Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types\nemitted by `build_health_finding_actions`. A single finding's `actions`\narray may carry multiple entries of different types: a finding that\nexceeded both cyclomatic and CRAP at `coverage_tier: partial` will get\nBOTH `increase-coverage` AND `refactor-function`, plus the trailing\n`suppress-line`."
@@ -22487,7 +22487,7 @@
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 9,
+      "const": 10,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {

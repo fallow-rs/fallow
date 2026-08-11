@@ -940,7 +940,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 9
+export type CombinedSchemaVersion = 10
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */

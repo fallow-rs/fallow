@@ -203,8 +203,11 @@ pub enum HealthFindingActionType {
     /// synthetic Angular `<template>` findings on `.html` files where a
     /// line suppression cannot be expressed.
     SuppressFile,
-    /// Suppress with an inline `// fallow-ignore-next-line complexity`
-    /// comment above the function or Angular decorator.
+    /// Suppress with a next-line comment above the reported line: the
+    /// inline `// fallow-ignore-next-line complexity` form above a function
+    /// or Angular decorator, or the markup
+    /// `<!-- fallow-ignore-next-line complexity -->` form for synthetic
+    /// `<template>` findings in `.svelte`, `.vue`, and `.astro` files.
     SuppressLine,
 }
 

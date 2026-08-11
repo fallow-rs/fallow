@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   raising `maxCyclomatic` says nothing about whether the unit still breaches
   `maxCrap`. `dimension` is required and always present, so the rows are not
   byte-identical for an unchanged consumer path and the health
-  `schema_version` moves from 9 to 10. `status` gains a fourth value,
+  `schema_version` moves from 9 to 10. The bare combined envelope embeds the
+  same health report, so combined `schema_version` moves from 9 to 10 with it;
+  the audit envelope does not embed the health contract and stays at 9.
+  `status` gains a fourth value,
   `insufficient`, for an override that raises a ceiling the code still exceeds;
   such an override previously emitted no row at all. A new optional
   `outstanding[]` lists the dimensions a matched unit still breaches after the
@@ -67,9 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an Angular decorator hint.
   Regex literals inside template expressions no longer hide the selected await
   state or logical operators that follow the regex.
-  Standalone health, combined, and audit output are version 9; dead-code and
-  unrelated output formats keep their existing versions. JSON consumers must
-  handle the two new values.
+  Audit output is version 9; standalone health and combined output moved on
+  to version 10 in this same release (see the threshold-override entry under
+  Changed). Dead-code and unrelated output formats keep their existing
+  versions. JSON consumers must handle the two new values.
 - **A complexity finding now names the dimension that fired, so a
   `thresholdOverrides` entry that did not silence it is diagnosable**
   ([#2163](https://github.com/fallow-rs/fallow/issues/2163)). Raising
