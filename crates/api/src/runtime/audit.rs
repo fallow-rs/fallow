@@ -599,8 +599,9 @@ fn build_programmatic_audit_comparison(
 }
 
 /// Demote introduced clone groups whose instances contain no added lines from
-/// the merge-base worktree diff: their duplicated text existed verbatim at
-/// base and only the group's attribution key changed because the changeset
+/// the merge-base worktree diff: no instance range contains an added line, so
+/// the changeset did not write the duplicated text and only the group's
+/// attribution key changed because the changeset
 /// removed code elsewhere. Keeps the new-only gate from failing a
 /// clone-removal refactor on duplication it did not write (issue #2164).
 fn demote_preexisting_dupe_introductions(

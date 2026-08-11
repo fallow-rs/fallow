@@ -217,7 +217,7 @@
     },
     "AuditIntroduced": {
       "type": "boolean",
-      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited.\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
+      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Duplication findings carry one carve-out: a clone\ngroup whose structural key is new but whose instances contain no added line\nfrom the diff (a group re-shaped by removing duplication elsewhere) is\ndemoted to inherited and serializes `false` (issue #2164).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
     },
     "ExplainOutput": {
       "type": "object",

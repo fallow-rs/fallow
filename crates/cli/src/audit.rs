@@ -1993,8 +1993,9 @@ fn build_cli_audit_comparison(
 }
 
 /// Demote introduced clone groups whose instances contain no added lines from
-/// the run's diff: their duplicated text existed verbatim at base and only the
-/// group's attribution key changed (membership or extent shifted because the
+/// the run's diff: no instance range contains an added line, so the changeset
+/// did not write the duplicated text and only the group's attribution key
+/// changed (membership or extent shifted because the
 /// changeset removed code elsewhere). Without this, the only safe sequence for
 /// a clone-removal refactor fails the new-only gate on duplication it did not
 /// write (issue #2164). Uses the same diff source as the rest of the run: the

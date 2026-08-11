@@ -3269,13 +3269,14 @@ pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path)
 }
 
 /// Keys of clone groups whose every instance lies entirely outside the diff's
-/// added lines: the duplicated text existed verbatim at base, and the group
-/// only became reportable (under a new attribution key) because the changeset
-/// removed code elsewhere; deduplicating one region can create or re-shape a
-/// clone group across files (issue #2164). New-only gating demotes these
-/// groups to inherited so a clone-removal refactor is not failed by the
-/// duplication it did not write. An instance whose path cannot be mapped into
-/// the diff's namespace is treated as touched, so its group keeps gating.
+/// added lines: no instance range contains an added line, so the changeset did
+/// not write the duplicated text, and the group only became reportable (under
+/// a new attribution key) because the changeset removed code elsewhere;
+/// deduplicating one region can create or re-shape a clone group across files
+/// (issue #2164). New-only gating demotes these groups to inherited so a
+/// clone-removal refactor is not failed by the duplication it did not write.
+/// An instance whose path cannot be mapped into the diff's namespace is
+/// treated as touched, so its group keeps gating.
 pub fn preexisting_dupe_group_keys<'a>(
     groups: impl IntoIterator<Item = &'a fallow_types::duplicates::CloneGroup>,
     root: &Path,

@@ -2757,6 +2757,136 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
     );
 }
 
+/// Repo whose working tree pastes a whole module into a new file on top of a
+/// committed base, with a duplication threshold so the pasted clone can fail
+/// the gate.
+fn pasted_clone_audit_repo() -> tempfile::TempDir {
+    let helper = "export function eq(xs: string[], ys: string[]): boolean {\n  if (xs.length !== ys.length) {\n    return false;\n  }\n  for (let index = 0; index < xs.length; index += 1) {\n    if (xs[index] !== ys[index]) {\n      return false;\n    }\n  }\n  return true;\n}\n";
+    let scaffolding = "export function selfTest(): boolean {\n  const alpha = ['alpha', 'beta', 'gamma'];\n  const beta = ['alpha', 'beta', 'gamma'];\n  const gamma = ['delta', 'epsilon', 'zeta'];\n  const first = eq(alpha, beta);\n  const second = eq(alpha, gamma);\n  const third = eq(beta, gamma);\n  const outcomes = [first, !second, !third];\n  const labels = ['same', 'differs', 'differs'];\n  const combined = outcomes.map((outcome, index) => `${labels[index]}:${outcome}`);\n  return combined.length === outcomes.length && outcomes.every((outcome) => outcome === true);\n}\n";
+
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let root = &tmp
+        .path()
+        .canonicalize()
+        .expect("temp dir should canonicalize");
+    fs::create_dir_all(root.join("src")).expect("src dir should be created");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-dupes-paste","main":"src/index.ts"}"#,
+    )
+    .expect("package.json should be written");
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"duplicates":{"threshold":1.0}}"#,
+    )
+    .expect("config should be written");
+    fs::write(
+        root.join("src/index.ts"),
+        "import { selfTest as a } from './a';\na();\n",
+    )
+    .expect("index should be written");
+    let module = format!("{helper}{scaffolding}");
+    fs::write(root.join("src/a.ts"), &module).expect("a should be written");
+
+    git(root, &["init", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+
+    // The paste: copy the whole module into a new file. Every line of the new
+    // clone instance is an added line, so the group must keep gating.
+    fs::write(root.join("src/b.ts"), &module).expect("b should be written");
+    fs::write(
+        root.join("src/index.ts"),
+        "import { selfTest as a } from './a';\nimport { selfTest as b } from './b';\na();\nb();\n",
+    )
+    .expect("index should be rewritten");
+
+    tmp
+}
+
+/// Strict-side pin for the issue #2164 fix: the touched-instance guard must
+/// only demote re-shaped groups. A genuinely pasted clone (whole module copied
+/// into a new file) contains added lines, so it must still gate as introduced
+/// and fail the new-only gate.
+#[test]
+fn audit_new_only_still_gates_pasted_clone_as_introduced() {
+    let tmp = pasted_clone_audit_repo();
+    let root_buf = tmp
+        .path()
+        .canonicalize()
+        .expect("temp root should canonicalize");
+    let root = root_buf.as_path();
+
+    let config_path = None;
+    let cache_root = root.join(".fallow");
+    let opts = AuditOptions {
+        root,
+        cache_dir: &cache_root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads: 1,
+        quiet: true,
+        allow_remote_extends: false,
+        changed_since: Some("HEAD"),
+        production: false,
+        production_dead_code: None,
+        production_health: None,
+        production_dupes: None,
+        workspace: None,
+        changed_workspaces: None,
+        explain: false,
+        explain_skipped: false,
+        performance: false,
+        group_by: None,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        max_crap: None,
+        coverage: None,
+        coverage_root: None,
+        gate: AuditGate::NewOnly,
+        include_entry_exports: false,
+        css: false,
+        css_deep: false,
+        runtime_coverage: None,
+        min_invocations_hot: 100,
+        brief: false,
+        max_decisions: 4,
+        walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
+        walkthrough_file: None,
+        show_deprioritized: false,
+    };
+
+    let result = execute_audit(&opts).expect("audit should execute");
+    let dupes = result.dupes.as_ref().expect("dupes should run");
+    assert!(
+        !dupes.report.clone_groups.is_empty(),
+        "the pasted clone group should be reported"
+    );
+    assert!(
+        !result.base_snapshot_skipped,
+        "base snapshot should be computed for attribution"
+    );
+    assert!(
+        result.attribution.duplication_introduced >= 1,
+        "a pasted clone contains added lines and must gate as introduced"
+    );
+    assert_eq!(
+        result.verdict,
+        AuditVerdict::Fail,
+        "introduced duplication above the threshold must fail the new-only gate"
+    );
+}
+
 #[test]
 fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");

@@ -270,7 +270,10 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  * Audit-mode marker emitted on each finding when `fallow audit --format json`
  * runs with a base ref. `true` means the finding's structural key was not
  * present at the base ref (introduced by the current changeset); `false`
- * means it was inherited.
+ * means it was inherited. Duplication findings carry one carve-out: a clone
+ * group whose structural key is new but whose instances contain no added line
+ * from the diff (a group re-shaped by removing duplication elsewhere) is
+ * demoted to inherited and serializes `false` (issue #2164).
  *
  * Outside of audit sub-results the field is omitted, so call sites typically
  * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
