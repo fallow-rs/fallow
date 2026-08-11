@@ -108,7 +108,7 @@ if render_with_fallow review-gitlab fallow-review.json; then
       --project-id "$CI_PROJECT_ID" \
       --api-url "$CI_API_V4_URL" \
       --envelope fallow-review.json > fallow-review-post.json 2> fallow-review-post-stderr.log; then
-    if jq -e '(.apply_errors // []) | length > 0 or (.post_errors // []) | length > 0' fallow-review-post.json > /dev/null 2>&1; then
+    if jq -e '((.apply_errors // []) | length > 0) or ((.post_errors // []) | length > 0)' fallow-review-post.json > /dev/null 2>&1; then
       HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-post.json)
       echo "WARNING: fallow post-review incomplete: $HINT"
     fi
