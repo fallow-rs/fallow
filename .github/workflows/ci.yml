@@ -439,7 +439,7 @@ jobs:
           path: .companion/fallow-skills
           persist-credentials: false
       - name: Documentation discoverability
-        uses: Hedde/trigger_tree@a5b8ae9f99100f92be620be2f1cd8526df5f932e # v1.27.2
+        uses: Hedde/trigger_tree@54a559c561dac35cfc993307b8087fe453a5bc6c # v1.29.1
         with:
           min-score: "100"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
