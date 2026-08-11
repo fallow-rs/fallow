@@ -36,10 +36,10 @@ describe("generated/output-contract.d.ts", () => {
     expectTypeOf<SchemaVersion>().toEqualTypeOf<8>();
     expectTypeOf<AuditSchemaVersion>().toEqualTypeOf<9>();
     expectTypeOf<CheckSchemaVersion>().toEqualTypeOf<8>();
-    expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<9>();
+    expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<10>();
     expectTypeOf<DupesSchemaVersion>().toEqualTypeOf<2 | 8>();
     expectTypeOf<FeatureFlagsSchemaVersion>().toEqualTypeOf<8>();
-    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<9>();
+    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<10>();
     expectTypeOf<TypeAwareStatusSchemaVersion>().toEqualTypeOf<8>();
   });
 
@@ -70,7 +70,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("exposes CombinedOutput with optional check/dupes/health branches", () => {
     const sample: CombinedOutput = {
-      schema_version: 9,
+      schema_version: 10,
       version: "0.0.0-test",
       elapsed_ms: 0,
     };
