@@ -1354,12 +1354,18 @@ audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
         }
     }
     drop_check_shared_parse(&mut check_result);
-    let comparison = build_cli_audit_comparison(
+    let mut comparison = build_cli_audit_comparison(
         check_result.as_ref(),
         dupes_result.as_ref(),
         health_result.as_ref(),
         base_snapshot.as_ref(),
         type_aware_degrade.is_some(),
+    );
+    demote_preexisting_dupe_introductions(
+        &mut comparison,
+        dupes_result.as_ref(),
+        opts.root,
+        &input.base_ref,
     );
     let (attribution, verdict, summary) = compute_comparison_audit_outcome(
         opts.gate,
@@ -1984,6 +1990,42 @@ fn build_cli_audit_comparison(
         dupes: dupes_ledger,
         styling,
     }
+}
+
+/// Demote introduced clone groups whose instances contain no added lines from
+/// the run's diff: their duplicated text existed verbatim at base and only the
+/// group's attribution key changed (membership or extent shifted because the
+/// changeset removed code elsewhere). Without this, the only safe sequence for
+/// a clone-removal refactor fails the new-only gate on duplication it did not
+/// write (issue #2164). Uses the same diff source as the rest of the run: the
+/// opt-in shared diff when present, else the merge-base worktree diff.
+fn demote_preexisting_dupe_introductions(
+    comparison: &mut keys::AuditComparison,
+    dupes: Option<&DupesResult>,
+    root: &Path,
+    base_ref: &str,
+) {
+    if comparison.dupes.introduced_count() == 0 {
+        return;
+    }
+    let Some(dupes) = dupes else {
+        return;
+    };
+    let fallback_index;
+    let index = if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
+        shared
+    } else if let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) {
+        fallback_index = fallow_output::DiffIndex::from_unified_diff(&diff);
+        &fallback_index
+    } else {
+        return;
+    };
+    let demote = keys::preexisting_dupe_group_keys(
+        dupes.report.clone_groups.iter(),
+        &dupes.config.root,
+        index,
+    );
+    comparison.dupes.demote_introductions(&demote);
 }
 
 fn compute_comparison_audit_outcome(

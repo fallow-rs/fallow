@@ -2647,6 +2647,116 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
     );
 }
 
+/// Issue #2164: a clone-removal refactor may re-shape a clone group (here the
+/// shared helper is extracted, leaving the surrounding scaffolding as a new,
+/// smaller group with a new attribution key) without writing any duplicated
+/// line. The new-only gate must classify that group as inherited, not
+/// introduced.
+#[test]
+fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
+    let helper = "export function eq(xs: string[], ys: string[]): boolean {\n  if (xs.length !== ys.length) {\n    return false;\n  }\n  for (let index = 0; index < xs.length; index += 1) {\n    if (xs[index] !== ys[index]) {\n      return false;\n    }\n  }\n  return true;\n}\n";
+    let scaffolding = "export function selfTest(): boolean {\n  const alpha = ['alpha', 'beta', 'gamma'];\n  const beta = ['alpha', 'beta', 'gamma'];\n  const gamma = ['delta', 'epsilon', 'zeta'];\n  const first = eq(alpha, beta);\n  const second = eq(alpha, gamma);\n  const third = eq(beta, gamma);\n  const outcomes = [first, !second, !third];\n  const labels = ['same', 'differs', 'differs'];\n  const combined = outcomes.map((outcome, index) => `${labels[index]}:${outcome}`);\n  return combined.length === outcomes.length && outcomes.every((outcome) => outcome === true);\n}\n";
+
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let root = &tmp
+        .path()
+        .canonicalize()
+        .expect("temp dir should canonicalize");
+    fs::create_dir_all(root.join("src")).expect("src dir should be created");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-dupes-reshape","main":"src/index.ts"}"#,
+    )
+    .expect("package.json should be written");
+    fs::write(
+        root.join("src/index.ts"),
+        "import { selfTest as a } from './a';\nimport { selfTest as b } from './b';\na();\nb();\n",
+    )
+    .expect("index should be written");
+    let base_module = format!("{helper}{scaffolding}");
+    fs::write(root.join("src/a.ts"), &base_module).expect("a should be written");
+    fs::write(root.join("src/b.ts"), &base_module).expect("b should be written");
+
+    git(root, &["init", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+
+    // The refactor: extract the identical helper to a shared lib. The
+    // scaffolding lines are untouched in both files.
+    let refactored = format!("import {{ eq }} from './lib';\n{scaffolding}");
+    fs::write(root.join("src/a.ts"), &refactored).expect("a should be rewritten");
+    fs::write(root.join("src/b.ts"), &refactored).expect("b should be rewritten");
+    fs::write(root.join("src/lib.ts"), helper).expect("lib should be written");
+
+    let config_path = None;
+    let cache_root = root.join(".fallow");
+    let opts = AuditOptions {
+        root,
+        cache_dir: &cache_root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads: 1,
+        quiet: true,
+        allow_remote_extends: false,
+        changed_since: Some("HEAD"),
+        production: false,
+        production_dead_code: None,
+        production_health: None,
+        production_dupes: None,
+        workspace: None,
+        changed_workspaces: None,
+        explain: false,
+        explain_skipped: false,
+        performance: false,
+        group_by: None,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        max_crap: None,
+        coverage: None,
+        coverage_root: None,
+        gate: AuditGate::NewOnly,
+        include_entry_exports: false,
+        css: false,
+        css_deep: false,
+        runtime_coverage: None,
+        min_invocations_hot: 100,
+        brief: false,
+        max_decisions: 4,
+        walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
+        walkthrough_file: None,
+        show_deprioritized: false,
+    };
+
+    let result = execute_audit(&opts).expect("audit should execute");
+    let dupes = result.dupes.as_ref().expect("dupes should run");
+    assert!(
+        !dupes.report.clone_groups.is_empty(),
+        "the scaffolding clone group should still be reported"
+    );
+    assert!(
+        !result.base_snapshot_skipped,
+        "base snapshot should be computed for attribution"
+    );
+    assert_eq!(
+        result.attribution.duplication_introduced, 0,
+        "a re-shaped clone group with no added lines must not gate as introduced"
+    );
+    assert!(
+        result.attribution.duplication_inherited >= 1,
+        "the pre-existing duplication should be reported as inherited"
+    );
+}
+
 #[test]
 fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
