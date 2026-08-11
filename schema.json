@@ -2846,7 +2846,7 @@
           ]
         },
         "cacheMaxAgeDays": {
-          "description": "Garbage-collection threshold, in whole days, for the persistent reusable base-snapshot worktree caches `fallow audit` creates: entries older than this window are swept on each audit run. Set to control cache accumulation; `0` disables the sweep and unset defaults to 30 days. The `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` environment variable overrides this field.",
+          "description": "Garbage-collection threshold, in whole days, for the persistent reusable base-snapshot worktree caches `fallow audit` creates: entries older than this window are swept on each audit run. Set to control cache accumulation; `0` disables the sweep and unset defaults to 30 days. Each sweep also reclaims abandoned entries minted under other repo identities (deleted or moved repos, other git worktrees) once they age past this repo's threshold; entries whose recorded owner root still exists are skipped and stay governed by that repo's own setting. The `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` environment variable overrides this field.",
           "type": [
             "integer",
             "null"

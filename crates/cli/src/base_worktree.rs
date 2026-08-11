@@ -546,6 +546,20 @@ fn load_audit_config(
 /// holding a kernel flock on different inodes. Lock files are tens of
 /// bytes; leaking them is harmless.
 pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
+    sweep_old_reusable_caches_in(repo_root, max_age, quiet, &std::env::temp_dir());
+}
+
+/// Scan-root-injectable body of [`sweep_old_reusable_caches`]. Production
+/// always passes `std::env::temp_dir()`; tests pass a private per-test
+/// directory so one test's cross-repo pass never scans (and reclaims)
+/// another test's fixtures or a developer's real ownerless caches in the
+/// shared temp dir.
+pub fn sweep_old_reusable_caches_in(
+    repo_root: &Path,
+    max_age: Option<Duration>,
+    quiet: bool,
+    scan_root: &Path,
+) {
     // Legacy pass: deregister reusable caches left REGISTERED by pre-#1815
     // fallow (the reporter's `git worktree list` backlog). This is what makes
     // those entries vanish on the first post-upgrade audit; the `--expire=now`
@@ -564,7 +578,7 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
     // entries from the old git-top-level identity. `git worktree list` no
     // longer sees the deregistered caches.
     let mut paths = vec![reusable_audit_worktree_path(repo_root)];
-    paths.extend(scan_legacy_reusable_cache_paths(repo_root));
+    paths.extend(scan_legacy_reusable_cache_paths(repo_root, scan_root));
     paths.sort();
     paths.dedup();
     let now = SystemTime::now();
@@ -582,7 +596,7 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
     // own sweep, so its `cacheMaxAgeDays` setting, including `0`, governs;
     // the rest are abandoned and age out under this run's threshold.
     let scoped: FxHashSet<&PathBuf> = paths.iter().collect();
-    for path in scan_all_reusable_cache_paths() {
+    for path in scan_all_reusable_cache_paths(scan_root) {
         if scoped.contains(&path) {
             continue;
         }
@@ -664,18 +678,18 @@ fn legacy_reusable_sha(path: &Path) -> Option<String> {
 /// dir. Sidecar entries (`.last-used` / `.sha` / `.lock`) are folded back to
 /// their owning cache path and deduplicated, so a dir removed out from under
 /// its sidecars is still visited for sidecar-orphan cleanup.
-fn scan_legacy_reusable_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
+fn scan_legacy_reusable_cache_paths(repo_root: &Path, scan_root: &Path) -> Vec<PathBuf> {
     let Some(prefix) = legacy_reusable_cache_repo_prefix(repo_root) else {
         return Vec::new();
     };
-    scan_cache_paths_with_hex_suffix(&prefix)
+    scan_cache_paths_with_hex_suffix(&prefix, scan_root)
 }
 
 fn scan_root_owned_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
     let Some(prefix) = root_owned_cache_repo_prefix(repo_root) else {
         return Vec::new();
     };
-    scan_cache_paths_with_hex_suffix(&prefix)
+    scan_cache_paths_with_hex_suffix(&prefix, &std::env::temp_dir())
 }
 
 /// Enumerate every reusable cache entry in the temp dir, regardless of repo
@@ -683,11 +697,10 @@ fn scan_root_owned_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
 /// fallow has ever minted are accepted: `<repo16>-<sha16>` (legacy) and
 /// `<repo16>-root-<root16>` (current). Sidecar entries fold back to their
 /// owning cache path like the repo-scoped scan.
-fn scan_all_reusable_cache_paths() -> Vec<PathBuf> {
+fn scan_all_reusable_cache_paths(scan_root: &Path) -> Vec<PathBuf> {
     const GLOBAL_CACHE_PREFIX: &str = "fallow-audit-base-cache-";
 
-    let temp = std::env::temp_dir();
-    let Ok(entries) = std::fs::read_dir(&temp) else {
+    let Ok(entries) = std::fs::read_dir(scan_root) else {
         return Vec::new();
     };
     let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
@@ -704,7 +717,7 @@ fn scan_all_reusable_cache_paths() -> Vec<PathBuf> {
         if !cache_hash_suffix_is_valid(hash_suffix) {
             continue;
         }
-        let path = temp.join(cache_name);
+        let path = scan_root.join(cache_name);
         if seen.insert(path.clone()) {
             paths.push(path);
         }
@@ -724,9 +737,8 @@ fn cache_hash_suffix_is_valid(suffix: &str) -> bool {
         .is_some_and(|(repo, sha)| is_hex16(repo) && is_hex16(sha))
 }
 
-fn scan_cache_paths_with_hex_suffix(prefix: &str) -> Vec<PathBuf> {
-    let temp = std::env::temp_dir();
-    let Ok(entries) = std::fs::read_dir(&temp) else {
+fn scan_cache_paths_with_hex_suffix(prefix: &str, scan_root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(scan_root) else {
         return Vec::new();
     };
     let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
@@ -743,7 +755,7 @@ fn scan_cache_paths_with_hex_suffix(prefix: &str) -> Vec<PathBuf> {
         if hash_suffix.len() != 16 || !hash_suffix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             continue;
         }
-        let path = temp.join(cache_name);
+        let path = scan_root.join(cache_name);
         if seen.insert(path.clone()) {
             paths.push(path);
         }
@@ -1049,7 +1061,10 @@ pub fn remove_reusable_audit_caches(
     dry_run: bool,
 ) -> std::io::Result<AuditCacheRemovalReport> {
     let mut paths = vec![reusable_audit_worktree_path(requested_root)];
-    paths.extend(scan_legacy_reusable_cache_paths(requested_root));
+    paths.extend(scan_legacy_reusable_cache_paths(
+        requested_root,
+        &std::env::temp_dir(),
+    ));
     if git_toplevel(requested_root).is_some_and(|root| paths_equal(&root, requested_root)) {
         paths.extend(scan_root_owned_cache_paths(requested_root));
     }
