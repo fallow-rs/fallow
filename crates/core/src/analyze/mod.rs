@@ -3046,6 +3046,7 @@ mod tests {
             unused_exports: Severity::Off,
             unused_types: Severity::Off,
             private_type_leaks: Severity::Off,
+            private_type_leaks_configured: false,
             unused_dependencies: Severity::Off,
             unused_dev_dependencies: Severity::Off,
             unused_optional_dependencies: Severity::Off,

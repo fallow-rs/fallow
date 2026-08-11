@@ -540,13 +540,21 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
     }
     apply_type_aware_overrides(opts, &mut config)?;
     opts.filters.activate_explicit_opt_ins(&mut config.rules);
+    apply_type_aware_private_leak_default(&mut config, opts.filters.any_active());
+    Ok(config)
+}
+
+/// Default the opt-in `private-type-leaks` rule to `warn` for type-aware runs,
+/// where semantic confirmation makes it trustworthy. An explicit user setting
+/// always wins: `"private-type-leaks": "off"` stays off (issue #2170).
+fn apply_type_aware_private_leak_default(config: &mut ResolvedConfig, filters_active: bool) {
     if config.type_aware.enabled
-        && !opts.filters.any_active()
+        && !filters_active
         && config.rules.private_type_leaks == Severity::Off
+        && !config.rules.private_type_leaks_configured
     {
         config.rules.private_type_leaks = Severity::Warn;
     }
-    Ok(config)
 }
 
 fn apply_type_aware_overrides(
@@ -1714,6 +1722,40 @@ mod tests {
         filters.activate_explicit_opt_ins(&mut rules);
 
         assert_eq!(rules.private_type_leaks, fallow_config::Severity::Warn);
+    }
+
+    fn type_aware_resolved_config() -> ResolvedConfig {
+        let mut config = fallow_config::FallowConfig::default().resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        config.type_aware.enabled = true;
+        config
+    }
+
+    #[test]
+    fn type_aware_defaults_private_type_leaks_on_when_unconfigured() {
+        let mut config = type_aware_resolved_config();
+        assert_eq!(config.rules.private_type_leaks, Severity::Off);
+        assert!(!config.rules.private_type_leaks_configured);
+
+        apply_type_aware_private_leak_default(&mut config, false);
+
+        assert_eq!(config.rules.private_type_leaks, Severity::Warn);
+    }
+
+    #[test]
+    fn type_aware_respects_explicit_private_type_leaks_off() {
+        let mut config = type_aware_resolved_config();
+        config.rules.private_type_leaks_configured = true;
+
+        apply_type_aware_private_leak_default(&mut config, false);
+
+        assert_eq!(config.rules.private_type_leaks, Severity::Off);
     }
 
     #[expect(

@@ -191,6 +191,11 @@ version, an explicit compatibility decision, generated contract updates, and
 the normal semver review described in
 [`backwards-compatibility.md`](backwards-compatibility.md).
 
+Type-aware runs default the opt-in `private-type-leaks` rule to `warn` when the
+config leaves it unset, because semantic confirmation makes the findings
+trustworthy. An explicit `"private-type-leaks": "off"` in `rules` always wins
+and disables the findings entirely, type-aware or not.
+
 Private-type-leak
 reconciliation sends only Fallow's bounded candidate set and receives stable
 candidate IDs. A complete response may remove an unmatched syntactic candidate.
