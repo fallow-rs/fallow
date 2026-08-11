@@ -928,7 +928,7 @@
     "json-schema-to-typescript": "15.0.4",
     "mocha": "11.7.6",
     "rolldown": "1.2.0",
-    "ovsx": "1.0.2",
+    "ovsx": "1.1.0",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
   }
