@@ -75,7 +75,7 @@ impl BaseWorktree {
                 _reusable_lock: Some(reusable_lock),
             };
             materialize_base_dependency_context(repo_root, worktree.path());
-            touch_last_used(worktree.path());
+            record_last_used(worktree.path(), repo_root);
             return Some(worktree);
         }
 
@@ -131,7 +131,7 @@ impl BaseWorktree {
         };
         materialize_base_dependency_context(repo_root, worktree.path());
         if readiness_published {
-            touch_last_used(worktree.path());
+            record_last_used(worktree.path(), repo_root);
         }
         Some(worktree)
     }
@@ -355,9 +355,28 @@ pub fn reusable_worktree_last_used_path(reusable_path: &Path) -> PathBuf {
 /// `warn!` so a persistent ENOSPC / read-only-tmp condition is visible at
 /// default `RUST_LOG=warn`; the caller does not abort the audit.
 pub fn touch_last_used(reusable_path: &Path) {
+    stamp_last_used(reusable_path, None);
+}
+
+/// Stamp `.last-used` like [`touch_last_used`] and additionally record
+/// `owner_root` (the requested analysis root that owns this cache) as the
+/// sidecar's content. The cross-repo GC pass reads it back to decide whether
+/// an entry outside the current repo's scope is still owned by a live project
+/// (issue #2169): caches whose recorded owner no longer exists on disk are
+/// abandoned and become eligible for age-based reclaim from any repo's sweep.
+pub fn record_last_used(reusable_path: &Path, owner_root: &Path) {
+    stamp_last_used(reusable_path, Some(owner_root));
+}
+
+fn stamp_last_used(reusable_path: &Path, owner_root: Option<&Path>) {
     let last_used = reusable_worktree_last_used_path(reusable_path);
-    let result = open_or_create_owned_sidecar(&last_used)
-        .and_then(|file| file.set_modified(SystemTime::now()));
+    let result = open_or_create_owned_sidecar(&last_used).and_then(|mut file| {
+        if let Some(owner_root) = owner_root {
+            file.set_len(0)?;
+            file.write_all(format!("{}\n", owner_root.display()).as_bytes())?;
+        }
+        file.set_modified(SystemTime::now())
+    });
     if let Err(err) = result {
         tracing::warn!(
             path = %last_used.display(),
@@ -365,6 +384,31 @@ pub fn touch_last_used(reusable_path: &Path) {
             "failed to touch reusable audit worktree sidecar; staleness signal may not update",
         );
     }
+}
+
+/// Read the owner root recorded in a cache entry's `.last-used` sidecar.
+/// Returns `None` for missing, empty (pre-#2169), oversized, or non-file
+/// sidecars. The path is only ever used for an existence probe, never as a
+/// removal target, so untrusted content cannot redirect the sweep.
+fn read_last_used_owner(reusable_path: &Path) -> Option<PathBuf> {
+    const MAX_OWNER_SIDECAR_BYTES: u64 = 4096;
+
+    let sidecar = reusable_worktree_last_used_path(reusable_path);
+    let metadata = std::fs::symlink_metadata(&sidecar).ok()?;
+    if !metadata_is_regular_file(&metadata) || metadata.len() > MAX_OWNER_SIDECAR_BYTES {
+        return None;
+    }
+    let mut contents = String::new();
+    std::fs::File::open(sidecar)
+        .ok()?
+        .take(MAX_OWNER_SIDECAR_BYTES)
+        .read_to_string(&mut contents)
+        .ok()?;
+    let owner = contents.trim();
+    if owner.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(owner))
 }
 
 fn open_or_create_owned_sidecar(path: &Path) -> std::io::Result<std::fs::File> {
@@ -414,7 +458,7 @@ fn metadata_is_regular_file(metadata: &std::fs::Metadata) -> bool {
 ///
 /// Precedence: `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` env var > `audit.cacheMaxAgeDays`
 /// config field > 30-day default. `0` from either source disables the sweep
-/// entirely (returns `None`). Invalid env values (non-integer) silently fall
+/// entirely (returns `None`). Invalid env values (non-integer) warn and fall
 /// back to config / default; audits do not fail on a typo in a runner env var.
 pub fn resolve_cache_max_age_with_options(
     root: &Path,
@@ -425,7 +469,7 @@ pub fn resolve_cache_max_age_with_options(
         if let Ok(days) = raw.trim().parse::<u32>() {
             return days_to_duration(days);
         }
-        tracing::debug!(
+        tracing::warn!(
             value = %raw,
             "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
         );
@@ -480,6 +524,10 @@ fn load_audit_config(
 /// - Aged-out: the sidecar `.last-used` file is older than `max_age` (only
 ///   when `max_age` is `Some`).
 ///
+/// Entries under other repo hashes (other linked worktrees, deleted or moved
+/// repos) are visited by a cross-repo pass; see
+/// [`reclaim_foreign_cache_entry`] for its owner-liveness gate (issue #2169).
+///
 /// Concurrency: each candidate is gated by [`ReusableWorktreeLock`] before
 /// removal, so an in-flight `fallow audit` mid-rebuild against the same
 /// cache entry will not be disturbed (the sweep skips on contention). The
@@ -521,8 +569,24 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
     paths.dedup();
     let now = SystemTime::now();
     let mut removed: u32 = 0;
-    for path in paths {
-        if reclaim_reusable_cache_entry(repo_root, &path, max_age, now) {
+    for path in &paths {
+        if reclaim_reusable_cache_entry(repo_root, path, max_age, now) {
+            removed += 1;
+        }
+    }
+
+    // Cross-repo pass (issue #2169): every other repo hash accumulates caches
+    // the repo-scoped pass can never see (one per linked git worktree, plus
+    // entries from deleted or moved repos that no surviving sweep covers).
+    // Entries whose recorded owner root still exists are left to that repo's
+    // own sweep, so its `cacheMaxAgeDays` setting, including `0`, governs;
+    // the rest are abandoned and age out under this run's threshold.
+    let scoped: FxHashSet<&PathBuf> = paths.iter().collect();
+    for path in scan_all_reusable_cache_paths() {
+        if scoped.contains(&path) {
+            continue;
+        }
+        if reclaim_foreign_cache_entry(repo_root, &path, max_age, now) {
             removed += 1;
         }
     }
@@ -614,6 +678,52 @@ fn scan_root_owned_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
     scan_cache_paths_with_hex_suffix(&prefix)
 }
 
+/// Enumerate every reusable cache entry in the temp dir, regardless of repo
+/// hash, for the cross-repo GC pass. Only names matching the two shapes
+/// fallow has ever minted are accepted: `<repo16>-<sha16>` (legacy) and
+/// `<repo16>-root-<root16>` (current). Sidecar entries fold back to their
+/// owning cache path like the repo-scoped scan.
+fn scan_all_reusable_cache_paths() -> Vec<PathBuf> {
+    const GLOBAL_CACHE_PREFIX: &str = "fallow-audit-base-cache-";
+
+    let temp = std::env::temp_dir();
+    let Ok(entries) = std::fs::read_dir(&temp) else {
+        return Vec::new();
+    };
+    let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
+    let mut paths = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let cache_name = strip_cache_sidecar_suffix(name);
+        let Some(hash_suffix) = cache_name.strip_prefix(GLOBAL_CACHE_PREFIX) else {
+            continue;
+        };
+        if !cache_hash_suffix_is_valid(hash_suffix) {
+            continue;
+        }
+        let path = temp.join(cache_name);
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+fn cache_hash_suffix_is_valid(suffix: &str) -> bool {
+    fn is_hex16(part: &str) -> bool {
+        part.len() == 16 && part.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }
+    if let Some((repo, root)) = suffix.split_once("-root-") {
+        return is_hex16(repo) && is_hex16(root);
+    }
+    suffix
+        .split_once('-')
+        .is_some_and(|(repo, sha)| is_hex16(repo) && is_hex16(sha))
+}
+
 fn scan_cache_paths_with_hex_suffix(prefix: &str) -> Vec<PathBuf> {
     let temp = std::env::temp_dir();
     let Ok(entries) = std::fs::read_dir(&temp) else {
@@ -699,24 +809,69 @@ fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> bool {
 }
 
 /// Reclaim a cache entry whose `.last-used` sidecar is older than `max_age`.
-/// Seeds a fresh sidecar for pre-upgrade entries that lack one (returns
-/// `false` so they age from real last-use on the next run). Removal is
-/// directory-and-sidecars only: the entry is unregistered, so no `git`
-/// subprocess is involved.
+/// Seeds a fresh owner-recording sidecar for pre-upgrade entries that lack
+/// one (returns `false` so they age from real last-use on the next run).
+/// Removal is directory-and-sidecars only: the entry is unregistered, so no
+/// `git` subprocess is involved.
 fn reclaim_aged_cache_entry(
     repo_root: &Path,
     path: &Path,
     max_age: Duration,
     now: SystemTime,
 ) -> bool {
-    let sidecar = reusable_worktree_last_used_path(path);
-    let sidecar_mtime = std::fs::metadata(&sidecar)
-        .ok()
-        .and_then(|m| m.modified().ok());
-    let Some(mtime) = sidecar_mtime else {
+    let Some(mtime) = last_used_mtime(path) else {
+        record_last_used(path, repo_root);
+        return false;
+    };
+    remove_entry_past_max_age(repo_root, path, max_age, now, mtime)
+}
+
+/// Reclaim a cache entry that belongs to a DIFFERENT repo hash than the
+/// sweeping repo (issue #2169).
+///
+/// An entry whose recorded owner root still exists on disk is skipped
+/// unconditionally: that repo's own sweep governs it, so its
+/// `cacheMaxAgeDays` policy (including `0` = never) cannot be defeated from
+/// the outside. Entries with a dead owner, or with no recorded owner (pre-
+/// upgrade or externally created), are abandoned: nothing will ever sweep
+/// them under their own hash again, so they age out under THIS run's
+/// threshold. The grace seed for a missing sidecar stays mtime-only because
+/// the true owner is unknown here.
+fn reclaim_foreign_cache_entry(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Option<Duration>,
+    now: SystemTime,
+) -> bool {
+    if !path.exists() {
+        return reclaim_orphan_cache_entry(repo_root, path);
+    }
+    if read_last_used_owner(path).is_some_and(|owner| owner.exists()) {
+        return false;
+    }
+    let Some(max_age) = max_age else {
+        return false;
+    };
+    let Some(mtime) = last_used_mtime(path) else {
         touch_last_used(path);
         return false;
     };
+    remove_entry_past_max_age(repo_root, path, max_age, now, mtime)
+}
+
+fn last_used_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(reusable_worktree_last_used_path(path))
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+}
+
+fn remove_entry_past_max_age(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Duration,
+    now: SystemTime,
+    mtime: SystemTime,
+) -> bool {
     let Ok(age) = now.duration_since(mtime) else {
         return false;
     };
