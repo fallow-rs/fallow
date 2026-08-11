@@ -811,18 +811,18 @@ fn health_svelte_await_then_shorthand_counts_both_states() {
         .and_then(|actions| {
             actions
                 .iter()
-                .find(|action| action["type"] == "suppress-file")
+                .find(|action| action["type"] == "suppress-line")
         })
         .expect("standalone Svelte template suppress action");
     assert_eq!(
         suppress["comment"],
-        "<!-- fallow-ignore-file complexity -->"
+        "<!-- fallow-ignore-next-line complexity -->"
     );
-    assert_eq!(suppress["placement"], "top-of-template");
+    assert_eq!(suppress["placement"], "above-template-anchor-line");
 
     write_file(
         &dir.path().join("src/App.svelte"),
-        "<!-- fallow-ignore-file complexity -->\n{#await load() then value}\n<p>{value}</p>\n{/await}\n",
+        "<!-- fallow-ignore-next-line complexity -->\n{#await load() then value}\n<p>{value}</p>\n{/await}\n",
     );
     let suppressed = run_fallow_in_root(
         "health",

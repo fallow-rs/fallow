@@ -4,7 +4,7 @@ expression: redact_version(&json_str)
 ---
 {
   "kind": "health",
-  "schema_version": 9,
+  "schema_version": 10,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "findings": [

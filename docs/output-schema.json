@@ -4347,7 +4347,7 @@
             "string",
             "null"
           ],
-          "description": "Where to insert the suppress comment\n(e.g., `above-function-declaration`, `above-angular-decorator`,\n`above-component-worst-method`, or `top-of-template`). Present on\n`suppress-line` and `suppress-file` action variants."
+          "description": "Where to insert the suppress comment\n(e.g., `above-function-declaration`, `above-angular-decorator`,\n`above-template-anchor-line`, `above-component-worst-method`, or\n`top-of-template`). Present on `suppress-line` and `suppress-file`\naction variants. `above-template-anchor-line` is used for\nsingle-file-component markup (`.svelte`, `.vue`, `.astro`), where the\nsynthetic `<template>` unit is anchored at its first contributing\nconstruct rather than at the top of the file, so the comment belongs on\nthe line immediately preceding the reported line."
         },
         "target_path": {
           "type": [
@@ -14200,7 +14200,18 @@
         },
         "override_index": {
           "type": "integer",
-          "description": "Index of the entry in the configured `thresholdOverrides` array."
+          "description": "Index of the entry in the configured `thresholdOverrides` array.\nSeveral rows can share one index when the override participates in more\nthan one dimension; group on this to count configured overrides."
+        },
+        "dimension": {
+          "description": "Threshold dimension this row describes.",
+          "$ref": "#/definitions/ThresholdOverrideDimension"
+        },
+        "outstanding": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThresholdOverrideDimension"
+          },
+          "description": "Dimensions on which the matched unit still produces a finding despite\nthis override. Non-empty means a finding survived; the listed dimensions\nare the ones that breached, whether or not this override configures\ntheir ceilings."
         },
         "path": {
           "type": [
@@ -14246,6 +14257,7 @@
       "required": [
         "status",
         "override_index",
+        "dimension",
         "configured_thresholds",
         "effective_thresholds"
       ],
@@ -14262,6 +14274,11 @@
           "type": "string",
           "const": "stale",
           "description": "The matched code now passes the global thresholds; the override can go."
+        },
+        {
+          "type": "string",
+          "const": "insufficient",
+          "description": "The override raises the ceiling for this dimension but the matched code\nstill exceeds the raised value, so the finding survives the override.\nWithout this state the row was dropped entirely and a user saw no\nfeedback at all on an override that was in force (issue #2163)."
         },
         {
           "type": "string",
@@ -22455,7 +22472,7 @@
     },
     "HealthSchemaVersion": {
       "type": "integer",
-      "const": 9,
+      "const": 10,
       "description": "Exact schema version for [`HealthOutput`]."
     },
     "AuditSchemaVersion": {
@@ -22490,6 +22507,21 @@
       "type": "integer",
       "const": 8,
       "description": "Schema projection for the type-aware status envelope's exact version."
+    },
+    "ThresholdOverrideDimension": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complexity",
+          "description": "The structural ceilings: `maxCyclomatic`, `maxCognitive` and\n`maxUnitSize`."
+        },
+        {
+          "type": "string",
+          "const": "crap",
+          "description": "The `maxCrap` ceiling, and only that ceiling."
+        }
+      ],
+      "description": "Which threshold dimension a `thresholdOverrides` state row describes.\n\nOne configured override produces one row per dimension it participates in,\nbecause the complexity ceilings and the CRAP ceiling are evaluated\nindependently: raising `maxCyclomatic` says nothing about whether the unit\nstill breaches `maxCrap`."
     }
   }
 }
