@@ -943,15 +943,9 @@ fn accessed_enum_member_via_re_export_not_flagged() {
     graph.set_reachable(1);
     graph.set_reachable(2);
 
-    set_exports(
-        &mut graph,
-        1,
-        &[make_export_with_members(
-            "Status",
-            vec![],
-            Some(0), // referenced from consumer
-        )],
-    );
+    graph.resolved_modules[0]
+        .resolved_imports
+        .push(make_resolved_import("./index", "Status", "Status", 1));
     graph.set_re_exports(
         1,
         vec![crate::graph::ReExportEdge {
@@ -1031,11 +1025,14 @@ fn accessed_class_static_member_via_re_export_not_flagged() {
     graph.set_reachable(1);
     graph.set_reachable(2);
 
-    set_exports(
-        &mut graph,
-        1,
-        &[make_export_with_members("StringUtils", vec![], Some(0))],
-    );
+    graph.resolved_modules[0]
+        .resolved_imports
+        .push(make_resolved_import(
+            "./index",
+            "StringUtils",
+            "StringUtils",
+            1,
+        ));
     graph.set_re_exports(
         1,
         vec![crate::graph::ReExportEdge {
@@ -1107,11 +1104,9 @@ fn accessed_member_via_renamed_re_export_not_flagged() {
     graph.set_reachable(1);
     graph.set_reachable(2);
 
-    set_exports(
-        &mut graph,
-        1,
-        &[make_export_with_members("Renamed", vec![], Some(0))],
-    );
+    graph.resolved_modules[0]
+        .resolved_imports
+        .push(make_resolved_import("./index", "Renamed", "Renamed", 1));
     graph.set_re_exports(
         1,
         vec![crate::graph::ReExportEdge {
