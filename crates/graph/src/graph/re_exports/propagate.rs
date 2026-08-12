@@ -11,7 +11,9 @@ use std::cell::Cell;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
 
-use crate::graph::effective_exports::{EffectiveExportIndex, ExportNamespace};
+use crate::graph::effective_exports::{
+    EffectiveExportIndex, EffectiveExportResolution, ExportNamespace,
+};
 use crate::graph::types::{
     ExportSymbol, ModuleNode, ReferenceKind, ReferencePathId, ReferencePathInterner,
     RoutedReference, SymbolReference,
@@ -1053,11 +1055,14 @@ fn propagate_entry_point_star(
 /// Returns `true` if any new references were added.
 pub(in crate::graph) struct NamedReExportPropagation<'a> {
     pub(in crate::graph) modules: &'a mut [ModuleNode],
+    pub(in crate::graph) effective_exports: &'a EffectiveExportIndex,
     pub(in crate::graph) barrel_id: FileId,
     pub(in crate::graph) barrel_idx: usize,
+    pub(in crate::graph) source_id: FileId,
     pub(in crate::graph) source_idx: usize,
     pub(in crate::graph) imported_name: &'a str,
     pub(in crate::graph) exported_name: &'a str,
+    pub(in crate::graph) is_type_only: bool,
     pub(in crate::graph) existing_refs: &'a mut FxHashSet<(FileId, Option<ReferencePathId>)>,
     pub(in crate::graph) reference_paths: &'a mut ReferencePathInterner,
 }
@@ -1065,14 +1070,42 @@ pub(in crate::graph) struct NamedReExportPropagation<'a> {
 pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagation<'_>) -> bool {
     let NamedReExportPropagation {
         modules,
+        effective_exports,
         barrel_id,
         barrel_idx,
+        source_id,
         source_idx,
         imported_name,
         exported_name,
+        is_type_only,
         existing_refs,
         reference_paths,
     } = input;
+
+    let type_resolves = matches!(
+        (
+            effective_exports.resolve(barrel_id, exported_name, ExportNamespace::Type),
+            effective_exports.resolve(source_id, imported_name, ExportNamespace::Type),
+        ),
+        (
+            EffectiveExportResolution::Unique(barrel_binding),
+            EffectiveExportResolution::Unique(source_binding),
+        ) if barrel_binding == source_binding
+    );
+    let value_resolves = !is_type_only
+        && matches!(
+            (
+                effective_exports.resolve(barrel_id, exported_name, ExportNamespace::Value),
+                effective_exports.resolve(source_id, imported_name, ExportNamespace::Value),
+            ),
+            (
+                EffectiveExportResolution::Unique(barrel_binding),
+                EffectiveExportResolution::Unique(source_binding),
+            ) if barrel_binding == source_binding
+        );
+    if !type_resolves && !value_resolves {
+        return false;
+    }
 
     let refs_on_barrel: Vec<RoutedReference> = modules[barrel_idx]
         .exports
@@ -1083,13 +1116,15 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
 
     if refs_on_barrel.is_empty() {
         if modules[barrel_idx].is_entry_point() {
-            return propagate_entry_point_named(
+            return propagate_entry_point_named(EntryPointNamedPropagation {
                 modules,
                 barrel_id,
                 source_idx,
                 imported_name,
+                type_resolves,
+                value_resolves,
                 reference_paths,
-            );
+            });
         }
         return false;
     }
@@ -1100,7 +1135,14 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
         .exports
         .iter()
         .enumerate()
-        .filter(|(_, e)| e.name.matches_str(imported_name))
+        .filter(|(_, export)| {
+            export.name.matches_str(imported_name)
+                && if export.is_type_only {
+                    type_resolves
+                } else {
+                    value_resolves
+                }
+        })
         .map(|(i, _)| i)
         .collect();
 
@@ -1124,13 +1166,26 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
 
 /// Entry point barrel with named re-export and no in-graph consumers — synthesize
 /// a `ReExport` reference so the source export is correctly marked as used.
-fn propagate_entry_point_named(
-    modules: &mut [ModuleNode],
+struct EntryPointNamedPropagation<'a> {
+    modules: &'a mut [ModuleNode],
     barrel_id: FileId,
     source_idx: usize,
-    imported_name: &str,
-    reference_paths: &mut ReferencePathInterner,
-) -> bool {
+    imported_name: &'a str,
+    type_resolves: bool,
+    value_resolves: bool,
+    reference_paths: &'a mut ReferencePathInterner,
+}
+
+fn propagate_entry_point_named(input: EntryPointNamedPropagation<'_>) -> bool {
+    let EntryPointNamedPropagation {
+        modules,
+        barrel_id,
+        source_idx,
+        imported_name,
+        type_resolves,
+        value_resolves,
+        reference_paths,
+    } = input;
     let source_id = modules[source_idx].file_id;
     let synthetic_ref = SymbolReference {
         from_file: barrel_id,
@@ -1144,7 +1199,14 @@ fn propagate_entry_point_named(
         .exports
         .iter()
         .enumerate()
-        .filter(|(_, e)| e.name.matches_str(imported_name))
+        .filter(|(_, export)| {
+            export.name.matches_str(imported_name)
+                && if export.is_type_only {
+                    type_resolves
+                } else {
+                    value_resolves
+                }
+        })
         .map(|(i, _)| i)
         .collect();
     for export_idx in target_exports {

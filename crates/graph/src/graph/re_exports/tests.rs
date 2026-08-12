@@ -74,18 +74,6 @@ fn graph_re_export_chain_propagates_references() {
         ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
-                name: ExportName::Named("foo".to_string()),
-                local_name: Some("foo".to_string()),
-                is_type_only: false,
-                visibility: VisibilityTag::None,
-                expected_unused_reason: None,
-                span: oxc_span::Span::new(0, 20),
-                members: vec![],
-                is_side_effect_used: false,
-                super_class: None,
-            }]
-            .into(),
             re_exports: vec![ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {
                     source: "./source".to_string(),

@@ -461,11 +461,14 @@ impl ModuleGraph {
         } else {
             propagate_named_re_export(NamedReExportPropagation {
                 modules,
+                effective_exports: context.effective_exports,
                 barrel_id: entry.barrel,
                 barrel_idx,
+                source_id: entry.source,
                 source_idx,
                 imported_name: &entry.imported_name,
                 exported_name: &entry.exported_name,
+                is_type_only: entry.is_type_only,
                 existing_refs: context.existing_refs,
                 reference_paths: context.reference_paths,
             })
