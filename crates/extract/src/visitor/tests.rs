@@ -6287,6 +6287,67 @@ fn typed_field_initializer_binds_local_receiver() {
 }
 
 #[test]
+fn function_type_alias_supplies_scoped_parameter_types() {
+    let info = parse(
+        r"
+        class Context {
+          strategy!: Strategy;
+        }
+        type ContextTask = (context: Context) => void;
+
+        export const audit: ContextTask = context => {
+          const { strategy } = context;
+          strategy.audit();
+        };
+        ",
+    );
+
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::TypedPropertyMemberAccess(access)
+                if access.type_name == "Context"
+                    && access.property_path == "strategy"
+                    && access.member == "audit"
+        )),
+        "function alias should provide the contextual parameter type: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn function_type_alias_supplies_nested_scoped_parameter_types() {
+    let info = parse(
+        r"
+        class Context {
+          strategy!: Strategy;
+        }
+        type ContextTask = (context: Context) => void;
+
+        export function createAudit() {
+          const audit: ContextTask = context => {
+            const { strategy } = context;
+            strategy.audit();
+          };
+          return audit;
+        }
+        ",
+    );
+
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::TypedPropertyMemberAccess(access)
+                if access.type_name == "Context"
+                    && access.property_path == "strategy"
+                    && access.member == "audit"
+        )),
+        "nested function alias should provide the contextual parameter type: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn angular_inject_property_records_instance_binding() {
     let info = parse(
         r"
