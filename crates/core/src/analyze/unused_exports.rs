@@ -7,7 +7,9 @@ use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig, Severity};
 use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
-use crate::graph::{ExportNamespace, ExportSymbol, ModuleGraph, ModuleNode};
+use crate::graph::{
+    EffectiveExportResolution, ExportNamespace, ExportSymbol, ModuleGraph, ModuleNode,
+};
 use crate::results::{
     DuplicateExport, DuplicateLocation, ExportUsage, PrivateTypeLeak, ReferenceLocation,
     StaleSuppression, SuppressionOrigin, UnusedExport,
@@ -823,15 +825,15 @@ fn collect_module_private_type_leaks(
     }
 }
 
-/// Add dynamic-import edges that act as re-exports to the existing
-/// `re_export_sources` map. Caller has already populated it from static
-/// `re_exports`. A dynamic import counts as a re-export only when the wrapper
-/// module also exports the same name, mirroring the static `export { X } from`
-/// shape.
+type DynamicReExportSources = FxHashMap<usize, FxHashMap<String, FxHashSet<usize>>>;
+
+/// Record dynamic-import edges that act as named re-exports. A dynamic import
+/// counts only when the wrapper module exports the same name, mirroring a
+/// static `export { X } from` shape without conflating unrelated names.
 fn collect_dynamic_reexport_sources(
     resolved_modules: &[crate::resolve::ResolvedModule],
     graph: &ModuleGraph,
-    re_export_sources: &mut FxHashMap<usize, FxHashSet<usize>>,
+    re_export_sources: &mut DynamicReExportSources,
 ) {
     use crate::extract::ExportName;
     use fallow_types::extract::ImportedName;
@@ -852,16 +854,13 @@ fn collect_dynamic_reexport_sources(
                 continue;
             };
 
-            let matches_export = match &dynamic_import.info.imported_name {
-                ImportedName::Named(name) => wrapper_exports
-                    .iter()
-                    .any(|e| matches!(&e.name, ExportName::Named(n) if n == name)),
-                ImportedName::Default => wrapper_exports
-                    .iter()
-                    .any(|e| matches!(&e.name, ExportName::Default)),
-                ImportedName::Namespace | ImportedName::SideEffect => false,
+            let ImportedName::Named(name) = &dynamic_import.info.imported_name else {
+                continue;
             };
-            if !matches_export {
+            if !wrapper_exports
+                .iter()
+                .any(|export| matches!(&export.name, ExportName::Named(n) if n == name))
+            {
                 continue;
             }
 
@@ -871,6 +870,8 @@ fn collect_dynamic_reexport_sources(
             }
             re_export_sources
                 .entry(wrapper_idx)
+                .or_default()
+                .entry(name.clone())
                 .or_default()
                 .insert(source_idx);
         }
@@ -1051,7 +1052,7 @@ pub(super) fn find_duplicate_exports_with_plugins(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     resolved_modules: &[crate::resolve::ResolvedModule],
 ) -> Vec<DuplicateExport> {
-    let re_export_sources = build_re_export_source_map(graph, resolved_modules);
+    let dynamic_re_export_sources = build_dynamic_re_export_source_map(graph, resolved_modules);
     let export_locations =
         collect_duplicate_export_locations(graph, config, suppressions, plugin_result);
 
@@ -1064,7 +1065,7 @@ pub(super) fn find_duplicate_exports_with_plugins(
             evaluate_duplicate_export_group(
                 name,
                 locations,
-                &re_export_sources,
+                &dynamic_re_export_sources,
                 graph,
                 line_offsets_by_file,
             )
@@ -1072,28 +1073,14 @@ pub(super) fn find_duplicate_exports_with_plugins(
         .collect()
 }
 
-/// Map each module index to the set of module indices it re-exports from
-/// (static `export ... from` edges plus dynamically-resolved re-exports). Used
-/// to strip re-export chain members from a duplicate-export group: a module that
-/// re-exports from another group member is not an independent origin.
-fn build_re_export_source_map(
+/// Map each wrapper module and exported name to the dynamic-import modules that
+/// supply it. Static exports are resolved by the graph's canonical effective
+/// export index instead of maintaining a second source map here.
+fn build_dynamic_re_export_source_map(
     graph: &ModuleGraph,
     resolved_modules: &[crate::resolve::ResolvedModule],
-) -> FxHashMap<usize, FxHashSet<usize>> {
-    let mut re_export_sources: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
-    for (idx, module) in graph.modules.iter().enumerate() {
-        debug_assert_eq!(
-            module.file_id.0 as usize, idx,
-            "ModuleGraph::modules FileId-as-index invariant broken"
-        );
-        for re in &module.re_exports {
-            re_export_sources
-                .entry(idx)
-                .or_default()
-                .insert(re.source_file.0 as usize);
-        }
-    }
-
+) -> DynamicReExportSources {
+    let mut re_export_sources = DynamicReExportSources::default();
     collect_dynamic_reexport_sources(resolved_modules, graph, &mut re_export_sources);
     re_export_sources
 }
@@ -1229,7 +1216,7 @@ fn duplicate_export_entry(
 fn evaluate_duplicate_export_group(
     name: String,
     locations: Vec<ExportEntry>,
-    re_export_sources: &FxHashMap<usize, FxHashSet<usize>>,
+    dynamic_re_export_sources: &DynamicReExportSources,
     graph: &ModuleGraph,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Option<DuplicateExport> {
@@ -1242,11 +1229,14 @@ fn evaluate_duplicate_export_group(
     let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
     let independent_entries: Vec<ExportEntry> = locations
         .into_iter()
-        .filter(|e| {
-            let sources = re_export_sources.get(&e.module_idx);
-            let has_source_in_set =
-                sources.is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
-            !has_source_in_set
+        .filter(|entry| {
+            !is_re_export_chain_member(
+                entry,
+                &name,
+                &module_indices,
+                dynamic_re_export_sources,
+                graph,
+            )
         })
         .collect();
 
@@ -1279,6 +1269,29 @@ fn evaluate_duplicate_export_group(
         export_name: name,
         locations: surviving_locations,
     })
+}
+
+fn is_re_export_chain_member(
+    entry: &ExportEntry,
+    export_name: &str,
+    group_modules: &FxHashSet<usize>,
+    dynamic_re_export_sources: &DynamicReExportSources,
+    graph: &ModuleGraph,
+) -> bool {
+    let is_static_re_export = matches!(
+        graph.resolve_export(entry.file_id, export_name, entry.namespace()),
+        EffectiveExportResolution::Unique(binding)
+            if binding.origin_file() != entry.file_id
+                && group_modules.contains(&(binding.origin_file().0 as usize))
+    );
+    if is_static_re_export {
+        return true;
+    }
+
+    dynamic_re_export_sources
+        .get(&entry.module_idx)
+        .and_then(|exports| exports.get(export_name))
+        .is_some_and(|sources| sources.iter().any(|source| group_modules.contains(source)))
 }
 
 /// Resolve one importer-connected component into the duplicate locations it
