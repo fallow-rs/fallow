@@ -104,31 +104,32 @@ impl StructuralParamMemberCollector {
         self.shadowed_stack.pop();
     }
 
-    fn is_shadowed(&self, name: &str) -> bool {
-        self.shadowed_stack.iter().any(|scope| scope.contains(name))
+    fn tracks_receiver_name(&self, name: &str) -> bool {
+        self.target_params.contains(name)
+            || self
+                .alias_stack
+                .iter()
+                .any(|aliases| aliases.contains_key(name))
     }
 
     fn collect_shadowed_params(&self, params: &FormalParameters<'_>) -> FxHashSet<String> {
-        let mut shadowed = FxHashSet::default();
-        for param in &params.items {
-            if let BindingPattern::BindingIdentifier(id) = &param.pattern
-                && self.target_params.contains(id.name.as_str())
-            {
-                shadowed.insert(id.name.to_string());
-            }
-        }
-        shadowed
+        params
+            .items
+            .iter()
+            .flat_map(|param| param.pattern.get_binding_identifiers())
+            .filter(|id| self.tracks_receiver_name(id.name.as_str()))
+            .map(|id| id.name.to_string())
+            .collect()
     }
 
     fn record_shadowed_bindings<'a>(
         &mut self,
         bindings: impl Iterator<Item = &'a BindingIdentifier<'a>>,
     ) {
-        let Some(scope) = self.shadowed_stack.last_mut() else {
-            return;
-        };
         for binding in bindings {
-            if self.target_params.contains(binding.name.as_str()) {
+            if self.tracks_receiver_name(binding.name.as_str())
+                && let Some(scope) = self.shadowed_stack.last_mut()
+            {
                 scope.insert(binding.name.to_string());
             }
         }
@@ -139,20 +140,21 @@ impl StructuralParamMemberCollector {
         let (root, suffix) = object_path
             .split_once('.')
             .map_or((object_path.as_str(), ""), |(root, suffix)| (root, suffix));
-        if let Some((param, alias_path)) = self
-            .alias_stack
-            .iter()
-            .rev()
-            .find_map(|aliases| aliases.get(root))
-        {
-            let path = match (alias_path.is_empty(), suffix.is_empty()) {
-                (true, _) => suffix.to_string(),
-                (_, true) => alias_path.clone(),
-                (false, false) => format!("{alias_path}.{suffix}"),
-            };
-            return Some((param.clone(), path));
+        for (aliases, shadowed) in self.alias_stack.iter().zip(&self.shadowed_stack).rev() {
+            if let Some((param, alias_path)) = aliases.get(root) {
+                let path = match (alias_path.is_empty(), suffix.is_empty()) {
+                    (true, _) => suffix.to_string(),
+                    (_, true) => alias_path.clone(),
+                    (false, false) => format!("{alias_path}.{suffix}"),
+                };
+                return Some((param.clone(), path));
+            }
+            if shadowed.contains(root) {
+                return None;
+            }
         }
-        (self.target_params.contains(root) && !self.is_shadowed(root))
+        self.target_params
+            .contains(root)
             .then(|| (root.to_string(), suffix.to_string()))
     }
 
@@ -204,14 +206,18 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         let shadowed = self.collect_shadowed_params(&func.params);
         self.shadowed_stack.push(shadowed);
+        self.alias_stack.push(FxHashMap::default());
         walk::walk_function(self, func, flags);
+        self.alias_stack.pop();
         self.shadowed_stack.pop();
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
         let shadowed = self.collect_shadowed_params(&expr.params);
         self.shadowed_stack.push(shadowed);
+        self.alias_stack.push(FxHashMap::default());
         walk::walk_arrow_function_expression(self, expr);
+        self.alias_stack.pop();
         self.shadowed_stack.pop();
     }
 

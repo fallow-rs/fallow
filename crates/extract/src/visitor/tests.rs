@@ -5623,6 +5623,27 @@ fn computed_enum_key_records_static_string_value_and_use() {
 }
 
 #[test]
+fn computed_enum_key_ignores_lexically_shadowed_binding() {
+    let info = parse(
+        r"
+        import { ProtocolKey } from './protocol';
+        export function read(
+            target: object,
+            ProtocolKey: { Protocol: string },
+        ) {
+            return target[ProtocolKey.Protocol]
+        }
+        ",
+    );
+
+    assert!(!info.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        SemanticFact::ComputedEnumKeyUse(usage)
+            if usage.key_object == "ProtocolKey" && usage.key_member == "Protocol"
+    )));
+}
+
+#[test]
 fn import_meta_env_static_member_access_tracked() {
     let info = parse("const secret = import.meta.env.SECRET_KEY;");
     assert!(
@@ -6217,6 +6238,32 @@ fn nullable_asserted_binding_records_member_on_asserted_type() {
 }
 
 #[test]
+fn asserted_generic_receiver_does_not_credit_module_type() {
+    let info = parse(
+        r"
+        import type { Strategy } from './strategy';
+
+        export function useStrategy<Strategy>(value: unknown): void {
+          (value as Strategy).directOnly();
+          const strategy = value ? (value as Strategy) : null;
+          if (strategy) strategy.conditionalOnly();
+        }
+        ",
+    );
+
+    for member in ["directOnly", "conditionalOnly"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Strategy" && access.member == member),
+            "a generic type parameter must not credit an imported same-name type: {member} in {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn scoped_typed_parameter_records_property_chain_accesses() {
     let info = parse(
         r"
@@ -6254,6 +6301,54 @@ fn scoped_typed_parameter_records_property_chain_accesses() {
     assert!(
         facts.contains(&("Context", "strategy", "reset")),
         "{facts:?}"
+    );
+}
+
+#[test]
+fn destructured_receiver_alias_respects_nested_value_shadowing() {
+    let info = parse(
+        r"
+        interface Context {
+          strategy: Strategy;
+        }
+        declare const replacement: Strategy;
+
+        export function useContext(context: Context): void {
+          const { strategy } = context;
+          strategy.outerUsed();
+
+          function nested(strategy: Strategy): void {
+            strategy.parameterOnly();
+          }
+          {
+            const strategy = replacement;
+            strategy.blockOnly();
+          }
+          void nested;
+        }
+        ",
+    );
+
+    let contextual_members = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::TypedPropertyMemberAccess(access)
+                if access.type_name == "Context" && access.property_path == "strategy" =>
+            {
+                Some(access.member.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        contextual_members.contains(&"outerUsed"),
+        "{contextual_members:?}"
+    );
+    assert!(
+        !contextual_members.contains(&"parameterOnly")
+            && !contextual_members.contains(&"blockOnly"),
+        "nearer value bindings must stop destructured receiver alias resolution: {contextual_members:?}"
     );
 }
 
@@ -6312,6 +6407,36 @@ fn function_type_alias_supplies_scoped_parameter_types() {
         )),
         "function alias should provide the contextual parameter type: {:?}",
         info.semantic_facts
+    );
+}
+
+#[test]
+fn generic_function_type_alias_substitutes_concrete_parameter_types() {
+    let info = parse(
+        r"
+        import type { Context } from './context';
+        type Handler<T> = (value: T) => void;
+
+        export const handle: Handler<Context> = value => {
+          value.run();
+        };
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Context" && access.member == "run"),
+        "the concrete type argument should replace the alias parameter: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "T" && access.member == "run"),
+        "a generic alias parameter must not become a module type: {:?}",
+        info.member_accesses
     );
 }
 
@@ -10330,6 +10455,73 @@ fn type_alias_surface_targets_exclude_nested_property_types() {
         info.member_accesses
             .iter()
             .any(|access| { access.object == "AliasContext" && access.member == "pickedOnly" })
+    );
+}
+
+#[test]
+fn generic_type_alias_parameters_are_not_module_surface_targets() {
+    let info = parse(
+        r"
+        import type { T } from './external';
+        export type Alias<T> = T;
+        ",
+    );
+
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::TypeAliasSurfaceTarget(target)
+                if target.alias_name == "Alias" && target.target_name == "T"
+        )),
+        "a bound alias parameter must not become a surface target: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        !info
+            .public_signature_type_references
+            .iter()
+            .any(|reference| reference.export_name == "Alias" && reference.type_name == "T"),
+        "a bound alias parameter must not resolve to an imported same-name type: {:?}",
+        info.public_signature_type_references
+    );
+}
+
+#[test]
+fn lexical_generic_parameters_shadow_imported_signature_types() {
+    let info = parse(
+        r"
+        import type { Context } from './external';
+
+        export function useContext<Context>(value: Context): Context {
+          value.run();
+          return value;
+        }
+
+        export class ContextBox<Context> {
+          value!: Context;
+          use(value: Context): Context {
+            value.run();
+            return value;
+          }
+        }
+        ",
+    );
+
+    assert!(
+        !info
+            .public_signature_type_references
+            .iter()
+            .any(|reference| reference.type_name == "Context"),
+        "lexical generic parameters must not resolve to imported same-name types: {:?}",
+        info.public_signature_type_references
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Context" && access.member == "run"),
+        "lexical generic parameters must not credit imported same-name members: {:?}",
+        info.member_accesses
     );
 }
 

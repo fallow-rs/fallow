@@ -225,6 +225,53 @@ fn make_export_with_members(
     }
 }
 
+#[test]
+fn shadowed_computed_enum_key_does_not_credit_class_member() {
+    let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/classes.ts", false)]);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Protocol",
+            vec![make_member("__shadowed", MemberKind::ClassProperty)],
+            Some(0),
+        )],
+    );
+    let module = fallow_extract::parse_source_to_module(
+        FileId(0),
+        std::path::Path::new("/src/entry.ts"),
+        r"
+        enum ProtocolKey { Protocol = '__shadowed' }
+        export function read(
+            target: Record<string, unknown>,
+            ProtocolKey: { Protocol: string },
+        ): unknown {
+            return target[ProtocolKey.Protocol]
+        }
+        ",
+        0,
+        false,
+    );
+    graph.resolved_modules[0].semantic_facts = std::sync::Arc::clone(&module.semantic_facts);
+
+    let (_, class_members) = find_unused_members(
+        &graph,
+        &graph.resolved_modules,
+        &[module],
+        &SuppressionContext::empty(),
+        &FxHashMap::default(),
+        &[],
+        &[],
+    );
+
+    assert!(
+        class_members.iter().any(|member| {
+            member.parent_name == "Protocol" && member.member_name == "__shadowed"
+        }),
+        "a parameter-shadowed enum key must not credit the matching class member: {class_members:?}"
+    );
+}
+
 /// Add canonical resolver inputs before the fixture builds its graph.
 fn set_exports(graph: &mut TestGraphFixture, target: usize, exports: &[TestExport]) {
     graph.assert_configuring();

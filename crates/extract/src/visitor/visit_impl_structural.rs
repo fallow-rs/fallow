@@ -78,17 +78,36 @@ impl ModuleInfoExtractor {
     }
 
     fn record_scoped_parameter_member_accesses(&mut self, uses: &ScopedStructuralUses) {
-        self.member_accesses
-            .extend(uses.params.values().flat_map(|param| {
-                param
-                    .members
-                    .iter()
-                    .map(|member| fallow_types::extract::MemberAccess {
-                        object: param.type_name.clone(),
-                        member: member.clone(),
-                    })
-            }));
+        let type_alias_scopes = &self.function_type_alias_scopes;
+        let is_shadowed = |type_name: &str| {
+            type_alias_scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.contains_key(type_name))
+        };
+        self.member_accesses.extend(
+            uses.params
+                .values()
+                .filter(|param| !is_shadowed(param.type_name.as_str()))
+                .flat_map(|param| {
+                    param
+                        .members
+                        .iter()
+                        .map(|member| fallow_types::extract::MemberAccess {
+                            object: param.type_name.clone(),
+                            member: member.clone(),
+                        })
+                }),
+        );
         for (type_name, property_path, member) in &uses.typed_property_accesses {
+            if self
+                .function_type_alias_scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.contains_key(type_name.as_str()))
+            {
+                continue;
+            }
             self.record_typed_property_member_fact(
                 type_name.clone(),
                 property_path.clone(),
@@ -200,9 +219,7 @@ impl ModuleInfoExtractor {
         let inferred_param_types = declarator
             .type_annotation
             .as_deref()
-            .and_then(extract_type_annotation_name)
-            .and_then(|name| self.resolve_function_type_alias_params(&name))
-            .cloned();
+            .and_then(|annotation| self.resolve_function_type_alias_params(annotation));
         match init {
             Expression::ArrowFunctionExpression(arrow) => {
                 if is_module_scope {
@@ -210,7 +227,9 @@ impl ModuleInfoExtractor {
                         id.name.as_str(),
                         &arrow.params,
                         Some(arrow.body.as_ref()),
-                        inferred_param_types.as_deref(),
+                        inferred_param_types
+                            .as_ref()
+                            .map(|types| types.parameters.as_slice()),
                     );
                     self.record_factory_return_function(
                         id.name.as_str(),
@@ -227,7 +246,9 @@ impl ModuleInfoExtractor {
                     self.record_structural_function_uses(
                         &arrow.params,
                         Some(arrow.body.as_ref()),
-                        inferred_param_types.as_deref(),
+                        inferred_param_types
+                            .as_ref()
+                            .map(|types| types.parameters.as_slice()),
                     );
                 }
             }
@@ -237,7 +258,9 @@ impl ModuleInfoExtractor {
                         id.name.as_str(),
                         &function.params,
                         function.body.as_deref(),
-                        inferred_param_types.as_deref(),
+                        inferred_param_types
+                            .as_ref()
+                            .map(|types| types.parameters.as_slice()),
                     );
                     self.record_factory_return_function(
                         id.name.as_str(),
@@ -254,7 +277,9 @@ impl ModuleInfoExtractor {
                     self.record_structural_function_uses(
                         &function.params,
                         function.body.as_deref(),
-                        inferred_param_types.as_deref(),
+                        inferred_param_types
+                            .as_ref()
+                            .map(|types| types.parameters.as_slice()),
                     );
                 }
             }
@@ -268,8 +293,8 @@ impl ModuleInfoExtractor {
         let TSType::TSFunctionType(function) = &alias.type_annotation else {
             return None;
         };
-        Some(
-            function
+        Some(ContextualParameterTypes {
+            parameters: function
                 .params
                 .items
                 .iter()
@@ -280,7 +305,14 @@ impl ModuleInfoExtractor {
                         .and_then(extract_type_annotation_name)
                 })
                 .collect(),
-        )
+            type_parameters: alias
+                .type_parameters
+                .as_deref()
+                .into_iter()
+                .flat_map(|parameters| &parameters.params)
+                .map(|parameter| parameter.name.name.to_string())
+                .collect(),
+        })
     }
 
     fn statement_type_alias<'statement, 'ast>(
@@ -407,7 +439,7 @@ impl ModuleInfoExtractor {
         self.function_type_alias_scopes.pop();
     }
 
-    fn resolve_function_type_alias_params(&self, name: &str) -> Option<&ContextualParameterTypes> {
+    fn resolve_function_type_alias(&self, name: &str) -> Option<&ContextualParameterTypes> {
         for scope in self.function_type_alias_scopes.iter().rev() {
             if let Some(binding) = scope.get(name) {
                 return match binding {
@@ -417,5 +449,74 @@ impl ModuleInfoExtractor {
             }
         }
         self.function_type_alias_params.get(name)
+    }
+
+    fn resolve_function_type_alias_params(
+        &self,
+        annotation: &oxc_ast::ast::TSTypeAnnotation<'_>,
+    ) -> Option<ContextualParameterTypes> {
+        let TSType::TSTypeReference(reference) = &annotation.type_annotation else {
+            return None;
+        };
+        let oxc_ast::ast::TSTypeName::IdentifierReference(alias_name) = &reference.type_name else {
+            return None;
+        };
+        let alias = self.resolve_function_type_alias(alias_name.name.as_str())?;
+        if alias.type_parameters.is_empty() {
+            if reference.type_arguments.is_some() {
+                return None;
+            }
+            return Some(ContextualParameterTypes {
+                parameters: alias.parameters.clone(),
+                type_parameters: Vec::new(),
+            });
+        }
+
+        let arguments = reference.type_arguments.as_deref()?;
+        if arguments.params.len() != alias.type_parameters.len() {
+            return None;
+        }
+        let substitutions: FxHashMap<&str, String> = alias
+            .type_parameters
+            .iter()
+            .map(String::as_str)
+            .zip(&arguments.params)
+            .map(|(parameter, argument)| {
+                let TSType::TSTypeReference(argument) = argument else {
+                    return None;
+                };
+                let oxc_ast::ast::TSTypeName::IdentifierReference(argument_name) =
+                    &argument.type_name
+                else {
+                    return None;
+                };
+                if argument.type_arguments.is_some()
+                    || self
+                        .function_type_alias_scopes
+                        .iter()
+                        .rev()
+                        .any(|scope| scope.contains_key(argument_name.name.as_str()))
+                {
+                    return None;
+                }
+                Some((parameter, argument_name.name.to_string()))
+            })
+            .collect::<Option<_>>()?;
+        let parameters = alias
+            .parameters
+            .iter()
+            .map(|parameter| {
+                parameter.as_ref().and_then(|name| {
+                    substitutions
+                        .get(name.as_str())
+                        .cloned()
+                        .or_else(|| (!alias.type_parameters.contains(name)).then(|| name.clone()))
+                })
+            })
+            .collect();
+        Some(ContextualParameterTypes {
+            parameters,
+            type_parameters: Vec::new(),
+        })
     }
 }
