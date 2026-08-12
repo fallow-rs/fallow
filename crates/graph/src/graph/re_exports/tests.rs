@@ -3270,7 +3270,7 @@ fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
     clippy::too_many_lines,
     reason = "fixture enumerates a mixed star-export graph across value and type paths"
 )]
-fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
+fn value_star_path_does_not_invent_a_value_binding_for_a_type_export() {
     let files = vec![
         DiscoveredFile {
             id: FileId(0),
@@ -3428,18 +3428,16 @@ fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
         .iter()
         .find(|e| e.name.to_string() == "X" && e.is_type_only)
         .expect("source should have a synthetic type stub for X");
-    let value_stub = source
-        .exports
-        .iter()
-        .find(|e| e.name.to_string() == "X" && !e.is_type_only)
-        .expect("source should have a synthetic value stub for X");
     assert!(
         !type_stub.references.is_empty(),
         "type-only star edge should keep a type synthetic stub"
     );
     assert!(
-        !value_stub.references.is_empty(),
-        "value star edge should keep a value synthetic stub"
+        !source
+            .exports
+            .iter()
+            .any(|export| export.name.to_string() == "X" && !export.is_type_only),
+        "a value star path must not synthesize a value binding for a type-only export"
     );
 }
 
