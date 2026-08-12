@@ -1204,6 +1204,97 @@ mod tests {
         assert!(!trace.is_used, "type usage must not select the type export");
     }
 
+    #[test]
+    fn trace_preserves_dual_namespace_named_re_exports() {
+        let files: Vec<_> = ["entry", "barrel", "types", "values"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(format!("/project/src/{name}.ts")),
+                size_bytes: 10,
+            })
+            .collect();
+        let export = |is_type_only| ExportInfo {
+            name: ExportName::Named("Foo".to_string()),
+            local_name: Some("Foo".to_string()),
+            is_type_only,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 3),
+            members: Vec::new(),
+            is_side_effect_used: false,
+            super_class: None,
+        };
+        let re_export = |source: FileId, is_type_only| ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./{}", source.0),
+                imported_name: "Foo".to_string(),
+                exported_name: "Foo".to_string(),
+                is_type_only,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(source),
+        };
+        let resolved = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./barrel".to_string(),
+                        imported_name: ImportedName::Named("Foo".to_string()),
+                        local_name: "Foo".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![re_export(FileId(2), true), re_export(FileId(3), false)],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![export(true)].into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                exports: vec![export(false)].into(),
+                ..Default::default()
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/barrel.ts", "Foo")
+            .expect("barrel exposes Foo in both namespaces");
+
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Value
+        );
+        assert!(
+            trace.is_used,
+            "the value import must credit the value surface"
+        );
+        assert_eq!(trace.direct_references.len(), 1);
+    }
+
     fn build_class_member_graph() -> ModuleGraph {
         use fallow_types::extract::{MemberInfo, MemberKind};
 
