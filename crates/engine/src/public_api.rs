@@ -40,6 +40,7 @@ pub fn public_api_package_entry_points(
         graph,
         &path_to_file_id,
         workspaces,
+        &config.public_packages,
         &canonical_project_root,
     );
 
@@ -120,9 +121,13 @@ fn add_workspace_public_api_entry_points(
     graph: &fallow_graph::graph::ModuleGraph,
     path_to_file_id: &FxHashMap<PathBuf, FileId>,
     workspaces: &[WorkspaceInfo],
+    public_packages: &[String],
     canonical_project_root: &Path,
 ) {
-    for workspace in workspaces {
+    for workspace in workspaces
+        .iter()
+        .filter(|workspace| fallow_config::workspace_is_public(&workspace.name, public_packages))
+    {
         let Some(pkg) = fallow_config::load_dir_package_json(&workspace.root) else {
             continue;
         };

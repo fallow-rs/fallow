@@ -258,18 +258,9 @@ fn public_workspace_roots<'a>(
 
     workspaces
         .iter()
-        .filter(|workspace| workspace_is_public(&workspace.name, public_packages))
+        .filter(|workspace| fallow_config::workspace_is_public(&workspace.name, public_packages))
         .map(|ws| ws.root.as_path())
         .collect()
-}
-
-fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
-    public_packages.iter().any(|pattern| {
-        name == pattern
-            || globset::Glob::new(pattern)
-                .ok()
-                .is_some_and(|glob| glob.compile_matcher().is_match(name))
-    })
 }
 
 /// Build the raw (as-discovered) module-path -> `FileId` index.
@@ -471,7 +462,7 @@ fn add_workspace_public_api_entry_points(
 ) {
     for workspace in workspaces
         .iter()
-        .filter(|workspace| workspace_is_public(&workspace.name, public_packages))
+        .filter(|workspace| fallow_config::workspace_is_public(&workspace.name, public_packages))
     {
         let Some(pkg) = fallow_config::load_dir_package_json(&workspace.root) else {
             continue;

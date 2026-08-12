@@ -67,6 +67,21 @@ pub struct WorkspaceInfo {
     pub is_internal_dependency: bool,
 }
 
+/// Return whether a workspace package name is selected by `publicPackages`.
+///
+/// Exact names and glob patterns share one config-owned matcher so analysis
+/// surfaces cannot disagree about which workspace APIs are public. Invalid
+/// patterns do not match, preserving the existing fail-closed behavior.
+#[must_use]
+pub fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
+    public_packages.iter().any(|pattern| {
+        name == pattern
+            || globset::Glob::new(pattern)
+                .ok()
+                .is_some_and(|glob| glob.compile_matcher().is_match(name))
+    })
+}
+
 /// Discover all workspace packages in a monorepo.
 ///
 /// Sources (additive, deduplicated by canonical path):
@@ -673,6 +688,23 @@ fn dir_name(dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_workspace_selection_supports_exact_names_and_globs() {
+        assert!(!workspace_is_public("@scope/core", &[]));
+        assert!(workspace_is_public(
+            "@scope/core",
+            &["@scope/core".to_string()]
+        ));
+        assert!(workspace_is_public(
+            "@scope/core",
+            &["@scope/*".to_string()]
+        ));
+        assert!(!workspace_is_public(
+            "@scope/core",
+            &["[invalid".to_string(), "@other/*".to_string()]
+        ));
+    }
 
     #[test]
     fn discover_workspaces_from_tsconfig_references() {
