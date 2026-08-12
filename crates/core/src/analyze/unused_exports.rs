@@ -2326,21 +2326,16 @@ mod tests {
     fn dynamic_import_named_without_matching_export_still_flagged() {
         use crate::extract::ImportedName;
 
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/Foo.tsx", false),
-            ("/src/other-foo.tsx", false),
-            ("/src/wrapper.tsx", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("Foo", 10, 30)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("Foo", 10, 30)];
-        graph.modules[3].set_reachable(true);
-        graph.modules[3].exports = vec![make_export("Bar", 10, 30)];
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
-        graph.reverse_deps[3] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/Foo.tsx", false),
+                ("/src/other-foo.tsx", false),
+                ("/src/wrapper.tsx", false),
+            ],
+            &[(1, "Foo", false), (2, "Foo", false), (3, "Bar", false)],
+            &[(0, 1, "Foo", false), (0, 2, "Foo", false)],
+        );
 
         let mut wrapper = make_resolved_module(3, "/src/wrapper.tsx");
         wrapper.resolved_dynamic_imports =
@@ -2372,17 +2367,15 @@ mod tests {
     fn dynamic_import_default_without_default_export_still_flagged() {
         use crate::extract::ImportedName;
 
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/source.ts", false),
-            ("/src/wrapper.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/source.ts", false),
+                ("/src/wrapper.ts", false),
+            ],
+            &[(1, "helper", false), (2, "helper", false)],
+            &[(0, 1, "helper", false), (0, 2, "helper", false)],
+        );
 
         let mut wrapper = make_resolved_module(2, "/src/wrapper.ts");
         wrapper.resolved_dynamic_imports = vec![dynamic_import_to(1, ImportedName::Default)];
@@ -2407,17 +2400,15 @@ mod tests {
 
     #[test]
     fn duplicate_without_dynamic_link_still_flagged() {
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/a.ts", false),
-            ("/src/b.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/a.ts", false),
+                ("/src/b.ts", false),
+            ],
+            &[(1, "helper", false), (2, "helper", false)],
+            &[(0, 1, "helper", false), (0, 2, "helper", false)],
+        );
 
         let resolved_modules = vec![
             make_resolved_module(1, "/src/a.ts"),
@@ -2440,17 +2431,15 @@ mod tests {
     fn dynamic_import_named_mismatched_with_wrapper_export_still_flagged() {
         use crate::extract::ImportedName;
 
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/source.ts", false),
-            ("/src/wrapper.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("Foo", 10, 30)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("Foo", 10, 30)];
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/source.ts", false),
+                ("/src/wrapper.ts", false),
+            ],
+            &[(1, "Foo", false), (2, "Foo", false)],
+            &[(0, 1, "Foo", false), (0, 2, "Foo", false)],
+        );
 
         let mut wrapper = make_resolved_module(2, "/src/wrapper.ts");
         wrapper.resolved_dynamic_imports =
