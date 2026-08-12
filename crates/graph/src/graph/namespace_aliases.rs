@@ -32,8 +32,8 @@ use super::namespace_indexes::{
     NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
 };
 use super::narrowing::{
-    ReferenceDedup, ReferenceSite, create_synthetic_exports_for_star_re_exports_at_site,
-    mark_member_exports_referenced_at_site,
+    NamespaceMarkContext, ReferenceDedup, ReferenceSite,
+    create_synthetic_exports_for_star_re_exports_at_site, mark_member_exports_referenced_at_site,
 };
 use super::types::{
     ReferenceKind, ReferencePathId, ReferencePathInterner, ReferenceRouteGraphSpec,
@@ -92,8 +92,12 @@ fn collect_pending_credits(
             else {
                 continue;
             };
-            let reachable =
-                indexes.enumerate_reachable_barrels(graph, alias_file_id, &alias.via_export_name);
+            let reachable = indexes.enumerate_reachable_barrels(
+                graph,
+                alias_file_id,
+                &alias.via_export_name,
+                super::ExportNamespace::Value,
+            );
             let routes = reachable.intern_routes(
                 namespace_target.file_id,
                 namespace_target.mechanism,
@@ -524,23 +528,28 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: Vec<PendingCredit>) {
     }
 
     let mut dedup = ReferenceDedup::default();
+    let effective_exports = &graph.effective_exports;
+    let modules = &mut graph.modules;
     for ((target_module_idx, consumer_file_id, import_span, path), members) in groups {
-        let module = &mut graph.modules[target_module_idx];
+        let module = &mut modules[target_module_idx];
         let site = ReferenceSite::exact(consumer_file_id, import_span, path);
-        let found_members = mark_member_exports_referenced_at_site(
-            &mut module.exports,
-            module.file_id,
+        let mut mark = NamespaceMarkContext {
+            module_id: module.file_id,
             site,
-            &members,
-            ReferenceKind::NamespaceImport,
-            &mut dedup,
-        );
+            kind: ReferenceKind::NamespaceImport,
+            namespace: super::ExportNamespace::Value,
+            effective_exports,
+            dedup: &mut dedup,
+        };
+        let found_members =
+            mark_member_exports_referenced_at_site(&mut module.exports, &members, &mut mark);
         create_synthetic_exports_for_star_re_exports_at_site(
             &mut module.exports,
             &module.re_exports,
             site,
             &members,
             &found_members,
+            super::ExportNamespace::Value,
         );
     }
 }

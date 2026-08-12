@@ -38,7 +38,7 @@ impl EffectiveExportBinding {
         self.file_id
     }
 
-    pub(super) const fn origin_slot(self) -> Option<usize> {
+    pub(in crate::graph) const fn origin_slot(self) -> Option<usize> {
         match self.kind {
             EffectiveExportBindingKind::Declaration(slot) => Some(slot),
             EffectiveExportBindingKind::NamespaceObject { .. }
@@ -477,23 +477,25 @@ fn register_named_observer(
     } = state;
     let exported_name = interner.intern(&info.exported_name);
     if info.imported_name == "*" {
-        let namespace = if info.is_type_only {
-            ExportNamespace::Type
+        let namespaces: &[ExportNamespace] = if info.is_type_only {
+            &[ExportNamespace::Type]
         } else {
-            ExportNamespace::Value
+            &[ExportNamespace::Type, ExportNamespace::Value]
         };
-        let destination = ExportLookup::new(barrel, exported_name, namespace);
-        if !direct_keys.contains(&destination) {
-            observers.explicit_keys.insert(destination);
-            merge_resolution(
-                resolutions,
-                queue,
-                destination,
-                EffectiveExportResolution::Unique(EffectiveExportBinding {
-                    file_id: barrel,
-                    kind: EffectiveExportBindingKind::NamespaceObject { source },
-                }),
-            );
+        for &namespace in namespaces {
+            let destination = ExportLookup::new(barrel, exported_name, namespace);
+            if !direct_keys.contains(&destination) {
+                observers.explicit_keys.insert(destination);
+                merge_resolution(
+                    resolutions,
+                    queue,
+                    destination,
+                    EffectiveExportResolution::Unique(EffectiveExportBinding {
+                        file_id: barrel,
+                        kind: EffectiveExportBindingKind::NamespaceObject { source },
+                    }),
+                );
+            }
         }
         return;
     }
@@ -803,6 +805,19 @@ mod tests {
             index.resolve(FileId(0), "Types", ExportNamespace::Value),
             EffectiveExportResolution::Missing
         );
+    }
+
+    #[test]
+    fn normal_namespace_re_export_resolves_in_both_namespaces() {
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![re_export(FileId(1), "*", "Namespace")]),
+            module(1, vec![value_export("foo")], Vec::new()),
+        ]);
+
+        let type_binding = index.resolve(FileId(0), "Namespace", ExportNamespace::Type);
+        let value_binding = index.resolve(FileId(0), "Namespace", ExportNamespace::Value);
+        assert!(matches!(type_binding, EffectiveExportResolution::Unique(_)));
+        assert_eq!(type_binding, value_binding);
     }
 
     #[test]

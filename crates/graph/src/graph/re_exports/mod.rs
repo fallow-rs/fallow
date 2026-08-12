@@ -15,7 +15,7 @@ use std::cell::{Cell, RefCell};
 use crate::resolve::ResolvedModule;
 use fallow_types::discover::FileId;
 
-use super::types::{ReferencePathId, ReferencePathInterner};
+use super::types::{ReferencePathInterner, RoutedReferenceKey};
 use super::{Edge, ModuleGraph};
 
 use propagate::{
@@ -103,7 +103,7 @@ struct ReExportContext<'a> {
     named_import_origin_index: &'a NamedImportOriginIndex,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     effective_exports: &'a super::effective_exports::EffectiveExportIndex,
-    existing_refs: &'a mut FxHashSet<(FileId, Option<ReferencePathId>)>,
+    existing_refs: &'a mut FxHashSet<RoutedReferenceKey>,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
     reference_paths: &'a mut ReferencePathInterner,
 }
@@ -321,7 +321,7 @@ impl ModuleGraph {
         let safety_cap = self.re_export_transition_safety_cap(re_export_info);
         let mut processed = 0usize;
         let mut plan = ReExportPropagationPlan::new(re_export_info);
-        let mut existing_refs: FxHashSet<(FileId, Option<ReferencePathId>)> = FxHashSet::default();
+        let mut existing_refs: FxHashSet<RoutedReferenceKey> = FxHashSet::default();
         let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
         while let Some(entry_idx) = plan.pop_front() {
@@ -489,7 +489,7 @@ impl ModuleGraph {
             reference_paths,
         } = input;
         let max_iterations = re_export_info.len().saturating_add(1);
-        let mut existing_refs: FxHashSet<(FileId, Option<ReferencePathId>)> = FxHashSet::default();
+        let mut existing_refs: FxHashSet<RoutedReferenceKey> = FxHashSet::default();
         let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
         for _ in 0..max_iterations {

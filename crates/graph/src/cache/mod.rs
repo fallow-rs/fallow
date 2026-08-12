@@ -71,7 +71,11 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 24: namespace-object bindings retain their source module so
 /// consumers can enumerate the namespace through the canonical index.
-pub const GRAPH_CACHE_VERSION: u32 = 24;
+///
+/// Bumped to 25: export references retain their semantic Type or Value
+/// namespace so one named re-export surface can route both without duplicate
+/// graph symbols.
+pub const GRAPH_CACHE_VERSION: u32 = 25;
 
 /// Cached form of a resolved target.
 ///

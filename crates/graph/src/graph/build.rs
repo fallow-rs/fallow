@@ -265,7 +265,6 @@ fn append_named_re_export_stubs(exports: &mut Vec<ExportSymbol>, resolved: &Reso
         if re.info.exported_name == "*" {
             continue;
         }
-
         let export_name = if re.info.exported_name == "default" {
             if std::mem::replace(&mut has_default, true) {
                 continue;
@@ -455,6 +454,7 @@ impl ModuleGraph {
                         module_by_id,
                         entry_point_ids,
                         export_index,
+                        effective_exports: &self.effective_exports,
                         dedup: &mut dedup,
                     },
                 );

@@ -18,8 +18,8 @@ use super::{EffectiveExportResolution, ExportNamespace};
 
 #[derive(Default)]
 struct ReExportTargets {
-    named: FxHashMap<String, Vec<(FileId, String)>>,
-    star_barrels: Vec<FileId>,
+    named: FxHashMap<String, Vec<(FileId, String, bool)>>,
+    star_barrels: Vec<(FileId, bool)>,
 }
 
 /// One resolved consumer import matching a reachable re-export name.
@@ -257,24 +257,30 @@ impl<'a> NamespacePropagationIndexes<'a> {
             for edge in &module.re_exports {
                 let targets = re_exports_by_source.entry(edge.source_file).or_default();
                 if edge.imported_name == "*" && edge.exported_name == "*" {
-                    targets.star_barrels.push(module.file_id);
+                    targets
+                        .star_barrels
+                        .push((module.file_id, edge.is_type_only));
                 } else if edge.imported_name != "*" {
                     targets
                         .named
                         .entry(edge.imported_name.clone())
                         .or_default()
-                        .push((module.file_id, edge.exported_name.clone()));
+                        .push((
+                            module.file_id,
+                            edge.exported_name.clone(),
+                            edge.is_type_only,
+                        ));
                 }
             }
         }
         for targets in re_exports_by_source.values_mut() {
             targets
                 .star_barrels
-                .sort_unstable_by_key(|file_id| file_id.0);
+                .sort_unstable_by_key(|(file_id, type_only)| (file_id.0, *type_only));
             targets.star_barrels.dedup();
             for named in targets.named.values_mut() {
                 named.sort_unstable_by(|left, right| {
-                    (left.0.0, left.1.as_str()).cmp(&(right.0.0, right.1.as_str()))
+                    (left.0.0, left.1.as_str(), left.2).cmp(&(right.0.0, right.1.as_str(), right.2))
                 });
                 named.dedup();
             }
@@ -284,9 +290,6 @@ impl<'a> NamespacePropagationIndexes<'a> {
             FxHashMap::default();
         for consumer in module_by_id.values() {
             for import in &consumer.resolved_imports {
-                if import.info.is_type_only {
-                    continue;
-                }
                 let Some(target) = import.target.internal_file_id() else {
                     continue;
                 };
@@ -326,17 +329,20 @@ impl<'a> NamespacePropagationIndexes<'a> {
         graph: &ModuleGraph,
         seed_file: FileId,
         seed_name: &str,
+        namespace: ExportNamespace,
     ) -> ReachableNamespaceExports {
         self.enumerate_reachable_barrels_with(
             seed_file,
             seed_name,
+            namespace,
             |source_file, source_name, barrel_file, barrel_name| {
-                uniquely_forwards_value_binding(
+                uniquely_forwards_binding(
                     graph,
                     source_file,
                     source_name,
                     barrel_file,
                     barrel_name,
+                    namespace,
                 )
             },
         )
@@ -346,6 +352,7 @@ impl<'a> NamespacePropagationIndexes<'a> {
         &self,
         seed_file: FileId,
         seed_name: &str,
+        namespace: ExportNamespace,
         mut forwards: impl FnMut(FileId, &str, FileId, &str) -> bool,
     ) -> ReachableNamespaceExports {
         let mut traversal = NamespaceTraversal::new(seed_file, seed_name);
@@ -359,14 +366,18 @@ impl<'a> NamespacePropagationIndexes<'a> {
                 continue;
             };
             if let Some(named) = targets.named.get(source_name.as_str()) {
-                for (barrel_file, exported_name) in named {
-                    if forwards(source_file, &source_name, *barrel_file, exported_name) {
+                for (barrel_file, exported_name, is_type_only) in named {
+                    if (namespace == ExportNamespace::Type || !is_type_only)
+                        && forwards(source_file, &source_name, *barrel_file, exported_name)
+                    {
                         traversal.connect(source_index, *barrel_file, exported_name);
                     }
                 }
             }
-            for &barrel_file in &targets.star_barrels {
-                if forwards(source_file, &source_name, barrel_file, &source_name) {
+            for &(barrel_file, is_type_only) in &targets.star_barrels {
+                if (namespace == ExportNamespace::Type || !is_type_only)
+                    && forwards(source_file, &source_name, barrel_file, &source_name)
+                {
                     traversal.connect(source_index, barrel_file, &source_name);
                 }
             }
@@ -387,17 +398,18 @@ impl<'a> NamespacePropagationIndexes<'a> {
     }
 }
 
-fn uniquely_forwards_value_binding(
+fn uniquely_forwards_binding(
     graph: &ModuleGraph,
     source_file: FileId,
     source_name: &str,
     barrel_file: FileId,
     barrel_name: &str,
+    namespace: ExportNamespace,
 ) -> bool {
     matches!(
         (
-            graph.resolve_export(source_file, source_name, ExportNamespace::Value),
-            graph.resolve_export(barrel_file, barrel_name, ExportNamespace::Value),
+            graph.resolve_export(source_file, source_name, namespace),
+            graph.resolve_export(barrel_file, barrel_name, namespace),
         ),
         (
             EffectiveExportResolution::Unique(source),
@@ -429,12 +441,16 @@ mod tests {
             targets.star_barrels.extend(
                 (0..BARREL_COUNT)
                     .filter(|&barrel| barrel != source)
-                    .map(FileId),
+                    .map(|barrel| (FileId(barrel), false)),
             );
         }
 
-        let reachable =
-            indexes.enumerate_reachable_barrels_with(FileId(0), "Ns", |_, _, _, _| true);
+        let reachable = indexes.enumerate_reachable_barrels_with(
+            FileId(0),
+            "Ns",
+            ExportNamespace::Value,
+            |_, _, _, _| true,
+        );
 
         assert_eq!(reachable.state_count(), BARREL_COUNT as usize);
         assert_eq!(
@@ -458,13 +474,17 @@ mod tests {
                     .entry(*source)
                     .or_default()
                     .star_barrels
-                    .extend(next.iter().copied());
+                    .extend(next.iter().copied().map(|file| (file, false)));
             }
             previous = next;
         }
 
-        let reachable =
-            indexes.enumerate_reachable_barrels_with(FileId(0), "Ns", |_, _, _, _| true);
+        let reachable = indexes.enumerate_reachable_barrels_with(
+            FileId(0),
+            "Ns",
+            ExportNamespace::Value,
+            |_, _, _, _| true,
+        );
 
         assert_eq!(reachable.state_count(), 1 + (LAYERS as usize * 2));
         assert_eq!(
