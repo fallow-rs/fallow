@@ -28,6 +28,7 @@ use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
 use types::{ReferencePathInterner, ReferencePathNode, ReferenceRouteNodeId, ReferenceRoutes};
 
+pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
     CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,
@@ -726,6 +727,21 @@ impl ModuleGraph {
             }
         }
         self.namespace_imported = bitset;
+    }
+
+    /// Resolve the effective declaration exported under `name` in one namespace.
+    ///
+    /// This is the canonical graph contract for direct exports and every named
+    /// or star re-export path. Missing and ambiguous bindings are explicit so
+    /// consumers cannot accidentally credit an arbitrary source declaration.
+    #[must_use]
+    pub fn resolve_export(
+        &self,
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> EffectiveExportResolution {
+        self.effective_exports.resolve(file_id, name, namespace)
     }
 
     /// Check if any importer uses `import * as ns` for this module.

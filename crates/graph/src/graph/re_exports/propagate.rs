@@ -11,7 +11,7 @@ use std::cell::Cell;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
 
-use crate::graph::effective_exports::{EffectiveExportIndex, ExportSpace};
+use crate::graph::effective_exports::{EffectiveExportIndex, ExportNamespace};
 use crate::graph::types::{
     ExportSymbol, ModuleNode, ReferenceKind, ReferencePathId, ReferencePathInterner,
     RoutedReference, SymbolReference,
@@ -120,9 +120,9 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     let source = &mut modules[source_idx];
     for (name, refs) in &refs_by_name {
         let type_resolves =
-            effective_exports.resolves_through(barrel_id, source_id, name, ExportSpace::Type);
+            effective_exports.resolves_through(barrel_id, source_id, name, ExportNamespace::Type);
         let value_resolves =
-            effective_exports.resolves_through(barrel_id, source_id, name, ExportSpace::Value);
+            effective_exports.resolves_through(barrel_id, source_id, name, ExportNamespace::Value);
         if !type_resolves && !value_resolves {
             continue;
         }
@@ -1020,9 +1020,9 @@ fn propagate_entry_point_star(
             continue;
         }
         let space = if export.is_type_only {
-            ExportSpace::Type
+            ExportNamespace::Type
         } else {
-            ExportSpace::Value
+            ExportNamespace::Value
         };
         if !effective_exports.resolves_through(
             barrel_id,
