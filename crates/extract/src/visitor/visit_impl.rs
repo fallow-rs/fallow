@@ -1550,6 +1550,15 @@ impl<'a> ModuleInfoExtractor {
         init: &Expression<'a>,
     ) {
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(source) = static_member_object_name(unwrap_static_expr(init))
+        {
+            let source = self.qualify_this_scope(&source);
+            if let Some(BindingTarget::Class(type_name)) = self.resolve_bound_object_name(&source) {
+                self.insert_class_binding_target(id.name.to_string(), type_name);
+            }
+        }
+
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Some(type_name) = nullable_asserted_type_name(init)
         {
             self.insert_class_binding_target(id.name.to_string(), type_name);

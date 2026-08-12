@@ -901,7 +901,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 263: scoped typed-parameter collection now persists property-chain
 /// accesses, including destructured aliases. Warm 262 caches omit those facts.
-pub(super) const CACHE_VERSION: u32 = 263;
+///
+/// Bumped to 264: locals initialized from typed instance fields retain the
+/// field's receiver type. Warm 263 caches omit accesses through those locals.
+pub(super) const CACHE_VERSION: u32 = 264;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

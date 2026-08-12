@@ -6258,6 +6258,35 @@ fn scoped_typed_parameter_records_property_chain_accesses() {
 }
 
 #[test]
+fn typed_field_initializer_binds_local_receiver() {
+    let info = parse(
+        r"
+        interface Strategy {
+          notify(): void;
+        }
+
+        export class Registry {
+          current?: Strategy;
+
+          flush(): void {
+            for (let current = this.current; current; current = undefined) {
+              current.notify();
+            }
+          }
+        }
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Strategy" && access.member == "notify"),
+        "typed field initializer should bind the local receiver: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn angular_inject_property_records_instance_binding() {
     let info = parse(
         r"
