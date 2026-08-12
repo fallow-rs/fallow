@@ -126,6 +126,22 @@ fn public_packages_suppress_exported_class_and_enum_members() {
 }
 
 #[test]
+fn public_package_glob_suppresses_exported_members() {
+    let root = fixture_path("public-package-members");
+    let mut config = create_config(root);
+    config.public_packages = vec!["@workspace/*".to_string()];
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(!results.unused_class_members.iter().any(|member| {
+        member.member.parent_name == "WorkspaceService"
+            && member.member.member_name == "externalApiMethod"
+    }));
+    assert!(!results.unused_enum_members.iter().any(|member| {
+        member.member.parent_name == "PublicStatus" && member.member.member_name == "External"
+    }));
+}
+
+#[test]
 fn non_public_packages_still_report_unused_class_and_enum_members() {
     let root = fixture_path("public-package-members");
 
