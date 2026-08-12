@@ -6643,6 +6643,12 @@ fn class_type_bindings_do_not_leak_outer_contextual_aliases() {
             const handler: Handler = context => context.genericShadowed();
             return handler;
           }
+
+          useSelf(target: Registry) {
+            target.required();
+          }
+
+          required(): void {}
         }
 
         export const Named = class Handler {
@@ -6664,6 +6670,13 @@ fn class_type_bindings_do_not_leak_outer_contextual_aliases() {
             info.member_accesses
         );
     }
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Registry" && access.member == "required"),
+        "the current class binding remains a concrete receiver type: {:?}",
+        info.member_accesses
+    );
 }
 
 #[test]

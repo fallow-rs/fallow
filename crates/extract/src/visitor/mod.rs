@@ -112,6 +112,7 @@ struct ContextualParameterTypes {
 
 enum FunctionTypeAliasBinding {
     Function(ContextualParameterTypes),
+    ClassSelf,
     NonFunction,
 }
 

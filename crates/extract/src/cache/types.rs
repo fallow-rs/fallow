@@ -920,7 +920,11 @@ use crate::MemberKind;
 /// facts. Computed enum-key uses also require a proven module binding. Warm 267
 /// caches can therefore retain false receiver/key credits or omit the concrete
 /// generic receiver selected by the current parse.
-pub(super) const CACHE_VERSION: u32 = 268;
+///
+/// Bumped to 269: a class's own lexical type binding now retains member accesses
+/// against that class while generic and nested type shadows still fail closed.
+/// Warm 268 caches can omit self-typed class member uses.
+pub(super) const CACHE_VERSION: u32 = 269;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

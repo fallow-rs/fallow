@@ -1652,7 +1652,8 @@ impl<'a> ModuleInfoExtractor {
             .function_type_alias_scopes
             .iter()
             .rev()
-            .any(|scope| scope.contains_key(root_name))
+            .find_map(|scope| scope.get(root_name))
+            .is_some_and(|binding| !matches!(binding, super::FunctionTypeAliasBinding::ClassSelf))
         {
             return None;
         }

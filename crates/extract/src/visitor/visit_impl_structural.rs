@@ -83,7 +83,8 @@ impl ModuleInfoExtractor {
             type_alias_scopes
                 .iter()
                 .rev()
-                .any(|scope| scope.contains_key(type_name))
+                .find_map(|scope| scope.get(type_name))
+                .is_some_and(|binding| !matches!(binding, FunctionTypeAliasBinding::ClassSelf))
         };
         self.member_accesses.extend(
             uses.params
@@ -104,7 +105,8 @@ impl ModuleInfoExtractor {
                 .function_type_alias_scopes
                 .iter()
                 .rev()
-                .any(|scope| scope.contains_key(type_name.as_str()))
+                .find_map(|scope| scope.get(type_name.as_str()))
+                .is_some_and(|binding| !matches!(binding, FunctionTypeAliasBinding::ClassSelf))
             {
                 continue;
             }
@@ -421,7 +423,7 @@ impl ModuleInfoExtractor {
         }
         let mut scope = FxHashMap::default();
         if let Some(id) = id {
-            scope.insert(id.name.to_string(), FunctionTypeAliasBinding::NonFunction);
+            scope.insert(id.name.to_string(), FunctionTypeAliasBinding::ClassSelf);
         }
         if let Some(type_parameters) = type_parameters {
             scope.extend(type_parameters.params.iter().map(|parameter| {
@@ -444,7 +446,9 @@ impl ModuleInfoExtractor {
             if let Some(binding) = scope.get(name) {
                 return match binding {
                     FunctionTypeAliasBinding::Function(params) => Some(params),
-                    FunctionTypeAliasBinding::NonFunction => None,
+                    FunctionTypeAliasBinding::ClassSelf | FunctionTypeAliasBinding::NonFunction => {
+                        None
+                    }
                 };
             }
         }
@@ -495,7 +499,10 @@ impl ModuleInfoExtractor {
                         .function_type_alias_scopes
                         .iter()
                         .rev()
-                        .any(|scope| scope.contains_key(argument_name.name.as_str()))
+                        .find_map(|scope| scope.get(argument_name.name.as_str()))
+                        .is_some_and(|binding| {
+                            !matches!(binding, FunctionTypeAliasBinding::ClassSelf)
+                        })
                 {
                     return None;
                 }
