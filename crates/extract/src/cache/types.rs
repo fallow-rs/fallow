@@ -891,7 +891,11 @@ use crate::MemberKind;
 ///
 /// Bumped to 260: SSR-safe aliases of the browser-global `HTMLElement` are now
 /// canonicalized in persisted class heritage. Warm 259 caches retain the alias.
-pub(super) const CACHE_VERSION: u32 = 260;
+///
+/// Bumped to 261: member accesses through explicit TypeScript assertion
+/// receivers are now persisted against the asserted type. Warm 260 caches omit
+/// those accesses.
+pub(super) const CACHE_VERSION: u32 = 261;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

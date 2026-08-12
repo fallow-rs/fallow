@@ -29,10 +29,11 @@ use super::helpers::{
     extract_class_type_parameter_names, extract_concat_parts, extract_custom_element_tag_reference,
     extract_custom_elements_define, extract_implemented_interface_names,
     extract_nested_type_bindings, extract_query_list_element_type, extract_super_class_name,
-    extract_super_class_type_args, extract_type_annotation_name, has_angular_class_decorator,
-    has_angular_plural_query_decorator, infer_array_binding_element_type, is_meta_url_arg,
-    lit_custom_element_decorator, lit_custom_element_tag, regex_pattern_to_suffix,
-    return_type_element_name, ts_import_type_qualifier_root,
+    extract_super_class_type_args, extract_type_annotation_name, extract_type_reference_name,
+    has_angular_class_decorator, has_angular_plural_query_decorator,
+    infer_array_binding_element_type, is_meta_url_arg, lit_custom_element_decorator,
+    lit_custom_element_tag, regex_pattern_to_suffix, return_type_element_name,
+    ts_import_type_qualifier_root,
 };
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
@@ -2743,6 +2744,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         }
+        if let Some(type_name) = asserted_receiver_type_name(&expr.object) {
+            self.member_accesses.push(MemberAccess {
+                object: type_name,
+                member: expr.property.name.to_string(),
+            });
+        }
         if let Some(callee_name) = Self::bare_call_callee_name(&expr.object)
             && Self::inline_store_factory_receiver(&expr.object).is_none()
         {
@@ -3225,6 +3232,21 @@ fn is_html_element_identifier(expr: &Expression<'_>) -> bool {
         unwrap_static_expr(expr),
         Expression::Identifier(identifier) if identifier.name == "HTMLElement"
     )
+}
+
+fn asserted_receiver_type_name(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::ParenthesizedExpression(parenthesized) => {
+            asserted_receiver_type_name(&parenthesized.expression)
+        }
+        Expression::TSAsExpression(assertion) => {
+            extract_type_reference_name(&assertion.type_annotation)
+        }
+        Expression::TSTypeAssertion(assertion) => {
+            extract_type_reference_name(&assertion.type_annotation)
+        }
+        _ => None,
+    }
 }
 
 fn is_string_coercion_sibling(expr: &Expression<'_>) -> bool {

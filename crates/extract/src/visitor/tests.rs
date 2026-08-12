@@ -6170,6 +6170,29 @@ fn shadowed_html_element_alias_keeps_local_superclass() {
 }
 
 #[test]
+fn asserted_receiver_records_member_on_asserted_type() {
+    let info = parse(
+        r"
+        interface Strategy {
+          refresh(): void;
+        }
+
+        export function refresh(value: unknown): void {
+          (value as unknown as Strategy).refresh();
+        }
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Strategy" && access.member == "refresh"),
+        "nested assertion should retain the final asserted receiver type: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn angular_inject_property_records_instance_binding() {
     let info = parse(
         r"
