@@ -55,12 +55,7 @@ pub(super) fn resolve_single_dynamic_import(
     // package name (`@scope/__mocks__`, issue #2213) for the
     // unlisted-dependency analysis.
     if imp.is_speculative
-        && matches!(
-            target,
-            ResolveResult::Unresolvable(_)
-                | ResolveResult::NpmPackage(_)
-                | ResolveResult::CommonJsNpmPackage(_)
-        )
+        && (target.is_bare_package() || matches!(target, ResolveResult::Unresolvable(_)))
     {
         return Vec::new();
     }

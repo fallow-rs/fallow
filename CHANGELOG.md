@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unused shell pagination helper has been removed now that provider pagination
   is owned by the typed Rust posting path.
 
+- **Factory-less `jest.mock`/`vi.mock` of a scoped package no longer fabricates
+  a phantom `unlisted-dependency` finding**
+  (Closes [#2213](https://github.com/fallow-rs/fallow/issues/2213)). The
+  speculative `__mocks__` sibling candidate synthesized for automock calls
+  (`@scope/__mocks__/pkg`) could classify as an npm package and surface as an
+  unlisted dependency named `@scope/__mocks__`, blocking gated CI runs in Jest
+  projects. Speculative mock candidates that resolve to package space are now
+  dropped in the resolver; manual-mock discovery through relative and aliased
+  specifiers is unchanged.
+
 ### Changed
 
 - **Threshold override rows carry the measured span and read `stale` on
@@ -34,7 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `insufficient`, `active`, then `stale`), at most 10 are printed, and an
   overflow line names what was hidden; JSON stays uncapped. No schema
   version bump: the new field is additive.
-
 ## [3.15.0] - 2026-08-11
 
 ### Added

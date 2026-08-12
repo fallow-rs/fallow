@@ -26,7 +26,10 @@ fn create_project(root: &Path) {
         r#"{
             "name": "issue-2213-repro",
             "private": true,
-            "dependencies": { "@bacons/apple-targets": "^5.0.0" },
+            "dependencies": {
+                "@bacons/apple-targets": "^5.0.0",
+                "@mockonly/kit": "^1.0.0"
+            },
             "devDependencies": { "jest": "^29.7.0" }
         }"#,
     );
@@ -47,6 +50,7 @@ fn create_project(root: &Path) {
         r#"import { ExtensionStorage } from "@bacons/apple-targets";
            import { helper } from "definitely-not-installed";
            jest.mock("@bacons/apple-targets");
+           jest.mock("@mockonly/kit");
            test("reads", () => {
              expect(ExtensionStorage.get()).toBe("mock");
              expect(helper).toBeDefined();
@@ -96,5 +100,17 @@ fn issue_2213_jest_mock_does_not_fabricate_phantom_unlisted_dependency() {
             .iter()
             .any(|specifier| specifier.contains("__mocks__")),
         "the speculative mock candidate must not surface as unresolved-import, got {unresolved:?}"
+    );
+
+    // Dropping the speculative sibling must not drop the package credit of the
+    // primary edge: `@mockonly/kit` is referenced only through `jest.mock`.
+    let unused: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused.contains(&"@mockonly/kit"),
+        "a listed package referenced only via jest.mock must keep its usage credit, got {unused:?}"
     );
 }

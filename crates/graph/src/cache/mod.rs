@@ -57,7 +57,12 @@ pub use store::GraphCacheStore;
 /// Bumped to 20: cached re-export edges now carry the enclosing statement
 /// span and the source string-literal span used to anchor unresolved-import
 /// findings on the specifier. Warm 19 caches lack both spans.
-pub const GRAPH_CACHE_VERSION: u32 = 20;
+///
+/// Bumped to 21 for issue #2213: speculative `__mocks__` sibling candidates
+/// that resolve to package space are no longer emitted, so warm 20 caches
+/// would keep replaying the phantom `@scope/__mocks__` package edges the
+/// resolver no longer produces.
+pub const GRAPH_CACHE_VERSION: u32 = 21;
 
 /// Cached form of a resolved target.
 ///
