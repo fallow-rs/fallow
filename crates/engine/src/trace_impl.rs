@@ -810,7 +810,8 @@ mod tests {
 
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
-    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+    use fallow_types::extract::ReExportInfo;
 
     fn build_test_graph() -> ModuleGraph {
         let files = vec![
@@ -951,6 +952,101 @@ mod tests {
 
         let trace = trace_export(&graph, root, "src/utils.ts", "nonexistent");
         assert!(trace.is_none());
+    }
+
+    #[test]
+    fn trace_reports_only_the_effective_re_export_origin() {
+        let files: Vec<_> = ["entry", "barrel", "star-source", "explicit-source"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(format!("/project/src/{name}.ts")),
+                size_bytes: 10,
+            })
+            .collect();
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let re_export = |source: FileId, imported: &str, exported: &str| ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./{}", source.0),
+                imported_name: imported.to_string(),
+                exported_name: exported.to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(source),
+        };
+        let export = || ExportInfo {
+            name: ExportName::Named("foo".to_string()),
+            local_name: Some("foo".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 3),
+            members: Vec::new(),
+            is_side_effect_used: false,
+            super_class: None,
+        };
+        let resolved = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./barrel".to_string(),
+                        imported_name: ImportedName::Named("foo".to_string()),
+                        local_name: "foo".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::default(),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![
+                    re_export(FileId(2), "*", "*"),
+                    re_export(FileId(3), "foo", "foo"),
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![export()].into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                exports: vec![export()].into(),
+                ..Default::default()
+            },
+        ];
+        let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+
+        let shadowed = trace_export(&graph, Path::new("/project"), "src/star-source.ts", "foo")
+            .expect("shadowed source export exists");
+        let effective = trace_export(
+            &graph,
+            Path::new("/project"),
+            "src/explicit-source.ts",
+            "foo",
+        )
+        .expect("effective source export exists");
+
+        assert!(shadowed.re_export_chains.is_empty());
+        assert_eq!(effective.re_export_chains.len(), 1);
+        assert_eq!(effective.re_export_chains[0].exported_as, "foo");
     }
 
     fn build_class_member_graph() -> ModuleGraph {
