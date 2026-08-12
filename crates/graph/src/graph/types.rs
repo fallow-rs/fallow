@@ -242,6 +242,8 @@ impl RoutedReference {
 }
 
 impl ExportSymbol {
+    const INLINE_PHYSICAL_REFERENCE_LIMIT: usize = 8;
+
     /// References that use one semantic namespace.
     pub fn references_in(
         &self,
@@ -255,17 +257,27 @@ impl ExportSymbol {
     /// Distinct physical reference sites, collapsing Type and Value uses of
     /// the same import while preserving different resolved routes.
     pub fn physical_references(&self) -> impl Iterator<Item = &SymbolReference> {
-        let mut seen = (self.references.len() > 1).then(FxHashSet::default);
+        let mut seen = (self.references.len() > Self::INLINE_PHYSICAL_REFERENCE_LIMIT)
+            .then(FxHashSet::default);
         self.references
             .iter()
             .enumerate()
             .filter(move |(index, reference)| {
-                seen.as_mut().is_none_or(|seen| {
-                    seen.insert((
-                        reference.from_file,
-                        reference.import_span,
-                        self.reference_path(*index),
-                    ))
+                let key = (
+                    reference.from_file,
+                    reference.import_span,
+                    self.reference_path(*index),
+                );
+                if let Some(seen) = &mut seen {
+                    return seen.insert(key);
+                }
+                !(0..*index).any(|prior_index| {
+                    let prior = &self.references[prior_index];
+                    key == (
+                        prior.from_file,
+                        prior.import_span,
+                        self.reference_path(prior_index),
+                    )
                 })
             })
             .map(|(_, reference)| reference)
@@ -984,6 +996,37 @@ mod tests {
             re_exports: Vec::new(),
             flags: 0,
         }
+    }
+
+    fn export_with_reference_files(files: &[u32]) -> ExportSymbol {
+        ExportSymbol {
+            name: ExportName::Named("value".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::default(),
+            references: files
+                .iter()
+                .map(|file| SymbolReference {
+                    from_file: FileId(*file),
+                    kind: ReferenceKind::NamedImport,
+                    namespace: ExportNamespace::Value,
+                    import_span: oxc_span::Span::default(),
+                })
+                .collect(),
+            reference_paths: Vec::new(),
+            members: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn physical_references_deduplicate_small_and_large_sets() {
+        let small = export_with_reference_files(&[0, 1, 2, 3, 4, 5, 6, 0]);
+        let large = export_with_reference_files(&[0, 1, 2, 3, 4, 5, 6, 7, 0]);
+
+        assert_eq!(small.physical_reference_count(), 7);
+        assert_eq!(large.physical_reference_count(), 8);
     }
 
     #[test]
