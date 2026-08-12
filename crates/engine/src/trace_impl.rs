@@ -11,7 +11,7 @@ use crate::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, dominant_identifier,
     group_refactoring_suggestion,
 };
-use crate::graph::{ModuleGraph, ReferenceKind};
+use crate::graph::{EffectiveExportResolution, ExportNamespace, ModuleGraph, ReferenceKind};
 
 /// Match a user-provided file path against a module's actual path.
 ///
@@ -58,6 +58,7 @@ fn collect_re_export_chains(
     root: &Path,
     target_file_id: crate::discover::FileId,
     export_name: &str,
+    namespace: ExportNamespace,
 ) -> Vec<ReExportChain> {
     graph
         .modules
@@ -66,8 +67,32 @@ fn collect_re_export_chains(
             m.re_exports
                 .iter()
                 .filter(move |re| {
-                    re.source_file == target_file_id
-                        && (re.imported_name == export_name || re.imported_name == "*")
+                    if re.source_file != target_file_id
+                        || (namespace == ExportNamespace::Value && re.is_type_only)
+                    {
+                        return false;
+                    }
+                    let exported_name = if re.imported_name == "*" {
+                        if re.exported_name != "*" || export_name == "default" {
+                            return false;
+                        }
+                        export_name
+                    } else {
+                        if re.imported_name != export_name {
+                            return false;
+                        }
+                        &re.exported_name
+                    };
+                    matches!(
+                        (
+                            graph.resolve_export(m.file_id, exported_name, namespace),
+                            graph.resolve_export(target_file_id, export_name, namespace),
+                        ),
+                        (
+                            EffectiveExportResolution::Unique(barrel_binding),
+                            EffectiveExportResolution::Unique(source_binding),
+                        ) if barrel_binding == source_binding
+                    )
                 })
                 .map(move |re| {
                     let barrel_export = m.exports.iter().find(|e| {
@@ -144,7 +169,13 @@ pub fn trace_export(
         .map(|r| reference_to_export_reference(graph, root, r))
         .collect();
 
-    let re_export_chains = collect_re_export_chains(graph, root, module.file_id, export_name);
+    let namespace = if export.is_type_only {
+        ExportNamespace::Type
+    } else {
+        ExportNamespace::Value
+    };
+    let re_export_chains =
+        collect_re_export_chains(graph, root, module.file_id, export_name, namespace);
 
     let is_used = !export.references.is_empty();
     let reason = export_trace_reason(module, export.references.len(), is_used, &re_export_chains);
