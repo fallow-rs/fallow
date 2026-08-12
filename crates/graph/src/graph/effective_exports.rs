@@ -293,7 +293,12 @@ fn register_named_observer(
     } = state;
     let exported_name = parse_export_name(&info.exported_name);
     if info.imported_name == "*" {
-        let destination = ExportKey::new(barrel, exported_name, ExportNamespace::Value);
+        let namespace = if info.is_type_only {
+            ExportNamespace::Type
+        } else {
+            ExportNamespace::Value
+        };
+        let destination = ExportKey::new(barrel, exported_name, namespace);
         if !direct_keys.contains(&destination) {
             observers.explicit_keys.insert(destination.clone());
             merge_resolution(
