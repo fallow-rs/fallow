@@ -81,7 +81,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 27: declaration merge groups are stored once and referenced by a
 /// compact per-slot group identifier instead of cloning every group per slot.
-pub const GRAPH_CACHE_VERSION: u32 = 27;
+///
+/// Bumped to 28: reference-site deduplication now includes the exact import
+/// span, so one consumer can retain multiple distinct imports of one binding.
+pub const GRAPH_CACHE_VERSION: u32 = 28;
 
 /// Cached form of a resolved target.
 ///
