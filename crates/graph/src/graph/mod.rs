@@ -5,6 +5,7 @@
 
 mod build;
 mod cycles;
+mod effective_exports;
 mod fan_io;
 mod impact_closure;
 mod namespace_aliases;
@@ -111,6 +112,8 @@ pub struct ModuleGraph {
     /// `re_exports::find_re_export_cycles` and consumed by the analysis
     /// backend, which wraps each entry in a typed `ReExportCycleFinding`.
     pub re_export_cycles: Vec<GraphReExportCycle>,
+    /// Canonical direct and transitive export binding resolution.
+    effective_exports: effective_exports::EffectiveExportIndex,
 }
 
 /// An edge in the module graph.
@@ -560,6 +563,7 @@ impl ModuleGraph {
             module_count,
             total_capacity,
         });
+        graph.effective_exports = effective_exports::EffectiveExportIndex::build(resolved_modules);
 
         let test_reachability_plan = reachability::TestReachabilityPlan::new(
             &test_entry_point_ids,

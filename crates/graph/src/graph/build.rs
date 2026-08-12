@@ -409,6 +409,7 @@ impl ModuleGraph {
                 reverse_deps,
                 namespace_imported: acc.namespace_imported,
                 re_export_cycles: Vec::new(),
+                effective_exports: super::effective_exports::EffectiveExportIndex::default(),
             },
             namespace_features,
         )
