@@ -622,6 +622,129 @@ pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
     commands
 }
 
+/// Return declared package scripts invoked by `command` through npm, pnpm,
+/// yarn, or bun. Used by entry-point discovery to propagate lifecycle roles
+/// through script indirection without expanding or executing script bodies.
+pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxHashSet<String> {
+    let mut names = FxHashSet::default();
+
+    for segment in shell::split_shell_operators(command) {
+        let tokens: Vec<&str> = segment
+            .split_whitespace()
+            .map(strip_surrounding_quotes)
+            .collect();
+        let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
+            continue;
+        };
+        if parse_workspace_script_invocation(&tokens, idx).is_some() {
+            continue;
+        }
+        if let Some(binary) = tokens.get(idx).copied()
+            && SCRIPT_MULTIPLEXERS.contains(&binary)
+        {
+            let mut skip_next = false;
+            for token in &tokens[idx + 1..] {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if matches!(*token, "--names" | "--prefix" | "--max-parallel") {
+                    skip_next = true;
+                    continue;
+                }
+                let name = token.strip_prefix("npm:").unwrap_or(token);
+                if !name.starts_with('-') && catalog.contains(name) {
+                    names.insert(name.to_string());
+                }
+            }
+            continue;
+        }
+        if let Some(invocation) = declared_script_invocation(&tokens, idx, catalog) {
+            names.insert(invocation.name.to_string());
+        }
+    }
+
+    names
+}
+
+/// Return package-qualified script calls such as
+/// `pnpm --filter @scope/api run serve` from one command.
+pub fn referenced_workspace_scripts(command: &str) -> Vec<(String, String)> {
+    let mut references = Vec::new();
+    for segment in shell::split_shell_operators(command) {
+        let tokens: Vec<&str> = segment
+            .split_whitespace()
+            .map(strip_surrounding_quotes)
+            .collect();
+        let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
+            continue;
+        };
+        if let Some(reference) = parse_workspace_script_invocation(&tokens, idx) {
+            references.push(reference);
+        }
+    }
+    references.sort_unstable();
+    references.dedup();
+    references
+}
+
+fn parse_workspace_script_invocation(tokens: &[&str], idx: usize) -> Option<(String, String)> {
+    match tokens.get(idx).copied()? {
+        "pnpm" => parse_pnpm_workspace_script(tokens, idx),
+        "npm" => parse_npm_workspace_script(tokens, idx),
+        "yarn" => parse_yarn_workspace_script(tokens, idx),
+        _ => None,
+    }
+}
+
+fn parse_pnpm_workspace_script(tokens: &[&str], idx: usize) -> Option<(String, String)> {
+    let mut next = idx + 1;
+    while tokens
+        .get(next)
+        .is_some_and(|token| PNPM_IMPLICIT_EXEC_FLAGS.contains(token))
+    {
+        next += 1;
+    }
+    let selector = if tokens.get(next) == Some(&"--filter") {
+        let selector = *tokens.get(next + 1)?;
+        next += 2;
+        selector
+    } else {
+        let selector = tokens.get(next)?.strip_prefix("--filter=")?;
+        next += 1;
+        selector
+    };
+    if !matches!(tokens.get(next), Some(&"run" | &"run-script")) {
+        return None;
+    }
+    Some((selector.to_string(), (*tokens.get(next + 1)?).to_string()))
+}
+
+fn parse_npm_workspace_script(tokens: &[&str], idx: usize) -> Option<(String, String)> {
+    let flag = *tokens.get(idx + 1)?;
+    let (selector, next) = if matches!(flag, "--workspace" | "-w") {
+        (*tokens.get(idx + 2)?, idx + 3)
+    } else {
+        (flag.strip_prefix("--workspace=")?, idx + 2)
+    };
+    if !matches!(tokens.get(next), Some(&"run" | &"run-script")) {
+        return None;
+    }
+    Some((selector.to_string(), (*tokens.get(next + 1)?).to_string()))
+}
+
+fn parse_yarn_workspace_script(tokens: &[&str], idx: usize) -> Option<(String, String)> {
+    if tokens.get(idx + 1) != Some(&"workspace") {
+        return None;
+    }
+    let selector = *tokens.get(idx + 2)?;
+    let mut next = idx + 3;
+    if matches!(tokens.get(next), Some(&"run" | &"run-script")) {
+        next += 1;
+    }
+    Some((selector.to_string(), (*tokens.get(next)?).to_string()))
+}
+
 fn parse_script_with_context(
     script: &str,
     root: &Path,
@@ -846,6 +969,34 @@ fn script_invocation_target(
     idx: usize,
     context: &ScriptCommandContext<'_>,
 ) -> Option<PackageManagerTarget> {
+    let invocation = declared_script_invocation(tokens, idx, context.scripts)?;
+    let mut extra_args_from = invocation.name_idx + 1;
+    if tokens.get(extra_args_from) == Some(&"--") {
+        extra_args_from += 1;
+    } else if invocation.requires_double_dash && extra_args_from < tokens.len() {
+        return None;
+    }
+
+    Some(PackageManagerTarget::Script {
+        name: invocation.name.to_string(),
+        extra_args_from,
+    })
+}
+
+struct DeclaredScriptInvocation<'a> {
+    name: &'a str,
+    name_idx: usize,
+    requires_double_dash: bool,
+}
+
+fn declared_script_invocation<'a>(
+    tokens: &'a [&'a str],
+    idx: usize,
+    catalog: &ScriptCatalog,
+) -> Option<DeclaredScriptInvocation<'a>> {
+    if parse_workspace_script_invocation(tokens, idx).is_some() {
+        return None;
+    }
     let manager = tokens[idx];
     if !matches!(manager, "npm" | "pnpm" | "yarn" | "bun") {
         return None;
@@ -856,12 +1007,17 @@ fn script_invocation_target(
         while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
             next += 1;
         }
+        if tokens.get(next) == Some(&"--filter") {
+            next += 2;
+        }
+    } else if manager == "npm" && tokens.get(next) == Some(&"--silent") {
+        next += 1;
     }
     let subcmd = *tokens.get(next)?;
 
     let (name_idx, requires_double_dash) = if matches!(subcmd, "run" | "run-script") {
         (next + 1, manager == "npm")
-    } else if matches!(manager, "yarn" | "pnpm")
+    } else if matches!(manager, "yarn" | "pnpm" | "bun")
         && !subcmd.starts_with('-')
         && !PACKAGE_MANAGER_BUILTIN_COMMANDS.contains(&subcmd)
     {
@@ -871,20 +1027,14 @@ fn script_invocation_target(
     };
 
     let name = *tokens.get(name_idx)?;
-    if !context.scripts.contains(name) {
+    if !catalog.contains(name) {
         return None;
     }
 
-    let mut extra_args_from = name_idx + 1;
-    if tokens.get(extra_args_from) == Some(&"--") {
-        extra_args_from += 1;
-    } else if requires_double_dash {
-        return None;
-    }
-
-    Some(PackageManagerTarget::Script {
-        name: name.to_string(),
-        extra_args_from,
+    Some(DeclaredScriptInvocation {
+        name,
+        name_idx,
+        requires_double_dash,
     })
 }
 
@@ -2458,6 +2608,128 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].binary, "node");
         assert!(cmds[0].file_args.contains(&"src/**/*.test.ts".to_string()));
+    }
+
+    #[test]
+    fn referenced_scripts_include_plain_npm_run_without_forwarded_args() {
+        let scripts = HashMap::from([
+            ("start".to_string(), "npm run serve".to_string()),
+            ("serve".to_string(), "node src/server.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+
+        let referenced = referenced_package_scripts(&scripts["start"], &catalog);
+
+        assert_eq!(referenced, FxHashSet::from_iter(["serve".to_string()]));
+    }
+
+    #[test]
+    fn referenced_scripts_honor_pnpm_silent_shorthand() {
+        let scripts = HashMap::from([
+            ("start".to_string(), "pnpm -s serve".to_string()),
+            ("serve".to_string(), "node src/server.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+
+        let referenced = referenced_package_scripts(&scripts["start"], &catalog);
+
+        assert_eq!(referenced, FxHashSet::from_iter(["serve".to_string()]));
+    }
+
+    #[test]
+    fn referenced_scripts_honor_package_manager_options() {
+        let scripts = HashMap::from([
+            ("start".to_string(), "npm --silent run serve".to_string()),
+            ("serve".to_string(), "node src/server.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+        assert_eq!(
+            referenced_package_scripts(&scripts["start"], &catalog),
+            FxHashSet::from_iter(["serve".to_string()])
+        );
+
+        let command = "pnpm --filter app run serve";
+        assert_eq!(
+            referenced_package_scripts(command, &catalog),
+            FxHashSet::default(),
+            "workspace-qualified calls must not promote a same-named local script"
+        );
+    }
+
+    #[test]
+    fn referenced_scripts_include_multiplexer_targets() {
+        let scripts = HashMap::from([
+            (
+                "start".to_string(),
+                "run-p serve worker && concurrently \"npm:monitor\"".to_string(),
+            ),
+            ("serve".to_string(), "node src/server.ts".to_string()),
+            ("worker".to_string(), "node src/worker.ts".to_string()),
+            ("monitor".to_string(), "node src/monitor.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+
+        let referenced = referenced_package_scripts(&scripts["start"], &catalog);
+
+        assert_eq!(
+            referenced,
+            FxHashSet::from_iter([
+                "serve".to_string(),
+                "worker".to_string(),
+                "monitor".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn referenced_scripts_skip_multiplexer_option_values() {
+        let scripts = HashMap::from([
+            (
+                "start".to_string(),
+                "concurrently --names serve npm:worker npm:api".to_string(),
+            ),
+            ("serve".to_string(), "node src/server.ts".to_string()),
+            ("worker".to_string(), "node src/worker.ts".to_string()),
+            ("api".to_string(), "node src/api.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+
+        let referenced = referenced_package_scripts(&scripts["start"], &catalog);
+
+        assert_eq!(
+            referenced,
+            FxHashSet::from_iter(["worker".to_string(), "api".to_string()])
+        );
+    }
+
+    #[test]
+    fn referenced_scripts_include_bun_implicit_target() {
+        let scripts = HashMap::from([
+            ("start".to_string(), "bun serve".to_string()),
+            ("serve".to_string(), "bun src/server.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+
+        let referenced = referenced_package_scripts(&scripts["start"], &catalog);
+
+        assert_eq!(referenced, FxHashSet::from_iter(["serve".to_string()]));
+    }
+
+    #[test]
+    fn referenced_workspace_scripts_preserve_package_identity() {
+        for command in [
+            "pnpm --filter @scope/api run serve",
+            "pnpm --filter=@scope/api run serve",
+            "npm --workspace @scope/api run serve",
+            "npm --workspace=@scope/api run serve",
+            "yarn workspace @scope/api serve",
+        ] {
+            assert_eq!(
+                referenced_workspace_scripts(command),
+                vec![("@scope/api".to_string(), "serve".to_string())],
+                "failed to parse {command}"
+            );
+        }
     }
 
     #[test]

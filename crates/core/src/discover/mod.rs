@@ -15,8 +15,8 @@ pub use entry_points::{
 };
 pub(crate) use entry_points::{
     EntryPointDiscovery, discover_entry_points_with_warnings_from_pkg,
-    discover_workspace_entry_points_with_warnings_from_pkg, resolve_entry_path,
-    warn_skipped_entry_summary,
+    discover_workspace_entry_points_with_runtime_scripts, resolve_entry_path,
+    warn_skipped_entry_summary, workspace_runtime_script_seeds,
 };
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub(crate) use infrastructure::discover_infrastructure_entry_points;

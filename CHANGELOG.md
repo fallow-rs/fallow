@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Build and tooling scripts no longer make devDependencies look like
+  production dependencies.** Files referenced from package.json scripts stay
+  reachable for dead-code analysis, but only npm's
+  `start`/`prestart`/`poststart` lifecycle and scripts invoked from it contribute
+  production reachability. This prevents `dev-dependencies-in-production`
+  false positives from build pipelines such as Style Dictionary and SVGO while
+  preserving the rule for start-only services.
+
 ## [3.15.0] - 2026-08-11
 
 ### Added
