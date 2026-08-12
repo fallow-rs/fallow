@@ -65,6 +65,7 @@ schema = ["fallow-types/schema"]
 criterion2 = { workspace = true }
 proptest = { workspace = true }
 dhat = { workspace = true }
+postcard = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

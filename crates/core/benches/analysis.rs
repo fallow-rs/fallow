@@ -503,6 +503,168 @@ fn namespace_re_export_propagation(c: &mut Criterion) {
     });
 }
 
+const EFFECTIVE_EXPORT_WIDTH: u32 = 256;
+const EFFECTIVE_EXPORT_DEPTH: u32 = 16;
+const EFFECTIVE_EXPORT_FAN_IN: u32 = 16;
+
+fn effective_export_info(name: &str, slot: u32) -> fallow_core::extract::ExportInfo {
+    use fallow_core::extract::{ExportName, VisibilityTag};
+
+    fallow_core::extract::ExportInfo {
+        name: ExportName::Named(name.to_string()),
+        local_name: Some(name.to_string()),
+        is_type_only: false,
+        visibility: VisibilityTag::None,
+        expected_unused_reason: None,
+        span: oxc_span::Span::new(slot * 10, slot * 10 + 5),
+        members: vec![],
+        is_side_effect_used: false,
+        super_class: None,
+    }
+}
+
+fn star_re_export(source: fallow_core::discover::FileId) -> fallow_core::resolve::ResolvedReExport {
+    use fallow_core::extract::ReExportInfo;
+    use fallow_core::resolve::{ResolveResult, ResolvedReExport};
+
+    ResolvedReExport {
+        info: ReExportInfo {
+            source: format!("./module-{}", source.0),
+            imported_name: "*".to_string(),
+            exported_name: "*".to_string(),
+            is_type_only: false,
+            span: oxc_span::Span::default(),
+            statement_span: oxc_span::Span::default(),
+            source_span: oxc_span::Span::default(),
+        },
+        target: ResolveResult::InternalModule(source),
+    }
+}
+
+fn effective_export_files(count: u32) -> Vec<fallow_core::discover::DiscoveredFile> {
+    use fallow_core::discover::{DiscoveredFile, FileId};
+
+    (0..count)
+        .map(|id| DiscoveredFile {
+            id: FileId(id),
+            path: PathBuf::from(format!("/project/src/module-{id}.ts")),
+            size_bytes: 100,
+        })
+        .collect()
+}
+
+fn create_effective_export_star_chain_input() -> ReExportInput {
+    use fallow_core::discover::FileId;
+
+    let files = effective_export_files(EFFECTIVE_EXPORT_DEPTH + 1);
+    let mut resolved_modules: Vec<_> = files
+        .iter()
+        .map(|file| empty_resolved_module(file.id, file.path.clone()))
+        .collect();
+    resolved_modules[0].exports = (0..EFFECTIVE_EXPORT_WIDTH)
+        .map(|slot| effective_export_info(&format!("symbol{slot}"), slot))
+        .collect();
+    for barrel in 1..=EFFECTIVE_EXPORT_DEPTH {
+        resolved_modules[barrel as usize]
+            .re_exports
+            .push(star_re_export(FileId(barrel - 1)));
+    }
+
+    ReExportInput {
+        files,
+        resolved_modules,
+        entry_points: vec![],
+    }
+}
+
+fn create_effective_export_ambiguous_fan_in_input() -> ReExportInput {
+    use fallow_core::discover::FileId;
+
+    let barrel = EFFECTIVE_EXPORT_FAN_IN;
+    let files = effective_export_files(barrel + 1);
+    let mut resolved_modules: Vec<_> = files
+        .iter()
+        .map(|file| empty_resolved_module(file.id, file.path.clone()))
+        .collect();
+    for source in 0..EFFECTIVE_EXPORT_FAN_IN {
+        resolved_modules[source as usize].exports = (0..EFFECTIVE_EXPORT_WIDTH)
+            .map(|slot| effective_export_info(&format!("symbol{slot}"), slot))
+            .collect();
+        resolved_modules[barrel as usize]
+            .re_exports
+            .push(star_re_export(FileId(source)));
+    }
+
+    ReExportInput {
+        files,
+        resolved_modules,
+        entry_points: vec![],
+    }
+}
+
+fn build_effective_export_graph(input: &ReExportInput) -> fallow_core::graph::ModuleGraph {
+    fallow_core::graph::ModuleGraph::build(
+        &input.resolved_modules,
+        &input.entry_points,
+        &input.files,
+    )
+}
+
+fn effective_export_star_chain_build(c: &mut Criterion) {
+    c.bench_function("effective_export_star_chain_build", |bencher| {
+        bencher.iter_batched_ref(
+            create_effective_export_star_chain_input,
+            |input| std::hint::black_box(build_effective_export_graph(input)),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn effective_export_ambiguous_star_fan_in_build(c: &mut Criterion) {
+    c.bench_function("effective_export_ambiguous_star_fan_in_build", |bencher| {
+        bencher.iter_batched_ref(
+            create_effective_export_ambiguous_fan_in_input,
+            |input| std::hint::black_box(build_effective_export_graph(input)),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn effective_export_resolution_queries(c: &mut Criterion) {
+    use fallow_core::graph::ExportNamespace;
+
+    let input = create_effective_export_star_chain_input();
+    let graph = build_effective_export_graph(&input);
+    let barrel = fallow_core::discover::FileId(EFFECTIVE_EXPORT_DEPTH);
+    let names: Vec<_> = (0..EFFECTIVE_EXPORT_WIDTH)
+        .map(|slot| format!("symbol{slot}"))
+        .collect();
+    c.bench_function("effective_export_resolution_queries", |bencher| {
+        bencher.iter(|| {
+            for name in &names {
+                std::hint::black_box(graph.resolve_export(barrel, name, ExportNamespace::Value));
+                std::hint::black_box(graph.resolve_export(barrel, name, ExportNamespace::Type));
+            }
+            std::hint::black_box(graph.resolve_export(barrel, "missing", ExportNamespace::Value));
+            std::hint::black_box(graph.resolve_export(barrel, "default", ExportNamespace::Value));
+        });
+    });
+}
+
+fn effective_export_cache_round_trip(c: &mut Criterion) {
+    let input = create_effective_export_star_chain_input();
+    let graph = build_effective_export_graph(&input);
+    c.bench_function("effective_export_cache_round_trip", |bencher| {
+        bencher.iter(|| {
+            let encoded = postcard::to_allocvec(&graph).expect("encode benchmark graph");
+            std::hint::black_box(encoded.len());
+            let decoded: fallow_core::graph::ModuleGraph =
+                postcard::from_bytes(&encoded).expect("decode benchmark graph");
+            std::hint::black_box(decoded);
+        });
+    });
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "benchmark fixture setup is intentionally kept together"
@@ -1267,6 +1429,10 @@ criterion_group!(
     resolve_re_export_chains,
     reverse_re_export_chain,
     namespace_re_export_propagation,
+    effective_export_star_chain_build,
+    effective_export_ambiguous_star_fan_in_build,
+    effective_export_resolution_queries,
+    effective_export_cache_round_trip,
     namespace_object_alias_propagation,
     cache_round_trip
 );
