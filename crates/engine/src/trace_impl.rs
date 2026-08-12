@@ -477,14 +477,17 @@ fn traced_exports(
     module
         .exports
         .iter()
-        .map(|e| TracedExport {
-            name: e.name.to_string(),
-            is_type_only: e.is_type_only,
-            reference_count: e.physical_reference_count(),
-            referenced_by: e
+        .map(|e| {
+            let referenced_by: Vec<_> = e
                 .physical_references()
                 .map(|r| reference_to_export_reference(graph, root, r))
-                .collect(),
+                .collect();
+            TracedExport {
+                name: e.name.to_string(),
+                is_type_only: e.is_type_only,
+                reference_count: referenced_by.len(),
+                referenced_by,
+            }
         })
         .collect()
 }

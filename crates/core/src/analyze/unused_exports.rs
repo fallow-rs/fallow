@@ -1372,7 +1372,7 @@ pub fn collect_export_usages(
             let (line, col) =
                 byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
 
-            let reference_locations = export_reference_locations(
+            let (reference_count, reference_locations) = export_reference_locations(
                 export,
                 &file_paths,
                 line_offsets_by_file,
@@ -1384,7 +1384,7 @@ pub fn collect_export_usages(
                 export_name: export.name.to_string(),
                 line,
                 col,
-                reference_count: export.physical_reference_count(),
+                reference_count,
                 reference_locations,
             });
         }
@@ -1401,10 +1401,12 @@ fn export_reference_locations(
     file_paths: &FxHashMap<FileId, &std::path::Path>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
     source_cache: &mut FxHashMap<FileId, (String, Vec<u32>)>,
-) -> Vec<ReferenceLocation> {
-    export
+) -> (usize, Vec<ReferenceLocation>) {
+    let mut reference_count = 0;
+    let locations = export
         .physical_references()
         .filter_map(|r| {
+            reference_count += 1;
             if r.import_span.start == 0 && r.import_span.end == 0 {
                 return None;
             }
@@ -1425,7 +1427,8 @@ fn export_reference_locations(
                 col: ref_col,
             })
         })
-        .collect()
+        .collect();
+    (reference_count, locations)
 }
 
 #[cfg(test)]

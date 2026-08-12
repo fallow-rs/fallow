@@ -255,16 +255,18 @@ impl ExportSymbol {
     /// Distinct physical reference sites, collapsing Type and Value uses of
     /// the same import while preserving different resolved routes.
     pub fn physical_references(&self) -> impl Iterator<Item = &SymbolReference> {
-        let mut seen = FxHashSet::default();
+        let mut seen = (self.references.len() > 1).then(FxHashSet::default);
         self.references
             .iter()
             .enumerate()
             .filter(move |(index, reference)| {
-                seen.insert((
-                    reference.from_file,
-                    reference.import_span,
-                    self.reference_path(*index),
-                ))
+                seen.as_mut().is_none_or(|seen| {
+                    seen.insert((
+                        reference.from_file,
+                        reference.import_span,
+                        self.reference_path(*index),
+                    ))
+                })
             })
             .map(|(_, reference)| reference)
     }
