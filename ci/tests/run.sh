@@ -1114,6 +1114,42 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "--envelope" "comment.sh pass
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gitlab_common.sh" "loads shared GitLab API helpers"
 assert_contains "$GITLAB_COMMON" "curl_retry" "wraps GitLab API calls with retry"
 assert_contains "$GITLAB_COMMON" "rate limit response; retrying" "retries GitLab rate-limit responses"
+assert_not_contains "$GITLAB_COMMON" "curl_paginate" "does not ship an unused pagination helper"
+
+TMP_CLEANUP_WORK=$(mktemp -d)
+TMP_CLEANUP_REGISTRY="$TMP_CLEANUP_WORK/registry"
+{
+  FALLOW_TMP_REGISTRY="$TMP_CLEANUP_REGISTRY" \
+    FALLOW_TMP_HELPER="$SCRIPTS_DIR/gitlab_common.sh" \
+    bash -c '
+      source "$FALLOW_TMP_HELPER"
+      curl() {
+        printf "%s\n" "${_FALLOW_TMPS[@]}" > "$FALLOW_TMP_REGISTRY"
+        kill -TERM "$$"
+      }
+      curl_retry https://example.test/api
+    '
+} > /dev/null 2>&1
+TMP_CLEANUP_STATUS=$?
+if [ "$TMP_CLEANUP_STATUS" -eq 143 ]; then
+  pass "curl retry cleanup fixture exits through its TERM path"
+else
+  fail "curl retry cleanup fixture exits through its TERM path" \
+    "expected exit 143, got $TMP_CLEANUP_STATUS"
+fi
+TMP_FILES_CLEANED=true
+while IFS= read -r temp_file; do
+  if [ -e "$temp_file" ]; then
+    TMP_FILES_CLEANED=false
+  fi
+done < "$TMP_CLEANUP_REGISTRY"
+if [ "$TMP_FILES_CLEANED" = "true" ] && [ "$(wc -l < "$TMP_CLEANUP_REGISTRY" | tr -d ' ')" = "2" ]; then
+  pass "curl retry exit trap removes registered temporary files"
+else
+  fail "curl retry exit trap removes registered temporary files" \
+    "registered files remained after TERM or the fixture did not create both files"
+fi
+rm -rf "$TMP_CLEANUP_WORK"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported FALLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
 
 echo "  review.sh:"
@@ -1148,7 +1184,17 @@ if [ "${1:-}" = "ci" ]; then
   if [ "${2:-}" = "post-pr-comment" ]; then
     printf '{"action":"update","marker_id":"fallow-results","comment_id":"777","body":"ok"}\n'
   elif [ "${2:-}" = "post-review" ]; then
-    printf '{"action":"post_review","comments_posted":1,"apply_errors":[],"post_errors":[]}\n'
+    case "${MOCK_POST_REVIEW_ERRORS:-}" in
+      apply)
+        printf '{"action":"post_review","comments_posted":1,"apply_errors":["resolve failed"],"post_errors":[],"apply_hint":"refresh provider state"}\n'
+        ;;
+      post)
+        printf '{"action":"post_review","comments_posted":0,"apply_errors":[],"post_errors":["post failed"],"apply_hint":"rerun the job"}\n'
+        ;;
+      *)
+        printf '{"action":"post_review","comments_posted":1,"apply_errors":[],"post_errors":[]}\n'
+        ;;
+    esac
   else
     printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
   fi
@@ -1241,7 +1287,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     FALLOW_COMMAND="check" \
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
-    bash "$SCRIPTS_DIR/review.sh" > /dev/null
+    bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-clean.out"
   PATH="$CI_TYPED_BIN:$PATH" \
     MOCK_LOG="$CI_TYPED_LOG" \
     MOCK_ZERO_REVIEW="1" \
@@ -1255,6 +1301,30 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    MOCK_POST_REVIEW_ERRORS="apply" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    CI_COMMIT_SHA="abcdef1234567890" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-apply-error.out"
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    MOCK_POST_REVIEW_ERRORS="post" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    CI_COMMIT_SHA="abcdef1234567890" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-post-error.out"
 )
 CI_TYPED_OUT=$(cat "$CI_TYPED_LOG")
 assert_contains "$CI_TYPED_OUT" "--format pr-comment-gitlab" "comment.sh invokes typed MR comment format"
@@ -1273,108 +1343,22 @@ fi
 assert_contains "$CI_TYPED_OUT" "fallow ci post-review --provider gitlab" "review.sh invokes GitLab review post command"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
+assert_not_contains "$(cat "$CI_TYPED_WORK/review-clean.out")" "WARNING: fallow post-review incomplete" \
+  "review.sh stays quiet when reconciliation fully succeeds"
+assert_contains "$(cat "$CI_TYPED_WORK/review-apply-error.out")" \
+  "WARNING: fallow post-review incomplete: refresh provider state" \
+  "review.sh warns when applying reconciliation is incomplete"
+assert_contains "$(cat "$CI_TYPED_WORK/review-post-error.out")" \
+  "WARNING: fallow post-review incomplete: rerun the job" \
+  "review.sh warns when posting review comments is incomplete"
 rm -rf "$CI_TYPED_WORK"
 
 # =========================================================================
-# curl_paginate Link-header walk: confirms multi-page concatenation
+# API failure handling: provider failure policy remains delegated to Rust
 # =========================================================================
-#
-# The single-page short-circuit is exercised indirectly by every typed-
-# integration test above (the mock returns a single-page body with no Link
-# header). This block exercises the multi-page path explicitly: page 1
-# returns content + `link: <URL>; rel="next"`, page 2 returns content
-# without a Link header. curl_paginate must visit both URLs and concatenate
-# the two arrays into one.
-echo ""
-echo "=== curl_paginate Link-header walk ==="
-
-# Load the shared helper, then define paginate_test_run as a regular function
-# and capture its output once. Disable pipefail just for the test run because
-# curl_paginate uses `url=$(grep | tr | sed | head -1)` and `head -1`
-# SIGPIPE-cancels the upstream pipeline on the no-Link-header page, which
-# under pipefail propagates as a non-zero exit.
-# shellcheck source=../scripts/gitlab_common.sh
-source "$SCRIPTS_DIR/gitlab_common.sh"
-
-paginate_test_run() {
-  set +o pipefail
-  PAGINATE_HITS=0
-  curl_retry() {
-    local args=("$@")
-    local headers_file=""
-    local i
-    for ((i=0; i<${#args[@]}; i++)); do
-      if [ "${args[$i]}" = "-D" ] && [ $((i+1)) -lt ${#args[@]} ]; then
-        headers_file="${args[$((i+1))]}"
-      fi
-    done
-    local last_idx=$(( ${#args[@]} - 1 ))
-    local url="${args[$last_idx]}"
-    PAGINATE_HITS=$((PAGINATE_HITS + 1))
-    case "$url" in
-      *page=2*)
-        : > "$headers_file"
-        printf '[{"id":2,"body":"second"}]'
-        ;;
-      *)
-        printf 'link: <https://example.test/api/notes?page=2>; rel="next"\n' \
-          > "$headers_file"
-        printf '[{"id":1,"body":"first"}]'
-        ;;
-    esac
-  }
-
-  curl_paginate --header "PRIVATE-TOKEN: t" \
-    "https://example.test/api/notes?page=1&per_page=100"
-  printf '\nHITS=%d' "$PAGINATE_HITS"
-}
-
-PAGINATE_TEST_OUT=$(paginate_test_run)
-
-assert_contains "$PAGINATE_TEST_OUT" '"first"' "curl_paginate captures page 1 body"
-assert_contains "$PAGINATE_TEST_OUT" '"second"' "curl_paginate follows Link rel=next to page 2"
-assert_contains "$PAGINATE_TEST_OUT" "HITS=2" "curl_paginate stops after page 2 (no Link header)"
-
-# Strip the trailing "\nHITS=N" tail before piping the array body to jq.
-PAGINATE_BODY="${PAGINATE_TEST_OUT%$'\n'HITS=*}"
-PAGINATE_LEN=$(printf '%s' "$PAGINATE_BODY" | jq 'length' 2>/dev/null || echo 0)
-if [ "$PAGINATE_LEN" = "2" ]; then
-  pass "curl_paginate concatenates pages into a single array of length 2"
-else
-  fail "curl_paginate concatenates pages into a single array of length 2" \
-    "got length $PAGINATE_LEN"
-fi
-
-# Defensive non-array safety: a 401 / 403 envelope ({"message":"Unauthorized"})
-# returned mid-walk must NOT crash the helper. The defensive
-# `jq -s 'map(arrays) | add // []'` skips non-array pages.
-paginate_defensive_run() {
-  set +o pipefail
-  curl_retry() {
-    local args=("$@")
-    local headers_file=""
-    local i
-    for ((i=0; i<${#args[@]}; i++)); do
-      if [ "${args[$i]}" = "-D" ] && [ $((i+1)) -lt ${#args[@]} ]; then
-        headers_file="${args[$((i+1))]}"
-      fi
-    done
-    : > "$headers_file"
-    printf '{"message":"401 Unauthorized"}'
-  }
-  curl_paginate --header "PRIVATE-TOKEN: t" "https://example.test/api/notes"
-}
-
-PAGINATE_DEFENSIVE_OUT=$(paginate_defensive_run)
-assert_contains "$PAGINATE_DEFENSIVE_OUT" "[]" \
-  "curl_paginate returns empty array when API returns non-array error envelope"
-
-# =========================================================================
-# API failure handling: dedup-lookup abort + 4xx vs 5xx exit code split
-# =========================================================================
-# Covers issue #470: silent curl_paginate failures must surface as both a
-# greppable sidecar artifact AND a stderr WARNING, never as duplicate MR
-# discussions on retry. 4xx (auth/scope) -> exit 1; 5xx / network -> exit 0.
+# Covers the issue #470 behavior after provider pagination moved into the typed
+# Rust posting path. The shell wrapper must delegate without recreating lookup,
+# deduplication, or 4xx/5xx policy.
 
 echo ""
 echo "=== API failure handling (issue #470) ==="
@@ -1384,9 +1368,9 @@ CI_API_FAIL_BIN="$CI_API_FAIL_WORK/bin"
 mkdir -p "$CI_API_FAIL_BIN"
 SCRIPTS_DIR="$DIR/../scripts"
 
-# Shared fallow + curl mocks. The curl mock fails review.sh pagination when
-# MOCK_PAGINATE_FAIL is set. comment.sh no longer performs provider lookup in
-# shell; it delegates sticky MR posting to `fallow ci post-pr-comment`.
+# Shared fallow + curl mocks. Legacy pagination failure switches remain in the
+# curl mock to prove neither review.sh nor comment.sh performs provider lookup
+# in shell; both delegate posting to the typed Rust commands.
 
 write_ci_api_fail_mocks() {
   cat > "$CI_API_FAIL_BIN/fallow" <<'SH'
@@ -1437,7 +1421,7 @@ SH
   cat > "$CI_API_FAIL_BIN/curl" <<'SH'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >> "$MOCK_LOG"
-# Find -D header file (curl_paginate passes it) and the last URL argument.
+# Find any curl header-output file and the last URL argument.
 headers_file=""
 last=""
 i=1

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **GitLab inline-review jobs now warn when posting only partially succeeds.**
+  The shell wrapper's jq condition previously failed on every valid error-array
+  payload, silently hiding both reconciliation and comment-posting failures.
+  Its temporary API files are now tracked by the existing exit cleanup, and an
+  unused shell pagination helper has been removed now that provider pagination
+  is owned by the typed Rust posting path.
 - **Build and tooling scripts no longer make devDependencies look like
   production dependencies.** Files referenced from package.json scripts stay
   reachable for dead-code analysis, but only npm's
