@@ -689,6 +689,71 @@ mod tests {
     }
 
     #[test]
+    fn explicit_export_shadows_namespace_object_forwarded_by_star() {
+        let files: Vec<_> = ["main", "namespace", "source", "explicit", "outer"]
+            .iter()
+            .enumerate()
+            .map(|(id, name)| discovered_file(id as u32, &format!("/project/{name}.ts"), 50))
+            .collect();
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![named_import_from("./outer", "N", FileId(4))],
+                member_accesses: vec![MemberAccess {
+                    object: "N".to_string(),
+                    member: "used".to_string(),
+                }]
+                .into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![ns_re_export("./source", "N", FileId(2))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![named_export("used")].into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                exports: vec![named_export("N")].into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(4),
+                path: files[4].path.clone(),
+                re_exports: vec![
+                    star_re_export("./namespace", FileId(1)),
+                    named_re_export("./explicit", "N", FileId(3)),
+                ],
+                ..Default::default()
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let target = graph.modules[2]
+            .exports
+            .iter()
+            .find(|export| export.name.to_string() == "used")
+            .expect("namespace target export");
+
+        assert!(
+            target.references.is_empty(),
+            "shadowed namespace object must not receive consumer member credit"
+        );
+    }
+
+    #[test]
     fn issue_324_multi_hop_named_re_export_chain_credits_target() {
         let files = vec![
             discovered_file(0, "/project/main.ts", 100),
