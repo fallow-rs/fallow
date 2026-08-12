@@ -1762,6 +1762,10 @@ pub enum SemanticFact {
     /// A computed property access keyed by a static enum member.
     /// Appended because bitcode encodes enum variants by ordinal.
     ComputedEnumKeyUse(ComputedEnumKeyUseFact),
+    /// A directly declared non-optional member required by a named interface
+    /// or object type.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    RequiredTypeMember(RequiredTypeMemberFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -1929,6 +1933,11 @@ impl<'a> SemanticFactView<'a> {
         typed_property_member_access_facts(self.semantic_facts)
             .cloned()
             .collect()
+    }
+
+    /// Collect members whose presence is required by a named structural type.
+    pub fn required_type_members(self) -> impl Iterator<Item = &'a RequiredTypeMemberFact> + 'a {
+        required_type_member_facts(self.semantic_facts)
     }
 
     /// Collect type-alias receiver-surface edges.
@@ -2120,6 +2129,18 @@ fn typed_property_member_access_facts(
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::TypedPropertyMemberAccess(access) = fact {
             Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn required_type_member_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &RequiredTypeMemberFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::RequiredTypeMember(required) = fact {
+            Some(required)
         } else {
             None
         }
@@ -2330,6 +2351,20 @@ pub struct TypedPropertyMemberAccessFact {
     /// final member (e.g. `"c"` for `this.opts.c.optM()`).
     pub property_path: String,
     /// Member accessed on the terminal property's instance.
+    pub member: String,
+}
+
+/// A class member directly required by a named structural type.
+///
+/// Optional properties and methods are excluded: removing an optional
+/// implementation can preserve assignability, while removing a required one
+/// from an explicit `implements` contract cannot.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RequiredTypeMemberFact {
+    /// Module-local interface or object-type alias name.
+    pub type_name: String,
+    /// Static required property or method name.
     pub member: String,
 }
 

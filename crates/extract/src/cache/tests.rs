@@ -4429,6 +4429,7 @@ fn warm_cache_load_matches_cold_parse() {
     let source = "import { useEffect } from 'react';\n\
          import { vi } from 'vitest';\n\
          import type { Props } from './types';\n\
+         export interface Runner { run(): void; optionalRun?(): void }\n\
          vi.mock('./dependency', () => ({ dependency: vi.fn() }));\n\
          export const App = ({ name }: Props) => {\n\
            useEffect(() => {}, [name]);\n\
@@ -4484,6 +4485,22 @@ fn warm_cache_load_matches_cold_parse() {
                     && operation.action.replaces_original()
         )),
         "warm cache should retain the proven replacement operation"
+    );
+    assert!(
+        warm_module.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::RequiredTypeMember(required)
+                if required.type_name == "Runner" && required.member == "run"
+        )),
+        "warm cache should retain required structural members"
+    );
+    assert!(
+        !warm_module.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::RequiredTypeMember(required)
+                if required.type_name == "Runner" && required.member == "optionalRun"
+        )),
+        "optional structural members must remain removable"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

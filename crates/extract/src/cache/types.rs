@@ -907,7 +907,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 265: contextually typed function expressions retain parameter
 /// receiver types from local function aliases. Warm 264 caches omit those uses.
-pub(super) const CACHE_VERSION: u32 = 265;
+///
+/// Bumped to 266: named structural types retain their required members. Warm
+/// 265 caches can report contract-required implementer members as removable.
+pub(super) const CACHE_VERSION: u32 = 266;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

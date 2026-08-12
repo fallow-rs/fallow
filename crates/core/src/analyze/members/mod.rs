@@ -1136,13 +1136,27 @@ fn collect_propagated_member_accesses(
         input,
         indexes,
         &heritage_context.class_heritage_by_file,
-        &heritage_context.interface_to_implementers,
+        &heritage_context
+            .interface_implementations
+            .implementers_by_interface,
         &mut accessed_members,
         &mut whole_object_used_exports,
     );
 
+    for (implementer, required) in &heritage_context
+        .interface_implementations
+        .required_members_by_implementer
+    {
+        accessed_members
+            .entry(implementer.clone())
+            .or_default()
+            .extend(required.iter().cloned());
+    }
+
     propagate_interface_member_accesses(
-        &heritage_context.interface_to_implementers,
+        &heritage_context
+            .interface_implementations
+            .implementers_by_interface,
         &mut accessed_members,
     );
 

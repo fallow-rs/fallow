@@ -63,9 +63,9 @@ pub use fallow_types::extract::{
     InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind,
     ModuleInfo, ModuleLoadMechanism, ParseResult, PlaywrightFixtureAliasFact,
     PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, SourceReadFailure,
-    StringEnumMemberValueFact, TypeAliasSurfaceTargetFact, TypeMemberTypeEntry,
-    TypedPropertyMemberAccessFact, VisibilityTag, VitestModuleMockAction,
+    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, RequiredTypeMemberFact,
+    SemanticFact, SourceReadFailure, StringEnumMemberValueFact, TypeAliasSurfaceTargetFact,
+    TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag, VitestModuleMockAction,
     VitestModuleMockOperationFact, compute_line_offsets,
 };
 

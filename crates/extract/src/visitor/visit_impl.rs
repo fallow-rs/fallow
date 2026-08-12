@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use crate::{
     ComputedEnumKeyUseFact, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
     ImportInfo, ImportedName, MemberAccess, ModuleLoadMechanism, ReExportInfo, RequireCallInfo,
-    SemanticFact, VisibilityTag,
+    RequiredTypeMemberFact, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
@@ -903,6 +903,7 @@ impl ModuleInfoExtractor {
         let refs = Self::collect_type_alias_signature_refs(alias);
         self.record_local_signature_refs(&alias.id.name, refs);
         if let TSType::TSTypeLiteral(type_lit) = &alias.type_annotation {
+            self.record_required_type_members(&alias.id.name, &type_lit.members);
             let properties = collect_object_type_property_types(&type_lit.members);
             if !properties.is_empty() {
                 self.interface_property_types
@@ -925,6 +926,7 @@ impl ModuleInfoExtractor {
         self.record_playwright_fixture_interface(iface);
         let refs = Self::collect_interface_signature_refs(iface);
         self.record_local_signature_refs(&iface.id.name, refs);
+        self.record_required_type_members(&iface.id.name, &iface.body.body);
         let properties = collect_object_type_property_types(&iface.body.body);
         if !properties.is_empty() {
             self.interface_property_types
@@ -937,6 +939,28 @@ impl ModuleInfoExtractor {
         // members / substitute T), so such a typed param abstains.
         if iface.extends.is_empty() && iface.type_parameters.is_none() {
             self.record_react_object_type_props(&iface.id.name, &iface.body.body);
+        }
+    }
+
+    fn record_required_type_members(&mut self, type_name: &str, members: &[TSSignature<'_>]) {
+        for member in members {
+            let required_name = match member {
+                TSSignature::TSPropertySignature(property) if !property.optional => {
+                    property.key.static_name()
+                }
+                TSSignature::TSMethodSignature(method) if !method.optional => {
+                    method.key.static_name()
+                }
+                _ => None,
+            };
+            if let Some(member) = required_name {
+                self.semantic_facts.push(SemanticFact::RequiredTypeMember(
+                    RequiredTypeMemberFact {
+                        type_name: type_name.to_string(),
+                        member: member.to_string(),
+                    },
+                ));
+            }
         }
     }
 

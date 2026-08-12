@@ -6348,6 +6348,43 @@ fn function_type_alias_supplies_nested_scoped_parameter_types() {
 }
 
 #[test]
+fn required_type_members_exclude_optional_contract_members() {
+    let info = parse(
+        r"
+        export interface Port {
+          active: boolean;
+          run(): void;
+          optionalProperty?: string;
+          optionalMethod?(): void;
+        }
+        export type Alias = {
+          save(): void;
+          optionalSave?(): void;
+        };
+        ",
+    );
+
+    let required: FxHashSet<(String, String)> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::RequiredTypeMember(required) => {
+                Some((required.type_name.clone(), required.member.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        required,
+        FxHashSet::from_iter([
+            ("Port".to_string(), "active".to_string()),
+            ("Port".to_string(), "run".to_string()),
+            ("Alias".to_string(), "save".to_string()),
+        ])
+    );
+}
+
+#[test]
 fn angular_inject_property_records_instance_binding() {
     let info = parse(
         r"

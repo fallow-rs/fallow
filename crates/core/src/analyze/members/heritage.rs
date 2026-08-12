@@ -171,7 +171,56 @@ pub(super) struct MemberHeritageContext<'a> {
         FxHashMap<FileId, &'a [fallow_types::extract::ClassHeritageInfo]>,
     pub(super) token_to_interface: FxHashMap<ExportKey, &'a str>,
     pub(super) implementers_by_name: FxHashMap<&'a str, Vec<ExportKey>>,
-    pub(super) interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>>,
+    pub(super) interface_implementations: InterfaceImplementationContracts,
+}
+
+#[derive(Default)]
+struct RequiredTypeMemberIndex {
+    by_file: FxHashMap<FileId, FxHashMap<String, FxHashSet<String>>>,
+}
+
+pub(super) struct InterfaceImplementationContracts {
+    pub(super) implementers_by_interface: FxHashMap<ExportKey, Vec<ExportKey>>,
+    pub(super) required_members_by_implementer: FxHashMap<ExportKey, FxHashSet<String>>,
+}
+
+impl RequiredTypeMemberIndex {
+    fn build(resolved_modules: &[ResolvedModule]) -> Self {
+        let mut index = Self::default();
+        for module in resolved_modules {
+            for required in SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                .required_type_members()
+            {
+                index
+                    .by_file
+                    .entry(module.file_id)
+                    .or_default()
+                    .entry(required.type_name.clone())
+                    .or_default()
+                    .insert(required.member.clone());
+            }
+        }
+        index
+    }
+
+    fn get(&self, file_id: FileId, type_name: &str) -> Option<&FxHashSet<String>> {
+        self.by_file.get(&file_id)?.get(type_name)
+    }
+
+    fn get_for_export<'a>(
+        &'a self,
+        indexes: &MemberPassIndexes<'_>,
+        key: &ExportKey,
+    ) -> Option<&'a FxHashSet<String>> {
+        let module = indexes.module_by_id.get(&key.file_id)?;
+        let local_name = module
+            .exports
+            .iter()
+            .find(|export| export.name.matches_str(key.export_name.as_str()))
+            .and_then(|export| export.local_name.as_deref())
+            .unwrap_or(key.export_name.as_str());
+        self.get(key.file_id, local_name)
+    }
 }
 
 pub(super) fn build_member_heritage_context<'a>(
@@ -211,15 +260,19 @@ pub(super) fn build_member_heritage_context<'a>(
         }
     }
 
-    let interface_to_implementers =
-        build_interface_to_implementers(graph, resolved_modules, &class_heritage_by_file, indexes);
+    let interface_implementations = build_interface_implementation_contracts(
+        graph,
+        resolved_modules,
+        &class_heritage_by_file,
+        indexes,
+    );
 
     MemberHeritageContext {
         class_heritage_by_export,
         class_heritage_by_file,
         token_to_interface,
         implementers_by_name,
-        interface_to_implementers,
+        interface_implementations,
     }
 }
 
@@ -476,13 +529,15 @@ fn propagate_member_accesses_through_inheritance(
     }
 }
 
-fn build_interface_to_implementers(
+fn build_interface_implementation_contracts(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
     indexes: &MemberPassIndexes<'_>,
-) -> FxHashMap<ExportKey, Vec<ExportKey>> {
+) -> InterfaceImplementationContracts {
+    let required_by_type = RequiredTypeMemberIndex::build(resolved_modules);
     let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    let mut required_by_implementer: FxHashMap<ExportKey, FxHashSet<String>> = FxHashMap::default();
     // O(1) dedup across the whole build: a `contains` scan of the growing
     // implementer Vec is O(implementers^2) for a widely-implemented interface
     // (issue #1843 follow-up). Keyed on (interface key, implementer key); the Vec
@@ -504,11 +559,25 @@ fn build_interface_to_implementers(
 
             let implementer_key = ExportKey::new(resolved.file_id, heritage.export_name.clone());
             for interface_name in &heritage.implements {
+                if let Some(required) = required_by_type.get(resolved.file_id, interface_name) {
+                    required_by_implementer
+                        .entry(implementer_key.clone())
+                        .or_default()
+                        .extend(required.iter().cloned());
+                }
                 let Some(interface_keys) = local_to_export_keys.get(interface_name.as_str()) else {
                     continue;
                 };
                 for interface_key in interface_keys {
                     for resolved_interface_key in export_key_with_origins(graph, interface_key) {
+                        if let Some(required) =
+                            required_by_type.get_for_export(indexes, &resolved_interface_key)
+                        {
+                            required_by_implementer
+                                .entry(implementer_key.clone())
+                                .or_default()
+                                .extend(required.iter().cloned());
+                        }
                         if seen_pairs
                             .insert((resolved_interface_key.clone(), implementer_key.clone()))
                         {
@@ -522,5 +591,8 @@ fn build_interface_to_implementers(
             }
         }
     }
-    interface_to_implementers
+    InterfaceImplementationContracts {
+        implementers_by_interface: interface_to_implementers,
+        required_members_by_implementer: required_by_implementer,
+    }
 }

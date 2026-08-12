@@ -84,7 +84,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 28: reference-site deduplication now includes the exact import
 /// span, so one consumer can retain multiple distinct imports of one binding.
-pub const GRAPH_CACHE_VERSION: u32 = 28;
+///
+/// Bumped to 29: resolved semantic facts retain directly required structural
+/// type members used to protect explicit interface implementations.
+pub const GRAPH_CACHE_VERSION: u32 = 29;
 
 /// Cached form of a resolved target.
 ///
