@@ -583,6 +583,11 @@ pub struct ThresholdOverrideMetrics {
     /// Current CRAP score, when coverage data exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crap: Option<f64>,
+    /// Measured line count of the matched unit. Present on complexity rows,
+    /// where `maxUnitSize` participates in the dimension; absent on CRAP rows
+    /// and `<component>` rollup rows, which are never scored on unit size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_count: Option<u32>,
 }
 
 /// Report entry describing whether a threshold override is active, stale, or

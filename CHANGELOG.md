@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unused shell pagination helper has been removed now that provider pagination
   is owned by the typed Rust posting path.
 
+### Changed
+
+- **Threshold override rows carry the measured span and read `stale` on
+  suppressed units.** `threshold_overrides[]` metrics gain an additive
+  `line_count` field on complexity rows (absent on CRAP and `<component>`
+  rollup rows, which never score unit size), so a
+  `still breaches: complexity` claim sits next to the number it was scored
+  on; human and compact output render it as `lines=N`, markdown as
+  `N lines`. A unit
+  hidden by an inline `fallow-ignore` comment now reports its matching
+  override as `stale` with position and metrics instead of `no_match`,
+  matching the existing CRAP-side behavior; a `maxUnitSize` ceiling still
+  scores suppressed units because suppression covers the finding, not the
+  large-function list. The human threshold-override section is now capped
+  like file scores: rows are prioritized by actionability (`no_match`,
+  `insufficient`, `active`, then `stale`), at most 10 are printed, and an
+  overflow line names what was hidden; JSON stays uncapped. No schema
+  version bump: the new field is additive.
+
 ## [3.15.0] - 2026-08-11
 
 ### Added

@@ -2092,13 +2092,17 @@ fn render_threshold_overrides(
             .yellow()
             .bold()
     ));
-    for entry in &report.threshold_overrides {
-        let status = match entry.status {
-            fallow_output::ThresholdOverrideStatus::Active => "active",
-            fallow_output::ThresholdOverrideStatus::Stale => "stale",
-            fallow_output::ThresholdOverrideStatus::Insufficient => "insufficient",
-            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
-        };
+    // Rows are prioritized by actionability before the cap: `no_match` and
+    // `insufficient` need a config or code change, `active` is confirmation,
+    // and `stale` is pure noise at volume. A wide glob produces one row per
+    // matched function, so an uncapped section drowned the actionable rows
+    // (issue #2163 follow-up). The stable sort preserves the engine's
+    // deterministic order within each status. JSON stays uncapped.
+    let mut display: Vec<&fallow_output::ThresholdOverrideState> =
+        report.threshold_overrides.iter().collect();
+    display.sort_by_key(|entry| threshold_override_status_display_rank(entry.status));
+    for entry in display.iter().take(MAX_FLAT_ITEMS) {
+        let status = threshold_override_status_label(entry.status);
         let dimension = threshold_override_dimension_label(entry.dimension);
         let outstanding = threshold_override_outstanding_suffix(&entry.outstanding);
         let target = entry.path.as_ref().map_or_else(
@@ -2109,9 +2113,12 @@ fn render_threshold_overrides(
             let crap = metrics
                 .crap
                 .map_or(String::new(), |value| format!(" crap={value:.1}"));
+            let line_count = metrics
+                .line_count
+                .map_or(String::new(), |value| format!(" lines={value}"));
             format!(
-                " cyclomatic={} cognitive={}{}",
-                metrics.cyclomatic, metrics.cognitive, crap
+                " cyclomatic={} cognitive={}{}{}",
+                metrics.cyclomatic, metrics.cognitive, line_count, crap
             )
         });
         lines.push(format!(
@@ -2119,7 +2126,57 @@ fn render_threshold_overrides(
             idx = entry.override_index
         ));
     }
+    push_threshold_overrides_overflow(lines, &display);
     lines.push(String::new());
+}
+
+fn threshold_override_status_label(status: fallow_output::ThresholdOverrideStatus) -> &'static str {
+    match status {
+        fallow_output::ThresholdOverrideStatus::Active => "active",
+        fallow_output::ThresholdOverrideStatus::Stale => "stale",
+        fallow_output::ThresholdOverrideStatus::Insufficient => "insufficient",
+        fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
+    }
+}
+
+fn threshold_override_status_display_rank(status: fallow_output::ThresholdOverrideStatus) -> u8 {
+    match status {
+        fallow_output::ThresholdOverrideStatus::NoMatch => 0,
+        fallow_output::ThresholdOverrideStatus::Insufficient => 1,
+        fallow_output::ThresholdOverrideStatus::Active => 2,
+        fallow_output::ThresholdOverrideStatus::Stale => 3,
+    }
+}
+
+fn push_threshold_overrides_overflow(
+    lines: &mut Vec<String>,
+    display: &[&fallow_output::ThresholdOverrideState],
+) {
+    if display.len() <= MAX_FLAT_ITEMS {
+        return;
+    }
+    let hidden = &display[MAX_FLAT_ITEMS..];
+    let mut counts: Vec<(&'static str, usize)> = Vec::new();
+    for entry in hidden {
+        let label = threshold_override_status_label(entry.status);
+        match counts.iter_mut().find(|(name, _)| *name == label) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((label, 1)),
+        }
+    }
+    let breakdown = counts
+        .iter()
+        .map(|(name, count)| format!("{count} {name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    lines.push(format!(
+        "    {}",
+        format!(
+            "... and {} more rows ({breakdown}) (--format json for full list)",
+            hidden.len()
+        )
+        .dimmed()
+    ));
 }
 
 fn threshold_override_dimension_label(
@@ -3051,6 +3108,7 @@ mod tests {
                 cyclomatic: 9,
                 cognitive: 21,
                 crap: None,
+                line_count: Some(100),
             }),
             reason: None,
         };
@@ -3061,6 +3119,7 @@ mod tests {
                 cyclomatic: 9,
                 cognitive: 21,
                 crap: Some(90.0),
+                line_count: None,
             }),
             ..base.clone()
         };
@@ -3071,6 +3130,129 @@ mod tests {
         assert!(text.contains("#0 complexity active"), "{text}");
         assert!(text.contains("#0 crap active"), "{text}");
         assert!(text.contains("(still breaches: CRAP)"), "{text}");
+    }
+
+    /// The measured span renders only when the engine attached one: complexity
+    /// rows carry it, CRAP rows never do, so a CRAP-breach claim is never
+    /// juxtaposed with an unrelated unit-size number (issue #2163 follow-up).
+    #[test]
+    fn threshold_override_row_shows_line_count_only_when_present() {
+        let root = PathBuf::from("/project");
+        let mut report = disclosure_report(vec![disclosure_violation(
+            root.join("src/Widget.svelte"),
+            "<template>",
+            fallow_output::ExceededThreshold::Crap,
+        )]);
+        report.threshold_overrides = vec![
+            threshold_override_row(
+                0,
+                fallow_output::ThresholdOverrideStatus::Active,
+                fallow_output::ThresholdOverrideDimension::Complexity,
+                "src/Widget.svelte",
+            ),
+            threshold_override_row(
+                0,
+                fallow_output::ThresholdOverrideStatus::Active,
+                fallow_output::ThresholdOverrideDimension::Crap,
+                "src/Widget.svelte",
+            ),
+        ];
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(
+            text.contains("#0 complexity active src/Widget.svelte:7:<template> cyclomatic=9 cognitive=21 lines=100"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "#0 crap active src/Widget.svelte:7:<template> cyclomatic=9 cognitive=21 crap=90.0"
+            ),
+            "{text}"
+        );
+    }
+
+    fn threshold_override_row(
+        override_index: usize,
+        status: fallow_output::ThresholdOverrideStatus,
+        dimension: fallow_output::ThresholdOverrideDimension,
+        path: &str,
+    ) -> fallow_output::ThresholdOverrideState {
+        let no_match = matches!(status, fallow_output::ThresholdOverrideStatus::NoMatch);
+        let is_crap = matches!(dimension, fallow_output::ThresholdOverrideDimension::Crap);
+        fallow_output::ThresholdOverrideState {
+            status,
+            override_index,
+            dimension,
+            outstanding: Vec::new(),
+            path: (!no_match).then(|| PathBuf::from(path)),
+            function: (!no_match).then(|| "<template>".to_string()),
+            line: (!no_match).then_some(7),
+            col: (!no_match).then_some(0),
+            configured_thresholds: fallow_output::HealthConfiguredThresholds {
+                max_cyclomatic: Some(500),
+                max_cognitive: Some(500),
+                max_crap: None,
+                max_unit_size: None,
+            },
+            effective_thresholds: OVERRIDE_THRESHOLDS,
+            metrics: (!no_match).then(|| fallow_output::ThresholdOverrideMetrics {
+                cyclomatic: 9,
+                cognitive: 21,
+                crap: is_crap.then_some(90.0),
+                line_count: (!is_crap).then_some(100),
+            }),
+            reason: None,
+        }
+    }
+
+    /// A wide glob emits one row per matched function, so the section is capped
+    /// like file scores and large functions. Actionable statuses survive the
+    /// cap ahead of `stale`, the header keeps counting configured entries, and
+    /// the overflow line names what was hidden (issue #2163 follow-up).
+    #[test]
+    fn threshold_override_section_caps_rows_and_keeps_actionable_statuses() {
+        let root = PathBuf::from("/project");
+        let mut report = disclosure_report(vec![disclosure_violation(
+            root.join("src/Widget.svelte"),
+            "<template>",
+            fallow_output::ExceededThreshold::Crap,
+        )]);
+        let mut rows = Vec::new();
+        for index in 0..12 {
+            rows.push(threshold_override_row(
+                0,
+                fallow_output::ThresholdOverrideStatus::Stale,
+                fallow_output::ThresholdOverrideDimension::Complexity,
+                &format!("src/stale{index}.spec.ts"),
+            ));
+        }
+        rows.push(threshold_override_row(
+            1,
+            fallow_output::ThresholdOverrideStatus::NoMatch,
+            fallow_output::ThresholdOverrideDimension::Complexity,
+            "",
+        ));
+        rows.push(threshold_override_row(
+            0,
+            fallow_output::ThresholdOverrideStatus::Insufficient,
+            fallow_output::ThresholdOverrideDimension::Complexity,
+            "src/big.spec.ts",
+        ));
+        report.threshold_overrides = rows;
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(text.contains("Health threshold overrides (2)"), "{text}");
+        let row_count = text
+            .lines()
+            .filter(|line| line.trim_start().starts_with('#'))
+            .count();
+        assert_eq!(row_count, MAX_FLAT_ITEMS, "{text}");
+        assert!(text.contains("#1 complexity no_match"), "{text}");
+        assert!(text.contains("#0 complexity insufficient"), "{text}");
+        assert!(
+            text.contains("... and 4 more rows (4 stale) (--format json for full list)"),
+            "{text}"
+        );
     }
 
     #[test]
