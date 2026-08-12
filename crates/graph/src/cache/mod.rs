@@ -57,7 +57,11 @@ pub use store::GraphCacheStore;
 /// Bumped to 20: cached re-export edges now carry the enclosing statement
 /// span and the source string-literal span used to anchor unresolved-import
 /// findings on the specifier. Warm 19 caches lack both spans.
-pub const GRAPH_CACHE_VERSION: u32 = 20;
+///
+/// Bumped to 21: persisted module graphs now carry the canonical effective
+/// export index used for named and star re-export resolution. Warm 20 caches
+/// lack that index and would replay the previous propagation semantics.
+pub const GRAPH_CACHE_VERSION: u32 = 21;
 
 /// Cached form of a resolved target.
 ///
