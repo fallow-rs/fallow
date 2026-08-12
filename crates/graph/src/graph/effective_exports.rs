@@ -27,7 +27,7 @@ pub struct EffectiveExportBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 enum EffectiveExportBindingKind {
     Declaration(usize),
-    NamespaceObject(usize),
+    NamespaceObject { source: FileId },
     ImplicitDefault,
 }
 
@@ -41,9 +41,25 @@ impl EffectiveExportBinding {
     pub(super) const fn origin_slot(self) -> Option<usize> {
         match self.kind {
             EffectiveExportBindingKind::Declaration(slot) => Some(slot),
-            EffectiveExportBindingKind::NamespaceObject(_)
+            EffectiveExportBindingKind::NamespaceObject { .. }
             | EffectiveExportBindingKind::ImplicitDefault => None,
         }
+    }
+
+    /// Source module represented by a namespace-object export.
+    #[must_use]
+    pub const fn namespace_source(self) -> Option<FileId> {
+        match self.kind {
+            EffectiveExportBindingKind::NamespaceObject { source } => Some(source),
+            EffectiveExportBindingKind::Declaration(_)
+            | EffectiveExportBindingKind::ImplicitDefault => None,
+        }
+    }
+
+    /// Whether this binding is the implicit default export of an SFC file.
+    #[must_use]
+    pub const fn is_implicit_default(self) -> bool {
+        matches!(self.kind, EffectiveExportBindingKind::ImplicitDefault)
     }
 }
 
@@ -279,6 +295,27 @@ impl EffectiveExportIndex {
             _ => false,
         }
     }
+
+    pub(super) fn unique_bindings(
+        &self,
+        file_id: FileId,
+        namespace: ExportNamespace,
+    ) -> FxHashSet<EffectiveExportBinding> {
+        self.resolutions
+            .iter()
+            .filter_map(|(key, resolutions)| {
+                if key.file_id != file_id {
+                    return None;
+                }
+                match resolutions.get(namespace) {
+                    EffectiveExportResolution::Unique(binding) => Some(binding),
+                    EffectiveExportResolution::Missing | EffectiveExportResolution::Ambiguous => {
+                        None
+                    }
+                }
+            })
+            .collect()
+    }
 }
 
 fn seed_direct_bindings(
@@ -388,7 +425,7 @@ fn collect_observers(
         star: FxHashMap::default(),
     };
     for module in modules {
-        for (re_export_index, re_export) in module.re_exports.iter().enumerate() {
+        for re_export in &module.re_exports {
             let Some(source) = re_export.target.internal_file_id() else {
                 continue;
             };
@@ -407,7 +444,6 @@ fn collect_observers(
                 module.file_id,
                 source,
                 &re_export.info,
-                module.exports.len() + re_export_index,
                 ObserverBuildState {
                     direct_keys,
                     interner,
@@ -425,7 +461,6 @@ fn register_named_observer(
     barrel: FileId,
     source: FileId,
     info: &fallow_types::extract::ReExportInfo,
-    re_export_slot: usize,
     state: ObserverBuildState<'_>,
 ) {
     let ObserverBuildState {
@@ -451,7 +486,7 @@ fn register_named_observer(
                 destination,
                 EffectiveExportResolution::Unique(EffectiveExportBinding {
                     file_id: barrel,
-                    kind: EffectiveExportBindingKind::NamespaceObject(re_export_slot),
+                    kind: EffectiveExportBindingKind::NamespaceObject { source },
                 }),
             );
         }

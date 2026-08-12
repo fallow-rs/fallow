@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use fallow_types::discover::FileId;
 use rustc_hash::FxHashSet;
 
-use super::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
+use super::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace, ModuleGraph};
 
 /// Direct declaration exposed through at least one public package entry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -89,21 +89,35 @@ impl ModuleGraph {
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
     ) -> FxHashSet<PublicExportOrigin> {
+        self.public_export_bindings(public_api_entry_points)
+            .into_iter()
+            .filter_map(|binding| self.export_binding_origin(binding))
+            .map(|origin| PublicExportOrigin {
+                file_id: origin.file_id(),
+                export_name: origin.export().name.to_string(),
+            })
+            .collect()
+    }
+
+    /// Unique value bindings exposed through at least one public package entry.
+    #[must_use]
+    pub fn public_export_bindings(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+    ) -> FxHashSet<EffectiveExportBinding> {
         let candidate_names = self.public_value_export_names(public_api_entry_points);
-        let mut origins = FxHashSet::default();
-        for entry in public_api_entry_points {
-            for name in &candidate_names {
-                let Some(origin) = self.resolve_export_origin(*entry, name, ExportNamespace::Value)
-                else {
-                    continue;
-                };
-                origins.insert(PublicExportOrigin {
-                    file_id: origin.file_id(),
-                    export_name: origin.export().name.to_string(),
-                });
-            }
-        }
-        origins
+        public_api_entry_points
+            .iter()
+            .flat_map(|entry| {
+                candidate_names.iter().filter_map(|name| {
+                    match self.resolve_export(*entry, name, ExportNamespace::Value) {
+                        EffectiveExportResolution::Unique(binding) => Some(binding),
+                        EffectiveExportResolution::Missing
+                        | EffectiveExportResolution::Ambiguous => None,
+                    }
+                })
+            })
+            .collect()
     }
 
     fn public_value_export_names(
@@ -111,14 +125,16 @@ impl ModuleGraph {
         public_api_entry_points: &FxHashSet<FileId>,
     ) -> FxHashSet<String> {
         let star_targets = self.public_star_re_export_targets(public_api_entry_points);
-        public_api_entry_points
+        let mut names: FxHashSet<String> = public_api_entry_points
             .iter()
             .chain(star_targets.iter())
             .filter_map(|id| self.modules.get(id.0 as usize))
             .flat_map(|module| &module.exports)
             .filter(|export| !export.is_type_only)
             .map(|export| export.name.to_string())
-            .collect()
+            .collect();
+        names.insert("default".to_string());
+        names
     }
 
     /// The `export *` closure rooted at the public-API entry points: every module

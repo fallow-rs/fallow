@@ -68,7 +68,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 23: effective bindings distinguish direct declarations,
 /// namespace objects, and implicit SFC default exports.
-pub const GRAPH_CACHE_VERSION: u32 = 23;
+///
+/// Bumped to 24: namespace-object bindings retain their source module so
+/// consumers can enumerate the namespace through the canonical index.
+pub const GRAPH_CACHE_VERSION: u32 = 24;
 
 /// Cached form of a resolved target.
 ///

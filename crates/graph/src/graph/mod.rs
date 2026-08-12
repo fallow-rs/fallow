@@ -783,6 +783,15 @@ impl ModuleGraph {
         else {
             return None;
         };
+        self.export_binding_origin(binding)
+    }
+
+    /// Resolve a unique binding to its direct declaration, when it has one.
+    #[must_use]
+    pub fn export_binding_origin(
+        &self,
+        binding: EffectiveExportBinding,
+    ) -> Option<EffectiveExportOrigin<'_>> {
         let origin_file = binding.origin_file();
         let export = self
             .modules
@@ -793,6 +802,19 @@ impl ModuleGraph {
             file_id: origin_file,
             export,
         })
+    }
+
+    /// Unique bindings exposed by a module in one namespace.
+    ///
+    /// Multiple names that resolve to the same declaration are deduplicated;
+    /// missing and ambiguous exports are excluded.
+    #[must_use]
+    pub fn unique_export_bindings(
+        &self,
+        file_id: FileId,
+        namespace: ExportNamespace,
+    ) -> FxHashSet<EffectiveExportBinding> {
+        self.effective_exports.unique_bindings(file_id, namespace)
     }
 
     /// Whether `importer` connects to `source` as an origin of `name`.
