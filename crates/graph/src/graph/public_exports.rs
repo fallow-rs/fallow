@@ -537,4 +537,37 @@ mod tests {
 
         assert_eq!(keys, FxHashSet::from_iter(["index.ts::foo".to_string()]));
     }
+
+    #[test]
+    fn public_surface_preserves_aliases_default_and_value_namespace() {
+        let mut default_export = named_export("Widget");
+        default_export.name = ExportName::Default;
+        let mut type_export = named_export("T");
+        type_export.is_type_only = true;
+        let mut type_re_export = re_export("T", "PublicType", FileId(1));
+        type_re_export.info.is_type_only = true;
+        let (graph, public_entries) = build_star_surface_graph(
+            vec![
+                re_export("default", "default", FileId(1)),
+                re_export("default", "Widget", FileId(1)),
+                type_re_export,
+            ],
+            vec![ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/p/widget.ts"),
+                exports: vec![default_export, type_export].into(),
+                ..Default::default()
+            }],
+        );
+
+        let keys = graph.public_export_keys(&public_entries, Path::new("/p"));
+
+        assert_eq!(
+            keys,
+            FxHashSet::from_iter([
+                "index.ts::default".to_string(),
+                "index.ts::Widget".to_string(),
+            ])
+        );
+    }
 }
