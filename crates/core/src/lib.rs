@@ -2037,33 +2037,47 @@ fn discover_all_entry_points(
         .iter()
         .map(|(ws, pkg)| (ws.root.clone(), pkg))
         .collect();
+    let workspace_script_seeds = discover::workspace_runtime_script_seeds(
+        &input.config.root,
+        input.root_pkg,
+        input.workspace_pkgs,
+    );
 
     let workspace_discovery: Vec<discover::EntryPointDiscovery> = input
         .workspaces
         .par_iter()
         .map(|ws| {
             let pkg = workspace_pkg_by_root.get(&ws.root).copied();
-            discover::discover_workspace_entry_points_with_warnings_from_pkg(
+            let seeds = workspace_script_seeds
+                .get(&ws.name)
+                .cloned()
+                .unwrap_or_default();
+            discover::discover_workspace_entry_points_with_runtime_scripts(
                 &ws.root,
                 input.files,
                 pkg,
+                &seeds,
             )
         })
         .collect();
     let mut skipped_entries = rustc_hash::FxHashMap::default();
     entry_points.extend_runtime(root_discovery.entries);
+    entry_points.extend_support(root_discovery.support_entries);
     for (path, count) in root_discovery.skipped_entries {
         *skipped_entries.entry(path).or_insert(0) += count;
     }
     let mut ws_entries = Vec::new();
+    let mut ws_support_entries = Vec::new();
     for workspace in workspace_discovery {
         ws_entries.extend(workspace.entries);
+        ws_support_entries.extend(workspace.support_entries);
         for (path, count) in workspace.skipped_entries {
             *skipped_entries.entry(path).or_insert(0) += count;
         }
     }
     discover::warn_skipped_entry_summary(&skipped_entries);
     entry_points.extend_runtime(ws_entries);
+    entry_points.extend_support(ws_support_entries);
 
     let plugin_entries =
         discover::discover_plugin_entry_point_sets(input.plugin_result, input.config, input.files);

@@ -20,6 +20,24 @@ fn dev_dependency_used_in_production_detected() {
         "yaml is value-imported from a production file and should be flagged, found: {flagged:?}"
     );
 
+    assert!(
+        flagged.contains(&"runtime-helper"),
+        "a devDependency reached through an indirect npm start script should be flagged, found: {flagged:?}"
+    );
+
+    assert!(
+        !flagged.contains(&"svgo"),
+        "a devDependency imported only by build tooling must not be flagged, found: {flagged:?}"
+    );
+
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|finding| finding.file.path.ends_with("scripts/build.ts")),
+        "build tooling referenced from package.json must remain reachable for dead-code analysis"
+    );
+
     // type-fest is imported from production code but ONLY via `import type`,
     // which is erased at build time, so it must NOT be flagged.
     assert!(

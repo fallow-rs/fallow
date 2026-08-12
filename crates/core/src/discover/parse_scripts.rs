@@ -11,7 +11,7 @@
 pub fn extract_script_file_refs(script: &str) -> Vec<String> {
     let mut refs = Vec::new();
 
-    const RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node"];
+    const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
 
     for segment in script.split(&['&', '|', ';'][..]) {
         let segment = segment.trim();
@@ -114,6 +114,12 @@ mod tests {
     fn script_tsx_runner() {
         let refs = extract_script_file_refs("tsx scripts/migrate.ts");
         assert_eq!(refs, vec!["scripts/migrate.ts"]);
+    }
+
+    #[test]
+    fn script_bun_runner() {
+        let refs = extract_script_file_refs("bun scripts/build.ts");
+        assert_eq!(refs, vec!["scripts/build.ts"]);
     }
 
     #[test]

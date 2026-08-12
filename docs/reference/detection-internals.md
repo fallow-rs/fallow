@@ -156,6 +156,14 @@ analyzes, so a production run cannot enter a body that script filtering skipped.
 A name declared with different bodies in several workspace packages keeps its
 name but permanently loses its body.
 
+Script-referenced files are support roots by default: they stay reachable for
+dead-code analysis without contributing production reachability to dependency,
+health, or security analysis. The npm `start`, `prestart`, and `poststart`
+lifecycle is the narrow runtime exception, including declared scripts reached
+through package-manager indirection. Projects deployed through a custom script
+name should declare the deployed file in `entry` when no manifest, framework,
+or infrastructure entry already identifies it as runtime code.
+
 ### CLI flag-value crediting
 
 Some CLIs load an npm package because a flag value names it: `eslint --format

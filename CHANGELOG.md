@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Its temporary API files are now tracked by the existing exit cleanup, and an
   unused shell pagination helper has been removed now that provider pagination
   is owned by the typed Rust posting path.
+- **Build and tooling scripts no longer make devDependencies look like
+  production dependencies.** Files referenced from package.json scripts stay
+  reachable for dead-code analysis, but only npm's
+  `start`/`prestart`/`poststart` lifecycle and scripts invoked from it contribute
+  production reachability. This prevents `dev-dependencies-in-production`
+  false positives from build pipelines such as Style Dictionary and SVGO while
+  preserving the rule for start-only services.
 
 - **Factory-less `jest.mock`/`vi.mock` of a scoped package no longer fabricates
   a phantom `unlisted-dependency` finding**
