@@ -10,85 +10,6 @@ const MIN_DEFINED_CLASS_LEN: usize = 6;
 /// defined floor, since a one-edit pair differs in length by at most one.
 const MIN_TOKEN_LEN: usize = 5;
 
-/// Count plain-CSS vs preprocessor (`.scss`/`.sass`/`.less`) stylesheet files in
-/// the project (ignore-filtered). Used to abstain from class-typo detection when
-/// preprocessors dominate, because the parser cannot expand their loops/mixins,
-/// so the defined-class set is unreliable.
-fn count_stylesheet_kinds(
-    files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-) -> (usize, usize) {
-    let mut css = 0usize;
-    let mut preprocessor = 0usize;
-    for file in files {
-        let path = &file.path;
-        let kind = match path.extension().and_then(|ext| ext.to_str()) {
-            Some("css") => &mut css,
-            Some("scss" | "sass" | "less") => &mut preprocessor,
-            _ => continue,
-        };
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        *kind += 1;
-    }
-    (css, preprocessor)
-}
-
-/// Collect every authored CSS class name defined anywhere in the project (plain
-/// and module `.css`/`.scss`, plus Astro/SFC `<style>` blocks of any scoping). The set
-/// is the typo-suggestion target for [`scan_unresolved_class_references`], so it
-/// is NOT narrowed by `changed_files` / `ws_roots`: a class defined in an
-/// unchanged file must still count as defined, or a markup token referencing it
-/// would false-positive as unresolved. Only the ignore filter applies.
-fn collect_defined_css_classes(
-    files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-) -> rustc_hash::FxHashSet<String> {
-    use fallow_types::extract::ExportName;
-    let mut defined: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    for file in files {
-        let path = &file.path;
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        let is_preprocessor = matches!(extension, Some("scss" | "sass" | "less"));
-        let is_css = extension == Some("css") || is_preprocessor;
-        let has_style_blocks = matches!(extension, Some("astro" | "vue" | "svelte"));
-        if !is_css && !has_style_blocks {
-            continue;
-        }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        if has_style_blocks {
-            for style in crate::css::extract_sfc_styles(&source) {
-                let is_style_scss = style
-                    .lang
-                    .as_deref()
-                    .is_some_and(|lang| matches!(lang, "scss" | "sass"));
-                for export in crate::css::extract_css_module_exports(&style.body, is_style_scss) {
-                    if let ExportName::Named(name) = export.name {
-                        defined.insert(name);
-                    }
-                }
-            }
-            continue;
-        }
-        for export in crate::css::extract_css_module_exports(&source, is_preprocessor) {
-            if let ExportName::Named(name) = export.name {
-                defined.insert(name);
-            }
-        }
-    }
-    defined
-}
-
 /// Find the best one-edit typo suggestion for a markup token among the defined
 /// classes, using a length-bucketed index so only classes of length `len-1`,
 /// `len`, `len+1` are compared. Returns the lexicographically smallest defined
@@ -188,6 +109,7 @@ pub(super) fn scan_unresolved_class_references(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
     summary: &mut fallow_output::CssAnalyticsSummary,
+    class_inventory: Option<&CssClassInventory>,
 ) -> Vec<fallow_output::UnresolvedClassReference> {
     let HealthScanCtx {
         config, ignore_set, ..
@@ -202,18 +124,26 @@ pub(super) fn scan_unresolved_class_references(
     // (`bg-white`) look unresolved and false-positive as a typo of a parsed
     // sibling. When preprocessor stylesheets outnumber plain CSS, the defined set
     // is too incomplete to trust, so emit nothing (real-world smoke: Bootstrap).
-    let (css_files, preprocessor_files) = count_stylesheet_kinds(files, config, ignore_set);
+    let fallback_class_inventory;
+    let class_inventory = if let Some(inventory) = class_inventory {
+        inventory
+    } else {
+        fallback_class_inventory = css_class_inventory(files, config, ignore_set);
+        &fallback_class_inventory
+    };
+    let css_files = class_inventory.css_files;
+    let preprocessor_files = class_inventory.preprocessor_files;
     summary.preprocessor_stylesheets = saturate_len(preprocessor_files);
     if preprocessor_files > css_files {
         summary.preprocessor_reachability_abstained = true;
         return Vec::new();
     }
 
-    let defined = collect_defined_css_classes(files, config, ignore_set);
+    let defined = &class_inventory.typo_target_classes;
     if defined.is_empty() {
         return Vec::new();
     }
-    let by_len = build_typo_target_index(&defined);
+    let by_len = build_typo_target_index(defined);
 
     let mut out: Vec<UnresolvedClassReference> = Vec::new();
     let mut seen: rustc_hash::FxHashSet<(String, u32, String)> = rustc_hash::FxHashSet::default();
@@ -221,9 +151,7 @@ pub(super) fn scan_unresolved_class_references(
         let Some((rel, source)) = read_markup_scan_source(file, ctx) else {
             continue;
         };
-        collect_unresolved_class_refs_in_file(
-            &source, &rel, &defined, &by_len, &mut seen, &mut out,
-        );
+        collect_unresolved_class_refs_in_file(&source, &rel, defined, &by_len, &mut seen, &mut out);
     }
 
     out.sort_by(|a, b| {
@@ -469,34 +397,65 @@ fn extract_dotted_class_names(selector: &str, out: &mut rustc_hash::FxHashSet<St
     }
 }
 
-/// Per-stylesheet located class definitions from STANDALONE `.css`/`.scss`/
-/// `.sass`/`.less` files (not SFC `<style>` blocks, which are component-scoped
-/// and covered by the scoped-unused check). Returns `(rel_path, [(class, 1-based
-/// line)])`, each class deduped to its first definition. The defined surface for
-/// the unreferenced-global-class candidate. Classes wrapped in `:global(...)`
-/// are dropped: they target externally-applied DOM and are never authored in
-/// markup.
-fn collect_defined_css_classes_located(
+/// Whole-project CSS class surfaces shared by the markup candidate passes.
+#[derive(Clone, Debug, Default)]
+pub(super) struct CssClassInventory {
+    css_files: usize,
+    preprocessor_files: usize,
+    typo_target_classes: rustc_hash::FxHashSet<String>,
+    defined_classes: Vec<(String, Vec<(String, u32)>)>,
+}
+
+/// Collect both class surfaces in one file pass. The typo-target set includes
+/// every authored class from standalone stylesheets and Astro/Vue/Svelte style
+/// blocks. The located standalone set powers the unreferenced-global-class
+/// check and omits `:global(...)` selectors.
+///
+/// The typo-target surface is not narrowed by `changed_files` or workspace
+/// roots. A definition in an unchanged file must still suppress an unresolved
+/// reference. Only the health ignore filter applies.
+pub(super) fn css_class_inventory(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
-) -> Vec<(String, Vec<(String, u32)>)> {
+) -> CssClassInventory {
     use fallow_types::extract::ExportName;
-    let mut out: Vec<(String, Vec<(String, u32)>)> = Vec::new();
+    let mut inventory = CssClassInventory::default();
     for file in files {
         let path = &file.path;
         let extension = path.extension().and_then(|ext| ext.to_str());
         let is_preprocessor = matches!(extension, Some("scss" | "sass" | "less"));
-        if extension != Some("css") && !is_preprocessor {
+        let is_css = extension == Some("css") || is_preprocessor;
+        let has_style_blocks = matches!(extension, Some("astro" | "vue" | "svelte"));
+        if !is_css && !has_style_blocks {
             continue;
         }
         let relative = path.strip_prefix(&config.root).unwrap_or(path);
         if ignore_set.is_match(relative) {
             continue;
         }
+        if extension == Some("css") {
+            inventory.css_files += 1;
+        } else if is_preprocessor {
+            inventory.preprocessor_files += 1;
+        }
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
+        if has_style_blocks {
+            for style in crate::css::extract_sfc_styles(&source) {
+                let is_style_scss = style
+                    .lang
+                    .as_deref()
+                    .is_some_and(|lang| matches!(lang, "scss" | "sass"));
+                for export in crate::css::extract_css_module_exports(&style.body, is_style_scss) {
+                    if let ExportName::Named(name) = export.name {
+                        inventory.typo_target_classes.insert(name);
+                    }
+                }
+            }
+            continue;
+        }
         let mut global_scoped: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         collect_global_scoped_classes(&source, &mut global_scoped);
         let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
@@ -505,6 +464,7 @@ fn collect_defined_css_classes_located(
             let ExportName::Named(name) = export.name else {
                 continue;
             };
+            inventory.typo_target_classes.insert(name.clone());
             // A `:global(.foo)` override targets DOM applied outside this module
             // (a third-party library's runtime markup), so it is never authored in
             // project markup and must not be an unreferenced-class candidate.
@@ -521,30 +481,12 @@ fn collect_defined_css_classes_located(
             classes.push((name, u32::try_from(line).unwrap_or(u32::MAX)));
         }
         if !classes.is_empty() {
-            out.push((relative.to_string_lossy().replace('\\', "/"), classes));
+            inventory
+                .defined_classes
+                .push((relative.to_string_lossy().replace('\\', "/"), classes));
         }
     }
-    out
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct CssClassInventory {
-    css_files: usize,
-    preprocessor_files: usize,
-    defined_classes: Vec<(String, Vec<(String, u32)>)>,
-}
-
-pub(super) fn css_class_inventory(
-    files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-) -> CssClassInventory {
-    let (css_files, preprocessor_files) = count_stylesheet_kinds(files, config, ignore_set);
-    CssClassInventory {
-        css_files,
-        preprocessor_files,
-        defined_classes: collect_defined_css_classes_located(files, config, ignore_set),
-    }
+    inventory
 }
 
 /// Scan for global CSS classes referenced by NO in-project markup (the CSS

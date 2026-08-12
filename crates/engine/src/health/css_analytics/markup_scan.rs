@@ -45,7 +45,7 @@ pub(super) struct MarkupCssCandidateInput<'a> {
     pub(super) css_deep: bool,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
     pub(super) styling_artifacts: Option<&'a StylingAnalysisArtifacts>,
-    pub(super) token_candidates: &'a [ComparableThemeTokenCandidate],
+    pub(super) token_candidates: &'a StylingTokenCandidateCache<'a>,
     pub(super) summary: &'a mut fallow_output::CssAnalyticsSummary,
 }
 
@@ -89,11 +89,19 @@ fn scan_markup_reference_candidates(
     input: &mut MarkupCssCandidateInput<'_>,
 ) -> MarkupReferenceCandidates {
     let ctx = markup_scan_ctx(input);
+    let fallback_class_inventory;
+    let class_inventory = if let Some(artifacts) = input.styling_artifacts {
+        &artifacts.class_inventory
+    } else {
+        fallback_class_inventory = css_class_inventory(input.files, input.config, input.ignore_set);
+        &fallback_class_inventory
+    };
     MarkupReferenceCandidates {
         unresolved_class_references: scan_unresolved_class_references(
             input.files,
             ctx,
             input.summary,
+            Some(class_inventory),
         ),
         unreferenced_css_classes: scan_unreferenced_css_classes(
             input.files,
@@ -102,9 +110,7 @@ fn scan_markup_reference_candidates(
             input
                 .styling_artifacts
                 .map(|artifacts| &artifacts.reference_surface),
-            input
-                .styling_artifacts
-                .map(|artifacts| &artifacts.class_inventory),
+            Some(class_inventory),
         ),
     }
 }

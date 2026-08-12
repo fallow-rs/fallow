@@ -1032,8 +1032,13 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     let mut summary = walk_ref.summary.clone();
     let mut raw_style_values = walk_ref.tokens.raw_style_values.clone();
     let styling_token_candidates =
-        css_report_token_candidates(&walk_ref.tokens, config, css_in_js_definers.as_ref());
-    annotate_raw_style_value_nearest_tokens(&mut raw_style_values, &styling_token_candidates);
+        StylingTokenCandidateCache::new(&walk_ref.tokens, config, css_in_js_definers.as_ref());
+    if !raw_style_values.is_empty() {
+        annotate_raw_style_value_nearest_tokens(
+            &mut raw_style_values,
+            styling_token_candidates.get(),
+        );
+    }
     let metrics =
         finalize_css_token_metrics(&walk_ref.tokens, &mut summary, files, config, ignore_set);
     let candidates = scan_markup_css_candidates(&mut MarkupCssCandidateInput {
@@ -1120,6 +1125,46 @@ fn css_report_token_candidates(
     candidates.extend(comparable_project_vocabulary_candidates(tokens));
     candidates.sort_by(|a, b| theme_token_sort_key(a).cmp(&theme_token_sort_key(b)));
     candidates
+}
+
+struct StylingTokenCandidateCache<'a> {
+    candidates: std::cell::OnceCell<Vec<ComparableThemeTokenCandidate>>,
+    tokens: &'a CssTokenSets,
+    config: &'a ResolvedConfig,
+    css_in_js_definers: Option<&'a CssInJsDefiners>,
+}
+
+impl<'a> StylingTokenCandidateCache<'a> {
+    fn new(
+        tokens: &'a CssTokenSets,
+        config: &'a ResolvedConfig,
+        css_in_js_definers: Option<&'a CssInJsDefiners>,
+    ) -> Self {
+        Self {
+            candidates: std::cell::OnceCell::new(),
+            tokens,
+            config,
+            css_in_js_definers,
+        }
+    }
+
+    fn get(&self) -> &[ComparableThemeTokenCandidate] {
+        self.candidates.get_or_init(|| {
+            css_report_token_candidates(self.tokens, self.config, self.css_in_js_definers)
+        })
+    }
+
+    fn is_definitely_empty(&self) -> bool {
+        if let Some(candidates) = self.candidates.get() {
+            return candidates.is_empty();
+        }
+        self.tokens.theme_token_definers.is_empty()
+            && self.tokens.custom_property_definers.is_empty()
+            && self.tokens.raw_style_values.len() < 2
+            && self
+                .css_in_js_definers
+                .is_none_or(|definers| definers.entries.iter().all(|entry| entry.leaves.is_empty()))
+    }
 }
 
 fn css_report_token_consumers(

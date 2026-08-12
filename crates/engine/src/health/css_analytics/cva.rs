@@ -63,14 +63,15 @@ pub(super) fn scan_cva_duplicate_variant_blocks(
 pub(super) fn scan_cva_variant_token_drifts(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    token_candidates: &[ComparableThemeTokenCandidate],
+    token_candidates: &StylingTokenCandidateCache<'_>,
 ) -> Vec<fallow_output::CvaVariantTokenDrift> {
-    if token_candidates.is_empty() {
+    if token_candidates.is_definitely_empty() {
         return Vec::new();
     }
     let mut out = Vec::new();
     let mut seen: rustc_hash::FxHashSet<(String, u32, String, String)> =
         rustc_hash::FxHashSet::default();
+    let mut candidates = None;
     for file in files {
         let Some((rel, source)) = read_js_style_scan_source(file, ctx) else {
             continue;
@@ -78,7 +79,11 @@ pub(super) fn scan_cva_variant_token_drifts(
         if !source_contains_cva_variants(&source) {
             continue;
         }
-        collect_cva_file_token_drifts(&mut out, &mut seen, &rel, &source, token_candidates);
+        let candidates = candidates.get_or_insert_with(|| token_candidates.get());
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+        collect_cva_file_token_drifts(&mut out, &mut seen, &rel, &source, candidates);
     }
     out.sort_by(|a, b| {
         a.path
