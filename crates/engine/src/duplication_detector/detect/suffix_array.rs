@@ -65,17 +65,16 @@ fn sais(s: &[usize], alphabet: usize) -> Vec<usize> {
     }
     let bucket_starts = bucket_bounds(&counts, false);
     let bucket_ends = bucket_bounds(&counts, true);
+    let mut bucket_cursors = vec![0usize; alphabet];
+    let ctx = SaisInductionCtx {
+        is_s: &is_s,
+        bucket_starts: &bucket_starts,
+        bucket_ends: &bucket_ends,
+    };
 
     // --- Stage 1: sort the LMS substrings via a first induced-sort pass. ---
     let lms_positions: Vec<usize> = (1..n).filter(|&i| is_lms(&is_s, i)).collect();
-    sort_lms_substrings(
-        s,
-        &mut sa,
-        &is_s,
-        &lms_positions,
-        &bucket_starts,
-        &bucket_ends,
-    );
+    sort_lms_substrings(s, &mut sa, &ctx, &lms_positions, &mut bucket_cursors);
 
     // Collect LMS suffixes in their now-sorted order and assign names by
     // comparing adjacent LMS substrings.
@@ -83,17 +82,7 @@ fn sais(s: &[usize], alphabet: usize) -> Vec<usize> {
     let sa1 = reduced_lms_suffix_array(&lms_positions, &names, name_count);
 
     // --- Stage 3: induce the final suffix array from the sorted LMS order. ---
-    induce_final_suffix_array(
-        s,
-        &mut sa,
-        &SaisInductionCtx {
-            is_s: &is_s,
-            bucket_starts: &bucket_starts,
-            bucket_ends: &bucket_ends,
-        },
-        &lms_positions,
-        &sa1,
-    );
+    induce_final_suffix_array(s, &mut sa, &ctx, &lms_positions, &sa1, &mut bucket_cursors);
 
     sa
 }
@@ -107,19 +96,18 @@ struct SaisInductionCtx<'a> {
 fn sort_lms_substrings(
     s: &[usize],
     sa: &mut [usize],
-    is_s: &[bool],
+    ctx: &SaisInductionCtx<'_>,
     lms_positions: &[usize],
-    bucket_starts: &[usize],
-    bucket_ends: &[usize],
+    bucket_cursors: &mut [usize],
 ) {
-    let mut tails = bucket_ends.to_vec();
+    bucket_cursors.copy_from_slice(ctx.bucket_ends);
     for &pos in lms_positions {
         let c = s[pos];
-        tails[c] -= 1;
-        sa[tails[c]] = pos;
+        bucket_cursors[c] -= 1;
+        sa[bucket_cursors[c]] = pos;
     }
-    induce_l_type(s, sa, is_s, bucket_starts);
-    induce_s_type(s, sa, is_s, bucket_ends);
+    induce_l_type(s, sa, ctx.is_s, ctx.bucket_starts, bucket_cursors);
+    induce_s_type(s, sa, ctx.is_s, ctx.bucket_ends, bucket_cursors);
 }
 
 fn name_lms_substrings(s: &[usize], is_s: &[bool], sa: &[usize]) -> (Vec<usize>, usize) {
@@ -164,17 +152,18 @@ fn induce_final_suffix_array(
     ctx: &SaisInductionCtx<'_>,
     lms_positions: &[usize],
     sorted_lms_indices: &[usize],
+    bucket_cursors: &mut [usize],
 ) {
     sa.fill(SA_EMPTY);
-    let mut tails = ctx.bucket_ends.to_vec();
+    bucket_cursors.copy_from_slice(ctx.bucket_ends);
     for &idx in sorted_lms_indices.iter().rev() {
         let pos = lms_positions[idx];
         let c = s[pos];
-        tails[c] -= 1;
-        sa[tails[c]] = pos;
+        bucket_cursors[c] -= 1;
+        sa[bucket_cursors[c]] = pos;
     }
-    induce_l_type(s, sa, ctx.is_s, ctx.bucket_starts);
-    induce_s_type(s, sa, ctx.is_s, ctx.bucket_ends);
+    induce_l_type(s, sa, ctx.is_s, ctx.bucket_starts, bucket_cursors);
+    induce_s_type(s, sa, ctx.is_s, ctx.bucket_ends, bucket_cursors);
 }
 
 /// Classify each position as S-type (`true`) or L-type (`false`). The final
@@ -210,32 +199,44 @@ fn bucket_bounds(counts: &[usize], end: bool) -> Vec<usize> {
 }
 
 /// Induce-sort L-type suffixes left-to-right into the front of their buckets.
-fn induce_l_type(s: &[usize], sa: &mut [usize], is_s: &[bool], bucket_starts: &[usize]) {
-    let mut heads = bucket_starts.to_vec();
+fn induce_l_type(
+    s: &[usize],
+    sa: &mut [usize],
+    is_s: &[bool],
+    bucket_starts: &[usize],
+    bucket_cursors: &mut [usize],
+) {
+    bucket_cursors.copy_from_slice(bucket_starts);
     for i in 0..sa.len() {
         let p = sa[i];
         if p != SA_EMPTY && p > 0 {
             let j = p - 1;
             if !is_s[j] {
                 let c = s[j];
-                sa[heads[c]] = j;
-                heads[c] += 1;
+                sa[bucket_cursors[c]] = j;
+                bucket_cursors[c] += 1;
             }
         }
     }
 }
 
 /// Induce-sort S-type suffixes right-to-left into the back of their buckets.
-fn induce_s_type(s: &[usize], sa: &mut [usize], is_s: &[bool], bucket_ends: &[usize]) {
-    let mut tails = bucket_ends.to_vec();
+fn induce_s_type(
+    s: &[usize],
+    sa: &mut [usize],
+    is_s: &[bool],
+    bucket_ends: &[usize],
+    bucket_cursors: &mut [usize],
+) {
+    bucket_cursors.copy_from_slice(bucket_ends);
     for i in (0..sa.len()).rev() {
         let p = sa[i];
         if p != SA_EMPTY && p > 0 {
             let j = p - 1;
             if is_s[j] {
                 let c = s[j];
-                tails[c] -= 1;
-                sa[tails[c]] = j;
+                bucket_cursors[c] -= 1;
+                sa[bucket_cursors[c]] = j;
             }
         }
     }
