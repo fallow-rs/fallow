@@ -691,4 +691,16 @@ mod tests {
             EffectiveExportResolution::Missing
         );
     }
+
+    #[test]
+    fn sfc_file_has_an_implicit_default_value_binding() {
+        let mut sfc = module(0, Vec::new(), Vec::new());
+        sfc.path = std::path::PathBuf::from("/project/Widget.vue");
+        let index = EffectiveExportIndex::build(&[sfc]);
+
+        assert!(matches!(
+            index.resolve(FileId(0), "default", ExportNamespace::Value),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(0)
+        ));
+    }
 }
