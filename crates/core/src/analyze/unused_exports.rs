@@ -888,12 +888,18 @@ struct ExportEntry {
 }
 
 impl ExportEntry {
-    const fn namespace(&self) -> ExportNamespace {
+    const fn namespaces(&self) -> &'static [ExportNamespace] {
         if self.is_type_only {
-            ExportNamespace::Type
+            &[ExportNamespace::Type]
         } else {
-            ExportNamespace::Value
+            &[ExportNamespace::Type, ExportNamespace::Value]
         }
+    }
+
+    fn connects_importer(&self, graph: &ModuleGraph, importer: FileId, export_name: &str) -> bool {
+        self.namespaces().iter().any(|&namespace| {
+            graph.importer_connects_export_origin(importer, self.file_id, export_name, namespace)
+        })
     }
 }
 
@@ -921,12 +927,7 @@ fn partition_by_common_importer(
             continue;
         }
         for &importer in &graph.reverse_deps[idx] {
-            if !graph.importer_connects_export_origin(
-                importer,
-                entry.file_id,
-                export_name,
-                entry.namespace(),
-            ) {
+            if !entry.connects_importer(graph, importer, export_name) {
                 continue;
             }
             importer_to_entries.entry(importer).or_default().push(i);
@@ -957,12 +958,7 @@ fn partition_by_common_importer(
             continue;
         }
         for &importer in &graph.reverse_deps[idx] {
-            if !graph.importer_connects_export_origin(
-                importer,
-                entry.file_id,
-                export_name,
-                entry.namespace(),
-            ) {
+            if !entry.connects_importer(graph, importer, export_name) {
                 continue;
             }
             if let Some(&j) = entry_index_by_file_id.get(&importer) {
@@ -1278,12 +1274,14 @@ fn is_re_export_chain_member(
     dynamic_re_export_sources: &DynamicReExportSources,
     graph: &ModuleGraph,
 ) -> bool {
-    let is_static_re_export = matches!(
-        graph.resolve_export(entry.file_id, export_name, entry.namespace()),
-        EffectiveExportResolution::Unique(binding)
-            if binding.origin_file() != entry.file_id
-                && group_modules.contains(&(binding.origin_file().0 as usize))
-    );
+    let is_static_re_export = entry.namespaces().iter().any(|&namespace| {
+        matches!(
+            graph.resolve_export(entry.file_id, export_name, namespace),
+            EffectiveExportResolution::Unique(binding)
+                if binding.origin_file() != entry.file_id
+                    && group_modules.contains(&(binding.origin_file().0 as usize))
+        )
+    });
     if is_static_re_export {
         return true;
     }
@@ -1819,6 +1817,97 @@ mod tests {
         let result =
             find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_follow_type_only_star_routes_for_value_backed_exports() {
+        let paths = ["/src/entry.ts", "/src/barrel.ts", "/src/a.ts", "/src/b.ts"];
+        let files: Vec<DiscoveredFile> = paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(path),
+                size_bytes: 0,
+            })
+            .collect();
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::ManualEntry,
+        }];
+        let class_export = |file_id: u32| ResolvedModule {
+            file_id: FileId(file_id),
+            path: files[file_id as usize].path.clone(),
+            exports: vec![ExportInfo {
+                name: ExportName::Named("Foo".to_string()),
+                local_name: Some("Foo".to_string()),
+                is_type_only: false,
+                is_side_effect_used: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: Span::new(10, 20),
+                members: vec![],
+                super_class: None,
+            }]
+            .into(),
+            ..Default::default()
+        };
+        let type_star = |source: &str, target: u32| ResolvedReExport {
+            info: ReExportInfo {
+                source: source.to_string(),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: true,
+                span: Span::new(10, 20),
+                statement_span: Span::new(10, 30),
+                source_span: Span::new(24, 29),
+            },
+            target: ResolveResult::InternalModule(FileId(target)),
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./barrel".to_string(),
+                        imported_name: ImportedName::Named("Foo".to_string()),
+                        local_name: "Foo".to_string(),
+                        is_type_only: true,
+                        from_style: false,
+                        span: Span::new(0, 10),
+                        source_span: Span::new(0, 1),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![type_star("./a", 2), type_star("./b", 3)],
+                ..Default::default()
+            },
+            class_export(2),
+            class_export(3),
+        ];
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        let result = find_duplicate_exports(
+            &graph,
+            &test_config(),
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+
+        assert_eq!(
+            result.len(),
+            1,
+            "ambiguous type-only stars must retain both class exports"
+        );
+        assert_eq!(result[0].export_name, "Foo");
+        assert_eq!(result[0].locations.len(), 2);
     }
 
     #[test]
@@ -3543,12 +3632,7 @@ mod tests {
                 continue;
             }
             for &importer in &graph.reverse_deps[idx] {
-                if !graph.importer_connects_export_origin(
-                    importer,
-                    entry.file_id,
-                    export_name,
-                    entry.namespace(),
-                ) {
+                if !entry.connects_importer(graph, importer, export_name) {
                     continue;
                 }
                 importer_to_entries.entry(importer).or_default().push(i);
@@ -3569,12 +3653,7 @@ mod tests {
                 continue;
             }
             for &importer in &graph.reverse_deps[idx] {
-                if !graph.importer_connects_export_origin(
-                    importer,
-                    entry.file_id,
-                    export_name,
-                    entry.namespace(),
-                ) {
+                if !entry.connects_importer(graph, importer, export_name) {
                     continue;
                 }
                 if entry_file_ids.contains(&importer)
