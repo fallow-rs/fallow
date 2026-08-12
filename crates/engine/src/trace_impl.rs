@@ -1080,6 +1080,87 @@ mod tests {
         assert_eq!(effective.re_export_chains[0].exported_as, "foo");
     }
 
+    #[test]
+    fn trace_follows_renamed_and_convergent_re_export_routes() {
+        let names = [
+            "source",
+            "renamed",
+            "final",
+            "left",
+            "right",
+            "diamond-entry",
+        ];
+        let files: Vec<_> = names
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(format!("/project/src/{name}.ts")),
+                size_bytes: 10,
+            })
+            .collect();
+        let re_export = |source: FileId, imported: &str, exported: &str| ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./{}", source.0),
+                imported_name: imported.to_string(),
+                exported_name: exported.to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(source),
+        };
+        let mut resolved: Vec<_> = files
+            .iter()
+            .map(|file| ResolvedModule {
+                file_id: file.id,
+                path: file.path.clone(),
+                ..Default::default()
+            })
+            .collect();
+        resolved[0].exports = vec![ExportInfo {
+            name: ExportName::Named("foo".to_string()),
+            local_name: Some("foo".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 3),
+            members: Vec::new(),
+            is_side_effect_used: false,
+            super_class: None,
+        }]
+        .into();
+        resolved[1].re_exports = vec![re_export(FileId(0), "foo", "bar")];
+        resolved[2].re_exports = vec![re_export(FileId(1), "bar", "baz")];
+        resolved[3].re_exports = vec![re_export(FileId(0), "*", "*")];
+        resolved[4].re_exports = vec![re_export(FileId(0), "*", "*")];
+        resolved[5].re_exports = vec![
+            re_export(FileId(3), "*", "*"),
+            re_export(FileId(4), "*", "*"),
+        ];
+        let entry_points = vec![EntryPoint {
+            path: files[5].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "foo")
+            .expect("source export exists");
+        let routes: FxHashSet<_> = trace
+            .re_export_chains
+            .iter()
+            .map(|route| (route.barrel_file.as_path(), route.exported_as.as_str()))
+            .collect();
+
+        assert_eq!(routes.len(), 5);
+        assert!(routes.contains(&(Path::new("src/renamed.ts"), "bar")));
+        assert!(routes.contains(&(Path::new("src/final.ts"), "baz")));
+        assert!(routes.contains(&(Path::new("src/left.ts"), "foo")));
+        assert!(routes.contains(&(Path::new("src/right.ts"), "foo")));
+        assert!(routes.contains(&(Path::new("src/diamond-entry.ts"), "foo")));
+    }
+
     fn build_class_member_graph() -> ModuleGraph {
         use fallow_types::extract::{MemberInfo, MemberKind};
 
