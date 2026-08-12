@@ -2976,6 +2976,38 @@ fn class_exposed_through_public_namespace_is_public_api() {
 }
 
 #[test]
+fn class_exposed_through_type_only_public_re_export_is_public_api() {
+    let mut graph = build_graph(&[("/src/index.ts", true), ("/src/context.ts", false)]);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Context",
+            vec![make_member("field", MemberKind::ClassProperty)],
+            None,
+        )],
+    );
+    graph.set_re_exports(
+        0,
+        vec![crate::graph::ReExportEdge {
+            source_file: FileId(1),
+            imported_name: "Context".to_string(),
+            exported_name: "Context".to_string(),
+            is_type_only: true,
+            span: Span::default(),
+        }],
+    );
+    let public_entries = FxHashSet::from_iter([FileId(0)]);
+    let public_class_exports = public_export_origin_keys(&graph, &public_entries);
+
+    assert!(is_entry_point_public_class_export(
+        &graph.modules[1],
+        &graph.modules[1].exports[0],
+        &public_class_exports,
+    ));
+}
+
+#[test]
 fn export_with_no_members_skipped() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
     graph.set_reachable(1);
