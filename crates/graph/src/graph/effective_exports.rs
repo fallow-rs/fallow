@@ -212,7 +212,13 @@ struct ObserverBuildState<'a> {
 pub(super) struct EffectiveExportIndex {
     name_ids: FxHashMap<Box<str>, ExportNameId>,
     resolutions: FxHashMap<ExportKey, NamespaceResolutions>,
-    declaration_merge_groups: FxHashMap<(FileId, usize), Box<[usize]>>,
+    declaration_merge_groups: DeclarationMergeGroups,
+}
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct DeclarationMergeGroups {
+    groups: Vec<Box<[usize]>>,
+    group_by_slot: FxHashMap<(FileId, usize), usize>,
 }
 
 impl EffectiveExportIndex {
@@ -324,41 +330,47 @@ impl EffectiveExportIndex {
             .origin_slot()
             .and_then(|slot| {
                 self.declaration_merge_groups
+                    .group_by_slot
                     .get(&(binding.origin_file(), slot))
             })
+            .and_then(|group| self.declaration_merge_groups.groups.get(*group))
             .map_or(&[], Box::as_ref)
     }
 }
 
-fn collect_declaration_merge_groups(
-    modules: &[ResolvedModule],
-) -> FxHashMap<(FileId, usize), Box<[usize]>> {
-    let mut by_slot = FxHashMap::default();
+fn collect_declaration_merge_groups(modules: &[ResolvedModule]) -> DeclarationMergeGroups {
+    let mut collected = DeclarationMergeGroups::default();
     for module in modules {
+        let slot_by_span: FxHashMap<_, _> = module
+            .exports
+            .iter()
+            .enumerate()
+            .map(|(slot, export)| ((export.span.start, export.span.end), slot))
+            .collect();
         for fact in module.semantic_facts.iter() {
             let fallow_types::extract::SemanticFact::DeclarationMerge(group) = fact else {
                 continue;
             };
-            let slots: Box<[usize]> = module
-                .exports
+            let mut slots: Vec<_> = group
+                .export_spans
                 .iter()
-                .enumerate()
-                .filter(|(_, export)| {
-                    group
-                        .export_spans
-                        .contains(&(export.span.start, export.span.end))
-                })
-                .map(|(slot, _)| slot)
+                .filter_map(|span| slot_by_span.get(span).copied())
                 .collect();
+            slots.sort_unstable();
+            slots.dedup();
             if slots.len() < 2 {
                 continue;
             }
+            let group_id = collected.groups.len();
             for &slot in &slots {
-                by_slot.insert((module.file_id, slot), slots.clone());
+                collected
+                    .group_by_slot
+                    .insert((module.file_id, slot), group_id);
             }
+            collected.groups.push(slots.into_boxed_slice());
         }
     }
-    by_slot
+    collected
 }
 
 fn seed_direct_bindings(

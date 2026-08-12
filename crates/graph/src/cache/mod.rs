@@ -78,7 +78,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 26: the effective export index retains typed declaration merge
 /// groups for namespace-aware reference selection.
-pub const GRAPH_CACHE_VERSION: u32 = 26;
+///
+/// Bumped to 27: declaration merge groups are stored once and referenced by a
+/// compact per-slot group identifier instead of cloning every group per slot.
+pub const GRAPH_CACHE_VERSION: u32 = 27;
 
 /// Cached form of a resolved target.
 ///
