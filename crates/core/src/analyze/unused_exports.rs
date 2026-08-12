@@ -1592,6 +1592,81 @@ mod tests {
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test file counts are trivially small"
+    )]
+    fn build_duplicate_graph(
+        file_specs: &[(&str, bool)],
+        exports: &[(usize, &str, bool)],
+        imports: &[(usize, usize, &str, bool)],
+    ) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = file_specs
+            .iter()
+            .enumerate()
+            .map(|(index, (path, _))| DiscoveredFile {
+                id: FileId(index as u32),
+                path: PathBuf::from(path),
+                size_bytes: 0,
+            })
+            .collect();
+        let entry_points: Vec<EntryPoint> = file_specs
+            .iter()
+            .filter(|(_, is_entry)| *is_entry)
+            .map(|(path, _)| EntryPoint {
+                path: PathBuf::from(path),
+                source: EntryPointSource::ManualEntry,
+            })
+            .collect();
+        let mut resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|file| ResolvedModule {
+                file_id: file.id,
+                path: file.path.clone(),
+                ..Default::default()
+            })
+            .collect();
+
+        let mut exports_by_module = vec![Vec::new(); resolved_modules.len()];
+        for &(module, name, is_type_only) in exports {
+            exports_by_module[module].push(ExportInfo {
+                name: ExportName::Named(name.to_string()),
+                local_name: Some(name.to_string()),
+                is_type_only,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: Span::new(10, 20),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            });
+        }
+        for (module, module_exports) in resolved_modules
+            .iter_mut()
+            .zip(exports_by_module.into_iter())
+        {
+            module.exports = module_exports.into();
+        }
+        for &(importer, source, name, is_type_only) in imports {
+            resolved_modules[importer]
+                .resolved_imports
+                .push(ResolvedImport {
+                    info: ImportInfo {
+                        source: format!("./{source}"),
+                        imported_name: ImportedName::Named(name.to_string()),
+                        local_name: format!("{name}{source}"),
+                        is_type_only,
+                        from_style: false,
+                        span: Span::new(1, 4),
+                        source_span: Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(source as u32)),
+                });
+        }
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
     #[test]
     fn duplicate_exports_empty_graph() {
         let graph = build_graph(&[]);
@@ -1616,17 +1691,15 @@ mod tests {
 
     #[test]
     fn duplicate_exports_detects_same_name_in_two_modules() {
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/a.ts", false),
-            ("/src/b.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/a.ts", false),
+                ("/src/b.ts", false),
+            ],
+            &[(1, "helper", false), (2, "helper", false)],
+            &[(0, 1, "helper", false), (0, 2, "helper", false)],
+        );
         let suppressions = SuppressionContext::empty();
         let config = test_config();
         let result =
@@ -1868,19 +1941,24 @@ mod tests {
 
     #[test]
     fn duplicate_exports_three_modules_same_name() {
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/a.ts", false),
-            ("/src/b.ts", false),
-            ("/src/c.ts", false),
-        ]);
-        for i in 1..=3 {
-            graph.modules[i].set_reachable(true);
-            graph.modules[i].exports = vec![make_export("sharedFn", 10, 20)];
-        }
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
-        graph.reverse_deps[3] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/a.ts", false),
+                ("/src/b.ts", false),
+                ("/src/c.ts", false),
+            ],
+            &[
+                (1, "sharedFn", false),
+                (2, "sharedFn", false),
+                (3, "sharedFn", false),
+            ],
+            &[
+                (0, 1, "sharedFn", false),
+                (0, 2, "sharedFn", false),
+                (0, 3, "sharedFn", false),
+            ],
+        );
         let suppressions = SuppressionContext::empty();
         let config = test_config();
         let result =
@@ -1913,16 +1991,15 @@ mod tests {
 
     #[test]
     fn duplicate_exports_direct_import_still_flagged() {
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/a.ts", false),
-            ("/src/b.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        graph.reverse_deps[2] = vec![FileId(1)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/a.ts", false),
+                ("/src/b.ts", false),
+            ],
+            &[(1, "helper", false), (2, "helper", false)],
+            &[(0, 1, "helper", false), (1, 2, "helper", false)],
+        );
         let suppressions = SuppressionContext::empty();
         let config = test_config();
         let result =
@@ -1996,17 +2073,15 @@ mod tests {
 
     #[test]
     fn duplicate_exports_same_namespace_still_flagged() {
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/a.ts", false),
-            ("/src/b.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/a.ts", false),
+                ("/src/b.ts", false),
+            ],
+            &[(1, "helper", false), (2, "helper", false)],
+            &[(0, 1, "helper", false), (0, 2, "helper", false)],
+        );
         let suppressions = SuppressionContext::empty();
         let config = test_config();
         let result =
@@ -2082,30 +2157,27 @@ mod tests {
     fn duplicate_exports_genuine_value_duplicate_still_flagged_despite_unrelated_backend() {
         // Files: 0=entry, 1=backend Label (no shared importer), 2=frontend-a Label,
         // 3=frontend-b Label, 4=shared consumer of frontend-a and frontend-b
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/backend/label.ts", false),
-            ("/src/frontend/a.ts", false),
-            ("/src/frontend/b.ts", false),
-            ("/src/frontend/consumer.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[2].set_reachable(true);
-        graph.modules[3].set_reachable(true);
-        graph.modules[4].set_reachable(true);
-
-        // All three export a value `Label`.
-        graph.modules[1].exports = vec![make_export("Label", 10, 20)];
-        graph.modules[2].exports = vec![make_export("Label", 10, 20)];
-        graph.modules[3].exports = vec![make_export("Label", 10, 20)];
-
-        // Backend is only imported by the entry (no connection to frontend).
-        graph.reverse_deps[1] = vec![FileId(0)];
-        // Frontend consumer imports from both frontend-a and frontend-b.
-        graph.reverse_deps[2] = vec![FileId(4)];
-        graph.reverse_deps[3] = vec![FileId(4)];
-        // Frontend consumer is imported by entry.
-        graph.reverse_deps[4] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/backend/label.ts", false),
+                ("/src/frontend/a.ts", false),
+                ("/src/frontend/b.ts", false),
+                ("/src/frontend/consumer.ts", false),
+            ],
+            &[
+                (1, "Label", false),
+                (2, "Label", false),
+                (3, "Label", false),
+                (4, "consumer", false),
+            ],
+            &[
+                (0, 1, "Label", false),
+                (0, 4, "consumer", false),
+                (4, 2, "Label", false),
+                (4, 3, "Label", false),
+            ],
+        );
 
         let suppressions = SuppressionContext::empty();
         let config = test_config();
@@ -2436,17 +2508,25 @@ mod tests {
 
     #[test]
     fn duplicate_exports_skipped_when_ignore_exports_lists_specific_names() {
-        let mut graph = build_graph(&[
-            ("/src/entry.ts", true),
-            ("/src/ui/dialog/index.ts", false),
-            ("/src/ui/card/index.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("Root", 10, 30), make_export("Helper", 40, 60)];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export("Root", 10, 30), make_export("Helper", 40, 60)];
-        graph.reverse_deps[1] = vec![FileId(0)];
-        graph.reverse_deps[2] = vec![FileId(0)];
+        let graph = build_duplicate_graph(
+            &[
+                ("/src/entry.ts", true),
+                ("/src/ui/dialog/index.ts", false),
+                ("/src/ui/card/index.ts", false),
+            ],
+            &[
+                (1, "Root", false),
+                (1, "Helper", false),
+                (2, "Root", false),
+                (2, "Helper", false),
+            ],
+            &[
+                (0, 1, "Root", false),
+                (0, 1, "Helper", false),
+                (0, 2, "Root", false),
+                (0, 2, "Helper", false),
+            ],
+        );
 
         let suppressions = SuppressionContext::empty();
         let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
