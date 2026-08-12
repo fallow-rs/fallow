@@ -3688,6 +3688,60 @@ fn star_re_export_duplicate_name_type_import_credits_type_export() {
 }
 
 #[test]
+fn named_type_re_export_does_not_credit_same_named_value_export() {
+    let files = vec![
+        discovered_file(0, "/project/consumer.ts"),
+        discovered_file(1, "/project/barrel.ts"),
+        discovered_file(2, "/project/merged.ts"),
+    ];
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/consumer.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: files[0].path.clone(),
+            resolved_imports: vec![named_import("Merged", "MergedType", true)],
+            type_referenced_import_bindings: vec!["MergedType".to_string()],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: files[1].path.clone(),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./merged".to_string(),
+                    imported_name: "Merged".to_string(),
+                    exported_name: "Merged".to_string(),
+                    is_type_only: true,
+                    span: oxc_span::Span::default(),
+                    statement_span: oxc_span::Span::default(),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(2)),
+            }],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(2),
+            path: files[2].path.clone(),
+            exports: vec![merged_export(true), merged_export(false)].into(),
+            ..Default::default()
+        },
+    ];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let (type_export, value_export) = merged_exports(&graph);
+
+    assert!(!type_export.references.is_empty());
+    assert!(
+        value_export.references.is_empty(),
+        "a named type-only route must not credit the same-named value binding"
+    );
+}
+
+#[test]
 fn star_re_export_duplicate_name_mixed_import_credits_both_exports() {
     let graph = graph_for_merged_star_import(
         vec![
