@@ -21667,6 +21667,10 @@
           "type": "string",
           "description": "The export name being traced."
         },
+        "namespace": {
+          "description": "Namespace selected for this trace.",
+          "$ref": "#/definitions/SemanticNamespace"
+        },
         "file_reachable": {
           "type": "boolean",
           "description": "Whether the file is reachable from an entry point."
@@ -21712,6 +21716,7 @@
       "required": [
         "file",
         "export_name",
+        "namespace",
         "file_reachable",
         "is_entry_point",
         "is_used",

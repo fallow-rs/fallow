@@ -8971,6 +8971,7 @@ file: string
  * The export name being traced.
  */
 export_name: string
+namespace: SemanticNamespace
 /**
  * Whether the file is reachable from an entry point.
  */
