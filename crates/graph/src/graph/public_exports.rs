@@ -6,19 +6,15 @@
 //! resolves the set of export symbols reachable through that public surface and
 //! returns one stable `"<rel_path>::<name>"` key per public export.
 //!
-//! An export `(file, name)` is PUBLIC when its DECLARING module is part of the
-//! public surface, which is:
-//! - a public-API entry point module itself (its own exports, INCLUDING the
-//!   synthetic re-export stubs the graph materializes on a barrel for every
-//!   `export { x } from './impl'` and `export * from './impl'` it forwards), OR
-//! - a module in the `export *` closure rooted at public-API entries (a target
-//!   whose names are flattened straight into the public surface by `export *`).
+//! A name is public when it resolves to one unique value binding on a public-API
+//! entry point. Candidates come from the entry's own exports and its `export *`
+//! closure. Shadowed and ambiguous star names are not public bindings.
 //!
 //! Keying on the surface AS EXPOSED (the entry's own name, e.g. `index.js::pub`),
 //! not the origin's internal name (`src/impl.ts::pub`), is what makes the delta
 //! exports-aware and avoids double-counting one symbol on both the barrel and
 //! the origin. A symbol re-exported only through an INTERNAL barrel that is not
-//! in `exports` never lands on a public entry or a star-target, so it produces
+//! in `exports` never resolves on a public entry, so it produces
 //! ZERO public-API delta (the Aisha repro); one re-exported through the
 //! `exports`-mapped entry lands on that entry once (exactly one). This mirrors
 //! the exports-aware reachability the `unprovided-inject` and
@@ -30,7 +26,7 @@ use std::path::{Path, PathBuf};
 use fallow_types::discover::FileId;
 use rustc_hash::FxHashSet;
 
-use super::ModuleGraph;
+use super::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
 
 impl ModuleGraph {
     /// Compute the set of public-export keys reachable through the given
@@ -46,26 +42,33 @@ impl ModuleGraph {
         root: &Path,
     ) -> FxHashSet<String> {
         let star_targets = self.public_star_re_export_targets(public_api_entry_points);
+        let star_names: FxHashSet<String> = star_targets
+            .iter()
+            .filter_map(|id| self.modules.get(id.0 as usize))
+            .flat_map(|module| &module.exports)
+            .filter(|export| !export.is_type_only)
+            .map(|export| export.name.to_string())
+            .collect();
         let mut keys: FxHashSet<String> = FxHashSet::default();
 
-        for module in &self.modules {
-            // The public surface is the exports DECLARED ON a public entry (its
-            // own + the synthetic re-export stubs the graph put there) plus the
-            // exports of any `export *` target reached from a public entry. The
-            // origin module of a NAMED re-export is internal, so its own copy of
-            // the symbol is intentionally NOT keyed (avoids double-counting and
-            // keeps an internal-barrel-only symbol out of the surface).
-            let module_is_public = public_api_entry_points.contains(&module.file_id)
-                || star_targets.contains(&module.file_id);
-            if !module_is_public {
+        for entry_id in public_api_entry_points {
+            let Some(entry) = self.modules.get(entry_id.0 as usize) else {
                 continue;
-            }
-            let rel = relativize(&module.path, root);
-            for export in &module.exports {
-                if export.is_type_only {
-                    continue;
+            };
+            let rel = relativize(&entry.path, root);
+            let candidate_names = entry
+                .exports
+                .iter()
+                .filter(|export| !export.is_type_only)
+                .map(|export| export.name.to_string())
+                .chain(star_names.iter().cloned());
+            for name in candidate_names {
+                if matches!(
+                    self.resolve_export(*entry_id, &name, ExportNamespace::Value),
+                    EffectiveExportResolution::Unique(_)
+                ) {
+                    keys.insert(format!("{rel}::{name}"));
                 }
-                keys.insert(format!("{rel}::{}", export.name));
             }
         }
         keys
@@ -73,8 +76,8 @@ impl ModuleGraph {
 
     /// The `export *` closure rooted at the public-API entry points: every module
     /// reachable through a chain of `export * from './x'` edges starting from a
-    /// public entry. Such modules' exports are part of the public surface even
-    /// though the entry never names them.
+    /// public entry. Their exported names are candidates for effective
+    /// resolution on each public entry.
     fn public_star_re_export_targets(
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
