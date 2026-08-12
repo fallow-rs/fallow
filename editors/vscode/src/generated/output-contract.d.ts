@@ -8977,11 +8977,7 @@ file: string
  * The export name being traced.
  */
 export_name: string
-/**
- * Namespace selected for this trace. Optional for wire compatibility with
- * trace payloads produced before namespace-aware export resolution.
- */
-namespace?: (SemanticNamespace | null)
+namespace?: SemanticNamespace
 /**
  * Whether the file is reachable from an entry point.
  */

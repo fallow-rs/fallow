@@ -21675,15 +21675,8 @@
           "description": "The export name being traced."
         },
         "namespace": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SemanticNamespace"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Namespace selected for this trace. Optional for wire compatibility with\ntrace payloads produced before namespace-aware export resolution."
+          "description": "Namespace selected for this trace. Producers always emit it; the schema\npermits omission by payloads created before namespaces were exposed.",
+          "$ref": "#/definitions/SemanticNamespace"
         },
         "file_reachable": {
           "type": "boolean",
