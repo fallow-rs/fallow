@@ -42,7 +42,9 @@ use fallow_types::extract::{
 };
 
 use crate::discover::FileId;
-use crate::graph::{ModuleGraph, ModuleNode};
+use crate::graph::{
+    EffectiveExportBinding, EffectiveExportResolution, ExportNamespace, ModuleGraph, ModuleNode,
+};
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use crate::results::UnrenderedComponent;
 use crate::suppress::{IssueKind, SuppressionContext};
@@ -128,13 +130,10 @@ pub fn find_unrendered_components(
 
     let used = build_rendered_sfc_used_set(graph, resolved_modules, &modules_by_id);
     let reexported = build_barrel_reexported_sfcs(graph);
-    // Public-API abstain set: every SFC reachable through ANY re-export chain
-    // from a non-private package entry point. A component library re-exports its
-    // components for downstream consumers to render, often through MULTI-HOP
-    // barrels (entry -> `export *` -> sub-barrel -> `export { default as X } from
-    // './X.vue'`), so a shallow one-hop check leaves deep leaves wrongly
-    // eligible. Over-abstaining here only suppresses findings (zero-FP), never
-    // creates them.
+    // Public-API abstain set: every SFC binding effectively exposed by a
+    // non-private package entry point. The graph owns shadowing, ambiguity,
+    // namespace, and multi-hop resolution; this analysis only classifies the
+    // resulting bindings as component files.
     let public_api = public_api_reexported_sfcs(graph, public_api_entry_points);
 
     // Pass 3: emit.
@@ -275,6 +274,9 @@ fn credit_static_import(
     referenced: &[String],
     used: &mut FxHashSet<FileId>,
 ) {
+    if import.info.is_type_only {
+        return;
+    }
     let Some(target) = import.target.internal_file_id() else {
         return;
     };
@@ -295,96 +297,56 @@ fn credit_static_import(
             }
         }
         ImportedName::Namespace => {
-            // `import * as ns from barrel` then `<ns.Foo />` (or the two-level
-            // `<ns.Sub.Foo />`): the rendered member is syntactically unknowable,
-            // so credit every SFC reachable from the namespace target through ANY
-            // re-export shape. `credit_all_reexported_sfcs` is name-agnostic, so it
-            // also follows nested `export * as Sub from './x'` and `export * from
-            // './x'` barrels that the old per-edge name walk (which re-walked each
-            // edge under the unmatched name `"*"`) silently dropped, and credits
-            // the target itself when it is an SFC.
+            // The rendered member is syntactically unknowable, so conservatively
+            // credit every unique value binding exposed by the namespace.
             credit_all_reexported_sfcs(graph, target, used);
         }
     }
 }
 
-/// Walk re-export edges from `(start_file, name)` and credit EVERY SFC file
-/// encountered in the chain. SFCs have no default `ExportSymbol`, so the generic
-/// `walk_re_export_origins` (which terminates at a locally-defined export) does
-/// not recognize them as origins; this variant credits the SFC file directly.
+/// Resolve a rendered import through the graph's effective value namespace.
 fn credit_rendered_sfc_chain(
     graph: &ModuleGraph,
     start_file: FileId,
     start_name: &str,
     used: &mut FxHashSet<FileId>,
 ) {
-    let mut visited: FxHashSet<(FileId, String)> = FxHashSet::default();
-    let mut stack: Vec<(FileId, String)> = vec![(start_file, start_name.to_string())];
-    while let Some((file_id, name)) = stack.pop() {
-        if !visited.insert((file_id, name.clone())) {
-            continue;
-        }
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
-            continue;
-        };
-        if is_sfc_extension(&module.path) {
-            used.insert(file_id);
-        }
-        // `name` is always a concrete export name here (the start name is a
-        // named/default import, never "*"), so `exported_name == name` already
-        // implies `exported_name != "*"`.
-        let mut matched = false;
-        for re in &module.re_exports {
-            if re.exported_name != name {
-                continue;
-            }
-            if re.imported_name == "*" {
-                // Namespace re-export: `export * as <name> from './x'`. The
-                // consumer rendered `<name.member>` for a member we cannot pin
-                // down, so credit EVERY SFC the namespace target re-exports
-                // (liberal, zero-drift, mirroring the direct `import * as ns`
-                // handling in `credit_static_import`).
-                credit_all_reexported_sfcs(graph, re.source_file, used);
-            } else {
-                // Named / renamed re-export: `export { X } from`,
-                // `export { Y as X } from`.
-                stack.push((re.source_file, re.imported_name.clone()));
-            }
-            matched = true;
-        }
-        if matched {
-            continue;
-        }
-        for re in &module.re_exports {
-            if re.exported_name == "*" {
-                stack.push((re.source_file, name.clone()));
-            }
-        }
+    let EffectiveExportResolution::Unique(binding) =
+        graph.resolve_export(start_file, start_name, ExportNamespace::Value)
+    else {
+        return;
+    };
+    if binding.is_implicit_default() {
+        used.insert(binding.origin_file());
+    } else if let Some(source) = binding.namespace_source() {
+        credit_all_reexported_sfcs(graph, source, used);
     }
 }
 
-/// Credit EVERY SFC reachable through ANY re-export edge from `start` (a
-/// namespace re-export target). When a consumer renders `<ns.member>` through a
-/// `export * as ns` barrel, the member is unknowable syntactically, so every
-/// member the namespace exposes is conservatively credited. Follows named,
-/// renamed, namespace, and star re-exports uniformly (name-agnostic) and is
-/// cycle-safe via the visited set. Over-crediting here can only suppress a
-/// finding, never create one.
+/// Credit the unique value bindings exposed by a namespace target.
 fn credit_all_reexported_sfcs(graph: &ModuleGraph, start: FileId, used: &mut FxHashSet<FileId>) {
-    let mut visited: FxHashSet<FileId> = FxHashSet::default();
-    let mut stack: Vec<FileId> = vec![start];
-    while let Some(file_id) = stack.pop() {
-        if !visited.insert(file_id) {
+    credit_effective_sfc_bindings(
+        graph,
+        graph.unique_export_bindings(start, ExportNamespace::Value),
+        used,
+    );
+}
+
+fn credit_effective_sfc_bindings(
+    graph: &ModuleGraph,
+    bindings: impl IntoIterator<Item = EffectiveExportBinding>,
+    used: &mut FxHashSet<FileId>,
+) {
+    let mut visited = FxHashSet::default();
+    let mut stack: Vec<_> = bindings.into_iter().collect();
+    while let Some(binding) = stack.pop() {
+        if !visited.insert(binding) {
             continue;
         }
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
-            continue;
-        };
-        if is_sfc_extension(&module.path) {
-            used.insert(file_id);
-        }
-        for re in &module.re_exports {
-            stack.push(re.source_file);
+        if binding.is_implicit_default() {
+            used.insert(binding.origin_file());
+        } else if let Some(source) = binding.namespace_source() {
+            stack.extend(graph.unique_export_bindings(source, ExportNamespace::Value));
         }
     }
 }
@@ -397,33 +359,17 @@ fn graph_path(graph: &ModuleGraph, file_id: FileId) -> std::path::PathBuf {
         .unwrap_or_default()
 }
 
-/// Every SFC reachable through ANY re-export chain (any imported name, including
-/// `*`) from a non-private package entry point. Such an SFC is exposed for a
-/// downstream consumer to render, so it is never a project-internal unrendered
-/// component. Walks the full chain (entry -> sub-barrel -> ... -> `.vue` leaf),
-/// not just one hop, and is cycle-safe via the visited set.
+/// SFC bindings effectively exposed by a non-private package entry point.
 fn public_api_reexported_sfcs(
     graph: &ModuleGraph,
     public_api_entry_points: &FxHashSet<FileId>,
 ) -> FxHashSet<FileId> {
-    let mut result: FxHashSet<FileId> = FxHashSet::default();
-    let mut visited: FxHashSet<FileId> = FxHashSet::default();
-    let mut stack: Vec<FileId> = public_api_entry_points.iter().copied().collect();
-    while let Some(file_id) = stack.pop() {
-        if !visited.insert(file_id) {
-            continue;
-        }
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
-            continue;
-        };
-        for re in &module.re_exports {
-            let source = re.source_file;
-            if is_sfc_extension(&graph_path(graph, source)) {
-                result.insert(source);
-            }
-            stack.push(source);
-        }
-    }
+    let mut result = FxHashSet::default();
+    credit_effective_sfc_bindings(
+        graph,
+        graph.public_export_bindings(public_api_entry_points),
+        &mut result,
+    );
     result
 }
 
@@ -865,33 +811,27 @@ fn build_angular_unrendered_component(
     }
 }
 
-/// Every source file reachable through ANY re-export chain (any imported name,
-/// including `*`) from a non-private package entry point. The extension-agnostic
-/// analogue of `public_api_reexported_sfcs`: an Angular component re-exported
-/// from a library `public-api.ts` is exposed for a downstream consumer to render,
-/// so it is never a project-internal unrendered component. Walks the full chain
-/// (entry -> sub-barrel -> ... -> leaf), cycle-safe via the visited set.
+/// Source files behind value bindings effectively exposed by public entries.
 fn public_api_reexported_files(
     graph: &ModuleGraph,
     public_api_entry_points: &FxHashSet<FileId>,
 ) -> FxHashSet<FileId> {
-    let mut result: FxHashSet<FileId> = FxHashSet::default();
-    let mut visited: FxHashSet<FileId> = FxHashSet::default();
-    let mut stack: Vec<FileId> = public_api_entry_points.iter().copied().collect();
-    while let Some(file_id) = stack.pop() {
-        if !visited.insert(file_id) {
+    let mut files = FxHashSet::default();
+    let mut visited = FxHashSet::default();
+    let mut stack: Vec<_> = graph
+        .public_export_bindings(public_api_entry_points)
+        .into_iter()
+        .collect();
+    while let Some(binding) = stack.pop() {
+        if !visited.insert(binding) {
             continue;
         }
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
-            continue;
-        };
-        for re in &module.re_exports {
-            let source = re.source_file;
-            result.insert(source);
-            stack.push(source);
+        files.insert(binding.origin_file());
+        if let Some(source) = binding.namespace_source() {
+            stack.extend(graph.unique_export_bindings(source, ExportNamespace::Value));
         }
     }
-    result
+    files
 }
 
 #[cfg(test)]
