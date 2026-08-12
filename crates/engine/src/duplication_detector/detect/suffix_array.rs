@@ -29,12 +29,14 @@ pub(super) fn build_suffix_array(text: &[i64]) -> Vec<usize> {
     s.extend(text.iter().map(|&v| (v - min_val) as usize + 1));
     s.push(0); // unique smallest terminator
 
-    let sa_full = sais(&s, alphabet);
-    debug_assert_eq!(sa_full[0], n, "terminator must sort first");
+    let mut sa = sais(&s, alphabet);
+    debug_assert_eq!(sa[0], n, "terminator must sort first");
 
     // Drop the terminator's position (always sa_full[0]); the remainder is a
     // permutation of `0..n`.
-    sa_full[1..].to_vec()
+    sa.copy_within(1.., 0);
+    sa.pop();
+    sa
 }
 
 const SA_EMPTY: usize = usize::MAX;
