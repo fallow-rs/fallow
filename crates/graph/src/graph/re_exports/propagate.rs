@@ -1079,7 +1079,9 @@ fn propagate_entry_point_star(input: EntryPointStarPropagation<'_>) -> bool {
             (ExportNamespace::Type, resolves_type),
             (ExportNamespace::Value, resolves_value),
         ] {
-            if resolves && !export.has_reference_from(barrel_id, path, namespace) {
+            if resolves
+                && !export.has_reference_from(barrel_id, oxc_span::Span::new(0, 0), path, namespace)
+            {
                 export.push_reference(
                     SymbolReference {
                         from_file: barrel_id,
@@ -1400,8 +1402,12 @@ fn propagate_entry_point_named(input: EntryPointNamedPropagation<'_>) -> bool {
             namespace,
         ) {
             let source = &mut modules[source_idx];
-            if !source.exports[export_idx].has_reference_from(barrel_id, synthetic_path, namespace)
-            {
+            if !source.exports[export_idx].has_reference_from(
+                barrel_id,
+                oxc_span::Span::new(0, 0),
+                synthetic_path,
+                namespace,
+            ) {
                 source.exports[export_idx].push_reference(
                     SymbolReference {
                         from_file: barrel_id,

@@ -229,12 +229,18 @@ pub(crate) struct RoutedReference {
     pub(crate) path: Option<ReferencePathId>,
 }
 
-pub(crate) type RoutedReferenceKey = (FileId, Option<ReferencePathId>, super::ExportNamespace);
+pub(crate) type RoutedReferenceKey = (
+    FileId,
+    oxc_span::Span,
+    Option<ReferencePathId>,
+    super::ExportNamespace,
+);
 
 impl RoutedReference {
     pub(crate) const fn key(self) -> RoutedReferenceKey {
         (
             self.reference.from_file,
+            self.reference.import_span,
             self.path,
             self.reference.namespace,
         )
@@ -299,6 +305,7 @@ impl ExportSymbol {
     pub(crate) fn has_reference_from(
         &self,
         from_file: FileId,
+        import_span: oxc_span::Span,
         path: Option<ReferencePathId>,
         namespace: super::ExportNamespace,
     ) -> bool {
@@ -307,6 +314,7 @@ impl ExportSymbol {
             .enumerate()
             .any(|(index, reference)| {
                 reference.from_file == from_file
+                    && reference.import_span == import_span
                     && self.reference_path(index) == path
                     && reference.namespace == namespace
             })
@@ -1341,8 +1349,18 @@ mod tests {
         assert!(export.reference_paths.is_empty());
         assert_eq!(export.reference_paths.capacity(), 0);
         assert_eq!(export.reference_path(1), None);
-        assert!(export.has_reference_from(FileId(1), None, ExportNamespace::Value));
-        assert!(!export.has_reference_from(FileId(9), None, ExportNamespace::Value));
+        assert!(export.has_reference_from(
+            FileId(1),
+            oxc_span::Span::default(),
+            None,
+            ExportNamespace::Value
+        ));
+        assert!(!export.has_reference_from(
+            FileId(9),
+            oxc_span::Span::default(),
+            None,
+            ExportNamespace::Value
+        ));
     }
 
     #[test]
@@ -1372,9 +1390,15 @@ mod tests {
         assert_eq!(export.reference_paths, vec![None, Some(tracked), None]);
         assert_eq!(export.reference_path(0), None);
         assert_eq!(export.reference_path(1), Some(tracked));
-        assert!(export.has_reference_from(FileId(0), Some(tracked), ExportNamespace::Value));
+        assert!(export.has_reference_from(
+            FileId(0),
+            reference.import_span,
+            Some(tracked),
+            ExportNamespace::Value
+        ));
         assert!(!export.has_reference_from(
             FileId(0),
+            reference.import_span,
             Some(ReferencePathId::from_index(7)),
             ExportNamespace::Value
         ));

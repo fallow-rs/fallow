@@ -26,10 +26,15 @@ use super::build::{ExportNameIndex, is_css_module_path};
 /// the k-th attach stays O(1) instead of scanning k-1 earlier references.
 const REFERENCE_DEDUP_THRESHOLD: usize = 32;
 
-/// The `(from_file, path)` pairs already attached to one export.
-type AttachedSiteSet = FxHashSet<(FileId, Option<ReferencePathId>, ExportNamespace)>;
+/// The exact `(from_file, import_span, path, namespace)` sites attached to one export.
+type AttachedSiteSet = FxHashSet<(
+    FileId,
+    oxc_span::Span,
+    Option<ReferencePathId>,
+    ExportNamespace,
+)>;
 
-/// Transient per-export index of already-attached `(from_file, path)` pairs,
+/// Transient per-export index of already-attached reference sites,
 /// keyed by `(module file, export index)`.
 ///
 /// Only valid while every reference push to the covered exports flows through
@@ -222,11 +227,11 @@ fn attach_reference(
         std::collections::hash_map::Entry::Occupied(entry) => {
             entry
                 .into_mut()
-                .insert((site.from_file, site.path, namespace))
+                .insert((site.from_file, site.import_span, site.path, namespace))
         }
         std::collections::hash_map::Entry::Vacant(entry) => {
             if export.references.len() < REFERENCE_DEDUP_THRESHOLD {
-                !export.has_reference_from(site.from_file, site.path, namespace)
+                !export.has_reference_from(site.from_file, site.import_span, site.path, namespace)
             } else {
                 let seen = entry.insert(
                     export
@@ -234,13 +239,14 @@ fn attach_reference(
                         .map(|routed| {
                             (
                                 routed.reference.from_file,
+                                routed.reference.import_span,
                                 routed.path,
                                 routed.reference.namespace,
                             )
                         })
                         .collect(),
                 );
-                seen.insert((site.from_file, site.path, namespace))
+                seen.insert((site.from_file, site.import_span, site.path, namespace))
             }
         }
     };
@@ -406,7 +412,7 @@ pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
             .iter_mut()
             .find(|export| export.name.matches_str(member))
         {
-            if !export.has_reference_from(site.from_file, site.path, namespace) {
+            if !export.has_reference_from(site.from_file, site.import_span, site.path, namespace) {
                 export.push_reference(
                     SymbolReference {
                         from_file: site.from_file,
@@ -906,7 +912,7 @@ mod tests {
     }
 
     #[test]
-    fn untracked_reference_sites_preserve_legacy_source_deduplication() {
+    fn untracked_reference_sites_preserve_distinct_import_spans() {
         let mut export = ExportSymbol {
             name: ExportName::Named("a".to_string()),
             is_type_only: false,
@@ -937,9 +943,14 @@ mod tests {
             &mut dedup,
         );
 
-        assert_eq!(export.references.len(), 1);
+        assert_eq!(export.references.len(), 2);
         assert_eq!(export.references[0].kind, ReferenceKind::NamedImport);
         assert_eq!(export.references[0].import_span, oxc_span::Span::new(0, 10));
+        assert_eq!(export.references[1].kind, ReferenceKind::NamespaceImport);
+        assert_eq!(
+            export.references[1].import_span,
+            oxc_span::Span::new(20, 30)
+        );
     }
 
     #[test]
