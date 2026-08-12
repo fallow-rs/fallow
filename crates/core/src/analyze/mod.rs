@@ -258,16 +258,18 @@ fn public_workspace_roots<'a>(
 
     workspaces
         .iter()
-        .filter(|ws| {
-            public_packages.iter().any(|pattern| {
-                ws.name == *pattern
-                    || globset::Glob::new(pattern)
-                        .ok()
-                        .is_some_and(|g| g.compile_matcher().is_match(&ws.name))
-            })
-        })
+        .filter(|workspace| workspace_is_public(&workspace.name, public_packages))
         .map(|ws| ws.root.as_path())
         .collect()
+}
+
+fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
+    public_packages.iter().any(|pattern| {
+        name == pattern
+            || globset::Glob::new(pattern)
+                .ok()
+                .is_some_and(|glob| glob.compile_matcher().is_match(name))
+    })
 }
 
 /// Build the raw (as-discovered) module-path -> `FileId` index.
@@ -404,12 +406,9 @@ fn add_exportless_package_source_indexes(
     }
 }
 
-/// Compute the exports-aware public-API entry-point set: the `package.json`
-/// `exports`-mapped modules (non-private packages) plus the no-`exports`
-/// source-index fallback. This encodes rule R4 (the `exports`-mapped copy is
-/// public; a no-`exports` copy is internal). Exposed for the review brief,
-/// which feeds it into [`ModuleGraph::public_export_keys`] to compute the
-/// exports-aware public-API surface delta.
+/// Compute the public API entries used by core detectors: the non-private root
+/// package plus workspace packages selected by `publicPackages`. Each package
+/// contributes its manifest entries and the no-`exports` source-index fallback.
 fn public_api_package_entry_points(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -434,6 +433,7 @@ fn public_api_package_entry_points(
         graph,
         &path_to_file_id,
         workspaces,
+        &config.public_packages,
         &canonical_project_root,
     );
 
@@ -466,9 +466,13 @@ fn add_workspace_public_api_entry_points(
     graph: &ModuleGraph,
     path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
     workspaces: &[fallow_config::WorkspaceInfo],
+    public_packages: &[String],
     canonical_project_root: &std::path::Path,
 ) {
-    for workspace in workspaces {
+    for workspace in workspaces
+        .iter()
+        .filter(|workspace| workspace_is_public(&workspace.name, public_packages))
+    {
         let Some(pkg) = fallow_config::load_dir_package_json(&workspace.root) else {
             continue;
         };
