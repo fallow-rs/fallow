@@ -1908,6 +1908,10 @@ fn interface_member_usage_does_not_flag_implementer_members() {
         "inspect should be credited through a class-typed property chain: {unused_members:?}"
     );
     assert!(
+        !unused_members.contains(&"FixedSizeScrollStrategy.notify".to_string()),
+        "notify should be credited through a local initialized from a typed field: {unused_members:?}"
+    );
+    assert!(
         unused_members.contains(&"FixedSizeScrollStrategy.unusedHelper".to_string()),
         "unrelated members should still be reported: {unused_members:?}"
     );

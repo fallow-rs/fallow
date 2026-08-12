@@ -3,6 +3,7 @@ import {
   inspectStrategy,
   refreshStrategy,
   resetStrategy,
+  StrategyRegistry,
   StrategyContext,
   ScrollViewport,
 } from './scroll-viewport';
@@ -15,3 +16,4 @@ viewport.destroy();
 refreshStrategy(strategy);
 resetStrategy(strategy);
 inspectStrategy(new StrategyContext(strategy));
+new StrategyRegistry(strategy).flush();

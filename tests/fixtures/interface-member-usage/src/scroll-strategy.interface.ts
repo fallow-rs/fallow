@@ -5,4 +5,5 @@ export interface VirtualScrollStrategy {
   refresh(): void;
   reset(): void;
   inspect(): void;
+  notify(): void;
 }

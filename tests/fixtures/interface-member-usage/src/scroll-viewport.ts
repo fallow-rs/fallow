@@ -35,3 +35,13 @@ export class StrategyContext {
 export function inspectStrategy(context: StrategyContext): void {
   context.strategy.inspect();
 }
+
+export class StrategyRegistry {
+  constructor(public current?: VirtualScrollStrategy) {}
+
+  flush(): void {
+    for (let current = this.current; current; current = undefined) {
+      current.notify();
+    }
+  }
+}
