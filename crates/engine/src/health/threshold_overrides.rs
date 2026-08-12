@@ -148,6 +148,14 @@ impl ThresholdOverrideResolver {
     fn entries(&self) -> &[CompiledThresholdOverride] {
         &self.entries
     }
+
+    /// True when no `thresholdOverrides` entries are configured. Lets callers
+    /// on cold paths (suppressed functions) skip `resolve` entirely, so the
+    /// common no-override run does zero extra work per suppressed unit.
+    #[must_use]
+    pub(super) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -219,6 +227,7 @@ impl ThresholdOverrideStateTracker {
             cyclomatic,
             cognitive,
             line_count,
+            suppressed,
         } = function;
         for matched in matches {
             let configured = matched.entry.configured;
@@ -255,10 +264,17 @@ impl ThresholdOverrideStateTracker {
             // finding, so folding an unrelated long function into the predicate
             // would flip a cyclomatic-only override to `insufficient` with
             // nothing outstanding to point at.
+            //
+            // Suppression neutralizes only the finding-driven terms: an inline
+            // `fallow-ignore` comment hides the complexity finding, so a raised
+            // cyclomatic/cognitive ceiling buys nothing there and the row reads
+            // `stale`, mirroring `record_crap`. The unit-size term keeps real
+            // scoring because suppression covers the finding only, never the
+            // large-function list, so a raised `maxUnitSize` still has effect
+            // on a suppressed unit (issue #2163 follow-up).
             let breaches = |max_cyclomatic: u16, max_cognitive: u16, max_unit_size: u32| {
-                cyclomatic > max_cyclomatic
-                    || cognitive > max_cognitive
-                    || (touches_unit_size && line_count > max_unit_size)
+                (!suppressed && (cyclomatic > max_cyclomatic || cognitive > max_cognitive))
+                    || (touches_unit_size && line_count.is_some_and(|lc| lc > max_unit_size))
             };
             let global_exceeded = breaches(global.cyclomatic, global.cognitive, global.unit_size);
             let local_exceeded = breaches(
@@ -279,11 +295,12 @@ impl ThresholdOverrideStateTracker {
             // unit-size-only entry that raised the ceiling without clearing it
             // read `insufficient` with an empty `outstanding`, the one
             // contradiction a CI gate cannot detect (issue #2163).
-            let outstanding = if touches_unit_size && line_count > effective.max_unit_size {
-                vec![ThresholdOverrideDimension::Complexity]
-            } else {
-                Vec::new()
-            };
+            let outstanding =
+                if touches_unit_size && line_count.is_some_and(|lc| lc > effective.max_unit_size) {
+                    vec![ThresholdOverrideDimension::Complexity]
+                } else {
+                    Vec::new()
+                };
             self.push_state(ThresholdOverrideStateInput {
                 status,
                 override_index: matched.entry.index,
@@ -298,6 +315,7 @@ impl ThresholdOverrideStateTracker {
                     cyclomatic,
                     cognitive,
                     crap: None,
+                    line_count,
                 }),
                 reason: matched.entry.reason.clone(),
                 dimension: ThresholdOverrideDimension::Complexity,
@@ -350,6 +368,9 @@ impl ThresholdOverrideStateTracker {
                     cyclomatic: metrics.cyclomatic,
                     cognitive: metrics.cognitive,
                     crap: Some(metrics.crap),
+                    // The CRAP dimension never scores unit size, so an absent
+                    // field keeps the row honest next to a CRAP-breach claim.
+                    line_count: None,
                 }),
                 reason: matched.entry.reason.clone(),
                 dimension: ThresholdOverrideDimension::Crap,
@@ -466,7 +487,14 @@ impl ThresholdOverrideStateTracker {
 ///
 /// `line_count` is here because `maxUnitSize` is part of the complexity
 /// dimension: without it a unit-size-only entry has nothing to score its row
-/// against.
+/// against. `None` means the caller has no unit-size-scorable span: the
+/// `<component>` rollup is never measured against `maxUnitSize`, so a `Some`
+/// there would let a row read `insufficient` over a breach no other part of
+/// the report can show.
+///
+/// `suppressed` mirrors [`CrapFunctionContext`]: an inline `fallow-ignore`
+/// comment hides the complexity finding, so the row must read `stale` instead
+/// of falling through to `no_match` (issue #2163 follow-up).
 #[derive(Clone, Copy)]
 pub(super) struct ComplexityFunctionContext<'a> {
     pub(super) path: &'a Path,
@@ -475,7 +503,8 @@ pub(super) struct ComplexityFunctionContext<'a> {
     pub(super) col: u32,
     pub(super) cyclomatic: u16,
     pub(super) cognitive: u16,
-    pub(super) line_count: u32,
+    pub(super) line_count: Option<u32>,
+    pub(super) suppressed: bool,
 }
 
 /// One function's identity and suppression state for the CRAP recorder.

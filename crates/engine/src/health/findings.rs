@@ -94,6 +94,29 @@ pub(super) fn collect_findings_with_resolver(
                 fc.line,
                 crate::suppress::IssueKind::Complexity,
             ) {
+                // Recorded before the skip, mirroring `record_crap`: the
+                // tracker is what registers the entry as matched, so skipping
+                // it here turned a glob that did match a suppressed unit into
+                // a `no_match` row (issue #2163 follow-up). The `is_empty`
+                // guard keeps the common no-override run at zero extra work.
+                if !input.threshold_resolver.is_empty() {
+                    let (applied, matched) = input.threshold_resolver.resolve(relative, &fc.name);
+                    input.threshold_state_tracker.record_complexity(
+                        ComplexityFunctionContext {
+                            path,
+                            function: &fc.name,
+                            line: fc.line,
+                            col: fc.col,
+                            cyclomatic: fc.cyclomatic,
+                            cognitive: fc.cognitive,
+                            line_count: Some(fc.line_count),
+                            suppressed: true,
+                        },
+                        &matched,
+                        input.threshold_resolver.global,
+                        applied.effective,
+                    );
+                }
                 continue;
             }
             let react_hook_profile = hook_profiles.get(fc_idx).cloned().flatten();
@@ -147,7 +170,8 @@ fn collect_complexity_finding(
             col: fc.col,
             cyclomatic: fc.cyclomatic,
             cognitive: fc.cognitive,
-            line_count: fc.line_count,
+            line_count: Some(fc.line_count),
+            suppressed: false,
         },
         &matched_overrides,
         input.threshold_resolver.global,

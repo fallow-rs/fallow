@@ -223,11 +223,12 @@ fn build_component_rollup(
             col: worst.col,
             cyclomatic: rollup_cyc,
             cognitive: rollup_cog,
-            // Zero, not the rollup's own span: the rollup is never measured
+            // None, not the rollup's own span: the rollup is never measured
             // against `maxUnitSize` and never enters the large-function list, so
             // scoring a unit-size term here would let a row read `insufficient`
             // over a breach no other part of the report can show.
-            line_count: 0,
+            line_count: None,
+            suppressed: false,
         },
         &matches,
         resolver.global,

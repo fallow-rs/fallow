@@ -616,9 +616,12 @@ fn push_threshold_overrides_compact(
             let crap = metrics
                 .crap
                 .map_or(String::new(), |value| format!(",crap={value:.1}"));
+            let line_count = metrics
+                .line_count
+                .map_or(String::new(), |value| format!(",lines={value}"));
             format!(
-                ",cyclomatic={},cognitive={}{}",
-                metrics.cyclomatic, metrics.cognitive, crap
+                ",cyclomatic={},cognitive={}{}{}",
+                metrics.cyclomatic, metrics.cognitive, line_count, crap
             )
         });
         let outstanding = if entry.outstanding.is_empty() {

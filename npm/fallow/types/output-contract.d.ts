@@ -5759,6 +5759,12 @@ cognitive: number
  * Current CRAP score, when coverage data exists.
  */
 crap?: (number | null)
+/**
+ * Measured line count of the matched unit. Present on complexity rows,
+ * where `maxUnitSize` participates in the dimension; absent on CRAP rows
+ * and `<component>` rollup rows, which are never scored on unit size.
+ */
+line_count?: (number | null)
 }
 /**
  * Project-wide vital signs: a fixed set of metrics for trend tracking.

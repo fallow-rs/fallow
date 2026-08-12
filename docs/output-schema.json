@@ -14353,6 +14353,13 @@
             "null"
           ],
           "description": "Current CRAP score, when coverage data exists."
+        },
+        "line_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Measured line count of the matched unit. Present on complexity rows,\nwhere `maxUnitSize` participates in the dimension; absent on CRAP rows\nand `<component>` rollup rows, which are never scored on unit size."
         }
       },
       "required": [

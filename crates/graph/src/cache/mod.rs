@@ -90,7 +90,12 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 30: declaration-merge references now propagate through named and
 /// star barrel surfaces using the canonical effective binding group.
-pub const GRAPH_CACHE_VERSION: u32 = 30;
+///
+/// Bumped to 31 for issue #2213: speculative `__mocks__` sibling candidates
+/// that resolve to package space are no longer emitted, so warm 30 caches
+/// would keep replaying the phantom `@scope/__mocks__` package edges the
+/// resolver no longer produces.
+pub const GRAPH_CACHE_VERSION: u32 = 31;
 
 /// Cached form of a resolved target.
 ///

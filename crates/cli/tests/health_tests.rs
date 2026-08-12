@@ -360,6 +360,114 @@ fn health_threshold_override_uses_local_ceiling() {
     assert_eq!(state["status"].as_str(), Some("active"));
     assert_eq!(state["function"].as_str(), Some("legacyFlow"));
     assert_eq!(state["reason"].as_str(), Some("legacy migration"));
+    assert!(
+        state["metrics"]["line_count"]
+            .as_u64()
+            .is_some_and(|n| n > 0),
+        "complexity rows must carry the measured span: {state:#?}"
+    );
+}
+
+/// An inline suppression already hides the finding, so the override is not
+/// what keeps the unit quiet: the row must read `stale`, not `no_match`,
+/// which claimed the glob matched nothing (issue #2163 follow-up).
+#[test]
+fn health_threshold_override_reports_stale_for_suppressed_function() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "functions": ["legacyFlow"],
+        "maxCyclomatic": 20
+      }
+    ]
+  }
+}
+"#,
+        &format!(
+            "// fallow-ignore-next-line complexity\n{}",
+            complex_threshold_override_source()
+        ),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    assert_eq!(states.len(), 1, "{states:#?}");
+    assert_eq!(states[0]["status"].as_str(), Some("stale"));
+    assert_eq!(states[0]["function"].as_str(), Some("legacyFlow"));
+}
+
+/// The human section is capped for scanability, but JSON is the machine
+/// surface and must keep every row (issue #2163 follow-up).
+#[test]
+fn health_threshold_override_json_keeps_every_row_when_human_section_caps() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"override-volume-fixture","type":"module","main":"src/many.spec.ts"}"#,
+    );
+    let mut source = String::new();
+    for i in 0..12 {
+        let _ = writeln!(
+            source,
+            "export function helper{i}(input: number): number {{\n  return input + {i};\n}}"
+        );
+    }
+    write_file(&root.join("src/many.spec.ts"), &source);
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"health":{"thresholdOverrides":[{"files":["src/*.spec.ts"],"maxCyclomatic":20}]}}"#,
+    );
+
+    let json_output = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&json_output);
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    assert_eq!(states.len(), 12, "one row per matched function, uncapped");
+
+    let human = run_fallow_in_root("health", root, &["--complexity", "--quiet"]);
+    let row_count = human
+        .stdout
+        .lines()
+        .filter(|line| line.trim_start().starts_with("#0 complexity"))
+        .count();
+    assert_eq!(row_count, 10, "{}", human.stdout);
+    assert!(
+        human
+            .stdout
+            .contains("... and 2 more rows (2 stale) (--format json for full list)"),
+        "{}",
+        human.stdout
+    );
 }
 
 /// A single low-complexity function whose body spans `body_lines` lines, so it

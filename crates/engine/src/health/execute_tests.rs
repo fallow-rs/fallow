@@ -2308,7 +2308,8 @@ fn override_row_names_crap_as_the_outstanding_dimension() {
             col: 0,
             cyclomatic: 9,
             cognitive: 21,
-            line_count: 30,
+            line_count: Some(30),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -2407,7 +2408,8 @@ fn override_configuring_every_ceiling_reports_nothing_outstanding() {
             col: 0,
             cyclomatic: 9,
             cognitive: 21,
-            line_count: 30,
+            line_count: Some(30),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -2523,7 +2525,8 @@ fn a_partly_configured_complexity_override_still_reports_the_surviving_dimension
             col: 0,
             cyclomatic: 25,
             cognitive: 21,
-            line_count: 30,
+            line_count: Some(30),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -2597,7 +2600,8 @@ fn a_superseded_override_row_reports_the_resolved_ceiling_not_its_own() {
             col: 0,
             cyclomatic: 30,
             cognitive: 29,
-            line_count: 30,
+            line_count: Some(30),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -2670,6 +2674,167 @@ fn a_suppressed_unit_reports_a_stale_crap_row_and_still_counts_as_matched() {
     assert!(states[0].outstanding.is_empty());
 }
 
+/// The complexity twin of the suppressed-CRAP case: an inline suppression
+/// already hides the complexity finding, so a cyclomatic/cognitive-scoped
+/// override buys nothing and the row reads `stale`, never `active`. The entry
+/// still counts as matched, so it must not fall through to a `no_match` row
+/// (issue #2163 follow-up).
+#[test]
+fn a_suppressed_unit_reports_a_stale_complexity_row_and_still_counts_as_matched() {
+    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+        files: vec!["src/supp.ts".to_string()],
+        functions: vec!["gnarly".to_string()],
+        max_cyclomatic: Some(40),
+        max_cognitive: None,
+        max_crap: None,
+        max_unit_size: None,
+        reason: None,
+    }]);
+    let (applied, matches) = resolver.resolve(Path::new("src/supp.ts"), "gnarly");
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_complexity(
+        ComplexityFunctionContext {
+            path: Path::new("/project/src/supp.ts"),
+            function: "gnarly",
+            line: 2,
+            col: 0,
+            cyclomatic: 30,
+            cognitive: 12,
+            line_count: Some(40),
+            suppressed: true,
+        },
+        &matches,
+        issue_2163_globals(),
+        applied.effective,
+    );
+    tracker.record_no_match_entries(&resolver, true);
+
+    annotate_outstanding_dimensions(&mut tracker, &[]);
+
+    let states = tracker.into_states();
+    assert_eq!(states.len(), 1, "one stale row, and not a `no_match` one");
+    assert!(
+        matches!(
+            states[0].status,
+            fallow_output::ThresholdOverrideStatus::Stale
+        ),
+        "the suppression, not the raised ceiling, keeps the unit quiet: {:#?}",
+        states[0]
+    );
+    assert!(states[0].outstanding.is_empty());
+}
+
+/// Suppression covers the complexity finding only, never the large-function
+/// list, so a `maxUnitSize`-scoped entry keeps real unit-size scoring on a
+/// suppressed unit (issue #2163 follow-up).
+#[test]
+fn a_max_unit_size_override_still_scores_a_suppressed_unit() {
+    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+        files: vec!["src/supp.ts".to_string()],
+        functions: Vec::new(),
+        max_cyclomatic: None,
+        max_cognitive: None,
+        max_crap: None,
+        max_unit_size: Some(500),
+        reason: None,
+    }]);
+    let (applied, matches) = resolver.resolve(Path::new("src/supp.ts"), "gnarly");
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_complexity(
+        ComplexityFunctionContext {
+            path: Path::new("/project/src/supp.ts"),
+            function: "gnarly",
+            line: 2,
+            col: 0,
+            cyclomatic: 5,
+            cognitive: 4,
+            line_count: Some(100),
+            suppressed: true,
+        },
+        &matches,
+        issue_2163_globals(),
+        applied.effective,
+    );
+
+    let states = tracker.into_states();
+    assert_eq!(states.len(), 1);
+    assert!(
+        matches!(
+            states[0].status,
+            fallow_output::ThresholdOverrideStatus::Active
+        ),
+        "100 lines exceed the global 60 and clear the raised 500: {:#?}",
+        states[0]
+    );
+}
+
+/// Complexity rows carry the measured span so a `still breaches: complexity`
+/// claim sits next to the number it was scored on; CRAP rows never score unit
+/// size, so the field stays absent there (issue #2163 follow-up).
+#[test]
+fn threshold_override_metrics_carry_line_count_on_complexity_rows_only() {
+    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+        files: vec!["src/Widget.svelte".to_string()],
+        functions: Vec::new(),
+        max_cyclomatic: Some(500),
+        max_cognitive: Some(500),
+        max_crap: Some(500.0),
+        max_unit_size: None,
+        reason: None,
+    }]);
+    let absolute = Path::new("/project/src/Widget.svelte");
+    let (applied, matches) = resolver.resolve(Path::new("src/Widget.svelte"), "<template>");
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_complexity(
+        ComplexityFunctionContext {
+            path: absolute,
+            function: "<template>",
+            line: 1,
+            col: 0,
+            cyclomatic: 9,
+            cognitive: 21,
+            line_count: Some(100),
+            suppressed: false,
+        },
+        &matches,
+        issue_2163_globals(),
+        applied.effective,
+    );
+    tracker.record_crap(
+        CrapFunctionContext {
+            path: absolute,
+            function: "<template>",
+            line: 1,
+            col: 0,
+            suppressed: false,
+        },
+        MeasuredThresholdMetrics {
+            cyclomatic: 9,
+            cognitive: 21,
+            crap: 90.0,
+        },
+        &matches,
+        issue_2163_globals(),
+        applied.effective,
+    );
+
+    let states = tracker.into_states();
+    assert_eq!(states.len(), 2);
+    let complexity_row = states
+        .iter()
+        .find(|state| state.dimension == fallow_output::ThresholdOverrideDimension::Complexity)
+        .expect("complexity row");
+    assert_eq!(
+        complexity_row.metrics.expect("metrics").line_count,
+        Some(100)
+    );
+    let crap_row = states
+        .iter()
+        .find(|state| state.dimension == fallow_output::ThresholdOverrideDimension::Crap)
+        .expect("crap row");
+    assert!(crap_row.metrics.expect("metrics").line_count.is_none());
+}
+
 /// Two units in one file share the name `handler`. The row keyed to the
 /// high-complexity unit must take that unit's `exceeded`, not the other's.
 #[test]
@@ -2696,7 +2861,8 @@ fn same_named_units_do_not_steal_each_others_outstanding_dimensions() {
                 col: 2,
                 cyclomatic,
                 cognitive,
-                line_count: 30,
+                line_count: Some(30),
+                suppressed: false,
             },
             &matches,
             issue_2163_globals(),
@@ -3064,6 +3230,10 @@ fn a_component_rollup_row_does_not_score_a_unit_size_term() {
         states[0]
     );
     assert!(states[0].outstanding.is_empty(), "{:#?}", states[0]);
+    assert!(
+        states[0].metrics.expect("metrics").line_count.is_none(),
+        "the rollup's synthetic span must not surface as a measured unit size"
+    );
 }
 
 /// `maxUnitSize` is part of the complexity dimension, so a matching unit-size
@@ -3092,7 +3262,8 @@ fn a_unit_size_only_override_reports_a_complexity_row_when_it_matches() {
             col: 0,
             cyclomatic: 9,
             cognitive: 10,
-            line_count: 320,
+            line_count: Some(320),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -3143,7 +3314,8 @@ fn a_unit_size_only_override_that_is_still_breached_reports_insufficient() {
             col: 0,
             cyclomatic: 9,
             cognitive: 10,
-            line_count: 320,
+            line_count: Some(320),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -3187,7 +3359,8 @@ fn a_unit_size_breach_and_a_complexity_finding_name_one_outstanding_dimension() 
             col: 0,
             cyclomatic: 30,
             cognitive: 10,
-            line_count: 320,
+            line_count: Some(320),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -3234,7 +3407,8 @@ fn a_cyclomatic_only_override_is_insufficient_when_cognitive_still_breaches() {
             col: 0,
             cyclomatic: 25,
             cognitive: 22,
-            line_count: 30,
+            line_count: Some(30),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
@@ -3289,7 +3463,8 @@ fn a_unit_size_only_override_is_not_stale_while_complexity_still_fires() {
             col: 0,
             cyclomatic: 25,
             cognitive: 21,
-            line_count: 32,
+            line_count: Some(32),
+            suppressed: false,
         },
         &matches,
         issue_2163_globals(),
