@@ -1439,7 +1439,9 @@ mod tests {
     use crate::extract::{
         ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
     };
-    use crate::graph::{ExportSymbol, ModuleGraph, ReExportEdge};
+    use crate::graph::{
+        ExportNamespace, ExportSymbol, ModuleGraph, ReExportEdge, ReferenceKind, SymbolReference,
+    };
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
     use crate::suppress::Suppression;
     use oxc_span::Span;
@@ -3250,6 +3252,26 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "helper");
         assert_eq!(result[0].reference_count, 1);
+    }
+
+    #[test]
+    fn collect_usages_collapses_namespaces_at_one_physical_site() {
+        let mut graph = build_graph(&[("/src/utils.ts", true), ("/src/app.ts", false)]);
+        let mut export = make_export("helper", 10, 20);
+        export.references = [ExportNamespace::Type, ExportNamespace::Value]
+            .into_iter()
+            .map(|namespace| SymbolReference {
+                from_file: FileId(1),
+                kind: ReferenceKind::NamedImport,
+                namespace,
+                import_span: Span::new(0, 10),
+            })
+            .collect();
+        graph.modules[0].exports = vec![export];
+
+        let result = collect_export_usages(&graph, &FxHashMap::default());
+        assert_eq!(result[0].reference_count, 1);
+        assert_eq!(result[0].reference_locations.len(), 1);
     }
 
     #[test]
