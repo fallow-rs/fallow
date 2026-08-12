@@ -371,7 +371,7 @@ variables:
           echo "Downloading MR integration scripts pinned to ${FALLOW_SCRIPTS_REF}..."
 
           for f in comment.sh review.sh gitlab_common.sh; do
-            if curl -sf "${FALLOW_SCRIPTS_BASE}/ci/scripts/${f}" -o "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
+            if curl -sf --retry 3 --retry-connrefused --retry-delay 2 "${FALLOW_SCRIPTS_BASE}/ci/scripts/${f}" -o "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
               chmod +x "${FALLOW_SCRIPTS_DIR}/${f}"
             else
               echo "  WARNING: Failed to download ci/scripts/${f}"

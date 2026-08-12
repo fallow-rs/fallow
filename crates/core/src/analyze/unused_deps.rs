@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -840,21 +841,26 @@ pub fn find_type_only_dependencies(
     type_only_deps
 }
 
-/// Build the glob set matching production-excluded test/story files.
+/// Return the process-wide glob set matching production-excluded test/story files.
 ///
 /// Returns `None` when the glob set fails to compile, mirroring the original
-/// early-return-empty behavior of `find_test_only_dependencies`.
-fn build_production_exclude_globset() -> Option<globset::GlobSet> {
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in crate::discover::PRODUCTION_EXCLUDE_PATTERNS {
-        if let Ok(glob) = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
-            builder.add(glob);
+/// early-return-empty behavior of both dependency detectors. The `Option` is
+/// cached too, so a failed compilation is never replaced with an empty matcher.
+fn production_exclude_globset() -> Option<&'static globset::GlobSet> {
+    static SET: OnceLock<Option<globset::GlobSet>> = OnceLock::new();
+    SET.get_or_init(|| {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pattern in crate::discover::PRODUCTION_EXCLUDE_PATTERNS {
+            if let Ok(glob) = globset::GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .build()
+            {
+                builder.add(glob);
+            }
         }
-    }
-    builder.build().ok()
+        builder.build().ok()
+    })
+    .as_ref()
 }
 
 /// Return `true` when every file importing `dep` is a test/story or config file
@@ -896,7 +902,7 @@ pub fn find_test_only_dependencies(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<TestOnlyDependency> {
-    let Some(test_globs) = build_production_exclude_globset() else {
+    let Some(test_globs) = production_exclude_globset() else {
         return Vec::new();
     };
 
@@ -919,7 +925,7 @@ pub fn find_test_only_dependencies(
             continue;
         }
 
-        if dependency_is_test_only(&dep, graph, config, &test_globs) {
+        if dependency_is_test_only(&dep, graph, config, test_globs) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -1027,7 +1033,7 @@ pub fn find_dev_dependencies_in_production(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<DevDependencyInProduction> {
-    let Some(test_globs) = build_production_exclude_globset() else {
+    let Some(test_globs) = production_exclude_globset() else {
         return Vec::new();
     };
 
@@ -1075,7 +1081,7 @@ pub fn find_dev_dependencies_in_production(
             continue;
         }
 
-        if dependency_has_prod_value_import(&dep, graph, config, &test_globs, workspaces) {
+        if dependency_has_prod_value_import(&dep, graph, config, test_globs, workspaces) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
