@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { List, Popover } from "@/design-system";
+import { Ambiguous, List, Popover, Shadowed } from "@/design-system";
+import type { TypeOnly } from "@/design-system";
 
 const items = [{ id: 1, name: "first" }];
+type ComponentType = TypeOnly;
+const typeMarker: ComponentType | undefined = undefined;
+void typeMarker;
 </script>
 
 <template>
@@ -11,4 +15,6 @@ const items = [{ id: 1, name: "first" }];
   <Popover.PopoverRoot>
     <Popover.PopoverContent>hi</Popover.PopoverContent>
   </Popover.PopoverRoot>
+  <Shadowed />
+  <Ambiguous />
 </template>

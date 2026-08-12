@@ -46,6 +46,22 @@ fn credits_components_rendered_through_namespace_reexport() {
         flagged.contains(&"DeadOrphan"),
         "an unconsumed namespace component must still be flagged: {flagged:?}"
     );
+    assert!(
+        !flagged.contains(&"Visible"),
+        "the explicit binding that shadows a star export must be credited: {flagged:?}"
+    );
+    assert!(
+        flagged.contains(&"Hidden"),
+        "the shadowed star binding must not be credited: {flagged:?}"
+    );
+    assert!(
+        flagged.contains(&"Left") && flagged.contains(&"Right"),
+        "an ambiguous star binding must not credit either component: {flagged:?}"
+    );
+    assert!(
+        flagged.contains(&"TypeOnly"),
+        "a type-only import must not count as a rendered component: {flagged:?}"
+    );
 }
 
 #[test]
