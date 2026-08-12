@@ -28,6 +28,9 @@ const CSS_REFERENCE_PATTERNS_PER_CONSUMER: usize = 4;
 const WARM_CSS_CONSUMER_FILE_COUNT: usize =
     WARM_CSS_FILE_COUNT / CSS_REFERENCE_PATTERNS_PER_CONSUMER;
 const WARM_CSS_TOKENS_PER_FILE: usize = 32;
+const CSS_DEEP_THEME_FILE_COUNT: usize = 16;
+const CSS_DEEP_COLORS_PER_FILE: usize = 12;
+const CSS_DEEP_CVA_FILE_COUNT: usize = 32;
 
 struct EngineFixture {
     _temp_dir: TempDir,
@@ -38,6 +41,11 @@ struct WarmEngineFixture {
     fixture: EngineFixture,
     session: AnalysisSession,
     config_path: Option<PathBuf>,
+}
+
+struct CssDeepEngineFixture {
+    fixture: WarmEngineFixture,
+    changed_files: Vec<PathBuf>,
 }
 
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
@@ -179,6 +187,76 @@ export function Consumer{consumer_index}() {{
     fixture
 }
 
+fn fixture_color(file_index: usize, color_index: usize) -> String {
+    if file_index == 0 && color_index < 2 {
+        return format!("#f05a2{}", 8 + color_index);
+    }
+    let red = (file_index * 17 + color_index * 3) % 256;
+    let green = (file_index * 11 + color_index * 5) % 256;
+    let blue = (file_index * 7 + color_index * 13) % 256;
+    format!("#{red:02x}{green:02x}{blue:02x}")
+}
+
+fn create_css_deep_color_candidate_fixture() -> CssDeepEngineFixture {
+    let fixture = create_engine_fixture_with_file_count(FILE_COUNT);
+    let mut changed_files = Vec::new();
+    write_file(
+        &fixture.root,
+        "package.json",
+        r#"{"name":"bench-engine","private":true,"type":"module","main":"src/index.ts","dependencies":{"class-variance-authority":"0.7.0","tailwindcss":"4.0.0"}}"#,
+    );
+
+    for file_index in 0..CSS_DEEP_THEME_FILE_COUNT {
+        let mut theme = String::from("@theme {\n");
+        for color_index in 0..CSS_DEEP_COLORS_PER_FILE {
+            let color = fixture_color(file_index, color_index);
+            let name = match (file_index, color_index) {
+                (0, 0) => "brand".to_owned(),
+                (0, 1) => "signal".to_owned(),
+                _ => format!("palette-{file_index}-{color_index}"),
+            };
+            writeln!(&mut theme, "  --color-{name}: {color};").unwrap();
+        }
+        theme.push_str("}\n");
+        let path = format!("src/styles/palette-{file_index}.css");
+        write_file(&fixture.root, &path, theme);
+        changed_files.push(fixture.root.join(path));
+    }
+
+    for file_index in 0..CSS_DEEP_CVA_FILE_COUNT {
+        let palette_index = file_index % CSS_DEEP_THEME_FILE_COUNT;
+        let mut source = String::from(
+            "import { cva } from 'class-variance-authority';\n\
+             export const palette = cva('inline-flex', { variants: { tone: {\n",
+        );
+        for color_index in 0..CSS_DEEP_COLORS_PER_FILE {
+            let color = fixture_color(palette_index, color_index);
+            writeln!(
+                &mut source,
+                "  tone{color_index}: 'bg-[{color}] border-[{color}]',"
+            )
+            .unwrap();
+        }
+        source.push_str("} } });\n");
+        let path = format!("src/components/palette-{file_index}.ts");
+        write_file(&fixture.root, &path, source);
+        changed_files.push(fixture.root.join(path));
+    }
+
+    let session = AnalysisSession::load_default(&fixture.root);
+    session
+        .analyze_dead_code_with_complexity()
+        .expect("warm-up analysis succeeds");
+    CssDeepEngineFixture {
+        fixture: WarmEngineFixture {
+            fixture,
+            session,
+            config_path: None,
+        },
+        changed_files,
+    }
+}
+
 fn warm_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
     HealthExecutionOptions {
         root: &fixture.fixture.root,
@@ -241,6 +319,13 @@ fn warm_css_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOption
     HealthExecutionOptions {
         css: true,
         ..warm_health_options(fixture)
+    }
+}
+
+fn warm_css_deep_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
+    HealthExecutionOptions {
+        css_deep: true,
+        ..warm_css_health_options(fixture)
     }
 }
 
@@ -359,6 +444,42 @@ fn component_engine_warm_session_css_health_many_files(c: &mut Criterion) {
     );
 }
 
+fn component_engine_warm_session_css_deep_color_candidates(c: &mut Criterion) {
+    let fixture = create_css_deep_color_candidate_fixture();
+    let options = warm_css_deep_health_options(&fixture.fixture);
+    let warmup = run_ungrouped_health_with_session(
+        &options,
+        None,
+        &fixture.fixture.session,
+        Some(fixture.changed_files.clone()),
+    )
+    .expect("CSS deep color candidate warm-up succeeds");
+    assert!(
+        warmup.report.css_analytics.is_some_and(|report| report
+            .near_duplicate_theme_tokens
+            .iter()
+            .any(|candidate| {
+                candidate.token == "--color-signal"
+                    && candidate.nearest_token.name == "--color-brand"
+            })),
+        "CSS deep analysis produces near-duplicate color candidates"
+    );
+    c.bench_function(
+        "component_engine_warm_session_css_deep_color_candidates",
+        |bencher| {
+            bencher.iter(|| {
+                run_ungrouped_health_with_session(
+                    &options,
+                    None,
+                    &fixture.fixture.session,
+                    Some(fixture.changed_files.clone()),
+                )
+                .expect("warm CSS deep color candidate analysis succeeds")
+            });
+        },
+    );
+}
+
 fn component_engine_first_session_css_health_references_many_files(c: &mut Criterion) {
     let fixture = create_css_reference_engine_fixture();
     let options = warm_css_health_options(&fixture);
@@ -390,6 +511,7 @@ criterion_group!(
     component_engine_warm_session_health,
     component_engine_warm_session_css_health,
     component_engine_warm_session_css_health_many_files,
+    component_engine_warm_session_css_deep_color_candidates,
     component_engine_first_session_css_health_references_many_files
 );
 criterion_main!(benches);

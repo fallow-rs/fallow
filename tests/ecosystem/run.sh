@@ -105,8 +105,18 @@ clone_project() {
         return 0
     fi
 
-    git clone --depth 1 --branch "$branch" --single-branch \
-        "https://github.com/$repo.git" "$dest" 2>/dev/null
+    # Cloning third-party repositories makes transient network and TLS errors
+    # the dominant failure mode here, so one blip should not fail the run.
+    local attempt
+    for attempt in 1 2 3; do
+        if git clone --depth 1 --branch "$branch" --single-branch \
+            "https://github.com/$repo.git" "$dest" 2>/dev/null; then
+            return 0
+        fi
+        rm -rf "$dest"
+        [[ "$attempt" -eq 3 ]] && return 1
+        sleep "$((attempt * 5))"
+    done
 }
 
 install_deps() {

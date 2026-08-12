@@ -9,6 +9,7 @@
 //! Sass syntax recovers into a partial, inaccurate result rather than failing).
 //! A hard parse failure yields `None`.
 
+use cssparser::{Delimiter, Parser, ParserInput, parse_important};
 use lightningcss::printer::PrinterOptions;
 use lightningcss::properties::Property;
 use lightningcss::properties::animation::AnimationName;
@@ -23,7 +24,7 @@ use lightningcss::rules::keyframes::KeyframesName;
 use lightningcss::rules::style::StyleRule;
 use lightningcss::selector::{Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
-use lightningcss::traits::ToCss;
+use lightningcss::traits::{Parse, ToCss};
 use lightningcss::values::color::CssColor;
 use lightningcss::visitor::{VisitTypes, Visitor};
 use rustc_hash::FxHashSet;
@@ -205,6 +206,49 @@ impl Visitor<'_> for FirstRgbColorCollector {
 /// normalize it to RGB. Supports hex, named colors, rgb(), hsl(), and hwb().
 #[must_use]
 pub fn parse_css_color_rgb(value: &str) -> Option<(f64, f64, f64)> {
+    if let Ok(color) = CssColor::parse_string(value)
+        && let Some(rgb) = concrete_rgb(&color)
+    {
+        return Some(rgb);
+    }
+    if let Some(color) = parse_declaration_color(value)
+        && let Some(rgb) = concrete_rgb(&color)
+    {
+        return Some(rgb);
+    }
+    parse_css_color_rgb_via_stylesheet(value)
+}
+
+fn concrete_rgb(color: &CssColor) -> Option<(f64, f64, f64)> {
+    let CssColor::RGBA(rgba) = color else {
+        return None;
+    };
+    Some((
+        f64::from(rgba.red),
+        f64::from(rgba.green),
+        f64::from(rgba.blue),
+    ))
+}
+
+fn parse_declaration_color(value: &str) -> Option<CssColor> {
+    let mut input = ParserInput::new(value);
+    let mut parser = Parser::new(&mut input);
+    let color = parser
+        .parse_until_before(Delimiter::Semicolon, |input| {
+            let color = CssColor::parse(input)?;
+            let _ = input.try_parse(parse_important);
+            input.expect_exhausted()?;
+            Ok(color)
+        })
+        .ok()?;
+    if !parser.is_exhausted() {
+        parser.expect_semicolon().ok()?;
+        parser.expect_exhausted().ok()?;
+    }
+    Some(color)
+}
+
+fn parse_css_color_rgb_via_stylesheet(value: &str) -> Option<(f64, f64, f64)> {
     let source = format!(".x{{color:{value};}}");
     let options = ParserOptions {
         error_recovery: true,
@@ -796,6 +840,109 @@ mod tests {
             Some((255.0, 0.0, 0.0))
         );
         assert!(parse_css_color_rgb("var(--brand)").is_none());
+    }
+
+    #[test]
+    fn direct_color_parser_matches_stylesheet_parser_corpus() {
+        let values = [
+            // Hex and named colors.
+            "#000",
+            "#fff",
+            "#f00",
+            "#0f08",
+            "#112233",
+            "#11223344",
+            "#abcdef",
+            "#ABCDEF",
+            "red",
+            "rebeccapurple",
+            "transparent",
+            // Functional RGB syntax, alpha, and clamping.
+            "rgb(255 0 0)",
+            "rgb(100% 0% 0%)",
+            "rgb(255, 0, 0)",
+            "rgba(255, 0, 0, 0.5)",
+            "rgba(255 0 0 / 0)",
+            "rgba(255 0 0 / 1)",
+            "rgb(255 0 0 / 25%)",
+            "rgb(300 -10 0)",
+            // HSL and HWB normalization.
+            "hsl(0 100% 50%)",
+            "hsl(120deg 100% 25% / 0.5)",
+            "hsla(240, 100%, 50%, 25%)",
+            "hwb(0 0% 0%)",
+            "hwb(120 10% 20% / 50%)",
+            // CSS whitespace and comments.
+            " red ",
+            "\t#f00\n",
+            "rgb( 255  0  0 / .5 )",
+            "r/**/ed",
+            "rgb(255/**/ 0 0)",
+            "/* before */ red /* after */",
+            // Valid CSS colors that do not resolve to a concrete RGBA value.
+            "currentColor",
+            "CURRENTCOLOR",
+            "CanvasText",
+            "ButtonFace",
+            "AccentColorText",
+            "var(--brand)",
+            "color-mix(in srgb, red 50%, blue)",
+            "lab(50% 40 30)",
+            "lch(50% 40 30)",
+            "oklab(50% .1 .1)",
+            "oklch(50% .1 30)",
+            "color(display-p3 1 0 0)",
+            // Malformed or trailing input.
+            "",
+            "#ff",
+            "not-a-color",
+            "rgb(255 0)",
+            "red junk",
+            "red, blue",
+            "red !important junk",
+            "red ! important junk",
+            "red !important !important",
+            "red,",
+            // Declaration-level syntax accepted by the old wrapper.
+            "red !important",
+            "red ! important",
+            "red ! IMPORTANT",
+            "red !/**/important",
+            "red/**/!important",
+            "red ! important;",
+            "red !important ;",
+            "red !important; color: blue",
+            "red !important; junk",
+            "#f00!important",
+            "red;",
+            "red ; ",
+            "red;;",
+            "red; junk",
+            "red; color: blue",
+            "red; --custom: value",
+            "red; :junk",
+            // Error-recovery syntax that requires the stylesheet fallback.
+            "not-a-color; color: blue",
+            "var(--x); color: blue",
+            "red; @media {}",
+            "red; --x: }",
+            "currentColor; color: blue",
+            "CanvasText; color: blue",
+            "lab(50% 40 30); color: blue",
+            "color(display-p3 1 0 0); color: blue",
+            "red; color: blue !important",
+            "rgb(1 2 3); color: blue !important",
+        ];
+
+        let mismatches = values
+            .into_iter()
+            .filter_map(|value| {
+                let direct = parse_css_color_rgb(value);
+                let stylesheet = parse_css_color_rgb_via_stylesheet(value);
+                (direct != stylesheet).then_some((value, direct, stylesheet))
+            })
+            .collect::<Vec<_>>();
+        assert!(mismatches.is_empty(), "parser mismatches: {mismatches:#?}");
     }
 
     #[test]

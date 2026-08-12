@@ -30,6 +30,7 @@ oxc_str = { workspace = true }
 
 # CSS AST parsing (class/import extraction + analytics)
 lightningcss = { workspace = true }
+cssparser = { workspace = true }
 
 # Parallelism
 rayon = { workspace = true }
