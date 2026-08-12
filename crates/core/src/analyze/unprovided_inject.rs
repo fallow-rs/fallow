@@ -38,8 +38,7 @@ use crate::results::UnprovidedInject;
 use crate::suppress::{IssueKind, SuppressionContext};
 
 use super::members::{
-    ExportKey, build_local_to_export_keys, entry_point_star_re_export_targets,
-    export_has_entry_point_re_export_reference, export_key_with_origins,
+    ExportKey, build_local_to_export_keys, export_key_with_origins, public_export_origin_keys,
 };
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -87,15 +86,15 @@ pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<Unprovid
         .collect();
 
     let provided = build_provided_key_set(input, &modules_by_id);
-    let entry_star_targets =
-        entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
+    let public_export_origins =
+        public_export_origin_keys(input.graph, input.public_api_entry_points);
 
     let scan = InjectScanContext {
         input,
         modules_by_id: &modules_by_id,
         path_by_id: &path_by_id,
         provided: &provided,
-        entry_star_targets: &entry_star_targets,
+        public_export_origins: &public_export_origins,
     };
     collect_unprovided_inject_findings(&scan)
 }
@@ -163,7 +162,7 @@ struct InjectScanContext<'a> {
     modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
     path_by_id: &'a FxHashMap<FileId, &'a std::path::Path>,
     provided: &'a FxHashSet<ExportKey>,
-    entry_star_targets: &'a FxHashSet<FileId>,
+    public_export_origins: &'a FxHashSet<ExportKey>,
 }
 
 /// Pass 2: emit a finding for each inject site whose key is provided nowhere.
@@ -255,14 +254,10 @@ fn inject_site_has_unprovided_key(
         return false;
     }
     // Public-API abstain: the consumer of this package provides the key.
-    if canonical.iter().any(|key| {
-        key_is_public_api(
-            scan.input.graph,
-            key,
-            scan.input.public_api_entry_points,
-            scan.entry_star_targets,
-        )
-    }) {
+    if canonical
+        .iter()
+        .any(|key| key_is_public_api(scan.input.graph, key, scan.public_export_origins))
+    {
         return false;
     }
 
@@ -340,22 +335,19 @@ fn resolve_key(
 fn key_is_public_api(
     graph: &ModuleGraph,
     key: &ExportKey,
-    public_api_entry_points: &FxHashSet<FileId>,
-    entry_star_targets: &FxHashSet<FileId>,
+    public_export_origins: &FxHashSet<ExportKey>,
 ) -> bool {
     let Some(module) = graph.modules.get(key.file_id.0 as usize) else {
         return false;
     };
-    let Some(export) = module
+    if !module
         .exports
         .iter()
-        .find(|export| export_name_matches(&export.name, &key.export_name))
-    else {
+        .any(|export| export_name_matches(&export.name, &key.export_name))
+    {
         return false;
-    };
-    public_api_entry_points.contains(&key.file_id)
-        || entry_star_targets.contains(&key.file_id)
-        || export_has_entry_point_re_export_reference(graph, export, public_api_entry_points)
+    }
+    public_export_origins.contains(key)
 }
 
 /// Whether a canonical export key names a known Angular `InjectionToken`: the

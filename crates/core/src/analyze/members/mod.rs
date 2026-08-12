@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
 use crate::extract::{MemberInfo, MemberKind, ModuleInfo};
-use crate::graph::{ModuleGraph, ReferenceKind};
+use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
@@ -537,39 +537,15 @@ pub(super) fn export_key_with_origins(graph: &ModuleGraph, key: &ExportKey) -> V
     keys
 }
 
-pub(super) fn entry_point_star_re_export_targets(
+pub(super) fn public_export_origin_keys(
     graph: &ModuleGraph,
     public_api_entry_points: &FxHashSet<FileId>,
-) -> FxHashSet<FileId> {
-    let mut targets: FxHashSet<FileId> = public_api_entry_points
+) -> FxHashSet<ExportKey> {
+    graph
+        .public_export_origins(public_api_entry_points)
         .iter()
-        .filter_map(|file_id| graph.modules.get(file_id.0 as usize))
-        .flat_map(|module| {
-            module
-                .re_exports
-                .iter()
-                .filter(|re_export| re_export.exported_name == "*")
-                .map(|re_export| re_export.source_file)
-        })
-        .collect();
-
-    let mut stack: Vec<FileId> = targets.iter().copied().collect();
-    while let Some(file_id) = stack.pop() {
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
-            continue;
-        };
-        for re_export in module
-            .re_exports
-            .iter()
-            .filter(|re_export| re_export.exported_name == "*")
-        {
-            if targets.insert(re_export.source_file) {
-                stack.push(re_export.source_file);
-            }
-        }
-    }
-
-    targets
+        .map(|origin| ExportKey::new(origin.file_id(), origin.export_name()))
+        .collect()
 }
 
 fn export_has_class_members(export: &crate::graph::ExportSymbol) -> bool {
@@ -581,31 +557,13 @@ fn export_has_class_members(export: &crate::graph::ExportSymbol) -> bool {
     })
 }
 
-pub(super) fn export_has_entry_point_re_export_reference(
-    graph: &ModuleGraph,
-    export: &crate::graph::ExportSymbol,
-    public_api_entry_points: &FxHashSet<FileId>,
-) -> bool {
-    export.references.iter().any(|reference| {
-        reference.kind == ReferenceKind::ReExport
-            && public_api_entry_points.contains(&reference.from_file)
-            && graph
-                .modules
-                .get(reference.from_file.0 as usize)
-                .is_some_and(|module| module.is_entry_point())
-    })
-}
-
 fn is_entry_point_public_class_export(
-    graph: &ModuleGraph,
     module: &crate::graph::ModuleNode,
     export: &crate::graph::ExportSymbol,
-    entry_star_targets: &FxHashSet<FileId>,
-    public_api_entry_points: &FxHashSet<FileId>,
+    public_class_exports: &FxHashSet<ExportKey>,
 ) -> bool {
     export_has_class_members(export)
-        && (entry_star_targets.contains(&module.file_id)
-            || export_has_entry_point_re_export_reference(graph, export, public_api_entry_points))
+        && public_class_exports.contains(&ExportKey::new(module.file_id, export.name.to_string()))
 }
 
 fn playwright_fixture_uses(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureUseFact> {
@@ -818,7 +776,7 @@ struct PreparedMemberScan<'a> {
     accessed_members: FxHashMap<ExportKey, FxHashSet<String>>,
     self_accessed_members: FxHashMap<FileId, FxHashSet<String>>,
     whole_object_used_exports: FxHashSet<ExportKey>,
-    entry_star_targets: FxHashSet<FileId>,
+    public_class_exports: FxHashSet<ExportKey>,
     error_subclass_keys: FxHashSet<ExportKey>,
     ol_interaction_subclass_keys: FxHashSet<ExportKey>,
 }
@@ -960,13 +918,8 @@ impl MemberReportContext<'_, '_> {
     ) {
         let module = target.module;
         let file_self_accesses = self.prepared.self_accessed_members.get(&module.file_id);
-        let is_public_api_class_export = is_entry_point_public_class_export(
-            self.input.graph,
-            module,
-            export,
-            &self.prepared.entry_star_targets,
-            self.input.public_api_entry_points,
-        );
+        let is_public_api_class_export =
+            is_entry_point_public_class_export(module, export, &self.prepared.public_class_exports);
         let (super_class, implemented_interfaces) = self
             .prepared
             .heritage_context
@@ -1074,8 +1027,8 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
         whole_object_used_exports,
     } = collect_propagated_member_accesses(input, &heritage_context, &parent_to_children, &indexes);
 
-    let entry_star_targets =
-        entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
+    let public_class_exports =
+        public_export_origin_keys(input.graph, input.public_api_entry_points);
 
     let error_subclass_keys = build_error_subclass_export_keys(
         &parent_to_children,
@@ -1090,7 +1043,7 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
         accessed_members,
         self_accessed_members,
         whole_object_used_exports,
-        entry_star_targets,
+        public_class_exports,
         error_subclass_keys,
         ol_interaction_subclass_keys,
     }

@@ -34,6 +34,7 @@ pub use impact_closure::{
     CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,
 };
 pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, ReviewUnitPaths};
+pub use public_exports::PublicExportOrigin;
 pub use re_exports::GraphReExportCycle;
 pub use types::{
     ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, ReferencePathId, SymbolReference,

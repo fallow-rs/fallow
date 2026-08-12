@@ -2934,14 +2934,12 @@ fn shadowed_star_class_is_not_a_public_api_export() {
         ],
     );
     let public_entries = FxHashSet::from_iter([FileId(0)]);
-    let star_targets = entry_point_star_re_export_targets(&graph, &public_entries);
+    let public_class_exports = public_export_origin_keys(&graph, &public_entries);
 
     assert!(!is_entry_point_public_class_export(
-        &graph,
         &graph.modules[1],
         &graph.modules[1].exports[0],
-        &star_targets,
-        &public_entries,
+        &public_class_exports,
     ));
 }
 

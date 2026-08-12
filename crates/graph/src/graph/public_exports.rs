@@ -28,6 +28,27 @@ use rustc_hash::FxHashSet;
 
 use super::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
 
+/// Direct declaration exposed through at least one public package entry.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PublicExportOrigin {
+    file_id: FileId,
+    export_name: String,
+}
+
+impl PublicExportOrigin {
+    /// Module that owns the public declaration.
+    #[must_use]
+    pub const fn file_id(&self) -> FileId {
+        self.file_id
+    }
+
+    /// Name of the declaration in its owning module.
+    #[must_use]
+    pub fn export_name(&self) -> &str {
+        &self.export_name
+    }
+}
+
 impl ModuleGraph {
     /// Compute the set of public-export keys reachable through the given
     /// `public_api_entry_points` (an exports-aware set; see module docs).
@@ -41,14 +62,7 @@ impl ModuleGraph {
         public_api_entry_points: &FxHashSet<FileId>,
         root: &Path,
     ) -> FxHashSet<String> {
-        let star_targets = self.public_star_re_export_targets(public_api_entry_points);
-        let star_names: FxHashSet<String> = star_targets
-            .iter()
-            .filter_map(|id| self.modules.get(id.0 as usize))
-            .flat_map(|module| &module.exports)
-            .filter(|export| !export.is_type_only)
-            .map(|export| export.name.to_string())
-            .collect();
+        let candidate_names = self.public_value_export_names(public_api_entry_points);
         let mut keys: FxHashSet<String> = FxHashSet::default();
 
         for entry_id in public_api_entry_points {
@@ -56,15 +70,9 @@ impl ModuleGraph {
                 continue;
             };
             let rel = relativize(&entry.path, root);
-            let candidate_names = entry
-                .exports
-                .iter()
-                .filter(|export| !export.is_type_only)
-                .map(|export| export.name.to_string())
-                .chain(star_names.iter().cloned());
-            for name in candidate_names {
+            for name in &candidate_names {
                 if matches!(
-                    self.resolve_export(*entry_id, &name, ExportNamespace::Value),
+                    self.resolve_export(*entry_id, name, ExportNamespace::Value),
                     EffectiveExportResolution::Unique(_)
                 ) {
                     keys.insert(format!("{rel}::{name}"));
@@ -72,6 +80,45 @@ impl ModuleGraph {
             }
         }
         keys
+    }
+
+    /// Resolve the direct declarations exposed through public package entries.
+    /// Shadowed and ambiguous star candidates contribute no origins.
+    #[must_use]
+    pub fn public_export_origins(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+    ) -> FxHashSet<PublicExportOrigin> {
+        let candidate_names = self.public_value_export_names(public_api_entry_points);
+        let mut origins = FxHashSet::default();
+        for entry in public_api_entry_points {
+            for name in &candidate_names {
+                let Some(origin) = self.resolve_export_origin(*entry, name, ExportNamespace::Value)
+                else {
+                    continue;
+                };
+                origins.insert(PublicExportOrigin {
+                    file_id: origin.file_id(),
+                    export_name: origin.export().name.to_string(),
+                });
+            }
+        }
+        origins
+    }
+
+    fn public_value_export_names(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+    ) -> FxHashSet<String> {
+        let star_targets = self.public_star_re_export_targets(public_api_entry_points);
+        public_api_entry_points
+            .iter()
+            .chain(star_targets.iter())
+            .filter_map(|id| self.modules.get(id.0 as usize))
+            .flat_map(|module| &module.exports)
+            .filter(|export| !export.is_type_only)
+            .map(|export| export.name.to_string())
+            .collect()
     }
 
     /// The `export *` closure rooted at the public-API entry points: every module
