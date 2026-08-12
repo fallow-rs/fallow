@@ -281,6 +281,50 @@ mod tests {
         }
     }
 
+    fn re_export_edge(
+        source_file: FileId,
+        imported_name: &str,
+        exported_name: &str,
+    ) -> ReExportEdge {
+        ReExportEdge {
+            source_file,
+            imported_name: imported_name.to_string(),
+            exported_name: exported_name.to_string(),
+            is_type_only: false,
+            span: Span::default(),
+        }
+    }
+
+    fn module(
+        file_id: FileId,
+        path: &str,
+        exports: Vec<ExportSymbol>,
+        re_exports: Vec<ReExportEdge>,
+    ) -> ModuleNode {
+        ModuleNode {
+            file_id,
+            path: PathBuf::from(path),
+            edge_range: 0..0,
+            exports,
+            re_exports,
+            flags: 0,
+        }
+    }
+
+    fn source_symbol() -> ExportSymbol {
+        ExportSymbol {
+            name: ExportName::Named("foo".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: Span::new(0, 3),
+            references: Vec::new(),
+            reference_paths: Vec::new(),
+            members: Vec::new(),
+        }
+    }
+
     #[test]
     fn declaration_route_retains_star_surface_and_origin_hops() {
         let resolved = vec![
@@ -296,38 +340,18 @@ mod tests {
             },
         ];
         let mut modules = vec![
-            ModuleNode {
-                file_id: FileId(0),
-                path: PathBuf::from("/project/inner.ts"),
-                edge_range: 0..0,
-                exports: Vec::new(),
-                re_exports: vec![ReExportEdge {
-                    source_file: FileId(1),
-                    imported_name: "*".to_string(),
-                    exported_name: "*".to_string(),
-                    is_type_only: false,
-                    span: Span::default(),
-                }],
-                flags: 0,
-            },
-            ModuleNode {
-                file_id: FileId(1),
-                path: PathBuf::from("/project/source.ts"),
-                edge_range: 0..0,
-                exports: vec![ExportSymbol {
-                    name: ExportName::Named("foo".to_string()),
-                    is_type_only: false,
-                    is_side_effect_used: false,
-                    visibility: VisibilityTag::None,
-                    expected_unused_reason: None,
-                    span: Span::new(0, 3),
-                    references: Vec::new(),
-                    reference_paths: Vec::new(),
-                    members: Vec::new(),
-                }],
-                re_exports: Vec::new(),
-                flags: 0,
-            },
+            module(
+                FileId(0),
+                "/project/inner.ts",
+                Vec::new(),
+                vec![re_export_edge(FileId(1), "*", "*")],
+            ),
+            module(
+                FileId(1),
+                "/project/source.ts",
+                vec![source_symbol()],
+                Vec::new(),
+            ),
         ];
         let index = EffectiveExportIndex::build(&resolved);
 
@@ -382,52 +406,24 @@ mod tests {
             },
         ];
         let mut modules = vec![
-            ModuleNode {
-                file_id: FileId(0),
-                path: PathBuf::from("/project/rename.ts"),
-                edge_range: 0..0,
-                exports: Vec::new(),
-                re_exports: vec![ReExportEdge {
-                    source_file: FileId(1),
-                    imported_name: "foo".to_string(),
-                    exported_name: "alias".to_string(),
-                    is_type_only: false,
-                    span: Span::default(),
-                }],
-                flags: 0,
-            },
-            ModuleNode {
-                file_id: FileId(1),
-                path: PathBuf::from("/project/inner.ts"),
-                edge_range: 0..0,
-                exports: Vec::new(),
-                re_exports: vec![ReExportEdge {
-                    source_file: FileId(2),
-                    imported_name: "*".to_string(),
-                    exported_name: "*".to_string(),
-                    is_type_only: false,
-                    span: Span::default(),
-                }],
-                flags: 0,
-            },
-            ModuleNode {
-                file_id: FileId(2),
-                path: PathBuf::from("/project/source.ts"),
-                edge_range: 0..0,
-                exports: vec![ExportSymbol {
-                    name: ExportName::Named("foo".to_string()),
-                    is_type_only: false,
-                    is_side_effect_used: false,
-                    visibility: VisibilityTag::None,
-                    expected_unused_reason: None,
-                    span: Span::new(0, 3),
-                    references: Vec::new(),
-                    reference_paths: Vec::new(),
-                    members: Vec::new(),
-                }],
-                re_exports: Vec::new(),
-                flags: 0,
-            },
+            module(
+                FileId(0),
+                "/project/rename.ts",
+                Vec::new(),
+                vec![re_export_edge(FileId(1), "foo", "alias")],
+            ),
+            module(
+                FileId(1),
+                "/project/inner.ts",
+                Vec::new(),
+                vec![re_export_edge(FileId(2), "*", "*")],
+            ),
+            module(
+                FileId(2),
+                "/project/source.ts",
+                vec![source_symbol()],
+                Vec::new(),
+            ),
         ];
         let index = EffectiveExportIndex::build(&resolved);
         let route = effective_declaration_route(
