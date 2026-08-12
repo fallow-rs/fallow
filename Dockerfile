@@ -26,7 +26,8 @@ RUN set -eux; \
       exit 1; \
       ;; \
   esac; \
-  curl -fsSL "https://github.com/fallow-rs/fallow/releases/download/v${FALLOW_VERSION}/${asset}" -o /usr/local/bin/fallow; \
+  curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+    "https://github.com/fallow-rs/fallow/releases/download/v${FALLOW_VERSION}/${asset}" -o /usr/local/bin/fallow; \
   echo "${sha256}  /usr/local/bin/fallow" | sha256sum -c -; \
   chmod +x /usr/local/bin/fallow
 
