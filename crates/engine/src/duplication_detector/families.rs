@@ -49,7 +49,7 @@ pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<Clon
         })
         .collect();
 
-    families.sort_by(|a, b| {
+    families.sort_unstable_by(|a, b| {
         b.total_duplicated_lines
             .cmp(&a.total_duplicated_lines)
             .then(b.groups.len().cmp(&a.groups.len()))
