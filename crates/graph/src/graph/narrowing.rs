@@ -179,14 +179,16 @@ pub(super) fn mark_all_exports_referenced_at_site(
     exports: &mut [ExportSymbol],
     context: &mut NamespaceMarkContext<'_>,
 ) {
-    let indices = effective_export_indices(
-        exports,
-        context.module_id,
-        None,
-        context.namespace,
-        context.effective_exports,
-    );
-    for idx in indices {
+    for idx in 0..exports.len() {
+        if !is_effective_export(
+            exports,
+            idx,
+            context.module_id,
+            context.namespace,
+            context.effective_exports,
+        ) {
+            continue;
+        }
         let export = &mut exports[idx];
         attach_reference(
             export,
@@ -298,79 +300,61 @@ pub(super) fn mark_member_exports_referenced_at_site(
 ) -> FxHashSet<String> {
     let member_set: FxHashSet<&str> = accessed_members.iter().map(String::as_str).collect();
     let mut found_members: FxHashSet<String> = FxHashSet::default();
-    let indices = effective_export_indices(
-        exports,
-        context.module_id,
-        Some(&member_set),
-        context.namespace,
-        context.effective_exports,
-    );
-    for idx in indices {
-        let export = &mut exports[idx];
-        let name_str = match &export.name {
+    for idx in 0..exports.len() {
+        let name_str = match &exports[idx].name {
             fallow_types::extract::ExportName::Named(n) => n.as_str(),
             fallow_types::extract::ExportName::Default => "default",
         };
-        if member_set.contains(name_str) {
-            found_members.insert(name_str.to_owned());
-            attach_reference(
-                export,
-                (context.module_id, idx),
-                context.site,
-                context.kind,
+        if !member_set.contains(name_str)
+            || !is_effective_export(
+                exports,
+                idx,
+                context.module_id,
                 context.namespace,
-                context.dedup,
-            );
+                context.effective_exports,
+            )
+        {
+            continue;
         }
+        found_members.insert(name_str.to_owned());
+        attach_reference(
+            &mut exports[idx],
+            (context.module_id, idx),
+            context.site,
+            context.kind,
+            context.namespace,
+            context.dedup,
+        );
     }
     found_members
 }
 
-fn effective_export_indices(
+fn is_effective_export(
     exports: &[ExportSymbol],
+    export_index: usize,
     module_id: FileId,
-    names: Option<&FxHashSet<&str>>,
     namespace: ExportNamespace,
     effective_exports: &super::effective_exports::EffectiveExportIndex,
-) -> Vec<usize> {
-    let mut by_name: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
-    for (index, export) in exports.iter().enumerate() {
-        let name = match &export.name {
-            fallow_types::extract::ExportName::Named(name) => name.as_str(),
-            fallow_types::extract::ExportName::Default => "default",
-        };
-        if names.is_none_or(|names| names.contains(name)) {
-            by_name.entry(name).or_default().push(index);
-        }
+) -> bool {
+    let export = &exports[export_index];
+    let name = match &export.name {
+        fallow_types::extract::ExportName::Named(name) => name.as_str(),
+        fallow_types::extract::ExportName::Default => "default",
+    };
+    let super::EffectiveExportResolution::Unique(binding) =
+        effective_exports.resolve(module_id, name, namespace)
+    else {
+        return false;
+    };
+    if binding.origin_file() != module_id {
+        return true;
     }
-    let mut selected = Vec::new();
-    for (name, matching) in by_name {
-        let super::EffectiveExportResolution::Unique(binding) =
-            effective_exports.resolve(module_id, name, namespace)
-        else {
-            continue;
-        };
-        if binding.origin_file() != module_id || binding.origin_slot().is_none() {
-            selected.extend(matching);
-            continue;
-        }
-        let exact: Vec<_> = matching
-            .iter()
-            .copied()
-            .filter(|&index| exports[index].is_type_only == (namespace == ExportNamespace::Type))
-            .collect();
-        if namespace == ExportNamespace::Type && exact.is_empty() {
-            selected.extend(
-                matching
-                    .into_iter()
-                    .filter(|&index| !exports[index].is_type_only),
-            );
-        } else {
-            selected.extend(exact);
-        }
-    }
-    selected.sort_unstable();
-    selected
+    let Some(origin_slot) = binding.origin_slot() else {
+        return true;
+    };
+    exports
+        .get(origin_slot)
+        .is_some_and(|origin| export.is_type_only == origin.is_type_only)
 }
 
 /// Create synthetic `ExportSymbol` entries for members accessed via namespace import
