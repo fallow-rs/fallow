@@ -6412,6 +6412,98 @@ fn non_function_type_alias_shadows_outer_contextual_alias() {
 }
 
 #[test]
+fn all_nearer_type_declarations_shadow_contextual_aliases() {
+    let info = parse(
+        r"
+        class OuterContext {
+          interfaceShadowed(): void {}
+          genericShadowed(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function interfaceHandler() {
+          interface Handler {
+            (context: unknown): void;
+          }
+          const handler: Handler = context => context.interfaceShadowed();
+          return handler;
+        }
+
+        export function genericHandler<Handler>() {
+          const handler: Handler = context => context.genericShadowed();
+          return handler;
+        }
+        ",
+    );
+
+    for member in ["interfaceShadowed", "genericShadowed"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "OuterContext" && access.member == member),
+            "the nearest type-space declaration must shadow the outer alias: {member} in {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn switch_and_static_block_aliases_do_not_leak_outer_context() {
+    let info = parse(
+        r"
+        class OuterContext {
+          switchShadowed(): void {}
+          staticShadowed(): void {}
+        }
+        class InnerContext {
+          switchUsed(): void {}
+          staticUsed(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function switchHandler(value: string) {
+          switch (value) {
+            default:
+              const handler: Handler = context => context.switchUsed();
+              type Handler = (context: InnerContext) => void;
+              return handler;
+          }
+        }
+
+        export class Registry {
+          static {
+            const handler: Handler = context => context.staticUsed();
+            type Handler = (context: InnerContext) => void;
+            void handler;
+          }
+        }
+        ",
+    );
+
+    for (used, shadowed) in [
+        ("switchUsed", "switchShadowed"),
+        ("staticUsed", "staticShadowed"),
+    ] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "InnerContext" && access.member == used),
+            "the lexical alias should apply inside its raw statement scope: {used} in {:?}",
+            info.member_accesses
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "OuterContext" && access.member == shadowed),
+            "the outer alias must not leak into a raw statement scope: {shadowed} in {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn required_type_members_exclude_optional_contract_members() {
     let info = parse(
         r"

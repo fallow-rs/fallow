@@ -1,6 +1,7 @@
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Declaration, Expression, FormalParameters,
-    FunctionBody, Program, Statement, TSType, TSTypeAliasDeclaration, VariableDeclarator,
+    FunctionBody, Program, Statement, TSModuleDeclarationName, TSType, TSTypeAliasDeclaration,
+    TSTypeParameterDeclaration, VariableDeclarator,
 };
 use rustc_hash::FxHashMap;
 
@@ -308,18 +309,74 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn push_function_type_alias_scope(&mut self, statements: &[Statement<'_>]) {
+    pub(super) fn push_function_type_alias_scope<'ast>(
+        &mut self,
+        statements: impl IntoIterator<Item = &'ast Statement<'ast>>,
+    ) -> bool {
         let mut scope = FxHashMap::default();
         for statement in statements {
-            if let Some(alias) = Self::statement_type_alias(statement) {
-                let binding = Self::function_type_alias_params(alias).map_or(
+            let (name, binding) = match statement {
+                Statement::TSTypeAliasDeclaration(alias) => {
+                    let binding = Self::function_type_alias_params(alias).map_or(
+                        FunctionTypeAliasBinding::NonFunction,
+                        FunctionTypeAliasBinding::Function,
+                    );
+                    (alias.id.name.as_str(), binding)
+                }
+                Statement::TSInterfaceDeclaration(interface) => (
+                    interface.id.name.as_str(),
                     FunctionTypeAliasBinding::NonFunction,
-                    FunctionTypeAliasBinding::Function,
-                );
-                scope.insert(alias.id.name.to_string(), binding);
-            }
+                ),
+                Statement::TSEnumDeclaration(r#enum) => (
+                    r#enum.id.name.as_str(),
+                    FunctionTypeAliasBinding::NonFunction,
+                ),
+                Statement::ClassDeclaration(class) => {
+                    let Some(id) = class.id.as_ref() else {
+                        continue;
+                    };
+                    (id.name.as_str(), FunctionTypeAliasBinding::NonFunction)
+                }
+                Statement::TSModuleDeclaration(module) => {
+                    let TSModuleDeclarationName::Identifier(id) = &module.id else {
+                        continue;
+                    };
+                    (id.name.as_str(), FunctionTypeAliasBinding::NonFunction)
+                }
+                Statement::TSImportEqualsDeclaration(import) => (
+                    import.id.name.as_str(),
+                    FunctionTypeAliasBinding::NonFunction,
+                ),
+                _ => continue,
+            };
+            scope.insert(name.to_string(), binding);
+        }
+        if scope.is_empty() {
+            return false;
         }
         self.function_type_alias_scopes.push(scope);
+        true
+    }
+
+    pub(super) fn push_function_type_parameter_scope(
+        &mut self,
+        type_parameters: &TSTypeParameterDeclaration<'_>,
+    ) -> bool {
+        if self.namespace_depth > 0 {
+            return false;
+        }
+        let scope = type_parameters
+            .params
+            .iter()
+            .map(|parameter| {
+                (
+                    parameter.name.name.to_string(),
+                    FunctionTypeAliasBinding::NonFunction,
+                )
+            })
+            .collect();
+        self.function_type_alias_scopes.push(scope);
+        true
     }
 
     pub(super) fn pop_function_type_alias_scope(&mut self) {

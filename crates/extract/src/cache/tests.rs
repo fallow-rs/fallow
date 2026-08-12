@@ -4430,6 +4430,14 @@ fn warm_cache_load_matches_cold_parse() {
          import { vi } from 'vitest';\n\
          import type { Props } from './types';\n\
          export interface Runner { run(): void; optionalRun?(): void }\n\
+         class OuterContext { outer(): void {} }\n\
+         class InnerContext { used(): void {} }\n\
+         type Handler = (context: OuterContext) => void;\n\
+         export function createHandler() {\n\
+           const handler: Handler = context => context.used();\n\
+           type Handler = (context: InnerContext) => void;\n\
+           return handler;\n\
+         }\n\
          vi.mock('./dependency', () => ({ dependency: vi.fn() }));\n\
          export const App = ({ name }: Props) => {\n\
            useEffect(() => {}, [name]);\n\
@@ -4472,11 +4480,26 @@ fn warm_cache_load_matches_cold_parse() {
     );
     assert_eq!(warm_module.react_props.len(), cold_module.react_props.len());
     assert_eq!(warm_module.hook_uses.len(), cold_module.hook_uses.len());
+    let member_accesses = |module: &ModuleInfo| {
+        module
+            .member_accesses
+            .iter()
+            .map(|access| (access.object.clone(), access.member.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(member_accesses(&warm_module), member_accesses(&cold_module));
     assert_eq!(
         warm_module.render_edges.len(),
         cold_module.render_edges.len()
     );
     assert_eq!(warm_module.semantic_facts, cold_module.semantic_facts);
+    assert!(
+        warm_module
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "InnerContext" && access.member == "used"),
+        "warm cache should retain the receiver selected by the nearest alias"
+    );
     assert!(
         warm_module.semantic_facts.iter().any(|fact| matches!(
             fact,

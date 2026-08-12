@@ -2210,8 +2210,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_block_statement(&mut self, stmt: &BlockStatement<'a>) {
         self.block_depth += 1;
+        let type_alias_scope_pushed =
+            self.namespace_depth == 0 && self.push_function_type_alias_scope(&stmt.body);
         if self.namespace_depth == 0 {
-            self.push_function_type_alias_scope(&stmt.body);
             self.nested_declaration_stack.push(FxHashSet::default());
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
@@ -2228,8 +2229,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.record_fail_closed_guard_after_statement(statement);
             }
         }
-        if self.namespace_depth == 0 {
+        if type_alias_scope_pushed {
             self.pop_function_type_alias_scope();
+        }
+        if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
             self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();
@@ -2239,6 +2242,26 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.path_relative_binding_stack.pop();
         }
         self.block_depth -= 1;
+    }
+
+    fn visit_switch_statement(&mut self, stmt: &SwitchStatement<'a>) {
+        let type_alias_scope_pushed = self.namespace_depth == 0
+            && self.push_function_type_alias_scope(
+                stmt.cases.iter().flat_map(|case| &case.consequent),
+            );
+        walk::walk_switch_statement(self, stmt);
+        if type_alias_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        let type_alias_scope_pushed =
+            self.namespace_depth == 0 && self.push_function_type_alias_scope(&block.body);
+        walk::walk_static_block(self, block);
+        if type_alias_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
     }
 
     fn visit_declaration(&mut self, decl: &Declaration<'a>) {
@@ -2255,11 +2278,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_next_function_param_sources(func);
         self.record_scoped_typed_parameter_accesses(&func.params, func.body.as_deref());
         self.push_function_declaration_scope(&func.params);
+        let type_parameter_scope_pushed = func
+            .type_parameters
+            .as_deref()
+            .is_some_and(|params| self.push_function_type_parameter_scope(params));
         self.function_depth += 1;
         let component_pushed = self.react_enter_function(func);
         walk::walk_function(self, func, flags);
         self.react_exit_component(component_pushed);
         self.function_depth -= 1;
+        if type_parameter_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
         self.pop_function_declaration_scope();
     }
 
@@ -2267,17 +2297,25 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_next_arrow_param_sources(expr);
         self.record_scoped_typed_parameter_accesses(&expr.params, Some(expr.body.as_ref()));
         self.push_function_declaration_scope(&expr.params);
+        let type_parameter_scope_pushed = expr
+            .type_parameters
+            .as_deref()
+            .is_some_and(|params| self.push_function_type_parameter_scope(params));
         self.function_depth += 1;
         let component_pushed = self.react_enter_arrow(expr);
         walk::walk_arrow_function_expression(self, expr);
         self.react_exit_component(component_pushed);
         self.function_depth -= 1;
+        if type_parameter_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
         self.pop_function_declaration_scope();
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
+        let type_alias_scope_pushed =
+            self.namespace_depth == 0 && self.push_function_type_alias_scope(&body.statements);
         if self.namespace_depth == 0 {
-            self.push_function_type_alias_scope(&body.statements);
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
         }
@@ -2287,8 +2325,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.record_fail_closed_guard_after_statement(statement);
             }
         }
-        if self.namespace_depth == 0 {
+        if type_alias_scope_pushed {
             self.pop_function_type_alias_scope();
+        }
+        if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types.pop();
         }
     }
