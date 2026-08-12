@@ -33,6 +33,21 @@ fn native_web_component_lifecycle_does_not_require_lit_dependency() {
         unused_members.contains(&"NativeElement.unusedHelper".to_string()),
         "non-lifecycle members should still be reported: {unused_members:?}"
     );
+    assert!(
+        !unused_members.contains(&"SsrAliasElement.connectedCallback".to_string())
+            && !unused_members.contains(&"SsrAliasElement.disconnectedCallback".to_string()),
+        "an SSR-safe alias of the global HTMLElement keeps native lifecycle semantics: \
+         {unused_members:?}"
+    );
+    assert!(
+        unused_members.contains(&"SsrAliasElement.unusedHelper".to_string()),
+        "the native alias must not suppress unrelated members: {unused_members:?}"
+    );
+    assert!(
+        unused_members.contains(&"ShadowedAliasElement.connectedCallback".to_string())
+            && unused_members.contains(&"ShadowedAliasElement.unusedHelper".to_string()),
+        "a module-local HTMLElement spelling is not the browser global: {unused_members:?}"
+    );
 }
 
 #[test]
