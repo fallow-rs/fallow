@@ -882,7 +882,10 @@ use crate::MemberKind;
 /// Bumped to 257: typed parameter member accesses are now resolved within their
 /// function body instead of relying solely on a module-flat binding fallback.
 /// Warm 256 caches can retain a sibling function's target for both scopes.
-pub(super) const CACHE_VERSION: u32 = 257;
+///
+/// Bumped to 258: type aliases now retain direct receiver-surface target facts.
+/// Warm 257 caches cannot propagate member access through those surfaces.
+pub(super) const CACHE_VERSION: u32 = 258;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

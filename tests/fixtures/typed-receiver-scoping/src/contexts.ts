@@ -10,6 +10,7 @@ export class SecondContext {
 
 export class AliasContext {
   aliasUsed(): void {}
+  pickedOnly(): void {}
   aliasDead(): void {}
 }
 

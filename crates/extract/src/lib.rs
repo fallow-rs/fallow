@@ -63,8 +63,8 @@ pub use fallow_types::extract::{
     ModuleInfo, ModuleLoadMechanism, ParseResult, PlaywrightFixtureAliasFact,
     PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
     PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, SourceReadFailure,
-    TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag, VitestModuleMockAction,
-    VitestModuleMockOperationFact, compute_line_offsets,
+    TypeAliasSurfaceTargetFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
+    VitestModuleMockAction, VitestModuleMockOperationFact, compute_line_offsets,
 };
 
 pub use astro::{

@@ -9823,6 +9823,37 @@ fn typed_parameter_member_accesses_keep_sibling_function_scopes() {
     );
 }
 
+#[test]
+fn type_alias_surface_targets_exclude_nested_property_types() {
+    let info = parse(
+        r"
+        import type { AliasContext, NestedContext } from './contexts'
+
+        export type ContextSurface =
+            | Pick<AliasContext, 'aliasUsed' | 'pickedOnly'>
+            | ({ nested: NestedContext } & AliasContext)
+        ",
+    );
+
+    let targets: Vec<&str> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::TypeAliasSurfaceTarget(fact) if fact.alias_name == "ContextSurface" => {
+                Some(fact.target_name.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(targets, ["AliasContext"]);
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| { access.object == "AliasContext" && access.member == "pickedOnly" })
+    );
+}
+
 // ---- merge_branch_aliases and visit_switch_statement edge (lines 703-724)
 // A Playwright fixture alias threaded through a switch statement without a
 // default case should still propagate the merged alias to subsequent accesses

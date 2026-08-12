@@ -39,6 +39,10 @@ fn typed_receivers_with_reused_parameter_names_are_scoped_per_function() {
         "AliasContext.aliasUsed is exposed by the parameter's Pick surface: {unused:?}"
     );
     assert!(
+        !unused.contains(&"AliasContext.pickedOnly".to_string()),
+        "a literal Pick key is itself a type-level member use: {unused:?}"
+    );
+    assert!(
         unused.contains(&"NestedContext.aliasUsed".to_string())
             && unused.contains(&"NestedContext.nestedDead".to_string()),
         "a nested property type must not inherit direct receiver-member credit: {unused:?}"

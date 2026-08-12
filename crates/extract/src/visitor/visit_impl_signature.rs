@@ -2,8 +2,138 @@
 
 use super::visit_helpers::*;
 use super::*;
+use crate::{SemanticFact, TypeAliasSurfaceTargetFact};
 
 impl ModuleInfoExtractor {
+    fn collect_type_alias_surface_targets(ty: &TSType<'_>, targets: &mut Vec<String>) {
+        match ty {
+            TSType::TSTypeReference(reference) => {
+                let Some((name, _)) = type_name_root(&reference.type_name) else {
+                    return;
+                };
+                if matches!(
+                    name.as_str(),
+                    "Pick" | "Omit" | "Partial" | "Required" | "Readonly" | "NonNullable"
+                ) {
+                    if let Some(first) = reference
+                        .type_arguments
+                        .as_deref()
+                        .and_then(|arguments| arguments.params.first())
+                    {
+                        Self::collect_type_alias_surface_targets(first, targets);
+                    }
+                } else {
+                    targets.push(name);
+                }
+            }
+            TSType::TSUnionType(union) => {
+                for branch in &union.types {
+                    Self::collect_type_alias_surface_targets(branch, targets);
+                }
+            }
+            TSType::TSIntersectionType(intersection) => {
+                for branch in &intersection.types {
+                    Self::collect_type_alias_surface_targets(branch, targets);
+                }
+            }
+            TSType::TSParenthesizedType(parenthesized) => {
+                Self::collect_type_alias_surface_targets(&parenthesized.type_annotation, targets);
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_literal_type_strings(ty: &TSType<'_>, values: &mut Vec<String>) {
+        match ty {
+            TSType::TSLiteralType(literal) => {
+                if let TSLiteral::StringLiteral(value) = &literal.literal {
+                    values.push(value.value.to_string());
+                }
+            }
+            TSType::TSUnionType(union) => {
+                for branch in &union.types {
+                    Self::collect_literal_type_strings(branch, values);
+                }
+            }
+            TSType::TSParenthesizedType(parenthesized) => {
+                Self::collect_literal_type_strings(&parenthesized.type_annotation, values);
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_pick_member_accesses(ty: &TSType<'_>, accesses: &mut Vec<MemberAccess>) {
+        match ty {
+            TSType::TSTypeReference(reference) => {
+                let Some((name, _)) = type_name_root(&reference.type_name) else {
+                    return;
+                };
+                if name != "Pick" {
+                    if matches!(
+                        name.as_str(),
+                        "Partial" | "Required" | "Readonly" | "NonNullable"
+                    ) && let Some(first) = reference
+                        .type_arguments
+                        .as_deref()
+                        .and_then(|arguments| arguments.params.first())
+                    {
+                        Self::collect_pick_member_accesses(first, accesses);
+                    }
+                    return;
+                }
+                let Some(arguments) = reference.type_arguments.as_deref() else {
+                    return;
+                };
+                let (Some(target), Some(keys)) =
+                    (arguments.params.first(), arguments.params.get(1))
+                else {
+                    return;
+                };
+                let mut targets = Vec::new();
+                Self::collect_type_alias_surface_targets(target, &mut targets);
+                let mut members = Vec::new();
+                Self::collect_literal_type_strings(keys, &mut members);
+                accesses.extend(targets.into_iter().flat_map(|object| {
+                    members.iter().cloned().map(move |member| MemberAccess {
+                        object: object.clone(),
+                        member,
+                    })
+                }));
+            }
+            TSType::TSUnionType(union) => {
+                for branch in &union.types {
+                    Self::collect_pick_member_accesses(branch, accesses);
+                }
+            }
+            TSType::TSIntersectionType(intersection) => {
+                for branch in &intersection.types {
+                    Self::collect_pick_member_accesses(branch, accesses);
+                }
+            }
+            TSType::TSParenthesizedType(parenthesized) => {
+                Self::collect_pick_member_accesses(&parenthesized.type_annotation, accesses);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn record_type_alias_surface_targets(&mut self, alias: &TSTypeAliasDeclaration<'_>) {
+        let mut targets = Vec::new();
+        Self::collect_type_alias_surface_targets(&alias.type_annotation, &mut targets);
+        targets.sort_unstable();
+        targets.dedup();
+        self.semantic_facts
+            .extend(targets.into_iter().map(|target_name| {
+                SemanticFact::TypeAliasSurfaceTarget(TypeAliasSurfaceTargetFact {
+                    alias_name: alias.id.name.to_string(),
+                    target_name,
+                })
+            }));
+        let mut picked_members = Vec::new();
+        Self::collect_pick_member_accesses(&alias.type_annotation, &mut picked_members);
+        self.member_accesses.extend(picked_members);
+    }
+
     pub(super) fn record_local_type_declaration(&mut self, name: &str, span: Span) {
         if self
             .local_type_declarations

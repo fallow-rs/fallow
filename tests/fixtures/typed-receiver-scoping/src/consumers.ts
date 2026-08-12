@@ -5,7 +5,7 @@ import type {
   SecondContext,
 } from './contexts'
 
-export type ContextSurface = Pick<AliasContext, 'aliasUsed'> & {
+export type ContextSurface = Pick<AliasContext, 'aliasUsed' | 'pickedOnly'> & {
   nested: NestedContext
 }
 

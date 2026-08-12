@@ -1174,6 +1174,7 @@ fn propagate_common_member_accesses(
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     whole_object_used_exports: &mut FxHashSet<ExportKey>,
 ) {
+    propagate_type_alias_surface_accesses(input.resolved_modules, indexes, accessed_members);
     propagate_playwright_fixture_accesses(
         input.graph,
         input.resolved_modules,
@@ -1243,6 +1244,54 @@ fn propagate_common_member_accesses(
         accessed_members,
         whole_object_used_exports,
     );
+}
+
+fn propagate_type_alias_surface_accesses(
+    resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let mut targets_by_alias: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    for module in resolved_modules {
+        let local_keys = indexes.local_keys(module.file_id);
+        let view = SemanticFactView::new(&module.semantic_facts, &module.member_accesses);
+        for fact in view.type_alias_surface_targets() {
+            let (Some(alias_keys), Some(target_keys)) = (
+                local_keys.get(fact.alias_name.as_str()),
+                local_keys.get(fact.target_name.as_str()),
+            ) else {
+                continue;
+            };
+            for alias in alias_keys {
+                targets_by_alias
+                    .entry(alias.clone())
+                    .or_default()
+                    .extend(target_keys.iter().cloned());
+            }
+        }
+    }
+
+    let mut queue: std::collections::VecDeque<ExportKey> = targets_by_alias
+        .keys()
+        .filter(|alias| accessed_members.contains_key(*alias))
+        .cloned()
+        .collect();
+    while let Some(alias) = queue.pop_front() {
+        let Some(members) = accessed_members.get(&alias).cloned() else {
+            continue;
+        };
+        let Some(targets) = targets_by_alias.get(&alias) else {
+            continue;
+        };
+        for target in targets {
+            let target_members = accessed_members.entry(target.clone()).or_default();
+            let old_len = target_members.len();
+            target_members.extend(members.iter().cloned());
+            if target_members.len() != old_len && targets_by_alias.contains_key(target) {
+                queue.push_back(target.clone());
+            }
+        }
+    }
 }
 
 fn should_skip_export_member_scan(

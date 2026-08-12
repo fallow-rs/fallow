@@ -44,6 +44,30 @@ fn cache_roundtrip_preserves_declaration_merge_facts() {
 }
 
 #[test]
+fn cache_roundtrip_preserves_type_alias_surface_targets() {
+    let module = parse_from_content(
+        FileId(0),
+        Path::new("src/alias.ts"),
+        "export type Surface = Pick<Target, 'used'> & { nested: Nested }",
+    );
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let encoded = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&encoded).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+
+    assert!(restored.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        fallow_types::extract::SemanticFact::TypeAliasSurfaceTarget(edge)
+            if edge.alias_name == "Surface" && edge.target_name == "Target"
+    )));
+    assert!(!restored.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        fallow_types::extract::SemanticFact::TypeAliasSurfaceTarget(edge)
+            if edge.target_name == "Nested"
+    )));
+}
+
+#[test]
 fn cache_roundtrip_preserves_unresolved_callee_diagnostics() {
     let module = parse_from_content(
         FileId(7),

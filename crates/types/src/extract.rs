@@ -1752,6 +1752,10 @@ pub enum SemanticFact {
     /// Direct declarations that form one legal TypeScript declaration merge.
     /// Appended because bitcode encodes enum variants by ordinal.
     DeclarationMerge(DeclarationMergeFact),
+    /// A named type whose direct receiver surface is contributed by another
+    /// named type (for example `Pick<Base, ...>` or a union constituent).
+    /// Appended because bitcode encodes enum variants by ordinal.
+    TypeAliasSurfaceTarget(TypeAliasSurfaceTargetFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -1917,6 +1921,13 @@ impl<'a> SemanticFactView<'a> {
     /// Collect typed-property-hop member facts.
     pub fn typed_property_member_accesses(self) -> Vec<TypedPropertyMemberAccessFact> {
         typed_property_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect type-alias receiver-surface edges.
+    pub fn type_alias_surface_targets(self) -> Vec<TypeAliasSurfaceTargetFact> {
+        type_alias_surface_target_facts(self.semantic_facts)
             .cloned()
             .collect()
     }
@@ -2095,6 +2106,18 @@ fn typed_property_member_access_facts(
     })
 }
 
+fn type_alias_surface_target_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &TypeAliasSurfaceTargetFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::TypeAliasSurfaceTarget(fact) = fact {
+            Some(fact)
+        } else {
+            None
+        }
+    })
+}
+
 /// Iterate typed constructor-rooted fluent-chain member facts.
 fn fluent_chain_new_member_access_facts(
     semantic_facts: &[SemanticFact],
@@ -2264,6 +2287,19 @@ pub struct TypedPropertyMemberAccessFact {
     pub property_path: String,
     /// Member accessed on the terminal property's instance.
     pub member: String,
+}
+
+/// One direct contributor to a named type alias's receiver surface.
+///
+/// Nested property types are deliberately excluded: in
+/// `{ nested: Nested }`, `Alias.member` does not access `Nested.member`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAliasSurfaceTargetFact {
+    /// Module-local alias declaration name.
+    pub alias_name: String,
+    /// Module-local or imported named type contributing the direct surface.
+    pub target_name: String,
 }
 
 /// A member access on a fluent chain rooted at a static factory call.

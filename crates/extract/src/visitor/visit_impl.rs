@@ -887,6 +887,7 @@ impl ModuleInfoExtractor {
     fn record_top_level_type_alias_declaration(&mut self, alias: &TSTypeAliasDeclaration<'_>) {
         self.record_local_declaration_name(&alias.id.name);
         self.record_local_type_declaration(&alias.id.name, alias.id.span);
+        self.record_type_alias_surface_targets(alias);
         self.record_playwright_fixture_type_alias(alias);
         if let Some(factory) = Self::store_factory_from_return_type(&alias.type_annotation) {
             // `type CounterStore = ReturnType<typeof useCounterStore>`: remember the
