@@ -11,9 +11,7 @@ use std::cell::Cell;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
 
-use crate::graph::effective_exports::{
-    EffectiveExportIndex, EffectiveExportResolution, ExportNamespace,
-};
+use crate::graph::effective_exports::{EffectiveExportIndex, ExportNamespace};
 use crate::graph::types::{
     ExportSymbol, ModuleNode, ReferenceKind, ReferencePathInterner, RoutedReference,
     RoutedReferenceKey, SymbolReference,
@@ -966,27 +964,28 @@ fn namespace_export_indices(
     name: &str,
     namespace: ExportNamespace,
 ) -> Vec<usize> {
-    let candidates: Vec<_> = module
-        .exports
-        .iter()
-        .enumerate()
-        .filter_map(|(index, export)| export.name.matches_str(name).then_some(index))
-        .collect();
-    effective_exports.declaration_slots(&module.exports, &candidates, file_id, name, namespace)
+    effective_exports.declaration_slots_for_name(&module.exports, file_id, name, namespace)
 }
 
-fn namespace_references(
+fn matching_namespace_references(
     module: &ModuleNode,
     name: &str,
-    namespace: ExportNamespace,
-) -> Vec<RoutedReference> {
-    module
+) -> (Vec<RoutedReference>, Vec<RoutedReference>) {
+    let mut type_references = Vec::new();
+    let mut value_references = Vec::new();
+    for export in module
         .exports
         .iter()
         .filter(|export| export.name.matches_str(name))
-        .flat_map(ExportSymbol::routed_references)
-        .filter(|routed| routed.reference.namespace == namespace)
-        .collect()
+    {
+        for reference in export.routed_references() {
+            match reference.reference.namespace {
+                ExportNamespace::Type => type_references.push(reference),
+                ExportNamespace::Value => value_references.push(reference),
+            }
+        }
+    }
+    (type_references, value_references)
 }
 
 struct EffectiveOriginPropagation<'a> {
@@ -1060,24 +1059,6 @@ fn propagate_to_effective_origin(input: EffectiveOriginPropagation<'_>) -> bool 
     changed
 }
 
-fn same_effective_binding(
-    effective_exports: &EffectiveExportIndex,
-    barrel: (FileId, &str),
-    source: (FileId, &str),
-    namespace: ExportNamespace,
-) -> bool {
-    matches!(
-        (
-            effective_exports.resolve(barrel.0, barrel.1, namespace),
-            effective_exports.resolve(source.0, source.1, namespace),
-        ),
-        (
-            EffectiveExportResolution::Unique(barrel_binding),
-            EffectiveExportResolution::Unique(source_binding),
-        ) if barrel_binding == source_binding
-    )
-}
-
 /// Handle named re-exports (`export { foo } from './source'`) — propagate barrel references
 /// to the source module's matching export.
 ///
@@ -1111,33 +1092,29 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
         reference_paths,
     } = input;
 
-    let type_resolves = same_effective_binding(
-        effective_exports,
-        (barrel_id, exported_name),
-        (source_id, imported_name),
-        ExportNamespace::Type,
-    );
-    let value_resolves = !is_type_only
-        && same_effective_binding(
-            effective_exports,
-            (barrel_id, exported_name),
-            (source_id, imported_name),
-            ExportNamespace::Value,
-        );
-    if !type_resolves && !value_resolves {
+    let (mut type_refs, mut value_refs) =
+        matching_namespace_references(&modules[barrel_idx], exported_name);
+    if type_refs.is_empty() && value_refs.is_empty() && !modules[barrel_idx].is_entry_point() {
         return false;
     }
 
-    let type_refs = if type_resolves {
-        namespace_references(&modules[barrel_idx], exported_name, ExportNamespace::Type)
-    } else {
-        Vec::new()
-    };
-    let value_refs = if value_resolves {
-        namespace_references(&modules[barrel_idx], exported_name, ExportNamespace::Value)
-    } else {
-        Vec::new()
-    };
+    let resolving_namespaces = effective_exports.resolving_namespaces_through(
+        barrel_id,
+        exported_name,
+        source_id,
+        imported_name,
+    );
+    let type_resolves = resolving_namespaces.contains(ExportNamespace::Type);
+    let value_resolves = !is_type_only && resolving_namespaces.contains(ExportNamespace::Value);
+    if !type_resolves && !value_resolves {
+        return false;
+    }
+    if !type_resolves {
+        type_refs.clear();
+    }
+    if !value_resolves {
+        value_refs.clear();
+    }
 
     if type_refs.is_empty() && value_refs.is_empty() {
         if modules[barrel_idx].is_entry_point() {
@@ -1156,11 +1133,51 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
         return false;
     }
 
+    propagate_named_references(NamedReferencePropagation {
+        modules,
+        effective_exports,
+        source_id,
+        source_idx,
+        imported_name,
+        type_refs: &type_refs,
+        value_refs: &value_refs,
+        existing_refs,
+        reference_paths,
+    })
+}
+
+struct NamedReferencePropagation<'a> {
+    modules: &'a mut [ModuleNode],
+    effective_exports: &'a EffectiveExportIndex,
+    source_id: FileId,
+    source_idx: usize,
+    imported_name: &'a str,
+    type_refs: &'a [RoutedReference],
+    value_refs: &'a [RoutedReference],
+    existing_refs: &'a mut FxHashSet<RoutedReferenceKey>,
+    reference_paths: &'a mut ReferencePathInterner,
+}
+
+fn propagate_named_references(input: NamedReferencePropagation<'_>) -> bool {
+    let NamedReferencePropagation {
+        modules,
+        effective_exports,
+        source_id,
+        source_idx,
+        imported_name,
+        type_refs,
+        value_refs,
+        existing_refs,
+        reference_paths,
+    } = input;
     let mut changed = false;
     for (namespace, refs) in [
-        (ExportNamespace::Type, type_refs.as_slice()),
-        (ExportNamespace::Value, value_refs.as_slice()),
+        (ExportNamespace::Type, type_refs),
+        (ExportNamespace::Value, value_refs),
     ] {
+        if refs.is_empty() {
+            continue;
+        }
         let export_indices = namespace_export_indices(
             &modules[source_idx],
             effective_exports,
@@ -1168,7 +1185,7 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
             imported_name,
             namespace,
         );
-        if export_indices.is_empty() && !refs.is_empty() {
+        if export_indices.is_empty() {
             changed |= propagate_to_effective_origin(EffectiveOriginPropagation {
                 modules,
                 effective_exports,
