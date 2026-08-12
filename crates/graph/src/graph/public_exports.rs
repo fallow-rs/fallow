@@ -352,4 +352,123 @@ mod tests {
         assert!(keys.contains("index.ts::v"));
         assert!(!keys.contains("index.ts::T"), "type-only export skipped");
     }
+
+    fn build_star_surface_graph(
+        entry_re_exports: Vec<ResolvedReExport>,
+        source_modules: Vec<ResolvedModule>,
+    ) -> (ModuleGraph, FxHashSet<FileId>) {
+        let mut files = vec![file(0, "/p/index.ts")];
+        files.extend(source_modules.iter().map(|module| {
+            file(
+                module.file_id.0,
+                module.path.to_str().expect("test path is UTF-8"),
+            )
+        }));
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/p/index.ts"),
+            source: EntryPointSource::PackageJsonExports,
+        }];
+        let mut resolved = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/p/index.ts"),
+            re_exports: entry_re_exports,
+            ..Default::default()
+        }];
+        resolved.extend(source_modules);
+        let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+        (graph, std::iter::once(FileId(0)).collect())
+    }
+
+    #[test]
+    fn explicit_export_hides_shadowed_star_binding_from_public_surface() {
+        let (graph, public_entries) = build_star_surface_graph(
+            vec![
+                re_export("*", "*", FileId(1)),
+                re_export("foo", "foo", FileId(2)),
+            ],
+            vec![
+                ResolvedModule {
+                    file_id: FileId(1),
+                    path: PathBuf::from("/p/star-source.ts"),
+                    exports: vec![named_export("foo")].into(),
+                    ..Default::default()
+                },
+                ResolvedModule {
+                    file_id: FileId(2),
+                    path: PathBuf::from("/p/explicit-source.ts"),
+                    exports: vec![named_export("foo")].into(),
+                    ..Default::default()
+                },
+            ],
+        );
+
+        let keys = graph.public_export_keys(&public_entries, Path::new("/p"));
+
+        assert_eq!(keys, FxHashSet::from_iter(["index.ts::foo".to_string()]));
+    }
+
+    #[test]
+    fn ambiguous_star_binding_is_absent_from_public_surface() {
+        let (graph, public_entries) = build_star_surface_graph(
+            vec![
+                re_export("*", "*", FileId(1)),
+                re_export("*", "*", FileId(2)),
+            ],
+            vec![
+                ResolvedModule {
+                    file_id: FileId(1),
+                    path: PathBuf::from("/p/left.ts"),
+                    exports: vec![named_export("foo")].into(),
+                    ..Default::default()
+                },
+                ResolvedModule {
+                    file_id: FileId(2),
+                    path: PathBuf::from("/p/right.ts"),
+                    exports: vec![named_export("foo")].into(),
+                    ..Default::default()
+                },
+            ],
+        );
+
+        let keys = graph.public_export_keys(&public_entries, Path::new("/p"));
+
+        assert!(
+            keys.is_empty(),
+            "ambiguous foo is not a public binding: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn convergent_star_diamond_has_one_exposed_public_key() {
+        let (graph, public_entries) = build_star_surface_graph(
+            vec![
+                re_export("*", "*", FileId(1)),
+                re_export("*", "*", FileId(2)),
+            ],
+            vec![
+                ResolvedModule {
+                    file_id: FileId(1),
+                    path: PathBuf::from("/p/left.ts"),
+                    re_exports: vec![re_export("*", "*", FileId(3))],
+                    ..Default::default()
+                },
+                ResolvedModule {
+                    file_id: FileId(2),
+                    path: PathBuf::from("/p/right.ts"),
+                    re_exports: vec![re_export("*", "*", FileId(3))],
+                    ..Default::default()
+                },
+                ResolvedModule {
+                    file_id: FileId(3),
+                    path: PathBuf::from("/p/source.ts"),
+                    exports: vec![named_export("foo")].into(),
+                    ..Default::default()
+                },
+            ],
+        );
+
+        let keys = graph.public_export_keys(&public_entries, Path::new("/p"));
+
+        assert_eq!(keys, FxHashSet::from_iter(["index.ts::foo".to_string()]));
+    }
 }
