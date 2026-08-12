@@ -126,11 +126,7 @@ pub fn trace_export(
         .iter()
         .find(|m| path_matches(&m.path, root, file_path))?;
 
-    let export = module
-        .exports
-        .iter()
-        .filter(|e| export_name_matches(e, export_name))
-        .max_by_key(|e| (!e.references.is_empty(), !e.is_type_only))?;
+    let (export, namespace) = select_export(module, export_name)?;
 
     let direct_references: Vec<ExportReference> = export
         .references
@@ -138,11 +134,6 @@ pub fn trace_export(
         .map(|r| reference_to_export_reference(graph, root, r))
         .collect();
 
-    let namespace = if export.is_type_only {
-        ExportNamespace::Type
-    } else {
-        ExportNamespace::Value
-    };
     let re_export_chains =
         collect_re_export_chains(graph, root, module.file_id, export_name, namespace);
 
@@ -181,11 +172,7 @@ pub fn semantic_symbol_for_export(
         .modules
         .iter()
         .find(|module| path_matches(&module.path, root, file_path))?;
-    let export = module
-        .exports
-        .iter()
-        .filter(|export| export_name_matches(export, export_name))
-        .max_by_key(|export| (!export.references.is_empty(), !export.is_type_only))?;
+    let (export, namespace) = select_export(module, export_name)?;
     let source = std::fs::read_to_string(&module.path).ok()?;
     let offsets = fallow_types::extract::compute_line_offsets(&source);
     let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
@@ -195,10 +182,9 @@ pub fn semantic_symbol_for_export(
             .strip_prefix(root)
             .unwrap_or(&module.path)
             .to_path_buf(),
-        namespace: if export.is_type_only {
-            SemanticNamespace::Type
-        } else {
-            SemanticNamespace::Value
+        namespace: match namespace {
+            ExportNamespace::Type => SemanticNamespace::Type,
+            ExportNamespace::Value => SemanticNamespace::Value,
         },
         declaration_kind: "export".to_string(),
         exported_name: export_name.to_string(),
@@ -466,6 +452,24 @@ fn class_member_trace_reason(
 fn export_name_matches(export: &crate::graph::ExportSymbol, export_name: &str) -> bool {
     let name_str = export.name.to_string();
     name_str == export_name || (export_name == "default" && name_str == "default")
+}
+
+fn select_export<'graph>(
+    module: &'graph crate::graph::ModuleNode,
+    export_name: &str,
+) -> Option<(&'graph crate::graph::ExportSymbol, ExportNamespace)> {
+    module
+        .exports
+        .iter()
+        .find(|export| !export.is_type_only && export_name_matches(export, export_name))
+        .map(|export| (export, ExportNamespace::Value))
+        .or_else(|| {
+            module
+                .exports
+                .iter()
+                .find(|export| export.is_type_only && export_name_matches(export, export_name))
+                .map(|export| (export, ExportNamespace::Type))
+        })
 }
 
 /// Map a module's exports to [`TracedExport`] entries with relativized references.
