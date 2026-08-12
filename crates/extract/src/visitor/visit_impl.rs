@@ -1549,6 +1549,12 @@ impl<'a> ModuleInfoExtractor {
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,
     ) {
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(type_name) = nullable_asserted_type_name(init)
+        {
+            self.insert_class_binding_target(id.name.to_string(), type_name);
+        }
+
         if let Expression::NewExpression(new_expr) = init
             && let Expression::Identifier(callee) = &new_expr.callee
             && let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -3247,6 +3253,25 @@ fn asserted_receiver_type_name(expr: &Expression<'_>) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn nullable_asserted_type_name(expr: &Expression<'_>) -> Option<String> {
+    let Expression::ConditionalExpression(conditional) = unwrap_static_expr(expr) else {
+        return None;
+    };
+    if matches!(
+        unwrap_static_expr(&conditional.alternate),
+        Expression::NullLiteral(_)
+    ) {
+        return asserted_receiver_type_name(&conditional.consequent);
+    }
+    if matches!(
+        unwrap_static_expr(&conditional.consequent),
+        Expression::NullLiteral(_)
+    ) {
+        return asserted_receiver_type_name(&conditional.alternate);
+    }
+    None
 }
 
 fn is_string_coercion_sibling(expr: &Expression<'_>) -> bool {

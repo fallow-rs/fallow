@@ -895,7 +895,10 @@ use crate::MemberKind;
 /// Bumped to 261: member accesses through explicit TypeScript assertion
 /// receivers are now persisted against the asserted type. Warm 260 caches omit
 /// those accesses.
-pub(super) const CACHE_VERSION: u32 = 261;
+///
+/// Bumped to 262: nullable conditional bindings retain a uniquely asserted
+/// non-null receiver type. Warm 261 caches omit accesses through those bindings.
+pub(super) const CACHE_VERSION: u32 = 262;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

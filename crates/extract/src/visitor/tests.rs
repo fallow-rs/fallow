@@ -6193,6 +6193,30 @@ fn asserted_receiver_records_member_on_asserted_type() {
 }
 
 #[test]
+fn nullable_asserted_binding_records_member_on_asserted_type() {
+    let info = parse(
+        r"
+        interface Strategy {
+          reset(): void;
+        }
+
+        export function reset(value: unknown): void {
+          const strategy = value ? (value as unknown as Strategy) : null;
+          if (strategy) strategy.reset();
+        }
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Strategy" && access.member == "reset"),
+        "nullable binding should retain its non-null asserted type: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn angular_inject_property_records_instance_binding() {
     let info = parse(
         r"
