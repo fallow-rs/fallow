@@ -33,6 +33,10 @@ impl EffectiveExportBinding {
     pub const fn origin_file(&self) -> FileId {
         self.file_id
     }
+
+    pub(super) const fn origin_slot(self) -> usize {
+        self.slot
+    }
 }
 
 /// Effective resolution for one module/name/namespace tuple.

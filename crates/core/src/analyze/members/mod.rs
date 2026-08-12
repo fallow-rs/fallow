@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
-use crate::extract::{ExportName, MemberInfo, MemberKind, ModuleInfo};
+use crate::extract::{MemberInfo, MemberKind, ModuleInfo};
 use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
@@ -457,55 +457,28 @@ pub(super) fn build_local_to_export_keys(
     local_to_export_keys
 }
 
-/// Walk re-export chains to the defining-site `ExportKey`s.
+/// Resolve an exported name to its unique defining-site `ExportKey`.
 ///
-/// Prefers real re-export edges over barrel stubs and handles renamed or
-/// star re-exports.
+/// Runtime bindings take precedence. Type resolution is used only when no
+/// value binding exists, preserving interface/type member analysis without
+/// allowing an ambiguous runtime binding to credit arbitrary declarations.
 fn walk_re_export_origins(
     graph: &ModuleGraph,
     start_file: FileId,
     start_name: &str,
 ) -> Vec<ExportKey> {
-    let mut origins: Vec<ExportKey> = Vec::new();
-    let mut visited: FxHashSet<(FileId, String)> = FxHashSet::default();
-    let mut stack: Vec<(FileId, String)> = vec![(start_file, start_name.to_string())];
+    use crate::graph::{EffectiveExportResolution, ExportNamespace};
 
-    while let Some((file_id, name)) = stack.pop() {
-        if !visited.insert((file_id, name.clone())) {
-            continue;
-        }
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
-            continue;
-        };
-
-        let mut matched_named = false;
-        for re in &module.re_exports {
-            if re.exported_name != "*" && re.imported_name != "*" && re.exported_name == name {
-                stack.push((re.source_file, re.imported_name.clone()));
-                matched_named = true;
-            }
-        }
-        if matched_named {
-            continue;
-        }
-
-        let locally_defined = module.exports.iter().any(|e| match &e.name {
-            ExportName::Named(n) => n.as_str() == name,
-            ExportName::Default => name == "default",
-        });
-        if locally_defined {
-            origins.push(ExportKey::new(file_id, name));
-            continue;
-        }
-
-        for re in &module.re_exports {
-            if re.exported_name == "*" {
-                stack.push((re.source_file, name.clone()));
-            }
-        }
-    }
-
-    origins
+    let namespace = match graph.resolve_export(start_file, start_name, ExportNamespace::Value) {
+        EffectiveExportResolution::Unique(_) => ExportNamespace::Value,
+        EffectiveExportResolution::Missing => ExportNamespace::Type,
+        EffectiveExportResolution::Ambiguous => return Vec::new(),
+    };
+    graph
+        .resolve_export_origin(start_file, start_name, namespace)
+        .map(|origin| ExportKey::new(origin.file_id(), origin.export().name.to_string()))
+        .into_iter()
+        .collect()
 }
 
 /// Copy access sets from barrel `ExportKey`s to every defining-site

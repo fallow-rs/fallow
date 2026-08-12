@@ -39,6 +39,27 @@ pub use types::{
     ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, ReferencePathId, SymbolReference,
 };
 
+/// Direct declaration selected by one unique effective export binding.
+#[derive(Debug, Clone, Copy)]
+pub struct EffectiveExportOrigin<'graph> {
+    file_id: FileId,
+    export: &'graph ExportSymbol,
+}
+
+impl<'graph> EffectiveExportOrigin<'graph> {
+    /// Module that owns the selected declaration.
+    #[must_use]
+    pub const fn file_id(self) -> FileId {
+        self.file_id
+    }
+
+    /// Selected declaration in its owning module.
+    #[must_use]
+    pub const fn export(self) -> &'graph ExportSymbol {
+        self.export
+    }
+}
+
 /// True when the path's final component looks like a TypeScript declaration
 /// file (`.d.ts`, `.d.mts`, `.d.cts`). Used to seed declaration files as
 /// overall entry points so ambient `typeof import()` references stay alive.
@@ -742,6 +763,35 @@ impl ModuleGraph {
         namespace: ExportNamespace,
     ) -> EffectiveExportResolution {
         self.effective_exports.resolve(file_id, name, namespace)
+    }
+
+    /// Resolve one exported name to its unique direct declaration.
+    ///
+    /// Missing and ambiguous bindings return `None`. Namespace-object exports
+    /// are bindings in their own right rather than direct declarations, so
+    /// they also have no declaration origin.
+    #[must_use]
+    pub fn resolve_export_origin(
+        &self,
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> Option<EffectiveExportOrigin<'_>> {
+        let EffectiveExportResolution::Unique(binding) =
+            self.resolve_export(file_id, name, namespace)
+        else {
+            return None;
+        };
+        let origin_file = binding.origin_file();
+        let export = self
+            .modules
+            .get(origin_file.0 as usize)?
+            .exports
+            .get(binding.origin_slot())?;
+        Some(EffectiveExportOrigin {
+            file_id: origin_file,
+            export,
+        })
     }
 
     /// Whether `importer` connects to `source` as an origin of `name`.
