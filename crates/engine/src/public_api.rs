@@ -398,3 +398,42 @@ fn is_source_index_under_package(path: &Path, package_root: &Path) -> bool {
         .and_then(|stem| stem.to_str())
         .is_some_and(|stem| stem == "index")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::AnalysisSession;
+
+    fn fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/public-package-members")
+    }
+
+    fn public_entry_paths(session: &AnalysisSession) -> Vec<PathBuf> {
+        let artifacts = session
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("analysis succeeds");
+        let graph = artifacts.graph.expect("retained graph");
+        public_api_entry_paths_for_graph(&graph, session.config(), session.workspaces())
+    }
+
+    #[test]
+    fn workspace_public_entries_require_public_packages_selection() {
+        let root = fixture_root();
+        let unselected = AnalysisSession::load_with_config(&root, None, |config| {
+            config.public_packages.clear();
+        })
+        .expect("unselected session loads");
+
+        assert!(public_entry_paths(&unselected).is_empty());
+
+        let selected = AnalysisSession::load_with_config(&root, None, |config| {
+            config.public_packages = vec!["@workspace/public-lib".to_string()];
+        })
+        .expect("selected session loads");
+        let selected_paths = public_entry_paths(&selected);
+
+        assert_eq!(selected_paths.len(), 1);
+        assert!(selected_paths[0].ends_with("packages/public-lib/src/index.ts"));
+    }
+}
