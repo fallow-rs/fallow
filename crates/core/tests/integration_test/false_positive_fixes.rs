@@ -1920,6 +1920,10 @@ fn interface_member_usage_does_not_flag_implementer_members() {
         "a required interface member cannot be removed from its implementer: {unused_members:?}"
     );
     assert!(
+        unused_members.contains(&"FixedSizeScrollStrategy.optionalByContract".to_string()),
+        "an optional interface member should remain removable when unused: {unused_members:?}"
+    );
+    assert!(
         unused_members.contains(&"FixedSizeScrollStrategy.unusedHelper".to_string()),
         "unrelated members should still be reported: {unused_members:?}"
     );

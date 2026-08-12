@@ -19,6 +19,8 @@ export class FixedSizeScrollStrategy implements VirtualScrollStrategy {
 
   requiredByContract(): void {}
 
+  optionalByContract(): void {}
+
   unusedHelper(): string {
     return 'unused';
   }
