@@ -55,6 +55,8 @@ pub struct EffectiveExportSurface<'graph> {
     binding: EffectiveExportBinding,
     namespace: ExportNamespace,
     export: Option<&'graph ExportSymbol>,
+    origin: Option<EffectiveExportOrigin<'graph>>,
+    local_export: bool,
 }
 
 impl<'graph> EffectiveExportSurface<'graph> {
@@ -78,6 +80,12 @@ impl<'graph> EffectiveExportSurface<'graph> {
     #[must_use]
     pub const fn export(self) -> Option<&'graph ExportSymbol> {
         self.export
+    }
+
+    /// Direct declaration that owns this binding, when one exists.
+    #[must_use]
+    pub const fn origin(self) -> Option<EffectiveExportOrigin<'graph>> {
+        self.origin
     }
 }
 
@@ -848,13 +856,82 @@ impl ModuleGraph {
                 .iter()
                 .find(|export| export.name.matches_str(name))
         });
-        let export =
-            surface_export.or_else(|| self.export_binding_origin(binding).map(|o| o.export));
+        let origin = self.export_binding_origin(binding);
+        let export = surface_export.or_else(|| origin.map(|o| o.export));
         Some(EffectiveExportSurface {
             binding,
             namespace,
             export,
+            origin,
+            local_export: surface_export.is_some(),
         })
+    }
+
+    /// References that reach one exact module export surface.
+    ///
+    /// Star-only surfaces share their declaration with other barrels, so their
+    /// origin references are filtered by recorded provenance instead of being
+    /// borrowed wholesale from the declaration.
+    #[must_use]
+    pub fn effective_export_surface_references(
+        &self,
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> Vec<&SymbolReference> {
+        let Some(surface) = self.effective_export_surface(file_id, name, namespace) else {
+            return Vec::new();
+        };
+        let Some(export) = surface.export() else {
+            return Vec::new();
+        };
+        if surface.local_export
+            || surface
+                .origin()
+                .is_none_or(|origin| origin.file_id() == file_id)
+        {
+            return export.references_in(namespace).collect();
+        }
+        let mut exposed = FxHashMap::from_iter([(file_id, name.to_string())]);
+        exposed.extend(
+            self.effective_re_export_routes(file_id, name, namespace)
+                .into_iter()
+                .map(|route| (route.barrel_file(), route.exported_name().to_string())),
+        );
+        export
+            .references
+            .iter()
+            .filter(|reference| {
+                reference.namespace == namespace
+                    && self.reference_reaches_surface(reference, &exposed, namespace)
+            })
+            .collect()
+    }
+
+    fn reference_reaches_surface(
+        &self,
+        reference: &SymbolReference,
+        exposed: &FxHashMap<FileId, String>,
+        namespace: ExportNamespace,
+    ) -> bool {
+        if reference.kind == ReferenceKind::ReExport && exposed.contains_key(&reference.from_file) {
+            return true;
+        }
+        self.outgoing_symbol_edges(reference.from_file)
+            .any(|(target, symbols)| {
+                let Some(name) = exposed.get(&target) else {
+                    return false;
+                };
+                symbols.iter().any(|symbol| {
+                    (namespace == ExportNamespace::Type || !symbol.is_type_only)
+                        && match &symbol.imported_name {
+                            ImportedName::Named(imported) => imported == name,
+                            ImportedName::Default => name == "default",
+                            ImportedName::Namespace => true,
+                            ImportedName::SideEffect => false,
+                        }
+                })
+            })
     }
 
     /// Resolve a unique binding to its direct declaration, when it has one.
