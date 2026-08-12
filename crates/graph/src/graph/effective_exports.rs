@@ -734,6 +734,40 @@ mod tests {
     }
 
     #[test]
+    fn star_exports_exclude_default_bindings() {
+        let mut default = value_export("local");
+        default.name = ExportName::Default;
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![re_export(FileId(1), "*", "*")]),
+            module(1, vec![default], Vec::new()),
+        ]);
+
+        assert_eq!(
+            index.resolve(FileId(0), "default", ExportNamespace::Value),
+            EffectiveExportResolution::Missing
+        );
+    }
+
+    #[test]
+    fn star_cycles_converge_on_the_same_binding() {
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![re_export(FileId(1), "*", "*")]),
+            module(
+                1,
+                Vec::new(),
+                vec![
+                    re_export(FileId(0), "*", "*"),
+                    re_export(FileId(2), "*", "*"),
+                ],
+            ),
+            module(2, vec![value_export("foo")], Vec::new()),
+        ]);
+
+        assert!(resolves_through(&index, FileId(0), FileId(2), "foo"));
+        assert!(resolves_through(&index, FileId(1), FileId(2), "foo"));
+    }
+
+    #[test]
     fn type_only_namespace_re_export_resolves_only_in_type_namespace() {
         let mut namespace = re_export(FileId(1), "*", "Types");
         namespace.info.is_type_only = true;
