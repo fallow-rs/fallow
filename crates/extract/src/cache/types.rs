@@ -914,7 +914,13 @@ use crate::MemberKind;
 /// Bumped to 267: contextually typed function expressions now resolve the
 /// nearest lexical function alias. Warm 266 caches can retain receiver facts
 /// from a shadowed outer alias and omit facts from the selected local alias.
-pub(super) const CACHE_VERSION: u32 = 267;
+///
+/// Bumped to 268: generic alias substitution and lexical type/value provenance
+/// now change persisted member accesses, signature references, and semantic
+/// facts. Computed enum-key uses also require a proven module binding. Warm 267
+/// caches can therefore retain false receiver/key credits or omit the concrete
+/// generic receiver selected by the current parse.
+pub(super) const CACHE_VERSION: u32 = 268;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

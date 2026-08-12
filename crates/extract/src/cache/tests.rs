@@ -4422,31 +4422,41 @@ fn cache_save_atomic_write_leaves_no_tmp_on_success() {
 /// produced by a fresh (cold) parse of the same source. Guards against a
 /// forgotten `CACHE_VERSION` bump or a serialization bug silently returning
 /// WRONG analysis results from disk.
+const WARM_CACHE_SOURCE: &str = "import { useEffect } from 'react';\n\
+     import { vi } from 'vitest';\n\
+     import { ProtocolKey } from './protocol';\n\
+     import type { Props } from './types';\n\
+     export interface Runner { run(): void; optionalRun?(): void }\n\
+     class OuterContext { outer(): void {} }\n\
+     class InnerContext { used(): void {} }\n\
+     type Handler = (context: OuterContext) => void;\n\
+     type GenericHandler<T> = (context: T) => void;\n\
+     export const genericHandler: GenericHandler<InnerContext> = context => context.used();\n\
+     export function createHandler() {\n\
+       const handler: Handler = context => context.used();\n\
+       type Handler = (context: InnerContext) => void;\n\
+       return handler;\n\
+     }\n\
+     export function readShadowedKey(\n\
+       target: object,\n\
+       ProtocolKey: { Protocol: string },\n\
+     ) {\n\
+       return target[ProtocolKey.Protocol];\n\
+     }\n\
+     vi.mock('./dependency', () => ({ dependency: vi.fn() }));\n\
+     export const App = ({ name }: Props) => {\n\
+       useEffect(() => {}, [name]);\n\
+       return <Child id={name} />;\n\
+     };\n\
+     export default App;";
+
 #[test]
 fn warm_cache_load_matches_cold_parse() {
     let dir = test_cache_dir("warm_equals_cold");
     let path = Path::new("src/warm.tsx");
-    let source = "import { useEffect } from 'react';\n\
-         import { vi } from 'vitest';\n\
-         import type { Props } from './types';\n\
-         export interface Runner { run(): void; optionalRun?(): void }\n\
-         class OuterContext { outer(): void {} }\n\
-         class InnerContext { used(): void {} }\n\
-         type Handler = (context: OuterContext) => void;\n\
-         export function createHandler() {\n\
-           const handler: Handler = context => context.used();\n\
-           type Handler = (context: InnerContext) => void;\n\
-           return handler;\n\
-         }\n\
-         vi.mock('./dependency', () => ({ dependency: vi.fn() }));\n\
-         export const App = ({ name }: Props) => {\n\
-           useEffect(() => {}, [name]);\n\
-           return <Child id={name} />;\n\
-         };\n\
-         export default App;";
 
     // Cold parse -> the cache unit that a fresh run would write to disk.
-    let cold_module = parse_from_content(FileId(0), path, source);
+    let cold_module = parse_from_content(FileId(0), path, WARM_CACHE_SOURCE);
     let cold_cached = module_to_cached_from_parts(&cold_module, 10, 20);
     let cold_bytes = bitcode::encode(&cold_cached);
 
@@ -4493,6 +4503,10 @@ fn warm_cache_load_matches_cold_parse() {
         cold_module.render_edges.len()
     );
     assert_eq!(warm_module.semantic_facts, cold_module.semantic_facts);
+    assert_eq!(
+        warm_module.public_signature_type_references,
+        cold_module.public_signature_type_references
+    );
     assert!(
         warm_module
             .member_accesses
