@@ -11,7 +11,7 @@ use crate::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, dominant_identifier,
     group_refactoring_suggestion,
 };
-use crate::graph::{EffectiveExportResolution, ExportNamespace, ModuleGraph, ReferenceKind};
+use crate::graph::{ExportNamespace, ModuleGraph, ReferenceKind};
 
 /// Match a user-provided file path against a module's actual path.
 ///
@@ -51,8 +51,7 @@ fn reference_to_export_reference(
     }
 }
 
-/// Collect every re-export chain across the graph that re-exports `export_name`
-/// from the module identified by `target_file_id`.
+/// Project graph-owned effective routes into the public trace contract.
 fn collect_re_export_chains(
     graph: &ModuleGraph,
     root: &Path,
@@ -61,53 +60,23 @@ fn collect_re_export_chains(
     namespace: ExportNamespace,
 ) -> Vec<ReExportChain> {
     graph
-        .modules
-        .iter()
-        .flat_map(|m| {
-            m.re_exports
+        .effective_re_export_routes(target_file_id, export_name, namespace)
+        .into_iter()
+        .filter_map(|route| {
+            let module = graph.modules.get(route.barrel_file().0 as usize)?;
+            let barrel_export = module
+                .exports
                 .iter()
-                .filter(move |re| {
-                    if re.source_file != target_file_id
-                        || (namespace == ExportNamespace::Value && re.is_type_only)
-                    {
-                        return false;
-                    }
-                    let exported_name = if re.imported_name == "*" {
-                        if re.exported_name != "*" || export_name == "default" {
-                            return false;
-                        }
-                        export_name
-                    } else {
-                        if re.imported_name != export_name {
-                            return false;
-                        }
-                        &re.exported_name
-                    };
-                    matches!(
-                        (
-                            graph.resolve_export(m.file_id, exported_name, namespace),
-                            graph.resolve_export(target_file_id, export_name, namespace),
-                        ),
-                        (
-                            EffectiveExportResolution::Unique(barrel_binding),
-                            EffectiveExportResolution::Unique(source_binding),
-                        ) if barrel_binding == source_binding
-                    )
-                })
-                .map(move |re| {
-                    let barrel_export = m.exports.iter().find(|e| {
-                        if re.exported_name == "*" {
-                            e.name.to_string() == export_name
-                        } else {
-                            e.name.to_string() == re.exported_name
-                        }
-                    });
-                    ReExportChain {
-                        barrel_file: m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
-                        exported_as: re.exported_name.clone(),
-                        reference_count: barrel_export.map_or(0, |e| e.references.len()),
-                    }
-                })
+                .find(|export| export.name.to_string() == route.exported_name());
+            Some(ReExportChain {
+                barrel_file: module
+                    .path
+                    .strip_prefix(root)
+                    .unwrap_or(&module.path)
+                    .to_path_buf(),
+                exported_as: route.exported_name().to_string(),
+                reference_count: barrel_export.map_or(0, |export| export.references.len()),
+            })
         })
         .collect()
 }
