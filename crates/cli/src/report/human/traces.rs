@@ -65,13 +65,15 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
         String::new()
     };
     lines.push(format!("  File: {reachable}{entry}"));
-    lines.push(format!(
-        "  Namespace: {}",
-        match trace.namespace {
-            SemanticNamespace::Value => "value",
-            SemanticNamespace::Type => "type",
-        }
-    ));
+    if let Some(namespace) = trace.namespace {
+        lines.push(format!(
+            "  Namespace: {}",
+            match namespace {
+                SemanticNamespace::Value => "value",
+                SemanticNamespace::Type => "type",
+            }
+        ));
+    }
     lines.push(format!("  Reason: {}", trace.reason));
 
     push_export_trace_direct_references(&mut lines, trace);
@@ -529,7 +531,7 @@ mod tests {
         let trace = ExportTrace {
             file: PathBuf::from("src/lib.ts"),
             export_name: "formatUser".to_string(),
-            namespace: fallow_types::semantic::SemanticNamespace::Value,
+            namespace: Some(fallow_types::semantic::SemanticNamespace::Value),
             file_reachable: true,
             is_entry_point: true,
             is_used: true,

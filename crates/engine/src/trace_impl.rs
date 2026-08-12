@@ -153,10 +153,10 @@ pub fn trace_export(
             .unwrap_or(&module.path)
             .to_path_buf(),
         export_name: export_name.to_string(),
-        namespace: match namespace {
+        namespace: Some(match namespace {
             ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
             ExportNamespace::Value => fallow_types::semantic::SemanticNamespace::Value,
-        },
+        }),
         file_reachable: module.is_reachable(),
         is_entry_point: module.is_entry_point(),
         is_used,
@@ -1375,7 +1375,7 @@ mod tests {
 
         assert_eq!(
             trace.namespace,
-            fallow_types::semantic::SemanticNamespace::Value
+            Some(fallow_types::semantic::SemanticNamespace::Value)
         );
         assert!(!trace.is_used, "type usage must not select the type export");
     }
@@ -1464,7 +1464,7 @@ mod tests {
 
         assert_eq!(
             trace.namespace,
-            fallow_types::semantic::SemanticNamespace::Value
+            Some(fallow_types::semantic::SemanticNamespace::Value)
         );
         assert!(
             trace.is_used,
@@ -2278,10 +2278,10 @@ mod tests {
     /// runs cross-platform.
     #[test]
     fn export_trace_serializes_windows_path_with_forward_slashes() {
-        let trace = ExportTrace {
+        let mut trace = ExportTrace {
             file: PathBuf::from(r"src\utils.ts"),
             export_name: "foo".to_string(),
-            namespace: fallow_types::semantic::SemanticNamespace::Value,
+            namespace: Some(fallow_types::semantic::SemanticNamespace::Value),
             file_reachable: true,
             is_entry_point: false,
             is_used: true,
@@ -2309,6 +2309,13 @@ mod tests {
         assert!(
             json.contains("\"barrel_file\":\"src/index.ts\""),
             "ReExportChain.barrel_file must serialize with forward slashes: {json}"
+        );
+
+        trace.namespace = None;
+        let legacy_compatible_json = serde_json::to_string(&trace).expect("serializes");
+        assert!(
+            !legacy_compatible_json.contains("\"namespace\""),
+            "an unknown namespace must remain an additive wire field: {legacy_compatible_json}"
         );
         assert!(
             !json.contains(r"\\"),
