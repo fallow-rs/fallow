@@ -131,9 +131,11 @@ pub fn trace_export(
     let surface = select_export(graph, module, export_name)?;
     let namespace = surface.namespace();
 
+    let mut referenced_files = FxHashSet::default();
     let direct_references: Vec<ExportReference> = graph
         .effective_export_surface_references(module.file_id, export_name, namespace)
         .into_iter()
+        .filter(|reference| referenced_files.insert(reference.from_file))
         .map(|r| reference_to_export_reference(graph, root, r))
         .collect();
 
@@ -182,37 +184,28 @@ pub fn semantic_symbol_for_export(
         .find(|module| path_matches(&module.path, root, file_path))?;
     let surface = select_export(graph, module, export_name)?;
     let namespace = surface.namespace();
-    let origin = surface.origin()?;
-    let (identity_module, export, identity_exported_name, local_name) = if surface
-        .has_local_export()
-        && origin.file_id() != module.file_id
+    let (identity_module, span, identity_exported_name, local_name) = if let Some(re_export) =
+        graph.effective_export_surface_re_export(module.file_id, export_name, namespace)
     {
-        let export = surface.export()?;
-        let binding = surface.binding();
-        let re_export = module.re_exports.iter().find(|re_export| {
-            re_export.exported_name == export_name
-                && re_export.imported_name != "*"
-                && graph.resolve_export(re_export.source_file, &re_export.imported_name, namespace)
-                    == EffectiveExportResolution::Unique(binding)
-        })?;
-        (
-            module,
-            export,
-            export_name,
-            re_export.imported_name.as_str(),
-        )
+        let local_name = if re_export.imported_name == "*" {
+            export_name
+        } else {
+            re_export.imported_name.as_str()
+        };
+        (module, re_export.span, export_name, local_name)
     } else {
+        let origin = surface.origin()?;
         let origin_module = graph.modules.get(origin.file_id().0 as usize)?;
         let origin_export = origin.export();
         let origin_name = match &origin_export.name {
             fallow_types::extract::ExportName::Named(name) => name.as_str(),
             fallow_types::extract::ExportName::Default => "default",
         };
-        (origin_module, origin_export, origin_name, origin_name)
+        (origin_module, origin_export.span, origin_name, origin_name)
     };
     let source = std::fs::read_to_string(&identity_module.path).ok()?;
     let offsets = fallow_types::extract::compute_line_offsets(&source);
-    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
+    let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, span.start);
     Some(SemanticSymbol {
         path: identity_module
             .path

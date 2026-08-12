@@ -876,6 +876,42 @@ impl ModuleGraph {
         })
     }
 
+    /// Local re-export specifier that owns one effective module surface.
+    ///
+    /// Direct declarations and star-only forwarded surfaces return `None`.
+    /// Named and namespace re-exports return the namespace-compatible edge
+    /// whose source resolves to the same canonical binding.
+    #[must_use]
+    pub fn effective_export_surface_re_export(
+        &self,
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> Option<&ReExportEdge> {
+        let EffectiveExportResolution::Unique(binding) =
+            self.resolve_export(file_id, name, namespace)
+        else {
+            return None;
+        };
+        self.modules
+            .get(file_id.0 as usize)?
+            .re_exports
+            .iter()
+            .find(|re_export| {
+                re_export.exported_name == name
+                    && (namespace == ExportNamespace::Type || !re_export.is_type_only)
+                    && if re_export.imported_name == "*" {
+                        binding.namespace_source() == Some(re_export.source_file)
+                    } else {
+                        self.resolve_export(
+                            re_export.source_file,
+                            &re_export.imported_name,
+                            namespace,
+                        ) == EffectiveExportResolution::Unique(binding)
+                    }
+            })
+    }
+
     /// References that reach one exact module export surface.
     ///
     /// Star-only surfaces share their declaration with other barrels, so their
