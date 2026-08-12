@@ -8,6 +8,16 @@ export namespace Merged {
   }
 }
 
+export interface NamedMerged {
+  value: string;
+}
+
+export namespace NamedMerged {
+  export interface Options {
+    enabled: boolean;
+  }
+}
+
 export interface Independent {}
 export const Independent = 1;
 export interface UnusedControl {}

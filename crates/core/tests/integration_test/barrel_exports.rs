@@ -80,7 +80,7 @@ fn barrel_re_export_propagates_to_source_module() {
 }
 
 #[test]
-fn type_usage_credits_legal_declaration_merges_only() {
+fn barrel_type_usage_credits_legal_declaration_merges_only() {
     let root = fixture_path("declaration-merge");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -97,6 +97,8 @@ fn type_usage_credits_legal_declaration_merges_only() {
 
     assert!(!unused_exports.contains(&"Merged"));
     assert!(!unused_types.contains(&"Merged"));
+    assert!(!unused_exports.contains(&"NamedMerged"));
+    assert!(!unused_types.contains(&"NamedMerged"));
     assert!(unused_exports.contains(&"Independent"));
     assert!(!unused_types.contains(&"Independent"));
     assert!(unused_types.contains(&"UnusedControl"));
