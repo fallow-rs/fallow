@@ -837,11 +837,14 @@ impl ModuleGraph {
         let Some(importer_module) = self.modules.get(importer.0 as usize) else {
             return false;
         };
+        let re_export_count = importer_module
+            .re_exports
+            .iter()
+            .filter(|re_export| re_export.source_file == source)
+            .count();
         if self.edges[importer_module.edge_range.clone()]
             .iter()
-            .filter(|edge| edge.target == source)
-            .flat_map(|edge| &edge.symbols)
-            .any(|symbol| !matches!(symbol.imported_name, ImportedName::SideEffect))
+            .any(|edge| edge.target == source && edge.symbols.len() > re_export_count)
         {
             return true;
         }
