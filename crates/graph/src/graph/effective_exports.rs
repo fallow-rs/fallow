@@ -335,16 +335,21 @@ fn seed_direct_bindings(
             };
             let name = interner.intern_export_name(&export.name);
             let key = ExportLookup::new(module.file_id, name, namespace);
-            direct_keys.insert(key);
-            merge_resolution(
-                resolutions,
-                queue,
-                key,
-                EffectiveExportResolution::Unique(EffectiveExportBinding {
-                    file_id: module.file_id,
-                    kind: EffectiveExportBindingKind::Declaration(slot),
-                }),
-            );
+            // Same-name declarations inside one module form one local export
+            // entry. This covers legal TypeScript declaration merging (for
+            // example class/function plus namespace) without weakening the
+            // ambiguity rule for distinct bindings arriving through stars.
+            if direct_keys.insert(key) {
+                merge_resolution(
+                    resolutions,
+                    queue,
+                    key,
+                    EffectiveExportResolution::Unique(EffectiveExportBinding {
+                        file_id: module.file_id,
+                        kind: EffectiveExportBindingKind::Declaration(slot),
+                    }),
+                );
+            }
             if namespace == ExportNamespace::Value {
                 value_type_fallbacks.push((module.file_id, name, slot));
             }
@@ -649,6 +654,20 @@ mod tests {
             index.resolve(FileId(0), "missing", ExportNamespace::Value),
             EffectiveExportResolution::Missing
         );
+    }
+
+    #[test]
+    fn same_module_declaration_merges_keep_one_binding() {
+        let index = EffectiveExportIndex::build(&[module(
+            0,
+            vec![value_export("Merged"), value_export("Merged")],
+            Vec::new(),
+        )]);
+
+        assert!(matches!(
+            index.resolve(FileId(0), "Merged", ExportNamespace::Value),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(0)
+        ));
     }
 
     #[test]
