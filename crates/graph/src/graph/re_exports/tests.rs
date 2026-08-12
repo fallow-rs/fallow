@@ -3688,9 +3688,10 @@ fn star_re_export_duplicate_name_value_import_credits_value_export() {
         type_export.references.is_empty(),
         "value use through a star barrel must not credit the type-only namespace"
     );
-    assert!(
-        !value_export.references.is_empty(),
-        "value use through a star barrel should credit the value export"
+    assert_eq!(
+        reference_namespaces(value_export),
+        vec![ExportNamespace::Value],
+        "value use through a star barrel should retain the value namespace"
     );
 }
 
@@ -3716,9 +3717,10 @@ fn star_re_export_duplicate_name_type_import_credits_type_export() {
     );
 
     let (type_export, value_export) = merged_exports(&graph);
-    assert!(
-        !type_export.references.is_empty(),
-        "type-only use through a star barrel should credit the type export"
+    assert_eq!(
+        reference_namespaces(type_export),
+        vec![ExportNamespace::Type],
+        "type-only use through a star barrel should retain the type namespace"
     );
     assert!(
         value_export.references.is_empty(),
@@ -3905,13 +3907,15 @@ fn star_re_export_duplicate_name_mixed_import_credits_both_exports() {
     );
 
     let (type_export, value_export) = merged_exports(&graph);
-    assert!(
-        !type_export.references.is_empty(),
-        "type use through a star barrel should credit the type export"
+    assert_eq!(
+        reference_namespaces(type_export),
+        vec![ExportNamespace::Type],
+        "type use through a star barrel should retain the type namespace"
     );
-    assert!(
-        !value_export.references.is_empty(),
-        "value use through a star barrel should credit the value export"
+    assert_eq!(
+        reference_namespaces(value_export),
+        vec![ExportNamespace::Value],
+        "value use through a star barrel should retain the value namespace"
     );
 }
 
@@ -3924,9 +3928,10 @@ fn star_re_export_duplicate_name_multi_hop_type_usage_credits_type_export() {
     );
 
     let (type_export, value_export) = merged_exports(&graph);
-    assert!(
-        !type_export.references.is_empty(),
-        "normal import used only as a type through a multi-hop star barrel should credit the type export"
+    assert_eq!(
+        reference_namespaces(type_export),
+        vec![ExportNamespace::Type],
+        "normal import used only as a type through a multi-hop star barrel should retain the type namespace"
     );
     assert!(
         value_export.references.is_empty(),
@@ -3946,13 +3951,15 @@ fn star_re_export_duplicate_name_multi_hop_mixed_usage_credits_both_exports() {
     );
 
     let (type_export, value_export) = merged_exports(&graph);
-    assert!(
-        !type_export.references.is_empty(),
-        "type use forwarded through an intermediate star stub should credit the type export"
+    assert_eq!(
+        reference_namespaces(type_export),
+        vec![ExportNamespace::Type],
+        "type use forwarded through an intermediate star stub should retain the type namespace"
     );
-    assert!(
-        !value_export.references.is_empty(),
-        "value use forwarded through an intermediate star stub should credit the value export"
+    assert_eq!(
+        reference_namespaces(value_export),
+        vec![ExportNamespace::Value],
+        "value use forwarded through an intermediate star stub should retain the value namespace"
     );
 }
 
