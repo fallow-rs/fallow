@@ -185,22 +185,17 @@ pub(super) struct InterfaceImplementationContracts {
 }
 
 impl RequiredTypeMemberIndex {
-    fn build(resolved_modules: &[ResolvedModule]) -> Self {
-        let mut index = Self::default();
-        for module in resolved_modules {
-            for required in SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
-                .required_type_members()
-            {
-                index
-                    .by_file
-                    .entry(module.file_id)
-                    .or_default()
-                    .entry(required.type_name.clone())
-                    .or_default()
-                    .insert(required.member.clone());
-            }
+    fn insert_module(&mut self, module: &ModuleInfo) {
+        for required in SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+            .required_type_members()
+        {
+            self.by_file
+                .entry(module.file_id)
+                .or_default()
+                .entry(required.type_name.clone())
+                .or_default()
+                .insert(required.member.clone());
         }
-        index
     }
 
     fn get(&self, file_id: FileId, type_name: &str) -> Option<&FxHashSet<String>> {
@@ -234,8 +229,10 @@ pub(super) fn build_member_heritage_context<'a>(
     let mut class_heritage_by_file = FxHashMap::default();
     let mut token_to_interface: FxHashMap<ExportKey, &str> = FxHashMap::default();
     let mut implementers_by_name: FxHashMap<&str, Vec<ExportKey>> = FxHashMap::default();
+    let mut required_type_members = RequiredTypeMemberIndex::default();
 
     for module in modules {
+        required_type_members.insert_module(module);
         class_heritage_by_file.insert(module.file_id, module.class_heritage.as_slice());
         class_heritage_by_export.extend(module.class_heritage.iter().map(|heritage| {
             (
@@ -265,6 +262,7 @@ pub(super) fn build_member_heritage_context<'a>(
         resolved_modules,
         &class_heritage_by_file,
         indexes,
+        &required_type_members,
     );
 
     MemberHeritageContext {
@@ -534,8 +532,8 @@ fn build_interface_implementation_contracts(
     resolved_modules: &[ResolvedModule],
     class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
     indexes: &MemberPassIndexes<'_>,
+    required_by_type: &RequiredTypeMemberIndex,
 ) -> InterfaceImplementationContracts {
-    let required_by_type = RequiredTypeMemberIndex::build(resolved_modules);
     let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
     let mut required_by_implementer: FxHashMap<ExportKey, FxHashSet<String>> = FxHashMap::default();
     // O(1) dedup across the whole build: a `contains` scan of the growing
