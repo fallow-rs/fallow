@@ -16,3 +16,7 @@ export class ScrollViewport {
     this.strategy.detach();
   }
 }
+
+export function refreshStrategy(value: unknown): void {
+  (value as unknown as VirtualScrollStrategy).refresh();
+}

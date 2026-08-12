@@ -1896,6 +1896,10 @@ fn interface_member_usage_does_not_flag_implementer_members() {
         "detach should be credited through interface-typed access: {unused_members:?}"
     );
     assert!(
+        !unused_members.contains(&"FixedSizeScrollStrategy.refresh".to_string()),
+        "refresh should be credited through a nested type assertion: {unused_members:?}"
+    );
+    assert!(
         unused_members.contains(&"FixedSizeScrollStrategy.unusedHelper".to_string()),
         "unrelated members should still be reported: {unused_members:?}"
     );
