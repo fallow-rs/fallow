@@ -28,12 +28,18 @@ pub struct EffectiveExportBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 enum EffectiveExportBindingKind {
     Declaration(usize),
-    NamespaceObject { source: FileId },
+    NamespaceObject {
+        source: FileId,
+    },
     ImplicitDefault,
+    /// A known export surface whose declaration lives outside this graph.
+    /// The re-export slot keeps opaque bindings distinct without pretending
+    /// that Fallow can inspect or canonicalize the external declaration.
+    ExternalReExport(usize),
 }
 
 impl EffectiveExportBinding {
-    /// Module that owns the resolved declaration.
+    /// Module that owns the resolved declaration or opaque external surface.
     #[must_use]
     pub const fn origin_file(&self) -> FileId {
         self.file_id
@@ -43,7 +49,8 @@ impl EffectiveExportBinding {
         match self.kind {
             EffectiveExportBindingKind::Declaration(slot) => Some(slot),
             EffectiveExportBindingKind::NamespaceObject { .. }
-            | EffectiveExportBindingKind::ImplicitDefault => None,
+            | EffectiveExportBindingKind::ImplicitDefault
+            | EffectiveExportBindingKind::ExternalReExport(_) => None,
         }
     }
 
@@ -53,7 +60,8 @@ impl EffectiveExportBinding {
         match self.kind {
             EffectiveExportBindingKind::NamespaceObject { source } => Some(source),
             EffectiveExportBindingKind::Declaration(_)
-            | EffectiveExportBindingKind::ImplicitDefault => None,
+            | EffectiveExportBindingKind::ImplicitDefault
+            | EffectiveExportBindingKind::ExternalReExport(_) => None,
         }
     }
 
@@ -435,10 +443,10 @@ impl EffectiveExportCapacity {
             capacity.direct_exports = capacity.direct_exports.saturating_add(module.exports.len());
             capacity.implicit_defaults += usize::from(is_sfc_path(&module.path));
             for re_export in &module.re_exports {
-                if re_export.target.internal_file_id().is_none() {
-                    continue;
-                }
                 if re_export.info.exported_name == "*" {
+                    if re_export.target.internal_file_id().is_none() {
+                        continue;
+                    }
                     capacity.star_re_exports = capacity.star_re_exports.saturating_add(1);
                 } else {
                     capacity.named_re_exports = capacity.named_re_exports.saturating_add(1);
@@ -927,8 +935,16 @@ fn collect_observers(
         star: FxHashMap::with_capacity_and_hasher(capacity.star_re_exports, FxBuildHasher),
     };
     for module in modules {
-        for re_export in &module.re_exports {
+        for (re_export_index, re_export) in module.re_exports.iter().enumerate() {
             let Some(source) = re_export.target.internal_file_id() else {
+                if re_export.info.exported_name != "*" {
+                    register_external_re_export(
+                        module.file_id,
+                        re_export_index,
+                        &re_export.info,
+                        ObserverBuildState { interner, arena },
+                    );
+                }
                 continue;
             };
             if re_export.info.exported_name == "*" {
@@ -951,6 +967,33 @@ fn collect_observers(
         }
     }
     observers
+}
+
+fn register_external_re_export(
+    barrel: FileId,
+    re_export_index: usize,
+    info: &fallow_types::extract::ReExportInfo,
+    state: ObserverBuildState<'_>,
+) {
+    let ObserverBuildState { interner, arena } = state;
+    let exported_name = interner.intern(&info.exported_name);
+    let destination = ExportKey::new(barrel, exported_name);
+    let destination_id = arena.intern(destination);
+    let namespaces = ExportNamespaces::for_re_export(info.is_type_only)
+        .without(arena.direct_namespaces(destination_id));
+    if namespaces.is_empty() {
+        return;
+    }
+    arena.mark_explicit(destination_id, namespaces);
+    let binding = EffectiveExportResolution::Unique(EffectiveExportBinding {
+        file_id: barrel,
+        kind: EffectiveExportBindingKind::ExternalReExport(re_export_index),
+    });
+    for namespace in [ExportNamespace::Type, ExportNamespace::Value] {
+        if namespaces.contains(namespace) {
+            arena.merge_resolution(destination_id, namespace, binding);
+        }
+    }
 }
 
 fn register_named_observer(
@@ -1079,6 +1122,21 @@ mod tests {
         }
     }
 
+    fn external_re_export(imported: &str, exported: &str, type_only: bool) -> ResolvedReExport {
+        ResolvedReExport {
+            info: ReExportInfo {
+                source: "node:path".to_string(),
+                imported_name: imported.to_string(),
+                exported_name: exported.to_string(),
+                is_type_only: type_only,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::NpmPackage("node:path".to_string()),
+        }
+    }
+
     fn module(
         file_id: u32,
         exports: Vec<ExportInfo>,
@@ -1108,6 +1166,45 @@ mod tests {
         assert_eq!(
             index.resolve(FileId(0), "missing", ExportNamespace::Value),
             EffectiveExportResolution::Missing
+        );
+    }
+
+    #[test]
+    fn external_named_re_exports_keep_an_opaque_local_binding() {
+        let index = EffectiveExportIndex::build(&[module(
+            0,
+            Vec::new(),
+            vec![
+                external_re_export("join", "join", false),
+                external_re_export("Stats", "Stats", true),
+                external_re_export("*", "path", false),
+            ],
+        )]);
+        let encoded = postcard::to_allocvec(&index).expect("encode effective export index");
+        let decoded: EffectiveExportIndex =
+            postcard::from_bytes(&encoded).expect("decode effective export index");
+
+        let value = decoded.resolve(FileId(0), "join", ExportNamespace::Value);
+        assert!(matches!(
+            value,
+            EffectiveExportResolution::Unique(binding)
+                if binding.origin_file() == FileId(0) && binding.origin_slot().is_none()
+        ));
+        assert_eq!(
+            value,
+            decoded.resolve(FileId(0), "join", ExportNamespace::Type)
+        );
+        assert!(matches!(
+            decoded.resolve(FileId(0), "Stats", ExportNamespace::Type),
+            EffectiveExportResolution::Unique(_)
+        ));
+        assert_eq!(
+            decoded.resolve(FileId(0), "Stats", ExportNamespace::Value),
+            EffectiveExportResolution::Missing
+        );
+        assert_eq!(
+            decoded.resolve(FileId(0), "path", ExportNamespace::Type),
+            decoded.resolve(FileId(0), "path", ExportNamespace::Value)
         );
     }
 

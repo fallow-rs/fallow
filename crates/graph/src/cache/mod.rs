@@ -95,7 +95,11 @@ pub use store::GraphCacheStore;
 /// that resolve to package space are no longer emitted, so warm 30 caches
 /// would keep replaying the phantom `@scope/__mocks__` package edges the
 /// resolver no longer produces.
-pub const GRAPH_CACHE_VERSION: u32 = 31;
+///
+/// Bumped to 32: effective export resolution now retains opaque bindings for
+/// known external named and namespace re-export surfaces. Warm 31 caches omit
+/// those bindings and can falsely report a consumed barrel export as unused.
+pub const GRAPH_CACHE_VERSION: u32 = 32;
 
 /// Cached form of a resolved target.
 ///

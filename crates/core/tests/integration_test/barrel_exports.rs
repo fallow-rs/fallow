@@ -16,6 +16,10 @@ fn barrel_exports_resolves_through_barrel() {
         unused_export_names.contains(&"fooUnused"),
         "fooUnused should be unused, found: {unused_export_names:?}"
     );
+    assert!(
+        !unused_export_names.contains(&"join"),
+        "a consumed external named re-export must stay live: {unused_export_names:?}"
+    );
 }
 
 #[test]
