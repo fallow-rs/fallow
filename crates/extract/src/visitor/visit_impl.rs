@@ -2211,6 +2211,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_block_statement(&mut self, stmt: &BlockStatement<'a>) {
         self.block_depth += 1;
         if self.namespace_depth == 0 {
+            self.push_function_type_alias_scope(&stmt.body);
             self.nested_declaration_stack.push(FxHashSet::default());
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
@@ -2228,6 +2229,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
         }
         if self.namespace_depth == 0 {
+            self.pop_function_type_alias_scope();
             self.nested_declaration_stack.pop();
             self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();
@@ -2275,6 +2277,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         if self.namespace_depth == 0 {
+            self.push_function_type_alias_scope(&body.statements);
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
         }
@@ -2285,6 +2288,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
         }
         if self.namespace_depth == 0 {
+            self.pop_function_type_alias_scope();
             self.scoped_array_binding_element_types.pop();
         }
     }

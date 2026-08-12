@@ -8,8 +8,9 @@ use super::visit_factory_returns::FactoryReturnFunctionInput;
 use super::visit_helpers::StructuralParamMemberCollector;
 use crate::visitor::helpers::{extract_type_annotation_name, is_builtin_constructor};
 use crate::visitor::{
-    LocalStructuralFunction, ModuleInfoExtractor, StructuralCallArgument,
-    StructuralClassCallCandidate, StructuralParameterUse,
+    ContextualParameterTypes, FunctionTypeAliasBinding, LocalStructuralFunction,
+    ModuleInfoExtractor, StructuralCallArgument, StructuralClassCallCandidate,
+    StructuralParameterUse,
 };
 
 #[derive(Default)]
@@ -199,7 +200,7 @@ impl ModuleInfoExtractor {
             .type_annotation
             .as_deref()
             .and_then(extract_type_annotation_name)
-            .and_then(|name| self.function_type_alias_params.get(&name))
+            .and_then(|name| self.resolve_function_type_alias_params(&name))
             .cloned();
         match init {
             Expression::ArrowFunctionExpression(arrow) => {
@@ -260,40 +261,80 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn record_function_type_alias(&mut self, alias: &TSTypeAliasDeclaration<'_>) {
+    fn function_type_alias_params(
+        alias: &TSTypeAliasDeclaration<'_>,
+    ) -> Option<ContextualParameterTypes> {
         let TSType::TSFunctionType(function) = &alias.type_annotation else {
-            return;
+            return None;
         };
-        let params = function
-            .params
-            .items
-            .iter()
-            .map(|param| {
-                param
-                    .type_annotation
-                    .as_deref()
-                    .and_then(extract_type_annotation_name)
-            })
-            .collect();
-        self.function_type_alias_params
-            .insert(alias.id.name.to_string(), params);
+        Some(
+            function
+                .params
+                .items
+                .iter()
+                .map(|param| {
+                    param
+                        .type_annotation
+                        .as_deref()
+                        .and_then(extract_type_annotation_name)
+                })
+                .collect(),
+        )
+    }
+
+    fn statement_type_alias<'statement, 'ast>(
+        statement: &'statement Statement<'ast>,
+    ) -> Option<&'statement TSTypeAliasDeclaration<'ast>> {
+        match statement {
+            Statement::TSTypeAliasDeclaration(alias) => Some(alias.as_ref()),
+            Statement::ExportNamedDeclaration(export) if export.source.is_none() => {
+                match export.declaration.as_ref() {
+                    Some(Declaration::TSTypeAliasDeclaration(alias)) => Some(alias.as_ref()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     pub(super) fn record_program_function_type_aliases(&mut self, program: &Program<'_>) {
         for statement in &program.body {
-            let alias = match statement {
-                Statement::TSTypeAliasDeclaration(alias) => Some(alias.as_ref()),
-                Statement::ExportNamedDeclaration(export) if export.source.is_none() => {
-                    match export.declaration.as_ref() {
-                        Some(Declaration::TSTypeAliasDeclaration(alias)) => Some(alias.as_ref()),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
-            if let Some(alias) = alias {
-                self.record_function_type_alias(alias);
+            if let Some(alias) = Self::statement_type_alias(statement)
+                && let Some(params) = Self::function_type_alias_params(alias)
+            {
+                self.function_type_alias_params
+                    .insert(alias.id.name.to_string(), params);
             }
         }
+    }
+
+    pub(super) fn push_function_type_alias_scope(&mut self, statements: &[Statement<'_>]) {
+        let mut scope = FxHashMap::default();
+        for statement in statements {
+            if let Some(alias) = Self::statement_type_alias(statement) {
+                let binding = Self::function_type_alias_params(alias).map_or(
+                    FunctionTypeAliasBinding::NonFunction,
+                    FunctionTypeAliasBinding::Function,
+                );
+                scope.insert(alias.id.name.to_string(), binding);
+            }
+        }
+        self.function_type_alias_scopes.push(scope);
+    }
+
+    pub(super) fn pop_function_type_alias_scope(&mut self) {
+        self.function_type_alias_scopes.pop();
+    }
+
+    fn resolve_function_type_alias_params(&self, name: &str) -> Option<&ContextualParameterTypes> {
+        for scope in self.function_type_alias_scopes.iter().rev() {
+            if let Some(binding) = scope.get(name) {
+                return match binding {
+                    FunctionTypeAliasBinding::Function(params) => Some(params),
+                    FunctionTypeAliasBinding::NonFunction => None,
+                };
+            }
+        }
+        self.function_type_alias_params.get(name)
     }
 }

@@ -18,3 +18,12 @@ export class NestedContext {
   aliasUsed(): void {}
   nestedDead(): void {}
 }
+
+export class OuterHandlerContext {
+  outerDead(): void {}
+}
+
+export class InnerHandlerContext {
+  innerUsed(): void {}
+  innerDead(): void {}
+}

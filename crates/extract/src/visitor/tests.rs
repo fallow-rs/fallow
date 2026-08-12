@@ -6348,6 +6348,70 @@ fn function_type_alias_supplies_nested_scoped_parameter_types() {
 }
 
 #[test]
+fn nearest_function_type_alias_controls_contextual_parameter_types() {
+    let info = parse(
+        r"
+        class OuterContext {
+          outer(): void {}
+        }
+        class InnerContext {
+          inner(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function createHandler() {
+          const handler: Handler = context => context.inner();
+          type Handler = (context: InnerContext) => void;
+          return handler;
+        }
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "InnerContext" && access.member == "inner"),
+        "the nearest lexical alias should type the parameter: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "OuterContext" && access.member == "inner"),
+        "an outer alias must not leak through a local declaration: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn non_function_type_alias_shadows_outer_contextual_alias() {
+    let info = parse(
+        r"
+        class OuterContext {
+          outer(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function createHandler() {
+          type Handler = string;
+          const handler: Handler = context => context.outer();
+          return handler;
+        }
+        ",
+    );
+
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "OuterContext" && access.member == "outer"),
+        "a non-function alias must still shadow the outer alias: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn required_type_members_exclude_optional_contract_members() {
     let info = parse(
         r"

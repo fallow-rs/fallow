@@ -1,1 +1,1 @@
-export { useAlias, useFirst, useSecond } from './consumers'
+export { createHandler, useAlias, useFirst, useSecond } from './consumers'

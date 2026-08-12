@@ -1,7 +1,9 @@
 import type {
   AliasContext,
   FirstContext,
+  InnerHandlerContext,
   NestedContext,
+  OuterHandlerContext,
   SecondContext,
 } from './contexts'
 
@@ -19,4 +21,12 @@ export function useSecond(ctx: SecondContext): void {
 
 export function useAlias(ctx: ContextSurface): void {
   ctx.aliasUsed()
+}
+
+type Handler = (context: OuterHandlerContext) => void
+
+export function createHandler() {
+  const handler: Handler = context => context.innerUsed()
+  type Handler = (context: InnerHandlerContext) => void
+  return handler
 }
