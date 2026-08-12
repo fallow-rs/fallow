@@ -553,4 +553,23 @@ mod tests {
         assert!(resolves_through(&index, FileId(0), FileId(1), "foo"));
         assert!(resolves_through(&index, FileId(0), FileId(2), "foo"));
     }
+
+    #[test]
+    fn type_only_namespace_re_export_resolves_only_in_type_namespace() {
+        let mut namespace = re_export(FileId(1), "*", "Types");
+        namespace.info.is_type_only = true;
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![namespace]),
+            module(1, vec![value_export("foo")], Vec::new()),
+        ]);
+
+        assert!(matches!(
+            index.resolve(FileId(0), "Types", ExportNamespace::Type),
+            EffectiveExportResolution::Unique(_)
+        ));
+        assert_eq!(
+            index.resolve(FileId(0), "Types", ExportNamespace::Value),
+            EffectiveExportResolution::Missing
+        );
+    }
 }
