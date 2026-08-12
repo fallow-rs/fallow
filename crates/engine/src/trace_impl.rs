@@ -819,6 +819,25 @@ mod tests {
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
     use fallow_types::extract::ReExportInfo;
 
+    fn resolved_re_export(
+        source: FileId,
+        imported_name: &str,
+        exported_name: &str,
+    ) -> ResolvedReExport {
+        ResolvedReExport {
+            info: ReExportInfo {
+                source: "./source".to_string(),
+                imported_name: imported_name.to_string(),
+                exported_name: exported_name.to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(source),
+        }
+    }
+
     fn build_test_graph() -> ModuleGraph {
         let files = vec![
             DiscoveredFile {
@@ -1056,11 +1075,11 @@ mod tests {
     }
 
     #[test]
-    fn star_surface_trace_excludes_sibling_barrel_usage_and_uses_origin_identity() {
+    fn star_surface_trace_keeps_aliases_separate_and_uses_origin_identity() {
         let root = tempfile::tempdir().expect("temporary project");
         let src = root.path().join("src");
         std::fs::create_dir_all(&src).expect("create source directory");
-        let paths: Vec<_> = ["source", "barrel-a", "barrel-b", "entry"]
+        let paths: Vec<_> = ["source", "barrel-a", "barrel-b", "outer", "entry"]
             .into_iter()
             .map(|name| src.join(format!("{name}.ts")))
             .collect();
@@ -1077,18 +1096,6 @@ mod tests {
                 size_bytes: 20,
             })
             .collect();
-        let star = |source| ResolvedReExport {
-            info: ReExportInfo {
-                source: "./source".to_string(),
-                imported_name: "*".to_string(),
-                exported_name: "*".to_string(),
-                is_type_only: false,
-                span: oxc_span::Span::default(),
-                statement_span: oxc_span::Span::default(),
-                source_span: oxc_span::Span::default(),
-            },
-            target: ResolveResult::InternalModule(source),
-        };
         let resolved = vec![
             ResolvedModule {
                 file_id: FileId(0),
@@ -1110,43 +1117,52 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: paths[1].clone(),
-                re_exports: vec![star(FileId(0))],
+                re_exports: vec![resolved_re_export(FileId(0), "*", "*")],
                 ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(2),
                 path: paths[2].clone(),
-                re_exports: vec![star(FileId(0))],
+                re_exports: vec![resolved_re_export(FileId(0), "*", "*")],
                 ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(3),
                 path: paths[3].clone(),
+                re_exports: vec![
+                    resolved_re_export(FileId(1), "foo", "left"),
+                    resolved_re_export(FileId(1), "foo", "right"),
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(4),
+                path: paths[4].clone(),
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
-                        source: "./barrel-b".to_string(),
-                        imported_name: ImportedName::Named("foo".to_string()),
-                        local_name: "foo".to_string(),
+                        source: "./outer".to_string(),
+                        imported_name: ImportedName::Named("left".to_string()),
+                        local_name: "left".to_string(),
                         is_type_only: false,
                         from_style: false,
                         span: oxc_span::Span::default(),
                         source_span: oxc_span::Span::default(),
                     },
-                    target: ResolveResult::InternalModule(FileId(2)),
+                    target: ResolveResult::InternalModule(FileId(3)),
                 }],
                 ..Default::default()
             },
         ];
         let entry_points = vec![EntryPoint {
-            path: paths[3].clone(),
+            path: paths[4].clone(),
             source: EntryPointSource::PackageJsonMain,
         }];
         let graph = ModuleGraph::build(&resolved, &entry_points, &files);
 
-        let unused = trace_export(&graph, root.path(), "src/barrel-a.ts", "foo")
-            .expect("first barrel exposes foo");
-        let used = trace_export(&graph, root.path(), "src/barrel-b.ts", "foo")
-            .expect("second barrel exposes foo");
+        let used = trace_export(&graph, root.path(), "src/barrel-a.ts", "foo")
+            .expect("aliased barrel exposes foo");
+        let unused = trace_export(&graph, root.path(), "src/barrel-b.ts", "foo")
+            .expect("sibling barrel exposes foo");
         assert!(!unused.is_used);
         assert!(unused.direct_references.is_empty());
         assert!(used.is_used);

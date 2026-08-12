@@ -892,12 +892,14 @@ impl ModuleGraph {
         {
             return export.references_in(namespace).collect();
         }
-        let mut exposed = FxHashMap::from_iter([(file_id, name.to_string())]);
-        exposed.extend(
-            self.effective_re_export_routes(file_id, name, namespace)
-                .into_iter()
-                .map(|route| (route.barrel_file(), route.exported_name().to_string())),
-        );
+        let mut exposed: FxHashMap<FileId, FxHashSet<String>> = FxHashMap::default();
+        exposed.entry(file_id).or_default().insert(name.to_string());
+        for route in self.effective_re_export_routes(file_id, name, namespace) {
+            exposed
+                .entry(route.barrel_file())
+                .or_default()
+                .insert(route.exported_name().to_string());
+        }
         export
             .references
             .iter()
@@ -911,7 +913,7 @@ impl ModuleGraph {
     fn reference_reaches_surface(
         &self,
         reference: &SymbolReference,
-        exposed: &FxHashMap<FileId, String>,
+        exposed: &FxHashMap<FileId, FxHashSet<String>>,
         namespace: ExportNamespace,
     ) -> bool {
         if reference.kind == ReferenceKind::ReExport && exposed.contains_key(&reference.from_file) {
@@ -919,14 +921,14 @@ impl ModuleGraph {
         }
         self.outgoing_symbol_edges(reference.from_file)
             .any(|(target, symbols)| {
-                let Some(name) = exposed.get(&target) else {
+                let Some(names) = exposed.get(&target) else {
                     return false;
                 };
                 symbols.iter().any(|symbol| {
                     (namespace == ExportNamespace::Type || !symbol.is_type_only)
                         && match &symbol.imported_name {
-                            ImportedName::Named(imported) => imported == name,
-                            ImportedName::Default => name == "default",
+                            ImportedName::Named(imported) => names.contains(imported.as_str()),
+                            ImportedName::Default => names.contains("default"),
                             ImportedName::Namespace => true,
                             ImportedName::SideEffect => false,
                         }
