@@ -103,6 +103,28 @@ fn type_usage_credits_legal_declaration_merges_only() {
 }
 
 #[test]
+fn renamed_exports_route_through_star_only_surfaces() {
+    let root = fixture_path("renamed-star-surface");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_exports: Vec<_> = results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    let unused_types: Vec<_> = results
+        .unused_types
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+
+    assert!(!unused_exports.contains(&"ValueMerged"));
+    assert!(!unused_types.contains(&"TypeMerged"));
+    assert!(unused_exports.contains(&"UnusedValueControl"));
+    assert!(unused_types.contains(&"UnusedTypeControl"));
+}
+
+#[test]
 fn source_order_independent_import_forwarding_is_re_export() {
     let root = fixture_path("source-order-re-export");
     let config = create_config(root);
