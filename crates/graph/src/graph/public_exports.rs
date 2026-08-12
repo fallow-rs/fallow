@@ -89,7 +89,7 @@ impl ModuleGraph {
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
     ) -> FxHashSet<PublicExportOrigin> {
-        self.public_export_bindings(public_api_entry_points)
+        self.public_export_declaration_bindings(public_api_entry_points)
             .into_iter()
             .filter_map(|binding| self.export_binding_origin(binding))
             .map(|origin| PublicExportOrigin {
@@ -118,6 +118,32 @@ impl ModuleGraph {
                 })
             })
             .collect()
+    }
+
+    /// Direct declaration bindings exposed through public entries, including
+    /// declarations nested under public namespace-object exports.
+    #[must_use]
+    pub fn public_export_declaration_bindings(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+    ) -> FxHashSet<EffectiveExportBinding> {
+        let mut declarations = FxHashSet::default();
+        let mut visited = FxHashSet::default();
+        let mut stack: Vec<_> = self
+            .public_export_bindings(public_api_entry_points)
+            .into_iter()
+            .collect();
+        while let Some(binding) = stack.pop() {
+            if !visited.insert(binding) {
+                continue;
+            }
+            if let Some(source) = binding.namespace_source() {
+                stack.extend(self.unique_export_bindings(source, ExportNamespace::Value));
+            } else if self.export_binding_origin(binding).is_some() {
+                declarations.insert(binding);
+            }
+        }
+        declarations
     }
 
     fn public_value_export_names(
@@ -417,6 +443,27 @@ mod tests {
         let keys = graph.public_export_keys(&public_entries, Path::new("/p"));
         assert!(keys.contains("index.ts::v"));
         assert!(!keys.contains("index.ts::T"), "type-only export skipped");
+    }
+
+    #[test]
+    fn public_namespace_objects_expand_to_declaration_bindings() {
+        let (graph, public_entries) = build_star_surface_graph(
+            vec![re_export("*", "SDK", FileId(1))],
+            vec![ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/p/sdk.ts"),
+                exports: vec![named_export("Client")].into(),
+                ..Default::default()
+            }],
+        );
+
+        let declarations = graph.public_export_declaration_bindings(&public_entries);
+
+        assert_eq!(declarations.len(), 1);
+        let binding = *declarations.iter().next().expect("public Client binding");
+        let origin = graph.export_binding_origin(binding).expect("direct origin");
+        assert_eq!(origin.file_id(), FileId(1));
+        assert_eq!(origin.export().name.to_string(), "Client");
     }
 
     fn build_star_surface_graph(
