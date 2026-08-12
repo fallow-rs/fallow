@@ -2,7 +2,6 @@ use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Expression, FormalParameters, FunctionBody,
     VariableDeclarator,
 };
-use oxc_ast_visit::Visit;
 use rustc_hash::FxHashMap;
 
 use super::visit_factory_returns::FactoryReturnFunctionInput;
@@ -13,11 +12,17 @@ use crate::visitor::{
     StructuralClassCallCandidate, StructuralParameterUse,
 };
 
+#[derive(Default)]
+struct ScopedStructuralUses {
+    params: FxHashMap<usize, StructuralParameterUse>,
+    typed_property_accesses: Vec<(String, String, String)>,
+}
+
 impl ModuleInfoExtractor {
     fn collect_structural_parameter_uses(
         params: &FormalParameters<'_>,
         body: &FunctionBody<'_>,
-    ) -> FxHashMap<usize, StructuralParameterUse> {
+    ) -> ScopedStructuralUses {
         let typed_params: Vec<(usize, String, String)> = params
             .items
             .iter()
@@ -32,7 +37,7 @@ impl ModuleInfoExtractor {
             })
             .collect();
         if typed_params.is_empty() {
-            return FxHashMap::default();
+            return ScopedStructuralUses::default();
         }
 
         let target_params = typed_params
@@ -40,24 +45,35 @@ impl ModuleInfoExtractor {
             .map(|(_, param_name, _)| param_name.clone())
             .collect();
         let mut collector = StructuralParamMemberCollector::new(target_params);
-        collector.visit_function_body(body);
+        collector.collect_function_body(body);
 
-        typed_params
-            .into_iter()
-            .filter_map(|(index, param_name, type_name)| {
-                let members = collector.members.remove(param_name.as_str())?;
-                (!members.is_empty())
-                    .then_some((index, StructuralParameterUse { type_name, members }))
-            })
-            .collect()
+        let mut uses = ScopedStructuralUses::default();
+        for (index, param_name, type_name) in typed_params {
+            if let Some(members) = collector.members.remove(param_name.as_str())
+                && !members.is_empty()
+            {
+                uses.params.insert(
+                    index,
+                    StructuralParameterUse {
+                        type_name: type_name.clone(),
+                        members,
+                    },
+                );
+            }
+            if let Some(property_members) = collector.property_members.remove(param_name.as_str()) {
+                uses.typed_property_accesses.extend(
+                    property_members
+                        .into_iter()
+                        .map(|(property_path, member)| (type_name.clone(), property_path, member)),
+                );
+            }
+        }
+        uses
     }
 
-    fn record_scoped_parameter_member_accesses(
-        &mut self,
-        params: &FxHashMap<usize, StructuralParameterUse>,
-    ) {
+    fn record_scoped_parameter_member_accesses(&mut self, uses: &ScopedStructuralUses) {
         self.member_accesses
-            .extend(params.values().flat_map(|param| {
+            .extend(uses.params.values().flat_map(|param| {
                 param
                     .members
                     .iter()
@@ -66,6 +82,13 @@ impl ModuleInfoExtractor {
                         member: member.clone(),
                     })
             }));
+        for (type_name, property_path, member) in &uses.typed_property_accesses {
+            self.record_typed_property_member_fact(
+                type_name.clone(),
+                property_path.clone(),
+                member.clone(),
+            );
+        }
     }
 
     pub(super) fn record_scoped_typed_parameter_accesses(
@@ -92,15 +115,19 @@ impl ModuleInfoExtractor {
         let Some(body) = body else {
             return;
         };
-        let function = LocalStructuralFunction {
-            params: Self::collect_structural_parameter_uses(params, body),
-        };
+        let uses = Self::collect_structural_parameter_uses(params, body);
         self.scoped_typed_parameter_body_spans.insert(body.span);
-        if function.params.is_empty() {
+        if uses.params.is_empty() && uses.typed_property_accesses.is_empty() {
             return;
         }
 
-        self.record_scoped_parameter_member_accesses(&function.params);
+        self.record_scoped_parameter_member_accesses(&uses);
+        let function = LocalStructuralFunction {
+            params: uses.params,
+        };
+        if function.params.is_empty() {
+            return;
+        }
         self.local_structural_functions
             .insert(name.to_string(), function);
     }

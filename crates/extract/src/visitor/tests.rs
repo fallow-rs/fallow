@@ -6217,6 +6217,47 @@ fn nullable_asserted_binding_records_member_on_asserted_type() {
 }
 
 #[test]
+fn scoped_typed_parameter_records_property_chain_accesses() {
+    let info = parse(
+        r"
+        interface Context {
+          strategy: Strategy;
+        }
+
+        export function useContext(context: Context): void {
+          context.strategy.inspect();
+          const { strategy } = context;
+          strategy.reset();
+        }
+        ",
+    );
+
+    let facts = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::TypedPropertyMemberAccess(access) = fact {
+                Some((
+                    access.type_name.as_str(),
+                    access.property_path.as_str(),
+                    access.member.as_str(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        facts.contains(&("Context", "strategy", "inspect")),
+        "{facts:?}"
+    );
+    assert!(
+        facts.contains(&("Context", "strategy", "reset")),
+        "{facts:?}"
+    );
+}
+
+#[test]
 fn angular_inject_property_records_instance_binding() {
     let info = parse(
         r"
