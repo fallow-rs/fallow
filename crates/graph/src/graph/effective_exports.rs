@@ -193,6 +193,7 @@ struct StarObserver {
 struct NamedObserver {
     namespaces: ExportNamespaces,
     destination: DenseExportId,
+    next: Option<usize>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -260,7 +261,8 @@ struct DenseExportEntry {
     resolutions: NamespaceResolutions,
     direct: ExportNamespaces,
     explicit: ExportNamespaces,
-    named: Vec<NamedObserver>,
+    named_head: Option<usize>,
+    named_tail: Option<usize>,
     queued: bool,
 }
 
@@ -268,14 +270,16 @@ struct DenseExportArena {
     ids: FxHashMap<ExportKey, DenseExportId>,
     entries: Vec<DenseExportEntry>,
     queue: VecDeque<DenseExportId>,
+    named_observers: Vec<NamedObserver>,
 }
 
 impl DenseExportArena {
-    fn with_capacity(key_capacity: usize, queue_capacity: usize) -> Self {
+    fn with_capacity(key_capacity: usize, queue_capacity: usize, named_capacity: usize) -> Self {
         Self {
             ids: FxHashMap::with_capacity_and_hasher(key_capacity, FxBuildHasher),
             entries: Vec::with_capacity(key_capacity),
             queue: VecDeque::with_capacity(queue_capacity),
+            named_observers: Vec::with_capacity(named_capacity),
         }
     }
 
@@ -290,7 +294,8 @@ impl DenseExportArena {
                     resolutions: NamespaceResolutions::default(),
                     direct: ExportNamespaces::default(),
                     explicit: ExportNamespaces::default(),
-                    named: Vec::new(),
+                    named_head: None,
+                    named_tail: None,
                     queued: false,
                 });
                 id
@@ -313,7 +318,15 @@ impl DenseExportArena {
     }
 
     fn add_named_observer(&mut self, source: DenseExportId, observer: NamedObserver) {
-        self.entries[source.0].named.push(observer);
+        let observer_index = self.named_observers.len();
+        let entry = &mut self.entries[source.0];
+        if let Some(tail) = entry.named_tail {
+            self.named_observers[tail].next = Some(observer_index);
+        } else {
+            entry.named_head = Some(observer_index);
+        }
+        entry.named_tail = Some(observer_index);
+        self.named_observers.push(observer);
     }
 
     fn merge_resolution(
@@ -469,8 +482,11 @@ impl EffectiveExportIndex {
         }
 
         let mut interner = ExportNameInterner::with_capacity(capacity.interned_names());
-        let mut arena =
-            DenseExportArena::with_capacity(capacity.build_keys(), capacity.resolution_keys());
+        let mut arena = DenseExportArena::with_capacity(
+            capacity.build_keys(),
+            capacity.resolution_keys(),
+            capacity.named_re_exports,
+        );
         seed_direct_bindings(modules, capacity.direct_exports, &mut interner, &mut arena);
         let observers = collect_observers(modules, capacity, &mut interner, &mut arena);
         propagate_bindings(&mut arena, &observers);
@@ -981,6 +997,7 @@ fn register_named_observer(
         NamedObserver {
             namespaces,
             destination: destination_id,
+            next: None,
         },
     );
 }
@@ -989,14 +1006,15 @@ fn propagate_bindings(arena: &mut DenseExportArena, observers: &PropagationObser
     while let Some(source_id) = arena.pop() {
         let source_key = arena.entries[source_id.0].key;
         let source_resolutions = arena.entries[source_id.0].resolutions;
-        let named_observer_count = arena.entries[source_id.0].named.len();
-        for index in 0..named_observer_count {
-            let observer = arena.entries[source_id.0].named[index];
+        let mut observer_index = arena.entries[source_id.0].named_head;
+        while let Some(index) = observer_index {
+            let observer = arena.named_observers[index];
             arena.merge_resolutions(
                 observer.destination,
                 source_resolutions,
                 observer.namespaces,
             );
+            observer_index = observer.next;
         }
         propagate_star_binding(arena, observers, source_key, source_resolutions);
     }
