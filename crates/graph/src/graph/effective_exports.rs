@@ -433,6 +433,7 @@ struct EffectiveExportCapacity {
     direct_exports: usize,
     implicit_defaults: usize,
     named_re_exports: usize,
+    external_re_exports: usize,
     star_re_exports: usize,
 }
 
@@ -448,8 +449,10 @@ impl EffectiveExportCapacity {
                         continue;
                     }
                     capacity.star_re_exports = capacity.star_re_exports.saturating_add(1);
-                } else {
+                } else if re_export.target.internal_file_id().is_some() {
                     capacity.named_re_exports = capacity.named_re_exports.saturating_add(1);
+                } else if is_external_re_export_target(&re_export.target) {
+                    capacity.external_re_exports = capacity.external_re_exports.saturating_add(1);
                 }
             }
         }
@@ -460,6 +463,7 @@ impl EffectiveExportCapacity {
         self.direct_exports > 0
             || self.implicit_defaults > 0
             || self.named_re_exports > 0
+            || self.external_re_exports > 0
             || self.star_re_exports > 0
     }
 
@@ -467,17 +471,20 @@ impl EffectiveExportCapacity {
         self.direct_exports
             .saturating_add(self.implicit_defaults)
             .saturating_add(self.named_re_exports.saturating_mul(2))
+            .saturating_add(self.external_re_exports)
     }
 
     const fn resolution_keys(self) -> usize {
         self.direct_exports
             .saturating_add(self.implicit_defaults)
             .saturating_add(self.named_re_exports)
+            .saturating_add(self.external_re_exports)
     }
 
     const fn interned_names(self) -> usize {
         self.direct_exports
             .saturating_add(self.named_re_exports.saturating_mul(2))
+            .saturating_add(self.external_re_exports)
             .saturating_add(1)
     }
 }
@@ -937,7 +944,9 @@ fn collect_observers(
     for module in modules {
         for (re_export_index, re_export) in module.re_exports.iter().enumerate() {
             let Some(source) = re_export.target.internal_file_id() else {
-                if re_export.info.exported_name != "*" {
+                if re_export.info.exported_name != "*"
+                    && is_external_re_export_target(&re_export.target)
+                {
                     register_external_re_export(
                         module.file_id,
                         re_export_index,
@@ -967,6 +976,15 @@ fn collect_observers(
         }
     }
     observers
+}
+
+fn is_external_re_export_target(target: &crate::resolve::ResolveResult) -> bool {
+    matches!(
+        target,
+        crate::resolve::ResolveResult::ExternalFile(_)
+            | crate::resolve::ResolveResult::NpmPackage(_)
+            | crate::resolve::ResolveResult::CommonJsNpmPackage(_)
+    )
 }
 
 fn register_external_re_export(
@@ -1205,6 +1223,22 @@ mod tests {
         assert_eq!(
             decoded.resolve(FileId(0), "path", ExportNamespace::Type),
             decoded.resolve(FileId(0), "path", ExportNamespace::Value)
+        );
+    }
+
+    #[test]
+    fn unresolved_named_re_exports_do_not_gain_an_external_binding() {
+        let mut unresolved = external_re_export("missing", "missing", false);
+        unresolved.target = ResolveResult::Unresolvable("./missing".to_string());
+        let index = EffectiveExportIndex::build(&[module(0, Vec::new(), vec![unresolved])]);
+
+        assert_eq!(
+            index.resolve(FileId(0), "missing", ExportNamespace::Type),
+            EffectiveExportResolution::Missing
+        );
+        assert_eq!(
+            index.resolve(FileId(0), "missing", ExportNamespace::Value),
+            EffectiveExportResolution::Missing
         );
     }
 
