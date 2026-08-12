@@ -316,8 +316,9 @@ fn credit_rendered_sfc_chain(
     else {
         return;
     };
-    if binding.is_implicit_default() {
-        used.insert(binding.origin_file());
+    let origin = binding.origin_file();
+    if is_sfc_extension(&graph_path(graph, origin)) {
+        used.insert(origin);
     } else if let Some(source) = binding.namespace_source() {
         credit_all_reexported_sfcs(graph, source, used);
     }
@@ -343,8 +344,9 @@ fn credit_effective_sfc_bindings(
         if !visited.insert(binding) {
             continue;
         }
-        if binding.is_implicit_default() {
-            used.insert(binding.origin_file());
+        let origin = binding.origin_file();
+        if is_sfc_extension(&graph_path(graph, origin)) {
+            used.insert(origin);
         } else if let Some(source) = binding.namespace_source() {
             stack.extend(graph.unique_export_bindings(source, ExportNamespace::Value));
         }

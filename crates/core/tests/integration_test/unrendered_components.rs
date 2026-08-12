@@ -25,6 +25,13 @@ fn flags_barrel_masked_component_but_credits_rendered_and_value_read() {
         !flagged.contains(&"Used"),
         "a template-rendered component must not be flagged: {flagged:?}"
     );
+    // A classic `<script>` SFC has an explicit default declaration rather than
+    // the implicit default synthesized for `<script setup>`. The effective
+    // binding must still resolve through the barrel to the component file.
+    assert!(
+        !flagged.contains(&"ExplicitDefault"),
+        "an explicitly default-exported component must not be flagged: {flagged:?}"
+    );
     // Lazy is value-read in registry.ts (script-side use): credited.
     assert!(
         !flagged.contains(&"Lazy"),
