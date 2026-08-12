@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use colored::Colorize;
-use fallow_types::semantic::{SemanticCompleteness, SemanticSymbolImpact, SemanticSymbolTrace};
+use fallow_types::semantic::{
+    SemanticCompleteness, SemanticNamespace, SemanticSymbolImpact, SemanticSymbolTrace,
+};
 use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ReExportChain, TracedCloneGroup,
@@ -63,6 +65,13 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
         String::new()
     };
     lines.push(format!("  File: {reachable}{entry}"));
+    lines.push(format!(
+        "  Namespace: {}",
+        match trace.namespace {
+            SemanticNamespace::Value => "value",
+            SemanticNamespace::Type => "type",
+        }
+    ));
     lines.push(format!("  Reason: {}", trace.reason));
 
     push_export_trace_direct_references(&mut lines, trace);
@@ -520,6 +529,7 @@ mod tests {
         let trace = ExportTrace {
             file: PathBuf::from("src/lib.ts"),
             export_name: "formatUser".to_string(),
+            namespace: fallow_types::semantic::SemanticNamespace::Value,
             file_reachable: true,
             is_entry_point: true,
             is_used: true,
@@ -540,6 +550,7 @@ mod tests {
 
         assert!(rendered.contains("USED formatUser in src/lib.ts"));
         assert!(rendered.contains("File: reachable (entry point)"));
+        assert!(rendered.contains("Namespace: value"));
         assert!(rendered.contains("Reason: referenced from reachable code"));
         assert!(rendered.contains("1 direct reference(s):"));
         assert!(rendered.contains("-> src/app.ts (value)"));
