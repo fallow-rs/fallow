@@ -740,6 +740,40 @@ fn concat_empty_file_in_middle() {
     assert_eq!(file_of[3], usize::MAX);
 }
 
+#[test]
+fn fused_rank_and_concatenate_matches_two_step_preparation() {
+    let files = vec![
+        FileData {
+            path: PathBuf::from("a.ts"),
+            hashed_tokens: make_hashed_tokens(&[30, 10, 30]),
+            file_tokens: make_file_tokens("a b a", 3),
+            atomic_invocation_spans: Vec::new(),
+        },
+        FileData {
+            path: PathBuf::from("empty.ts"),
+            hashed_tokens: Vec::new(),
+            file_tokens: make_file_tokens("", 0),
+            atomic_invocation_spans: Vec::new(),
+        },
+        FileData {
+            path: PathBuf::from("b.ts"),
+            hashed_tokens: make_hashed_tokens(&[10, 20]),
+            file_tokens: make_file_tokens("b c", 2),
+            atomic_invocation_spans: Vec::new(),
+        },
+    ];
+
+    let ranked_files = ranking::rank_reduce(&files);
+    let expected = concatenation::concatenate_with_sentinels(&ranked_files);
+    let actual = concatenation::rank_and_concatenate(&files);
+
+    assert_eq!(actual.text, expected.0);
+    assert_eq!(actual.file_of, expected.1);
+    assert_eq!(actual.file_offsets, expected.2);
+    assert_eq!(actual.text, vec![0, 1, 0, -1, -2, 1, 2]);
+    assert_eq!(actual.unique_ranks, 3);
+}
+
 fn make_file_data(path: &str, source: &str, num_tokens: usize) -> FileData {
     FileData {
         path: PathBuf::from(path),

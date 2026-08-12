@@ -284,9 +284,8 @@ fn build_detection_inputs(
     (files, totals, focus_file_ids)
 }
 
-/// Run the clone-detection front half (steps 1-2: rank-reduce then concatenate
-/// with sentinels), returning the concatenated text, file index maps, and each
-/// step's elapsed time for the completion trace.
+/// Run the clone-detection front half, ranking tokens while writing the
+/// concatenated suffix-array text and file index maps.
 fn rank_and_concatenate(
     files: &[FileData],
 ) -> (
@@ -297,30 +296,29 @@ fn rank_and_concatenate(
     std::time::Duration,
 ) {
     let t0 = std::time::Instant::now();
-    let ranked_files = ranking::rank_reduce(files);
+    let ranked = concatenation::rank_and_concatenate(files);
     let rank_time = t0.elapsed();
-    let unique_ranks: usize = ranked_files
-        .iter()
-        .flat_map(|f| f.iter())
-        .copied()
-        .max()
-        .map_or(0, |m| m as usize + 1);
     tracing::debug!(
         elapsed_us = rank_time.as_micros(),
-        unique_ranks,
+        unique_ranks = ranked.unique_ranks,
         "step1_rank_reduce"
     );
-
-    let t0 = std::time::Instant::now();
-    let (text, file_of, file_offsets) = concatenation::concatenate_with_sentinels(&ranked_files);
-    let concat_time = t0.elapsed();
+    // Keep the established trace events stable. The fused pass is accounted
+    // in rank time because there is no longer a separately measurable copy.
+    let concat_time = std::time::Duration::ZERO;
     tracing::debug!(
         elapsed_us = concat_time.as_micros(),
-        concat_len = text.len(),
+        concat_len = ranked.text.len(),
         "step2_concatenate"
     );
 
-    (text, file_of, file_offsets, rank_time, concat_time)
+    (
+        ranked.text,
+        ranked.file_of,
+        ranked.file_offsets,
+        rank_time,
+        concat_time,
+    )
 }
 
 struct CloneDetectionTimings {
