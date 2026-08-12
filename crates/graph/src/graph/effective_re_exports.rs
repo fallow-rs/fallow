@@ -266,18 +266,18 @@ mod tests {
         }
     }
 
-    fn star_re_export() -> ResolvedReExport {
+    fn re_export(target: FileId, imported_name: &str, exported_name: &str) -> ResolvedReExport {
         ResolvedReExport {
             info: ReExportInfo {
                 source: "./source".to_string(),
-                imported_name: "*".to_string(),
-                exported_name: "*".to_string(),
+                imported_name: imported_name.to_string(),
+                exported_name: exported_name.to_string(),
                 is_type_only: false,
                 span: Span::default(),
                 statement_span: Span::default(),
                 source_span: Span::default(),
             },
-            target: ResolveResult::InternalModule(FileId(1)),
+            target: ResolveResult::InternalModule(target),
         }
     }
 
@@ -286,7 +286,7 @@ mod tests {
         let resolved = vec![
             ResolvedModule {
                 file_id: FileId(0),
-                re_exports: vec![star_re_export()],
+                re_exports: vec![re_export(FileId(1), "*", "*")],
                 ..Default::default()
             },
             ResolvedModule {
@@ -356,6 +356,111 @@ mod tests {
                 .routes
                 .canonical_hops(graph, start, terminal, start_mechanism),
             vec![
+                (FileId(1), ModuleLoadMechanism::EsModule),
+                (FileId(0), ModuleLoadMechanism::EsModule),
+            ]
+        );
+    }
+
+    #[test]
+    fn declaration_route_retains_rename_star_and_origin_hops() {
+        let resolved = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                re_exports: vec![re_export(FileId(1), "foo", "alias")],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                re_exports: vec![re_export(FileId(2), "*", "*")],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                exports: vec![source_export()].into(),
+                ..Default::default()
+            },
+        ];
+        let mut modules = vec![
+            ModuleNode {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/rename.ts"),
+                edge_range: 0..0,
+                exports: Vec::new(),
+                re_exports: vec![ReExportEdge {
+                    source_file: FileId(1),
+                    imported_name: "foo".to_string(),
+                    exported_name: "alias".to_string(),
+                    is_type_only: false,
+                    span: Span::default(),
+                }],
+                flags: 0,
+            },
+            ModuleNode {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/inner.ts"),
+                edge_range: 0..0,
+                exports: Vec::new(),
+                re_exports: vec![ReExportEdge {
+                    source_file: FileId(2),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: Span::default(),
+                }],
+                flags: 0,
+            },
+            ModuleNode {
+                file_id: FileId(2),
+                path: PathBuf::from("/project/source.ts"),
+                edge_range: 0..0,
+                exports: vec![ExportSymbol {
+                    name: ExportName::Named("foo".to_string()),
+                    is_type_only: false,
+                    is_side_effect_used: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: Span::new(0, 3),
+                    references: Vec::new(),
+                    reference_paths: Vec::new(),
+                    members: Vec::new(),
+                }],
+                re_exports: Vec::new(),
+                flags: 0,
+            },
+        ];
+        let index = EffectiveExportIndex::build(&resolved);
+        let route = effective_declaration_route(
+            &modules,
+            &index,
+            FileId(0),
+            "alias",
+            ExportNamespace::Value,
+        )
+        .expect("the renamed star surface must retain its declaration route");
+
+        assert_eq!(route.binding.origin_file(), FileId(2));
+        let mut paths = ReferencePathInterner::new(true);
+        let path = route
+            .extend_path(None, &mut paths)
+            .expect("tracked routes return one interned path");
+        let finalized = paths.finalize(&mut modules);
+        let ReferencePathNode::Route {
+            graph,
+            start,
+            terminal,
+            start_mechanism,
+            ..
+        } = finalized.paths[path.index()]
+        else {
+            panic!("effective declaration routes use the compact route contract");
+        };
+        assert_eq!(
+            finalized
+                .routes
+                .canonical_hops(graph, start, terminal, start_mechanism),
+            vec![
+                (FileId(2), ModuleLoadMechanism::EsModule),
                 (FileId(1), ModuleLoadMechanism::EsModule),
                 (FileId(0), ModuleLoadMechanism::EsModule),
             ]
