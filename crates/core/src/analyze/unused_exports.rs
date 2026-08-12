@@ -1424,9 +1424,11 @@ fn export_reference_locations(
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use crate::extract::{
+        ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
+    };
     use crate::graph::{ExportSymbol, ModuleGraph, ReExportEdge};
-    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
     use crate::suppress::Suppression;
     use oxc_span::Span;
     use std::path::PathBuf;
@@ -1730,6 +1732,102 @@ mod tests {
         let result =
             find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_preserves_local_export_with_unrelated_re_export() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/src/entry.ts"),
+                size_bytes: 0,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/src/source.ts"),
+                size_bytes: 0,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/src/barrel.ts"),
+                size_bytes: 0,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::ManualEntry,
+        }];
+        let imported_foo = |target: FileId| ResolvedImport {
+            info: ImportInfo {
+                source: format!("./{}", target.0),
+                imported_name: ImportedName::Named("Foo".to_string()),
+                local_name: format!("Foo{}", target.0),
+                is_type_only: false,
+                from_style: false,
+                span: Span::new(1, 4),
+                source_span: Span::default(),
+            },
+            target: ResolveResult::InternalModule(target),
+        };
+        let export = |name: &str, span: Span| ExportInfo {
+            name: ExportName::Named(name.to_string()),
+            local_name: Some(name.to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span,
+            members: vec![],
+            is_side_effect_used: false,
+            super_class: None,
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![imported_foo(FileId(1)), imported_foo(FileId(2))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: vec![
+                    export("Foo", Span::new(10, 13)),
+                    export("Bar", Span::new(20, 23)),
+                ]
+                .into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![export("Foo", Span::new(30, 33))].into(),
+                re_exports: vec![ResolvedReExport {
+                    info: ReExportInfo {
+                        source: "./source".to_string(),
+                        imported_name: "Bar".to_string(),
+                        exported_name: "Bar".to_string(),
+                        is_type_only: false,
+                        span: Span::new(40, 43),
+                        statement_span: Span::new(35, 44),
+                        source_span: Span::new(35, 39),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                ..Default::default()
+            },
+        ];
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let result = find_duplicate_exports(
+            &graph,
+            &test_config(),
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].export_name, "Foo");
+        assert_eq!(result[0].locations.len(), 2);
     }
 
     #[test]
