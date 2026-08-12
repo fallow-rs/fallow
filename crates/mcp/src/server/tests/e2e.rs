@@ -284,6 +284,7 @@ async fn e2e_trace_export_returns_json() {
         .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
     assert_eq!(json["file"].as_str(), Some("src/utils.ts"));
     assert_eq!(json["export_name"].as_str(), Some("usedFunction"));
+    assert_eq!(json["namespace"].as_str(), Some("value"));
     assert_eq!(json["is_used"].as_bool(), Some(true));
 }
 
@@ -311,6 +312,7 @@ async fn api_backed_trace_export_tool_returns_json() {
         .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
     assert_eq!(json["file"].as_str(), Some("src/utils.ts"));
     assert_eq!(json["export_name"].as_str(), Some("usedFunction"));
+    assert_eq!(json["namespace"].as_str(), Some("value"));
     assert_eq!(json["is_used"].as_bool(), Some(true));
 }
 
