@@ -2997,6 +2997,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_class(&mut self, class: &Class<'a>) {
         let member_access_start = self.member_accesses.len();
         let whole_object_start = self.whole_object_uses.len();
+        let type_scope_pushed =
+            self.push_class_type_scope(class.id.as_ref(), class.type_parameters.as_deref());
         self.record_lit_custom_element(class);
 
         if let Some(meta) = extract_angular_component_metadata(class) {
@@ -3027,6 +3029,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.class_scope_stack.pop();
         self.class_type_param_constraints.pop();
         self.class_super_stack.pop();
+        if type_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
     }
 
     /// Track asset references inside `` html`...` `` tagged template literals

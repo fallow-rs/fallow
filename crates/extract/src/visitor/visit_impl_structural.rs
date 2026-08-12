@@ -1,7 +1,7 @@
 use oxc_ast::ast::{
-    Argument, BindingPattern, CallExpression, Declaration, Expression, FormalParameters,
-    FunctionBody, Program, Statement, TSModuleDeclarationName, TSType, TSTypeAliasDeclaration,
-    TSTypeParameterDeclaration, VariableDeclarator,
+    Argument, BindingIdentifier, BindingPattern, CallExpression, Declaration, Expression,
+    FormalParameters, FunctionBody, Program, Statement, TSModuleDeclarationName, TSType,
+    TSTypeAliasDeclaration, TSTypeParameterDeclaration, VariableDeclarator,
 };
 use rustc_hash::FxHashMap;
 
@@ -375,6 +375,30 @@ impl ModuleInfoExtractor {
                 )
             })
             .collect();
+        self.function_type_alias_scopes.push(scope);
+        true
+    }
+
+    pub(super) fn push_class_type_scope(
+        &mut self,
+        id: Option<&BindingIdentifier<'_>>,
+        type_parameters: Option<&TSTypeParameterDeclaration<'_>>,
+    ) -> bool {
+        if self.namespace_depth > 0 || (id.is_none() && type_parameters.is_none()) {
+            return false;
+        }
+        let mut scope = FxHashMap::default();
+        if let Some(id) = id {
+            scope.insert(id.name.to_string(), FunctionTypeAliasBinding::NonFunction);
+        }
+        if let Some(type_parameters) = type_parameters {
+            scope.extend(type_parameters.params.iter().map(|parameter| {
+                (
+                    parameter.name.name.to_string(),
+                    FunctionTypeAliasBinding::NonFunction,
+                )
+            }));
+        }
         self.function_type_alias_scopes.push(scope);
         true
     }

@@ -6504,6 +6504,44 @@ fn switch_and_static_block_aliases_do_not_leak_outer_context() {
 }
 
 #[test]
+fn class_type_bindings_do_not_leak_outer_contextual_aliases() {
+    let info = parse(
+        r"
+        class OuterContext {
+          genericShadowed(): void {}
+          classNameShadowed(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export class Registry<Handler> {
+          create() {
+            const handler: Handler = context => context.genericShadowed();
+            return handler;
+          }
+        }
+
+        export const Named = class Handler {
+          create() {
+            const handler: Handler = context => context.classNameShadowed();
+            return handler;
+          }
+        };
+        ",
+    );
+
+    for member in ["genericShadowed", "classNameShadowed"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "OuterContext" && access.member == member),
+            "class type bindings must shadow the outer alias: {member} in {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn required_type_members_exclude_optional_contract_members() {
     let info = parse(
         r"
