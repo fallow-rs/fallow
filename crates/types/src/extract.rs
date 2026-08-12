@@ -1674,6 +1674,17 @@ pub struct MemberAccess {
     pub member: String,
 }
 
+/// Direct export declarations that TypeScript treats as one merged symbol.
+///
+/// Spans identify the exact declaration slots without conflating unrelated
+/// type/value declarations that happen to share a name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DeclarationMergeFact {
+    /// Identifier spans for the declarations in this merge group.
+    pub export_spans: Vec<(u32, u32)>,
+}
+
 /// A typed extraction fact for cross-layer analysis.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1738,6 +1749,9 @@ pub enum SemanticFact {
     /// dynamic-import fact for the same source remains authoritative for graph
     /// reachability and unresolved-import diagnostics.
     VitestModuleMockOperation(VitestModuleMockOperationFact),
+    /// Direct declarations that form one legal TypeScript declaration merge.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    DeclarationMerge(DeclarationMergeFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.

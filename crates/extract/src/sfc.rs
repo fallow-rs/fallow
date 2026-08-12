@@ -19,9 +19,7 @@ use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::asset_url::normalize_asset_url;
-use crate::parse::{
-    compute_auto_import_candidates, compute_import_binding_usage, compute_semantic_usage,
-};
+use crate::parse::{compute_import_binding_usage, compute_semantic_usage};
 use crate::sfc_template::{SfcKind, collect_template_usage_with_bound_targets};
 use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
@@ -651,22 +649,27 @@ fn merge_script_binding_usage(
 ) {
     let augmented_body = build_generic_attr_probe_source(input.script);
     let empty_template_used = FxHashSet::default();
+    let semantic_usage =
+        compute_semantic_usage(&parser_return.program, imports, &empty_template_used);
     let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
     {
         let augmented_return =
             Parser::new(allocator, augmented, source_type_for_script(input.script)).parse();
         (
             compute_import_binding_usage(&augmented_return.program, imports, &empty_template_used),
-            compute_auto_import_candidates(&parser_return.program),
+            semantic_usage.auto_import_candidates,
         )
     } else {
-        let semantic_usage =
-            compute_semantic_usage(&parser_return.program, imports, &empty_template_used);
         (
             semantic_usage.import_binding_usage,
             semantic_usage.auto_import_candidates,
         )
     };
+    crate::parse::append_declaration_merge_facts(
+        &mut input.combined.semantic_facts,
+        semantic_usage.declaration_merges,
+        input.script.byte_offset as u32,
+    );
     input
         .combined
         .unused_import_bindings

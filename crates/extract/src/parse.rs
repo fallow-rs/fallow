@@ -333,10 +333,40 @@ fn assemble_module_info(input: ModuleAssemblyInput) -> ModuleInfo {
     info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
     info.value_referenced_import_bindings = semantic_usage.import_binding_usage.value_referenced;
     info.auto_import_candidates = semantic_usage.auto_import_candidates;
+    append_declaration_merge_facts(
+        &mut info.semantic_facts,
+        semantic_usage.declaration_merges,
+        0,
+    );
     info.line_offsets = line_offsets;
     info.complexity = complexity;
     info.flag_uses = flag_uses;
     info
+}
+
+pub fn append_declaration_merge_facts(
+    facts: &mut std::sync::Arc<[fallow_types::extract::SemanticFact]>,
+    mut groups: Vec<fallow_types::extract::DeclarationMergeFact>,
+    byte_offset: u32,
+) {
+    if groups.is_empty() {
+        return;
+    }
+    if byte_offset != 0 {
+        for group in &mut groups {
+            for (start, end) in &mut group.export_spans {
+                *start += byte_offset;
+                *end += byte_offset;
+            }
+        }
+    }
+    let mut merged = std::mem::take(facts).to_vec();
+    merged.extend(
+        groups
+            .into_iter()
+            .map(fallow_types::extract::SemanticFact::DeclarationMerge),
+    );
+    *facts = merged.into();
 }
 
 struct JsxRetryInput<'a> {
@@ -1103,6 +1133,7 @@ pub struct MockApiReferenceSpans {
 pub struct SemanticUsage {
     pub import_binding_usage: ImportBindingUsage,
     pub auto_import_candidates: Vec<String>,
+    pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
     pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
 }
 
@@ -1163,6 +1194,7 @@ pub fn compute_semantic_usage(
         value_referenced_bindings.into_iter().collect();
     value_referenced_bindings.sort_unstable();
     let mock_api_reference_spans = compute_mock_api_reference_spans(&semantic, imports, root_scope);
+    let declaration_merges = declaration_merge_facts(&semantic);
 
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
@@ -1171,8 +1203,93 @@ pub fn compute_semantic_usage(
             value_referenced: value_referenced_bindings,
         },
         auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
+        declaration_merges,
         mock_api_reference_spans,
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MergeDeclarationKind {
+    Interface,
+    Class,
+    Function,
+    Enum,
+    Namespace,
+}
+
+fn declaration_merge_facts(
+    semantic: &oxc_semantic::Semantic<'_>,
+) -> Vec<fallow_types::extract::DeclarationMergeFact> {
+    use fallow_types::extract::DeclarationMergeFact;
+
+    let scoping = semantic.scoping();
+    let mut groups = Vec::new();
+    for symbol_id in scoping.symbol_ids() {
+        let declarations: Vec<_> = scoping
+            .symbol_declarations(symbol_id)
+            .filter_map(|node_id| merge_declaration(semantic.nodes().kind(node_id)))
+            .collect();
+        if declarations.len() < 2 {
+            continue;
+        }
+        let mut selected = Vec::new();
+        for (kind, span) in &declarations {
+            if declarations
+                .iter()
+                .any(|(other, _)| compatible_merge(*kind, *other))
+            {
+                selected.push((span.start, span.end));
+            }
+        }
+        selected.sort_unstable();
+        selected.dedup();
+        if selected.len() > 1 {
+            groups.push(DeclarationMergeFact {
+                export_spans: selected,
+            });
+        }
+    }
+    groups.sort_unstable_by_key(|group| group.export_spans[0]);
+    groups
+}
+
+fn merge_declaration(kind: AstKind<'_>) -> Option<(MergeDeclarationKind, Span)> {
+    match kind {
+        AstKind::TSInterfaceDeclaration(declaration) => {
+            Some((MergeDeclarationKind::Interface, declaration.id.span))
+        }
+        AstKind::Class(declaration) => declaration
+            .id
+            .as_ref()
+            .map(|id| (MergeDeclarationKind::Class, id.span)),
+        AstKind::Function(declaration) => declaration
+            .id
+            .as_ref()
+            .map(|id| (MergeDeclarationKind::Function, id.span)),
+        AstKind::TSEnumDeclaration(declaration) if !declaration.r#const => {
+            Some((MergeDeclarationKind::Enum, declaration.id.span))
+        }
+        AstKind::TSModuleDeclaration(declaration) => match &declaration.id {
+            oxc_ast::ast::TSModuleDeclarationName::Identifier(id) => {
+                Some((MergeDeclarationKind::Namespace, id.span))
+            }
+            oxc_ast::ast::TSModuleDeclarationName::StringLiteral(_) => None,
+        },
+        _ => None,
+    }
+}
+
+const fn compatible_merge(left: MergeDeclarationKind, right: MergeDeclarationKind) -> bool {
+    use MergeDeclarationKind::{Class, Enum, Function, Interface, Namespace};
+
+    matches!(
+        (left, right),
+        (Interface, Interface | Class | Namespace)
+            | (Class, Interface | Namespace)
+            | (Function, Namespace)
+            | (Enum, Enum | Namespace)
+            | (Namespace, Interface | Class | Function | Enum | Namespace)
+    )
 }
 
 fn compute_mock_api_reference_spans(
@@ -1248,14 +1365,6 @@ fn compute_mock_api_reference_spans(
     }
 
     spans
-}
-
-pub fn compute_auto_import_candidates(program: &Program<'_>) -> Vec<String> {
-    use oxc_semantic::SemanticBuilder;
-
-    let semantic_ret = SemanticBuilder::new().build(program);
-    let semantic = semantic_ret.semantic;
-    compute_auto_import_candidates_from_semantic(semantic.scoping())
 }
 
 fn compute_auto_import_candidates_from_semantic(scoping: &oxc_semantic::Scoping) -> Vec<String> {

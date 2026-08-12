@@ -35,6 +35,44 @@ pub fn parse_at_path(path: &str, source: &str) -> ModuleInfo {
 }
 
 #[test]
+fn declaration_merge_facts_distinguish_namespace_merges_from_dual_space_names() {
+    let info = parse_ts(
+        "export interface Merged {}\n\
+         export namespace Merged { export interface Options {} }\n\
+         export interface Independent {}\n\
+         export const Independent = 1;",
+    );
+
+    let merge = info
+        .semantic_facts
+        .iter()
+        .find_map(|fact| match fact {
+            fallow_types::extract::SemanticFact::DeclarationMerge(merge) => Some(merge),
+            _ => None,
+        })
+        .expect("interface and namespace must form one typed declaration merge");
+    let merged_spans: Vec<_> = info
+        .exports
+        .iter()
+        .filter(|export| export.name.matches_str("Merged"))
+        .map(|export| (export.span.start, export.span.end))
+        .collect();
+
+    assert_eq!(merge.export_spans, merged_spans);
+    assert_eq!(
+        info.semantic_facts
+            .iter()
+            .filter(|fact| matches!(
+                fact,
+                fallow_types::extract::SemanticFact::DeclarationMerge(_)
+            ))
+            .count(),
+        1,
+        "interface plus const is a dual-space symbol, not a declaration merge"
+    );
+}
+
+#[test]
 fn parses_glimmer_typescript_as_typescript() {
     let info = parse_source_to_module(
         FileId(0),

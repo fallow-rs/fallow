@@ -875,7 +875,10 @@ use crate::MemberKind;
 /// (`{#await promise then value}` / `{#await promise catch error}`) now retain
 /// their continuation contribution instead of being cached with only `Await`,
 /// and template-expression regex literals no longer hide later contributions.
-pub(super) const CACHE_VERSION: u32 = 255;
+///
+/// Bumped to 256: semantic facts now retain legal TypeScript declaration merge
+/// groups so warm extraction results preserve the same export identity.
+pub(super) const CACHE_VERSION: u32 = 256;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

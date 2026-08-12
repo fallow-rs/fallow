@@ -518,6 +518,11 @@ pub(crate) fn parse_astro_to_module(
     info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
     info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
     info.value_referenced_import_bindings = semantic_usage.import_binding_usage.value_referenced;
+    crate::parse::append_declaration_merge_facts(
+        &mut info.semantic_facts,
+        semantic_usage.declaration_merges,
+        frontmatter_offset as u32,
+    );
     apply_astro_props(
         &mut info,
         props_harvest,
