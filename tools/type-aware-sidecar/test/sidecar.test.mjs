@@ -1518,6 +1518,64 @@ test("protocol v6 keeps merged value and type namespaces distinct", () => {
   }
 });
 
+test("protocol v6 resolves namespace export surfaces in both namespaces", () => {
+  const root = makeProject();
+  try {
+    const barrelSource = 'export * as ns from "./source";\n';
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(
+      root,
+      "src/source.ts",
+      "export interface Shape { size: number }\nexport const value = 1;\n",
+    );
+    write(root, "src/barrel.ts", barrelSource);
+    write(
+      root,
+      "src/consumer.ts",
+      [
+        'import { ns } from "./barrel";',
+        "export const current = ns.value;",
+        "export type CurrentShape = ns.Shape;",
+        "",
+      ].join("\n"),
+    );
+    const namespaceExport = (namespace) =>
+      symbolIdentity({
+        source: barrelSource,
+        marker: "export",
+        file: "src/barrel.ts",
+        namespace,
+        declarationKind: "export",
+        exportedName: "ns",
+      });
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        { id: 42, operation: "symbol-impact", symbol: namespaceExport("value") },
+        { id: 43, operation: "symbol-impact", symbol: namespaceExport("type") },
+      ]),
+    );
+
+    assert.deepEqual(
+      response.results.map((result) => result.assertion),
+      ["consumers-found", "consumers-found"],
+    );
+    assert.deepEqual(
+      response.results.map((result) => result.data.direct_consumers),
+      [
+        [{ path: "src/consumer.ts", namespace: "value" }],
+        [{ path: "src/consumer.ts", namespace: "type" }],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v6 confirms complete closed-world absence of static class-member references", () => {
   const root = makeProject();
   try {

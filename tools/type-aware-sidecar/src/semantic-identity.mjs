@@ -12,9 +12,11 @@ import {
   isMethodDeclaration,
   isMethodSignatureDeclaration,
   isModuleDeclaration,
+  isNamespaceExport,
   isPropertyDeclaration,
   isPropertySignatureDeclaration,
   isSetAccessorDeclaration,
+  isSourceFile,
   isTypeAliasDeclaration,
   isVariableDeclaration,
 } from "typescript/unstable/ast/is";
@@ -45,7 +47,12 @@ const TYPE_ONLY_DECLARATIONS = [
   isTypeAliasDeclaration,
   isPropertySignatureDeclaration,
 ];
-const DUAL_NAMESPACE_DECLARATIONS = [isClassDeclaration, isClassExpression, isEnumDeclaration];
+const DUAL_NAMESPACE_DECLARATIONS = [
+  isClassDeclaration,
+  isClassExpression,
+  isEnumDeclaration,
+  isSourceFile,
+];
 const DECLARATION_OWNER_NODES = [isClassDeclaration, isClassExpression, isInterfaceDeclaration];
 
 const slash = (value) => value.split(path.sep).join("/");
@@ -101,6 +108,8 @@ export const ownerDeclaration = (node) => {
 
 export const isDeclaration = (node) => declarationKind(node) !== undefined;
 
+export const isExportAnchor = (node) => isExportSpecifier(node) || isNamespaceExport(node);
+
 const visit = (node, callback) => {
   callback(node);
   node.forEachChild((child) => {
@@ -151,6 +160,16 @@ const indexExportSpecifier = (index, node) => {
   );
 };
 
+const indexNamespaceExport = (index, node) => {
+  const exportedName = nodeText(node.name);
+  if (!exportedName) return;
+  [node.parent, node]
+    .flatMap((candidate) => positions(candidate))
+    .forEach((position) =>
+      indexExportPosition(index, node, { localName: exportedName, exportedName }, position),
+    );
+};
+
 const defaultModifierFor = (node) =>
   node.modifiers?.find((modifier) => modifier.getText(node.getSourceFile()) === "default");
 
@@ -197,6 +216,10 @@ const declarationIndex = (sourceFile) => {
       indexExportSpecifier(index, node);
       return;
     }
+    if (isNamespaceExport(node)) {
+      indexNamespaceExport(index, node);
+      return;
+    }
     indexDeclarationNode(index, node);
   });
   declarationIndexes.set(sourceFile, index);
@@ -205,7 +228,7 @@ const declarationIndex = (sourceFile) => {
 
 export const findDeclaration = (sourceFile, identity) => {
   const anchor = declarationIndex(sourceFile).get(anchorKey(identity));
-  if (!anchor || isExportSpecifier(anchor)) return anchor;
+  if (!anchor || isExportAnchor(anchor)) return anchor;
   return declarationNamespaces(anchor).has(identity.namespace) ? anchor : undefined;
 };
 

@@ -35,6 +35,7 @@ import {
   declarationsForSymbol,
   findDeclaration,
   isDeclaration,
+  isExportAnchor,
   isProjectSource,
   nodeText,
   ownerDeclaration,
@@ -735,7 +736,7 @@ const selectSymbolContext = (
 
 const resolvedAnchorTarget = (project, anchor, requestedSymbol) => {
   if (!anchor) return undefined;
-  if (!isExportSpecifier(anchor)) {
+  if (!isExportAnchor(anchor)) {
     return declarationNamespaces(anchor).has(requestedSymbol.namespace)
       ? { declaration: anchor, namespace: requestedSymbol.namespace }
       : undefined;
