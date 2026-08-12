@@ -68,6 +68,30 @@ fn cache_roundtrip_preserves_type_alias_surface_targets() {
 }
 
 #[test]
+fn cache_roundtrip_preserves_computed_enum_key_facts() {
+    let module = parse_from_content(
+        FileId(0),
+        Path::new("src/key.ts"),
+        "export enum Key { Protocol = '__protocol' }\nvalue[Key.Protocol]",
+    );
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let encoded = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&encoded).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+
+    assert!(restored.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        fallow_types::extract::SemanticFact::StringEnumMemberValue(value)
+            if value.value == "__protocol"
+    )));
+    assert!(restored.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        fallow_types::extract::SemanticFact::ComputedEnumKeyUse(usage)
+            if usage.key_object == "Key" && usage.key_member == "Protocol"
+    )));
+}
+
+#[test]
 fn cache_roundtrip_preserves_unresolved_callee_diagnostics() {
     let module = parse_from_content(
         FileId(7),

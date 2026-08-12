@@ -8,7 +8,10 @@ use oxc_ast::ast::{
     TSEnumMemberName, TSModuleDeclarationName, VariableDeclarator,
 };
 
-use crate::{ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo, VisibilityTag};
+use crate::{
+    ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo, SemanticFact,
+    StringEnumMemberValueFact, VisibilityTag,
+};
 use fallow_types::extract::ClassHeritageInfo;
 
 use super::helpers::{
@@ -19,6 +22,32 @@ use super::helpers::{
 use super::{MemberAccess, ModuleInfoExtractor, extract_destructured_names};
 
 impl ModuleInfoExtractor {
+    pub(crate) fn record_string_enum_member_values(
+        &mut self,
+        enumd: &oxc_ast::ast::TSEnumDeclaration<'_>,
+    ) {
+        for member in &enumd.body.members {
+            let Some(Expression::StringLiteral(value)) = member.initializer.as_ref() else {
+                continue;
+            };
+            let member_name = match &member.id {
+                TSEnumMemberName::Identifier(id) => id.name.to_string(),
+                TSEnumMemberName::String(name) | TSEnumMemberName::ComputedString(name) => {
+                    name.value.to_string()
+                }
+                TSEnumMemberName::ComputedTemplateString(_) => continue,
+            };
+            self.semantic_facts
+                .push(SemanticFact::StringEnumMemberValue(
+                    StringEnumMemberValueFact {
+                        enum_name: enumd.id.name.to_string(),
+                        member_name,
+                        value: value.value.to_string(),
+                    },
+                ));
+        }
+    }
+
     pub(crate) fn extract_declaration_exports(
         &mut self,
         decl: &Declaration<'_>,

@@ -885,7 +885,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 258: type aliases now retain direct receiver-surface target facts.
 /// Warm 257 caches cannot propagate member access through those surfaces.
-pub(super) const CACHE_VERSION: u32 = 258;
+///
+/// Bumped to 259: string enum member values and computed enum-key uses are now
+/// persisted for exact protocol-member credit. Warm 258 caches lack both facts.
+pub(super) const CACHE_VERSION: u32 = 259;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -10,8 +10,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::{
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
-    MemberAccess, ModuleLoadMechanism, ReExportInfo, RequireCallInfo, VisibilityTag,
+    ComputedEnumKeyUseFact, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
+    ImportInfo, ImportedName, MemberAccess, ModuleLoadMechanism, ReExportInfo, RequireCallInfo,
+    SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
@@ -765,6 +766,7 @@ impl ModuleInfoExtractor {
             Declaration::TSEnumDeclaration(enumd) => {
                 self.record_local_declaration_name(&enumd.id.name);
                 self.record_local_type_declaration(&enumd.id.name, enumd.id.span);
+                self.record_string_enum_member_values(enumd);
             }
             Declaration::TSModuleDeclaration(module) => {
                 if let TSModuleDeclarationName::Identifier(id) = &module.id {
@@ -2710,6 +2712,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        if let Expression::StaticMemberExpression(key) = &expr.expression
+            && let Expression::Identifier(key_object) = &key.object
+        {
+            self.semantic_facts
+                .push(SemanticFact::ComputedEnumKeyUse(ComputedEnumKeyUseFact {
+                    key_object: key_object.name.to_string(),
+                    key_member: key.property.name.to_string(),
+                }));
+        }
         if let Expression::Identifier(obj) = &expr.object {
             if (self.route_loader_data_bindings.contains(obj.name.as_str())
                 || obj.name == "loaderData")

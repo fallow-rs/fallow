@@ -55,16 +55,18 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
     ClassHeritageInfo, ClassThisMemberAccessFact, ClassThisWholeObjectUseFact,
-    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
-    FactoryReturnExport, FactoryReturnObjectPropertyAccessFact, FactoryReturnObjectShapeExport,
+    ComputedEnumKeyUseFact, DynamicCustomElementRenderFact, DynamicImportInfo,
+    DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
+    FactoryFnMemberAccessFact, FactoryFnWholeObjectFact, FactoryReturnExport,
+    FactoryReturnObjectPropertyAccessFact, FactoryReturnObjectShapeExport,
     FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
     InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind,
     ModuleInfo, ModuleLoadMechanism, ParseResult, PlaywrightFixtureAliasFact,
     PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
     PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, SourceReadFailure,
-    TypeAliasSurfaceTargetFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
-    VitestModuleMockAction, VitestModuleMockOperationFact, compute_line_offsets,
+    StringEnumMemberValueFact, TypeAliasSurfaceTargetFact, TypeMemberTypeEntry,
+    TypedPropertyMemberAccessFact, VisibilityTag, VitestModuleMockAction,
+    VitestModuleMockOperationFact, compute_line_offsets,
 };
 
 pub use astro::{

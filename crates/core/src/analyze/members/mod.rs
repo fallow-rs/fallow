@@ -1174,6 +1174,12 @@ fn propagate_common_member_accesses(
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     whole_object_used_exports: &mut FxHashSet<ExportKey>,
 ) {
+    propagate_computed_enum_key_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
     propagate_type_alias_surface_accesses(input.resolved_modules, indexes, accessed_members);
     propagate_playwright_fixture_accesses(
         input.graph,
@@ -1244,6 +1250,96 @@ fn propagate_common_member_accesses(
         accessed_members,
         whole_object_used_exports,
     );
+}
+
+fn propagate_computed_enum_key_accesses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let mut local_values: FxHashMap<(FileId, String, String), FxHashSet<String>> =
+        FxHashMap::default();
+    let mut exported_values: FxHashMap<(ExportKey, String), FxHashSet<String>> =
+        FxHashMap::default();
+
+    for module in resolved_modules {
+        let local_keys = indexes.local_keys(module.file_id);
+        let view = SemanticFactView::new(&module.semantic_facts, &module.member_accesses);
+        for fact in view.string_enum_member_values() {
+            local_values
+                .entry((
+                    module.file_id,
+                    fact.enum_name.clone(),
+                    fact.member_name.clone(),
+                ))
+                .or_default()
+                .insert(fact.value.clone());
+            if let Some(keys) = local_keys.get(fact.enum_name.as_str()) {
+                for key in keys {
+                    exported_values
+                        .entry((key.clone(), fact.member_name.clone()))
+                        .or_default()
+                        .insert(fact.value.clone());
+                }
+            }
+        }
+    }
+
+    let mut used_property_names = FxHashSet::default();
+    for module in resolved_modules {
+        let local_keys = indexes.local_keys(module.file_id);
+        let view = SemanticFactView::new(&module.semantic_facts, &module.member_accesses);
+        for fact in view.computed_enum_key_uses() {
+            let mut values = local_values
+                .get(&(
+                    module.file_id,
+                    fact.key_object.clone(),
+                    fact.key_member.clone(),
+                ))
+                .cloned()
+                .unwrap_or_default();
+
+            if !module
+                .unused_import_bindings
+                .contains(fact.key_object.as_str())
+                && let Some(keys) = local_keys.get(fact.key_object.as_str())
+            {
+                for key in keys {
+                    for origin in export_key_with_origins(graph, key) {
+                        if let Some(found) = exported_values.get(&(origin, fact.key_member.clone()))
+                        {
+                            values.extend(found.iter().cloned());
+                        }
+                    }
+                }
+            }
+
+            if values.len() == 1 {
+                used_property_names.extend(values);
+            }
+        }
+    }
+
+    if used_property_names.is_empty() {
+        return;
+    }
+    for module in &graph.modules {
+        for export in &module.exports {
+            for member in &export.members {
+                if matches!(
+                    member.kind,
+                    MemberKind::ClassMethod | MemberKind::ClassProperty
+                ) && used_property_names.contains(member.name.as_str())
+                {
+                    accessed_members
+                        .entry(ExportKey::new(module.file_id, export.name.to_string()))
+                        .or_default()
+                        .insert(member.name.clone());
+                }
+            }
+        }
+    }
 }
 
 fn propagate_type_alias_surface_accesses(

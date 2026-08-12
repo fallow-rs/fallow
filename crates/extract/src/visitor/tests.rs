@@ -5594,6 +5594,35 @@ fn member_access_computed_dynamic_marks_whole() {
 }
 
 #[test]
+fn computed_enum_key_records_static_string_value_and_use() {
+    let info = parse(
+        r"
+        export enum ProtocolKey { Protocol = '__protocol', Numeric = 1 }
+        export function read(target: object) {
+            return target[ProtocolKey.Protocol]
+        }
+        ",
+    );
+
+    assert!(info.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        SemanticFact::StringEnumMemberValue(value)
+            if value.enum_name == "ProtocolKey"
+                && value.member_name == "Protocol"
+                && value.value == "__protocol"
+    )));
+    assert!(!info.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        SemanticFact::StringEnumMemberValue(value) if value.member_name == "Numeric"
+    )));
+    assert!(info.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        SemanticFact::ComputedEnumKeyUse(usage)
+            if usage.key_object == "ProtocolKey" && usage.key_member == "Protocol"
+    )));
+}
+
+#[test]
 fn import_meta_env_static_member_access_tracked() {
     let info = parse("const secret = import.meta.env.SECRET_KEY;");
     assert!(
