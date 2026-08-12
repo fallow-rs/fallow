@@ -43,6 +43,7 @@ jobs:
           install_root="${RUNNER_TEMP}/cargo-hawk"
           mkdir -p "${install_root}"
           curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            --retry 5 --retry-connrefused --retry-delay 2 \
             --output "${RUNNER_TEMP}/${HAWK_ARCHIVE}" \
             "${archive_url}"
           printf '%s *%s\n' "${HAWK_SHA256}" "${RUNNER_TEMP}/${HAWK_ARCHIVE}" \
