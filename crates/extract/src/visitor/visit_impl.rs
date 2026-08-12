@@ -848,6 +848,7 @@ impl ModuleInfoExtractor {
                 id.name.as_str(),
                 &function.params,
                 function.body.as_deref(),
+                None,
             );
             self.record_factory_return_function(
                 id.name.as_str(),
@@ -2085,6 +2086,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.directives
                 .push(directive.directive.as_str().to_string());
         }
+        self.record_program_function_type_aliases(program);
         self.record_program_prologue(program);
         self.record_program_sanitizer_functions(program);
         self.record_local_function_return_types(program);

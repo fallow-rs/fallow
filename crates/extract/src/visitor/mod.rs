@@ -353,6 +353,9 @@ pub(crate) struct ModuleInfoExtractor {
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
+    /// Parameter types declared by module-local function type aliases, used to
+    /// recover contextual types for unannotated arrow/function expressions.
+    function_type_alias_params: FxHashMap<String, Vec<Option<String>>>,
     /// Local function bodies pre-scanned by `record_local_structural_function`.
     /// Prevents a second AST walk when the ordinary visitor reaches the body.
     scoped_typed_parameter_body_spans: FxHashSet<Span>,

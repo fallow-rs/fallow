@@ -904,7 +904,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 264: locals initialized from typed instance fields retain the
 /// field's receiver type. Warm 263 caches omit accesses through those locals.
-pub(super) const CACHE_VERSION: u32 = 264;
+///
+/// Bumped to 265: contextually typed function expressions retain parameter
+/// receiver types from local function aliases. Warm 264 caches omit those uses.
+pub(super) const CACHE_VERSION: u32 = 265;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
