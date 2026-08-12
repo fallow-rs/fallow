@@ -6129,6 +6129,47 @@ fn typed_getter_records_instance_binding() {
 }
 
 #[test]
+fn ssr_safe_html_element_alias_canonicalizes_superclass() {
+    let info = parse(
+        r"
+        const BaseClass = (
+          typeof HTMLElement !== 'undefined' ? HTMLElement : class {}
+        ) as typeof HTMLElement;
+
+        export class NativeElement extends BaseClass {}
+        ",
+    );
+
+    let native_element = info
+        .exports
+        .iter()
+        .find(|export| export.name.to_string() == "NativeElement")
+        .expect("NativeElement export should be extracted");
+    assert_eq!(native_element.super_class.as_deref(), Some("HTMLElement"));
+}
+
+#[test]
+fn shadowed_html_element_alias_keeps_local_superclass() {
+    let info = parse(
+        r"
+        class HTMLElement {}
+        const LocalBase = (
+          typeof HTMLElement !== 'undefined' ? HTMLElement : class {}
+        ) as typeof HTMLElement;
+
+        export class LocalElement extends LocalBase {}
+        ",
+    );
+
+    let local_element = info
+        .exports
+        .iter()
+        .find(|export| export.name.to_string() == "LocalElement")
+        .expect("LocalElement export should be extracted");
+    assert_eq!(local_element.super_class.as_deref(), Some("LocalBase"));
+}
+
+#[test]
 fn angular_inject_property_records_instance_binding() {
     let info = parse(
         r"

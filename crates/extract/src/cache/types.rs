@@ -888,7 +888,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 259: string enum member values and computed enum-key uses are now
 /// persisted for exact protocol-member credit. Warm 258 caches lack both facts.
-pub(super) const CACHE_VERSION: u32 = 259;
+///
+/// Bumped to 260: SSR-safe aliases of the browser-global `HTMLElement` are now
+/// canonicalized in persisted class heritage. Warm 259 caches retain the alias.
+pub(super) const CACHE_VERSION: u32 = 260;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

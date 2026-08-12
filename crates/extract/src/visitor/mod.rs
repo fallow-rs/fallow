@@ -356,6 +356,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// Local function bodies pre-scanned by `record_local_structural_function`.
     /// Prevents a second AST walk when the ordinary visitor reaches the body.
     scoped_typed_parameter_body_spans: FxHashSet<Span>,
+    /// Module-local const aliases proven to select the browser-global
+    /// `HTMLElement` when it exists, with an SSR-only class fallback.
+    native_html_element_alias_candidates: FxHashSet<String>,
     structural_class_call_candidates: Vec<StructuralClassCallCandidate>,
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
@@ -2477,6 +2480,7 @@ impl ModuleInfoExtractor {
     fn finalize_resolution_phase(&mut self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
         self.resolve_typed_destructure_bindings();
         self.resolve_pending_local_export_specifiers();
+        self.resolve_native_html_element_aliases();
         self.enrich_local_class_exports();
         self.enrich_store_exports();
         self.finalize_di_key_sites();
