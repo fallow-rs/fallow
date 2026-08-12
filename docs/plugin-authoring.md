@@ -136,7 +136,33 @@ Derives entry points from matching JSON or JSONC manifest files. Each rule
 selects manifests, can require exact field values through `when`, and resolves
 its `entries` relative to the manifest directory. Entry paths may interpolate a
 dotted manifest field. A string creates one path and an array creates one path
-per value.
+per value. A field traversal may retain at most 1,024 values at any step, and
+one entry template may expand to at most 4,096 concrete paths per manifest.
+Fallow skips the affected gate or template and reports a structured
+`plugin-check` warning instead of returning a partial result.
+
+Use `[*]` to traverse every object in a manifest array. For example,
+`${content_scripts[*].js}` emits every JavaScript path from every browser
+extension content-script object. The same syntax works in `when`; a wildcard
+condition passes when any yielded value equals the expected value. Nested
+wildcards are evaluated left-to-right. `[*]` is the only supported bracket
+syntax; numeric indexes and other bracket forms are invalid configuration.
+
+Each `when` value is either a JSON value compared by strict equality or an
+explicit presence predicate. The exact `{ "exists": true }` shape matches
+false, null, empty arrays, and any other present value; `{ "exists": false }`
+matches only when the path yields no value. Presence checks never use
+truthiness. Other objects and arrays retain their existing equality behavior.
+
+```jsonc
+{
+  "when": {
+    "main": { "exists": true },
+    "content_scripts[*].js": { "exists": true },
+    "enabled": false
+  }
+}
+```
 
 ```jsonc
 {
