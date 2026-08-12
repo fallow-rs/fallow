@@ -2851,6 +2851,54 @@ fn same_named_exports_do_not_share_member_usage() {
 }
 
 #[test]
+fn ambiguous_star_re_exports_have_no_unique_member_origin() {
+    let mut graph = build_graph(&[
+        ("/src/barrel.ts", false),
+        ("/src/left.ts", false),
+        ("/src/right.ts", false),
+    ]);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Widget",
+            vec![make_member("left", MemberKind::ClassMethod)],
+            None,
+        )],
+    );
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members(
+            "Widget",
+            vec![make_member("right", MemberKind::ClassMethod)],
+            None,
+        )],
+    );
+    graph.set_re_exports(
+        0,
+        vec![
+            crate::graph::ReExportEdge {
+                source_file: FileId(1),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: false,
+                span: Span::default(),
+            },
+            crate::graph::ReExportEdge {
+                source_file: FileId(2),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: false,
+                span: Span::default(),
+            },
+        ],
+    );
+
+    assert!(walk_re_export_origins(&graph, FileId(0), "Widget").is_empty());
+}
+
+#[test]
 fn export_with_no_members_skipped() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
     graph.set_reachable(1);
