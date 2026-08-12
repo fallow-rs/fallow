@@ -1,0 +1,6 @@
+{
+  "name": "effective-export-explicit-shadow",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts"
+}

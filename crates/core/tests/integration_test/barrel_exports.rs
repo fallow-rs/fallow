@@ -112,6 +112,42 @@ fn source_order_independent_import_forwarding_is_re_export() {
 }
 
 #[test]
+fn explicit_re_export_shadows_star_export_with_the_same_name() {
+    let root = fixture_path("effective-export-explicit-shadow");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<_> = results
+        .unused_exports
+        .iter()
+        .map(|finding| {
+            (
+                finding.export.path.to_string_lossy().replace('\\', "/"),
+                finding.export.export_name.as_str(),
+            )
+        })
+        .collect();
+
+    assert!(
+        unused_exports
+            .iter()
+            .any(|(path, name)| { path.ends_with("src/star-source.ts") && *name == "foo" }),
+        "the star source's shadowed foo must remain unused: {unused_exports:?}"
+    );
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(path, name)| { path.ends_with("src/explicit-source.ts") && *name == "foo" }),
+        "the explicit re-export is the effective foo binding: {unused_exports:?}"
+    );
+    assert!(
+        results.duplicate_exports.is_empty(),
+        "the shadowed star export must not form a duplicate-export group: {:?}",
+        results.duplicate_exports
+    );
+}
+
+#[test]
 fn barrel_exports_detects_unused_re_export_bar() {
     let root = fixture_path("barrel-exports");
     let config = create_config(root);
