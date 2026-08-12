@@ -145,6 +145,7 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
             source: &mut *source,
             name,
             refs,
+            effective_exports,
             type_resolves,
             value_resolves,
             matching_exports,
@@ -382,6 +383,7 @@ struct ApplyStarRefs<'a> {
     source: &'a mut ModuleNode,
     name: &'a str,
     refs: &'a [StarReference],
+    effective_exports: &'a EffectiveExportIndex,
     type_resolves: bool,
     value_resolves: bool,
     /// Indices into `source.exports` whose name exactly matches `name`, prebuilt
@@ -404,6 +406,7 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
         source,
         name,
         refs,
+        effective_exports,
         type_resolves,
         value_resolves,
         matching_exports,
@@ -425,6 +428,7 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
             source,
             name,
             refs,
+            effective_exports,
             type_resolves,
             value_resolves,
             source_id,
@@ -459,6 +463,7 @@ struct ApplyMatchingStarRefs<'a> {
     source: &'a mut ModuleNode,
     name: &'a str,
     refs: &'a [StarReference],
+    effective_exports: &'a EffectiveExportIndex,
     type_resolves: bool,
     value_resolves: bool,
     source_id: FileId,
@@ -489,6 +494,7 @@ fn apply_star_refs_to_matching_exports(input: ApplyMatchingStarRefs<'_>) -> bool
         source,
         name,
         refs,
+        effective_exports,
         type_resolves,
         value_resolves,
         source_id,
@@ -502,7 +508,8 @@ fn apply_star_refs_to_matching_exports(input: ApplyMatchingStarRefs<'_>) -> bool
     } = input;
 
     let can_synthesize = source_has_star_re_exports;
-    let mut exports = matching_star_exports(source, matching_exports);
+    let mut exports =
+        matching_star_exports(source, matching_exports, effective_exports, source_id, name);
     let (needs_type_export, needs_value_export) = required_matching_star_exports(
         refs,
         module_by_id,
@@ -537,18 +544,28 @@ fn apply_star_refs_to_matching_exports(input: ApplyMatchingStarRefs<'_>) -> bool
     changed
 }
 
-fn matching_star_exports(source: &ModuleNode, matching_exports: &[usize]) -> MatchingStarExports {
+fn matching_star_exports(
+    source: &ModuleNode,
+    matching_exports: &[usize],
+    effective_exports: &EffectiveExportIndex,
+    source_id: FileId,
+    name: &str,
+) -> MatchingStarExports {
     MatchingStarExports {
-        type_indices: matching_exports
-            .iter()
-            .copied()
-            .filter(|idx| source.exports[*idx].is_type_only)
-            .collect(),
-        value_indices: matching_exports
-            .iter()
-            .copied()
-            .filter(|idx| !source.exports[*idx].is_type_only)
-            .collect(),
+        type_indices: effective_exports.declaration_slots(
+            &source.exports,
+            matching_exports,
+            source_id,
+            name,
+            ExportNamespace::Type,
+        ),
+        value_indices: effective_exports.declaration_slots(
+            &source.exports,
+            matching_exports,
+            source_id,
+            name,
+            ExportNamespace::Value,
+        ),
     }
 }
 
@@ -1105,33 +1122,13 @@ fn namespace_export_indices(
     name: &str,
     namespace: ExportNamespace,
 ) -> Vec<usize> {
-    let EffectiveExportResolution::Unique(binding) =
-        effective_exports.resolve(file_id, name, namespace)
-    else {
-        return Vec::new();
-    };
-    let matching: Vec<_> = module
+    let candidates: Vec<_> = module
         .exports
         .iter()
         .enumerate()
-        .filter(|(_, export)| export.name.matches_str(name))
-        .map(|(index, _)| index)
+        .filter_map(|(index, export)| export.name.matches_str(name).then_some(index))
         .collect();
-    if binding.origin_file() != file_id || binding.origin_slot().is_none() {
-        return matching;
-    }
-    let exact: Vec<_> = matching
-        .iter()
-        .copied()
-        .filter(|&index| module.exports[index].is_type_only == (namespace == ExportNamespace::Type))
-        .collect();
-    if namespace == ExportNamespace::Type && exact.is_empty() {
-        return matching
-            .into_iter()
-            .filter(|&index| !module.exports[index].is_type_only)
-            .collect();
-    }
-    exact
+    effective_exports.declaration_slots(&module.exports, &candidates, file_id, name, namespace)
 }
 
 fn namespace_references(

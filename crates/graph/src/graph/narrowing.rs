@@ -185,12 +185,16 @@ pub(super) fn mark_all_exports_referenced_at_site(
     context: &mut NamespaceMarkContext<'_>,
 ) {
     for idx in 0..exports.len() {
-        if !is_effective_export(
+        let name = match &exports[idx].name {
+            fallow_types::extract::ExportName::Named(name) => name.as_str(),
+            fallow_types::extract::ExportName::Default => "default",
+        };
+        if !context.effective_exports.is_declaration_slot(
             exports,
-            idx,
             context.module_id,
+            name,
             context.namespace,
-            context.effective_exports,
+            idx,
         ) {
             continue;
         }
@@ -312,12 +316,12 @@ pub(super) fn mark_member_exports_referenced_at_site(
             fallow_types::extract::ExportName::Default => "default",
         };
         if !member_set.contains(name_str)
-            || !is_effective_export(
+            || !context.effective_exports.is_declaration_slot(
                 exports,
-                idx,
                 context.module_id,
+                name_str,
                 context.namespace,
-                context.effective_exports,
+                idx,
             )
         {
             continue;
@@ -333,41 +337,6 @@ pub(super) fn mark_member_exports_referenced_at_site(
         );
     }
     found_members
-}
-
-fn is_effective_export(
-    exports: &[ExportSymbol],
-    export_index: usize,
-    module_id: FileId,
-    namespace: ExportNamespace,
-    effective_exports: &super::effective_exports::EffectiveExportIndex,
-) -> bool {
-    let export = &exports[export_index];
-    let name = match &export.name {
-        fallow_types::extract::ExportName::Named(name) => name.as_str(),
-        fallow_types::extract::ExportName::Default => "default",
-    };
-    let super::EffectiveExportResolution::Unique(binding) =
-        effective_exports.resolve(module_id, name, namespace)
-    else {
-        return false;
-    };
-    if binding.origin_file() != module_id {
-        return true;
-    }
-    let Some(origin_slot) = binding.origin_slot() else {
-        return true;
-    };
-    if namespace == ExportNamespace::Type
-        && effective_exports
-            .declaration_group_slots(binding)
-            .contains(&export_index)
-    {
-        return true;
-    }
-    exports
-        .get(origin_slot)
-        .is_some_and(|origin| export.is_type_only == origin.is_type_only)
 }
 
 /// Create synthetic `ExportSymbol` entries for members accessed via namespace import

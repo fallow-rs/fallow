@@ -6,6 +6,7 @@ use fallow_types::discover::FileId;
 use fallow_types::extract::ExportName;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::types::ExportSymbol;
 use crate::resolve::ResolvedModule;
 
 /// The namespace in which an exported name is resolved.
@@ -335,6 +336,73 @@ impl EffectiveExportIndex {
             })
             .and_then(|group| self.declaration_merge_groups.groups.get(*group))
             .map_or(&[], Box::as_ref)
+    }
+
+    pub(super) fn is_declaration_slot(
+        &self,
+        exports: &[ExportSymbol],
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+        export_index: usize,
+    ) -> bool {
+        let Some(export) = exports.get(export_index) else {
+            return false;
+        };
+        if !export.name.matches_str(name) {
+            return false;
+        }
+        let EffectiveExportResolution::Unique(binding) = self.resolve(file_id, name, namespace)
+        else {
+            return false;
+        };
+        if binding.origin_file() != file_id {
+            return true;
+        }
+        let Some(origin_slot) = binding.origin_slot() else {
+            return true;
+        };
+        if namespace == ExportNamespace::Type {
+            let group = self.declaration_group_slots(binding);
+            if !group.is_empty() {
+                return group.contains(&export_index);
+            }
+        }
+        exports
+            .get(origin_slot)
+            .is_some_and(|origin| export.is_type_only == origin.is_type_only)
+    }
+
+    pub(super) fn declaration_slots(
+        &self,
+        exports: &[ExportSymbol],
+        candidates: &[usize],
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> Vec<usize> {
+        let EffectiveExportResolution::Unique(binding) = self.resolve(file_id, name, namespace)
+        else {
+            return Vec::new();
+        };
+        if binding.origin_file() == file_id && binding.origin_slot().is_some() {
+            return candidates
+                .iter()
+                .copied()
+                .filter(|&index| self.is_declaration_slot(exports, file_id, name, namespace, index))
+                .collect();
+        }
+
+        let exact_type_only = namespace == ExportNamespace::Type
+            && candidates.iter().any(|&index| exports[index].is_type_only);
+        candidates
+            .iter()
+            .copied()
+            .filter(|&index| {
+                exports[index].name.matches_str(name)
+                    && exports[index].is_type_only == exact_type_only
+            })
+            .collect()
     }
 }
 
