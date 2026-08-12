@@ -18,7 +18,7 @@ pub enum ExportNamespace {
 }
 
 /// One canonical declaration that an exported name resolves to.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct EffectiveExportBinding {
     file_id: FileId,
     /// Stable declaration slot within the resolved module. Direct exports use
@@ -36,9 +36,10 @@ impl EffectiveExportBinding {
 }
 
 /// Effective resolution for one module/name/namespace tuple.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EffectiveExportResolution {
     /// The module does not export this name in the requested namespace.
+    #[default]
     Missing,
     /// Exactly one canonical declaration supplies the exported name.
     Unique(EffectiveExportBinding),
@@ -47,10 +48,10 @@ pub enum EffectiveExportResolution {
 }
 
 impl EffectiveExportResolution {
-    fn merged_with(&self, incoming: &Self) -> Self {
+    fn merged_with(self, incoming: Self) -> Self {
         match (self, incoming) {
-            (Self::Missing, resolution) | (resolution, Self::Missing) => resolution.clone(),
-            (Self::Unique(left), Self::Unique(right)) if left == right => self.clone(),
+            (Self::Missing, resolution) | (resolution, Self::Missing) => resolution,
+            (Self::Unique(left), Self::Unique(right)) if left == right => self,
             (Self::Ambiguous, _) | (_, Self::Ambiguous) | (Self::Unique(_), Self::Unique(_)) => {
                 Self::Ambiguous
             }
@@ -58,28 +59,99 @@ impl EffectiveExportResolution {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+struct ExportNameId(usize);
+
+impl ExportNameId {
+    const DEFAULT: Self = Self(0);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 struct ExportKey {
     file_id: FileId,
-    name: ExportName,
-    namespace: ExportNamespace,
+    name: ExportNameId,
 }
 
 impl ExportKey {
-    fn new(file_id: FileId, name: ExportName, namespace: ExportNamespace) -> Self {
+    const fn new(file_id: FileId, name: ExportNameId) -> Self {
+        Self { file_id, name }
+    }
+
+    const fn with_file(self, file_id: FileId) -> Self {
+        Self { file_id, ..self }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ExportLookup {
+    key: ExportKey,
+    namespace: ExportNamespace,
+}
+
+impl ExportLookup {
+    const fn new(file_id: FileId, name: ExportNameId, namespace: ExportNamespace) -> Self {
         Self {
-            file_id,
-            name,
+            key: ExportKey::new(file_id, name),
             namespace,
         }
     }
 
-    fn with_file(&self, file_id: FileId) -> Self {
+    const fn with_file(self, file_id: FileId) -> Self {
         Self {
-            file_id,
-            name: self.name.clone(),
-            namespace: self.namespace,
+            key: self.key.with_file(file_id),
+            ..self
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+struct NamespaceResolutions {
+    r#type: EffectiveExportResolution,
+    value: EffectiveExportResolution,
+}
+
+impl NamespaceResolutions {
+    const fn get(self, namespace: ExportNamespace) -> EffectiveExportResolution {
+        match namespace {
+            ExportNamespace::Type => self.r#type,
+            ExportNamespace::Value => self.value,
+        }
+    }
+
+    const fn set(&mut self, namespace: ExportNamespace, resolution: EffectiveExportResolution) {
+        match namespace {
+            ExportNamespace::Type => self.r#type = resolution,
+            ExportNamespace::Value => self.value = resolution,
+        }
+    }
+}
+
+struct ExportNameInterner {
+    ids: FxHashMap<Box<str>, ExportNameId>,
+    next_id: usize,
+}
+
+impl ExportNameInterner {
+    fn new() -> Self {
+        let ids = FxHashMap::from_iter([(Box::<str>::from("default"), ExportNameId::DEFAULT)]);
+        Self { ids, next_id: 1 }
+    }
+
+    fn intern_export_name(&mut self, name: &ExportName) -> ExportNameId {
+        match name {
+            ExportName::Default => ExportNameId::DEFAULT,
+            ExportName::Named(name) => self.intern(name),
+        }
+    }
+
+    fn intern(&mut self, name: &str) -> ExportNameId {
+        if let Some(id) = self.ids.get(name) {
+            return *id;
+        }
+        let id = ExportNameId(self.next_id);
+        self.next_id += 1;
+        self.ids.insert(Box::from(name), id);
+        id
     }
 }
 
@@ -90,15 +162,16 @@ struct StarObserver {
 }
 
 struct PropagationObservers {
-    explicit_keys: FxHashSet<ExportKey>,
-    named: FxHashMap<ExportKey, Vec<ExportKey>>,
+    explicit_keys: FxHashSet<ExportLookup>,
+    named: FxHashMap<ExportLookup, Vec<ExportLookup>>,
     star: FxHashMap<FileId, Vec<StarObserver>>,
 }
 
 struct ObserverBuildState<'a> {
-    direct_keys: &'a FxHashSet<ExportKey>,
-    resolutions: &'a mut FxHashMap<ExportKey, EffectiveExportResolution>,
-    queue: &'a mut VecDeque<ExportKey>,
+    direct_keys: &'a FxHashSet<ExportLookup>,
+    interner: &'a mut ExportNameInterner,
+    resolutions: &'a mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &'a mut VecDeque<ExportLookup>,
     observers: &'a mut PropagationObservers,
 }
 
@@ -109,18 +182,30 @@ struct ObserverBuildState<'a> {
 /// while multiple paths to the same binding remain unique.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct EffectiveExportIndex {
-    resolutions: FxHashMap<ExportKey, EffectiveExportResolution>,
+    name_ids: FxHashMap<Box<str>, ExportNameId>,
+    resolutions: FxHashMap<ExportKey, NamespaceResolutions>,
 }
 
 impl EffectiveExportIndex {
     pub(super) fn build(modules: &[ResolvedModule]) -> Self {
+        let mut interner = ExportNameInterner::new();
         let mut resolutions = FxHashMap::default();
         let mut queue = VecDeque::new();
-        let direct_keys = seed_direct_bindings(modules, &mut resolutions, &mut queue);
-        let observers = collect_observers(modules, &direct_keys, &mut resolutions, &mut queue);
+        let direct_keys =
+            seed_direct_bindings(modules, &mut interner, &mut resolutions, &mut queue);
+        let observers = collect_observers(
+            modules,
+            &direct_keys,
+            &mut interner,
+            &mut resolutions,
+            &mut queue,
+        );
         propagate_bindings(&mut resolutions, &mut queue, &observers);
 
-        Self { resolutions }
+        Self {
+            name_ids: interner.ids,
+            resolutions,
+        }
     }
 
     pub(super) fn resolve(
@@ -129,10 +214,14 @@ impl EffectiveExportIndex {
         name: &str,
         namespace: ExportNamespace,
     ) -> EffectiveExportResolution {
+        let Some(name) = self.name_ids.get(name) else {
+            return EffectiveExportResolution::Missing;
+        };
         self.resolutions
-            .get(&ExportKey::new(file_id, parse_export_name(name), namespace))
-            .cloned()
-            .unwrap_or(EffectiveExportResolution::Missing)
+            .get(&ExportKey::new(file_id, *name))
+            .map_or(EffectiveExportResolution::Missing, |resolutions| {
+                resolutions.get(namespace)
+            })
     }
 
     pub(super) fn resolves_through(
@@ -181,9 +270,10 @@ impl EffectiveExportIndex {
 
 fn seed_direct_bindings(
     modules: &[ResolvedModule],
-    resolutions: &mut FxHashMap<ExportKey, EffectiveExportResolution>,
-    queue: &mut VecDeque<ExportKey>,
-) -> FxHashSet<ExportKey> {
+    interner: &mut ExportNameInterner,
+    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &mut VecDeque<ExportLookup>,
+) -> FxHashSet<ExportLookup> {
     let mut direct_keys = FxHashSet::default();
     let mut value_type_fallbacks = Vec::new();
     for module in modules {
@@ -193,19 +283,20 @@ fn seed_direct_bindings(
             } else {
                 ExportNamespace::Value
             };
-            let key = ExportKey::new(module.file_id, export.name.clone(), namespace);
-            direct_keys.insert(key.clone());
+            let name = interner.intern_export_name(&export.name);
+            let key = ExportLookup::new(module.file_id, name, namespace);
+            direct_keys.insert(key);
             merge_resolution(
                 resolutions,
                 queue,
                 key,
-                &EffectiveExportResolution::Unique(EffectiveExportBinding {
+                EffectiveExportResolution::Unique(EffectiveExportBinding {
                     file_id: module.file_id,
                     slot,
                 }),
             );
             if namespace == ExportNamespace::Value {
-                value_type_fallbacks.push((module.file_id, export.name.clone(), slot));
+                value_type_fallbacks.push((module.file_id, name, slot));
             }
         }
     }
@@ -214,31 +305,32 @@ fn seed_direct_bindings(
 }
 
 fn seed_value_type_fallbacks(
-    fallbacks: Vec<(FileId, ExportName, usize)>,
-    direct_keys: &mut FxHashSet<ExportKey>,
-    resolutions: &mut FxHashMap<ExportKey, EffectiveExportResolution>,
-    queue: &mut VecDeque<ExportKey>,
+    fallbacks: Vec<(FileId, ExportNameId, usize)>,
+    direct_keys: &mut FxHashSet<ExportLookup>,
+    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &mut VecDeque<ExportLookup>,
 ) {
     for (file_id, name, slot) in fallbacks {
-        let type_key = ExportKey::new(file_id, name.clone(), ExportNamespace::Type);
+        let type_key = ExportLookup::new(file_id, name, ExportNamespace::Type);
         if direct_keys.contains(&type_key) {
             continue;
         }
-        direct_keys.insert(type_key.clone());
+        direct_keys.insert(type_key);
         merge_resolution(
             resolutions,
             queue,
             type_key,
-            &EffectiveExportResolution::Unique(EffectiveExportBinding { file_id, slot }),
+            EffectiveExportResolution::Unique(EffectiveExportBinding { file_id, slot }),
         );
     }
 }
 
 fn collect_observers(
     modules: &[ResolvedModule],
-    direct_keys: &FxHashSet<ExportKey>,
-    resolutions: &mut FxHashMap<ExportKey, EffectiveExportResolution>,
-    queue: &mut VecDeque<ExportKey>,
+    direct_keys: &FxHashSet<ExportLookup>,
+    interner: &mut ExportNameInterner,
+    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &mut VecDeque<ExportLookup>,
 ) -> PropagationObservers {
     let mut observers = PropagationObservers {
         explicit_keys: direct_keys.clone(),
@@ -268,6 +360,7 @@ fn collect_observers(
                 module.exports.len() + re_export_index,
                 ObserverBuildState {
                     direct_keys,
+                    interner,
                     resolutions,
                     queue,
                     observers: &mut observers,
@@ -287,25 +380,26 @@ fn register_named_observer(
 ) {
     let ObserverBuildState {
         direct_keys,
+        interner,
         resolutions,
         queue,
         observers,
     } = state;
-    let exported_name = parse_export_name(&info.exported_name);
+    let exported_name = interner.intern(&info.exported_name);
     if info.imported_name == "*" {
         let namespace = if info.is_type_only {
             ExportNamespace::Type
         } else {
             ExportNamespace::Value
         };
-        let destination = ExportKey::new(barrel, exported_name, namespace);
+        let destination = ExportLookup::new(barrel, exported_name, namespace);
         if !direct_keys.contains(&destination) {
-            observers.explicit_keys.insert(destination.clone());
+            observers.explicit_keys.insert(destination);
             merge_resolution(
                 resolutions,
                 queue,
                 destination,
-                &EffectiveExportResolution::Unique(EffectiveExportBinding {
+                EffectiveExportResolution::Unique(EffectiveExportBinding {
                     file_id: barrel,
                     slot: re_export_slot,
                 }),
@@ -314,38 +408,41 @@ fn register_named_observer(
         return;
     }
 
-    let imported_name = parse_export_name(&info.imported_name);
+    let imported_name = interner.intern(&info.imported_name);
     let namespaces: &[ExportNamespace] = if info.is_type_only {
         &[ExportNamespace::Type]
     } else {
         &[ExportNamespace::Type, ExportNamespace::Value]
     };
     for &namespace in namespaces {
-        let destination = ExportKey::new(barrel, exported_name.clone(), namespace);
+        let destination = ExportLookup::new(barrel, exported_name, namespace);
         if direct_keys.contains(&destination) {
             continue;
         }
-        observers.explicit_keys.insert(destination.clone());
+        observers.explicit_keys.insert(destination);
         observers
             .named
-            .entry(ExportKey::new(source, imported_name.clone(), namespace))
+            .entry(ExportLookup::new(source, imported_name, namespace))
             .or_default()
             .push(destination);
     }
 }
 
 fn propagate_bindings(
-    resolutions: &mut FxHashMap<ExportKey, EffectiveExportResolution>,
-    queue: &mut VecDeque<ExportKey>,
+    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &mut VecDeque<ExportLookup>,
     observers: &PropagationObservers,
 ) {
     while let Some(source_key) = queue.pop_front() {
-        let Some(source_resolution) = resolutions.get(&source_key).cloned() else {
+        let Some(source_resolution) = resolutions
+            .get(&source_key.key)
+            .map(|resolutions| resolutions.get(source_key.namespace))
+        else {
             continue;
         };
         if let Some(destinations) = observers.named.get(&source_key) {
             for destination in destinations {
-                merge_resolution(resolutions, queue, destination.clone(), &source_resolution);
+                merge_resolution(resolutions, queue, *destination, source_resolution);
             }
         }
         propagate_star_binding(
@@ -353,22 +450,22 @@ fn propagate_bindings(
             queue,
             observers,
             &source_key,
-            &source_resolution,
+            source_resolution,
         );
     }
 }
 
 fn propagate_star_binding(
-    resolutions: &mut FxHashMap<ExportKey, EffectiveExportResolution>,
-    queue: &mut VecDeque<ExportKey>,
+    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &mut VecDeque<ExportLookup>,
     observers: &PropagationObservers,
-    source_key: &ExportKey,
-    source_resolution: &EffectiveExportResolution,
+    source_key: &ExportLookup,
+    source_resolution: EffectiveExportResolution,
 ) {
-    if matches!(source_key.name, ExportName::Default) {
+    if source_key.key.name == ExportNameId::DEFAULT {
         return;
     }
-    let Some(star_observers) = observers.star.get(&source_key.file_id) else {
+    let Some(star_observers) = observers.star.get(&source_key.key.file_id) else {
         return;
     };
     for observer in star_observers {
@@ -387,27 +484,19 @@ fn propagate_star_binding(
 }
 
 fn merge_resolution(
-    resolutions: &mut FxHashMap<ExportKey, EffectiveExportResolution>,
-    queue: &mut VecDeque<ExportKey>,
-    key: ExportKey,
-    incoming: &EffectiveExportResolution,
+    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &mut VecDeque<ExportLookup>,
+    key: ExportLookup,
+    incoming: EffectiveExportResolution,
 ) {
-    let next = resolutions
-        .get(&key)
-        .map_or_else(|| incoming.clone(), |current| current.merged_with(incoming));
-    if resolutions.get(&key) == Some(&next) {
+    let namespace_resolutions = resolutions.entry(key.key).or_default();
+    let current = namespace_resolutions.get(key.namespace);
+    let next = current.merged_with(incoming);
+    if current == next {
         return;
     }
-    resolutions.insert(key.clone(), next);
+    namespace_resolutions.set(key.namespace, next);
     queue.push_back(key);
-}
-
-fn parse_export_name(name: &str) -> ExportName {
-    if name == "default" {
-        ExportName::Default
-    } else {
-        ExportName::Named(name.to_string())
-    }
 }
 
 #[cfg(test)]
@@ -574,6 +663,26 @@ mod tests {
         ));
         assert_eq!(
             index.resolve(FileId(0), "Types", ExportNamespace::Value),
+            EffectiveExportResolution::Missing
+        );
+    }
+
+    #[test]
+    fn persisted_index_remains_queryable_without_reconstruction() {
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![re_export(FileId(1), "foo", "bar")]),
+            module(1, vec![value_export("foo")], Vec::new()),
+        ]);
+        let encoded = postcard::to_allocvec(&index).expect("encode effective export index");
+        let decoded: EffectiveExportIndex =
+            postcard::from_bytes(&encoded).expect("decode effective export index");
+
+        assert!(matches!(
+            decoded.resolve(FileId(0), "bar", ExportNamespace::Value),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(1)
+        ));
+        assert_eq!(
+            decoded.resolve(FileId(0), "missing", ExportNamespace::Value),
             EffectiveExportResolution::Missing
         );
     }

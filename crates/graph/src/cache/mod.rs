@@ -61,7 +61,11 @@ pub use store::GraphCacheStore;
 /// Bumped to 21: persisted module graphs now carry the canonical effective
 /// export index used for named and star re-export resolution. Warm 20 caches
 /// lack that index and would replay the previous propagation semantics.
-pub const GRAPH_CACHE_VERSION: u32 = 21;
+///
+/// Bumped to 22: effective export names are interned once per graph and type
+/// and value resolutions share one compact key. Warm 21 caches contain the
+/// allocation-heavy intermediate index layout.
+pub const GRAPH_CACHE_VERSION: u32 = 22;
 
 /// Cached form of a resolved target.
 ///
