@@ -32,6 +32,10 @@ fn flags_barrel_masked_component_but_credits_rendered_and_value_read() {
         !flagged.contains(&"ExplicitDefault"),
         "an explicitly default-exported component must not be flagged: {flagged:?}"
     );
+    assert!(
+        flagged.contains(&"NamedExportOrphan"),
+        "using an SFC's named export must not credit its default component: {flagged:?}"
+    );
     // Lazy is value-read in registry.ts (script-side use): credited.
     assert!(
         !flagged.contains(&"Lazy"),

@@ -316,8 +316,7 @@ fn credit_rendered_sfc_chain(
     else {
         return;
     };
-    let origin = binding.origin_file();
-    if is_sfc_extension(&graph_path(graph, origin)) {
+    if let Some(origin) = sfc_default_origin(graph, binding) {
         used.insert(origin);
     } else if let Some(source) = binding.namespace_source() {
         credit_all_reexported_sfcs(graph, source, used);
@@ -344,13 +343,24 @@ fn credit_effective_sfc_bindings(
         if !visited.insert(binding) {
             continue;
         }
-        let origin = binding.origin_file();
-        if is_sfc_extension(&graph_path(graph, origin)) {
+        if let Some(origin) = sfc_default_origin(graph, binding) {
             used.insert(origin);
         } else if let Some(source) = binding.namespace_source() {
             stack.extend(graph.unique_export_bindings(source, ExportNamespace::Value));
         }
     }
+}
+
+fn sfc_default_origin(graph: &ModuleGraph, binding: EffectiveExportBinding) -> Option<FileId> {
+    let origin = binding.origin_file();
+    if !is_sfc_extension(&graph_path(graph, origin)) {
+        return None;
+    }
+    matches!(
+        graph.resolve_export(origin, "default", ExportNamespace::Value),
+        EffectiveExportResolution::Unique(default_binding) if default_binding == binding
+    )
+    .then_some(origin)
 }
 
 fn graph_path(graph: &ModuleGraph, file_id: FileId) -> std::path::PathBuf {
