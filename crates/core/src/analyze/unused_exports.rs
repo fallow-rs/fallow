@@ -1384,7 +1384,7 @@ pub fn collect_export_usages(
                 export_name: export.name.to_string(),
                 line,
                 col,
-                reference_count: export.references.len(),
+                reference_count: export.physical_reference_count(),
                 reference_locations,
             });
         }
@@ -1403,8 +1403,7 @@ fn export_reference_locations(
     source_cache: &mut FxHashMap<FileId, (String, Vec<u32>)>,
 ) -> Vec<ReferenceLocation> {
     export
-        .references
-        .iter()
+        .physical_references()
         .filter_map(|r| {
             if r.import_span.start == 0 && r.import_span.end == 0 {
                 return None;
