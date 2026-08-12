@@ -320,6 +320,18 @@ impl AuditDomainLedger {
     pub fn introduced(&self) -> impl ExactSizeIterator<Item = bool> + '_ {
         self.records.iter().map(|(_, introduced)| *introduced)
     }
+
+    /// Demote introduced findings whose keys are in `demote` to inherited
+    /// (advisory) status so they no longer fail the new-only gate.
+    pub fn demote_introductions(&mut self, demote: &FxHashSet<String>) {
+        for (key, introduced) in &mut self.records {
+            if *introduced && demote.contains(key) {
+                *introduced = false;
+                self.introduced_keys.remove(key);
+                self.inherited_keys.insert(key.clone());
+            }
+        }
+    }
 }
 
 /// One-pass audit comparison shared by attribution, verdict, and annotations.
@@ -3256,6 +3268,35 @@ pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path)
     )
 }
 
+/// Keys of clone groups whose every instance lies entirely outside the diff's
+/// added lines: no instance range contains an added line, so the changeset did
+/// not write the duplicated text, and the group only became reportable (under
+/// a new attribution key) because the changeset removed code elsewhere;
+/// deduplicating one region can create or re-shape a clone group across files
+/// (issue #2164). New-only gating demotes these groups to inherited so a
+/// clone-removal refactor is not failed by the duplication it did not write.
+/// An instance whose path cannot be mapped into the diff's namespace is
+/// treated as touched, so its group keeps gating.
+pub fn preexisting_dupe_group_keys<'a>(
+    groups: impl IntoIterator<Item = &'a fallow_types::duplicates::CloneGroup>,
+    root: &Path,
+    diff: &fallow_output::DiffIndex,
+) -> FxHashSet<String> {
+    let instance_touched = |instance: &fallow_types::duplicates::CloneInstance| -> bool {
+        let Some(rel) = diff.key_for(&instance.file, root) else {
+            return true;
+        };
+        let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
+        let end = u64::try_from(instance.end_line).unwrap_or(u64::MAX);
+        diff.range_overlaps_added(&rel, start, end)
+    };
+    groups
+        .into_iter()
+        .filter(|group| !group.instances.iter().any(instance_touched))
+        .map(|group| dupe_group_key(group, root))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -4329,6 +4370,44 @@ mod tests {
         assert!(key_ba.starts_with("dupe:src/a.ts|src/b.ts:"));
         // Same fragment => same hash.
         assert_eq!(key_ab, key_ba);
+    }
+
+    #[test]
+    fn preexisting_dupe_group_keys_collects_only_groups_outside_added_lines() {
+        let root = root();
+        let a = root.join("src/a.ts");
+        let b = root.join("src/b.ts");
+        let c = root.join("src/c.ts");
+        // Instances span lines 1..=5. The diff adds line 3 in src/c.ts only.
+        let untouched = make_clone_group(&[a.clone(), b], "shared scaffolding");
+        let touched = make_clone_group(&[a, c], "pasted block");
+        let diff = fallow_output::DiffIndex::from_unified_diff(
+            "diff --git a/src/c.ts b/src/c.ts\n--- a/src/c.ts\n+++ b/src/c.ts\n@@ -3,0 +3,1 @@\n+const added = 1;\n",
+        );
+
+        let demote = super::preexisting_dupe_group_keys([&untouched, &touched], &root, &diff);
+
+        assert!(demote.contains(&dupe_group_key(&untouched, &root)));
+        assert!(!demote.contains(&dupe_group_key(&touched, &root)));
+        assert_eq!(demote.len(), 1);
+    }
+
+    #[test]
+    fn demote_introductions_moves_introduced_keys_to_inherited() {
+        let base: FxHashSet<String> = std::iter::once("dupe:old".to_string()).collect();
+        let mut ledger = AuditDomainLedger::compare(
+            ["dupe:kept".to_string(), "dupe:demoted".to_string()],
+            Some(&base),
+        );
+        assert_eq!(ledger.introduced_count(), 2);
+
+        let demote: FxHashSet<String> = std::iter::once("dupe:demoted".to_string()).collect();
+        ledger.demote_introductions(&demote);
+
+        assert_eq!(ledger.introduced_count(), 1);
+        assert_eq!(ledger.inherited_count(), 1);
+        let introduced: Vec<bool> = ledger.introduced().collect();
+        assert_eq!(introduced, vec![true, false]);
     }
 
     #[test]

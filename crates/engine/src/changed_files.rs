@@ -381,7 +381,7 @@ fn append_untracked_diffs(
 
     for path in untracked {
         let mut command = git_command(root, &["diff", "--no-index", "--unified=0", "--"]);
-        command.arg(empty_file).arg(&path);
+        command.arg(empty_file).arg(untracked_path_arg(&path));
         let output =
             spawn_output(&mut command).map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
         if !output.status.success() && output.status.code() != Some(1) {
@@ -393,6 +393,14 @@ fn append_untracked_diffs(
         diff.push_str(&String::from_utf8_lossy(&output.stdout));
     }
     Ok(())
+}
+
+/// Forward-slashed relative path for the `git diff --no-index` argument.
+/// Passing the native form on Windows makes git echo backslashes into the
+/// `+++ b/` header, so every consumer keyed on forward-slashed diff paths
+/// (added-line lookups included) silently misses the file.
+fn untracked_path_arg(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn changed_files_error_from_output(output: &Output) -> ChangedFilesError {
@@ -1037,6 +1045,15 @@ mod tests {
             "git {args:?} failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn untracked_path_arg_uses_forward_slashes() {
+        assert_eq!(
+            super::untracked_path_arg(Path::new("src\\nested\\b.ts")),
+            "src/nested/b.ts"
+        );
+        assert_eq!(super::untracked_path_arg(Path::new("src/b.ts")), "src/b.ts");
     }
 
     #[test]

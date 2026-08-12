@@ -1643,10 +1643,11 @@ fn write_findings_section(out: &mut String, report: &fallow_output::HealthReport
     write_findings_table_header(out, has_synthetic);
 
     for finding in &report.findings {
-        write_findings_row(out, finding, report, root);
+        write_findings_row(out, finding, root);
     }
 
     let s = &report.summary;
+    out.push_str("\n**!** marks the dimension that breached.\n");
     let _ = write!(
         out,
         "\n**{files}** files, **{funcs}** functions analyzed \
@@ -1694,32 +1695,17 @@ fn write_findings_table_header(out: &mut String, has_synthetic: bool) {
 }
 
 /// Write one complexity finding row, including threshold-breach markers.
-fn write_findings_row(
-    out: &mut String,
-    finding: &fallow_output::HealthFinding,
-    report: &fallow_output::HealthReport,
-    root: &Path,
-) {
+fn write_findings_row(out: &mut String, finding: &fallow_output::HealthFinding, root: &Path) {
     let file_str = normalize_uri(&relative_path(&finding.path, root).display().to_string());
     let location = format!("{file_str}:{}", finding.line);
-    let thresholds =
-        finding
-            .effective_thresholds
-            .unwrap_or(fallow_output::HealthEffectiveThresholds {
-                max_cyclomatic: report.summary.max_cyclomatic_threshold,
-                max_cognitive: report.summary.max_cognitive_threshold,
-                max_crap: report.summary.max_crap_threshold,
-                // Not rendered on complexity findings today, but carry the run's
-                // configured global unit-size ceiling (not the static default)
-                // so the fallback stays consistent with the other thresholds.
-                max_unit_size: report.summary.max_unit_size_threshold,
-            });
-    let cyc_marker = if finding.cyclomatic > thresholds.max_cyclomatic {
+    // Markers come from `exceeded`, the engine's own discriminant, rather than
+    // a second re-comparison that could drift from it (issue #2163).
+    let cyc_marker = if finding.exceeded.includes_cyclomatic() {
         " **!**"
     } else {
         ""
     };
-    let cog_marker = if finding.cognitive > thresholds.max_cognitive {
+    let cog_marker = if finding.exceeded.includes_cognitive() {
         " **!**"
     } else {
         ""
@@ -1731,7 +1717,7 @@ fn write_findings_row(
     };
     let crap_cell = match finding.crap {
         Some(crap) => {
-            let marker = if crap >= thresholds.max_crap {
+            let marker = if finding.exceeded.includes_crap() {
                 " **!**"
             } else {
                 ""
@@ -1763,22 +1749,32 @@ fn write_threshold_overrides_section(
         out.push('\n');
     }
     out.push_str("## Health Threshold Overrides\n\n");
-    out.push_str("| Override | Status | Target | Metrics |\n");
-    out.push_str("|---------:|:-------|:-------|:--------|\n");
+    out.push_str("| Override | Dimension | Status | Target | Metrics | Outstanding |\n");
+    out.push_str("|---------:|:----------|:-------|:-------|:--------|:------------|\n");
     for entry in &report.threshold_overrides {
         let status = match entry.status {
             fallow_output::ThresholdOverrideStatus::Active => "active",
             fallow_output::ThresholdOverrideStatus::Stale => "stale",
+            fallow_output::ThresholdOverrideStatus::Insufficient => "insufficient",
             fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
+        };
+        let dimension = threshold_override_dimension_label(entry.dimension);
+        let outstanding = if entry.outstanding.is_empty() {
+            "-".to_string()
+        } else {
+            entry
+                .outstanding
+                .iter()
+                .map(|value| threshold_override_dimension_label(*value))
+                .collect::<Vec<_>>()
+                .join(", ")
         };
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
             |path| {
-                let display = normalize_uri(&relative_path(path, root).display().to_string());
-                entry
-                    .function
-                    .as_ref()
-                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
+                entry.target_label(&normalize_uri(
+                    &relative_path(path, root).display().to_string(),
+                ))
             },
         );
         let metrics = entry.metrics.map_or_else(
@@ -1795,14 +1791,25 @@ fn write_threshold_overrides_section(
         );
         let _ = writeln!(
             out,
-            "| {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} |",
             entry.override_index,
+            dimension,
             status,
             markdown_table_code_span(&target),
-            metrics
+            metrics,
+            outstanding
         );
     }
     out.push('\n');
+}
+
+fn threshold_override_dimension_label(
+    dimension: fallow_output::ThresholdOverrideDimension,
+) -> &'static str {
+    match dimension {
+        fallow_output::ThresholdOverrideDimension::Complexity => "complexity",
+        fallow_output::ThresholdOverrideDimension::Crap => "crap",
+    }
 }
 
 /// Write the file health scores table to the output.

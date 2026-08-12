@@ -80,18 +80,41 @@ jobs:
           PROJECT_REF: ${{ matrix.project.ref }}
           PROJECT_SPARSE: ${{ matrix.project.sparse }}
         run: |
+          # Five third-party repositories are cloned per run, which makes
+          # transient network and TLS errors the dominant failure mode. The
+          # analysis step below is deliberately non-gating, so a blip while
+          # fetching someone else's repository should not be the one thing
+          # that turns this workflow red.
+          clone_project() {
+            if [ -n "$PROJECT_SPARSE" ]; then
+              git clone --depth 1 --filter=blob:none --sparse \
+                --branch "$PROJECT_REF" \
+                "https://github.com/$PROJECT_REPO.git" \
+                ecosystem-project
+            else
+              git clone --depth 1 \
+                --branch "$PROJECT_REF" \
+                "https://github.com/$PROJECT_REPO.git" \
+                ecosystem-project
+            fi
+          }
+
+          for attempt in 1 2 3; do
+            if clone_project; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::could not clone $PROJECT_REPO after $attempt attempts"
+              exit 1
+            fi
+            echo "clone attempt $attempt failed, retrying"
+            rm -rf ecosystem-project
+            sleep "$((attempt * 15))"
+          done
+
           if [ -n "$PROJECT_SPARSE" ]; then
-            git clone --depth 1 --filter=blob:none --sparse \
-              --branch "$PROJECT_REF" \
-              "https://github.com/$PROJECT_REPO.git" \
-              ecosystem-project
             cd ecosystem-project
             git sparse-checkout set "$PROJECT_SPARSE"
-          else
-            git clone --depth 1 \
-              --branch "$PROJECT_REF" \
-              "https://github.com/$PROJECT_REPO.git" \
-              ecosystem-project
           fi
 
       - name: Run fallow dead-code

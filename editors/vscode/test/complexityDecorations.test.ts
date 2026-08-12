@@ -131,17 +131,36 @@ describe("buildComplexityDecorations", () => {
     expect(after).toContain("else if");
   });
 
-  it("renders Svelte await and then contributions with source labels", () => {
+  it("keeps the compact extra-kind count for an ordinary mixed line", () => {
     const f = finding({
       contributions: [
-        contribution(8, "cognitive", "await", 1),
-        contribution(10, "cognitive", "then", 1),
+        contribution(8, "cognitive", "if", 1),
+        contribution(8, "cognitive", "logical-and", 1),
       ],
     });
     const result = buildComplexityDecorations([f], docPath, root, all);
-    expect(result[0]?.afterText).toContain("await");
-    expect(result[1]?.afterText).toContain("then");
+    expect(result[0]?.afterText).toBe("+2 if +1");
   });
+
+  it.each(["then", "catch"] as const)(
+    "renders a same-line Svelte await + %s shorthand with both source labels",
+    (state) => {
+      const f = finding({
+        line: 8,
+        cyclomatic: 3,
+        cognitive: 2,
+        contributions: [
+          contribution(8, "cyclomatic", "await", 1),
+          contribution(8, "cognitive", "await", 1),
+          contribution(8, "cyclomatic", state, 1),
+          contribution(8, "cognitive", state, 1),
+        ],
+      });
+      const result = buildComplexityDecorations([f], docPath, root, all);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.afterText).toBe(`+2 await + ${state}`);
+    },
+  );
 });
 
 describe("hoverForLine", () => {
@@ -170,11 +189,27 @@ describe("hoverForLine", () => {
     expect(md?.value).toContain("for loop");
   });
 
-  it("uses the Svelte continuation label in the hover", () => {
-    const f = finding({ contributions: [contribution(12, "cognitive", "then", 1)] });
-    const md = hoverForLine([f], 12);
-    expect(md?.value).toContain("then · +1 cognitive");
-  });
+  it.each(["then", "catch"] as const)(
+    "keeps the function summary and shows both same-line Svelte await + %s labels",
+    (state) => {
+      const f = finding({
+        line: 12,
+        cyclomatic: 3,
+        cognitive: 2,
+        contributions: [
+          contribution(12, "cyclomatic", "await", 1),
+          contribution(12, "cognitive", "await", 1),
+          contribution(12, "cyclomatic", state, 1),
+          contribution(12, "cognitive", state, 1),
+        ],
+      });
+      const value = hoverForLine([f], 12)?.value;
+      expect(value).toContain("parseArgs");
+      expect(value).toContain("Complexity contributions");
+      expect(value).toContain("await · +1 cognitive");
+      expect(value).toContain(`${state} · +1 cognitive`);
+    },
+  );
 
   it("returns undefined on a line with neither a function nor a contribution", () => {
     const f = finding({ line: 10, contributions: [contribution(12, "cyclomatic", "if", 1)] });

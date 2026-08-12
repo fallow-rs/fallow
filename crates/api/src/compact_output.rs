@@ -604,18 +604,14 @@ fn push_threshold_overrides_compact(
         let status = match entry.status {
             fallow_output::ThresholdOverrideStatus::Active => "active",
             fallow_output::ThresholdOverrideStatus::Stale => "stale",
+            fallow_output::ThresholdOverrideStatus::Insufficient => "insufficient",
             fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let target = entry.path.as_ref().map_or_else(
             || "no-match".to_string(),
-            |path| {
-                let display = health_compact_path(path, root);
-                entry
-                    .function
-                    .as_ref()
-                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
-            },
+            |path| entry.target_label(&health_compact_path(path, root)),
         );
+        let dimension = threshold_override_dimension_label(entry.dimension);
         let metrics = entry.metrics.map_or(String::new(), |metrics| {
             let crap = metrics
                 .crap
@@ -625,10 +621,32 @@ fn push_threshold_overrides_compact(
                 metrics.cyclomatic, metrics.cognitive, crap
             )
         });
+        let outstanding = if entry.outstanding.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ",outstanding={}",
+                entry
+                    .outstanding
+                    .iter()
+                    .map(|value| threshold_override_dimension_label(*value))
+                    .collect::<Vec<_>>()
+                    .join("|")
+            )
+        };
         lines.push(format!(
-            "threshold-override:{}:{}:{}{}",
-            entry.override_index, status, target, metrics
+            "threshold-override:{}:{}:{}:{}{}{}",
+            entry.override_index, dimension, status, target, metrics, outstanding
         ));
+    }
+}
+
+fn threshold_override_dimension_label(
+    dimension: fallow_output::ThresholdOverrideDimension,
+) -> &'static str {
+    match dimension {
+        fallow_output::ThresholdOverrideDimension::Complexity => "complexity",
+        fallow_output::ThresholdOverrideDimension::Crap => "crap",
     }
 }
 
@@ -672,6 +690,19 @@ fn health_compact_path(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }
 
+/// Serde-name mirror of `ExceededThreshold` for the compact line grammar.
+fn exceeded_compact_label(exceeded: fallow_output::ExceededThreshold) -> &'static str {
+    match exceeded {
+        fallow_output::ExceededThreshold::Cyclomatic => "cyclomatic",
+        fallow_output::ExceededThreshold::Cognitive => "cognitive",
+        fallow_output::ExceededThreshold::Both => "both",
+        fallow_output::ExceededThreshold::Crap => "crap",
+        fallow_output::ExceededThreshold::CyclomaticCrap => "cyclomatic_crap",
+        fallow_output::ExceededThreshold::CognitiveCrap => "cognitive_crap",
+        fallow_output::ExceededThreshold::All => "all",
+    }
+}
+
 fn push_health_findings_compact(
     lines: &mut Vec<String>,
     findings: &[fallow_output::HealthFinding],
@@ -694,14 +725,19 @@ fn push_health_findings_compact(
             }
             None => String::new(),
         };
+        // The `high-complexity:` row prefix is deliberately kept even for a
+        // CRAP-only breach (other machine formats route that to
+        // `fallow/high-crap-score`): renaming a line prefix breaks grep-based CI
+        // consumers, and `exceeded=` carries the dimension instead (issue #2163).
         lines.push(format!(
-            "high-complexity:{}:{}:{}:cyclomatic={},cognitive={},severity={}{}",
+            "high-complexity:{}:{}:{}:cyclomatic={},cognitive={},severity={},exceeded={}{}",
             relative,
             finding.line,
             finding.name,
             finding.cyclomatic,
             finding.cognitive,
             severity,
+            exceeded_compact_label(finding.exceeded),
             crap_suffix,
         ));
     }

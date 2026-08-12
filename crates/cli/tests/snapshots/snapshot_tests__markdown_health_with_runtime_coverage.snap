@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 2047
 expression: output
 ---
 ## Fallow: 1 high complexity function
@@ -8,6 +7,8 @@ expression: output
 | File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
 |:-----|:---------|:---------|:-----------|:----------|:-----|:------|
 | `src/complex.ts:42` | `processData` | high | 25 **!** | 30 **!** | - | 120 |
+
+**!** marks the dimension that breached.
 
 **50** files, **200** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30.0)
 

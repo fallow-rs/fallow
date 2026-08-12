@@ -21,7 +21,7 @@ name = "fallow-mcp"
 path = "src/main.rs"
 
 [dependencies]
-rmcp = { version = "2.0", features = ["transport-io"] }
+rmcp = { version = "3.1", features = ["transport-io"] }
 rquickjs = "0.12"
 fallow-api.workspace = true
 fallow-process = { workspace = true, features = ["tokio"] }

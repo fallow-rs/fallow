@@ -217,7 +217,7 @@
     },
     "AuditIntroduced": {
       "type": "boolean",
-      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited.\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
+      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Duplication findings carry one carve-out: a clone\ngroup whose structural key is new but whose instances contain no added line\nfrom the diff (a group re-shaped by removing duplication elsewhere) is\ndemoted to inherited and serializes `false` (issue #2164).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
     },
     "ExplainOutput": {
       "type": "object",
@@ -4347,7 +4347,7 @@
             "string",
             "null"
           ],
-          "description": "Where to insert the suppress comment\n(e.g., `above-function-declaration`, `above-angular-decorator`,\n`above-component-worst-method`, or `top-of-template`). Present on\n`suppress-line` and `suppress-file` action variants."
+          "description": "Where to insert the suppress comment\n(e.g., `above-function-declaration`, `above-angular-decorator`,\n`above-template-anchor-line`, `above-component-worst-method`, or\n`top-of-template`). Present on `suppress-line` and `suppress-file`\naction variants. `above-template-anchor-line` is used for\nsingle-file-component markup (`.svelte`, `.vue`, `.astro`), where the\nsynthetic `<template>` unit is anchored at its first contributing\nconstruct rather than at the top of the file, so the comment belongs on\nthe line immediately preceding the reported line."
         },
         "target_path": {
           "type": [
@@ -8245,7 +8245,7 @@
         {
           "type": "string",
           "const": "suppress-line",
-          "description": "Suppress with an inline `// fallow-ignore-next-line complexity`\ncomment above the function or Angular decorator."
+          "description": "Suppress with a next-line comment above the reported line: the\ninline `// fallow-ignore-next-line complexity` form above a function\nor Angular decorator, or the markup\n`<!-- fallow-ignore-next-line complexity -->` form for synthetic\n`<template>` findings in `.svelte`, `.vue`, and `.astro` files."
         }
       ],
       "description": "Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types\nemitted by `build_health_finding_actions`. A single finding's `actions`\narray may carry multiple entries of different types: a finding that\nexceeded both cyclomatic and CRAP at `coverage_tier: partial` will get\nBOTH `increase-coverage` AND `refactor-function`, plus the trailing\n`suppress-line`."
@@ -14200,7 +14200,18 @@
         },
         "override_index": {
           "type": "integer",
-          "description": "Index of the entry in the configured `thresholdOverrides` array."
+          "description": "Index of the entry in the configured `thresholdOverrides` array.\nSeveral rows can share one index when the override participates in more\nthan one dimension; group on this to count configured overrides."
+        },
+        "dimension": {
+          "description": "Threshold dimension this row describes.",
+          "$ref": "#/definitions/ThresholdOverrideDimension"
+        },
+        "outstanding": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThresholdOverrideDimension"
+          },
+          "description": "Dimensions the matched unit still breaches despite this override,\nwhether or not this override configures their ceilings. Non-empty means\nraising the ceiling did not settle the matter: a complexity or CRAP\nfinding survived, or the unit is still longer than the resolved\n`maxUnitSize`, which keeps it in the large-function list without\nemitting a finding of its own."
         },
         "path": {
           "type": [
@@ -14215,6 +14226,20 @@
             "null"
           ],
           "description": "Matched function name, for function-scoped overrides."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the matched unit. Absent on `no_match` rows, which\ndescribe an entry that matched nothing. Name alone is not an identity:\none file can hold several units sharing a name, so this pairs with\n`col` to keep their rows distinct (issue #2163)."
+        },
+        "col": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "0-based byte column of the matched unit. Absent on `no_match` rows."
         },
         "configured_thresholds": {
           "description": "Ceilings the override entry configures.",
@@ -14246,6 +14271,7 @@
       "required": [
         "status",
         "override_index",
+        "dimension",
         "configured_thresholds",
         "effective_thresholds"
       ],
@@ -14261,7 +14287,12 @@
         {
           "type": "string",
           "const": "stale",
-          "description": "The matched code now passes the global thresholds; the override can go."
+          "description": "The override is not what keeps the matched unit quiet, so it can go:\neither the unit passes the global thresholds on its own, or an inline\nsuppression already covers it."
+        },
+        {
+          "type": "string",
+          "const": "insufficient",
+          "description": "The override raises the ceiling for this dimension but the matched code\nstill exceeds the raised value, so the finding survives the override.\nWithout this state the row was dropped entirely and a user saw no\nfeedback at all on an override that was in force (issue #2163)."
         },
         {
           "type": "string",
@@ -22455,7 +22486,7 @@
     },
     "HealthSchemaVersion": {
       "type": "integer",
-      "const": 8,
+      "const": 10,
       "description": "Exact schema version for [`HealthOutput`]."
     },
     "AuditSchemaVersion": {
@@ -22470,7 +22501,7 @@
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 9,
+      "const": 10,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {
@@ -22490,6 +22521,21 @@
       "type": "integer",
       "const": 8,
       "description": "Schema projection for the type-aware status envelope's exact version."
+    },
+    "ThresholdOverrideDimension": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complexity",
+          "description": "The structural ceilings: `maxCyclomatic`, `maxCognitive` and\n`maxUnitSize`."
+        },
+        {
+          "type": "string",
+          "const": "crap",
+          "description": "The `maxCrap` ceiling, and only that ceiling."
+        }
+      ],
+      "description": "Which threshold dimension a `thresholdOverrides` state row describes.\n\nOne configured override produces one row per dimension it participates in,\nbecause the complexity ceilings and the CRAP ceiling are evaluated\nindependently: raising `maxCyclomatic` says nothing about whether the unit\nstill breaches `maxCrap`."
     }
   }
 }

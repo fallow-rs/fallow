@@ -62,8 +62,9 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         None
     };
     let config = load_programmatic_audit_config(&resolved)?;
-    let comparison =
+    let mut comparison =
         build_programmatic_audit_comparison(&head, &config, runtime_base_snapshot.as_ref());
+    demote_preexisting_dupe_introductions(&mut comparison, &head, &resolved_base.git_ref);
     let summary = build_programmatic_audit_summary(&head, &comparison);
     let attribution =
         comparison_attribution(options.gate, &comparison, runtime_base_snapshot.is_some());
@@ -595,6 +596,39 @@ fn build_programmatic_audit_comparison(
         base_dupes: base.map(|snapshot| &snapshot.public.dupes),
         base_styling: base.map(|snapshot| &snapshot.styling),
     })
+}
+
+/// Demote introduced clone groups whose instances contain no added lines from
+/// the merge-base worktree diff: no instance range contains an added line, so
+/// the changeset did not write the duplicated text and only the group's
+/// attribution key changed because the changeset
+/// removed code elsewhere. Keeps the new-only gate from failing a
+/// clone-removal refactor on duplication it did not write (issue #2164).
+fn demote_preexisting_dupe_introductions(
+    comparison: &mut crate::audit_keys::AuditComparison,
+    analyses: &AuditSubanalyses,
+    base_ref: &str,
+) {
+    if comparison.dupes.introduced_count() == 0 {
+        return;
+    }
+    let root = &analyses.duplication.root;
+    let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) else {
+        return;
+    };
+    let index = fallow_output::DiffIndex::from_unified_diff(&diff);
+    let demote = crate::audit_keys::preexisting_dupe_group_keys(
+        analyses
+            .duplication
+            .output
+            .report
+            .clone_groups
+            .iter()
+            .map(|group| &group.group),
+        root,
+        &index,
+    );
+    comparison.dupes.demote_introductions(&demote);
 }
 
 fn build_programmatic_audit_summary(

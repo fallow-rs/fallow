@@ -876,9 +876,9 @@ use crate::base_worktree::{
     ReusableWorktreeLock, WorktreeCleanupGuard, audit_worktree_pid, days_to_duration,
     is_fallow_audit_worktree_path, is_reusable_audit_worktree_path, list_audit_worktrees,
     materialize_base_dependency_context, parse_worktree_list, paths_equal, process_is_alive,
-    remove_audit_worktree, reusable_audit_worktree_path, reusable_worktree_last_used_path,
-    reusable_worktree_lock_path, reusable_worktree_sha_path, sweep_orphan_audit_worktrees_in,
-    touch_last_used, unregister_worktree,
+    record_last_used, remove_audit_worktree, reusable_audit_worktree_path,
+    reusable_worktree_last_used_path, reusable_worktree_lock_path, reusable_worktree_sha_path,
+    sweep_orphan_audit_worktrees_in, touch_last_used, unregister_worktree,
 };
 
 pub use fallow_api::audit_keys as keys;
@@ -1354,12 +1354,18 @@ audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
         }
     }
     drop_check_shared_parse(&mut check_result);
-    let comparison = build_cli_audit_comparison(
+    let mut comparison = build_cli_audit_comparison(
         check_result.as_ref(),
         dupes_result.as_ref(),
         health_result.as_ref(),
         base_snapshot.as_ref(),
         type_aware_degrade.is_some(),
+    );
+    demote_preexisting_dupe_introductions(
+        &mut comparison,
+        dupes_result.as_ref(),
+        opts.root,
+        &input.base_ref,
     );
     let (attribution, verdict, summary) = compute_comparison_audit_outcome(
         opts.gate,
@@ -1984,6 +1990,43 @@ fn build_cli_audit_comparison(
         dupes: dupes_ledger,
         styling,
     }
+}
+
+/// Demote introduced clone groups whose instances contain no added lines from
+/// the run's diff: no instance range contains an added line, so the changeset
+/// did not write the duplicated text and only the group's attribution key
+/// changed (membership or extent shifted because the
+/// changeset removed code elsewhere). Without this, the only safe sequence for
+/// a clone-removal refactor fails the new-only gate on duplication it did not
+/// write (issue #2164). Uses the same diff source as the rest of the run: the
+/// opt-in shared diff when present, else the merge-base worktree diff.
+fn demote_preexisting_dupe_introductions(
+    comparison: &mut keys::AuditComparison,
+    dupes: Option<&DupesResult>,
+    root: &Path,
+    base_ref: &str,
+) {
+    if comparison.dupes.introduced_count() == 0 {
+        return;
+    }
+    let Some(dupes) = dupes else {
+        return;
+    };
+    let fallback_index;
+    let index = if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
+        shared
+    } else if let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) {
+        fallback_index = fallow_output::DiffIndex::from_unified_diff(&diff);
+        &fallback_index
+    } else {
+        return;
+    };
+    let demote = keys::preexisting_dupe_group_keys(
+        dupes.report.clone_groups.iter(),
+        &dupes.config.root,
+        index,
+    );
+    comparison.dupes.demote_introductions(&demote);
 }
 
 fn compute_comparison_audit_outcome(

@@ -68,7 +68,7 @@ jobs:
           key: fuzz-smoke-nightly-2026-07-20-cargo-fuzz-0.13.2
 
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@cb33e69fad06166ca28a42b2575e4dadabf62ee8 # v2.85.8
         with:
           tool: cargo-fuzz@0.13.2
           fallback: cargo-install

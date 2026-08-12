@@ -77,6 +77,13 @@ pub struct RulesConfig {
     /// defaults to `off`.
     #[serde(default = "Severity::default_off", alias = "private-type-leak")]
     pub private_type_leaks: Severity,
+    /// Whether the user explicitly configured `private-type-leaks` (rather
+    /// than the field taking its `off` default). Populated during config file
+    /// loading, not by serde: type-aware hosts default this opt-in rule to
+    /// `warn`, and this flag lets an explicit user `off` win over that
+    /// default (issue #2170).
+    #[serde(skip)]
+    pub private_type_leaks_configured: bool,
     /// A declared `dependencies` entry never observed used. Defaults to
     /// `error`.
     #[serde(default, alias = "unused-dependency")]
@@ -377,6 +384,7 @@ impl Default for RulesConfig {
             unused_exports: Severity::Error,
             unused_types: Severity::Error,
             private_type_leaks: Severity::Off,
+            private_type_leaks_configured: false,
             unused_dependencies: Severity::Error,
             unused_dev_dependencies: Severity::Warn,
             unused_optional_dependencies: Severity::Warn,

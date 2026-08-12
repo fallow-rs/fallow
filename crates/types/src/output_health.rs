@@ -154,8 +154,13 @@ pub struct HealthFindingAction {
     pub comment: Option<String>,
     /// Where to insert the suppress comment
     /// (e.g., `above-function-declaration`, `above-angular-decorator`,
-    /// `above-component-worst-method`, or `top-of-template`). Present on
-    /// `suppress-line` and `suppress-file` action variants.
+    /// `above-template-anchor-line`, `above-component-worst-method`, or
+    /// `top-of-template`). Present on `suppress-line` and `suppress-file`
+    /// action variants. `above-template-anchor-line` is used for
+    /// single-file-component markup (`.svelte`, `.vue`, `.astro`), where the
+    /// synthetic `<template>` unit is anchored at its first contributing
+    /// construct rather than at the top of the file, so the comment belongs on
+    /// the line immediately preceding the reported line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<String>,
     /// Project-relative path the action should target when the finding's
@@ -198,8 +203,11 @@ pub enum HealthFindingActionType {
     /// synthetic Angular `<template>` findings on `.html` files where a
     /// line suppression cannot be expressed.
     SuppressFile,
-    /// Suppress with an inline `// fallow-ignore-next-line complexity`
-    /// comment above the function or Angular decorator.
+    /// Suppress with a next-line comment above the reported line: the
+    /// inline `// fallow-ignore-next-line complexity` form above a function
+    /// or Angular decorator, or the markup
+    /// `<!-- fallow-ignore-next-line complexity -->` form for synthetic
+    /// `<template>` findings in `.svelte`, `.vue`, and `.astro` files.
     SuppressLine,
 }
 

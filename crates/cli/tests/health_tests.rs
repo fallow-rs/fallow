@@ -9,7 +9,9 @@ mod common;
 
 use common::{
     fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+    run_fallow_raw,
 };
+use std::fmt::Write as _;
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -756,6 +758,102 @@ fn health_svelte_await_breakdown_uses_source_kinds() {
 }
 
 #[test]
+fn health_svelte_await_then_shorthand_counts_both_states() {
+    let dir = tempdir().expect("create temp dir");
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"svelte-await-shorthand-complexity","dependencies":{"svelte":"latest"}}"#,
+    );
+    write_file(
+        &dir.path().join("src/App.svelte"),
+        "{#await load() then value}\n<p>{value}</p>\n{/await}\n",
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--complexity-breakdown",
+            "--max-cyclomatic",
+            "1",
+            "--max-cognitive",
+            "1",
+            "--report-only",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let template = json["findings"]
+        .as_array()
+        .and_then(|findings| {
+            findings
+                .iter()
+                .find(|finding| finding["name"] == "<template>")
+        })
+        .expect("Svelte template complexity finding");
+    let kinds: Vec<&str> = template["contributions"]
+        .as_array()
+        .expect("complexity contributions")
+        .iter()
+        .filter_map(|contribution| contribution["kind"].as_str())
+        .collect();
+
+    assert_eq!(kinds, vec!["await", "await", "then", "then"]);
+    assert_eq!(template["cyclomatic"], 3);
+    assert_eq!(template["cognitive"], 2);
+
+    let suppress = template["actions"]
+        .as_array()
+        .and_then(|actions| {
+            actions
+                .iter()
+                .find(|action| action["type"] == "suppress-line")
+        })
+        .expect("standalone Svelte template suppress action");
+    assert_eq!(
+        suppress["comment"],
+        "<!-- fallow-ignore-next-line complexity -->"
+    );
+    assert_eq!(suppress["placement"], "above-template-anchor-line");
+
+    write_file(
+        &dir.path().join("src/App.svelte"),
+        "<!-- fallow-ignore-next-line complexity -->\n{#await load() then value}\n<p>{value}</p>\n{/await}\n",
+    );
+    let suppressed = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "1",
+            "--max-cognitive",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(suppressed.code, 0, "stderr: {}", suppressed.stderr);
+    let suppressed_json = parse_json(&suppressed);
+    assert!(
+        suppressed_json["findings"]
+            .as_array()
+            .is_none_or(|findings| findings
+                .iter()
+                .all(|finding| finding["name"] != "<template>")),
+        "suppressed Svelte template should not emit a finding: {suppressed_json:#?}"
+    );
+}
+
+#[test]
 fn health_reports_angular_template_complexity() {
     let output = run_fallow(
         "health",
@@ -1282,6 +1380,60 @@ fn health_inline_template_complexity_can_be_suppressed() {
     assert!(
         findings.is_none_or(|arr| arr.iter().all(|f| f["name"] != "<template>")),
         "suppressed inline template should not emit a <template> finding: {json:#?}"
+    );
+}
+
+/// The Angular suppression hint is keyed on "not `.html`, not SFC markup", not on
+/// an extension allowlist. A `.tsx` component is the cheapest proof: it regressed
+/// once, when the human predicate was narrowed to `ts`/`js`/`mts`/`cts` while the
+/// JSON action kept emitting `above-angular-decorator`.
+#[test]
+fn health_inline_template_hint_matches_the_json_action_on_a_tsx_component() {
+    let dir = tempdir().unwrap();
+    copy_dir_recursive(
+        &fixture_path("angular-inline-template-complexity"),
+        dir.path(),
+    );
+    let source = dir.path().join("src/host-game.component.ts");
+    let renamed = dir.path().join("src/host-game.component.tsx");
+    std::fs::rename(&source, &renamed).expect("rename component to .tsx");
+
+    let args = [
+        "--complexity",
+        "--max-cyclomatic",
+        "3",
+        "--max-cognitive",
+        "3",
+        "--max-crap",
+        "10000",
+        "--quiet",
+    ];
+    let human = run_fallow_in_root("health", dir.path(), &args);
+    let mut json_args = args.to_vec();
+    json_args.extend_from_slice(&["--format", "json"]);
+    let json = parse_json(&run_fallow_in_root("health", dir.path(), &json_args));
+
+    let template = json["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .find(|finding| finding["name"] == "<template>")
+        .cloned()
+        .unwrap_or_else(|| panic!("expected a .tsx <template> finding: {json:#?}"));
+    assert_eq!(
+        template["actions"]
+            .as_array()
+            .expect("actions array")
+            .iter()
+            .find(|action| action["type"] == "suppress-line")
+            .and_then(|action| action["placement"].as_str()),
+        Some("above-angular-decorator"),
+        "a .tsx inline template still routes to the decorator placement: {template:#?}"
+    );
+    assert!(
+        human.stdout.contains("above @Component"),
+        "human output must carry the same decorator hint the JSON action advertises: {}",
+        human.stdout
     );
 }
 
@@ -6589,5 +6741,1203 @@ fn health_css_skips_js_ts_without_css_in_js_dep() {
         json.get("css_analytics").is_none(),
         "no CSS-in-JS dep means no JS/TS styling analytics: {}",
         out.stdout
+    );
+}
+
+/// Insert `line` immediately above the 1-based `anchor` line of `path`, which is
+/// where the SFC `suppress-line` action tells the user to put the comment.
+fn insert_line_above(path: &Path, anchor: u64, line: &str) {
+    let original = std::fs::read_to_string(path).expect("read source");
+    let mut lines: Vec<String> = original.lines().map(str::to_string).collect();
+    let index = usize::try_from(anchor).expect("anchor fits usize") - 1;
+    lines.insert(index, line.to_string());
+    std::fs::write(path, format!("{}\n", lines.join("\n"))).expect("write source");
+}
+
+fn sfc_template_finding(json: &serde_json::Value, file: &str) -> serde_json::Value {
+    let findings = json["findings"].as_array().expect("findings array");
+    findings
+        .iter()
+        .find(|finding| {
+            finding["name"] == "<template>"
+                && finding["path"].as_str().is_some_and(|p| p.ends_with(file))
+        })
+        .unwrap_or_else(|| panic!("expected a <template> finding for {file}: {findings:#?}"))
+        .clone()
+}
+
+const SFC_COMPLEXITY_ARGS: [&str; 10] = [
+    "--complexity",
+    "--max-cyclomatic",
+    "3",
+    "--max-cognitive",
+    "3",
+    "--max-crap",
+    "10000",
+    "--format",
+    "json",
+    "--quiet",
+];
+
+fn run_sfc_health(root: &Path) -> serde_json::Value {
+    parse_json(&run_fallow_in_root("health", root, &SFC_COMPLEXITY_ARGS))
+}
+
+#[test]
+fn health_sfc_template_findings_recommend_a_markup_suppression_comment() {
+    let json = parse_json(&run_fallow(
+        "health",
+        "issue-2163-sfc-template-complexity",
+        &SFC_COMPLEXITY_ARGS,
+    ));
+    for file in ["Widget.svelte", "Panel.vue", "Board.astro"] {
+        let finding = sfc_template_finding(&json, file);
+        let actions = finding["actions"].as_array().expect("actions array");
+        let suppress = actions
+            .iter()
+            .find(|action| action["type"] == "suppress-line")
+            .unwrap_or_else(|| panic!("suppress-line action for {file}: {actions:#?}"));
+        assert_eq!(
+            suppress["comment"].as_str(),
+            Some("<!-- fallow-ignore-next-line complexity -->"),
+            "{file} must get a markup comment, not the `//` form: {actions:#?}"
+        );
+        assert_eq!(
+            suppress["placement"].as_str(),
+            Some("above-template-anchor-line"),
+            "{file} must not be told to use the Angular decorator placement: {actions:#?}"
+        );
+        assert!(
+            actions.iter().all(|action| action["type"] != "add-tests"),
+            "a template carries no direct coverage, so add-tests is never actionable: {actions:#?}"
+        );
+    }
+}
+
+#[test]
+fn health_sfc_suppression_comment_works_on_the_reported_line() {
+    for file in ["Widget.svelte", "Panel.vue", "Board.astro"] {
+        let dir = tempdir().unwrap();
+        copy_dir_recursive(
+            &fixture_path("issue-2163-sfc-template-complexity"),
+            dir.path(),
+        );
+        let source = dir.path().join("src").join(file);
+        let anchor = sfc_template_finding(&run_sfc_health(dir.path()), file)["line"]
+            .as_u64()
+            .expect("anchor line");
+        insert_line_above(
+            &source,
+            anchor,
+            "<!-- fallow-ignore-next-line complexity -->",
+        );
+
+        let json = run_sfc_health(dir.path());
+        let findings = json["findings"].as_array();
+        assert!(
+            findings.is_none_or(|arr| arr.iter().all(|f| f["name"] != "<template>"
+                || !f["path"].as_str().is_some_and(|p| p.ends_with(file)))),
+            "the recommended comment must actually suppress {file}: {json:#?}"
+        );
+    }
+}
+
+#[test]
+fn health_sfc_suppression_above_the_wrapper_element_still_fires() {
+    for file in ["Widget.svelte", "Panel.vue", "Board.astro"] {
+        let dir = tempdir().unwrap();
+        copy_dir_recursive(
+            &fixture_path("issue-2163-sfc-template-complexity"),
+            dir.path(),
+        );
+        let source = dir.path().join("src").join(file);
+        let anchor = sfc_template_finding(&run_sfc_health(dir.path()), file)["line"]
+            .as_u64()
+            .expect("anchor line");
+        assert!(anchor > 1, "{file} anchor must have a line above it");
+        insert_line_above(
+            &source,
+            anchor - 1,
+            "<!-- fallow-ignore-next-line complexity -->",
+        );
+
+        // Negative control for the action description: pointing at the top of the
+        // template instead of the reported line would be wrong advice. The anchor
+        // shifts down by one because the comment was inserted above it.
+        let still = sfc_template_finding(&run_sfc_health(dir.path()), file);
+        assert_eq!(
+            still["line"].as_u64(),
+            Some(anchor + 1),
+            "the comment sat above the wrapper element, so the template anchor must still fire: {still:#?}"
+        );
+    }
+}
+
+fn issue_2163_override_config(max_crap: Option<&str>) -> String {
+    let crap = max_crap.map_or(String::new(), |value| {
+        format!(",\n        \"maxCrap\": {value}")
+    });
+    format!(
+        r#"{{
+  "health": {{
+    "thresholdOverrides": [
+      {{
+        "files": ["src/Widget.svelte"],
+        "maxCyclomatic": 500,
+        "maxCognitive": 500{crap},
+        "reason": "should exempt this file"
+      }}
+    ]
+  }}
+}}
+"#
+    )
+}
+
+fn write_issue_2163_fixture(root: &Path, config: &str) {
+    copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
+    std::fs::remove_file(root.join("src/Panel.vue")).expect("drop vue sibling");
+    std::fs::remove_file(root.join("src/Board.astro")).expect("drop astro sibling");
+    write_file(
+        &root.join("src/main.ts"),
+        "import Widget from './Widget.svelte';\n\nexport const registry = { Widget };\n",
+    );
+    write_file(&root.join(".fallowrc.json"), config);
+}
+
+#[test]
+fn health_override_discloses_the_crap_dimension_that_kept_the_finding() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(dir.path(), &issue_2163_override_config(None));
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    let finding = sfc_template_finding(&json, "Widget.svelte");
+    assert_eq!(
+        finding["exceeded"].as_str(),
+        Some("crap"),
+        "the raised complexity ceilings leave CRAP as the only breaching dimension: {finding:#?}"
+    );
+    assert_eq!(finding["threshold_source"].as_str(), Some("override"));
+
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    assert!(
+        states
+            .iter()
+            .all(|state| state["override_index"].as_u64() == Some(0)),
+        "one configured override must not look like several: {states:#?}"
+    );
+    let complexity_row = states
+        .iter()
+        .find(|state| state["dimension"] == "complexity")
+        .unwrap_or_else(|| panic!("a complexity-dimension row: {states:#?}"));
+    assert_eq!(
+        complexity_row["outstanding"].as_array(),
+        Some(&vec![serde_json::Value::from("crap")]),
+        "the row must name the dimension the override does not configure: {complexity_row:#?}"
+    );
+
+    let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
+    assert!(
+        human.stdout.contains("! CRAP"),
+        "human output must mark CRAP as the breaching dimension: {}",
+        human.stdout
+    );
+    assert!(
+        !human.stdout.contains("! cyclomatic") && !human.stdout.contains("! cognitive"),
+        "human output must not mark the dimensions the override cleared: {}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("CRAP 30.0"),
+        "human output must name the CRAP ceiling still in force: {}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("(still breaches: CRAP)"),
+        "the override row must not read as unqualified success: {}",
+        human.stdout
+    );
+}
+
+#[test]
+fn health_override_that_raises_max_crap_too_little_reports_insufficient() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(dir.path(), &issue_2163_override_config(Some("40")));
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    let finding = sfc_template_finding(&json, "Widget.svelte");
+    assert_eq!(finding["exceeded"].as_str(), Some("crap"));
+
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let crap_row = states
+        .iter()
+        .find(|state| state["dimension"] == "crap")
+        .unwrap_or_else(|| panic!("a crap-dimension row: {states:#?}"));
+    assert_eq!(
+        crap_row["status"].as_str(),
+        Some("insufficient"),
+        "a ceiling the code still exceeds is neither active nor stale: {crap_row:#?}"
+    );
+    assert_eq!(
+        crap_row["outstanding"].as_array(),
+        Some(&vec![serde_json::Value::from("crap")]),
+        "outstanding must not go silent just because the entry configures the breaching ceiling: {crap_row:#?}"
+    );
+
+    let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
+    assert!(
+        human.stdout.contains("#0 crap insufficient"),
+        "the human row must say the raised ceiling did not clear the finding: {}",
+        human.stdout
+    );
+}
+
+/// The whole override section used to disappear here, which is the same
+/// feedback vacuum that produced issue #2163 in the first place.
+#[test]
+fn health_crap_only_override_that_is_still_breached_still_reports_a_row() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/Widget.svelte"], "maxCrap": 40 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("an override whose only ceiling is still breached must still report");
+    assert_eq!(states.len(), 1, "{states:#?}");
+    assert_eq!(states[0]["status"].as_str(), Some("insufficient"));
+    assert_eq!(states[0]["dimension"].as_str(), Some("crap"));
+
+    let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
+    assert!(
+        human.stdout.contains("Health threshold overrides (1)"),
+        "the section must not vanish: {}",
+        human.stdout
+    );
+}
+
+#[test]
+fn health_partly_configured_complexity_override_names_the_surviving_dimension() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/Widget.svelte"], "maxCyclomatic": 500, "maxCrap": 5000 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    let finding = sfc_template_finding(&json, "Widget.svelte");
+    assert_eq!(
+        finding["exceeded"].as_str(),
+        Some("cognitive"),
+        "cognitive is the ceiling this override leaves alone: {finding:#?}"
+    );
+
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    assert!(
+        states.iter().all(|state| state["outstanding"].as_array()
+            == Some(&vec![serde_json::Value::from("complexity")])),
+        "configuring one of the two complexity ceilings must not silence the other: {states:#?}"
+    );
+
+    let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
+    assert!(
+        human.stdout.contains("(still breaches: complexity)"),
+        "the human rows must disclose the surviving dimension: {}",
+        human.stdout
+    );
+}
+
+#[test]
+fn health_override_that_also_raises_max_crap_clears_the_finding() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(dir.path(), &issue_2163_override_config(Some("500")));
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    assert!(
+        json["findings"]
+            .as_array()
+            .is_none_or(|findings| findings.is_empty()),
+        "raising maxCrap too must empty the findings list: {json:#?}"
+    );
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let dimensions: Vec<&str> = states
+        .iter()
+        .filter_map(|state| state["dimension"].as_str())
+        .collect();
+    assert_eq!(
+        dimensions,
+        vec!["complexity", "crap"],
+        "one override configuring both axes reports one row per dimension: {states:#?}"
+    );
+    assert!(
+        states.iter().all(|state| state["outstanding"].is_null()),
+        "nothing is outstanding once every ceiling is configured: {states:#?}"
+    );
+
+    let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
+    assert!(
+        human.stdout.contains("Health threshold overrides (1)"),
+        "the header counts configured overrides, not state rows: {}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("#0 complexity active") && human.stdout.contains("#0 crap active"),
+        "each row must name its dimension: {}",
+        human.stdout
+    );
+}
+
+#[test]
+fn health_threshold_override_reports_no_match_on_a_full_run() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/typo.ts"], "maxCyclomatic": 20 }
+    ]
+  }
+}
+"#,
+        complex_threshold_override_source(),
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let no_match = states
+        .iter()
+        .find(|state| state["status"] == "no_match")
+        .unwrap_or_else(|| {
+            panic!("a full run must report a glob that matches nothing: {states:#?}")
+        });
+    assert!(no_match["path"].is_null());
+
+    let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
+    assert!(
+        human.stdout.contains("no_match"),
+        "the human report is the channel a user debugging a glob reads: {}",
+        human.stdout
+    );
+}
+
+/// Two overrides on two different files, each too small to clear its finding, so
+/// both rows carry a non-empty `outstanding`.
+fn write_two_override_fixture(root: &Path) {
+    copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/Widget.svelte"], "maxCognitive": 20 },
+      { "files": ["src/Board.astro"], "maxCrap": 100 }
+    ]
+  }
+}
+"#,
+    );
+}
+
+fn outstanding_by_override_index(json: &serde_json::Value) -> Vec<(u64, usize)> {
+    json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array")
+        .iter()
+        .map(|state| {
+            (
+                state["override_index"].as_u64().expect("override_index"),
+                state["outstanding"]
+                    .as_array()
+                    .map_or(0, |dimensions| dimensions.len()),
+            )
+        })
+        .collect()
+}
+
+/// `--top` shrinks the DISPLAYED findings, not the analyzed ones, and override
+/// rows are never truncated. A surviving row whose `outstanding` silently
+/// emptied is the one degradation a CI gate keying on that field cannot see.
+#[test]
+fn health_override_outstanding_survives_top_truncation() {
+    let dir = tempdir().expect("create temp dir");
+    write_two_override_fixture(dir.path());
+
+    let args = ["--complexity", "--format", "json", "--quiet"];
+    let full = parse_json(&run_fallow_in_root("health", dir.path(), &args));
+    let mut top_args = args.to_vec();
+    top_args.extend_from_slice(&["--top", "1"]);
+    let truncated = parse_json(&run_fallow_in_root("health", dir.path(), &top_args));
+
+    assert_eq!(
+        truncated["findings"].as_array().map(Vec::len),
+        Some(1),
+        "the fixture must actually be truncated: {truncated:#?}"
+    );
+    assert_eq!(
+        outstanding_by_override_index(&truncated),
+        outstanding_by_override_index(&full),
+        "override rows must keep the outstanding dimensions a full run reports: {truncated:#?}"
+    );
+    assert!(
+        outstanding_by_override_index(&truncated)
+            .iter()
+            .all(|(_, count)| *count > 0),
+        "both overrides are too small to clear their finding: {truncated:#?}"
+    );
+}
+
+#[test]
+fn health_override_outstanding_survives_a_baseline_filter() {
+    let dir = tempdir().expect("create temp dir");
+    write_two_override_fixture(dir.path());
+    let baseline = dir.path().join("health-baseline.json");
+
+    let args = ["--complexity", "--format", "json", "--quiet"];
+    let full = parse_json(&run_fallow_in_root("health", dir.path(), &args));
+    let mut save_args = args.to_vec();
+    save_args.extend_from_slice(&["--save-baseline", baseline.to_str().unwrap()]);
+    run_fallow_in_root("health", dir.path(), &save_args);
+    let mut baselined_args = args.to_vec();
+    baselined_args.extend_from_slice(&["--baseline", baseline.to_str().unwrap()]);
+    let baselined = parse_json(&run_fallow_in_root("health", dir.path(), &baselined_args));
+
+    assert!(
+        baselined["findings"]
+            .as_array()
+            .is_none_or(|findings| findings.is_empty()),
+        "every finding must be baselined away for this to be a regression test: {baselined:#?}"
+    );
+    assert_eq!(
+        outstanding_by_override_index(&baselined),
+        outstanding_by_override_index(&full),
+        "a baselined run still reports which dimension each override failed to clear: {baselined:#?}"
+    );
+}
+
+/// `--diff-file` is the CI path: the GitHub Action and GitLab CI both scope the
+/// report to a merge request. It narrows the DISPLAYED findings only, so an
+/// override row whose finding sits outside the diff must still report the
+/// dimensions it failed to clear.
+#[test]
+fn health_override_outstanding_survives_a_diff_filter() {
+    let dir = tempdir().expect("create temp dir");
+    write_two_override_fixture(dir.path());
+    let diff_path = dir.path().join("pr.diff");
+    write_file(
+        &diff_path,
+        "diff --git a/src/Panel.vue b/src/Panel.vue\n\
+         --- a/src/Panel.vue\n\
+         +++ b/src/Panel.vue\n\
+         @@ -2,0 +3,1 @@\n\
+         +    <span />\n",
+    );
+
+    let args = ["--complexity", "--format", "json", "--quiet"];
+    let full = parse_json(&run_fallow_in_root("health", dir.path(), &args));
+    let mut diff_args = args.to_vec();
+    diff_args.extend_from_slice(&["--diff-file", diff_path.to_str().expect("utf8 path")]);
+    let scoped = parse_json(&run_fallow_in_root("health", dir.path(), &diff_args));
+
+    let scoped_paths: Vec<&str> = scoped["findings"]
+        .as_array()
+        .map(|findings| {
+            findings
+                .iter()
+                .filter_map(|finding| finding["path"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        scoped_paths,
+        vec!["src/Panel.vue"],
+        "only the diffed file may survive for this to exercise the filter: {scoped:#?}"
+    );
+    assert_eq!(
+        outstanding_by_override_index(&scoped),
+        outstanding_by_override_index(&full),
+        "a diff-scoped run still reports which dimension each override failed to clear: {scoped:#?}"
+    );
+    assert!(
+        outstanding_by_override_index(&scoped)
+            .iter()
+            .all(|(_, count)| *count > 0),
+        "both overrides are too small to clear their finding: {scoped:#?}"
+    );
+
+    let mut human_args = vec!["--complexity", "--quiet"];
+    human_args.extend_from_slice(&["--diff-file", diff_path.to_str().expect("utf8 path")]);
+    let human = run_fallow_in_root("health", dir.path(), &human_args);
+    assert!(
+        human.stdout.contains("(still breaches: complexity, CRAP)")
+            && human.stdout.contains("(still breaches: CRAP)"),
+        "an insufficient row must never render without the dimensions it failed to clear: {}",
+        human.stdout
+    );
+}
+
+#[test]
+fn health_no_match_row_names_the_dimension_the_entry_configures() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/typo.ts"], "maxCrap": 500 }
+    ]
+  }
+}
+"#,
+        complex_threshold_override_source(),
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let dimensions: Vec<&str> = states
+        .iter()
+        .filter(|state| state["status"] == "no_match")
+        .filter_map(|state| state["dimension"].as_str())
+        .collect();
+    assert_eq!(
+        dimensions,
+        vec!["crap"],
+        "a crap-only entry that matches nothing is not a complexity row: {states:#?}"
+    );
+
+    let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
+    assert!(
+        human.stdout.contains("#0 crap no_match"),
+        "the human row must carry the same dimension the JSON row does: {}",
+        human.stdout
+    );
+}
+
+#[test]
+fn health_compact_output_names_the_breaching_dimension() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(dir.path(), &issue_2163_override_config(None));
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "compact", "--quiet"],
+    );
+    let row = output
+        .stdout
+        .lines()
+        .find(|line| line.starts_with("high-complexity:"))
+        .unwrap_or_else(|| panic!("a high-complexity compact row: {}", output.stdout));
+    assert!(
+        row.contains(",exceeded=crap"),
+        "compact must carry the dimension: {row}"
+    );
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("threshold-override:0:complexity:")),
+        "compact override rows must be distinguishable by dimension: {}",
+        output.stdout
+    );
+}
+
+/// The `**!**` cells are the whole point of the disclosure, so the table needs a
+/// gloss for a reader who has never seen the marker before.
+#[test]
+fn health_markdown_findings_table_explains_the_breach_marker() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(dir.path(), &issue_2163_override_config(None));
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "markdown", "--quiet"],
+    );
+    assert!(
+        output.stdout.contains("**!**")
+            && output.stdout.contains("marks the dimension that breached"),
+        "the markdown findings table must gloss its breach marker: {}",
+        output.stdout
+    );
+}
+
+/// One function whose cyclomatic and cognitive complexity clear the global
+/// ceilings by a wide margin, so every dimension of an override is exercised.
+fn dense_branch_source(name: &str, branches: usize) -> String {
+    let mut src = String::from("export function ");
+    src.push_str(name);
+    src.push_str("(input) {\n  let score = 0;\n");
+    push_branches(&mut src, branches, "  ");
+    src.push_str("  return score;\n}\n");
+    src
+}
+
+fn push_branches(src: &mut String, branches: usize, indent: &str) {
+    for index in 0..branches {
+        src.push_str(indent);
+        src.push_str("if (input > ");
+        src.push_str(&index.to_string());
+        src.push_str(") score += 1;\n");
+    }
+}
+
+/// Two classes in one file, each with a method named `handler`, so the pair
+/// shares a name inside a single file.
+fn same_named_handlers_source(first_branches: usize, second_branches: usize) -> String {
+    let mut src = String::new();
+    for (class_name, branches) in [("Alpha", first_branches), ("Beta", second_branches)] {
+        src.push_str("export class ");
+        src.push_str(class_name);
+        src.push_str(" {\n  handler(input) {\n    let score = 0;\n");
+        push_branches(&mut src, branches, "    ");
+        src.push_str("    return score;\n  }\n}\n\n");
+    }
+    src
+}
+
+fn threshold_override_rows(json: &serde_json::Value) -> &Vec<serde_json::Value> {
+    json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array")
+}
+
+/// `insufficient` states that the finding survived the override, so a row that
+/// claims it while `outstanding` is empty asserts a finding no other part of
+/// the report can show. That contradiction is invisible to a CI gate, so it is
+/// asserted directly (issue #2163).
+fn assert_no_insufficient_row_without_outstanding(json: &serde_json::Value) {
+    for row in threshold_override_rows(json) {
+        if row["status"].as_str() == Some("insufficient") {
+            assert!(
+                row["outstanding"]
+                    .as_array()
+                    .is_some_and(|dimensions| !dimensions.is_empty()),
+                "an insufficient row must name the dimension that still fires: {row:#?}"
+            );
+        }
+    }
+}
+
+/// A later entry raises the ceiling past the metric; the earlier, narrower
+/// entry does not. The finding is emitted against the resolved ceiling, so the
+/// earlier row must not claim a finding that never fires.
+#[test]
+fn health_override_superseded_by_a_later_entry_reports_active() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"overlapping-overrides","type":"module","main":"src/hot.js"}"#,
+    );
+    write_file(&root.join("src/hot.js"), &dense_branch_source("hot", 29));
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/**"], "maxCyclomatic": 25 },
+      { "files": ["src/hot.js"], "maxCyclomatic": 100, "maxCognitive": 100, "maxCrap": 5000 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    assert!(
+        json["findings"].as_array().is_none_or(Vec::is_empty),
+        "the resolved ceilings clear every dimension: {json:#?}"
+    );
+    assert_no_insufficient_row_without_outstanding(&json);
+    let superseded = threshold_override_rows(&json)
+        .iter()
+        .find(|row| row["override_index"].as_u64() == Some(0))
+        .expect("a row for the superseded entry");
+    assert_eq!(
+        superseded["status"].as_str(),
+        Some("active"),
+        "{superseded:#?}"
+    );
+    assert_eq!(
+        superseded["effective_thresholds"]["max_cyclomatic"].as_u64(),
+        Some(100),
+        "a row must publish the ceiling in force, not its own configured value: {superseded:#?}"
+    );
+}
+
+/// A `fallow-ignore` comment already hides the finding, so the raised ceiling
+/// buys nothing and the row reads `stale`. The entry must still count as
+/// matched rather than falling through to a `no_match` row.
+#[test]
+fn health_override_on_a_suppressed_unit_reports_stale() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"suppressed-override","type":"module","main":"src/supp.js"}"#,
+    );
+    write_file(
+        &root.join("src/supp.js"),
+        &format!(
+            "// fallow-ignore-next-line complexity\n{}",
+            dense_branch_source("legacyParse", 29)
+        ),
+    );
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/supp.js"], "maxCyclomatic": 25, "maxCrap": 100 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    assert!(
+        json["findings"].as_array().is_none_or(Vec::is_empty),
+        "the suppression comment hides the finding: {json:#?}"
+    );
+    assert_no_insufficient_row_without_outstanding(&json);
+    let rows = threshold_override_rows(&json);
+    assert!(
+        rows.iter()
+            .all(|row| row["status"].as_str() != Some("no_match")),
+        "the glob matched a real unit, so no row may claim it matched nothing: {rows:#?}"
+    );
+    let crap_row = rows
+        .iter()
+        .find(|row| row["dimension"].as_str() == Some("crap"))
+        .expect("a crap row for the matched unit");
+    assert_eq!(crap_row["status"].as_str(), Some("stale"), "{crap_row:#?}");
+}
+
+fn write_same_named_handler_fixture(root: &Path, first: usize, second: usize) {
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"same-named-handlers","type":"module","main":"src/handlers.js"}"#,
+    );
+    write_file(
+        &root.join("src/handlers.js"),
+        &same_named_handlers_source(first, second),
+    );
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/**"], "functions": ["handler"], "maxCyclomatic": 25 }
+    ]
+  }
+}
+"#,
+    );
+}
+
+fn override_row_by_cyclomatic(json: &serde_json::Value, cyclomatic: u64) -> &serde_json::Value {
+    threshold_override_rows(json)
+        .iter()
+        .find(|row| row["metrics"]["cyclomatic"].as_u64() == Some(cyclomatic))
+        .unwrap_or_else(|| panic!("a row measuring cyclomatic {cyclomatic}: {json:#?}"))
+}
+
+/// A name is not an identity. Keying the join on it let the last-written
+/// same-named unit hand its `exceeded` to every other row, so a row advised
+/// raising `maxCrap` while the finding it describes fires on cyclomatic too.
+#[test]
+fn health_override_outstanding_is_not_stolen_by_a_same_named_unit() {
+    let dir = tempdir().expect("create temp dir");
+    write_same_named_handler_fixture(dir.path(), 29, 11);
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    let breaching = override_row_by_cyclomatic(&json, 30);
+    assert_eq!(breaching["status"].as_str(), Some("insufficient"));
+    assert_eq!(
+        breaching["outstanding"].as_array().map(Vec::len),
+        Some(2),
+        "the unit breaches both dimensions: {breaching:#?}"
+    );
+    let quiet = override_row_by_cyclomatic(&json, 12);
+    assert_eq!(
+        quiet["outstanding"].as_array().map(|dimensions| dimensions
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>()),
+        Some(vec!["crap"]),
+        "{quiet:#?}"
+    );
+    assert_no_insufficient_row_without_outstanding(&json);
+}
+
+/// Two same-named units that land on the same status used to collapse into one
+/// row, dropping the other unit's metrics from the report entirely.
+#[test]
+fn health_override_rows_do_not_collapse_across_same_named_units() {
+    let dir = tempdir().expect("create temp dir");
+    write_same_named_handler_fixture(dir.path(), 29, 27);
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    let insufficient: Vec<_> = threshold_override_rows(&json)
+        .iter()
+        .filter(|row| {
+            row["status"].as_str() == Some("insufficient")
+                && row["dimension"].as_str() == Some("complexity")
+        })
+        .collect();
+    assert_eq!(insufficient.len(), 2, "{json:#?}");
+    let lines: Vec<_> = insufficient
+        .iter()
+        .filter_map(|row| row["line"].as_u64())
+        .collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "both rows carry a position: {insufficient:#?}"
+    );
+    assert_ne!(lines[0], lines[1], "{insufficient:#?}");
+    let metrics: Vec<_> = insufficient
+        .iter()
+        .filter_map(|row| row["metrics"]["cyclomatic"].as_u64())
+        .collect();
+    assert!(
+        metrics.contains(&30) && metrics.contains(&28),
+        "each row keeps its own unit's metrics: {insufficient:#?}"
+    );
+}
+
+fn board_astro_override_root(root: &Path) {
+    copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/Board.astro"], "maxCrap": 100 }
+    ]
+  }
+}
+"#,
+    );
+}
+
+fn board_astro_codeclimate_description(text: &str) -> String {
+    let issues: Vec<serde_json::Value> =
+        serde_json::from_str(text).unwrap_or_else(|error| panic!("codeclimate JSON: {error}"));
+    issues
+        .iter()
+        .find(|issue| {
+            issue["location"]["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("Board.astro"))
+        })
+        .and_then(|issue| issue["description"].as_str())
+        .unwrap_or_else(|| panic!("a Board.astro codeclimate issue: {text}"))
+        .to_owned()
+}
+
+fn board_astro_sarif_message(text: &str) -> String {
+    let sarif: serde_json::Value =
+        serde_json::from_str(text).unwrap_or_else(|error| panic!("sarif JSON: {error}"));
+    sarif["runs"][0]["results"]
+        .as_array()
+        .expect("sarif results")
+        .iter()
+        .find(|result| {
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                .as_str()
+                .is_some_and(|uri| uri.ends_with("Board.astro"))
+        })
+        .and_then(|result| result["message"]["text"].as_str())
+        .unwrap_or_else(|| panic!("a Board.astro sarif result: {text}"))
+        .to_owned()
+}
+
+fn board_astro_comment_row(text: &str) -> String {
+    text.lines()
+        .find(|line| line.contains("Board.astro") && line.contains("CRAP score"))
+        .unwrap_or_else(|| panic!("a Board.astro comment row: {text}"))
+        .to_owned()
+}
+
+/// The ceiling a reader sees must be the one the finding was measured with, in
+/// every format and on both the direct and the `report --from` path. SARIF and
+/// the CodeClimate-derived comment formats used to disagree inside one run.
+#[test]
+fn health_formats_agree_on_an_override_affected_ceiling() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    board_astro_override_root(root);
+
+    let json = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "json"],
+    );
+    let saved = root.join("health.json");
+    write_file(&saved, &json.stdout);
+
+    let direct_sarif = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "sarif"],
+    );
+    let saved_sarif = run_fallow_raw(&[
+        "report",
+        "--from",
+        saved.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--quiet",
+        "--format",
+        "sarif",
+    ]);
+    let codeclimate = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "codeclimate"],
+    );
+    let comment = run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--quiet", "--format", "pr-comment-github"],
+    );
+
+    for (label, row) in [
+        (
+            "direct sarif",
+            board_astro_sarif_message(&direct_sarif.stdout),
+        ),
+        (
+            "saved sarif",
+            board_astro_sarif_message(&saved_sarif.stdout),
+        ),
+        (
+            "codeclimate",
+            board_astro_codeclimate_description(&codeclimate.stdout),
+        ),
+        (
+            "pr-comment-github",
+            board_astro_comment_row(&comment.stdout),
+        ),
+    ] {
+        assert!(
+            row.contains("threshold: 100.0"),
+            "{label} must quote the override ceiling: {row}"
+        );
+        assert!(
+            !row.contains("threshold: 30.0"),
+            "{label} must not quote the global ceiling: {row}"
+        );
+    }
+}
+
+/// A long but complexity-clean function, so the only ceiling it can breach is
+/// `maxUnitSize`.
+fn long_clean_source(name: &str, lines: usize) -> String {
+    let mut src = format!("export function {name}(n) {{\n  let total = 0;\n");
+    for step in 0..lines {
+        let _ = writeln!(src, "  total += n * {step};");
+    }
+    src.push_str("  return total;\n}\n");
+    src
+}
+
+/// `maxUnitSize` breaches never reach the findings list, so the row's
+/// `outstanding` has to be seeded by the recorder. Without it a unit-size-only
+/// entry that raised the ceiling without clearing it read `insufficient` with
+/// nothing outstanding, the same contradiction the status vocabulary exists to
+/// prevent (issue #2163).
+#[test]
+fn health_unit_size_only_override_that_still_breaches_names_its_dimension() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"unit-size-override","type":"module","main":"src/long.js"}"#,
+    );
+    write_file(&root.join("src/long.js"), &long_clean_source("longFn", 100));
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/long.js"], "maxUnitSize": 80 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+
+    assert_no_insufficient_row_without_outstanding(&json);
+    let row = threshold_override_rows(&json)
+        .iter()
+        .find(|row| row["function"].as_str() == Some("longFn"))
+        .unwrap_or_else(|| panic!("a row for the matched unit: {json:#?}"));
+    assert_eq!(row["status"].as_str(), Some("insufficient"), "{row:#?}");
+    assert_eq!(
+        row["outstanding"].as_array().map(|dimensions| dimensions
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>()),
+        Some(vec!["complexity"]),
+        "103 lines still exceed the raised 80: {row:#?}"
+    );
+}
+
+/// `functions: ["<component>"]` is the documented way to scope an entry to the
+/// synthetic Angular rollup. Resolving the rollup's ceilings without recording
+/// the match reported `no_match`, the user's only signal that a glob is wrong,
+/// about the entry that had just removed a finding (issue #2163).
+#[test]
+fn health_component_scoped_override_reaches_the_rollup_and_is_disclosed() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    copy_dir_recursive(&fixture_path("angular-component-rollup"), root);
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/host-game.component.ts"],
+        "functions": ["<component>"],
+        "maxCyclomatic": 500,
+        "maxCognitive": 500
+      }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+
+    let findings = json["findings"].as_array().expect("findings array");
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["name"] == "handleClick"),
+        "the entry is scoped to the rollup, so class findings stay: {findings:#?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["name"] != "<component>"),
+        "the raised ceilings reach the rollup: {findings:#?}"
+    );
+    let rows = threshold_override_rows(&json);
+    assert!(
+        rows.iter()
+            .all(|row| row["status"].as_str() != Some("no_match")),
+        "the entry changed the finding set, so no row may claim it matched nothing: {rows:#?}"
+    );
+    let row = rows
+        .iter()
+        .find(|row| row["function"].as_str() == Some("<component>"))
+        .unwrap_or_else(|| panic!("a row for the rollup: {rows:#?}"));
+    assert_eq!(row["status"].as_str(), Some("active"), "{row:#?}");
+    assert!(
+        row["line"].as_u64().is_some(),
+        "the row carries the rollup's anchor position: {row:#?}"
     );
 }

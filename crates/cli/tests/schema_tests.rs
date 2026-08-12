@@ -110,6 +110,29 @@ fn explain_markdown_is_markdown() {
     );
 }
 
+/// Guard against the template-complexity copy drifting back to Angular-only.
+/// The metric fires on Vue, Svelte and Astro markup too (issue #2163).
+#[test]
+fn explain_complexity_guidance_names_every_template_dialect() {
+    for rule in ["high-complexity", "high-crap-score"] {
+        let output = run_fallow_raw(&["explain", rule, "--format", "json", "--quiet"]);
+        assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+        let json = parse_json(&output);
+        let copy = format!(
+            "{} {} {}",
+            json["example"].as_str().unwrap_or_default(),
+            json["how_to_fix"].as_str().unwrap_or_default(),
+            json["full"].as_str().unwrap_or_default(),
+        );
+        for dialect in ["Svelte", "Vue"] {
+            assert!(
+                copy.contains(dialect),
+                "{rule} guidance should name {dialect}: {copy}"
+            );
+        }
+    }
+}
+
 #[test]
 fn explain_rejects_unknown_issue_type() {
     let output = run_fallow_raw(&["explain", "not-a-real-rule", "--format", "json", "--quiet"]);

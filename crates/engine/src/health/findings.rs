@@ -9,8 +9,8 @@ use fallow_output::{
 #[cfg(test)]
 use super::threshold_overrides::GlobalHealthThresholds;
 use super::threshold_overrides::{
-    AppliedHealthThresholds, ComplexityFunctionContext, MeasuredThresholdMetrics,
-    ThresholdOverrideResolver, ThresholdOverrideStateTracker,
+    AppliedHealthThresholds, ComplexityFunctionContext, CrapFunctionContext,
+    MeasuredThresholdMetrics, ThresholdOverrideResolver, ThresholdOverrideStateTracker,
 };
 use super::{react_hooks, scoring};
 
@@ -143,11 +143,15 @@ fn collect_complexity_finding(
         ComplexityFunctionContext {
             path,
             function: &fc.name,
+            line: fc.line,
+            col: fc.col,
             cyclomatic: fc.cyclomatic,
             cognitive: fc.cognitive,
+            line_count: fc.line_count,
         },
         &matched_overrides,
         input.threshold_resolver.global,
+        applied_thresholds.effective,
     );
     let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
     let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
@@ -292,9 +296,19 @@ fn process_crap_findings_for_path(input: CrapPathProcessingInput<'_, '_, '_>) {
         let relative = path.strip_prefix(merge.config_root).unwrap_or(path);
         let (applied_thresholds, matched_overrides) =
             merge.threshold_resolver.resolve(relative, &fc.name);
+        let suppressed = crap_is_suppressed(path, pf, &maps.suppressions_by_path);
+        // Recorded before the guards, not behind them: `record_crap` is what
+        // registers the entry as matched, so skipping it for a suppressed or
+        // below-threshold unit turns a glob that did match into a `no_match`
+        // row (issue #2163).
         merge.threshold_state_tracker.record_crap(
-            path,
-            &fc.name,
+            CrapFunctionContext {
+                path,
+                function: &fc.name,
+                line: pf.line,
+                col: pf.col,
+                suppressed,
+            },
             MeasuredThresholdMetrics {
                 cyclomatic: fc.cyclomatic,
                 cognitive: fc.cognitive,
@@ -302,10 +316,9 @@ fn process_crap_findings_for_path(input: CrapPathProcessingInput<'_, '_, '_>) {
             },
             &matched_overrides,
             merge.threshold_resolver.global,
+            applied_thresholds.effective,
         );
-        if pf.crap < applied_thresholds.effective.max_crap
-            || crap_is_suppressed(path, pf, &maps.suppressions_by_path)
-        {
+        if pf.crap < applied_thresholds.effective.max_crap || suppressed {
             continue;
         }
 

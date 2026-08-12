@@ -348,6 +348,36 @@ fn github_annotations_health_snapshot() {
     insta::assert_snapshot!("github_annotations_health", rendered);
 }
 
+/// An override-affected finding must be annotated against the ceiling it was
+/// measured with, not the run's global summary ceiling (issue #2163). The jq
+/// mirror `action/jq/annotations-health.jq` is held to the same assertion by
+/// `action/tests/run.sh`.
+#[test]
+fn annotations_use_the_finding_effective_threshold() {
+    let mut envelope = health_envelope();
+    envelope["findings"] = json!([
+        {
+            "path": "src/Board.astro", "line": 6, "col": 3, "name": "<template>",
+            "severity": "critical", "exceeded": "crap", "cyclomatic": 11,
+            "cognitive": 4, "crap": 132.0, "line_count": 20,
+            "threshold_source": "override",
+            "effective_thresholds": {
+                "max_cyclomatic": 20, "max_cognitive": 15,
+                "max_crap": 100.0, "max_unit_size": 60
+            }
+        }
+    ]);
+
+    let rendered = render_annotations(EnvelopeKind::Health, &envelope, &plain_options());
+
+    assert_eq!(
+        rendered.matches("(threshold: 100)").count(),
+        2,
+        "{rendered}"
+    );
+    assert!(!rendered.contains("(threshold: 30)"), "{rendered}");
+}
+
 #[test]
 fn github_annotations_audit_snapshot() {
     let rendered = render_annotations(EnvelopeKind::Audit, &audit_envelope(), &plain_options());

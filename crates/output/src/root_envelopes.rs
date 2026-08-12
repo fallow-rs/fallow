@@ -8,7 +8,11 @@ use serde::Serialize;
 pub const AUDIT_SCHEMA_VERSION: u32 = 9;
 
 /// Current schema version for bare combined JSON output.
-pub const COMBINED_SCHEMA_VERSION: u32 = 9;
+///
+/// Version 10 tracks the embedded health contract: `threshold_overrides[]`
+/// rows gained the required `dimension` field and the `insufficient` status
+/// (issue #2163), and an envelope embedding a changed contract bumps with it.
+pub const COMBINED_SCHEMA_VERSION: u32 = 10;
 
 /// Schema projection for the audit envelope's exact version.
 #[cfg(feature = "schema")]

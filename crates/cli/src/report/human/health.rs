@@ -1601,31 +1601,67 @@ fn render_large_functions(
     lines.push(String::new());
 }
 
+/// Human twin of the `suppress-line` action built for SFC templates. Sources the
+/// comment from `fallow_output` so the hint and the JSON action cannot drift. The
+/// template unit is anchored at its FIRST contributing construct, not at the top
+/// of the file, so the comment has to sit on the line directly above the
+/// reported line.
+fn sfc_template_suppression_hint() -> String {
+    format!(
+        "To suppress SFC templates: {} on the line directly above the reported line",
+        fallow_output::SFC_TEMPLATE_SUPPRESS_COMMENT
+    )
+}
+
+/// True when the extension names a single-file-component dialect whose template
+/// lives in markup, not in a TypeScript decorator literal.
+fn is_sfc_template_extension(ext: &str) -> bool {
+    ext.eq_ignore_ascii_case("svelte")
+        || ext.eq_ignore_ascii_case("vue")
+        || ext.eq_ignore_ascii_case("astro")
+}
+
+fn template_finding_extension(finding: &fallow_output::ComplexityViolation) -> Option<&str> {
+    if finding.name != "<template>" {
+        return None;
+    }
+    finding.path.extension().and_then(|ext| ext.to_str())
+}
+
 /// Append per-finding-kind suppression hints to the findings section footer.
 ///
-/// External `.html` templates take a file-level HTML comment; inline
-/// `@Component` templates take a line-level TS comment placed directly above
-/// the decorator. `<component>` rollups suppress through the worst class
-/// method (the rollup anchors at that method's line). Generic function
-/// findings get the catch-all hint above a `>=3` noise threshold. Extracted
-/// from `render_findings` to keep that function under the SIG unit-size
-/// threshold.
+/// External `.html` templates take a file-level HTML comment; SFC markup
+/// (`.svelte`, `.vue`, `.astro`) takes an HTML comment on the line above the
+/// reported anchor line; inline `@Component` templates take a line-level TS
+/// comment placed directly above the decorator. `<component>` rollups suppress
+/// through the worst class method (the rollup anchors at that method's line).
+/// Generic function findings get the catch-all hint above a `>=3` noise
+/// threshold. Extracted from `render_findings` to keep that function under the
+/// SIG unit-size threshold.
 fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     let has_html_template = report.findings.iter().any(|finding| {
-        finding.name == "<template>"
-            && finding
-                .path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+        template_finding_extension(finding).is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
     });
+    let has_sfc_template = report
+        .findings
+        .iter()
+        .any(|finding| template_finding_extension(finding).is_some_and(is_sfc_template_extension));
+    // Exact complement of the `above-angular-decorator` fallthrough in
+    // `fallow_output::build_suppress_action`: every template that is neither
+    // `.html` nor SFC markup gets the Angular hint there, so narrowing this to an
+    // extension allowlist would leave the human surface silent while JSON still
+    // advertises the action. Keep the `<template>` guard explicit rather than
+    // routing through `template_finding_extension`, whose `None` also covers
+    // ordinary function findings.
     let has_inline_template = report.findings.iter().any(|finding| {
         finding.name == "<template>"
             && finding
                 .path
                 .extension()
                 .and_then(|ext| ext.to_str())
-                .is_none_or(|ext| !ext.eq_ignore_ascii_case("html"))
+                .is_none_or(|ext| {
+                    !ext.eq_ignore_ascii_case("html") && !is_sfc_template_extension(ext)
+                })
     });
     let has_component_rollup = report
         .findings
@@ -1640,6 +1676,9 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::Hea
             "  {}",
             "To suppress HTML templates: <!-- fallow-ignore-file complexity -->".dimmed()
         ));
+    }
+    if has_sfc_template {
+        lines.push(format!("  {}", sfc_template_suppression_hint().dimmed()));
     }
     if has_inline_template {
         lines.push(format!(
@@ -1719,7 +1758,7 @@ fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport
     };
     lines.push(format!(
         "  {}",
-        format!("{scope} exceeding cyclomatic, cognitive, or CRAP thresholds ({DOCS_HEALTH}#complexity-metrics)")
+        format!("{scope} exceeding cyclomatic, cognitive, or CRAP thresholds; ! marks the dimension that breached ({DOCS_HEALTH}#complexity-metrics)")
             .dimmed()
     ));
     append_suppression_hints(lines, report);
@@ -1794,9 +1833,11 @@ fn push_finding_metric_rows(
         finding_generated_tag(finding),
     ));
     lines.push(format!(
-        "         {} cyclomatic  {} cognitive  {} lines",
+        "         {}{} cyclomatic  {}{} cognitive  {} lines",
         threshold_colored(finding.cyclomatic, thresholds.max_cyclomatic),
+        breach_marker(finding.exceeded.includes_cyclomatic()),
         threshold_colored(finding.cognitive, thresholds.max_cognitive),
+        breach_marker(finding.exceeded.includes_cognitive()),
         format!("{:>3}", finding.line_count).dimmed(),
     ));
     if let Some(line) = render_react_context(finding) {
@@ -1811,6 +1852,49 @@ fn push_finding_metric_rows(
     if let Some(line) = finding_crap_line(finding, root) {
         lines.push(line);
     }
+    if let Some(line) = finding_override_thresholds_line(finding, thresholds) {
+        lines.push(line);
+    }
+}
+
+/// Colour-independent marker for the dimension that actually breached.
+///
+/// Driven off `exceeded`, never a re-comparison, so human output can never
+/// disagree with the JSON discriminant. Fixed width so the metric columns stay
+/// aligned, and plain ASCII so the signal survives `NO_COLOR`, pipes, and
+/// pasted terminal logs (issue #2163).
+fn breach_marker(breached: bool) -> &'static str {
+    if breached { " !" } else { "  " }
+}
+
+/// Name the ceilings a finding was actually measured against when a
+/// `thresholdOverrides` entry moved them.
+///
+/// The report header prints the GLOBAL ceilings, so without this line a user
+/// who raised `maxCyclomatic` and `maxCognitive` but left `maxCrap` alone has no
+/// way to see which ceiling still applies (issue #2163). Renders only for
+/// override-affected findings.
+fn finding_override_thresholds_line(
+    finding: &fallow_output::ComplexityViolation,
+    thresholds: fallow_output::HealthEffectiveThresholds,
+) -> Option<String> {
+    if !matches!(
+        finding.threshold_source,
+        Some(fallow_output::ThresholdSource::Override)
+    ) {
+        return None;
+    }
+    Some(format!(
+        "         {}",
+        format!(
+            "override: cyclomatic {}, cognitive {}, CRAP {:.1}, unit size {}",
+            thresholds.max_cyclomatic,
+            thresholds.max_cognitive,
+            thresholds.max_crap,
+            thresholds.max_unit_size,
+        )
+        .dimmed()
+    ))
 }
 
 /// Render the descriptive React-shape context line for a complexity finding:
@@ -1917,17 +2001,7 @@ fn finding_thresholds(
     finding: &fallow_output::ComplexityViolation,
     report: &fallow_output::HealthReport,
 ) -> fallow_output::HealthEffectiveThresholds {
-    finding
-        .effective_thresholds
-        .unwrap_or(fallow_output::HealthEffectiveThresholds {
-            max_cyclomatic: report.summary.max_cyclomatic_threshold,
-            max_cognitive: report.summary.max_cognitive_threshold,
-            max_crap: report.summary.max_crap_threshold,
-            // Not rendered on complexity findings today, but carry the run's
-            // configured global unit-size ceiling (not the static default) so
-            // the fallback stays consistent with the other three thresholds.
-            max_unit_size: report.summary.max_unit_size_threshold,
-        })
+    finding.resolved_thresholds(&report.summary)
 }
 
 fn threshold_colored(value: u16, threshold: u16) -> String {
@@ -1955,9 +2029,21 @@ fn finding_generated_tag(finding: &fallow_output::ComplexityViolation) -> String
     }
 }
 
+/// Render the CRAP row.
+///
+/// The CRAP value is highlighted only when CRAP is one of the dimensions that
+/// produced the finding. It used to render red unconditionally, which made a
+/// benign CRAP look identical to a breaching one and left the colour channel
+/// carrying no information (issue #2163).
 fn finding_crap_line(finding: &fallow_output::ComplexityViolation, root: &Path) -> Option<String> {
     let crap = finding.crap?;
-    let crap_colored = format!("{crap:>5.1}").red().bold().to_string();
+    let breached = finding.exceeded.includes_crap();
+    let formatted = format!("{crap:>5.1}");
+    let crap_colored = if breached {
+        formatted.red().bold().to_string()
+    } else {
+        formatted.dimmed().to_string()
+    };
     let coverage_suffix = if let Some(pct) = finding.coverage_pct {
         format!("  ({pct:.0}% tested)")
     } else if matches!(
@@ -1971,7 +2057,8 @@ fn finding_crap_line(finding: &fallow_output::ComplexityViolation, root: &Path) 
         String::new()
     };
     Some(format!(
-        "         {crap_colored} CRAP{}",
+        "         {crap_colored}{} CRAP{}",
+        breach_marker(breached),
         coverage_suffix.dimmed(),
     ))
 }
@@ -1985,31 +2072,38 @@ fn render_threshold_overrides(
         return;
     }
 
+    // Count configured overrides, not state rows: one override contributes one
+    // row per dimension it participates in, and interpolating the row count read
+    // as "you configured N overrides" (issue #2163).
+    let configured_count = {
+        let mut indexes: Vec<usize> = report
+            .threshold_overrides
+            .iter()
+            .map(|entry| entry.override_index)
+            .collect();
+        indexes.sort_unstable();
+        indexes.dedup();
+        indexes.len()
+    };
     lines.push(format!(
         "{} {}",
         "\u{25cf}".yellow(),
-        format!(
-            "Health threshold overrides ({})",
-            report.threshold_overrides.len()
-        )
-        .yellow()
-        .bold()
+        format!("Health threshold overrides ({configured_count})")
+            .yellow()
+            .bold()
     ));
     for entry in &report.threshold_overrides {
         let status = match entry.status {
             fallow_output::ThresholdOverrideStatus::Active => "active",
             fallow_output::ThresholdOverrideStatus::Stale => "stale",
+            fallow_output::ThresholdOverrideStatus::Insufficient => "insufficient",
             fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
+        let dimension = threshold_override_dimension_label(entry.dimension);
+        let outstanding = threshold_override_outstanding_suffix(&entry.outstanding);
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
-            |path| {
-                let display = crate::report::format_display_path(path, root);
-                entry
-                    .function
-                    .as_ref()
-                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
-            },
+            |path| entry.target_label(&crate::report::format_display_path(path, root)),
         );
         let metrics = entry.metrics.map_or(String::new(), |metrics| {
             let crap = metrics
@@ -2021,11 +2115,39 @@ fn render_threshold_overrides(
             )
         });
         lines.push(format!(
-            "    #{idx} {status} {target}{metrics}",
+            "    #{idx} {dimension} {status} {target}{metrics}{outstanding}",
             idx = entry.override_index
         ));
     }
     lines.push(String::new());
+}
+
+fn threshold_override_dimension_label(
+    dimension: fallow_output::ThresholdOverrideDimension,
+) -> &'static str {
+    match dimension {
+        fallow_output::ThresholdOverrideDimension::Complexity => "complexity",
+        fallow_output::ThresholdOverrideDimension::Crap => "crap",
+    }
+}
+
+fn threshold_override_outstanding_suffix(
+    outstanding: &[fallow_output::ThresholdOverrideDimension],
+) -> String {
+    if outstanding.is_empty() {
+        return String::new();
+    }
+    let names: Vec<&str> = outstanding
+        .iter()
+        .map(|dimension| match dimension {
+            fallow_output::ThresholdOverrideDimension::Complexity => "complexity",
+            fallow_output::ThresholdOverrideDimension::Crap => "CRAP",
+        })
+        .collect();
+    // "still breaches", not "finding still fires": the complexity dimension
+    // covers `maxUnitSize`, which keeps a unit in the large-function list
+    // without ever emitting a finding of its own.
+    format!(" (still breaches: {})", names.join(", "))
 }
 
 fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
@@ -2686,8 +2808,8 @@ mod tests {
         assert!(text.contains("src/parser.ts"));
         assert!(text.contains(":42"));
         assert!(text.contains("parseExpression"));
-        assert!(text.contains("25 cyclomatic"));
-        assert!(text.contains("30 cognitive"));
+        assert!(text.contains("25 ! cyclomatic"));
+        assert!(text.contains("30 ! cognitive"));
         assert!(text.contains("80 lines"));
     }
 
@@ -2736,6 +2858,333 @@ mod tests {
         assert!(text.contains("High complexity findings (1)"));
         assert!(text.contains("<template> (template complexity)"));
         assert!(text.contains("Functions and synthetic template or component entries"));
+    }
+
+    /// Minimal complexity violation for the issue-2163 disclosure tests.
+    fn disclosure_violation(
+        path: PathBuf,
+        name: &str,
+        exceeded: fallow_output::ExceededThreshold,
+    ) -> fallow_output::ComplexityViolation {
+        fallow_output::ComplexityViolation {
+            path,
+            name: name.to_string(),
+            line: 5,
+            col: 0,
+            cyclomatic: 9,
+            cognitive: 21,
+            line_count: 13,
+            param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded,
+            severity: fallow_output::FindingSeverity::High,
+            crap: Some(90.0),
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
+        }
+    }
+
+    fn disclosure_report(
+        findings: Vec<fallow_output::ComplexityViolation>,
+    ) -> fallow_output::HealthReport {
+        let count = findings.len();
+        fallow_output::HealthReport {
+            findings: findings.into_iter().map(Into::into).collect(),
+            summary: fallow_output::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: count,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    const OVERRIDE_THRESHOLDS: fallow_output::HealthEffectiveThresholds =
+        fallow_output::HealthEffectiveThresholds {
+            max_cyclomatic: 500,
+            max_cognitive: 500,
+            max_crap: 30.0,
+            max_unit_size: 60,
+        };
+
+    #[test]
+    fn crap_only_breach_marks_crap_and_not_complexity() {
+        let root = PathBuf::from("/project");
+        let mut finding = disclosure_violation(
+            root.join("src/Widget.svelte"),
+            "<template>",
+            fallow_output::ExceededThreshold::Crap,
+        );
+        finding.effective_thresholds = Some(OVERRIDE_THRESHOLDS);
+        finding.threshold_source = Some(fallow_output::ThresholdSource::Override);
+        let report = disclosure_report(vec![finding]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(text.contains("90.0 ! CRAP"), "{text}");
+        assert!(!text.contains("9 ! cyclomatic"), "{text}");
+        assert!(!text.contains("21 ! cognitive"), "{text}");
+    }
+
+    #[test]
+    fn override_affected_finding_names_the_ceilings_in_force() {
+        let root = PathBuf::from("/project");
+        let mut finding = disclosure_violation(
+            root.join("src/Widget.svelte"),
+            "<template>",
+            fallow_output::ExceededThreshold::Crap,
+        );
+        finding.effective_thresholds = Some(OVERRIDE_THRESHOLDS);
+        finding.threshold_source = Some(fallow_output::ThresholdSource::Override);
+        let report = disclosure_report(vec![finding]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(
+            text.contains("override: cyclomatic 500, cognitive 500, CRAP 30.0, unit size 60"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn finding_without_override_renders_no_ceilings_line() {
+        let root = PathBuf::from("/project");
+        let finding = disclosure_violation(
+            root.join("src/a.ts"),
+            "parse",
+            fallow_output::ExceededThreshold::Crap,
+        );
+        let report = disclosure_report(vec![finding]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(!text.contains("override:"), "{text}");
+    }
+
+    #[test]
+    fn all_dimensions_breach_marks_every_metric() {
+        let root = PathBuf::from("/project");
+        let finding = disclosure_violation(
+            root.join("src/a.ts"),
+            "parse",
+            fallow_output::ExceededThreshold::All,
+        );
+        let report = disclosure_report(vec![finding]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(text.contains("9 ! cyclomatic"), "{text}");
+        assert!(text.contains("21 ! cognitive"), "{text}");
+        assert!(text.contains("90.0 ! CRAP"), "{text}");
+    }
+
+    /// A colour-free reader has no other way to learn what `!` means, and the
+    /// footer is the only line in the section that can carry the legend.
+    #[test]
+    fn findings_footer_explains_the_breach_marker() {
+        let root = PathBuf::from("/project");
+        let report = disclosure_report(vec![disclosure_violation(
+            root.join("src/a.ts"),
+            "parse",
+            fallow_output::ExceededThreshold::All,
+        )]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(
+            text.contains("! marks the dimension that breached"),
+            "{text}"
+        );
+    }
+
+    /// The renderer's styling rule is contract-tested against `exceeded` alone
+    /// and deliberately does not assume the engine's current attach-on-breach
+    /// behavior, so this input pairs an attached `crap` with an `exceeded` that
+    /// omits it. The producing invariant is pinned in the engine instead.
+    #[test]
+    fn crap_is_dimmed_when_exceeded_does_not_include_crap() {
+        let root = PathBuf::from("/project");
+        let mut finding = disclosure_violation(
+            root.join("src/a.ts"),
+            "parse",
+            fallow_output::ExceededThreshold::Cyclomatic,
+        );
+        finding.crap = Some(4.0);
+        let report = disclosure_report(vec![finding]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(text.contains("9 ! cyclomatic"), "{text}");
+        assert!(!text.contains("4.0 ! CRAP"), "{text}");
+        assert!(text.contains("4.0   CRAP"), "{text}");
+    }
+
+    #[test]
+    fn threshold_override_section_counts_configured_overrides_not_rows() {
+        let root = PathBuf::from("/project");
+        let mut report = disclosure_report(vec![disclosure_violation(
+            root.join("src/Widget.svelte"),
+            "<template>",
+            fallow_output::ExceededThreshold::Crap,
+        )]);
+        let base = fallow_output::ThresholdOverrideState {
+            status: fallow_output::ThresholdOverrideStatus::Active,
+            override_index: 0,
+            dimension: fallow_output::ThresholdOverrideDimension::Complexity,
+            outstanding: vec![fallow_output::ThresholdOverrideDimension::Crap],
+            path: Some(PathBuf::from("src/Widget.svelte")),
+            function: Some("<template>".to_string()),
+            line: Some(7),
+            col: Some(0),
+            configured_thresholds: fallow_output::HealthConfiguredThresholds {
+                max_cyclomatic: Some(500),
+                max_cognitive: Some(500),
+                max_crap: None,
+                max_unit_size: None,
+            },
+            effective_thresholds: OVERRIDE_THRESHOLDS,
+            metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                cyclomatic: 9,
+                cognitive: 21,
+                crap: None,
+            }),
+            reason: None,
+        };
+        let crap_row = fallow_output::ThresholdOverrideState {
+            dimension: fallow_output::ThresholdOverrideDimension::Crap,
+            outstanding: Vec::new(),
+            metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                cyclomatic: 9,
+                cognitive: 21,
+                crap: Some(90.0),
+            }),
+            ..base.clone()
+        };
+        report.threshold_overrides = vec![base, crap_row];
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(text.contains("Health threshold overrides (1)"), "{text}");
+        assert!(text.contains("#0 complexity active"), "{text}");
+        assert!(text.contains("#0 crap active"), "{text}");
+        assert!(text.contains("(still breaches: CRAP)"), "{text}");
+    }
+
+    #[test]
+    fn sfc_template_findings_get_markup_suppression_hint() {
+        let root = PathBuf::from("/project");
+        let report = disclosure_report(vec![disclosure_violation(
+            root.join("src/Widget.svelte"),
+            "<template>",
+            fallow_output::ExceededThreshold::Crap,
+        )]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(
+            text.contains(fallow_output::SFC_TEMPLATE_SUPPRESS_COMMENT),
+            "{text}"
+        );
+        assert!(!text.contains("above @Component"), "{text}");
+    }
+
+    #[test]
+    fn inline_angular_template_findings_keep_decorator_hint() {
+        let root = PathBuf::from("/project");
+        for file in [
+            "src/host.component.ts",
+            "src/host.component.tsx",
+            "src/host.component.mjs",
+            "src/host.component.gts",
+        ] {
+            let report = disclosure_report(vec![disclosure_violation(
+                root.join(file),
+                "<template>",
+                fallow_output::ExceededThreshold::Crap,
+            )]);
+
+            let text = plain(&build_health_human_lines(&report, &root));
+            assert!(text.contains("above @Component"), "{file}: {text}");
+            assert!(
+                !text.contains("To suppress SFC templates"),
+                "{file}: {text}"
+            );
+        }
+    }
+
+    /// The human hint and the JSON `suppress-line` action are one contract: any
+    /// finding routed to `above-angular-decorator` must also produce the human
+    /// decorator hint. Narrowing either side to an extension allowlist silently
+    /// splits them (issue #2163 follow-up). The lockstep holds for the default
+    /// action options asserted here; `health.suggestInlineSuppression: false`
+    /// drops both surfaces together, which is why this pins the default.
+    #[test]
+    fn angular_decorator_action_and_human_hint_stay_in_lockstep() {
+        let root = PathBuf::from("/project");
+        let ctx = fallow_output::HealthActionContext {
+            opts: fallow_output::HealthActionOptions::default(),
+            max_cyclomatic_threshold: 20,
+            max_cognitive_threshold: 15,
+            max_crap_threshold: 30.0,
+            crap_refactor_band: 5,
+        };
+        for file in [
+            "src/host.component.ts",
+            "src/host.component.js",
+            "src/host.component.mts",
+            "src/host.component.cts",
+            "src/host.component.mjs",
+            "src/host.component.cjs",
+            "src/host.component.tsx",
+            "src/host.component.jsx",
+            "src/host.component.gts",
+            "src/host.component.gjs",
+            "src/host.component.html",
+            "src/Widget.svelte",
+            "src/Panel.vue",
+            "src/Board.astro",
+        ] {
+            let violation = disclosure_violation(
+                root.join(file),
+                "<template>",
+                fallow_output::ExceededThreshold::Crap,
+            );
+            let is_angular = fallow_output::build_health_finding_actions(&violation, &ctx)
+                .iter()
+                .any(|action| action.placement.as_deref() == Some("above-angular-decorator"));
+            let text = plain(&build_health_human_lines(
+                &disclosure_report(vec![violation]),
+                &root,
+            ));
+            assert_eq!(
+                is_angular,
+                text.contains("above @Component"),
+                "{file}: JSON action and human hint disagree: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_template_findings_emit_both_suppression_hints() {
+        let root = PathBuf::from("/project");
+        let report = disclosure_report(vec![
+            disclosure_violation(
+                root.join("src/Widget.svelte"),
+                "<template>",
+                fallow_output::ExceededThreshold::Crap,
+            ),
+            disclosure_violation(
+                root.join("src/host.component.ts"),
+                "<template>",
+                fallow_output::ExceededThreshold::Crap,
+            ),
+        ]);
+
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(text.contains("To suppress SFC templates"), "{text}");
+        assert!(text.contains("above @Component"), "{text}");
     }
 
     #[test]
@@ -4733,8 +5182,8 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("25 cyclomatic"));
-        assert!(text.contains("10 cognitive"));
+        assert!(text.contains("25 ! cyclomatic"));
+        assert!(text.contains("10   cognitive"));
     }
 
     #[test]
@@ -4772,8 +5221,8 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("10 cyclomatic"));
-        assert!(text.contains("25 cognitive"));
+        assert!(text.contains("10   cyclomatic"));
+        assert!(text.contains("25 ! cognitive"));
     }
 
     #[test]

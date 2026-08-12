@@ -12,7 +12,7 @@ Complete command and flag specifications for all fallow CLI commands.
 - [`list`: Project Introspection](#list-project-introspection)
 - [`init`: Config Generation](#init-config-generation)
 - [`migrate`: Config Migration](#migrate-config-migration)
-- [`health`: Function Complexity Analysis](#health-function-complexity-analysis)
+- [`health`: Function Complexity and File Health Analysis](#health-function-complexity-and-file-health-analysis)
 - [`audit`: Changed-File Quality Gate](#audit-changed-file-quality-gate)
 - [`flags`: Feature Flag Detection](#flags-feature-flag-detection)
 - [`explain`: Rule Explanation](#explain-rule-explanation)
@@ -62,7 +62,7 @@ Analyzes the project for unused files, exports, dependencies, types, members, an
 | `--unused-files` | Unused files |
 | `--unused-exports` | Unused exports |
 | `--unused-types` | Unused types |
-| `--private-type-leaks` | Opt-in API hygiene check (default `off`) for exported signatures that reference same-file private types. Storybook `*.stories.*` story files and framework routing convention files (Next.js App + Pages Router, Gatsby, Remix v2, TanStack Router, Expo Router) are skipped to avoid noise. Enable via this flag or `private-type-leaks: "warn"` / `"error"` in [`rules`](#rules-configuration). |
+| `--private-type-leaks` | Opt-in API hygiene check (default `off`) for exported signatures that reference same-file private types. Storybook `*.stories.*` story files and framework routing convention files (Next.js App + Pages Router, Gatsby, Remix v2, TanStack Router, Expo Router) are skipped to avoid noise. Enable via this flag or `private-type-leaks: "warn"` / `"error"` in [`rules`](#configuration-file-format). |
 | `--unused-deps` | Unused dependencies, devDependencies, optionalDependencies, type-only production deps, and test-only production deps |
 | `--unused-enum-members` | Unused enum members |
 | `--unused-class-members` | Unused class members |
@@ -351,11 +351,11 @@ fallow migrate --from knip.jsonc
 
 ---
 
-## `health`: Function Complexity & File Health Analysis
+## `health`: Function Complexity and File Health Analysis
 
 Analyzes function complexity across the project using cyclomatic and cognitive complexity metrics. By default all sections are included (health score, complexity findings, file scores, hotspots, and refactoring targets). Use `--complexity`, `--file-scores`, `--hotspots`, `--targets`, or `--score` to show only specific sections.
 
-Angular templates contribute synthetic `<template>` complexity findings whenever they use `@if`/`@for`/`@switch`/`@case`/`@defer (when ...)`/`@let` blocks, legacy structural directives (`*ngIf`, `*ngFor`), bound attributes (`[x]`, `(x)`, `bind-x`, `on-x`), or `{{ }}` interpolations. Both standalone external `.html` files referenced via `templateUrl` AND inline `@Component({ template: \`...\` })` literals are scanned. Inline-template findings anchor at the host `.ts` file's `@Component` decorator line and emit a `suppress-line` action with `// fallow-ignore-next-line complexity` (place the comment directly above the `@Component` decorator). External-template findings emit a `suppress-file` action with `<!-- fallow-ignore-file complexity -->` (place at the top of the `.html` file; HTML cannot express line-level comments). Tagged template literals containing `${...}` interpolations and `template:` properties bound to a variable are skipped (out of scope for the first cut).
+Angular templates contribute synthetic `<template>` complexity findings whenever they use `@if`/`@for`/`@switch`/`@case`/`@defer (when ...)`/`@let` blocks, legacy structural directives (`*ngIf`, `*ngFor`), bound attributes (`[x]`, `(x)`, `bind-x`, `on-x`), or `{{ }}` interpolations. Both standalone external `.html` files referenced via `templateUrl` AND inline `@Component({ template: \`...\` })` literals are scanned. Inline-template findings anchor at the host `.ts` file's `@Component` decorator line and emit a `suppress-line` action with `// fallow-ignore-next-line complexity` (place the comment directly above the `@Component` decorator). External-template findings emit a `suppress-file` action with `<!-- fallow-ignore-file complexity -->` (place at the top of the `.html` file; HTML cannot express line-level comments). Tagged template literals containing `${...}` interpolations and `template:` properties bound to a variable are skipped (out of scope for the first cut). Vue, Svelte, and Astro single-file components contribute synthetic `<template>` findings too, each scored against its own control-flow vocabulary; those findings emit a `suppress-line` action with the markup comment `<!-- fallow-ignore-next-line complexity -->` placed on the line immediately above the reported line (`placement: "above-template-anchor-line"`), because the synthetic template unit anchors at its first contributing construct rather than the top of the file.
 
 ### Flags
 
@@ -1330,7 +1330,7 @@ Available on all commands:
 | `FALLOW_TIMEOUT_SECS` | MCP server subprocess timeout in seconds (default: `120`). Increase for very large codebases. |
 | `FALLOW_EXTENDS_TIMEOUT_SECS` | Timeout for fetching remote config inheritance in seconds (default: `5`). Do not raise this for untrusted sources. |
 | `FALLOW_CACHE_MAX_SIZE` | Maximum on-disk extraction cache (`.fallow/cache.bin`) size in megabytes (default: `256`). Triggers LRU eviction when crossed. Wins over `cache.maxSizeMb` config field. Intended for CI runners with disk quotas. `--no-cache` short-circuits this knob. |
-| `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` | Max age (in days since last reuse or fresh create) of a persistent reusable `fallow audit` base-snapshot worktree cache. Older entries are reclaimed at the top of the next `fallow audit` invocation (default: `30`). Wins over `audit.cacheMaxAgeDays` config field. `0` disables the GC; invalid values silently fall back to config / default. |
+| `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` | Max age (in days since last reuse or fresh create) of a persistent reusable `fallow audit` base-snapshot worktree cache. Older entries are reclaimed at the top of the next `fallow audit` invocation (default: `30`). Wins over `audit.cacheMaxAgeDays` config field. `0` disables the GC; invalid values log a warning and fall back to config / default. Each sweep also reclaims abandoned entries from other repo identities (deleted or moved repos, other git worktrees); entries whose recorded owner root still exists are left to that repo's own sweep and setting. |
 | `FALLOW_COMMAND` | GitLab CI: command to run (default: `dead-code`). |
 | `FALLOW_FAIL_ON_ISSUES` | GitLab CI: set to `true` to exit 1 if issues found. |
 | `FALLOW_CHANGED_SINCE` | GitLab CI: git ref for incremental analysis. Auto-detected in MR pipelines. |

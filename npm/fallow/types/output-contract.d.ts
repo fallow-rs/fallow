@@ -270,7 +270,10 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  * Audit-mode marker emitted on each finding when `fallow audit --format json`
  * runs with a base ref. `true` means the finding's structural key was not
  * present at the base ref (introduced by the current changeset); `false`
- * means it was inherited.
+ * means it was inherited. Duplication findings carry one carve-out: a clone
+ * group whose structural key is new but whose instances contain no added line
+ * from the diff (a group re-shaped by removing duplication elsewhere) is
+ * demoted to inherited and serializes `false` (issue #2164).
  *
  * Outside of audit sub-results the field is omitted, so call sites typically
  * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
@@ -505,7 +508,16 @@ export type CoverageSourceConsistency = ("uniform" | "mixed")
 /**
  * Lifecycle state for a configured threshold override.
  */
-export type ThresholdOverrideStatus = ("active" | "stale" | "no_match")
+export type ThresholdOverrideStatus = ("active" | "stale" | "insufficient" | "no_match")
+/**
+ * Which threshold dimension a `thresholdOverrides` state row describes.
+ *
+ * One configured override produces one row per dimension it participates in,
+ * because the complexity ceilings and the CRAP ceiling are evaluated
+ * independently: raising `maxCyclomatic` says nothing about whether the unit
+ * still breaches `maxCrap`.
+ */
+export type ThresholdOverrideDimension = ("complexity" | "crap")
 /**
  * Discriminant for [`UntestedFileAction::kind`]. Mirrors the action types
  * emitted by `build_untested_file_actions`.
@@ -806,7 +818,7 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 /**
  * Exact schema version for [`HealthOutput`].
  */
-export type HealthSchemaVersion = 8
+export type HealthSchemaVersion = 10
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
@@ -931,7 +943,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 9
+export type CombinedSchemaVersion = 10
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */
@@ -5516,8 +5528,13 @@ comment?: (string | null)
 /**
  * Where to insert the suppress comment
  * (e.g., `above-function-declaration`, `above-angular-decorator`,
- * `above-component-worst-method`, or `top-of-template`). Present on
- * `suppress-line` and `suppress-file` action variants.
+ * `above-template-anchor-line`, `above-component-worst-method`, or
+ * `top-of-template`). Present on `suppress-line` and `suppress-file`
+ * action variants. `above-template-anchor-line` is used for
+ * single-file-component markup (`.svelte`, `.vue`, `.astro`), where the
+ * synthetic `<template>` unit is anchored at its first contributing
+ * construct rather than at the top of the file, so the comment belongs on
+ * the line immediately preceding the reported line.
  */
 placement?: (string | null)
 /**
@@ -5661,8 +5678,20 @@ export interface ThresholdOverrideState {
 status: ThresholdOverrideStatus
 /**
  * Index of the entry in the configured `thresholdOverrides` array.
+ * Several rows can share one index when the override participates in more
+ * than one dimension; group on this to count configured overrides.
  */
 override_index: number
+dimension: ThresholdOverrideDimension
+/**
+ * Dimensions the matched unit still breaches despite this override,
+ * whether or not this override configures their ceilings. Non-empty means
+ * raising the ceiling did not settle the matter: a complexity or CRAP
+ * finding survived, or the unit is still longer than the resolved
+ * `maxUnitSize`, which keeps it in the large-function list without
+ * emitting a finding of its own.
+ */
+outstanding?: ThresholdOverrideDimension[]
 /**
  * Matched file path, when the override matched one.
  */
@@ -5671,6 +5700,17 @@ path?: (string | null)
  * Matched function name, for function-scoped overrides.
  */
 function?: (string | null)
+/**
+ * 1-based line of the matched unit. Absent on `no_match` rows, which
+ * describe an entry that matched nothing. Name alone is not an identity:
+ * one file can hold several units sharing a name, so this pairs with
+ * `col` to keep their rows distinct (issue #2163).
+ */
+line?: (number | null)
+/**
+ * 0-based byte column of the matched unit. Absent on `no_match` rows.
+ */
+col?: (number | null)
 configured_thresholds: HealthConfiguredThresholds
 effective_thresholds: HealthEffectiveThresholds
 /**

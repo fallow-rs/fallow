@@ -8,6 +8,8 @@ expression: output
 |:-----|:---------|:---------|:-----------|:----------|:-----|:------|
 | `src/complex.ts:42` | `processData` | high | 25 **!** | 30 **!** | - | 120 |
 
+**!** marks the dimension that breached.
+
 **50** files, **200** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30.0)
 
 ## Runtime Coverage

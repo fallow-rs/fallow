@@ -237,20 +237,18 @@ export const toTradeOffEnvelope = (raw: unknown): TradeOffEnvelope => {
     ? []
     : items
         .filter((d): d is Record<string, unknown> => typeof d === "object" && d !== null)
-        .map(
-          (d): TradeOff => ({
-            id: asString(d["id"]),
-            anchor: asString(d["anchor"]),
-            lens: asString(d["lens"]),
-            observed: asString(d["observed"]),
-            tradeoff: asString(d["tradeoff"]),
-            question: asString(d["question"]),
-            consequence: asSeverity(d["consequence"]),
-            confidence: asSeverity(d["confidence"]),
-            captured: d["captured"] === true,
-            deterministic: false,
-          }),
-        )
+        .map((d): TradeOff => ({
+          id: asString(d["id"]),
+          anchor: asString(d["anchor"]),
+          lens: asString(d["lens"]),
+          observed: asString(d["observed"]),
+          tradeoff: asString(d["tradeoff"]),
+          question: asString(d["question"]),
+          consequence: asSeverity(d["consequence"]),
+          confidence: asSeverity(d["confidence"]),
+          captured: d["captured"] === true,
+          deterministic: false,
+        }))
         .filter((t) => t.anchor.length > 0)
         .toSorted((a, b) => a.anchor.localeCompare(b.anchor) || a.lens.localeCompare(b.lens));
   return { graphSnapshotHash: asString(x["graph_snapshot_hash"]), abstained, tradeoffs };

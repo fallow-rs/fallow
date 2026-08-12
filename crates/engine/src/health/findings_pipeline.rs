@@ -80,8 +80,6 @@ pub(super) fn prepare_health_findings(
         ignore_set: input.ignore_set,
         changed_files: input.changed_files,
         ws_roots: input.ws_roots,
-        max_cyclomatic: input.max_cyclomatic,
-        max_cognitive: input.max_cognitive,
         enforce_crap: input.enforce_crap,
         score_output: input.score_output,
         config_root: &input.config.root,
@@ -102,6 +100,7 @@ pub(super) fn prepare_health_findings(
         &mut collected.findings,
         input.diff_index,
         is_change_scoped(&input),
+        &mut threshold_state_tracker,
     )?;
     threshold_state_tracker.record_no_match_entries(
         &threshold_resolver,
@@ -162,8 +161,6 @@ struct HealthCrapMergeContext<'a> {
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    max_cyclomatic: u16,
-    max_cognitive: u16,
     enforce_crap: bool,
     score_output: Option<&'a scoring::FileScoreOutput>,
     config_root: &'a std::path::Path,
@@ -198,11 +195,95 @@ fn apply_optional_crap_findings(
         findings,
         ctx.score_output
             .map(|output| &output.template_inherit_provenance),
-        ctx.max_cyclomatic,
-        ctx.max_cognitive,
+        ctx.threshold_resolver,
+        ctx.config_root,
+        ctx.threshold_state_tracker,
     );
 }
 
+/// Complete each matched override row's `outstanding` list with every dimension
+/// on which the unit still has a live finding.
+///
+/// The list is not filtered by what the entry configures. An override that
+/// raises `maxCrap` too little, or that raises `maxCyclomatic` while the unit
+/// breaches on cognitive, still leaves a live finding, and suppressing the
+/// disclosure in those cases is what made issue #2163 look like a
+/// threshold-resolution bug.
+///
+/// The finding-backed dimensions cannot be derived inside the tracker.
+/// `record_complexity` runs during collection, before the CRAP merge, so at
+/// record time it is unknown whether a finding survives at all, let alone on
+/// which dimension. The unit-size term is the mirror image and is seeded by the
+/// tracker instead, because it never produces a finding to read back here.
+pub(super) fn annotate_outstanding_dimensions(
+    tracker: &mut ThresholdOverrideStateTracker,
+    findings: &[ComplexityViolation],
+) {
+    // Both sides carry the discovery path and the same `(line, col)` the
+    // finding is built from, so no relativization is needed. Name and position
+    // are BOTH part of the key, and neither alone is an identity: one file can
+    // hold several units sharing a name, and the synthetic `<component>` rollup
+    // is deliberately anchored at the worst class method's exact `(path, line,
+    // col)` while that method keeps its own finding, so keying on either half
+    // alone let one unit overwrite the other's `exceeded` (issue #2163).
+    let mut exceeded_by_unit: rustc_hash::FxHashMap<
+        (&std::path::Path, u32, u32, &str),
+        fallow_output::ExceededThreshold,
+    > = rustc_hash::FxHashMap::default();
+    for finding in findings {
+        exceeded_by_unit.insert(
+            (
+                finding.path.as_path(),
+                finding.line,
+                finding.col,
+                finding.name.as_str(),
+            ),
+            finding.exceeded,
+        );
+    }
+
+    for state in tracker.states_mut() {
+        let (Some(path), Some(line), Some(col), Some(function)) = (
+            state.path.as_deref(),
+            state.line,
+            state.col,
+            state.function.as_deref(),
+        ) else {
+            continue;
+        };
+        let Some(exceeded) = exceeded_by_unit.get(&(path, line, col, function)).copied() else {
+            continue;
+        };
+        // `record_complexity` may already have seeded `Complexity` for a
+        // surviving unit-size breach, which produces no finding of its own, so
+        // the dimension is added only when it is not there yet.
+        if (exceeded.includes_cyclomatic() || exceeded.includes_cognitive())
+            && !state
+                .outstanding
+                .contains(&fallow_output::ThresholdOverrideDimension::Complexity)
+        {
+            state
+                .outstanding
+                .push(fallow_output::ThresholdOverrideDimension::Complexity);
+        }
+        if exceeded.includes_crap()
+            && !state
+                .outstanding
+                .contains(&fallow_output::ThresholdOverrideDimension::Crap)
+        {
+            state
+                .outstanding
+                .push(fallow_output::ThresholdOverrideDimension::Crap);
+        }
+    }
+}
+
+/// `no_match` rows are the only feedback a user gets that an override glob
+/// matched nothing, so a full-repo run must emit them. The `diff_index`
+/// parameter is the RESOLVED index, so a run that actually loaded a shared diff
+/// is already excluded by the `diff_index.is_none()` clause; gating on the
+/// `use_shared_diff_index` request instead made the rows unreachable from every
+/// CLI entry point (issue #2163).
 fn should_emit_no_match_threshold_overrides(
     opts: &HealthOptions<'_>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -211,7 +292,6 @@ fn should_emit_no_match_threshold_overrides(
 ) -> bool {
     opts.changed_since.is_none()
         && opts.diff_index.is_none()
-        && !opts.use_shared_diff_index
         && opts.workspace.is_none()
         && opts.changed_workspaces.is_none()
         && changed_files.is_none()
@@ -240,7 +320,14 @@ fn finalize_health_findings(
     findings: &mut Vec<ComplexityViolation>,
     diff_index: Option<&fallow_output::DiffIndex>,
     change_scoped: bool,
+    threshold_state_tracker: &mut ThresholdOverrideStateTracker,
 ) -> Result<HealthFindingFinalizeResult, HealthError> {
+    // Runs before every downstream narrowing. The override rows were recorded
+    // over the whole collection pass, while `--diff-file`/`--diff-stdin`,
+    // `--baseline` and `--top` all narrow the findings list for DISPLAY, so
+    // annotating after any of them leaves an `insufficient` row with an empty
+    // `outstanding`: the one contradiction a CI gate cannot detect.
+    annotate_outstanding_dimensions(threshold_state_tracker, findings);
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
     }

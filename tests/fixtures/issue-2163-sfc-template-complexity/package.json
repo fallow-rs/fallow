@@ -1,0 +1,11 @@
+{
+  "name": "issue-2163-sfc-template-complexity",
+  "main": "src/main.ts",
+  "dependencies": {
+    "svelte": "^5.0.0",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "astro": "^4.0.0"
+  }
+}

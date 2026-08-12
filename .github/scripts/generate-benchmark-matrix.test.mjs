@@ -7,7 +7,7 @@ import {
   selectFastTargets,
 } from "./generate-benchmark-matrix.mjs";
 
-const names = (targets) => targets.map((target) => target.bench).sort();
+const names = (targets) => targets.map((target) => target.bench).toSorted();
 
 test("manual and merge queue runs select every fast benchmark", () => {
   assert.deepEqual(names(selectFastTargets(null)), names(allFastTargets()));

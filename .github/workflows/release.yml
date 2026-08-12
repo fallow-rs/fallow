@@ -53,6 +53,52 @@ jobs:
             echo "::error::Release tag ${TAG_NAME} does not match workspace version ${workspace_version}"
             exit 1
           fi
+          # The npm wrapper is bumped in the release commit (step 2b of the
+          # maintainer flow); a stale wrapper means the release commit was
+          # assembled wrong, so fail the dispatch before anything builds.
+          wrapper_version="$(jq -r '.version' npm/fallow/package.json)"
+          if [ "$TAG_NAME" != "v${wrapper_version}" ]; then
+            echo "::error::npm wrapper version ${wrapper_version} does not match release tag ${TAG_NAME}"
+            exit 1
+          fi
+
+          # The type-aware companion is version-locked to the binary at runtime:
+          # the CLI refuses a companion whose version differs, so a release
+          # commit that bumped the workspace without bumping the companion
+          # ships a CLI that cannot run type-aware analysis. Catch it here,
+          # before anything is built, tagged or published, rather than in the
+          # Windows validation job or in the audit tests on main.
+          #
+          # crates/napi is deliberately NOT checked here. Its platform packages
+          # do not exist on the registry until this workflow publishes them, so
+          # the committed manifests stay at the last published version until the
+          # post-release catch-up. Bumping them early breaks the publish tree.
+          WORKSPACE_VERSION="$workspace_version" python3 - <<'PY'
+          import json, os, sys
+
+          expected = os.environ["WORKSPACE_VERSION"]
+          root = "tools/type-aware-sidecar"
+          manifest = json.load(open(f"{root}/package.json"))
+          lock = json.load(open(f"{root}/package-lock.json"))
+
+          found = {
+              f"{root}/package.json": manifest["version"],
+              f"{root}/package-lock.json version": lock["version"],
+              f'{root}/package-lock.json packages[""]': lock["packages"][""]["version"],
+          }
+          stale = {path: value for path, value in found.items() if value != expected}
+          if stale:
+              for path, value in stale.items():
+                  print(f"::error::{path} is {value}, expected {expected}")
+              print(
+                  "::error::bump the type-aware companion to "
+                  f"{expected} in the release commit. Set the version in those "
+                  "files directly; do not run scripts/sync-npm-versions.sh "
+                  "during a release, it also moves crates/napi ahead of publish."
+              )
+              sys.exit(1)
+          print(f"type-aware companion matches the workspace at {expected}")
+          PY
 
       # Release immutability is verified in the maintainer release flow, not
       # here. `repos/{owner}/{repo}/immutable-releases` requires the

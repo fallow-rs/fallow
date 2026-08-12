@@ -1125,7 +1125,13 @@ impl FallowConfig {
     fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {
         warn_on_unknown_rule_keys(path, &merged);
 
-        let config: Self = serde_json::from_value(merged).map_err(|e| {
+        let private_type_leaks_configured = merged
+            .get("rules")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|rules| {
+                rules.contains_key("private-type-leaks") || rules.contains_key("private-type-leak")
+            });
+        let mut config: Self = serde_json::from_value(merged).map_err(|e| {
             let reason = e.to_string();
             // Unknown fields on overrides/ignoreExports entries are usually
             // inline annotations; point at JSONC comments as the fix.
@@ -1140,6 +1146,7 @@ impl FallowConfig {
             };
             miette::miette!("{reason} in {}{hint}", path.display())
         })?;
+        config.rules.private_type_leaks_configured = private_type_leaks_configured;
 
         config.validate_user_globs().map_err(|errors| {
             let joined = errors
@@ -1811,6 +1818,38 @@ unknown_field = true
         let config = FallowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
+    }
+
+    #[test]
+    fn load_records_explicit_private_type_leaks_setting() {
+        let dir = test_dir("explicit-private-type-leaks");
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(&config_path, r#"{"rules": {"private-type-leaks": "off"}}"#).unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        assert_eq!(config.rules.private_type_leaks, Severity::Off);
+        assert!(config.rules.private_type_leaks_configured);
+    }
+
+    #[test]
+    fn load_records_explicit_private_type_leaks_singular_alias() {
+        let dir = test_dir("explicit-private-type-leak-alias");
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(&config_path, r#"{"rules": {"private-type-leak": "off"}}"#).unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        assert!(config.rules.private_type_leaks_configured);
+    }
+
+    #[test]
+    fn load_leaves_defaulted_private_type_leaks_unmarked() {
+        let dir = test_dir("defaulted-private-type-leaks");
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(&config_path, r#"{"rules": {"unused-exports": "warn"}}"#).unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        assert_eq!(config.rules.private_type_leaks, Severity::Off);
+        assert!(!config.rules.private_type_leaks_configured);
     }
 
     #[test]

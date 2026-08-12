@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitLab inline-review jobs now warn when posting only partially succeeds.**
+  The shell wrapper's jq condition previously failed on every valid error-array
+  payload, silently hiding both reconciliation and comment-posting failures.
+  Its temporary API files are now tracked by the existing exit cleanup, and an
+  unused shell pagination helper has been removed now that provider pagination
+  is owned by the typed Rust posting path.
+
+## [3.15.0] - 2026-08-11
+
+### Added
+
+- **Near-miss clone detection, spread-aware ranking, and a reviewed-clones
+  ignore list** (Closes [#2155](https://github.com/fallow-rs/fallow/issues/2155)).
+  `fallow dupes --near` (config `duplicates.near`) additionally detects
+  function-scoped clones with small structural edits; near matching always
+  uses semantic shingles while exact matching keeps the selected mode, and
+  near groups carry a `similarity` score. Every clone-group finding now
+  includes a `spread` field, and `--top` ranking multiplies token count and
+  occurrences with a capped spread boost, so clones scattered across distant
+  files rank above local ones. A new `duplicates.ignoredClones` config list
+  (`"dup:<fingerprint>:<instance_count>"` entries) silences clone groups a
+  reviewer has accepted; fingerprints hash the normalized token sequence, so
+  formatting-only edits keep a reviewed clone recognized.
+
 ### Changed
 
 - **The complexity contribution kind is now non-exhaustive.** Rust workspace
@@ -19,6 +45,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CheckSchemaVersion`, `HealthSchemaVersion`, or the corresponding envelope
   type. The legacy `SchemaVersion` export remains an alias of
   `CheckSchemaVersion` for source compatibility.
+- **Health JSON schema version 10: `threshold_overrides[]` rows carry a
+  `dimension`.** One configured `health.thresholdOverrides` entry now emits one
+  row per threshold dimension it participates in (`complexity` for the
+  cyclomatic and cognitive ceilings, `crap` for the CRAP ceiling), because
+  raising `maxCyclomatic` says nothing about whether the unit still breaches
+  `maxCrap`. `dimension` is required and always present, so the rows are not
+  byte-identical for an unchanged consumer path and the health
+  `schema_version` moves from 9 to 10. The bare combined envelope embeds the
+  same health report, so combined `schema_version` moves from 9 to 10 with it;
+  the audit envelope does not embed the health contract and stays at 9.
+  `status` gains a fourth value,
+  `insufficient`, for an override that raises a ceiling the code still exceeds;
+  such an override previously emitted no row at all. A new optional
+  `outstanding[]` lists the dimensions a matched unit still breaches after the
+  override applied. Matched rows also carry the unit's optional `line` and
+  `col`, because a file can hold several units sharing a name and those rows
+  must stay distinct. Migration: group rows on `override_index` to count
+  configured overrides, and treat `insufficient` as "override in force, finding
+  survives".
+- **Two `--format compact` health line grammars gained fields.** The
+  `high-complexity:` line gained a trailing `exceeded=<dimension>` field
+  between `severity=` and `crap=`, and the `threshold-override:` line gained a
+  dimension segment after the override index plus an optional trailing
+  `outstanding=` field. A matched `threshold-override:` target is now
+  `<path>:<line>:<function>` rather than `<path>:<function>`, matching the
+  `high-complexity:` target grammar. Consumers that split these lines
+  positionally past `severity` or past the index need to adapt; consumers that
+  parse `key=value` pairs are unaffected.
+- **The human override row's surviving-dimension suffix reads `(still
+  breaches: ...)`.** It used to read `(finding still fires on: ...)`, which
+  overstates the `maxUnitSize` case: unit size is part of the `complexity`
+  dimension but keeps a unit in the large-function list without emitting a
+  finding of its own. The JSON `outstanding[]` field is unchanged.
 - **Malformed config shapes now fail loud instead of being silently
   dropped.** Three previously-tolerated shapes are rejected at config load:
   a malformed `extends` value (must be a string or an array of strings), an
@@ -34,15 +93,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An explicit `"private-type-leaks": "off"` now survives enabling type-aware
+  analysis** (Closes [#2170](https://github.com/fallow-rs/fallow/issues/2170)).
+  Type-aware analysis force-enabled the opt-in `private-type-leaks` rule
+  regardless of config, which also made the api-surface sidecar capability
+  mandatory. The config layer now records whether the rule was configured
+  explicitly (JSON, JSONC, TOML, the singular alias, and `extends` chains all
+  count), and the type-aware default applies only when it was not. Unset
+  configs keep the default-on behavior.
+- **`cacheMaxAgeDays` and `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` now actually
+  reclaim audit base-snapshot caches**
+  (Closes [#2169](https://github.com/fallow-rs/fallow/issues/2169)). The
+  cache GC only visited entries under the current repo's hash prefix, while
+  every linked git worktree hashes to its own prefix, so abandoned caches
+  accumulated forever. The GC now ages out abandoned entries from other repo
+  identities, skips entries whose recorded owner root still exists (a repo's
+  own `0` = never-reclaim cannot be defeated from outside), and logs a warning
+  for invalid env values instead of silently falling back.
+- **`--gate new-only` no longer fails a clone-removal refactor**
+  (Closes [#2164](https://github.com/fallow-rs/fallow/issues/2164)). The
+  duplication attribution key changes whenever a clone group's membership or
+  extent shifts, so extracting a shared helper and deleting instances made the
+  surviving group look introduced. Clone groups whose instance ranges contain
+  no added line from the diff are now demoted to inherited; a genuinely pasted
+  clone still gates with `duplication_introduced >= 1` and a failing verdict.
+- **Windows: added-line attribution now sees untracked files.** The
+  untracked-file diff passed native backslash paths to
+  `git diff --no-index`, so the resulting diff keys never matched the
+  forward-slashed lookup paths and every added-line check on an untracked
+  file silently missed on Windows, including the new-only duplication gate
+  above.
 - **Svelte await-block complexity labels now match the source.** `{#await}`
   and `{:then}` contributions previously appeared as `if` in health JSON and
   the VS Code inline breakdown. They now use the explicit `await` and `then`
-  kinds, while `{:catch}` remains `catch` and metric totals are unchanged.
-  The standalone health schema is now version 8. Combined and audit output are
-  version 9 because they embed health; dead-code and unrelated output formats
-  keep their existing versions. JSON consumers must handle the two new values.
+  kinds, while `{:catch}` remains `catch`. Inline continuations such as
+  `{#await load() then value}` and `{#await load() catch error}` now count and
+  label both the await frame and its continuation, including when both labels
+  share one VS Code decoration and hover; explicit continuation totals are
+  unchanged. Standalone Svelte, Vue, and Astro template findings now also emit
+  a valid HTML-comment suppression anchored at the reported line instead of
+  an Angular decorator hint.
+  Regex literals inside template expressions no longer hide the selected await
+  state or logical operators that follow the regex.
+  Audit output is version 9; standalone health and combined output moved on
+  to version 10 in this same release (see the threshold-override entry under
+  Changed). Dead-code and unrelated output formats keep their existing
+  versions. JSON consumers must handle the two new values.
+- **A complexity finding now names the dimension that fired, so a
+  `thresholdOverrides` entry that did not silence it is diagnosable**
+  ([#2163](https://github.com/fallow-rs/fallow/issues/2163)). Raising
+  `maxCyclomatic` and `maxCognitive` on a framework `<template>` left the
+  finding in place because it fired on CRAP, and nothing in the output said
+  so: the human report printed the cyclomatic and cognitive numbers with no
+  marker, and the override section reported the entry as `active` next to the
+  surviving finding. Human output now marks the breaching metric, prints the
+  ceilings in force under an override-affected finding, and labels each
+  override row with its dimension, its status (including the new
+  `insufficient`), and the dimensions the unit still breaches. `--format
+  compact` and `--format markdown` carry the same information, and every
+  format that prints or compares a ceiling now interpolates the finding's own
+  resolved one instead of the run's global one: SARIF, human, markdown,
+  CodeClimate (and the `pr-comment-*` and `review-*` formats derived from it),
+  GitHub annotations from both the native renderer and the Action's jq filter,
+  and a `fallow report --from` re-render of a saved envelope, which previously
+  dropped `effective_thresholds` on the way back in. A single run no longer
+  contradicts itself across formats. The synthetic `<component>` rollup is
+  measured against the owning file's resolved ceilings too, and publishes them,
+  so an override that raises `maxCognitive` for the file both stops the rollup
+  reporting a cognitive breach and stops every renderer describing it against
+  the global ceiling. An entry that reaches the rollup now emits a matched
+  `threshold_overrides[]` row for the `<component>` unit, so an entry scoped
+  with `functions: ["<component>"]`, the documented way to address the rollup,
+  is no longer reported `no_match` while it silently removes the rollup
+  finding; a file-scoped entry on a component file gains that row alongside its
+  per-method and `<template>` rows. An
+  entry that configures only `maxUnitSize` now emits a
+  `complexity` row when it matches, instead of being silent when in force and
+  loud (`no_match`) only when its glob was a typo; when the raised unit-size
+  ceiling is still breached, that row names `complexity` in `outstanding`,
+  since a unit-size breach keeps the unit in the large-function list without
+  emitting a finding of its own. An override row's `status`
+  and `outstanding` are now derived from one dimension predicate, so a row can
+  no longer read `active` next to "still breaches: complexity", and a
+  row on a unit whose finding is already hidden by a `fallow-ignore` comment
+  reads `stale` rather than `insufficient` with nothing outstanding. Rows are
+  keyed on the matched unit's position as well as its name, so two units that
+  share a name in one file keep their own metrics and their own surviving
+  dimensions instead of collapsing into one row and trading answers.
+- **Suppression advice for `<template>` findings matches the file's
+  framework.** Every synthetic template finding recommended
+  `// fallow-ignore-next-line complexity` above an `@Component` decorator,
+  including in `.svelte`, `.vue`, and `.astro` files that have no decorator.
+  Single-file components now get `<!-- fallow-ignore-next-line complexity -->`
+  on the line above the reported line (`placement` value
+  `above-template-anchor-line`), `.html` templates get the HTML comment form,
+  and only inline templates in a component class keep the Angular decorator
+  wording. A template finding no longer suggests adding tests to lower its
+  CRAP score: a template carries no direct coverage, so its CRAP is driven by
+  branching alone. `fallow explain` for the complexity metrics describes all
+  four template dialects instead of Angular only.
+- **`thresholdOverrides` entries whose glob matches nothing are reported
+  again.** The `no_match` row was gated on a flag that is set on every CLI
+  entry point, so a typo in an override path produced silence rather than a
+  row saying it matched nothing.
 - **Complexity findings in framework templates now show which conditions
-  caused them.** A `<template>` finding in Vue, Angular, Svelte, or Astro
+  caused them** (Closes [#2150](https://github.com/fallow-rs/fallow/issues/2150)).
+  A `<template>` finding in Vue, Angular, Svelte, or Astro
   reported a cyclomatic and cognitive number with nothing behind it, so the
   VS Code inline breakdown and `health --complexity-breakdown` had nothing to
   display, while the same finding in a script block listed its contributing
@@ -5560,7 +5716,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.14.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.15.0...HEAD
+[3.15.0]: https://github.com/fallow-rs/fallow/compare/v3.14.0...v3.15.0
 [3.14.0]: https://github.com/fallow-rs/fallow/compare/v3.13.0...v3.14.0
 [3.13.0]: https://github.com/fallow-rs/fallow/compare/v3.12.0...v3.13.0
 [3.12.0]: https://github.com/fallow-rs/fallow/compare/v3.11.0...v3.12.0
