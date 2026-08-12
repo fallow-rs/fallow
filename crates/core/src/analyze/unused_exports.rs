@@ -7,7 +7,7 @@ use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig, Severity};
 use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
-use crate::graph::{ExportSymbol, ModuleGraph, ModuleNode};
+use crate::graph::{ExportNamespace, ExportSymbol, ModuleGraph, ModuleNode};
 use crate::results::{
     DuplicateExport, DuplicateLocation, ExportUsage, PrivateTypeLeak, ReferenceLocation,
     StaleSuppression, SuppressionOrigin, UnusedExport,
@@ -886,6 +886,16 @@ struct ExportEntry {
     is_type_only: bool,
 }
 
+impl ExportEntry {
+    const fn namespace(&self) -> ExportNamespace {
+        if self.is_type_only {
+            ExportNamespace::Type
+        } else {
+            ExportNamespace::Value
+        }
+    }
+}
+
 /// Partition `entries` into connected components where two entries are connected
 /// when they share at least one common importer in `graph`, or one directly
 /// imports the other.
@@ -893,7 +903,11 @@ struct ExportEntry {
 /// Returns index sets into `entries`; each inner vec is one component.
 /// Singleton components (no shared importer with any sibling) are included so
 /// the caller can drop them as unrelated leaf modules.
-fn partition_by_common_importer(entries: &[ExportEntry], graph: &ModuleGraph) -> Vec<Vec<usize>> {
+fn partition_by_common_importer(
+    entries: &[ExportEntry],
+    export_name: &str,
+    graph: &ModuleGraph,
+) -> Vec<Vec<usize>> {
     let n = entries.len();
     let mut union_find = UnionFind::new(n);
 
@@ -906,6 +920,14 @@ fn partition_by_common_importer(entries: &[ExportEntry], graph: &ModuleGraph) ->
             continue;
         }
         for &importer in &graph.reverse_deps[idx] {
+            if !graph.importer_observes_export(
+                importer,
+                entry.file_id,
+                export_name,
+                entry.namespace(),
+            ) {
+                continue;
+            }
             importer_to_entries.entry(importer).or_default().push(i);
         }
     }
@@ -934,6 +956,14 @@ fn partition_by_common_importer(entries: &[ExportEntry], graph: &ModuleGraph) ->
             continue;
         }
         for &importer in &graph.reverse_deps[idx] {
+            if !graph.importer_observes_export(
+                importer,
+                entry.file_id,
+                export_name,
+                entry.namespace(),
+            ) {
+                continue;
+            }
             if let Some(&j) = entry_index_by_file_id.get(&importer) {
                 union_find.union(i, j);
             }
@@ -1230,7 +1260,7 @@ fn evaluate_duplicate_export_group(
     // module imports) from inflating `value_modules` and defeating the
     // value+type self-suppression check that should apply only to the
     // frontend component.
-    let components = partition_by_common_importer(&independent_entries, graph);
+    let components = partition_by_common_importer(&independent_entries, &name, graph);
 
     let mut surviving_locations: Vec<DuplicateLocation> = Vec::new();
     for component_indices in components {
@@ -3298,7 +3328,11 @@ mod tests {
     /// original O(n^2) `entries.iter().position(...)` linear scan, so the
     /// O(1) `file_id -> first index` map in `partition_by_common_importer`
     /// (issue #1843 follow-up) can be proven to produce identical grouping.
-    fn reference_partition(entries: &[ExportEntry], graph: &ModuleGraph) -> Vec<Vec<usize>> {
+    fn reference_partition(
+        entries: &[ExportEntry],
+        export_name: &str,
+        graph: &ModuleGraph,
+    ) -> Vec<Vec<usize>> {
         let mut union_find = UnionFind::new(entries.len());
 
         let mut importer_to_entries: FxHashMap<FileId, Vec<usize>> = FxHashMap::default();
@@ -3308,6 +3342,14 @@ mod tests {
                 continue;
             }
             for &importer in &graph.reverse_deps[idx] {
+                if !graph.importer_observes_export(
+                    importer,
+                    entry.file_id,
+                    export_name,
+                    entry.namespace(),
+                ) {
+                    continue;
+                }
                 importer_to_entries.entry(importer).or_default().push(i);
             }
         }
@@ -3326,6 +3368,14 @@ mod tests {
                 continue;
             }
             for &importer in &graph.reverse_deps[idx] {
+                if !graph.importer_observes_export(
+                    importer,
+                    entry.file_id,
+                    export_name,
+                    entry.namespace(),
+                ) {
+                    continue;
+                }
                 if entry_file_ids.contains(&importer)
                     && let Some(j) = entries.iter().position(|e| e.file_id == importer)
                 {
@@ -3347,17 +3397,39 @@ mod tests {
 
     #[test]
     fn partition_direct_import_index_matches_position_scan() {
-        // Four real files (FileIds 0..=3), all also duplicate-export entry files.
-        let mut graph = build_graph(&[
-            ("f0.ts", false),
-            ("f1.ts", false),
-            ("f2.ts", false),
-            ("f3.ts", false),
-        ]);
-
-        // file0 imported by file1 and file3; file2 imported by file1.
-        graph.reverse_deps[0] = vec![FileId(1), FileId(3)];
-        graph.reverse_deps[2] = vec![FileId(1)];
+        let files: Vec<_> = (0..4)
+            .map(|file_id| DiscoveredFile {
+                id: FileId(file_id),
+                path: PathBuf::from(format!("f{file_id}.ts")),
+                size_bytes: 0,
+            })
+            .collect();
+        let named_import = |target: FileId| ResolvedImport {
+            info: ImportInfo {
+                source: format!("./f{}", target.0),
+                imported_name: ImportedName::Named("shared".to_string()),
+                local_name: "shared".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: Span::default(),
+                source_span: Span::default(),
+            },
+            target: ResolveResult::InternalModule(target),
+        };
+        let resolved_modules: Vec<_> = files
+            .iter()
+            .map(|file| ResolvedModule {
+                file_id: file.id,
+                path: file.path.clone(),
+                resolved_imports: match file.id.0 {
+                    1 => vec![named_import(FileId(0)), named_import(FileId(2))],
+                    3 => vec![named_import(FileId(0))],
+                    _ => Vec::new(),
+                },
+                ..Default::default()
+            })
+            .collect();
+        let graph = ModuleGraph::build(&resolved_modules, &[], &files);
 
         // Five entries with a DUPLICATE file_id (indices 1 and 2 both in file1),
         // exercising the first-index-wins semantics the map must preserve.
@@ -3369,8 +3441,8 @@ mod tests {
             make_export_entry(4, 3),
         ];
 
-        let actual = normalize_components(partition_by_common_importer(&entries, &graph));
-        let reference = normalize_components(reference_partition(&entries, &graph));
+        let actual = normalize_components(partition_by_common_importer(&entries, "shared", &graph));
+        let reference = normalize_components(reference_partition(&entries, "shared", &graph));
         assert_eq!(
             actual, reference,
             "map-based partition must match the position()-scan reference"

@@ -744,6 +744,66 @@ impl ModuleGraph {
         self.effective_exports.resolve(file_id, name, namespace)
     }
 
+    /// Whether `importer` observes `source`'s declaration of `name`.
+    ///
+    /// Direct named and namespace imports observe the source declaration. A
+    /// re-export observes it only when that edge contributes to the importer's
+    /// effective binding, including each contributor to an ambiguous star
+    /// export and excluding star bindings shadowed by an explicit export.
+    #[must_use]
+    pub fn importer_observes_export(
+        &self,
+        importer: FileId,
+        source: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> bool {
+        let Some(importer_module) = self.modules.get(importer.0 as usize) else {
+            return false;
+        };
+        if self.edges[importer_module.edge_range.clone()]
+            .iter()
+            .filter(|edge| edge.target == source)
+            .flat_map(|edge| &edge.symbols)
+            .any(|symbol| {
+                (namespace == ExportNamespace::Type || !symbol.is_type_only)
+                    && match &symbol.imported_name {
+                        ImportedName::Named(imported) => imported == name,
+                        ImportedName::Namespace => true,
+                        ImportedName::Default | ImportedName::SideEffect => false,
+                    }
+            })
+        {
+            return true;
+        }
+
+        importer_module.re_exports.iter().any(|re_export| {
+            if re_export.source_file != source
+                || (namespace == ExportNamespace::Value && re_export.is_type_only)
+            {
+                return false;
+            }
+            let exported_name = if re_export.imported_name == "*" {
+                if re_export.exported_name != "*" || name == "default" {
+                    return false;
+                }
+                name
+            } else {
+                if re_export.imported_name != name {
+                    return false;
+                }
+                &re_export.exported_name
+            };
+            self.effective_exports.contributes_through(
+                importer,
+                exported_name,
+                source,
+                name,
+                namespace,
+            )
+        })
+    }
+
     /// Check if any importer uses `import * as ns` for this module.
     /// Uses precomputed bitset, O(1) lookup.
     #[must_use]

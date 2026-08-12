@@ -153,6 +153,30 @@ impl EffectiveExportIndex {
             ) if barrel_binding == source_binding
         )
     }
+
+    pub(super) fn contributes_through(
+        &self,
+        barrel: FileId,
+        barrel_name: &str,
+        source: FileId,
+        source_name: &str,
+        namespace: ExportNamespace,
+    ) -> bool {
+        match (
+            self.resolve(barrel, barrel_name, namespace),
+            self.resolve(source, source_name, namespace),
+        ) {
+            (
+                EffectiveExportResolution::Unique(barrel_binding),
+                EffectiveExportResolution::Unique(source_binding),
+            ) => barrel_binding == source_binding,
+            (
+                EffectiveExportResolution::Ambiguous,
+                EffectiveExportResolution::Unique(_) | EffectiveExportResolution::Ambiguous,
+            ) => true,
+            _ => false,
+        }
+    }
 }
 
 fn seed_direct_bindings(
@@ -466,6 +490,13 @@ mod tests {
 
         assert!(!resolves_through(&index, FileId(0), FileId(1), "foo"));
         assert!(resolves_through(&index, FileId(0), FileId(2), "foo"));
+        assert!(!index.contributes_through(
+            FileId(0),
+            "foo",
+            FileId(1),
+            "foo",
+            ExportNamespace::Value
+        ));
     }
 
     #[test]
@@ -486,6 +517,20 @@ mod tests {
 
         assert!(!resolves_through(&index, FileId(0), FileId(1), "foo"));
         assert!(!resolves_through(&index, FileId(0), FileId(2), "foo"));
+        assert!(index.contributes_through(
+            FileId(0),
+            "foo",
+            FileId(1),
+            "foo",
+            ExportNamespace::Value
+        ));
+        assert!(index.contributes_through(
+            FileId(0),
+            "foo",
+            FileId(2),
+            "foo",
+            ExportNamespace::Value
+        ));
     }
 
     #[test]
