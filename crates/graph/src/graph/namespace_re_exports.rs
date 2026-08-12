@@ -754,6 +754,53 @@ mod tests {
     }
 
     #[test]
+    fn type_only_consumer_does_not_credit_namespace_object_members() {
+        let files = vec![
+            discovered_file(0, "/project/main.ts", 100),
+            discovered_file(1, "/project/barrel.ts", 50),
+            discovered_file(2, "/project/source.ts", 50),
+        ];
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let mut import = named_import_from("./barrel", "N", FileId(1));
+        import.info.is_type_only = true;
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![import],
+                member_accesses: vec![MemberAccess {
+                    object: "N".to_string(),
+                    member: "used".to_string(),
+                }]
+                .into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![ns_re_export("./source", "N", FileId(2))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![named_export("used")].into(),
+                ..Default::default()
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        assert!(
+            graph.modules[2].exports[0].references.is_empty(),
+            "type-only consumers must not credit runtime namespace members"
+        );
+    }
+
+    #[test]
     fn issue_324_multi_hop_named_re_export_chain_credits_target() {
         let files = vec![
             discovered_file(0, "/project/main.ts", 100),

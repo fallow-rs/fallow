@@ -284,6 +284,9 @@ impl<'a> NamespacePropagationIndexes<'a> {
             FxHashMap::default();
         for consumer in module_by_id.values() {
             for import in &consumer.resolved_imports {
+                if import.info.is_type_only {
+                    continue;
+                }
                 let Some(target) = import.target.internal_file_id() else {
                     continue;
                 };
