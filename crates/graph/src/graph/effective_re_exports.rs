@@ -5,6 +5,13 @@ use std::collections::VecDeque;
 use fallow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_types::extract::ModuleLoadMechanism;
+
+use super::effective_exports::{EffectiveExportBinding, EffectiveExportIndex};
+use super::types::{
+    ModuleNode, ReferencePathId, ReferencePathInterner, ReferenceRouteGraphSpec,
+    ReferenceRouteNodeId, ReferenceRouteNodeSpec,
+};
 use super::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
 
 /// One module/name pair that effectively exposes a traced binding.
@@ -95,6 +102,110 @@ impl ModuleGraph {
     }
 }
 
+pub(in crate::graph) struct EffectiveDeclarationRoute {
+    pub(in crate::graph) binding: EffectiveExportBinding,
+    graph: ReferenceRouteGraphSpec,
+    start: ReferenceRouteNodeId,
+    terminal: ReferenceRouteNodeId,
+}
+
+impl EffectiveDeclarationRoute {
+    pub(in crate::graph) fn extend_path(
+        &self,
+        parent: Option<ReferencePathId>,
+        reference_paths: &mut ReferencePathInterner,
+    ) -> Option<ReferencePathId> {
+        if !reference_paths.tracks_provenance() {
+            return None;
+        }
+        let graph = reference_paths.intern_route_graph(self.graph.clone());
+        reference_paths.route(
+            parent,
+            graph,
+            self.start,
+            self.terminal,
+            Some(ModuleLoadMechanism::EsModule),
+        )
+    }
+}
+
+pub(in crate::graph) fn effective_declaration_route(
+    modules: &[ModuleNode],
+    index: &EffectiveExportIndex,
+    file: FileId,
+    name: &str,
+    namespace: ExportNamespace,
+) -> Option<EffectiveDeclarationRoute> {
+    let EffectiveExportResolution::Unique(binding) = index.resolve(file, name, namespace) else {
+        return None;
+    };
+    binding.origin_slot()?;
+
+    let initial = (file, name.to_string());
+    let mut states = vec![initial.clone()];
+    let mut state_ids = FxHashMap::from_iter([(initial, 0_usize)]);
+    let mut successors: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut frontier = VecDeque::from([0_usize]);
+    let mut terminal = None;
+
+    while let Some(state_id) = frontier.pop_front() {
+        let (current_file, current_name) = states[state_id].clone();
+        if current_file == binding.origin_file() {
+            terminal = Some(state_id);
+            continue;
+        }
+        let module = modules.get(current_file.0 as usize)?;
+        for edge in &module.re_exports {
+            let Some(source_name) = effective_source_name(edge, &current_name, namespace) else {
+                continue;
+            };
+            if index.resolve(edge.source_file, source_name, namespace)
+                != EffectiveExportResolution::Unique(binding)
+            {
+                continue;
+            }
+            let state = (edge.source_file, source_name.to_string());
+            let next_id = if let Some(next_id) = state_ids.get(&state) {
+                *next_id
+            } else {
+                let next_id = states.len();
+                states.push(state.clone());
+                state_ids.insert(state, next_id);
+                successors.push(Vec::new());
+                frontier.push_back(next_id);
+                next_id
+            };
+            successors[state_id].push(next_id);
+        }
+    }
+
+    let terminal = terminal?;
+    for next in &mut successors {
+        next.sort_unstable();
+        next.dedup();
+    }
+    let nodes = states
+        .iter()
+        .zip(successors)
+        .map(|((target, _), successors)| {
+            ReferenceRouteNodeSpec::new(
+                *target,
+                ModuleLoadMechanism::EsModule,
+                successors
+                    .into_iter()
+                    .map(|id| ReferenceRouteNodeId(id as u32))
+                    .collect(),
+            )
+        })
+        .collect();
+    Some(EffectiveDeclarationRoute {
+        binding,
+        graph: ReferenceRouteGraphSpec::new(nodes),
+        start: ReferenceRouteNodeId(0),
+        terminal: ReferenceRouteNodeId(terminal as u32),
+    })
+}
+
 fn effective_destination_name<'a>(
     re_export: &'a super::ReExportEdge,
     source_name: &'a str,
@@ -110,4 +221,144 @@ fn effective_destination_name<'a>(
         return None;
     }
     Some(&re_export.exported_name)
+}
+
+fn effective_source_name<'a>(
+    re_export: &'a super::ReExportEdge,
+    exported_name: &'a str,
+    namespace: ExportNamespace,
+) -> Option<&'a str> {
+    if namespace == ExportNamespace::Value && re_export.is_type_only {
+        return None;
+    }
+    if re_export.exported_name == "*" {
+        return (exported_name != "default").then_some(exported_name);
+    }
+    if re_export.exported_name != exported_name || re_export.imported_name == "*" {
+        return None;
+    }
+    Some(&re_export.imported_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use fallow_types::extract::{ExportInfo, ExportName, ReExportInfo, VisibilityTag};
+    use oxc_span::Span;
+
+    use super::*;
+    use crate::graph::ReExportEdge;
+    use crate::graph::types::{ExportSymbol, ReferencePathNode};
+    use crate::resolve::{ResolveResult, ResolvedModule, ResolvedReExport};
+
+    fn source_export() -> ExportInfo {
+        ExportInfo {
+            name: ExportName::Named("foo".to_string()),
+            local_name: Some("foo".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: Span::new(0, 3),
+            members: Vec::new(),
+            super_class: None,
+        }
+    }
+
+    fn star_re_export() -> ResolvedReExport {
+        ResolvedReExport {
+            info: ReExportInfo {
+                source: "./source".to_string(),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: false,
+                span: Span::default(),
+                statement_span: Span::default(),
+                source_span: Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(1)),
+        }
+    }
+
+    #[test]
+    fn declaration_route_retains_star_surface_and_origin_hops() {
+        let resolved = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                re_exports: vec![star_re_export()],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                exports: vec![source_export()].into(),
+                ..Default::default()
+            },
+        ];
+        let mut modules = vec![
+            ModuleNode {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/inner.ts"),
+                edge_range: 0..0,
+                exports: Vec::new(),
+                re_exports: vec![ReExportEdge {
+                    source_file: FileId(1),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: Span::default(),
+                }],
+                flags: 0,
+            },
+            ModuleNode {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/source.ts"),
+                edge_range: 0..0,
+                exports: vec![ExportSymbol {
+                    name: ExportName::Named("foo".to_string()),
+                    is_type_only: false,
+                    is_side_effect_used: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: Span::new(0, 3),
+                    references: Vec::new(),
+                    reference_paths: Vec::new(),
+                    members: Vec::new(),
+                }],
+                re_exports: Vec::new(),
+                flags: 0,
+            },
+        ];
+        let index = EffectiveExportIndex::build(&resolved);
+
+        let route =
+            effective_declaration_route(&modules, &index, FileId(0), "foo", ExportNamespace::Value)
+                .expect("the star surface must retain a route to its declaration");
+
+        assert_eq!(route.binding.origin_file(), FileId(1));
+        let mut paths = ReferencePathInterner::new(true);
+        let path = route
+            .extend_path(None, &mut paths)
+            .expect("tracked routes return one interned path");
+        let finalized = paths.finalize(&mut modules);
+        let ReferencePathNode::Route {
+            graph,
+            start,
+            terminal,
+            start_mechanism,
+            ..
+        } = finalized.paths[path.index()]
+        else {
+            panic!("effective declaration routes use the compact route contract");
+        };
+        assert_eq!(
+            finalized
+                .routes
+                .canonical_hops(graph, start, terminal, start_mechanism),
+            vec![
+                (FileId(1), ModuleLoadMechanism::EsModule),
+                (FileId(0), ModuleLoadMechanism::EsModule),
+            ]
+        );
+    }
 }
