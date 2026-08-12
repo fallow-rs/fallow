@@ -1,0 +1,6 @@
+{
+  "name": "declaration-merge",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

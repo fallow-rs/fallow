@@ -80,6 +80,29 @@ fn barrel_re_export_propagates_to_source_module() {
 }
 
 #[test]
+fn type_usage_credits_legal_declaration_merges_only() {
+    let root = fixture_path("declaration-merge");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_exports: Vec<_> = results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    let unused_types: Vec<_> = results
+        .unused_types
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+
+    assert!(!unused_exports.contains(&"Merged"));
+    assert!(!unused_types.contains(&"Merged"));
+    assert!(unused_exports.contains(&"Independent"));
+    assert!(!unused_types.contains(&"Independent"));
+    assert!(unused_types.contains(&"UnusedControl"));
+}
+
+#[test]
 fn source_order_independent_import_forwarding_is_re_export() {
     let root = fixture_path("source-order-re-export");
     let config = create_config(root);
