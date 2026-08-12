@@ -716,6 +716,37 @@ mod tests {
     }
 
     #[test]
+    fn declaration_merge_groups_survive_graph_cache_roundtrip() {
+        let mut interface = value_export("Merged");
+        interface.is_type_only = true;
+        interface.span = oxc_span::Span::new(0, 6);
+        let mut namespace = value_export("Merged");
+        namespace.span = oxc_span::Span::new(10, 16);
+        let modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            exports: vec![interface, namespace].into(),
+            semantic_facts: vec![fallow_types::extract::SemanticFact::DeclarationMerge(
+                fallow_types::extract::DeclarationMergeFact {
+                    export_spans: vec![(0, 6), (10, 16)],
+                },
+            )]
+            .into(),
+            ..Default::default()
+        }];
+        let index = EffectiveExportIndex::build(&modules);
+        let encoded = postcard::to_allocvec(&index).expect("encode effective export index");
+        let decoded: EffectiveExportIndex =
+            postcard::from_bytes(&encoded).expect("decode effective export index");
+        let EffectiveExportResolution::Unique(binding) =
+            decoded.resolve(FileId(0), "Merged", ExportNamespace::Type)
+        else {
+            panic!("merged type binding must remain unique");
+        };
+
+        assert_eq!(decoded.declaration_group_slots(binding), &[0, 1]);
+    }
+
+    #[test]
     fn explicit_re_export_shadows_a_star_binding() {
         let modules = vec![
             module(

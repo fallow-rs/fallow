@@ -25,6 +25,25 @@ fn cache_store_default_is_empty() {
 }
 
 #[test]
+fn cache_roundtrip_preserves_declaration_merge_facts() {
+    let module = parse_from_content(
+        FileId(0),
+        Path::new("src/merged.ts"),
+        "export interface Merged {}\nexport namespace Merged {}",
+    );
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let encoded = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&encoded).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+
+    assert!(restored.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        fallow_types::extract::SemanticFact::DeclarationMerge(group)
+            if group.export_spans.len() == 2
+    )));
+}
+
+#[test]
 fn cache_roundtrip_preserves_unresolved_callee_diagnostics() {
     let module = parse_from_content(
         FileId(7),
