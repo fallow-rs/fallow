@@ -788,7 +788,7 @@ impl ModuleGraph {
             .modules
             .get(origin_file.0 as usize)?
             .exports
-            .get(binding.origin_slot())?;
+            .get(binding.origin_slot()?)?;
         Some(EffectiveExportOrigin {
             file_id: origin_file,
             export,

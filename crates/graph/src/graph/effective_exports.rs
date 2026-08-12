@@ -21,10 +21,14 @@ pub enum ExportNamespace {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct EffectiveExportBinding {
     file_id: FileId,
-    /// Stable declaration slot within the resolved module. Direct exports use
-    /// their export index; namespace re-exports use the following re-export
-    /// range. Named re-exports retain their source binding identity.
-    slot: usize,
+    kind: EffectiveExportBindingKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+enum EffectiveExportBindingKind {
+    Declaration(usize),
+    NamespaceObject(usize),
+    ImplicitDefault,
 }
 
 impl EffectiveExportBinding {
@@ -34,8 +38,12 @@ impl EffectiveExportBinding {
         self.file_id
     }
 
-    pub(super) const fn origin_slot(self) -> usize {
-        self.slot
+    pub(super) const fn origin_slot(self) -> Option<usize> {
+        match self.kind {
+            EffectiveExportBindingKind::Declaration(slot) => Some(slot),
+            EffectiveExportBindingKind::NamespaceObject(_)
+            | EffectiveExportBindingKind::ImplicitDefault => None,
+        }
     }
 }
 
@@ -297,13 +305,14 @@ fn seed_direct_bindings(
                 key,
                 EffectiveExportResolution::Unique(EffectiveExportBinding {
                     file_id: module.file_id,
-                    slot,
+                    kind: EffectiveExportBindingKind::Declaration(slot),
                 }),
             );
             if namespace == ExportNamespace::Value {
                 value_type_fallbacks.push((module.file_id, name, slot));
             }
         }
+        seed_implicit_sfc_default(module, interner, &mut direct_keys, resolutions, queue);
     }
     seed_value_type_fallbacks(value_type_fallbacks, &mut direct_keys, resolutions, queue);
     direct_keys
@@ -325,9 +334,45 @@ fn seed_value_type_fallbacks(
             resolutions,
             queue,
             type_key,
-            EffectiveExportResolution::Unique(EffectiveExportBinding { file_id, slot }),
+            EffectiveExportResolution::Unique(EffectiveExportBinding {
+                file_id,
+                kind: EffectiveExportBindingKind::Declaration(slot),
+            }),
         );
     }
+}
+
+fn seed_implicit_sfc_default(
+    module: &ResolvedModule,
+    interner: &mut ExportNameInterner,
+    direct_keys: &mut FxHashSet<ExportLookup>,
+    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
+    queue: &mut VecDeque<ExportLookup>,
+) {
+    if !is_sfc_path(&module.path) {
+        return;
+    }
+    let name = interner.intern("default");
+    let value = ExportLookup::new(module.file_id, name, ExportNamespace::Value);
+    if direct_keys.contains(&value) {
+        return;
+    }
+    let binding = EffectiveExportResolution::Unique(EffectiveExportBinding {
+        file_id: module.file_id,
+        kind: EffectiveExportBindingKind::ImplicitDefault,
+    });
+    for namespace in [ExportNamespace::Value, ExportNamespace::Type] {
+        let key = ExportLookup::new(module.file_id, name, namespace);
+        direct_keys.insert(key);
+        merge_resolution(resolutions, queue, key, binding);
+    }
+}
+
+fn is_sfc_path(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(std::ffi::OsStr::to_str),
+        Some("vue" | "svelte" | "astro")
+    )
 }
 
 fn collect_observers(
@@ -406,7 +451,7 @@ fn register_named_observer(
                 destination,
                 EffectiveExportResolution::Unique(EffectiveExportBinding {
                     file_id: barrel,
-                    slot: re_export_slot,
+                    kind: EffectiveExportBindingKind::NamespaceObject(re_export_slot),
                 }),
             );
         }

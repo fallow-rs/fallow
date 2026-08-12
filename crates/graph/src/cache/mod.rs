@@ -65,7 +65,10 @@ pub use store::GraphCacheStore;
 /// Bumped to 22: effective export names are interned once per graph and type
 /// and value resolutions share one compact key. Warm 21 caches contain the
 /// allocation-heavy intermediate index layout.
-pub const GRAPH_CACHE_VERSION: u32 = 22;
+///
+/// Bumped to 23: effective bindings distinguish direct declarations,
+/// namespace objects, and implicit SFC default exports.
+pub const GRAPH_CACHE_VERSION: u32 = 23;
 
 /// Cached form of a resolved target.
 ///
