@@ -1,0 +1,5 @@
+{
+  "name": "computed-enum-key-members",
+  "private": true,
+  "main": "src/index.ts"
+}

@@ -120,6 +120,8 @@ mod workspaces;
 mod boundary_violations;
 #[path = "integration_test/capability_e_route_exports.rs"]
 mod capability_e_route_exports;
+#[path = "integration_test/computed_enum_key_members.rs"]
+mod computed_enum_key_members;
 #[path = "integration_test/config_file_loading.rs"]
 mod config_file_loading;
 #[path = "integration_test/css_modules_unused.rs"]
