@@ -75,7 +75,10 @@ pub use store::GraphCacheStore;
 /// Bumped to 25: export references retain their semantic Type or Value
 /// namespace so one named re-export surface can route both without duplicate
 /// graph symbols.
-pub const GRAPH_CACHE_VERSION: u32 = 25;
+///
+/// Bumped to 26: the effective export index retains typed declaration merge
+/// groups for namespace-aware reference selection.
+pub const GRAPH_CACHE_VERSION: u32 = 26;
 
 /// Cached form of a resolved target.
 ///

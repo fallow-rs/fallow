@@ -212,6 +212,7 @@ struct ObserverBuildState<'a> {
 pub(super) struct EffectiveExportIndex {
     name_ids: FxHashMap<Box<str>, ExportNameId>,
     resolutions: FxHashMap<ExportKey, NamespaceResolutions>,
+    declaration_merge_groups: FxHashMap<(FileId, usize), Box<[usize]>>,
 }
 
 impl EffectiveExportIndex {
@@ -233,6 +234,7 @@ impl EffectiveExportIndex {
         Self {
             name_ids: interner.ids,
             resolutions,
+            declaration_merge_groups: collect_declaration_merge_groups(modules),
         }
     }
 
@@ -316,6 +318,47 @@ impl EffectiveExportIndex {
             })
             .collect()
     }
+
+    pub(super) fn declaration_group_slots(&self, binding: EffectiveExportBinding) -> &[usize] {
+        binding
+            .origin_slot()
+            .and_then(|slot| {
+                self.declaration_merge_groups
+                    .get(&(binding.origin_file(), slot))
+            })
+            .map_or(&[], Box::as_ref)
+    }
+}
+
+fn collect_declaration_merge_groups(
+    modules: &[ResolvedModule],
+) -> FxHashMap<(FileId, usize), Box<[usize]>> {
+    let mut by_slot = FxHashMap::default();
+    for module in modules {
+        for fact in module.semantic_facts.iter() {
+            let fallow_types::extract::SemanticFact::DeclarationMerge(group) = fact else {
+                continue;
+            };
+            let slots: Box<[usize]> = module
+                .exports
+                .iter()
+                .enumerate()
+                .filter(|(_, export)| {
+                    group
+                        .export_spans
+                        .contains(&(export.span.start, export.span.end))
+                })
+                .map(|(slot, _)| slot)
+                .collect();
+            if slots.len() < 2 {
+                continue;
+            }
+            for &slot in &slots {
+                by_slot.insert((module.file_id, slot), slots.clone());
+            }
+        }
+    }
+    by_slot
 }
 
 fn seed_direct_bindings(

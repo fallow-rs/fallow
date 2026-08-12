@@ -352,6 +352,13 @@ fn is_effective_export(
     let Some(origin_slot) = binding.origin_slot() else {
         return true;
     };
+    if namespace == ExportNamespace::Type
+        && effective_exports
+            .declaration_group_slots(binding)
+            .contains(&export_index)
+    {
+        return true;
+    }
     exports
         .get(origin_slot)
         .is_some_and(|origin| export.is_type_only == origin.is_type_only)
@@ -610,6 +617,12 @@ fn attach_direct_export_references(
         let indices: &[usize] =
             if binding.origin_file() != target_module.file_id || binding.origin_slot().is_none() {
                 matching_exports
+            } else if namespace == ExportNamespace::Type
+                && !effective_exports
+                    .declaration_group_slots(binding)
+                    .is_empty()
+            {
+                effective_exports.declaration_group_slots(binding)
             } else if namespace == ExportNamespace::Type && !type_exports.is_empty() {
                 &type_exports
             } else {
