@@ -4,4 +4,5 @@ export interface VirtualScrollStrategy {
   detach(): void;
   refresh(): void;
   reset(): void;
+  inspect(): void;
 }

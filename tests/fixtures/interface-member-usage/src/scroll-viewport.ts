@@ -27,3 +27,11 @@ export function resetStrategy(value: unknown): void {
     strategy.reset();
   }
 }
+
+export class StrategyContext {
+  constructor(public strategy: VirtualScrollStrategy) {}
+}
+
+export function inspectStrategy(context: StrategyContext): void {
+  context.strategy.inspect();
+}

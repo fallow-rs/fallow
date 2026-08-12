@@ -1904,6 +1904,10 @@ fn interface_member_usage_does_not_flag_implementer_members() {
         "reset should be credited through a nullable asserted binding: {unused_members:?}"
     );
     assert!(
+        !unused_members.contains(&"FixedSizeScrollStrategy.inspect".to_string()),
+        "inspect should be credited through a class-typed property chain: {unused_members:?}"
+    );
+    assert!(
         unused_members.contains(&"FixedSizeScrollStrategy.unusedHelper".to_string()),
         "unrelated members should still be reported: {unused_members:?}"
     );
