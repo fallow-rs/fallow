@@ -30,7 +30,17 @@ fn typed_receivers_with_reused_parameter_names_are_scoped_per_function() {
     );
     assert!(
         unused.contains(&"FirstContext.firstDead".to_string())
-            && unused.contains(&"SecondContext.secondDead".to_string()),
+            && unused.contains(&"SecondContext.secondDead".to_string())
+            && unused.contains(&"AliasContext.aliasDead".to_string()),
         "unrelated members must remain reportable: {unused:?}"
+    );
+    assert!(
+        !unused.contains(&"AliasContext.aliasUsed".to_string()),
+        "AliasContext.aliasUsed is exposed by the parameter's Pick surface: {unused:?}"
+    );
+    assert!(
+        unused.contains(&"NestedContext.aliasUsed".to_string())
+            && unused.contains(&"NestedContext.nestedDead".to_string()),
+        "a nested property type must not inherit direct receiver-member credit: {unused:?}"
     );
 }

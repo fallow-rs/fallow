@@ -1,1 +1,1 @@
-export { useFirst, useSecond } from './consumers'
+export { useAlias, useFirst, useSecond } from './consumers'
