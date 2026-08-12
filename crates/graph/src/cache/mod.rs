@@ -87,7 +87,10 @@ pub use store::GraphCacheStore;
 ///
 /// Bumped to 29: resolved semantic facts retain directly required structural
 /// type members used to protect explicit interface implementations.
-pub const GRAPH_CACHE_VERSION: u32 = 29;
+///
+/// Bumped to 30: declaration-merge references now propagate through named and
+/// star barrel surfaces using the canonical effective binding group.
+pub const GRAPH_CACHE_VERSION: u32 = 30;
 
 /// Cached form of a resolved target.
 ///
