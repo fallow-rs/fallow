@@ -6,6 +6,7 @@
 mod build;
 mod cycles;
 mod effective_exports;
+mod effective_re_exports;
 mod fan_io;
 mod impact_closure;
 mod namespace_aliases;
@@ -29,6 +30,7 @@ use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
 use types::{ReferencePathInterner, ReferencePathNode, ReferenceRouteNodeId, ReferenceRoutes};
 
 pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
+pub use effective_re_exports::EffectiveReExportRoute;
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
     CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,
