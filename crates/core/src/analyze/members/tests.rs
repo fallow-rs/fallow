@@ -2894,6 +2894,58 @@ fn ambiguous_star_re_exports_have_no_unique_member_origin() {
 }
 
 #[test]
+fn shadowed_star_class_is_not_a_public_api_export() {
+    let mut graph = build_graph(&[
+        ("/src/index.ts", true),
+        ("/src/hidden.ts", false),
+        ("/src/public.ts", false),
+    ]);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Widget",
+            vec![make_member("hidden", MemberKind::ClassMethod)],
+            None,
+        )],
+    );
+    set_exports(
+        &mut graph,
+        2,
+        &[make_export_with_members("Widget", vec![], None)],
+    );
+    graph.set_re_exports(
+        0,
+        vec![
+            crate::graph::ReExportEdge {
+                source_file: FileId(1),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: false,
+                span: Span::default(),
+            },
+            crate::graph::ReExportEdge {
+                source_file: FileId(2),
+                imported_name: "Widget".to_string(),
+                exported_name: "Widget".to_string(),
+                is_type_only: false,
+                span: Span::default(),
+            },
+        ],
+    );
+    let public_entries = FxHashSet::from_iter([FileId(0)]);
+    let star_targets = entry_point_star_re_export_targets(&graph, &public_entries);
+
+    assert!(!is_entry_point_public_class_export(
+        &graph,
+        &graph.modules[1],
+        &graph.modules[1].exports[0],
+        &star_targets,
+        &public_entries,
+    ));
+}
+
+#[test]
 fn export_with_no_members_skipped() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
     graph.set_reachable(1);
