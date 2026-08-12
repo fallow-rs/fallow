@@ -16,6 +16,8 @@ pub struct ExportTrace {
     pub file: PathBuf,
     /// The export name being traced.
     pub export_name: String,
+    /// Namespace selected for this trace.
+    pub namespace: crate::semantic::SemanticNamespace,
     /// Whether the file is reachable from an entry point.
     pub file_reachable: bool,
     /// Whether the file is an entry point.

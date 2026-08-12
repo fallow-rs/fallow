@@ -147,6 +147,10 @@ pub fn trace_export(
             .unwrap_or(&module.path)
             .to_path_buf(),
         export_name: export_name.to_string(),
+        namespace: match namespace {
+            ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
+            ExportNamespace::Value => fallow_types::semantic::SemanticNamespace::Value,
+        },
         file_reachable: module.is_reachable(),
         is_entry_point: module.is_entry_point(),
         is_used,
@@ -1193,6 +1197,10 @@ mod tests {
         let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
             .expect("value export exists");
 
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Value
+        );
         assert!(!trace.is_used, "type usage must not select the type export");
     }
 
@@ -1993,6 +2001,7 @@ mod tests {
         let trace = ExportTrace {
             file: PathBuf::from(r"src\utils.ts"),
             export_name: "foo".to_string(),
+            namespace: fallow_types::semantic::SemanticNamespace::Value,
             file_reachable: true,
             is_entry_point: false,
             is_used: true,
