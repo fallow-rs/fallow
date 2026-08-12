@@ -2944,6 +2944,38 @@ fn shadowed_star_class_is_not_a_public_api_export() {
 }
 
 #[test]
+fn class_exposed_through_public_namespace_is_public_api() {
+    let mut graph = build_graph(&[("/src/index.ts", true), ("/src/sdk.ts", false)]);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Client",
+            vec![make_member("request", MemberKind::ClassMethod)],
+            None,
+        )],
+    );
+    graph.set_re_exports(
+        0,
+        vec![crate::graph::ReExportEdge {
+            source_file: FileId(1),
+            imported_name: "*".to_string(),
+            exported_name: "SDK".to_string(),
+            is_type_only: false,
+            span: Span::default(),
+        }],
+    );
+    let public_entries = FxHashSet::from_iter([FileId(0)]);
+    let public_class_exports = public_export_origin_keys(&graph, &public_entries);
+
+    assert!(is_entry_point_public_class_export(
+        &graph.modules[1],
+        &graph.modules[1].exports[0],
+        &public_class_exports,
+    ));
+}
+
+#[test]
 fn export_with_no_members_skipped() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
     graph.set_reachable(1);
