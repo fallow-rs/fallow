@@ -8,14 +8,11 @@ use super::*;
 fn typed_property_declaring_sites<'a>(
     graph: &ModuleGraph,
     indexes: &MemberPassIndexes<'a>,
+    class_heritage_by_file: &FxHashMap<FileId, &'a [fallow_types::extract::ClassHeritageInfo]>,
     module: &'a ResolvedModule,
     name: &str,
 ) -> Vec<(&'a ResolvedModule, String)> {
-    if module
-        .type_member_types
-        .iter()
-        .any(|entry| entry.type_name == name)
-    {
+    if module_declares_typed_properties(module, class_heritage_by_file, name) {
         return vec![(module, name.to_string())];
     }
     let Some(seed_keys) = indexes.local_keys(module.file_id).get(name) else {
@@ -38,16 +35,57 @@ fn typed_property_declaring_sites<'a>(
                 .find(|export| export.name.matches_str(origin.export_name.as_str()))
                 .and_then(|export| export.local_name.as_deref())
                 .unwrap_or(origin.export_name.as_str());
-            if origin_module
-                .type_member_types
-                .iter()
-                .any(|entry| entry.type_name == declared_name)
-            {
+            if module_declares_typed_properties(
+                origin_module,
+                class_heritage_by_file,
+                declared_name,
+            ) {
                 sites.push((*origin_module, declared_name.to_string()));
             }
         }
     }
     sites
+}
+
+fn module_declares_typed_properties(
+    module: &ResolvedModule,
+    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
+    name: &str,
+) -> bool {
+    module
+        .type_member_types
+        .iter()
+        .any(|entry| entry.type_name == name)
+        || class_heritage_by_file
+            .get(&module.file_id)
+            .is_some_and(|heritage| {
+                heritage
+                    .iter()
+                    .any(|class| class.export_name == name && !class.instance_bindings.is_empty())
+            })
+}
+
+fn typed_property_type(
+    module: &ResolvedModule,
+    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
+    type_name: &str,
+    property: &str,
+) -> Option<String> {
+    module
+        .type_member_types
+        .iter()
+        .find(|entry| entry.type_name == type_name && entry.property == property)
+        .map(|entry| entry.property_type.clone())
+        .or_else(|| {
+            class_heritage_by_file
+                .get(&module.file_id)?
+                .iter()
+                .find(|class| class.export_name == type_name)?
+                .instance_bindings
+                .iter()
+                .find(|(name, _)| name == property)
+                .map(|(_, property_type)| property_type.clone())
+        })
 }
 
 /// Credit member accesses reached through a typed property hop whose named
@@ -76,6 +114,7 @@ pub(super) fn propagate_typed_property_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     indexes: &MemberPassIndexes<'_>,
+    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
     interface_to_implementers: &FxHashMap<ExportKey, Vec<ExportKey>>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
@@ -98,15 +137,21 @@ pub(super) fn propagate_typed_property_accesses(
                 let mut next: Vec<(&ResolvedModule, String)> = Vec::new();
                 let mut seen: FxHashSet<(FileId, String)> = FxHashSet::default();
                 for (module, name) in frontier {
-                    for (declaring, declared_name) in
-                        typed_property_declaring_sites(graph, indexes, module, &name)
-                    {
-                        let Some(entry) = declaring.type_member_types.iter().find(|entry| {
-                            entry.type_name == declared_name && entry.property == *segment
-                        }) else {
+                    for (declaring, declared_name) in typed_property_declaring_sites(
+                        graph,
+                        indexes,
+                        class_heritage_by_file,
+                        module,
+                        &name,
+                    ) {
+                        let Some(property_type) = typed_property_type(
+                            declaring,
+                            class_heritage_by_file,
+                            &declared_name,
+                            segment,
+                        ) else {
                             continue;
                         };
-                        let property_type = entry.property_type.clone();
                         if idx + 1 == segments.len() {
                             terminals.insert((
                                 declaring.file_id,

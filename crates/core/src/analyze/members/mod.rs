@@ -1135,6 +1135,7 @@ fn collect_propagated_member_accesses(
     propagate_common_member_accesses(
         input,
         indexes,
+        &heritage_context.class_heritage_by_file,
         &heritage_context.interface_to_implementers,
         &mut accessed_members,
         &mut whole_object_used_exports,
@@ -1170,6 +1171,7 @@ fn collect_propagated_member_accesses(
 fn propagate_common_member_accesses(
     input: UnusedMemberScanInput<'_>,
     indexes: &MemberPassIndexes<'_>,
+    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
     interface_to_implementers: &FxHashMap<ExportKey, Vec<ExportKey>>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     whole_object_used_exports: &mut FxHashSet<ExportKey>,
@@ -1210,6 +1212,7 @@ fn propagate_common_member_accesses(
         input.graph,
         input.resolved_modules,
         indexes,
+        class_heritage_by_file,
         interface_to_implementers,
         accessed_members,
     );
