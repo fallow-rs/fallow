@@ -1191,6 +1191,7 @@ fn propagate_to_effective_origin(input: EffectiveOriginPropagation<'_>) -> bool 
     if origin_slots.is_empty() {
         origin_slots.push(origin_slot);
     }
+    let route = route.intern(reference_paths);
     let Some(origin) = modules.get_mut(origin_file.0 as usize) else {
         return false;
     };

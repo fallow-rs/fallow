@@ -9,8 +9,8 @@ use fallow_types::extract::ModuleLoadMechanism;
 
 use super::effective_exports::{EffectiveExportBinding, EffectiveExportIndex};
 use super::types::{
-    ModuleNode, ReferencePathId, ReferencePathInterner, ReferenceRouteGraphSpec,
-    ReferenceRouteNodeId, ReferenceRouteNodeSpec,
+    ModuleNode, ReferencePathId, ReferencePathInterner, ReferenceRouteGraphId,
+    ReferenceRouteGraphSpec, ReferenceRouteNodeId, ReferenceRouteNodeSpec,
 };
 use super::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
 
@@ -110,15 +110,34 @@ pub(in crate::graph) struct EffectiveDeclarationRoute {
 }
 
 impl EffectiveDeclarationRoute {
+    pub(in crate::graph) fn intern(
+        self,
+        reference_paths: &mut ReferencePathInterner,
+    ) -> InternedEffectiveDeclarationRoute {
+        let graph = reference_paths
+            .tracks_provenance()
+            .then(|| reference_paths.intern_route_graph(self.graph));
+        InternedEffectiveDeclarationRoute {
+            graph,
+            start: self.start,
+            terminal: self.terminal,
+        }
+    }
+}
+
+pub(in crate::graph) struct InternedEffectiveDeclarationRoute {
+    graph: Option<ReferenceRouteGraphId>,
+    start: ReferenceRouteNodeId,
+    terminal: ReferenceRouteNodeId,
+}
+
+impl InternedEffectiveDeclarationRoute {
     pub(in crate::graph) fn extend_path(
         &self,
         parent: Option<ReferencePathId>,
         reference_paths: &mut ReferencePathInterner,
     ) -> Option<ReferencePathId> {
-        if !reference_paths.tracks_provenance() {
-            return None;
-        }
-        let graph = reference_paths.intern_route_graph(self.graph.clone());
+        let graph = self.graph?;
         reference_paths.route(
             parent,
             graph,
@@ -361,6 +380,7 @@ mod tests {
 
         assert_eq!(route.binding.origin_file(), FileId(1));
         let mut paths = ReferencePathInterner::new(true);
+        let route = route.intern(&mut paths);
         let path = route
             .extend_path(None, &mut paths)
             .expect("tracked routes return one interned path");
@@ -437,6 +457,7 @@ mod tests {
 
         assert_eq!(route.binding.origin_file(), FileId(2));
         let mut paths = ReferencePathInterner::new(true);
+        let route = route.intern(&mut paths);
         let path = route
             .extend_path(None, &mut paths)
             .expect("tracked routes return one interned path");
