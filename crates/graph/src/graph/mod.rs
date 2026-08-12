@@ -744,14 +744,15 @@ impl ModuleGraph {
         self.effective_exports.resolve(file_id, name, namespace)
     }
 
-    /// Whether `importer` observes `source`'s declaration of `name`.
+    /// Whether `importer` connects to `source` as an origin of `name`.
     ///
-    /// Direct named and namespace imports observe the source declaration. A
-    /// re-export observes it only when that edge contributes to the importer's
-    /// effective binding, including each contributor to an ambiguous star
-    /// export and excluding star bindings shadowed by an explicit export.
+    /// Any direct import connects the two modules for duplicate-export
+    /// grouping, even when it imports a different symbol. A re-export-only edge
+    /// connects them only when it contributes this binding, including each
+    /// contributor to an ambiguous star export and excluding star bindings
+    /// shadowed by an explicit export.
     #[must_use]
-    pub fn importer_observes_export(
+    pub fn importer_connects_export_origin(
         &self,
         importer: FileId,
         source: FileId,
@@ -765,14 +766,7 @@ impl ModuleGraph {
             .iter()
             .filter(|edge| edge.target == source)
             .flat_map(|edge| &edge.symbols)
-            .any(|symbol| {
-                (namespace == ExportNamespace::Type || !symbol.is_type_only)
-                    && match &symbol.imported_name {
-                        ImportedName::Named(imported) => imported == name,
-                        ImportedName::Namespace => true,
-                        ImportedName::Default | ImportedName::SideEffect => false,
-                    }
-            })
+            .any(|symbol| !matches!(symbol.imported_name, ImportedName::SideEffect))
         {
             return true;
         }

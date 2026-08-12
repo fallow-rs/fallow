@@ -921,7 +921,7 @@ fn partition_by_common_importer(
             continue;
         }
         for &importer in &graph.reverse_deps[idx] {
-            if !graph.importer_observes_export(
+            if !graph.importer_connects_export_origin(
                 importer,
                 entry.file_id,
                 export_name,
@@ -957,7 +957,7 @@ fn partition_by_common_importer(
             continue;
         }
         for &importer in &graph.reverse_deps[idx] {
-            if !graph.importer_observes_export(
+            if !graph.importer_connects_export_origin(
                 importer,
                 entry.file_id,
                 export_name,
@@ -1641,10 +1641,7 @@ mod tests {
                 super_class: None,
             });
         }
-        for (module, module_exports) in resolved_modules
-            .iter_mut()
-            .zip(exports_by_module.into_iter())
-        {
+        for (module, module_exports) in resolved_modules.iter_mut().zip(exports_by_module) {
             module.exports = module_exports.into();
         }
         for &(importer, source, name, is_type_only) in imports {
@@ -3533,7 +3530,7 @@ mod tests {
                 continue;
             }
             for &importer in &graph.reverse_deps[idx] {
-                if !graph.importer_observes_export(
+                if !graph.importer_connects_export_origin(
                     importer,
                     entry.file_id,
                     export_name,
@@ -3559,7 +3556,7 @@ mod tests {
                 continue;
             }
             for &importer in &graph.reverse_deps[idx] {
-                if !graph.importer_observes_export(
+                if !graph.importer_connects_export_origin(
                     importer,
                     entry.file_id,
                     export_name,
