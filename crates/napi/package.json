@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-node",
-  "version": "3.14.0",
+  "version": "3.15.0",
   "description": "Native Node.js bindings for fallow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling drift. Optional runtime intelligence layer (Fallow Runtime) adds production execution evidence.",
   "main": "loader.js",
   "types": "index.d.ts",
@@ -67,14 +67,14 @@
     "@napi-rs/cli": "3.8.2"
   },
   "optionalDependencies": {
-    "@fallow-cli/fallow-node-darwin-arm64": "3.14.0",
-    "@fallow-cli/fallow-node-darwin-x64": "3.14.0",
-    "@fallow-cli/fallow-node-linux-arm64-gnu": "3.14.0",
-    "@fallow-cli/fallow-node-linux-arm64-musl": "3.14.0",
-    "@fallow-cli/fallow-node-linux-x64-gnu": "3.14.0",
-    "@fallow-cli/fallow-node-linux-x64-musl": "3.14.0",
-    "@fallow-cli/fallow-node-win32-arm64-msvc": "3.14.0",
-    "@fallow-cli/fallow-node-win32-x64-msvc": "3.14.0",
+    "@fallow-cli/fallow-node-darwin-arm64": "3.15.0",
+    "@fallow-cli/fallow-node-darwin-x64": "3.15.0",
+    "@fallow-cli/fallow-node-linux-arm64-gnu": "3.15.0",
+    "@fallow-cli/fallow-node-linux-arm64-musl": "3.15.0",
+    "@fallow-cli/fallow-node-linux-x64-gnu": "3.15.0",
+    "@fallow-cli/fallow-node-linux-x64-musl": "3.15.0",
+    "@fallow-cli/fallow-node-win32-arm64-msvc": "3.15.0",
+    "@fallow-cli/fallow-node-win32-x64-msvc": "3.15.0",
     "fallow-type-aware": "3.14.0"
   }
 }
