@@ -93,7 +93,7 @@ fn collect_pending_credits(
                 continue;
             };
             let reachable =
-                indexes.enumerate_reachable_barrels(alias_file_id, &alias.via_export_name);
+                indexes.enumerate_reachable_barrels(graph, alias_file_id, &alias.via_export_name);
             let routes = reachable.intern_routes(
                 namespace_target.file_id,
                 namespace_target.mechanism,

@@ -121,10 +121,20 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         FxHashSet::default();
     let source = &mut modules[source_idx];
     for (name, refs) in &refs_by_name {
-        let type_resolves =
-            effective_exports.resolves_through(barrel_id, source_id, name, ExportNamespace::Type);
-        let value_resolves =
-            effective_exports.resolves_through(barrel_id, source_id, name, ExportNamespace::Value);
+        let type_resolves = effective_exports.resolves_through(
+            barrel_id,
+            name,
+            source_id,
+            name,
+            ExportNamespace::Type,
+        );
+        let value_resolves = effective_exports.resolves_through(
+            barrel_id,
+            name,
+            source_id,
+            name,
+            ExportNamespace::Value,
+        );
         if !type_resolves && !value_resolves {
             continue;
         }
@@ -1028,6 +1038,7 @@ fn propagate_entry_point_star(
         };
         if !effective_exports.resolves_through(
             barrel_id,
+            &export.name.to_string(),
             source_id,
             &export.name.to_string(),
             space,

@@ -100,7 +100,7 @@ pub(super) fn propagate_namespace_re_exports(
             continue;
         };
 
-        let reachable = indexes.enumerate_reachable_barrels(*barrel_file_id, exported_name);
+        let reachable = indexes.enumerate_reachable_barrels(graph, *barrel_file_id, exported_name);
         let routes = reachable.intern_routes(
             *source_file_id,
             ModuleLoadMechanism::EsModule,

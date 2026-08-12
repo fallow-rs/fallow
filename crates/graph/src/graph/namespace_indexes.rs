@@ -14,6 +14,7 @@ use super::types::{
     ReferencePathId, ReferencePathInterner, ReferenceRouteGraphId, ReferenceRouteGraphSpec,
     ReferenceRouteNodeId, ReferenceRouteNodeSpec,
 };
+use super::{EffectiveExportResolution, ExportNamespace};
 
 #[derive(Default)]
 struct ReExportTargets {
@@ -319,8 +320,30 @@ impl<'a> NamespacePropagationIndexes<'a> {
 
     pub(super) fn enumerate_reachable_barrels(
         &self,
+        graph: &ModuleGraph,
         seed_file: FileId,
         seed_name: &str,
+    ) -> ReachableNamespaceExports {
+        self.enumerate_reachable_barrels_with(
+            seed_file,
+            seed_name,
+            |source_file, source_name, barrel_file, barrel_name| {
+                uniquely_forwards_value_binding(
+                    graph,
+                    source_file,
+                    source_name,
+                    barrel_file,
+                    barrel_name,
+                )
+            },
+        )
+    }
+
+    fn enumerate_reachable_barrels_with(
+        &self,
+        seed_file: FileId,
+        seed_name: &str,
+        mut forwards: impl FnMut(FileId, &str, FileId, &str) -> bool,
     ) -> ReachableNamespaceExports {
         let mut traversal = NamespaceTraversal::new(seed_file, seed_name);
 
@@ -334,11 +357,15 @@ impl<'a> NamespacePropagationIndexes<'a> {
             };
             if let Some(named) = targets.named.get(source_name.as_str()) {
                 for (barrel_file, exported_name) in named {
-                    traversal.connect(source_index, *barrel_file, exported_name);
+                    if forwards(source_file, &source_name, *barrel_file, exported_name) {
+                        traversal.connect(source_index, *barrel_file, exported_name);
+                    }
                 }
             }
             for &barrel_file in &targets.star_barrels {
-                traversal.connect(source_index, barrel_file, &source_name);
+                if forwards(source_file, &source_name, barrel_file, &source_name) {
+                    traversal.connect(source_index, barrel_file, &source_name);
+                }
             }
         }
 
@@ -355,6 +382,25 @@ impl<'a> NamespacePropagationIndexes<'a> {
             .and_then(|by_name| by_name.get(imported_name))
             .map_or(&[], Vec::as_slice)
     }
+}
+
+fn uniquely_forwards_value_binding(
+    graph: &ModuleGraph,
+    source_file: FileId,
+    source_name: &str,
+    barrel_file: FileId,
+    barrel_name: &str,
+) -> bool {
+    matches!(
+        (
+            graph.resolve_export(source_file, source_name, ExportNamespace::Value),
+            graph.resolve_export(barrel_file, barrel_name, ExportNamespace::Value),
+        ),
+        (
+            EffectiveExportResolution::Unique(source),
+            EffectiveExportResolution::Unique(barrel),
+        ) if source == barrel
+    )
 }
 
 #[cfg(test)]
@@ -384,7 +430,8 @@ mod tests {
             );
         }
 
-        let reachable = indexes.enumerate_reachable_barrels(FileId(0), "Ns");
+        let reachable =
+            indexes.enumerate_reachable_barrels_with(FileId(0), "Ns", |_, _, _, _| true);
 
         assert_eq!(reachable.state_count(), BARREL_COUNT as usize);
         assert_eq!(
@@ -413,7 +460,8 @@ mod tests {
             previous = next;
         }
 
-        let reachable = indexes.enumerate_reachable_barrels(FileId(0), "Ns");
+        let reachable =
+            indexes.enumerate_reachable_barrels_with(FileId(0), "Ns", |_, _, _, _| true);
 
         assert_eq!(reachable.state_count(), 1 + (LAYERS as usize * 2));
         assert_eq!(

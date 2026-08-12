@@ -227,14 +227,15 @@ impl EffectiveExportIndex {
     pub(super) fn resolves_through(
         &self,
         barrel: FileId,
+        barrel_name: &str,
         source: FileId,
-        name: &str,
+        source_name: &str,
         namespace: ExportNamespace,
     ) -> bool {
         matches!(
             (
-                self.resolve(barrel, name, namespace),
-                self.resolve(source, name, namespace),
+                self.resolve(barrel, barrel_name, namespace),
+                self.resolve(source, source_name, namespace),
             ),
             (
                 EffectiveExportResolution::Unique(barrel_binding),
@@ -553,7 +554,7 @@ mod tests {
         source: FileId,
         name: &str,
     ) -> bool {
-        index.resolves_through(barrel, source, name, ExportNamespace::Value)
+        index.resolves_through(barrel, name, source, name, ExportNamespace::Value)
     }
 
     #[test]
