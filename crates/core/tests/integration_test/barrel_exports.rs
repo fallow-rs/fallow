@@ -140,6 +140,14 @@ fn explicit_re_export_shadows_star_export_with_the_same_name() {
             .any(|(path, name)| { path.ends_with("src/explicit-source.ts") && *name == "foo" }),
         "the explicit re-export is the effective foo binding: {unused_exports:?}"
     );
+}
+
+#[test]
+fn shadowed_star_export_does_not_form_a_duplicate_export_group() {
+    let root = fixture_path("effective-export-explicit-shadow");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
     assert!(
         results.duplicate_exports.is_empty(),
         "the shadowed star export must not form a duplicate-export group: {:?}",
