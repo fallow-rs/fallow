@@ -9786,6 +9786,43 @@ fn structural_param_member_accesses_recorded_regardless_of_inner_shadow() {
     );
 }
 
+#[test]
+fn typed_parameter_member_accesses_keep_sibling_function_scopes() {
+    let info = parse(
+        r"
+        import type { FirstContext, SecondContext } from './contexts'
+
+        export function useFirst(ctx: FirstContext) {
+            ctx.firstUsed()
+        }
+
+        export function useSecond(ctx: SecondContext) {
+            ctx.secondUsed()
+        }
+        ",
+    );
+
+    let accesses: Vec<(&str, &str)> = info
+        .member_accesses
+        .iter()
+        .map(|access| (access.object.as_str(), access.member.as_str()))
+        .collect();
+
+    assert!(
+        accesses.contains(&("FirstContext", "firstUsed")),
+        "the first function's receiver type must not be overwritten by a sibling binding: \
+         {accesses:?}"
+    );
+    assert!(
+        accesses.contains(&("SecondContext", "secondUsed")),
+        "the second function must retain its own receiver type: {accesses:?}"
+    );
+    assert!(
+        !accesses.contains(&("SecondContext", "firstUsed")),
+        "a sibling function's same-named parameter must not receive this member: {accesses:?}"
+    );
+}
+
 // ---- merge_branch_aliases and visit_switch_statement edge (lines 703-724)
 // A Playwright fixture alias threaded through a switch statement without a
 // default case should still propagate the merged alias to subsequent accesses

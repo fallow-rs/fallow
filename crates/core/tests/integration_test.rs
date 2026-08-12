@@ -109,6 +109,8 @@ mod sfc_parsing;
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]
 mod symlink_root_containment;
+#[path = "integration_test/typed_receiver_scoping.rs"]
+mod typed_receiver_scoping;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/workspaces.rs"]

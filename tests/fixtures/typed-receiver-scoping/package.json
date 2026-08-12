@@ -1,0 +1,5 @@
+{
+  "name": "typed-receiver-scoping",
+  "private": true,
+  "main": "src/index.ts"
+}
