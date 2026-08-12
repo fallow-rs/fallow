@@ -341,16 +341,24 @@ impl EffectiveExportIndex {
 fn collect_declaration_merge_groups(modules: &[ResolvedModule]) -> DeclarationMergeGroups {
     let mut collected = DeclarationMergeGroups::default();
     for module in modules {
+        let merge_facts: Vec<_> = module
+            .semantic_facts
+            .iter()
+            .filter_map(|fact| match fact {
+                fallow_types::extract::SemanticFact::DeclarationMerge(group) => Some(group),
+                _ => None,
+            })
+            .collect();
+        if merge_facts.is_empty() {
+            continue;
+        }
         let slot_by_span: FxHashMap<_, _> = module
             .exports
             .iter()
             .enumerate()
             .map(|(slot, export)| ((export.span.start, export.span.end), slot))
             .collect();
-        for fact in module.semantic_facts.iter() {
-            let fallow_types::extract::SemanticFact::DeclarationMerge(group) = fact else {
-                continue;
-            };
+        for group in merge_facts {
             let mut slots: Vec<_> = group
                 .export_spans
                 .iter()
