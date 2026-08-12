@@ -173,13 +173,17 @@ pub(crate) enum BindingTarget {
         callee_object: String,
         callee_method: String,
     },
+    /// The same unqualified binding name could not be proven to have one target
+    /// across lexical scopes or assignments. Module-flat fallback resolution
+    /// must abstain; scope-owned extraction records precise parameter accesses.
+    Ambiguous,
 }
 
 impl BindingTarget {
     pub(crate) fn class_name(&self) -> Option<&str> {
         match self {
             Self::Class(name) => Some(name),
-            Self::FactoryCall { .. } => None,
+            Self::FactoryCall { .. } | Self::Ambiguous => None,
         }
     }
 
@@ -349,6 +353,9 @@ pub(crate) struct ModuleInfoExtractor {
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
+    /// Local function bodies pre-scanned by `record_local_structural_function`.
+    /// Prevents a second AST walk when the ordinary visitor reaches the body.
+    scoped_typed_parameter_body_spans: FxHashSet<Span>,
     structural_class_call_candidates: Vec<StructuralClassCallCandidate>,
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
@@ -937,8 +944,15 @@ impl ModuleInfoExtractor {
     }
 
     fn insert_class_binding_target(&mut self, binding: String, target: String) {
+        let target = BindingTarget::Class(target);
         self.binding_target_names
-            .insert(binding, BindingTarget::Class(target));
+            .entry(binding)
+            .and_modify(|existing| {
+                if *existing != target {
+                    *existing = BindingTarget::Ambiguous;
+                }
+            })
+            .or_insert(target);
     }
 
     fn insert_class_binding_target_if_absent(&mut self, binding: String, target: String) {
@@ -2005,7 +2019,7 @@ impl ModuleInfoExtractor {
                         | TypedPropertyExpansion::Opaque => None,
                     }
                 }
-                BindingTarget::FactoryCall { .. } => None,
+                BindingTarget::FactoryCall { .. } | BindingTarget::Ambiguous => None,
             },
         }
     }
@@ -2210,6 +2224,7 @@ impl ModuleInfoExtractor {
                     callee_object,
                     callee_method,
                 } => additional_facts.push((callee_object, callee_method, access.member.clone())),
+                BindingTarget::Ambiguous => {}
             }
         }
         let additional_whole: Vec<String> =

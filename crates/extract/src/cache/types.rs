@@ -878,7 +878,11 @@ use crate::MemberKind;
 ///
 /// Bumped to 256: semantic facts now retain legal TypeScript declaration merge
 /// groups so warm extraction results preserve the same export identity.
-pub(super) const CACHE_VERSION: u32 = 256;
+///
+/// Bumped to 257: typed parameter member accesses are now resolved within their
+/// function body instead of relying solely on a module-flat binding fallback.
+/// Warm 256 caches can retain a sibling function's target for both scopes.
+pub(super) const CACHE_VERSION: u32 = 257;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

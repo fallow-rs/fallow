@@ -237,6 +237,14 @@ impl ModuleInfoExtractor {
             self.insert_class_binding_target(binding_name.to_string(), resolved);
         }
 
+        self.record_typed_nested_bindings(binding_name, type_annotation);
+    }
+
+    pub(super) fn record_typed_nested_bindings(
+        &mut self,
+        binding_name: &str,
+        type_annotation: &TSTypeAnnotation<'_>,
+    ) {
         for (property_path, type_name) in extract_nested_type_bindings(type_annotation) {
             if let Some(factory) = self.store_factory_for_type_name(&type_name) {
                 self.insert_class_binding_target(

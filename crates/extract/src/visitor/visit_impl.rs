@@ -1994,7 +1994,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let BindingPattern::BindingIdentifier(id) = &param.pattern
             && let Some(type_annotation) = param.type_annotation.as_deref()
         {
-            self.record_typed_binding(id.name.as_str(), type_annotation);
+            // The parameter itself is resolved by the scope-owned body collector.
+            // Only nested paths remain in the module fallback for consumers such
+            // as typed store properties; conflicting scopes become Ambiguous.
+            self.record_typed_nested_bindings(id.name.as_str(), type_annotation);
             if param.accessibility.is_some() {
                 let key = self.this_member_key(id.name.as_str());
                 self.record_typed_binding(key.as_str(), type_annotation);
@@ -2121,6 +2124,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         self.record_next_function_param_sources(func);
+        self.record_scoped_typed_parameter_accesses(&func.params, func.body.as_deref());
         self.push_function_declaration_scope(&func.params);
         self.function_depth += 1;
         let component_pushed = self.react_enter_function(func);
@@ -2132,6 +2136,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
         self.record_next_arrow_param_sources(expr);
+        self.record_scoped_typed_parameter_accesses(&expr.params, Some(expr.body.as_ref()));
         self.push_function_declaration_scope(&expr.params);
         self.function_depth += 1;
         let component_pushed = self.react_enter_arrow(expr);
