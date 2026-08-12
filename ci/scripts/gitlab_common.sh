@@ -42,7 +42,9 @@ curl_retry() {
   local attempt=1
   local err out
   err=$(mktemp)
+  _FALLOW_TMPS+=("$err")
   out=$(mktemp)
+  _FALLOW_TMPS+=("$out")
   while true; do
     if curl -sf "$@" >"$out" 2>"$err"; then
       cat "$out"
@@ -64,36 +66,4 @@ curl_retry() {
     sleep "$delay"
     attempt=$((attempt + 1))
   done
-}
-
-# Walk the GitLab REST API's Link-header pagination, concatenating every page
-# of a JSON array into a single combined array on stdout. Last positional arg
-# is the initial URL; preceding args are passed to curl_retry verbatim. Without
-# this, high-comment MRs can silently lose notes outside the first page and
-# re-post duplicates on every run.
-curl_paginate() {
-  local args=("$@")
-  local last=$(( ${#args[@]} - 1 ))
-  local url="${args[$last]}"
-  unset 'args[last]'
-  local headers body
-  headers=$(mktemp)
-  body=$(mktemp)
-  local combined='[]'
-  while [ -n "$url" ]; do
-    if ! curl_retry -D "$headers" "${args[@]}" "$url" > "$body"; then
-      rm -f "$headers" "$body"
-      return 1
-    fi
-    # Defensively skip non-array pages (e.g. an error envelope) so callers
-    # degrade to "no existing notes seen" instead of crashing on jq shape
-    # errors.
-    combined=$(jq -s 'map(arrays) | add // []' <(printf '%s' "$combined") "$body")
-    url=$(grep -i '^link:' "$headers" \
-      | tr ',' '\n' \
-      | sed -n 's/.*<\([^>]*\)>.*rel="next".*/\1/p' \
-      | head -1)
-  done
-  rm -f "$headers" "$body"
-  printf '%s' "$combined"
 }

@@ -632,29 +632,92 @@ pub(super) fn scan_unreferenced_css_classes(
 #[derive(Clone, Debug)]
 pub(super) struct CssReferenceSurface {
     static_tokens: rustc_hash::FxHashSet<String>,
+    dynamic_class_names: rustc_hash::FxHashSet<String>,
+    dynamic_corpus: String,
+    css_module_dot_properties: SortedPrefixLookup,
+    css_module_bracket_properties: rustc_hash::FxHashSet<String>,
+    dynamic_prefixes_reversed: SortedPrefixLookup,
+    dynamic_literals: rustc_hash::FxHashSet<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SortedPrefixLookup {
+    values: Vec<String>,
+}
+
+impl SortedPrefixLookup {
+    fn new(mut values: Vec<String>) -> Self {
+        values.sort_unstable();
+        values.dedup();
+        Self { values }
+    }
+
+    fn contains_prefix(&self, prefix: &str) -> bool {
+        let index = self.values.partition_point(|value| value.as_str() < prefix);
+        self.values
+            .get(index)
+            .is_some_and(|value| value.starts_with(prefix))
+    }
+}
+
+#[derive(Debug, Default)]
+struct CssReferenceSurfaceBuilder {
+    static_tokens: rustc_hash::FxHashSet<String>,
     dynamic_corpus: String,
     source_corpus: String,
     dynamic_interpolants: rustc_hash::FxHashSet<String>,
 }
 
+impl CssReferenceSurfaceBuilder {
+    fn finish(self) -> CssReferenceSurface {
+        let dynamic_class_names = collect_class_name_tokens(&self.dynamic_corpus);
+        let mut css_module_dot_properties = Vec::new();
+        let mut css_module_bracket_properties = rustc_hash::FxHashSet::default();
+        collect_css_module_properties(
+            &self.source_corpus,
+            &mut css_module_dot_properties,
+            &mut css_module_bracket_properties,
+        );
+        let dynamic_prefixes_reversed = collect_dynamic_prefixes(&self.dynamic_corpus);
+        let dynamic_literals =
+            collect_dynamic_literals(&self.source_corpus, &self.dynamic_interpolants);
+
+        CssReferenceSurface {
+            static_tokens: self.static_tokens,
+            dynamic_class_names,
+            dynamic_corpus: self.dynamic_corpus,
+            css_module_dot_properties: SortedPrefixLookup::new(css_module_dot_properties),
+            css_module_bracket_properties,
+            dynamic_prefixes_reversed: SortedPrefixLookup::new(dynamic_prefixes_reversed),
+            dynamic_literals,
+        }
+    }
+}
+
 impl CssReferenceSurface {
     fn references(&self, class: &str) -> bool {
         self.static_tokens.contains(class)
-            || class_name_occurrences(&self.dynamic_corpus, class)
-                .next()
-                .is_some()
+            || self.dynamic_class_referenced(class)
             || self.css_module_property_referenced(class)
             || self.dynamic_prefix_referenced(class)
             || self.dynamic_literal_referenced(class)
+    }
+
+    fn dynamic_class_referenced(&self, class: &str) -> bool {
+        if class.bytes().all(is_class_name_byte) {
+            return self.dynamic_class_names.contains(class);
+        }
+        class_name_occurrences(&self.dynamic_corpus, class)
+            .next()
+            .is_some()
     }
 
     fn css_module_property_referenced(&self, class: &str) -> bool {
         let Some(alias) = css_module_property_alias(class) else {
             return false;
         };
-        self.source_corpus.contains(&format!(".{alias}"))
-            || self.source_corpus.contains(&format!("['{alias}']"))
-            || self.source_corpus.contains(&format!("[\"{alias}\"]"))
+        self.css_module_dot_properties.contains_prefix(&alias)
+            || self.css_module_bracket_properties.contains(&alias)
     }
 
     fn dynamic_prefix_referenced(&self, class: &str) -> bool {
@@ -662,29 +725,21 @@ impl CssReferenceSurface {
             return false;
         };
         let head = &class[..=dash];
-        const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
+        if head.bytes().all(is_class_name_byte) {
+            let reversed: String = head.bytes().rev().map(char::from).collect();
+            return self.dynamic_prefixes_reversed.contains_prefix(&reversed);
+        }
         INTERP_MARKERS
             .iter()
             .any(|marker| self.dynamic_corpus.contains(&format!("{head}{marker}")))
     }
 
     fn dynamic_literal_referenced(&self, class: &str) -> bool {
-        if !is_plain_dynamic_class_value(class) || self.dynamic_interpolants.is_empty() {
-            return false;
-        }
-        class_literal_occurrences(&self.source_corpus, class).any(|offset| {
-            let start = offset.saturating_sub(120);
-            let end = self.source_corpus.len().min(offset + class.len() + 120);
-            let Some(window) = self.source_corpus.get(start..end) else {
-                return false;
-            };
-            let window = window.to_ascii_lowercase();
-            self.dynamic_interpolants
-                .iter()
-                .any(|name| window.contains(&name.to_ascii_lowercase()))
-        })
+        is_plain_dynamic_class_value(class) && self.dynamic_literals.contains(class)
     }
 }
+
+const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
 
 fn css_module_property_alias(class: &str) -> Option<String> {
     if !class.contains('-') {
@@ -723,22 +778,6 @@ fn is_plain_dynamic_class_value(class: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
-fn class_literal_occurrences<'a>(
-    source: &'a str,
-    class: &'a str,
-) -> impl Iterator<Item = usize> + 'a {
-    source.match_indices(class).filter_map(move |(offset, _)| {
-        let before = source.as_bytes().get(offset.wrapping_sub(1)).copied();
-        let after = source.as_bytes().get(offset + class.len()).copied();
-        match (before, after) {
-            (Some(b'\''), Some(b'\'' | b',' | b';' | b')' | b']' | b'}'))
-            | (Some(b'"'), Some(b'"' | b',' | b';' | b')' | b']' | b'}'))
-            | (Some(b'`'), Some(b'`' | b',' | b';' | b')' | b']' | b'}')) => Some(offset),
-            _ => None,
-        }
-    })
-}
-
 fn class_name_occurrences<'a>(source: &'a str, class: &'a str) -> impl Iterator<Item = usize> + 'a {
     source.match_indices(class).filter_map(move |(offset, _)| {
         let before = source.as_bytes().get(offset.wrapping_sub(1)).copied();
@@ -753,6 +792,140 @@ fn class_name_occurrences<'a>(source: &'a str, class: &'a str) -> impl Iterator<
 
 fn is_class_name_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
+}
+
+fn collect_class_name_tokens(source: &str) -> rustc_hash::FxHashSet<String> {
+    let bytes = source.as_bytes();
+    let mut out = rustc_hash::FxHashSet::default();
+    let mut start = 0usize;
+    while start < bytes.len() {
+        if !is_class_name_byte(bytes[start]) {
+            start += 1;
+            continue;
+        }
+        let mut end = start + 1;
+        while bytes.get(end).is_some_and(|byte| is_class_name_byte(*byte)) {
+            end += 1;
+        }
+        out.insert(source[start..end].to_owned());
+        start = end;
+    }
+    out
+}
+
+fn collect_css_module_properties(
+    source: &str,
+    dot_properties: &mut Vec<String>,
+    bracket_properties: &mut rustc_hash::FxHashSet<String>,
+) {
+    let bytes = source.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'.'
+            && bytes
+                .get(i + 1)
+                .is_some_and(|byte| is_js_identifier_start(*byte))
+        {
+            let start = i + 1;
+            let mut end = start + 1;
+            while bytes
+                .get(end)
+                .is_some_and(|byte| is_js_identifier_continue(*byte))
+            {
+                end += 1;
+            }
+            dot_properties.push(source[start..end].to_owned());
+            i = end;
+            continue;
+        }
+        if bytes[i] == b'[' && matches!(bytes.get(i + 1), Some(b'\'' | b'"')) {
+            let quote = bytes[i + 1];
+            let start = i + 2;
+            let mut end = start;
+            while bytes.get(end).is_some_and(|byte| *byte != quote) {
+                end += 1;
+            }
+            if bytes.get(end) == Some(&quote)
+                && bytes.get(end + 1) == Some(&b']')
+                && source
+                    .get(start..end)
+                    .is_some_and(is_valid_js_property_ident)
+            {
+                bracket_properties.insert(source[start..end].to_owned());
+            }
+        }
+        i += 1;
+    }
+}
+
+fn collect_dynamic_prefixes(source: &str) -> Vec<String> {
+    let bytes = source.as_bytes();
+    let mut out = Vec::new();
+    for marker in INTERP_MARKERS {
+        for (end, _) in source.match_indices(marker) {
+            let mut start = end;
+            while start > 0 && is_class_name_byte(bytes[start - 1]) {
+                start -= 1;
+            }
+            if start < end {
+                out.push(source[start..end].bytes().rev().map(char::from).collect());
+            }
+        }
+    }
+    out
+}
+
+fn collect_dynamic_literals(
+    source: &str,
+    interpolants: &rustc_hash::FxHashSet<String>,
+) -> rustc_hash::FxHashSet<String> {
+    if interpolants.is_empty() {
+        return rustc_hash::FxHashSet::default();
+    }
+    let bytes = source.as_bytes();
+    let mut out = rustc_hash::FxHashSet::default();
+    for (quote_offset, quote) in bytes.iter().copied().enumerate() {
+        if !matches!(quote, b'\'' | b'"' | b'`') {
+            continue;
+        }
+        let offset = quote_offset + 1;
+        let mut end = offset;
+        while bytes.get(end).is_some_and(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_')
+        }) {
+            end += 1;
+        }
+        let Some(class) = source.get(offset..end) else {
+            continue;
+        };
+        if !is_plain_dynamic_class_value(class)
+            || !matches!(
+                bytes.get(end),
+                Some(b'\'' | b'"' | b'`' | b',' | b';' | b')' | b']' | b'}')
+            )
+        {
+            continue;
+        }
+        let window_start = offset.saturating_sub(120);
+        let window_end = source.len().min(end + 120);
+        let Some(window) = source.get(window_start..window_end) else {
+            continue;
+        };
+        if interpolants
+            .iter()
+            .any(|name| contains_ignore_ascii_case(window, name))
+        {
+            out.insert(class.to_owned());
+        }
+    }
+    out
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 fn collect_dynamic_class_interpolants(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
@@ -805,21 +978,16 @@ pub(super) fn css_reference_surface(
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> CssReferenceSurface {
-    let mut surface = CssReferenceSurface {
-        static_tokens: rustc_hash::FxHashSet::default(),
-        dynamic_corpus: String::new(),
-        source_corpus: String::new(),
-        dynamic_interpolants: rustc_hash::FxHashSet::default(),
-    };
+    let mut surface = CssReferenceSurfaceBuilder::default();
     for file in files {
         collect_css_reference_surface_file(&mut surface, file, config, ignore_set);
     }
     collect_markdown_reference_surface_files(&mut surface, config, ignore_set);
-    surface
+    surface.finish()
 }
 
 fn collect_css_reference_surface_file(
-    surface: &mut CssReferenceSurface,
+    surface: &mut CssReferenceSurfaceBuilder,
     file: &fallow_types::discover::DiscoveredFile,
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -857,7 +1025,7 @@ fn collect_css_reference_surface_file(
 }
 
 fn collect_markdown_reference_surface_files(
-    surface: &mut CssReferenceSurface,
+    surface: &mut CssReferenceSurfaceBuilder,
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) {
@@ -865,7 +1033,7 @@ fn collect_markdown_reference_surface_files(
 }
 
 fn collect_markdown_reference_surface_dir(
-    surface: &mut CssReferenceSurface,
+    surface: &mut CssReferenceSurfaceBuilder,
     dir: &std::path::Path,
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -968,5 +1136,85 @@ fn push_unreferenced_css_class_candidates(
                 line,
             });
         }
+    }
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap to keep reference-surface fixtures concise"
+)]
+mod tests {
+    use super::*;
+    use fallow_config::{FallowConfig, OutputFormat};
+    use fallow_types::discover::{DiscoveredFile, FileId};
+
+    fn reference_surface(sources: &[(&str, &str)]) -> CssReferenceSurface {
+        let dir = tempfile::tempdir().unwrap();
+        let files: Vec<DiscoveredFile> = sources
+            .iter()
+            .enumerate()
+            .map(|(index, (relative, source))| {
+                let path = dir.path().join(relative);
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).unwrap();
+                }
+                std::fs::write(&path, source).unwrap();
+                DiscoveredFile {
+                    id: FileId(u32::try_from(index).unwrap()),
+                    path,
+                    size_bytes: u64::try_from(source.len()).unwrap(),
+                }
+            })
+            .collect();
+        let config = FallowConfig::default().resolve(
+            dir.path().to_path_buf(),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        css_reference_surface(&files, &config, &globset::GlobSet::empty())
+    }
+
+    #[test]
+    fn dynamic_reference_index_preserves_tokens_prefixes_and_boundaries() {
+        let surface = reference_surface(&[
+            ("src/state.ts", "export const state = 'selected';"),
+            (
+                "src/Card.tsx",
+                r"
+                    const className = ready ? 'reactive' : fallback;
+                    const tone = 'danger';
+                    export const Card = () => (
+                        <div className={`${className} notice-${tone}`} />
+                    );
+                ",
+            ),
+        ]);
+
+        assert!(surface.references("reactive"));
+        assert!(surface.references("notice-danger"));
+        assert!(surface.references("selected"));
+        assert!(!surface.references("active"));
+        assert!(!surface.references("other-danger"));
+        assert!(!surface.references("selecting"));
+    }
+
+    #[test]
+    fn css_module_property_index_preserves_conservative_prefix_matching() {
+        let surface = reference_surface(&[(
+            "src/styles.ts",
+            r"
+                export const primary = styles.buttonPrimaryExtra;
+                export const navigation = styles['navigationItem'];
+            ",
+        )]);
+
+        assert!(surface.references("button-primary"));
+        assert!(surface.references("navigation-item"));
+        assert!(!surface.references("button-secondary"));
+        assert!(!surface.references("navigation-link"));
     }
 }

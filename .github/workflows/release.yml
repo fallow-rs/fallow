@@ -53,6 +53,14 @@ jobs:
             echo "::error::Release tag ${TAG_NAME} does not match workspace version ${workspace_version}"
             exit 1
           fi
+          # The npm wrapper is bumped in the release commit (step 2b of the
+          # maintainer flow); a stale wrapper means the release commit was
+          # assembled wrong, so fail the dispatch before anything builds.
+          wrapper_version="$(jq -r '.version' npm/fallow/package.json)"
+          if [ "$TAG_NAME" != "v${wrapper_version}" ]; then
+            echo "::error::npm wrapper version ${wrapper_version} does not match release tag ${TAG_NAME}"
+            exit 1
+          fi
 
           # The type-aware companion is version-locked to the binary at runtime:
           # the CLI refuses a companion whose version differs, so a release

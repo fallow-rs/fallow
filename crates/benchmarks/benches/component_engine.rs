@@ -24,6 +24,9 @@ use tempfile::TempDir;
 const FILE_COUNT: usize = 32;
 const WARM_FILE_COUNT: usize = 256;
 const WARM_CSS_FILE_COUNT: usize = 96;
+const CSS_REFERENCE_PATTERNS_PER_CONSUMER: usize = 4;
+const WARM_CSS_CONSUMER_FILE_COUNT: usize =
+    WARM_CSS_FILE_COUNT / CSS_REFERENCE_PATTERNS_PER_CONSUMER;
 const WARM_CSS_TOKENS_PER_FILE: usize = 32;
 
 struct EngineFixture {
@@ -136,6 +139,44 @@ fn create_warm_css_engine_fixture() -> WarmEngineFixture {
         session,
         config_path: None,
     }
+}
+
+fn create_css_reference_engine_fixture() -> WarmEngineFixture {
+    let mut fixture = create_warm_css_engine_fixture();
+    for consumer_index in 0..WARM_CSS_CONSUMER_FILE_COUNT {
+        let static_file_index = consumer_index * CSS_REFERENCE_PATTERNS_PER_CONSUMER;
+        let interpolated_file_index = static_file_index + 1;
+        let dot_file_index = static_file_index + 2;
+        let bracket_file_index = static_file_index + 3;
+        write_file(
+            &fixture.fixture.root,
+            &format!("src/components/consumer-{consumer_index}.tsx"),
+            format!(
+                r#"
+import dotStyles from '../styles/theme-{dot_file_index}.css';
+import bracketStyles from '../styles/theme-{bracket_file_index}.css';
+
+const tone = 1;
+
+export function Consumer{consumer_index}() {{
+  return (
+    <section className="component-{static_file_index}-0">
+      <span className={{`component-{interpolated_file_index}-${{tone}}`}} />
+      <span className={{dotStyles.component{dot_file_index}2}} />
+      <span className={{bracketStyles['component{bracket_file_index}3']}} />
+    </section>
+  );
+}}
+"#
+            ),
+        );
+    }
+    fixture.session = AnalysisSession::load_default(&fixture.fixture.root);
+    fixture
+        .session
+        .analyze_dead_code_with_complexity()
+        .expect("warm-up analysis succeeds");
+    fixture
 }
 
 fn warm_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
@@ -318,6 +359,26 @@ fn component_engine_warm_session_css_health_many_files(c: &mut Criterion) {
     );
 }
 
+fn component_engine_first_session_css_health_references_many_files(c: &mut Criterion) {
+    let fixture = create_css_reference_engine_fixture();
+    let options = warm_css_health_options(&fixture);
+    run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+        .expect("many-file CSS reference health pre-warm succeeds");
+    c.bench_function(
+        "component_engine_first_session_css_health_references_many_files",
+        |bencher| {
+            bencher.iter_batched(
+                || AnalysisSession::load_default(&fixture.fixture.root),
+                |session| {
+                    run_ungrouped_health_with_session(&options, None, &session, None)
+                        .expect("first-session many-file CSS reference health analysis succeeds")
+                },
+                BatchSize::LargeInput,
+            );
+        },
+    );
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
@@ -328,6 +389,7 @@ criterion_group!(
     component_engine_warm_session_complexity_shared,
     component_engine_warm_session_health,
     component_engine_warm_session_css_health,
-    component_engine_warm_session_css_health_many_files
+    component_engine_warm_session_css_health_many_files,
+    component_engine_first_session_css_health_references_many_files
 );
 criterion_main!(benches);
