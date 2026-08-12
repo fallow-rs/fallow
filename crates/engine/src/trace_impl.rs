@@ -1130,6 +1130,68 @@ mod tests {
         assert!(routes.contains(&(Path::new("src/diamond-entry.ts"), "foo")));
     }
 
+    #[test]
+    fn trace_prefers_the_value_namespace_independent_of_usage() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 10,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/source.ts"),
+                size_bytes: 10,
+            },
+        ];
+        let export = |is_type_only| ExportInfo {
+            name: ExportName::Named("Foo".to_string()),
+            local_name: Some("Foo".to_string()),
+            is_type_only,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 3),
+            members: Vec::new(),
+            is_side_effect_used: false,
+            super_class: None,
+        };
+        let resolved = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./source".to_string(),
+                        imported_name: ImportedName::Named("Foo".to_string()),
+                        local_name: "Foo".to_string(),
+                        is_type_only: true,
+                        from_style: false,
+                        span: oxc_span::Span::default(),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: vec![export(false), export(true)].into(),
+                ..Default::default()
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
+            .expect("value export exists");
+
+        assert!(!trace.is_used, "type usage must not select the type export");
+    }
+
     fn build_class_member_graph() -> ModuleGraph {
         use fallow_types::extract::{MemberInfo, MemberKind};
 
