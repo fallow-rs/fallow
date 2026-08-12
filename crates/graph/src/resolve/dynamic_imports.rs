@@ -47,7 +47,21 @@ pub(super) fn resolve_single_dynamic_import(
 ) -> Vec<ResolvedImport> {
     let target = resolve_specifier(ctx, file_path, &imp.source, false);
 
-    if imp.is_speculative && matches!(target, ResolveResult::Unresolvable(_)) {
+    // Speculative candidates (the `__mocks__` sibling synthesized for
+    // factory-less `vi.mock`/`jest.mock` calls) exist solely to discover an
+    // internal manual-mock file. A package-space result means the specifier
+    // stayed bare after alias substitution; `pkg/__mocks__/...` is not a
+    // runner convention, so treating it as a hit would fabricate a phantom
+    // package name (`@scope/__mocks__`, issue #2213) for the
+    // unlisted-dependency analysis.
+    if imp.is_speculative
+        && matches!(
+            target,
+            ResolveResult::Unresolvable(_)
+                | ResolveResult::NpmPackage(_)
+                | ResolveResult::CommonJsNpmPackage(_)
+        )
+    {
         return Vec::new();
     }
 

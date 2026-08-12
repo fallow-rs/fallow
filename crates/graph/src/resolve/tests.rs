@@ -1476,6 +1476,46 @@ fn speculative_dynamic_import_drops_when_unresolvable() {
 }
 
 #[test]
+fn speculative_dynamic_import_drops_when_package_space() {
+    with_empty_ctx(|ctx| {
+        // `jest.mock('@bacons/apple-targets')` synthesizes the sibling
+        // candidate `@bacons/__mocks__/apple-targets`. Bare specifiers are
+        // never Unresolvable, so without the package-space drop this would
+        // surface as phantom package `@bacons/__mocks__` (issue #2213).
+        let imp = DynamicImportInfo {
+            source: "@bacons/__mocks__/apple-targets".into(),
+            span: dummy_span(),
+            destructured_names: vec![],
+            local_name: Some(String::new()),
+            is_speculative: true,
+        };
+        let file = Path::new("/project/src/app.test.ts");
+        let result = resolve_single_dynamic_import(ctx, file, &imp);
+        assert!(
+            result.is_empty(),
+            "speculative imports landing in package space must be dropped, got: {result:?}"
+        );
+    });
+}
+
+#[test]
+fn non_speculative_dynamic_import_keeps_package_entry() {
+    with_empty_ctx(|ctx| {
+        let imp = DynamicImportInfo {
+            source: "@bacons/apple-targets".into(),
+            span: dummy_span(),
+            destructured_names: vec![],
+            local_name: None,
+            is_speculative: false,
+        };
+        let file = Path::new("/project/src/app.test.ts");
+        let result = resolve_single_dynamic_import(ctx, file, &imp);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0].target, ResolveResult::NpmPackage(_)));
+    });
+}
+
+#[test]
 fn non_speculative_dynamic_import_keeps_unresolvable_entry() {
     with_empty_ctx(|ctx| {
         let imp = DynamicImportInfo {
