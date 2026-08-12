@@ -11,7 +11,7 @@ use crate::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, dominant_identifier,
     group_refactoring_suggestion,
 };
-use crate::graph::{ExportNamespace, ModuleGraph, ReferenceKind};
+use crate::graph::{EffectiveExportResolution, ExportNamespace, ModuleGraph, ReferenceKind};
 
 /// Match a user-provided file path against a module's actual path.
 ///
@@ -64,10 +64,6 @@ fn collect_re_export_chains(
         .into_iter()
         .filter_map(|route| {
             let module = graph.modules.get(route.barrel_file().0 as usize)?;
-            let barrel_export = module
-                .exports
-                .iter()
-                .find(|export| export.name.matches_str(route.exported_name()));
             Some(ReExportChain {
                 barrel_file: module
                     .path
@@ -75,8 +71,13 @@ fn collect_re_export_chains(
                     .unwrap_or(&module.path)
                     .to_path_buf(),
                 exported_as: route.exported_name().to_string(),
-                reference_count: barrel_export
-                    .map_or(0, |export| export.references_in(namespace).count()),
+                reference_count: graph
+                    .effective_export_surface_references(
+                        route.barrel_file(),
+                        route.exported_name(),
+                        namespace,
+                    )
+                    .len(),
             })
         })
         .collect()
@@ -182,24 +183,49 @@ pub fn semantic_symbol_for_export(
     let surface = select_export(graph, module, export_name)?;
     let namespace = surface.namespace();
     let origin = surface.origin()?;
-    let origin_module = graph.modules.get(origin.file_id().0 as usize)?;
-    let export = origin.export();
-    let source = std::fs::read_to_string(&origin_module.path).ok()?;
+    let (identity_module, export, identity_exported_name, local_name) = if surface
+        .has_local_export()
+        && origin.file_id() != module.file_id
+    {
+        let export = surface.export()?;
+        let binding = surface.binding();
+        let re_export = module.re_exports.iter().find(|re_export| {
+            re_export.exported_name == export_name
+                && re_export.imported_name != "*"
+                && graph.resolve_export(re_export.source_file, &re_export.imported_name, namespace)
+                    == EffectiveExportResolution::Unique(binding)
+        })?;
+        (
+            module,
+            export,
+            export_name,
+            re_export.imported_name.as_str(),
+        )
+    } else {
+        let origin_module = graph.modules.get(origin.file_id().0 as usize)?;
+        let origin_export = origin.export();
+        let origin_name = match &origin_export.name {
+            fallow_types::extract::ExportName::Named(name) => name.as_str(),
+            fallow_types::extract::ExportName::Default => "default",
+        };
+        (origin_module, origin_export, origin_name, origin_name)
+    };
+    let source = std::fs::read_to_string(&identity_module.path).ok()?;
     let offsets = fallow_types::extract::compute_line_offsets(&source);
     let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
     Some(SemanticSymbol {
-        path: origin_module
+        path: identity_module
             .path
             .strip_prefix(root)
-            .unwrap_or(&origin_module.path)
+            .unwrap_or(&identity_module.path)
             .to_path_buf(),
         namespace: match namespace {
             ExportNamespace::Type => SemanticNamespace::Type,
             ExportNamespace::Value => SemanticNamespace::Value,
         },
         declaration_kind: "export".to_string(),
-        exported_name: export_name.to_string(),
-        local_name: export.name.to_string(),
+        exported_name: identity_exported_name.to_string(),
+        local_name: local_name.to_string(),
         owner: None,
         line,
         col,
@@ -1074,10 +1100,8 @@ mod tests {
         assert_eq!(effective.re_export_chains[0].exported_as, "foo");
     }
 
-    #[test]
-    fn star_surface_trace_keeps_aliases_separate_and_uses_origin_identity() {
-        let root = tempfile::tempdir().expect("temporary project");
-        let src = root.path().join("src");
+    fn star_surface_trace_graph(root: &Path) -> ModuleGraph {
+        let src = root.join("src");
         std::fs::create_dir_all(&src).expect("create source directory");
         let paths: Vec<_> = ["source", "barrel-a", "barrel-b", "outer", "entry"]
             .into_iter()
@@ -1138,18 +1162,32 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(4),
                 path: paths[4].clone(),
-                resolved_imports: vec![ResolvedImport {
-                    info: ImportInfo {
-                        source: "./outer".to_string(),
-                        imported_name: ImportedName::Named("left".to_string()),
-                        local_name: "left".to_string(),
-                        is_type_only: false,
-                        from_style: false,
-                        span: oxc_span::Span::default(),
-                        source_span: oxc_span::Span::default(),
+                resolved_imports: vec![
+                    ResolvedImport {
+                        info: ImportInfo {
+                            source: "./outer".to_string(),
+                            imported_name: ImportedName::Named("left".to_string()),
+                            local_name: "left".to_string(),
+                            is_type_only: false,
+                            from_style: false,
+                            span: oxc_span::Span::new(10, 20),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(3)),
                     },
-                    target: ResolveResult::InternalModule(FileId(3)),
-                }],
+                    ResolvedImport {
+                        info: ImportInfo {
+                            source: "./barrel-b".to_string(),
+                            imported_name: ImportedName::Named("foo".to_string()),
+                            local_name: "otherFoo".to_string(),
+                            is_type_only: false,
+                            from_style: false,
+                            span: oxc_span::Span::new(30, 40),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(2)),
+                    },
+                ],
                 ..Default::default()
             },
         ];
@@ -1157,21 +1195,49 @@ mod tests {
             path: paths[4].clone(),
             source: EntryPointSource::PackageJsonMain,
         }];
-        let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+        ModuleGraph::build(&resolved, &entry_points, &files)
+    }
+
+    #[test]
+    fn star_surface_trace_keeps_aliases_separate_and_uses_origin_identity() {
+        let root = tempfile::tempdir().expect("temporary project");
+        let graph = star_surface_trace_graph(root.path());
 
         let used = trace_export(&graph, root.path(), "src/barrel-a.ts", "foo")
             .expect("aliased barrel exposes foo");
-        let unused = trace_export(&graph, root.path(), "src/barrel-b.ts", "foo")
+        let sibling = trace_export(&graph, root.path(), "src/barrel-b.ts", "foo")
             .expect("sibling barrel exposes foo");
-        assert!(!unused.is_used);
-        assert!(unused.direct_references.is_empty());
         assert!(used.is_used);
         assert_eq!(used.direct_references.len(), 1);
+        assert!(sibling.is_used);
+        assert_eq!(sibling.direct_references.len(), 1);
+
+        let source_trace = trace_export(&graph, root.path(), "src/source.ts", "foo")
+            .expect("source declaration is traceable");
+        let chain_count = |file: &str, name: &str| {
+            source_trace
+                .re_export_chains
+                .iter()
+                .find(|chain| chain.barrel_file == Path::new(file) && chain.exported_as == name)
+                .map(|chain| chain.reference_count)
+        };
+        assert_eq!(chain_count("src/barrel-a.ts", "foo"), Some(1));
+        assert_eq!(chain_count("src/barrel-b.ts", "foo"), Some(1));
+        assert_eq!(chain_count("src/outer.ts", "left"), Some(1));
+        assert_eq!(chain_count("src/outer.ts", "right"), Some(0));
 
         let semantic = semantic_symbol_for_export(&graph, root.path(), "src/barrel-a.ts", "foo")
             .expect("star surface resolves to its declaration identity");
         assert_eq!(semantic.path, Path::new("src/source.ts"));
+        assert_eq!(semantic.exported_name, "foo");
+        assert_eq!(semantic.local_name, "foo");
         assert_eq!((semantic.line, semantic.col), (3, 0));
+
+        let alias = semantic_symbol_for_export(&graph, root.path(), "src/outer.ts", "left")
+            .expect("named re-export keeps its export-specifier identity");
+        assert_eq!(alias.path, Path::new("src/outer.ts"));
+        assert_eq!(alias.exported_name, "left");
+        assert_eq!(alias.local_name, "foo");
     }
 
     #[test]
