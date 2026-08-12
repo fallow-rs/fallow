@@ -1,0 +1,6 @@
+{
+  "name": "effective-export-convergent-star",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts"
+}

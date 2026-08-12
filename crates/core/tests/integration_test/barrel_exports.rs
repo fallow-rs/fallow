@@ -148,6 +148,54 @@ fn explicit_re_export_shadows_star_export_with_the_same_name() {
 }
 
 #[test]
+fn conflicting_star_exports_do_not_resolve_an_effective_binding() {
+    let root = fixture_path("effective-export-ambiguous-star");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_foo_paths: Vec<_> = results
+        .unused_exports
+        .iter()
+        .filter(|finding| finding.export.export_name == "foo")
+        .map(|finding| finding.export.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    assert_eq!(
+        unused_foo_paths.len(),
+        2,
+        "an ambiguous barrel import must credit neither foo binding: {unused_foo_paths:?}"
+    );
+    assert!(
+        unused_foo_paths
+            .iter()
+            .any(|path| path.ends_with("src/left.ts")),
+        "left.foo must remain unused: {unused_foo_paths:?}"
+    );
+    assert!(
+        unused_foo_paths
+            .iter()
+            .any(|path| path.ends_with("src/right.ts")),
+        "right.foo must remain unused: {unused_foo_paths:?}"
+    );
+}
+
+#[test]
+fn convergent_star_exports_resolve_the_shared_original_binding() {
+    let root = fixture_path("effective-export-convergent-star");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        !results
+            .unused_exports
+            .iter()
+            .any(|finding| finding.export.export_name == "foo"),
+        "two star paths to one original binding are not ambiguous: {:?}",
+        results.unused_exports
+    );
+}
+
+#[test]
 fn barrel_exports_detects_unused_re_export_bar() {
     let root = fixture_path("barrel-exports");
     let config = create_config(root);
