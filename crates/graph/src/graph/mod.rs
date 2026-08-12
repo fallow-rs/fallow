@@ -49,6 +49,38 @@ pub struct EffectiveExportOrigin<'graph> {
     export: &'graph ExportSymbol,
 }
 
+/// One namespace-specific export exposed by a module and its effective binding.
+#[derive(Debug, Clone, Copy)]
+pub struct EffectiveExportSurface<'graph> {
+    binding: EffectiveExportBinding,
+    namespace: ExportNamespace,
+    export: Option<&'graph ExportSymbol>,
+}
+
+impl<'graph> EffectiveExportSurface<'graph> {
+    /// Canonical binding exposed by the requested module/name/namespace.
+    #[must_use]
+    pub const fn binding(self) -> EffectiveExportBinding {
+        self.binding
+    }
+
+    /// Namespace selected for this surface.
+    #[must_use]
+    pub const fn namespace(self) -> ExportNamespace {
+        self.namespace
+    }
+
+    /// Reference-bearing graph export selected for this surface.
+    ///
+    /// Direct declarations use their origin export. Named re-exports use their
+    /// single barrel surface while references remain namespace-specific;
+    /// namespace objects and implicit SFC defaults have no declaration export.
+    #[must_use]
+    pub const fn export(self) -> Option<&'graph ExportSymbol> {
+        self.export
+    }
+}
+
 impl<'graph> EffectiveExportOrigin<'graph> {
     /// Module that owns the selected declaration.
     #[must_use]
@@ -786,6 +818,43 @@ impl ModuleGraph {
             return None;
         };
         self.export_binding_origin(binding)
+    }
+
+    /// Resolve one module surface to its canonical binding and reference-bearing
+    /// graph export. Value and type namespaces are selected independently.
+    #[must_use]
+    pub fn effective_export_surface(
+        &self,
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> Option<EffectiveExportSurface<'_>> {
+        let EffectiveExportResolution::Unique(binding) =
+            self.resolve_export(file_id, name, namespace)
+        else {
+            return None;
+        };
+        let module = self.modules.get(file_id.0 as usize)?;
+        let exact_surface = module.exports.iter().find(|export| {
+            export.name.matches_str(name)
+                && match namespace {
+                    ExportNamespace::Type => export.is_type_only,
+                    ExportNamespace::Value => !export.is_type_only,
+                }
+        });
+        let surface_export = exact_surface.or_else(|| {
+            module
+                .exports
+                .iter()
+                .find(|export| export.name.matches_str(name))
+        });
+        let export =
+            surface_export.or_else(|| self.export_binding_origin(binding).map(|o| o.export));
+        Some(EffectiveExportSurface {
+            binding,
+            namespace,
+            export,
+        })
     }
 
     /// Resolve a unique binding to its direct declaration, when it has one.

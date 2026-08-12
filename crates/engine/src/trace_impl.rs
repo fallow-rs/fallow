@@ -67,7 +67,7 @@ fn collect_re_export_chains(
             let barrel_export = module
                 .exports
                 .iter()
-                .find(|export| export.name.to_string() == route.exported_name());
+                .find(|export| export.name.matches_str(route.exported_name()));
             Some(ReExportChain {
                 barrel_file: module
                     .path
@@ -75,7 +75,8 @@ fn collect_re_export_chains(
                     .unwrap_or(&module.path)
                     .to_path_buf(),
                 exported_as: route.exported_name().to_string(),
-                reference_count: barrel_export.map_or(0, |export| export.references.len()),
+                reference_count: barrel_export
+                    .map_or(0, |export| export.references_in(namespace).count()),
             })
         })
         .collect()
@@ -126,19 +127,19 @@ pub fn trace_export(
         .iter()
         .find(|m| path_matches(&m.path, root, file_path))?;
 
-    let (export, namespace) = select_export(module, export_name)?;
+    let (export, namespace) = select_export(graph, module, export_name)?;
 
     let direct_references: Vec<ExportReference> = export
-        .references
-        .iter()
+        .references_in(namespace)
         .map(|r| reference_to_export_reference(graph, root, r))
         .collect();
 
     let re_export_chains =
         collect_re_export_chains(graph, root, module.file_id, export_name, namespace);
 
-    let is_used = !export.references.is_empty();
-    let reason = export_trace_reason(module, export.references.len(), is_used, &re_export_chains);
+    let reference_count = direct_references.len();
+    let is_used = reference_count > 0;
+    let reason = export_trace_reason(module, reference_count, is_used, &re_export_chains);
 
     Some(ExportTrace {
         file: module
@@ -176,7 +177,7 @@ pub fn semantic_symbol_for_export(
         .modules
         .iter()
         .find(|module| path_matches(&module.path, root, file_path))?;
-    let (export, namespace) = select_export(module, export_name)?;
+    let (export, namespace) = select_export(graph, module, export_name)?;
     let source = std::fs::read_to_string(&module.path).ok()?;
     let offsets = fallow_types::extract::compute_line_offsets(&source);
     let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
@@ -293,7 +294,7 @@ pub fn semantic_symbol_for_exact_class_method(
     let owners = module
         .exports
         .iter()
-        .filter(|export| export_name_matches(export, owner_name))
+        .filter(|export| export.name.matches_str(owner_name))
         .collect::<Vec<_>>();
     if owners.len() != 1 {
         return Err(if owners.is_empty() {
@@ -453,26 +454,17 @@ fn class_member_trace_reason(
     format!("{head}{body}")
 }
 
-fn export_name_matches(export: &crate::graph::ExportSymbol, export_name: &str) -> bool {
-    let name_str = export.name.to_string();
-    name_str == export_name || (export_name == "default" && name_str == "default")
-}
-
 fn select_export<'graph>(
+    graph: &'graph ModuleGraph,
     module: &'graph crate::graph::ModuleNode,
     export_name: &str,
 ) -> Option<(&'graph crate::graph::ExportSymbol, ExportNamespace)> {
-    module
-        .exports
-        .iter()
-        .find(|export| !export.is_type_only && export_name_matches(export, export_name))
-        .map(|export| (export, ExportNamespace::Value))
-        .or_else(|| {
-            module
-                .exports
-                .iter()
-                .find(|export| export.is_type_only && export_name_matches(export, export_name))
-                .map(|export| (export, ExportNamespace::Type))
+    [ExportNamespace::Value, ExportNamespace::Type]
+        .into_iter()
+        .find_map(|namespace| {
+            graph
+                .effective_export_surface(module.file_id, export_name, namespace)
+                .and_then(|surface| surface.export().map(|export| (export, namespace)))
         })
 }
 
@@ -488,10 +480,9 @@ fn traced_exports(
         .map(|e| TracedExport {
             name: e.name.to_string(),
             is_type_only: e.is_type_only,
-            reference_count: e.references.len(),
+            reference_count: e.physical_reference_count(),
             referenced_by: e
-                .references
-                .iter()
+                .physical_references()
                 .map(|r| reference_to_export_reference(graph, root, r))
                 .collect(),
         })
@@ -1238,7 +1229,7 @@ mod tests {
             },
             target: ResolveResult::InternalModule(source),
         };
-        let resolved = vec![
+        let mut resolved = vec![
             ResolvedModule {
                 file_id: FileId(0),
                 path: files[0].path.clone(),
@@ -1280,6 +1271,8 @@ mod tests {
             source: EntryPointSource::PackageJsonMain,
         }];
         let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+        resolved[1].re_exports.reverse();
+        let reversed_graph = ModuleGraph::build(&resolved, &entry_points, &files);
 
         let trace = trace_export(&graph, Path::new("/project"), "src/barrel.ts", "Foo")
             .expect("barrel exposes Foo in both namespaces");
@@ -1293,6 +1286,17 @@ mod tests {
             "the value import must credit the value surface"
         );
         assert_eq!(trace.direct_references.len(), 1);
+        let reversed_trace = trace_export(
+            &reversed_graph,
+            Path::new("/project"),
+            "src/barrel.ts",
+            "Foo",
+        )
+        .expect("reversed declarations expose the same surface");
+        assert_eq!(
+            serde_json::to_value(trace).expect("serialize trace"),
+            serde_json::to_value(reversed_trace).expect("serialize reversed trace")
+        );
     }
 
     fn build_class_member_graph() -> ModuleGraph {
