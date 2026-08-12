@@ -45,3 +45,14 @@ export class StrategyRegistry {
     }
   }
 }
+
+export class AuditContext {
+  constructor(public auditor: VirtualScrollStrategy) {}
+}
+
+type StrategyTask = (context: AuditContext) => void;
+
+export const auditStrategy: StrategyTask = context => {
+  const { auditor } = context;
+  auditor.audit();
+};

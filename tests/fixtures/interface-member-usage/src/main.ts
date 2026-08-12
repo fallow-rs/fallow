@@ -1,5 +1,7 @@
 import { FixedSizeScrollStrategy } from './fixed-size-strategy';
 import {
+  auditStrategy,
+  AuditContext,
   inspectStrategy,
   refreshStrategy,
   resetStrategy,
@@ -17,3 +19,4 @@ refreshStrategy(strategy);
 resetStrategy(strategy);
 inspectStrategy(new StrategyContext(strategy));
 new StrategyRegistry(strategy).flush();
+auditStrategy(new AuditContext(strategy));

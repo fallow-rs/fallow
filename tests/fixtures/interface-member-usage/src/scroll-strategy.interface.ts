@@ -6,4 +6,5 @@ export interface VirtualScrollStrategy {
   reset(): void;
   inspect(): void;
   notify(): void;
+  audit(): void;
 }
