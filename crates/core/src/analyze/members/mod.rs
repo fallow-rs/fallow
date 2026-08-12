@@ -548,6 +548,21 @@ pub(super) fn public_export_origin_keys(
         .collect()
 }
 
+fn public_class_export_origin_keys(
+    graph: &ModuleGraph,
+    public_api_entry_points: &FxHashSet<FileId>,
+) -> FxHashSet<ExportKey> {
+    use crate::graph::ExportNamespace;
+
+    [ExportNamespace::Value, ExportNamespace::Type]
+        .into_iter()
+        .flat_map(|namespace| {
+            graph.public_export_origins_in_namespace(public_api_entry_points, namespace)
+        })
+        .map(|origin| ExportKey::new(origin.file_id(), origin.export_name()))
+        .collect()
+}
+
 fn export_has_class_members(export: &crate::graph::ExportSymbol) -> bool {
     export.members.iter().any(|member| {
         matches!(
@@ -1028,7 +1043,7 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
     } = collect_propagated_member_accesses(input, &heritage_context, &parent_to_children, &indexes);
 
     let public_class_exports =
-        public_export_origin_keys(input.graph, input.public_api_entry_points);
+        public_class_export_origin_keys(input.graph, input.public_api_entry_points);
 
     let error_subclass_keys = build_error_subclass_export_keys(
         &parent_to_children,

@@ -89,7 +89,22 @@ impl ModuleGraph {
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
     ) -> FxHashSet<PublicExportOrigin> {
-        self.public_export_declaration_bindings(public_api_entry_points)
+        self.public_export_origins_in_namespace(public_api_entry_points, ExportNamespace::Value)
+    }
+
+    /// Resolve direct declarations exposed through public package entries in
+    /// one export namespace.
+    ///
+    /// Type-only public surfaces matter to structural consumers such as class
+    /// member analysis, while runtime consumers can continue to request only
+    /// the value namespace.
+    #[must_use]
+    pub fn public_export_origins_in_namespace(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+        namespace: ExportNamespace,
+    ) -> FxHashSet<PublicExportOrigin> {
+        self.public_export_declaration_bindings_in_namespace(public_api_entry_points, namespace)
             .into_iter()
             .filter_map(|binding| self.export_binding_origin(binding))
             .map(|origin| PublicExportOrigin {
@@ -105,12 +120,20 @@ impl ModuleGraph {
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
     ) -> FxHashSet<EffectiveExportBinding> {
-        let candidate_names = self.public_value_export_names(public_api_entry_points);
+        self.public_export_bindings_in_namespace(public_api_entry_points, ExportNamespace::Value)
+    }
+
+    fn public_export_bindings_in_namespace(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+        namespace: ExportNamespace,
+    ) -> FxHashSet<EffectiveExportBinding> {
+        let candidate_names = self.public_export_names(public_api_entry_points, namespace);
         public_api_entry_points
             .iter()
             .flat_map(|entry| {
                 candidate_names.iter().filter_map(|name| {
-                    match self.resolve_export(*entry, name, ExportNamespace::Value) {
+                    match self.resolve_export(*entry, name, namespace) {
                         EffectiveExportResolution::Unique(binding) => Some(binding),
                         EffectiveExportResolution::Missing
                         | EffectiveExportResolution::Ambiguous => None,
@@ -127,10 +150,21 @@ impl ModuleGraph {
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
     ) -> FxHashSet<EffectiveExportBinding> {
+        self.public_export_declaration_bindings_in_namespace(
+            public_api_entry_points,
+            ExportNamespace::Value,
+        )
+    }
+
+    fn public_export_declaration_bindings_in_namespace(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+        namespace: ExportNamespace,
+    ) -> FxHashSet<EffectiveExportBinding> {
         let mut declarations = FxHashSet::default();
         let mut visited = FxHashSet::default();
         let mut stack: Vec<_> = self
-            .public_export_bindings(public_api_entry_points)
+            .public_export_bindings_in_namespace(public_api_entry_points, namespace)
             .into_iter()
             .collect();
         while let Some(binding) = stack.pop() {
@@ -138,7 +172,7 @@ impl ModuleGraph {
                 continue;
             }
             if let Some(source) = binding.namespace_source() {
-                stack.extend(self.unique_export_bindings(source, ExportNamespace::Value));
+                stack.extend(self.unique_export_bindings(source, namespace));
             } else if self.export_binding_origin(binding).is_some() {
                 declarations.insert(binding);
             }
@@ -150,13 +184,21 @@ impl ModuleGraph {
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
     ) -> FxHashSet<String> {
+        self.public_export_names(public_api_entry_points, ExportNamespace::Value)
+    }
+
+    fn public_export_names(
+        &self,
+        public_api_entry_points: &FxHashSet<FileId>,
+        namespace: ExportNamespace,
+    ) -> FxHashSet<String> {
         let star_targets = self.public_star_re_export_targets(public_api_entry_points);
         let mut names: FxHashSet<String> = public_api_entry_points
             .iter()
             .chain(star_targets.iter())
             .filter_map(|id| self.modules.get(id.0 as usize))
             .flat_map(|module| &module.exports)
-            .filter(|export| !export.is_type_only)
+            .filter(|export| namespace == ExportNamespace::Type || !export.is_type_only)
             .map(|export| export.name.to_string())
             .collect();
         names.insert("default".to_string());
@@ -443,6 +485,22 @@ mod tests {
         let keys = graph.public_export_keys(&public_entries, Path::new("/p"));
         assert!(keys.contains("index.ts::v"));
         assert!(!keys.contains("index.ts::T"), "type-only export skipped");
+
+        let type_origins =
+            graph.public_export_origins_in_namespace(&public_entries, ExportNamespace::Type);
+        assert!(
+            type_origins
+                .iter()
+                .any(|origin| origin.export_name() == "T"),
+            "type namespace keeps the public declaration"
+        );
+        assert!(
+            graph
+                .public_export_origins(&public_entries)
+                .iter()
+                .all(|origin| origin.export_name() != "T"),
+            "value-only consumers still exclude type-only declarations"
+        );
     }
 
     #[test]
