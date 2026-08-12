@@ -1916,6 +1916,10 @@ fn interface_member_usage_does_not_flag_implementer_members() {
         "audit should be credited through a function-type alias parameter: {unused_members:?}"
     );
     assert!(
+        !unused_members.contains(&"FixedSizeScrollStrategy.requiredByContract".to_string()),
+        "a required interface member cannot be removed from its implementer: {unused_members:?}"
+    );
+    assert!(
         unused_members.contains(&"FixedSizeScrollStrategy.unusedHelper".to_string()),
         "unrelated members should still be reported: {unused_members:?}"
     );

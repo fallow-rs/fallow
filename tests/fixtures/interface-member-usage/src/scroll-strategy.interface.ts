@@ -7,4 +7,5 @@ export interface VirtualScrollStrategy {
   inspect(): void;
   notify(): void;
   audit(): void;
+  requiredByContract(): void;
 }
