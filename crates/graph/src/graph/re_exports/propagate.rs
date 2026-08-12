@@ -23,16 +23,7 @@ use crate::resolve::ResolvedModule;
 
 #[cfg(test)]
 thread_local! {
-    static NAMED_IMPORT_ORIGIN_INDEX_BUILDS: Cell<usize> = const { Cell::new(0) };
     static STAR_REFERENCE_SET_REBUILDS: Cell<usize> = const { Cell::new(0) };
-}
-
-#[cfg(test)]
-pub(super) fn count_named_import_origin_index_builds<T>(run: impl FnOnce() -> T) -> (T, usize) {
-    NAMED_IMPORT_ORIGIN_INDEX_BUILDS.set(0);
-    let result = run();
-    let builds = NAMED_IMPORT_ORIGIN_INDEX_BUILDS.get();
-    (result, builds)
 }
 
 #[cfg(test)]
@@ -54,7 +45,6 @@ pub(in crate::graph) struct StarReExportPropagation<'a> {
     pub(in crate::graph) modules: &'a mut [ModuleNode],
     pub(in crate::graph) edges: &'a [Edge],
     pub(in crate::graph) edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
-    pub(in crate::graph) named_import_origin_index: &'a NamedImportOriginIndex,
     pub(in crate::graph) module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     pub(in crate::graph) effective_exports: &'a EffectiveExportIndex,
     pub(in crate::graph) barrel_id: FileId,
@@ -72,7 +62,6 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         modules,
         edges,
         edges_by_target,
-        named_import_origin_index,
         module_by_id,
         effective_exports,
         barrel_id,
@@ -104,7 +93,7 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         modules,
         edges,
         edges_by_target,
-        named_import_origin_index,
+        module_by_id,
         barrel_file_id,
         barrel_idx,
         reference_paths,
@@ -150,7 +139,6 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
             value_resolves,
             matching_exports,
             source_id,
-            module_by_id,
             triggering_is_type_only,
             source_has_star_re_exports,
             existing_references: &mut existing_references,
@@ -189,7 +177,7 @@ struct StarReferenceCollection<'a> {
     modules: &'a [ModuleNode],
     edges: &'a [Edge],
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
-    named_import_origin_index: &'a NamedImportOriginIndex,
+    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     barrel_file_id: FileId,
     barrel_idx: usize,
     reference_paths: &'a mut ReferencePathInterner,
@@ -197,20 +185,26 @@ struct StarReferenceCollection<'a> {
 
 fn collect_star_refs_by_name(
     input: StarReferenceCollection<'_>,
-) -> FxHashMap<String, Vec<StarReference>> {
+) -> FxHashMap<String, Vec<RoutedReference>> {
     let StarReferenceCollection {
         modules,
         edges,
         edges_by_target,
-        named_import_origin_index,
+        module_by_id,
         barrel_file_id,
         barrel_idx,
         reference_paths,
     } = input;
-    let named_refs = named_star_refs(edges, edges_by_target, barrel_file_id, reference_paths);
-    let barrel_refs = barrel_star_refs(&modules[barrel_idx], named_import_origin_index);
+    let named_refs = named_star_refs(
+        edges,
+        edges_by_target,
+        module_by_id,
+        barrel_file_id,
+        reference_paths,
+    );
+    let barrel_refs = barrel_star_refs(&modules[barrel_idx]);
 
-    let mut refs_by_name: FxHashMap<String, Vec<StarReference>> = FxHashMap::default();
+    let mut refs_by_name: FxHashMap<String, Vec<RoutedReference>> = FxHashMap::default();
     for (name, ref_item) in named_refs {
         refs_by_name.entry(name).or_default().push(ref_item);
     }
@@ -223,15 +217,16 @@ fn collect_star_refs_by_name(
 fn named_star_refs(
     edges: &[Edge],
     edges_by_target: &FxHashMap<FileId, Vec<usize>>,
+    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     barrel_file_id: FileId,
     reference_paths: &mut ReferencePathInterner,
-) -> Vec<(String, StarReference)> {
+) -> Vec<(String, RoutedReference)> {
     edges_by_target
         .get(&barrel_file_id)
         .map(|indices| {
             indices
                 .iter()
-                .flat_map(|&idx| named_refs_for_edge(&edges[idx], reference_paths))
+                .flat_map(|&idx| named_refs_for_edge(&edges[idx], module_by_id, reference_paths))
                 .collect()
         })
         .unwrap_or_default()
@@ -239,150 +234,66 @@ fn named_star_refs(
 
 fn named_refs_for_edge(
     edge: &Edge,
+    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     reference_paths: &mut ReferencePathInterner,
-) -> Vec<(String, StarReference)> {
-    edge.symbols
-        .iter()
-        .filter_map(|sym| {
-            let ImportedName::Named(name) = &sym.imported_name else {
-                return None;
-            };
-            if name == "default" {
-                return None;
-            }
-            Some((
+) -> Vec<(String, RoutedReference)> {
+    let source = module_by_id.get(&edge.source);
+    let mut references = Vec::new();
+    for symbol in &edge.symbols {
+        let ImportedName::Named(name) = &symbol.imported_name else {
+            continue;
+        };
+        if name == "default" {
+            continue;
+        }
+
+        let uses_type = symbol.is_type_only
+            || import_binding_has_type_usage(source, symbol.local_name.as_str());
+        let uses_value = !symbol.is_type_only
+            && import_binding_has_value_usage(source, symbol.local_name.as_str());
+        // A binding with no recorded usage keeps the existing value-space
+        // fallback; unused-import analysis owns whether that site is reported.
+        let namespaces: &[ExportNamespace] = match (uses_type, uses_value) {
+            (true, true) => &[ExportNamespace::Type, ExportNamespace::Value],
+            (true, false) => &[ExportNamespace::Type],
+            (false, _) => &[ExportNamespace::Value],
+        };
+        let path = reference_paths.direct(edge.target, symbol.mechanism);
+        for &namespace in namespaces {
+            references.push((
                 name.clone(),
-                StarReference {
-                    routed: RoutedReference {
-                        reference: SymbolReference {
-                            from_file: edge.source,
-                            kind: ReferenceKind::NamedImport,
-                            namespace: if sym.is_type_only {
-                                ExportNamespace::Type
-                            } else {
-                                ExportNamespace::Value
-                            },
-                            import_span: sym.import_span,
-                        },
-                        path: reference_paths.direct(edge.target, sym.mechanism),
+                RoutedReference {
+                    reference: SymbolReference {
+                        from_file: edge.source,
+                        kind: ReferenceKind::NamedImport,
+                        namespace,
+                        import_span: symbol.import_span,
                     },
-                    origin: StarReferenceOrigin::NamedImport {
-                        local_name: sym.local_name.clone(),
-                        is_type_only: sym.is_type_only,
-                    },
+                    path,
                 },
-            ))
-        })
-        .collect()
+            ));
+        }
+    }
+    references
 }
 
-fn barrel_star_refs(
-    module: &ModuleNode,
-    named_import_origin_index: &NamedImportOriginIndex,
-) -> Vec<(String, Vec<StarReference>)> {
+fn barrel_star_refs(module: &ModuleNode) -> Vec<(String, Vec<RoutedReference>)> {
     module
         .exports
         .iter()
         .filter(|export| !export.references.is_empty())
         .map(|export| {
             let name = export.name.to_string();
-            let refs = export
-                .routed_references()
-                .map(|routed| {
-                    barrel_star_ref(
-                        routed,
-                        &name,
-                        export.is_type_only,
-                        named_import_origin_index,
-                    )
-                })
-                .collect();
+            let refs = export.routed_references().collect();
             (name, refs)
         })
         .collect()
 }
 
-fn barrel_star_ref(
-    routed: RoutedReference,
-    name: &str,
-    is_type_only: bool,
-    named_import_origin_index: &NamedImportOriginIndex,
-) -> StarReference {
-    StarReference {
-        routed,
-        origin: named_import_origin_index
-            .get(routed.reference, name)
-            .cloned()
-            .unwrap_or(StarReferenceOrigin::BarrelExport { is_type_only }),
-    }
-}
-
-type ReferenceSite = (FileId, u32, u32);
-
-#[derive(Default)]
-pub(in crate::graph) struct NamedImportOriginIndex(
-    FxHashMap<ReferenceSite, FxHashMap<String, StarReferenceOrigin>>,
-);
-
-impl NamedImportOriginIndex {
-    pub(in crate::graph) fn from_edges(edges: &[Edge]) -> Self {
-        #[cfg(test)]
-        NAMED_IMPORT_ORIGIN_INDEX_BUILDS.set(NAMED_IMPORT_ORIGIN_INDEX_BUILDS.get() + 1);
-
-        let mut index: FxHashMap<ReferenceSite, FxHashMap<String, StarReferenceOrigin>> =
-            FxHashMap::default();
-        for edge in edges {
-            for sym in &edge.symbols {
-                let ImportedName::Named(name) = &sym.imported_name else {
-                    continue;
-                };
-                index
-                    .entry((edge.source, sym.import_span.start, sym.import_span.end))
-                    .or_default()
-                    .insert(
-                        name.clone(),
-                        StarReferenceOrigin::NamedImport {
-                            local_name: sym.local_name.clone(),
-                            is_type_only: sym.is_type_only,
-                        },
-                    );
-            }
-        }
-        Self(index)
-    }
-
-    fn get(&self, reference: SymbolReference, name: &str) -> Option<&StarReferenceOrigin> {
-        self.0
-            .get(&(
-                reference.from_file,
-                reference.import_span.start,
-                reference.import_span.end,
-            ))
-            .and_then(|origins| origins.get(name))
-    }
-}
-
-#[derive(Clone)]
-struct StarReference {
-    routed: RoutedReference,
-    origin: StarReferenceOrigin,
-}
-
-#[derive(Clone)]
-enum StarReferenceOrigin {
-    NamedImport {
-        local_name: String,
-        is_type_only: bool,
-    },
-    BarrelExport {
-        is_type_only: bool,
-    },
-}
-
 struct ApplyStarRefs<'a> {
     source: &'a mut ModuleNode,
     name: &'a str,
-    refs: &'a [StarReference],
+    refs: &'a [RoutedReference],
     effective_exports: &'a EffectiveExportIndex,
     type_resolves: bool,
     value_resolves: bool,
@@ -390,7 +301,6 @@ struct ApplyStarRefs<'a> {
     /// once per source module by `build_named_export_index` (issue #1843 follow-up).
     matching_exports: &'a [usize],
     source_id: FileId,
-    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     triggering_is_type_only: bool,
     source_has_star_re_exports: bool,
     existing_references: &'a mut FxHashSet<RoutedReferenceKey>,
@@ -411,7 +321,6 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
         value_resolves,
         matching_exports,
         source_id,
-        module_by_id,
         triggering_is_type_only,
         source_has_star_re_exports,
         existing_references,
@@ -432,7 +341,6 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
             type_resolves,
             value_resolves,
             source_id,
-            module_by_id,
             triggering_is_type_only,
             source_has_star_re_exports,
             matching_exports,
@@ -449,7 +357,6 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
             type_resolves,
             value_resolves,
             source_id,
-            module_by_id,
             triggering_is_type_only,
             synthetic_stubs,
             reference_paths,
@@ -462,12 +369,11 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
 struct ApplyMatchingStarRefs<'a> {
     source: &'a mut ModuleNode,
     name: &'a str,
-    refs: &'a [StarReference],
+    refs: &'a [RoutedReference],
     effective_exports: &'a EffectiveExportIndex,
     type_resolves: bool,
     value_resolves: bool,
     source_id: FileId,
-    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     triggering_is_type_only: bool,
     source_has_star_re_exports: bool,
     matching_exports: &'a [usize],
@@ -498,7 +404,6 @@ fn apply_star_refs_to_matching_exports(input: ApplyMatchingStarRefs<'_>) -> bool
         type_resolves,
         value_resolves,
         source_id,
-        module_by_id,
         triggering_is_type_only,
         source_has_star_re_exports,
         matching_exports,
@@ -512,7 +417,6 @@ fn apply_star_refs_to_matching_exports(input: ApplyMatchingStarRefs<'_>) -> bool
         matching_star_exports(source, matching_exports, effective_exports, source_id, name);
     let (needs_type_export, needs_value_export) = required_matching_star_exports(
         refs,
-        module_by_id,
         type_resolves && (!exports.type_indices.is_empty() || can_synthesize),
         value_resolves
             && (!exports.value_indices.is_empty() || (can_synthesize && !triggering_is_type_only)),
@@ -532,7 +436,6 @@ fn apply_star_refs_to_matching_exports(input: ApplyMatchingStarRefs<'_>) -> bool
     changed |= attach_matching_star_refs(AttachMatchingStarRefs {
         source,
         refs,
-        module_by_id,
         triggering_is_type_only,
         type_resolves,
         value_resolves,
@@ -570,17 +473,16 @@ fn matching_star_exports(
 }
 
 fn required_matching_star_exports(
-    refs: &[StarReference],
-    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    refs: &[RoutedReference],
     effective_has_type_exports: bool,
     effective_has_value_exports: bool,
     triggering_is_type_only: bool,
 ) -> (bool, bool) {
     let mut needs_type_export = false;
     let mut needs_value_export = false;
-    for star_ref in refs {
-        let (attach_type_exports, attach_value_exports) = star_ref.attach_targets(
-            module_by_id,
+    for routed in refs {
+        let (attach_type_exports, attach_value_exports) = star_reference_attach_targets(
+            routed.reference.namespace,
             StarExportTargets {
                 has_type: effective_has_type_exports,
                 has_value: effective_has_value_exports,
@@ -699,8 +601,7 @@ fn matching_synthetic_export_index(
 
 struct AttachMatchingStarRefs<'a> {
     source: &'a mut ModuleNode,
-    refs: &'a [StarReference],
-    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    refs: &'a [RoutedReference],
     triggering_is_type_only: bool,
     type_resolves: bool,
     value_resolves: bool,
@@ -714,7 +615,6 @@ fn attach_matching_star_refs(input: AttachMatchingStarRefs<'_>) -> bool {
     let AttachMatchingStarRefs {
         source,
         refs,
-        module_by_id,
         triggering_is_type_only,
         type_resolves,
         value_resolves,
@@ -726,9 +626,9 @@ fn attach_matching_star_refs(input: AttachMatchingStarRefs<'_>) -> bool {
 
     let mut type_refs = Vec::new();
     let mut value_refs = Vec::new();
-    for star_ref in refs {
-        let (attach_type_exports, attach_value_exports) = star_ref.attach_targets(
-            module_by_id,
+    for routed in refs {
+        let (attach_type_exports, attach_value_exports) = star_reference_attach_targets(
+            routed.reference.namespace,
             StarExportTargets {
                 has_type: !exports.type_indices.is_empty(),
                 has_value: !exports.value_indices.is_empty(),
@@ -737,7 +637,7 @@ fn attach_matching_star_refs(input: AttachMatchingStarRefs<'_>) -> bool {
             },
             triggering_is_type_only,
         );
-        let routed = through_re_export(star_ref.routed, source_id, reference_paths);
+        let routed = through_re_export(*routed, source_id, reference_paths);
         if attach_type_exports {
             let mut typed = routed;
             typed.reference.namespace = ExportNamespace::Type;
@@ -774,11 +674,10 @@ struct CreateSyntheticExports<'a> {
     source: &'a mut ModuleNode,
     name: &'a str,
     export_name: ExportName,
-    refs: &'a [StarReference],
+    refs: &'a [RoutedReference],
     type_resolves: bool,
     value_resolves: bool,
     source_id: FileId,
-    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     triggering_is_type_only: bool,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
     reference_paths: &'a mut ReferencePathInterner,
@@ -793,7 +692,6 @@ fn create_synthetic_exports_for_refs(input: CreateSyntheticExports<'_>) -> bool 
         type_resolves,
         value_resolves,
         source_id,
-        module_by_id,
         triggering_is_type_only,
         synthetic_stubs,
         reference_paths,
@@ -801,9 +699,9 @@ fn create_synthetic_exports_for_refs(input: CreateSyntheticExports<'_>) -> bool 
 
     let mut type_refs = Vec::new();
     let mut value_refs = Vec::new();
-    for star_ref in refs {
-        let (attach_type_exports, attach_value_exports) = star_ref.attach_targets(
-            module_by_id,
+    for routed in refs {
+        let (attach_type_exports, attach_value_exports) = star_reference_attach_targets(
+            routed.reference.namespace,
             StarExportTargets {
                 has_type: true,
                 has_value: !triggering_is_type_only,
@@ -812,7 +710,7 @@ fn create_synthetic_exports_for_refs(input: CreateSyntheticExports<'_>) -> bool 
             },
             triggering_is_type_only,
         );
-        let routed = through_re_export(star_ref.routed, source_id, reference_paths);
+        let routed = through_re_export(*routed, source_id, reference_paths);
         if attach_type_exports {
             let mut typed = routed;
             typed.reference.namespace = ExportNamespace::Type;
@@ -955,69 +853,15 @@ fn through_re_export(
     }
 }
 
-impl StarReference {
-    fn attach_targets(
-        &self,
-        module_by_id: &FxHashMap<FileId, &ResolvedModule>,
-        targets: StarExportTargets,
-        triggering_is_type_only: bool,
-    ) -> (bool, bool) {
-        if triggering_is_type_only {
-            return type_attach_targets(targets);
-        }
-
-        match &self.origin {
-            StarReferenceOrigin::NamedImport {
-                local_name,
-                is_type_only,
-            } => decide_named_import_attach_targets(
-                module_by_id.get(&self.routed.reference.from_file),
-                local_name,
-                *is_type_only,
-                targets,
-            ),
-            StarReferenceOrigin::BarrelExport { is_type_only } => {
-                decide_barrel_export_attach_targets(*is_type_only, targets)
-            }
-        }
-    }
-}
-
-fn decide_named_import_attach_targets(
-    source_mod: Option<&&ResolvedModule>,
-    local_name: &str,
-    is_type_only: bool,
+const fn star_reference_attach_targets(
+    namespace: ExportNamespace,
     targets: StarExportTargets,
+    triggering_is_type_only: bool,
 ) -> (bool, bool) {
-    if is_type_only {
+    if triggering_is_type_only || matches!(namespace, ExportNamespace::Type) {
         return type_attach_targets(targets);
     }
-
-    let uses_type = import_binding_has_type_usage(source_mod, local_name);
-    let uses_value = import_binding_has_value_usage(source_mod, local_name);
-    if !uses_type && !uses_value {
-        return (false, targets.value_resolves && targets.has_value);
-    }
-
-    let (type_export, type_value_fallback) = type_attach_targets(StarExportTargets {
-        type_resolves: uses_type && targets.type_resolves,
-        ..targets
-    });
-    (
-        type_export,
-        type_value_fallback || (uses_value && targets.value_resolves && targets.has_value),
-    )
-}
-
-const fn decide_barrel_export_attach_targets(
-    is_type_only: bool,
-    targets: StarExportTargets,
-) -> (bool, bool) {
-    if is_type_only {
-        type_attach_targets(targets)
-    } else {
-        (false, targets.value_resolves && targets.has_value)
-    }
+    (false, targets.value_resolves && targets.has_value)
 }
 
 const fn type_attach_targets(targets: StarExportTargets) -> (bool, bool) {

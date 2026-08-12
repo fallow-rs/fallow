@@ -1,6 +1,6 @@
 use rustc_hash::FxHashSet;
 
-use super::propagate::{count_named_import_origin_index_builds, count_star_reference_set_rebuilds};
+use super::propagate::count_star_reference_set_rebuilds;
 use super::{
     ReExportPropagationPlan, ReExportTuple, capture_propagation_visits,
     with_re_export_differential_check,
@@ -193,14 +193,7 @@ fn barrel_re_export_creates_export_symbol() {
         },
     ];
 
-    let (graph, origin_index_builds) = count_named_import_origin_index_builds(|| {
-        ModuleGraph::build(&resolved_modules, &entry_points, &files)
-    });
-
-    assert_eq!(
-        origin_index_builds, 0,
-        "named re-exports should not build the star-import origin index"
-    );
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
     let barrel = &graph.modules[1];
     let foo_export = barrel.exports.iter().find(|e| e.name.to_string() == "foo");
@@ -920,14 +913,7 @@ fn entry_point_star_re_export_propagates_to_source() {
         },
     ];
 
-    let (graph, origin_index_builds) = count_named_import_origin_index_builds(|| {
-        ModuleGraph::build(&resolved_modules, &entry_points, &files)
-    });
-
-    assert_eq!(
-        origin_index_builds, 0,
-        "entry-point star re-exports should use the fast path without an origin index"
-    );
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
     let utils_module = &graph.modules[1];
     let foo = utils_module
@@ -3696,19 +3682,6 @@ fn star_re_export_duplicate_name_value_import_credits_value_export() {
 }
 
 #[test]
-fn star_re_export_origin_index_is_built_once_per_graph() {
-    let (_, builds) = count_named_import_origin_index_builds(|| {
-        graph_for_merged_star_chain_import(
-            vec![named_import("Merged", "Local", false)],
-            vec![],
-            vec!["Local"],
-        )
-    });
-
-    assert_eq!(builds, 1, "the whole-edge origin index must be shared");
-}
-
-#[test]
 fn star_re_export_duplicate_name_type_import_credits_type_export() {
     let graph = graph_for_merged_star_import(
         vec![named_import("Merged", "MergedType", true)],
@@ -3896,14 +3869,11 @@ fn assert_single_merged_barrel_stub(graph: &ModuleGraph, namespaces: &[ExportNam
 }
 
 #[test]
-fn star_re_export_duplicate_name_mixed_import_credits_both_exports() {
+fn star_re_export_single_import_mixed_use_credits_both_exports() {
     let graph = graph_for_merged_star_import(
-        vec![
-            named_import("Merged", "MergedValue", false),
-            named_import("Merged", "MergedType", true),
-        ],
-        vec!["MergedType"],
-        vec!["MergedValue"],
+        vec![named_import("Merged", "MergedBoth", false)],
+        vec!["MergedBoth"],
+        vec!["MergedBoth"],
     );
 
     let (type_export, value_export) = merged_exports(&graph);
