@@ -3,4 +3,5 @@ export interface VirtualScrollStrategy {
   attach(viewport: unknown): void;
   detach(): void;
   refresh(): void;
+  reset(): void;
 }

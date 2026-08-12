@@ -9,6 +9,8 @@ export class FixedSizeScrollStrategy implements VirtualScrollStrategy {
 
   refresh(): void {}
 
+  reset(): void {}
+
   unusedHelper(): string {
     return 'unused';
   }

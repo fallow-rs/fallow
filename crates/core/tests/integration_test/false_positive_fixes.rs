@@ -1900,6 +1900,10 @@ fn interface_member_usage_does_not_flag_implementer_members() {
         "refresh should be credited through a nested type assertion: {unused_members:?}"
     );
     assert!(
+        !unused_members.contains(&"FixedSizeScrollStrategy.reset".to_string()),
+        "reset should be credited through a nullable asserted binding: {unused_members:?}"
+    );
+    assert!(
         unused_members.contains(&"FixedSizeScrollStrategy.unusedHelper".to_string()),
         "unrelated members should still be reported: {unused_members:?}"
     );
