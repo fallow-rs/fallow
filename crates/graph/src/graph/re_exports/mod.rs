@@ -102,6 +102,7 @@ struct ReExportContext<'a> {
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     named_import_origin_index: &'a NamedImportOriginIndex,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    effective_exports: &'a super::effective_exports::EffectiveExportIndex,
     existing_refs: &'a mut FxHashSet<(FileId, Option<ReferencePathId>)>,
     synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
     reference_paths: &'a mut ReferencePathInterner,
@@ -125,6 +126,7 @@ struct LegacyReExportFullScan<'a> {
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     named_import_origin_index: &'a NamedImportOriginIndex,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    effective_exports: &'a super::effective_exports::EffectiveExportIndex,
     reference_paths: &'a mut ReferencePathInterner,
 }
 
@@ -341,6 +343,7 @@ impl ModuleGraph {
                 edges_by_target,
                 named_import_origin_index,
                 module_by_id,
+                effective_exports: &self.effective_exports,
                 existing_refs: &mut existing_refs,
                 synthetic_stubs: &mut synthetic_stubs,
                 reference_paths,
@@ -365,6 +368,7 @@ impl ModuleGraph {
                 edges_by_target,
                 named_import_origin_index,
                 module_by_id,
+                effective_exports: &self.effective_exports,
                 reference_paths,
             });
             assert_eq!(
@@ -444,6 +448,7 @@ impl ModuleGraph {
                 edges_by_target: context.edges_by_target,
                 named_import_origin_index: context.named_import_origin_index,
                 module_by_id: context.module_by_id,
+                effective_exports: context.effective_exports,
                 barrel_id: entry.barrel,
                 barrel_idx,
                 source_id: entry.source,
@@ -477,6 +482,7 @@ impl ModuleGraph {
             edges_by_target,
             named_import_origin_index,
             module_by_id,
+            effective_exports,
             reference_paths,
         } = input;
         let max_iterations = re_export_info.len().saturating_add(1);
@@ -491,6 +497,7 @@ impl ModuleGraph {
                     edges_by_target,
                     named_import_origin_index,
                     module_by_id,
+                    effective_exports,
                     existing_refs: &mut existing_refs,
                     synthetic_stubs: &mut synthetic_stubs,
                     reference_paths,

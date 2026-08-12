@@ -107,6 +107,28 @@ impl EffectiveExportIndex {
 
         Self { resolutions }
     }
+
+    pub(super) fn resolves_through(
+        &self,
+        barrel: FileId,
+        source: FileId,
+        name: &str,
+        space: ExportSpace,
+    ) -> bool {
+        let name = parse_export_name(name);
+        let barrel_key = ExportKey::new(barrel, name.clone(), space);
+        let source_key = ExportKey::new(source, name, space);
+        matches!(
+            (
+                self.resolutions.get(&barrel_key),
+                self.resolutions.get(&source_key),
+            ),
+            (
+                Some(EffectiveExportResolution::Unique(barrel_binding)),
+                Some(EffectiveExportResolution::Unique(source_binding)),
+            ) if barrel_binding == source_binding
+        )
+    }
 }
 
 fn seed_direct_bindings(
@@ -389,19 +411,7 @@ mod tests {
         source: FileId,
         name: &str,
     ) -> bool {
-        let name = parse_export_name(name);
-        let barrel_key = ExportKey::new(barrel, name.clone(), ExportSpace::Value);
-        let source_key = ExportKey::new(source, name, ExportSpace::Value);
-        matches!(
-            (
-                index.resolutions.get(&barrel_key),
-                index.resolutions.get(&source_key),
-            ),
-            (
-                Some(EffectiveExportResolution::Unique(barrel_binding)),
-                Some(EffectiveExportResolution::Unique(source_binding)),
-            ) if barrel_binding == source_binding
-        )
+        index.resolves_through(barrel, source, name, ExportSpace::Value)
     }
 
     #[test]
