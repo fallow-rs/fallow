@@ -694,3 +694,33 @@ fn explicit_default_reexport_alongside_star_still_credits_source_default() {
         "an explicit default re-export must still credit the source default"
     );
 }
+
+/// A value and an interface of the same name, star-exported through one barrel
+/// (the codec plus companion-interface idiom), must each keep resolving in
+/// their own declaration space so neither is reported as unused.
+#[test]
+fn star_barrel_companion_type_and_value_are_both_credited() {
+    let root = fixture_path("barrel-star-companion-type");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_types: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    let unused_exports: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_types.contains(&"User"),
+        "the companion interface reached through the barrel must stay used, found: {unused_types:?}"
+    );
+    assert!(
+        !unused_exports.contains(&"User"),
+        "the companion value reached through the barrel must stay used, found: {unused_exports:?}"
+    );
+}

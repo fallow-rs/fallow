@@ -571,12 +571,18 @@ fn attach_direct_export_references(
         .filter(|idx| !target_module.exports[*idx].is_type_only)
         .collect();
 
-    let (uses_type, uses_value) = desired_import_namespaces(sym, source_mod);
+    let usage = desired_import_namespaces(sym, source_mod);
     let imported_name = match &sym.imported_name {
         ImportedName::Named(name) => name.as_str(),
         ImportedName::Default => "default",
         ImportedName::Namespace | ImportedName::SideEffect => return,
     };
+    let (uses_type, uses_value) = resolved_import_namespaces(
+        usage,
+        effective_exports,
+        target_module.file_id,
+        imported_name,
+    );
     for (namespace, should_attach) in [
         (ExportNamespace::Type, uses_type),
         (ExportNamespace::Value, uses_value),
@@ -616,21 +622,74 @@ fn attach_direct_export_references(
     }
 }
 
+/// Which semantic namespaces an imported binding uses.
+///
+/// `classified` is false when the extractor recorded no type or value usage for
+/// the binding and the value namespace is only the default guess.
+#[derive(Clone, Copy)]
+struct ImportNamespaceUse {
+    uses_type: bool,
+    uses_value: bool,
+    classified: bool,
+}
+
+impl ImportNamespaceUse {
+    const fn namespaces(self) -> (bool, bool) {
+        (self.uses_type, self.uses_value)
+    }
+}
+
 /// Decide which semantic namespaces the imported binding uses.
 fn desired_import_namespaces(
     sym: &ImportedSymbol,
     source_mod: Option<&&ResolvedModule>,
-) -> (bool, bool) {
+) -> ImportNamespaceUse {
     if sym.is_type_only {
-        return (true, false);
+        return ImportNamespaceUse {
+            uses_type: true,
+            uses_value: false,
+            classified: true,
+        };
     }
     let uses_type = import_binding_has_type_usage(source_mod, &sym.local_name);
     let uses_value = import_binding_has_value_usage(source_mod, &sym.local_name);
     if uses_type || uses_value {
-        (uses_type, uses_value)
-    } else {
-        (false, true)
+        return ImportNamespaceUse {
+            uses_type,
+            uses_value,
+            classified: true,
+        };
     }
+    ImportNamespaceUse {
+        uses_type: false,
+        uses_value: true,
+        classified: false,
+    }
+}
+
+/// Keep an unclassified binding on the only namespace that actually resolves.
+///
+/// The value guess would otherwise attach nothing when the imported name exists
+/// only as a type, silently un-referencing a type-only export.
+fn resolved_import_namespaces(
+    usage: ImportNamespaceUse,
+    effective_exports: &super::effective_exports::EffectiveExportIndex,
+    file_id: FileId,
+    imported_name: &str,
+) -> (bool, bool) {
+    if usage.classified {
+        return usage.namespaces();
+    }
+    let resolves = |namespace| {
+        matches!(
+            effective_exports.resolve(file_id, imported_name, namespace),
+            super::EffectiveExportResolution::Unique(_)
+        )
+    };
+    if !resolves(ExportNamespace::Value) && resolves(ExportNamespace::Type) {
+        return (true, false);
+    }
+    usage.namespaces()
 }
 
 /// Process a single imported symbol, attaching references to the target module's exports.
@@ -655,7 +714,7 @@ pub(super) fn attach_symbol_reference(
 
     if matches!(sym.imported_name, ImportedName::Namespace) {
         if sym.local_name.is_empty() {
-            let namespaces = desired_import_namespaces(sym, source_mod);
+            let namespaces = desired_import_namespaces(sym, source_mod).namespaces();
             for (namespace, is_used) in [
                 (ExportNamespace::Type, namespaces.0),
                 (ExportNamespace::Value, namespaces.1),
@@ -677,7 +736,7 @@ pub(super) fn attach_symbol_reference(
                 target_module,
                 site,
                 &sym.local_name,
-                desired_import_namespaces(sym, source_mod),
+                desired_import_namespaces(sym, source_mod).namespaces(),
                 &mut ctx,
             );
         }

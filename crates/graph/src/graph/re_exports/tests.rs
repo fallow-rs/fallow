@@ -3889,6 +3889,64 @@ fn star_re_export_single_import_mixed_use_credits_both_exports() {
     );
 }
 
+/// An import binding the extractor could not classify (no recorded type or
+/// value usage) must still credit a name that only exists as a type, instead of
+/// resolving in the value namespace and attaching nothing.
+#[test]
+fn star_re_export_unclassified_import_credits_a_type_only_export() {
+    let graph = graph_for_star_import(
+        vec![named_import("Merged", "Merged", false)],
+        vec![],
+        vec![],
+        vec![merged_export(true)],
+    );
+
+    let source = graph
+        .modules
+        .iter()
+        .find(|module| module.path.ends_with("merged.ts"))
+        .expect("source module should exist");
+    let type_export = source
+        .exports
+        .iter()
+        .find(|export| export.name.to_string() == "Merged" && export.is_type_only)
+        .expect("type export should exist");
+
+    assert_eq!(
+        reference_namespaces(type_export),
+        vec![ExportNamespace::Type],
+        "an unclassified binding through a star barrel must credit the type-only export"
+    );
+}
+
+#[test]
+fn named_re_export_unclassified_import_credits_a_type_only_export() {
+    let graph = graph_for_named_import(
+        vec![named_import("Merged", "Merged", false)],
+        vec![],
+        vec![],
+        vec![merged_export(true)],
+        false,
+    );
+
+    let source = graph
+        .modules
+        .iter()
+        .find(|module| module.path.ends_with("merged.ts"))
+        .expect("source module should exist");
+    let type_export = source
+        .exports
+        .iter()
+        .find(|export| export.name.to_string() == "Merged" && export.is_type_only)
+        .expect("type export should exist");
+
+    assert_eq!(
+        reference_namespaces(type_export),
+        vec![ExportNamespace::Type],
+        "an unclassified binding through a named re-export must credit the type-only export"
+    );
+}
+
 #[test]
 fn star_re_export_duplicate_name_multi_hop_type_usage_credits_type_export() {
     let graph = graph_for_merged_star_chain_import(
@@ -3938,6 +3996,20 @@ fn graph_for_merged_star_import(
     type_usages: Vec<&str>,
     value_usages: Vec<&str>,
 ) -> ModuleGraph {
+    graph_for_star_import(
+        imports,
+        type_usages,
+        value_usages,
+        vec![merged_export(true), merged_export(false)],
+    )
+}
+
+fn graph_for_star_import(
+    imports: Vec<ResolvedImport>,
+    type_usages: Vec<&str>,
+    value_usages: Vec<&str>,
+    source_exports: Vec<fallow_types::extract::ExportInfo>,
+) -> ModuleGraph {
     let files = vec![
         discovered_file(0, "/project/consumer.ts"),
         discovered_file(1, "/project/barrel.ts"),
@@ -3981,7 +4053,7 @@ fn graph_for_merged_star_import(
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/merged.ts"),
-            exports: vec![merged_export(true), merged_export(false)].into(),
+            exports: source_exports.into(),
             ..Default::default()
         },
     ];

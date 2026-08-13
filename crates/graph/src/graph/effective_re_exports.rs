@@ -125,6 +125,7 @@ impl EffectiveDeclarationRoute {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(in crate::graph) struct InternedEffectiveDeclarationRoute {
     graph: Option<ReferenceRouteGraphId>,
     start: ReferenceRouteNodeId,
@@ -160,22 +161,24 @@ pub(in crate::graph) fn effective_declaration_route(
     };
     binding.origin_slot()?;
 
-    let initial = (file, name.to_string());
-    let mut states = vec![initial.clone()];
-    let mut state_ids = FxHashMap::from_iter([(initial, 0_usize)]);
+    // States borrow their names from the module re-export edges, so the search
+    // walks the topology without allocating one string per visited hop.
+    let initial: (FileId, &str) = (file, name);
+    let mut states = vec![initial];
+    let mut state_ids: FxHashMap<(FileId, &str), usize> = FxHashMap::from_iter([(initial, 0)]);
     let mut successors: Vec<Vec<usize>> = vec![Vec::new()];
     let mut frontier = VecDeque::from([0_usize]);
     let mut terminal = None;
 
     while let Some(state_id) = frontier.pop_front() {
-        let (current_file, current_name) = states[state_id].clone();
+        let (current_file, current_name) = states[state_id];
         if current_file == binding.origin_file() {
             terminal = Some(state_id);
             continue;
         }
         let module = modules.get(current_file.0 as usize)?;
         for edge in &module.re_exports {
-            let Some(source_name) = effective_source_name(edge, &current_name, namespace) else {
+            let Some(source_name) = effective_source_name(edge, current_name, namespace) else {
                 continue;
             };
             if index.resolve(edge.source_file, source_name, namespace)
@@ -183,12 +186,12 @@ pub(in crate::graph) fn effective_declaration_route(
             {
                 continue;
             }
-            let state = (edge.source_file, source_name.to_string());
+            let state = (edge.source_file, source_name);
             let next_id = if let Some(next_id) = state_ids.get(&state) {
                 *next_id
             } else {
                 let next_id = states.len();
-                states.push(state.clone());
+                states.push(state);
                 state_ids.insert(state, next_id);
                 successors.push(Vec::new());
                 frontier.push_back(next_id);

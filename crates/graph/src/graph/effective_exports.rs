@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::ExportName;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use super::types::ExportSymbol;
 use crate::resolve::ResolvedModule;
@@ -111,17 +111,32 @@ impl ExportKey {
     }
 }
 
+/// Propagation lane for one exported name.
+///
+/// The type namespace is resolved in two lanes. `Type` holds declarations that
+/// really occupy TypeScript's type space (`interface`, `type`, `export type`).
+/// `TypeFallback` holds the type meaning synthesized for plain value exports so
+/// dual-space declarations (`class`, `enum`) keep resolving as types. A real
+/// type declaration therefore wins over a synthesized one instead of colliding
+/// with it, while two real declarations still collide into `Ambiguous`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ResolutionLane {
+    Type,
+    TypeFallback,
+    Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ExportLookup {
     key: ExportKey,
-    namespace: ExportNamespace,
+    lane: ResolutionLane,
 }
 
 impl ExportLookup {
-    const fn new(file_id: FileId, name: ExportNameId, namespace: ExportNamespace) -> Self {
+    const fn new(file_id: FileId, name: ExportNameId, lane: ResolutionLane) -> Self {
         Self {
             key: ExportKey::new(file_id, name),
-            namespace,
+            lane,
         }
     }
 
@@ -133,24 +148,129 @@ impl ExportLookup {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
-struct NamespaceResolutions {
-    r#type: EffectiveExportResolution,
-    value: EffectiveExportResolution,
-}
+/// Which lanes of one exported name are claimed by the module itself.
+///
+/// Seeding used to carry this in two `(file, name, lane)` hash sets alongside
+/// the resolution table. The bits live on the resolution entry instead, so a
+/// seed or observer registration hashes the name once instead of three times.
+/// Build-time only: the flags are rebuilt with the index and stay out of the
+/// serialized cache.
+#[derive(Debug, Clone, Copy, Default)]
+struct SeededLanes(u8);
 
-impl NamespaceResolutions {
-    const fn get(self, namespace: ExportNamespace) -> EffectiveExportResolution {
-        match namespace {
-            ExportNamespace::Type => self.r#type,
-            ExportNamespace::Value => self.value,
+impl SeededLanes {
+    const fn bit(lane: ResolutionLane) -> u8 {
+        match lane {
+            ResolutionLane::Type => 1,
+            ResolutionLane::TypeFallback => 2,
+            ResolutionLane::Value => 4,
         }
     }
 
-    const fn set(&mut self, namespace: ExportNamespace, resolution: EffectiveExportResolution) {
+    const fn is_direct(self, lane: ResolutionLane) -> bool {
+        self.0 & Self::bit(lane) != 0
+    }
+
+    /// Claim `lane` as locally declared, reporting whether it was unclaimed.
+    const fn claim_direct(&mut self, lane: ResolutionLane) -> bool {
+        let bit = Self::bit(lane);
+        let claimed = self.0 & bit == 0;
+        self.0 |= bit;
+        claimed
+    }
+
+    const fn is_explicit(self, lane: ResolutionLane) -> bool {
+        self.0 & (Self::bit(lane) | (Self::bit(lane) << 3)) != 0
+    }
+
+    const fn claim_explicit(&mut self, lane: ResolutionLane) {
+        self.0 |= Self::bit(lane) << 3;
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+struct NamespaceResolutions {
+    r#type: EffectiveExportResolution,
+    type_fallback: EffectiveExportResolution,
+    value: EffectiveExportResolution,
+    #[serde(skip)]
+    seeded: SeededLanes,
+}
+
+impl NamespaceResolutions {
+    /// Merge `incoming` into `lane`, reporting whether the lane advanced.
+    fn merge(&mut self, lane: ResolutionLane, incoming: EffectiveExportResolution) -> bool {
+        let current = self.get(lane);
+        let next = current.merged_with(incoming);
+        if current == next {
+            return false;
+        }
+        self.set(lane, next);
+        true
+    }
+
+    const fn get(self, lane: ResolutionLane) -> EffectiveExportResolution {
+        match lane {
+            ResolutionLane::Type => self.r#type,
+            ResolutionLane::TypeFallback => self.type_fallback,
+            ResolutionLane::Value => self.value,
+        }
+    }
+
+    const fn set(&mut self, lane: ResolutionLane, resolution: EffectiveExportResolution) {
+        match lane {
+            ResolutionLane::Type => self.r#type = resolution,
+            ResolutionLane::TypeFallback => self.type_fallback = resolution,
+            ResolutionLane::Value => self.value = resolution,
+        }
+    }
+
+    const fn effective(self, namespace: ExportNamespace) -> EffectiveExportResolution {
         match namespace {
-            ExportNamespace::Type => self.r#type = resolution,
-            ExportNamespace::Value => self.value = resolution,
+            ExportNamespace::Value => self.value,
+            ExportNamespace::Type => match self.r#type {
+                EffectiveExportResolution::Missing => self.type_fallback,
+                resolution => resolution,
+            },
+        }
+    }
+}
+
+/// Upfront element counts for the propagation tables.
+///
+/// The tables are keyed by interned name, so they grow into the thousands on
+/// real projects and re-hash repeatedly when they start empty. Counting is a
+/// linear scan over already-resident slices and buys exact capacity.
+#[derive(Clone, Copy)]
+struct ProjectExportSizes {
+    /// Distinct `(file, name)` pairs, an upper bound on the resolution table.
+    keys: usize,
+    /// Distinct `(file, name, lane)` triples, an upper bound on seeded lanes.
+    lane_keys: usize,
+    /// Interned name upper bound: every export plus every re-export alias.
+    names: usize,
+}
+
+impl ProjectExportSizes {
+    fn measure(modules: &[ResolvedModule]) -> Self {
+        let mut keys = 0;
+        let mut lane_keys = 0;
+        let mut names = 0;
+        for module in modules {
+            let value_exports = module
+                .exports
+                .iter()
+                .filter(|export| !export.is_type_only)
+                .count();
+            keys += module.exports.len() + module.re_exports.len();
+            // Value exports also reserve the type lane and seed the fallback lane.
+            lane_keys += module.exports.len() + value_exports * 2 + module.re_exports.len() * 3;
+            names += module.exports.len() + module.re_exports.len() * 2;
+        }
+        Self {
+            keys,
+            lane_keys,
+            names,
         }
     }
 }
@@ -161,8 +281,9 @@ struct ExportNameInterner {
 }
 
 impl ExportNameInterner {
-    fn new() -> Self {
-        let ids = FxHashMap::from_iter([(Box::<str>::from("default"), ExportNameId::DEFAULT)]);
+    fn with_capacity(capacity: usize) -> Self {
+        let mut ids = FxHashMap::with_capacity_and_hasher(capacity + 1, FxBuildHasher);
+        ids.insert(Box::<str>::from("default"), ExportNameId::DEFAULT);
         Self { ids, next_id: 1 }
     }
 
@@ -190,14 +311,38 @@ struct StarObserver {
     type_only: bool,
 }
 
+/// Destinations fed by one source lane.
+///
+/// A re-exported name almost always has a single barrel destination, so the
+/// common case stays inline instead of allocating a one-element vector per
+/// observed lane.
+enum NamedDestinations {
+    One(ExportLookup),
+    Many(Vec<ExportLookup>),
+}
+
+impl NamedDestinations {
+    fn push(&mut self, destination: ExportLookup) {
+        match self {
+            Self::One(first) => *self = Self::Many(vec![*first, destination]),
+            Self::Many(destinations) => destinations.push(destination),
+        }
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, ExportLookup> {
+        match self {
+            Self::One(destination) => std::slice::from_ref(destination).iter(),
+            Self::Many(destinations) => destinations.iter(),
+        }
+    }
+}
+
 struct PropagationObservers {
-    explicit_keys: FxHashSet<ExportLookup>,
-    named: FxHashMap<ExportLookup, Vec<ExportLookup>>,
+    named: FxHashMap<ExportLookup, NamedDestinations>,
     star: FxHashMap<FileId, Vec<StarObserver>>,
 }
 
 struct ObserverBuildState<'a> {
-    direct_keys: &'a FxHashSet<ExportLookup>,
     interner: &'a mut ExportNameInterner,
     resolutions: &'a mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &'a mut VecDeque<ExportLookup>,
@@ -213,6 +358,9 @@ struct ObserverBuildState<'a> {
 pub(super) struct EffectiveExportIndex {
     name_ids: FxHashMap<Box<str>, ExportNameId>,
     resolutions: FxHashMap<ExportKey, NamespaceResolutions>,
+    /// Names resolved on each module, so [`EffectiveExportIndex::unique_bindings`]
+    /// reads one module instead of scanning every key in the project.
+    names_by_file: FxHashMap<FileId, Box<[ExportNameId]>>,
     declaration_merge_groups: DeclarationMergeGroups,
 }
 
@@ -224,22 +372,17 @@ struct DeclarationMergeGroups {
 
 impl EffectiveExportIndex {
     pub(super) fn build(modules: &[ResolvedModule]) -> Self {
-        let mut interner = ExportNameInterner::new();
-        let mut resolutions = FxHashMap::default();
-        let mut queue = VecDeque::new();
-        let direct_keys =
-            seed_direct_bindings(modules, &mut interner, &mut resolutions, &mut queue);
-        let observers = collect_observers(
-            modules,
-            &direct_keys,
-            &mut interner,
-            &mut resolutions,
-            &mut queue,
-        );
+        let sizes = ProjectExportSizes::measure(modules);
+        let mut interner = ExportNameInterner::with_capacity(sizes.names);
+        let mut resolutions = FxHashMap::with_capacity_and_hasher(sizes.keys, FxBuildHasher);
+        let mut queue = VecDeque::with_capacity(sizes.lane_keys);
+        seed_direct_bindings(modules, &mut interner, &mut resolutions, &mut queue);
+        let observers = collect_observers(modules, &mut interner, &mut resolutions, &mut queue);
         propagate_bindings(&mut resolutions, &mut queue, &observers);
 
         Self {
             name_ids: interner.ids,
+            names_by_file: index_names_by_file(&resolutions),
             resolutions,
             declaration_merge_groups: collect_declaration_merge_groups(modules),
         }
@@ -257,7 +400,7 @@ impl EffectiveExportIndex {
         self.resolutions
             .get(&ExportKey::new(file_id, *name))
             .map_or(EffectiveExportResolution::Missing, |resolutions| {
-                resolutions.get(namespace)
+                resolutions.effective(namespace)
             })
     }
 
@@ -310,13 +453,17 @@ impl EffectiveExportIndex {
         file_id: FileId,
         namespace: ExportNamespace,
     ) -> FxHashSet<EffectiveExportBinding> {
-        self.resolutions
+        let Some(names) = self.names_by_file.get(&file_id) else {
+            return FxHashSet::default();
+        };
+        names
             .iter()
-            .filter_map(|(key, resolutions)| {
-                if key.file_id != file_id {
-                    return None;
-                }
-                match resolutions.get(namespace) {
+            .filter_map(|name| {
+                match self
+                    .resolutions
+                    .get(&ExportKey::new(file_id, *name))?
+                    .effective(namespace)
+                {
                     EffectiveExportResolution::Unique(binding) => Some(binding),
                     EffectiveExportResolution::Missing | EffectiveExportResolution::Ambiguous => {
                         None
@@ -381,29 +528,76 @@ impl EffectiveExportIndex {
         name: &str,
         namespace: ExportNamespace,
     ) -> Vec<usize> {
+        let mut slots = Vec::new();
+        self.extend_declaration_slots(
+            DeclarationSlotQuery {
+                exports,
+                candidates,
+                file_id,
+                name,
+                namespace,
+            },
+            &mut slots,
+        );
+        slots
+    }
+
+    /// Append the declaration slots for one name into `slots`.
+    pub(super) fn extend_declaration_slots(
+        &self,
+        query: DeclarationSlotQuery<'_>,
+        slots: &mut Vec<usize>,
+    ) {
+        let DeclarationSlotQuery {
+            exports,
+            candidates,
+            file_id,
+            name,
+            namespace,
+        } = query;
         let EffectiveExportResolution::Unique(binding) = self.resolve(file_id, name, namespace)
         else {
-            return Vec::new();
+            return;
         };
         if binding.origin_file() == file_id && binding.origin_slot().is_some() {
-            return candidates
-                .iter()
-                .copied()
-                .filter(|&index| self.is_declaration_slot(exports, file_id, name, namespace, index))
-                .collect();
+            slots.extend(candidates.iter().copied().filter(|&index| {
+                self.is_declaration_slot(exports, file_id, name, namespace, index)
+            }));
+            return;
         }
 
         let exact_type_only = namespace == ExportNamespace::Type
             && candidates.iter().any(|&index| exports[index].is_type_only);
-        candidates
-            .iter()
-            .copied()
-            .filter(|&index| {
-                exports[index].name.matches_str(name)
-                    && exports[index].is_type_only == exact_type_only
-            })
-            .collect()
+        slots.extend(candidates.iter().copied().filter(|&index| {
+            exports[index].name.matches_str(name) && exports[index].is_type_only == exact_type_only
+        }));
     }
+}
+
+/// One name's candidate export slots on a module.
+#[derive(Clone, Copy)]
+pub(in crate::graph) struct DeclarationSlotQuery<'a> {
+    pub(in crate::graph) exports: &'a [ExportSymbol],
+    pub(in crate::graph) candidates: &'a [usize],
+    pub(in crate::graph) file_id: FileId,
+    pub(in crate::graph) name: &'a str,
+    pub(in crate::graph) namespace: ExportNamespace,
+}
+
+fn index_names_by_file(
+    resolutions: &FxHashMap<ExportKey, NamespaceResolutions>,
+) -> FxHashMap<FileId, Box<[ExportNameId]>> {
+    let mut names_by_file: FxHashMap<FileId, Vec<ExportNameId>> = FxHashMap::default();
+    for key in resolutions.keys() {
+        names_by_file.entry(key.file_id).or_default().push(key.name);
+    }
+    names_by_file
+        .into_iter()
+        .map(|(file_id, mut names)| {
+            names.sort_unstable_by_key(|name| name.0);
+            (file_id, names.into_boxed_slice())
+        })
+        .collect()
 }
 
 fn collect_declaration_merge_groups(modules: &[ResolvedModule]) -> DeclarationMergeGroups {
@@ -454,71 +648,69 @@ fn seed_direct_bindings(
     interner: &mut ExportNameInterner,
     resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &mut VecDeque<ExportLookup>,
-) -> FxHashSet<ExportLookup> {
-    let mut direct_keys = FxHashSet::default();
+) {
     let mut value_type_fallbacks = Vec::new();
     for module in modules {
         for (slot, export) in module.exports.iter().enumerate() {
-            let namespace = if export.is_type_only {
-                ExportNamespace::Type
+            let lane = if export.is_type_only {
+                ResolutionLane::Type
             } else {
-                ExportNamespace::Value
+                ResolutionLane::Value
             };
             let name = interner.intern_export_name(&export.name);
-            let key = ExportLookup::new(module.file_id, name, namespace);
+            let key = ExportLookup::new(module.file_id, name, lane);
+            let binding = EffectiveExportResolution::Unique(EffectiveExportBinding {
+                file_id: module.file_id,
+                kind: EffectiveExportBindingKind::Declaration(slot),
+            });
+            let entry = resolutions.entry(key.key).or_default();
             // Same-name declarations inside one module form one local export
             // entry. This covers legal TypeScript declaration merging (for
             // example class/function plus namespace) without weakening the
             // ambiguity rule for distinct bindings arriving through stars.
-            if direct_keys.insert(key) {
-                merge_resolution(
-                    resolutions,
-                    queue,
-                    key,
-                    EffectiveExportResolution::Unique(EffectiveExportBinding {
-                        file_id: module.file_id,
-                        kind: EffectiveExportBindingKind::Declaration(slot),
-                    }),
-                );
+            if entry.seeded.claim_direct(lane) && entry.merge(lane, binding) {
+                queue.push_back(key);
             }
-            if namespace == ExportNamespace::Value {
+            if lane == ResolutionLane::Value {
                 value_type_fallbacks.push((module.file_id, name, slot));
             }
         }
-        seed_implicit_sfc_default(module, interner, &mut direct_keys, resolutions, queue);
+        seed_implicit_sfc_default(module, interner, resolutions, queue);
     }
-    seed_value_type_fallbacks(value_type_fallbacks, &mut direct_keys, resolutions, queue);
-    direct_keys
+    seed_value_type_fallbacks(value_type_fallbacks, resolutions, queue);
 }
 
 fn seed_value_type_fallbacks(
     fallbacks: Vec<(FileId, ExportNameId, usize)>,
-    direct_keys: &mut FxHashSet<ExportLookup>,
     resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &mut VecDeque<ExportLookup>,
 ) {
     for (file_id, name, slot) in fallbacks {
-        let type_key = ExportLookup::new(file_id, name, ExportNamespace::Type);
-        if direct_keys.contains(&type_key) {
-            continue;
-        }
-        direct_keys.insert(type_key);
-        merge_resolution(
-            resolutions,
-            queue,
-            type_key,
-            EffectiveExportResolution::Unique(EffectiveExportBinding {
+        let key = ExportKey::new(file_id, name);
+        let binding = EffectiveExportResolution::Unique(EffectiveExportBinding {
+            file_id,
+            kind: EffectiveExportBindingKind::Declaration(slot),
+        });
+        let entry = resolutions.entry(key).or_default();
+        // A locally declared name owns its module's type surface even when the
+        // declaration only occupies value space, so the real type lane stays
+        // reserved here and star sources cannot propagate into it.
+        entry.seeded.claim_direct(ResolutionLane::Type);
+        if entry.seeded.claim_direct(ResolutionLane::TypeFallback)
+            && entry.merge(ResolutionLane::TypeFallback, binding)
+        {
+            queue.push_back(ExportLookup::new(
                 file_id,
-                kind: EffectiveExportBindingKind::Declaration(slot),
-            }),
-        );
+                name,
+                ResolutionLane::TypeFallback,
+            ));
+        }
     }
 }
 
 fn seed_implicit_sfc_default(
     module: &ResolvedModule,
     interner: &mut ExportNameInterner,
-    direct_keys: &mut FxHashSet<ExportLookup>,
     resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &mut VecDeque<ExportLookup>,
 ) {
@@ -526,18 +718,20 @@ fn seed_implicit_sfc_default(
         return;
     }
     let name = interner.intern("default");
-    let value = ExportLookup::new(module.file_id, name, ExportNamespace::Value);
-    if direct_keys.contains(&value) {
+    let key = ExportKey::new(module.file_id, name);
+    let entry = resolutions.entry(key).or_default();
+    if entry.seeded.is_direct(ResolutionLane::Value) {
         return;
     }
     let binding = EffectiveExportResolution::Unique(EffectiveExportBinding {
         file_id: module.file_id,
         kind: EffectiveExportBindingKind::ImplicitDefault,
     });
-    for namespace in [ExportNamespace::Value, ExportNamespace::Type] {
-        let key = ExportLookup::new(module.file_id, name, namespace);
-        direct_keys.insert(key);
-        merge_resolution(resolutions, queue, key, binding);
+    for lane in [ResolutionLane::Value, ResolutionLane::Type] {
+        entry.seeded.claim_direct(lane);
+        if entry.merge(lane, binding) {
+            queue.push_back(ExportLookup::new(module.file_id, name, lane));
+        }
     }
 }
 
@@ -550,13 +744,11 @@ fn is_sfc_path(path: &std::path::Path) -> bool {
 
 fn collect_observers(
     modules: &[ResolvedModule],
-    direct_keys: &FxHashSet<ExportLookup>,
     interner: &mut ExportNameInterner,
     resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &mut VecDeque<ExportLookup>,
 ) -> PropagationObservers {
     let mut observers = PropagationObservers {
-        explicit_keys: direct_keys.clone(),
         named: FxHashMap::default(),
         star: FxHashMap::default(),
     };
@@ -581,7 +773,6 @@ fn collect_observers(
                 source,
                 &re_export.info,
                 ObserverBuildState {
-                    direct_keys,
                     interner,
                     resolutions,
                     queue,
@@ -600,7 +791,6 @@ fn register_named_observer(
     state: ObserverBuildState<'_>,
 ) {
     let ObserverBuildState {
-        direct_keys,
         interner,
         resolutions,
         queue,
@@ -608,46 +798,51 @@ fn register_named_observer(
     } = state;
     let exported_name = interner.intern(&info.exported_name);
     if info.imported_name == "*" {
-        let namespaces: &[ExportNamespace] = if info.is_type_only {
-            &[ExportNamespace::Type]
+        let lanes: &[ResolutionLane] = if info.is_type_only {
+            &[ResolutionLane::Type]
         } else {
-            &[ExportNamespace::Type, ExportNamespace::Value]
+            &[ResolutionLane::Type, ResolutionLane::Value]
         };
-        for &namespace in namespaces {
-            let destination = ExportLookup::new(barrel, exported_name, namespace);
-            if !direct_keys.contains(&destination) {
-                observers.explicit_keys.insert(destination);
-                merge_resolution(
-                    resolutions,
-                    queue,
-                    destination,
-                    EffectiveExportResolution::Unique(EffectiveExportBinding {
-                        file_id: barrel,
-                        kind: EffectiveExportBindingKind::NamespaceObject { source },
-                    }),
-                );
+        let binding = EffectiveExportResolution::Unique(EffectiveExportBinding {
+            file_id: barrel,
+            kind: EffectiveExportBindingKind::NamespaceObject { source },
+        });
+        for &lane in lanes {
+            let destination = ExportLookup::new(barrel, exported_name, lane);
+            let entry = resolutions.entry(destination.key).or_default();
+            if entry.seeded.is_direct(lane) {
+                continue;
+            }
+            entry.seeded.claim_explicit(lane);
+            if entry.merge(lane, binding) {
+                queue.push_back(destination);
             }
         }
         return;
     }
 
     let imported_name = interner.intern(&info.imported_name);
-    let namespaces: &[ExportNamespace] = if info.is_type_only {
-        &[ExportNamespace::Type]
+    let lanes: &[ResolutionLane] = if info.is_type_only {
+        &[ResolutionLane::Type, ResolutionLane::TypeFallback]
     } else {
-        &[ExportNamespace::Type, ExportNamespace::Value]
+        &[
+            ResolutionLane::Type,
+            ResolutionLane::TypeFallback,
+            ResolutionLane::Value,
+        ]
     };
-    for &namespace in namespaces {
-        let destination = ExportLookup::new(barrel, exported_name, namespace);
-        if direct_keys.contains(&destination) {
+    for &lane in lanes {
+        let destination = ExportLookup::new(barrel, exported_name, lane);
+        let entry = resolutions.entry(destination.key).or_default();
+        if entry.seeded.is_direct(lane) {
             continue;
         }
-        observers.explicit_keys.insert(destination);
+        entry.seeded.claim_explicit(lane);
         observers
             .named
-            .entry(ExportLookup::new(source, imported_name, namespace))
-            .or_default()
-            .push(destination);
+            .entry(ExportLookup::new(source, imported_name, lane))
+            .and_modify(|destinations| destinations.push(destination))
+            .or_insert(NamedDestinations::One(destination));
     }
 }
 
@@ -659,12 +854,12 @@ fn propagate_bindings(
     while let Some(source_key) = queue.pop_front() {
         let Some(source_resolution) = resolutions
             .get(&source_key.key)
-            .map(|resolutions| resolutions.get(source_key.namespace))
+            .map(|resolutions| resolutions.get(source_key.lane))
         else {
             continue;
         };
         if let Some(destinations) = observers.named.get(&source_key) {
-            for destination in destinations {
+            for destination in destinations.iter() {
                 merge_resolution(resolutions, queue, *destination, source_resolution);
             }
         }
@@ -692,17 +887,17 @@ fn propagate_star_binding(
         return;
     };
     for observer in star_observers {
-        if observer.type_only && source_key.namespace == ExportNamespace::Value {
+        if observer.type_only && source_key.lane == ResolutionLane::Value {
             continue;
         }
-        let mut destination = source_key.with_file(observer.barrel);
-        if observer.type_only {
-            destination.namespace = ExportNamespace::Type;
-        }
-        if observers.explicit_keys.contains(&destination) {
+        let destination = source_key.with_file(observer.barrel);
+        let entry = resolutions.entry(destination.key).or_default();
+        if entry.seeded.is_explicit(destination.lane) {
             continue;
         }
-        merge_resolution(resolutions, queue, destination, source_resolution);
+        if entry.merge(destination.lane, source_resolution) {
+            queue.push_back(destination);
+        }
     }
 }
 
@@ -712,14 +907,13 @@ fn merge_resolution(
     key: ExportLookup,
     incoming: EffectiveExportResolution,
 ) {
-    let namespace_resolutions = resolutions.entry(key.key).or_default();
-    let current = namespace_resolutions.get(key.namespace);
-    let next = current.merged_with(incoming);
-    if current == next {
-        return;
+    if resolutions
+        .entry(key.key)
+        .or_default()
+        .merge(key.lane, incoming)
+    {
+        queue.push_back(key);
     }
-    namespace_resolutions.set(key.namespace, next);
-    queue.push_back(key);
 }
 
 #[cfg(test)]
@@ -914,6 +1108,92 @@ mod tests {
 
         assert!(resolves_through(&index, FileId(0), FileId(1), "foo"));
         assert!(resolves_through(&index, FileId(0), FileId(2), "foo"));
+    }
+
+    #[test]
+    fn a_real_type_declaration_wins_over_a_value_type_fallback() {
+        let mut interface = value_export("User");
+        interface.is_type_only = true;
+        let modules = vec![
+            module(
+                0,
+                Vec::new(),
+                vec![
+                    re_export(FileId(1), "*", "*"),
+                    re_export(FileId(2), "*", "*"),
+                ],
+            ),
+            module(1, vec![value_export("User")], Vec::new()),
+            module(2, vec![interface], Vec::new()),
+        ];
+        let index = EffectiveExportIndex::build(&modules);
+
+        assert!(matches!(
+            index.resolve(FileId(0), "User", ExportNamespace::Type),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(2)
+        ));
+        assert!(matches!(
+            index.resolve(FileId(0), "User", ExportNamespace::Value),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(1)
+        ));
+        assert!(index.resolves_through(
+            FileId(0),
+            "User",
+            FileId(2),
+            "User",
+            ExportNamespace::Type
+        ));
+        assert!(index.resolves_through(
+            FileId(0),
+            "User",
+            FileId(1),
+            "User",
+            ExportNamespace::Value
+        ));
+    }
+
+    #[test]
+    fn colliding_real_type_declarations_stay_ambiguous() {
+        let type_export = |name: &str| {
+            let mut export = value_export(name);
+            export.is_type_only = true;
+            export
+        };
+        let modules = vec![
+            module(
+                0,
+                Vec::new(),
+                vec![
+                    re_export(FileId(1), "*", "*"),
+                    re_export(FileId(2), "*", "*"),
+                ],
+            ),
+            module(1, vec![type_export("User")], Vec::new()),
+            module(2, vec![type_export("User")], Vec::new()),
+        ];
+        let index = EffectiveExportIndex::build(&modules);
+
+        assert_eq!(
+            index.resolve(FileId(0), "User", ExportNamespace::Type),
+            EffectiveExportResolution::Ambiguous
+        );
+    }
+
+    #[test]
+    fn a_value_export_still_carries_its_type_meaning_through_a_barrel() {
+        let modules = vec![
+            module(0, Vec::new(), vec![re_export(FileId(1), "*", "*")]),
+            module(1, vec![value_export("Widget")], Vec::new()),
+        ];
+        let index = EffectiveExportIndex::build(&modules);
+
+        assert!(index.resolves_through(
+            FileId(0),
+            "Widget",
+            FileId(1),
+            "Widget",
+            ExportNamespace::Type
+        ));
     }
 
     #[test]

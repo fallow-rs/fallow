@@ -95,7 +95,11 @@ pub use store::GraphCacheStore;
 /// that resolve to package space are no longer emitted, so warm 30 caches
 /// would keep replaying the phantom `@scope/__mocks__` package edges the
 /// resolver no longer produces.
-pub const GRAPH_CACHE_VERSION: u32 = 31;
+///
+/// Bumped to 32: the effective export index resolves the type namespace in two
+/// lanes (real declarations and value-derived fallbacks) and stores a per-file
+/// name index, so warm 31 payloads no longer describe the same structure.
+pub const GRAPH_CACHE_VERSION: u32 = 32;
 
 /// Cached form of a resolved target.
 ///
