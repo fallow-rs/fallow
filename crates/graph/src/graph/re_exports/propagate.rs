@@ -3,7 +3,7 @@
 //! Handles both star (`export * from`) and named (`export { foo } from`) re-exports,
 //! including entry-point special cases where exports are consumed externally.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -164,7 +164,8 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
 /// need to appear in a later name's lookup. The result is therefore byte-identical
 /// to the exact-`ExportName::Named`-match, ascending-index scan it replaces.
 fn build_named_export_index(source: &ModuleNode) -> FxHashMap<String, Vec<usize>> {
-    let mut index: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+    let mut index: FxHashMap<String, Vec<usize>> =
+        FxHashMap::with_capacity_and_hasher(source.exports.len(), FxBuildHasher);
     for (idx, export) in source.exports.iter().enumerate() {
         if let ExportName::Named(name) = &export.name {
             index.entry(name.clone()).or_default().push(idx);
