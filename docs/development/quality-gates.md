@@ -20,6 +20,33 @@ old, the sidecar exits with code 2 and a stderr message naming the conflict
 and the install command above; that failure is a missing install, not a code
 defect. CI installs the sidecar, so these tests pass there either way.
 
+## Local resolution invariant
+
+Every checkout runs the dependency versions it pins. Node resolves a bare
+specifier by walking ancestor directories until it finds a matching
+`node_modules` entry, and `npm run` extends `PATH` the same way, so a checkout
+nested inside another checkout (a git worktree placed inside the clone) borrows
+the outer install whenever it has none of its own. The tools then run at
+whatever version the outer checkout pinned, and the results do not describe the
+branch under test.
+
+Install into the checkout you are working in:
+
+```bash
+npm ci
+npm ci --prefix tools/type-aware-sidecar
+pnpm --dir editors/vscode install
+```
+
+`scripts/assert-local-resolution.mjs` enforces the invariant for the
+entrypoints that load third-party modules. It runs before the JavaScript lint
+and format scripts, and before contract generation reaches the extension
+codegen. When it fires it names the foreign path it resolved and the install
+command that fixes it. Entrypoints that import only `node:` builtins cannot
+escape and need no guard. The type-aware sidecar keeps its own preflight in
+`tools/type-aware-sidecar/src/backend-preflight.mjs` because it also checks the
+backend version.
+
 ## Canonical commands
 
 Run the smallest useful scope first:

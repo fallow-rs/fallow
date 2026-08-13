@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { assertLocalResolution } from "./assert-local-resolution.mjs";
 import {
   checkSummaryRowFiles,
   formatSummaryRowProblems,
@@ -29,6 +30,7 @@ const OUTPUT_SCHEMA_PATH = "docs/output-schema.json";
 const AGENT_DOCS_TARGET = "npm/fallow/skills/fallow";
 const TYPE_AWARE_MANIFEST_PATH = "crates/api/type-aware-protocol.json";
 const TYPE_AWARE_MODULE_PATH = "tools/type-aware-sidecar/src/generated-protocol.mjs";
+const EXTENSION_CODEGEN_PATH = "editors/vscode/scripts/codegen-contracts.mjs";
 
 const run = (cmd, args, options = {}) =>
   execFileSync(cmd, args, {
@@ -112,7 +114,12 @@ const generateSchemaFiles = (stagingRoot) => {
 };
 
 const generateExtensionContracts = (stagingRoot) => {
-  run("node", ["editors/vscode/scripts/codegen-contracts.mjs"], {
+  assertLocalResolution({
+    dependency: "json-schema-to-typescript",
+    resolveFrom: join(REPO_ROOT, EXTENSION_CODEGEN_PATH),
+    installCommand: "pnpm --dir editors/vscode install",
+  });
+  run("node", [EXTENSION_CODEGEN_PATH], {
     env: {
       FALLOW_CODEGEN_CAPABILITY_SCHEMA: join(stagingRoot, CAPABILITY_SCHEMA_PATH),
       FALLOW_CODEGEN_OUTPUT_SCHEMA: join(stagingRoot, OUTPUT_SCHEMA_PATH),
