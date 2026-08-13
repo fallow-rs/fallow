@@ -52,7 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unit-level aggregates (`avg_cyclomatic`, `p90_cyclomatic`,
   `unit_size_profile`, `unit_interfacing_profile`,
   `functions_over_60_loc_per_k`) move on snippet-using Svelte projects, and
-  through them the health score can move. **Action required for baselined
+  through them the health score can move. A snippet unit's `line_count` is
+  its `{#snippet}`..`{/snippet}` block span, while the parent `<template>`
+  unit keeps its whole-file line count, so those lines are intentionally
+  counted in both units: the `<template>` unit already counts every script
+  function's lines the same way, and region-accurate line counts for all
+  template dialects remain a named follow-up. **Action required for baselined
   CI**: new `<snippet:name>` unit names create new health-baseline buckets in
   both `identity` and `count` modes, so a baseline saved before this release
   overflows (the gate flips red, not merely stale) on snippet-using Svelte
