@@ -4,21 +4,29 @@ Use this before large changes, reviews, commits, and pushes.
 
 ## One-time local setup
 
-The type-aware CLI tests launch the real sidecar from
-`tools/type-aware-sidecar/`, which needs its own dependencies:
+A root-only `npm ci` is enough for the type-aware CLI test targets. The
+type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`;
+without a sidecar-local install it resolves `typescript` from ancestor
+`node_modules` directories, and the root install pins the same `typescript`
+version as the sidecar (kept in lockstep through the root `package.json`
+`overrides` entry). The sidecar's own `node --test` suite resolves
+`typescript` the same way, so it also passes after a root-only `npm ci`.
+
+The sidecar-local install is still needed in two cases:
 
 ```bash
-npm --prefix tools/type-aware-sidecar install
+npm ci --prefix tools/type-aware-sidecar
 ```
 
-Without it, the sidecar falls back to whatever `typescript` ancestor
-`node_modules` directories provide. The root install pins the same
-`typescript` version as the sidecar (kept in lockstep through the root
-`package.json` `overrides` entry), so the type-aware CLI tests still pass
-after a root-only `npm ci`. When the resolvable `typescript` is missing or too
-old, the sidecar exits with code 2 and a stderr message naming the conflict
-and the install command above; that failure is a missing install, not a code
-defect. CI installs the sidecar, so these tests pass there either way.
+- The sidecar bench (`npm run bench --prefix tools/type-aware-sidecar`)
+  imports sidecar-local devDependencies that the root install does not
+  provide.
+- When the resolvable `typescript` is missing or too old (for example the
+  root install is absent or out of lockstep), the sidecar exits with code 2
+  and a stderr message naming the resolved version, its location, and the
+  install fix; that failure is a missing install, not a code defect.
+
+CI installs the sidecar explicitly, so these tests pass there either way.
 
 ## Canonical commands
 
