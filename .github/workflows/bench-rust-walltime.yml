@@ -15,6 +15,7 @@ on:
           - analysis
           - programmatic-stable
           - component-engine
+          - component-output
 
 permissions:
   contents: read
@@ -63,6 +64,10 @@ jobs:
             component-engine)
               echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
               echo "bench=component_engine" >> "$GITHUB_OUTPUT"
+              ;;
+            component-output)
+              echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
+              echo "bench=component_output" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unsupported walltime workload: $WALLTIME_WORKLOAD" >&2
