@@ -1852,6 +1852,32 @@ unknown_field = true
         assert!(!config.rules.private_type_leaks_configured);
     }
 
+    /// The explicit-configuration flag is `serde(skip)`, so a serde round-trip
+    /// of a loaded config drops it and the type-aware `warn` default would
+    /// force the rule back on. No production path round-trips a
+    /// [`FallowConfig`] today; this test pins the hazard so introducing one
+    /// fails loudly instead of silently re-enabling an explicitly-off rule.
+    #[test]
+    fn serde_round_trip_drops_explicit_private_type_leaks_flag() {
+        let dir = test_dir("round-trip-private-type-leaks");
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(&config_path, r#"{"rules": {"private-type-leaks": "off"}}"#).unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        assert!(config.rules.private_type_leaks_configured);
+
+        let serialized = serde_json::to_value(&config).unwrap();
+        let round_tripped: FallowConfig = serde_json::from_value(serialized).unwrap();
+
+        assert_eq!(round_tripped.rules.private_type_leaks, Severity::Off);
+        assert!(
+            !round_tripped.rules.private_type_leaks_configured,
+            "a serde round-trip drops the serde(skip) flag; any code path that \
+             round-trips a loaded FallowConfig must re-record it (see the field \
+             docs on RulesConfig::private_type_leaks_configured)"
+        );
+    }
+
     #[test]
     fn load_json_config_file_with_health_threshold_override() {
         let dir = test_dir("json-health-threshold-override");

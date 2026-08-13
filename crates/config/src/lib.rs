@@ -6,6 +6,13 @@
 //! [`ResolvedConfig`] the analysis crates consume. Also hosts workspace and
 //! `package.json` discovery, declarative external plugin definitions, rule
 //! packs, and the in-place config editing used by `fallow fix`.
+//!
+//! Config section structs such as [`RulesConfig`] are not `#[non_exhaustive]`
+//! and gain new public fields in minor releases as rules are added, so
+//! exhaustive struct literals in downstream code are source-breaking on
+//! upgrade. Construct them with struct update syntax, for example
+//! `RulesConfig { unused_files: Severity::Off, ..RulesConfig::default() }`,
+//! to stay source-compatible.
 
 #![warn(missing_docs)]
 #![cfg_attr(
