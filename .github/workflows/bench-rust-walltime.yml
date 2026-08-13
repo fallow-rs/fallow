@@ -26,7 +26,7 @@ env:
 jobs:
   benchmark:
     name: CodSpeed walltime (${{ inputs.workload }})
-    runs-on: ubuntu-latest
+    runs-on: codspeed-macro
     permissions:
       contents: read
       id-token: write

@@ -16,7 +16,7 @@ Rust walltime retain gates run through the separate, manual
 cover core analysis, stable programmatic sessions, and engine components
 without accepting arbitrary commands. Keeping it manual avoids adding
 release-LTO builds to every pull request while preserving comparable Linux
-base/head evidence:
+base/head evidence on CodSpeed's dedicated macro runners:
 
 ```bash
 gh workflow run bench-rust-walltime.yml \
