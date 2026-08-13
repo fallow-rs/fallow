@@ -484,6 +484,20 @@ const DEFAULT_INDEX_PATTERNS: &[&str] = &[
     "main.{ts,tsx,js,jsx}",
 ];
 
+/// Process-wide matcher for the compile-time default index patterns.
+fn default_index_matchers() -> &'static globset::GlobSet {
+    static MATCHERS: std::sync::OnceLock<globset::GlobSet> = std::sync::OnceLock::new();
+    MATCHERS.get_or_init(|| {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pattern in DEFAULT_INDEX_PATTERNS {
+            if let Ok(glob) = globset::Glob::new(pattern) {
+                builder.add(glob);
+            }
+        }
+        builder.build().unwrap_or_default()
+    })
+}
+
 /// Fall back to default index patterns if no entries were found.
 ///
 /// When `ws_filter` is `Some`, only files whose path starts with the given
@@ -493,10 +507,7 @@ fn apply_default_fallback(
     root: &Path,
     ws_filter: Option<&Path>,
 ) -> Vec<EntryPoint> {
-    let default_matchers: Vec<globset::GlobMatcher> = DEFAULT_INDEX_PATTERNS
-        .iter()
-        .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
-        .collect();
+    let default_matchers = default_index_matchers();
 
     let mut entries = Vec::new();
     for file in files {
@@ -507,10 +518,7 @@ fn apply_default_fallback(
         }
         let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
         let relative_str = relative.to_string_lossy();
-        if default_matchers
-            .iter()
-            .any(|m| m.is_match(relative_str.as_ref()))
-        {
+        if default_matchers.is_match(relative_str.as_ref()) {
             entries.push(EntryPoint {
                 path: file.path.clone(),
                 source: EntryPointSource::DefaultIndex,
@@ -2832,6 +2840,52 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(entries[0].path.ends_with("src/index.ts"));
         assert!(matches!(entries[0].source, EntryPointSource::DefaultIndex));
+    }
+
+    #[test]
+    fn default_index_matchers_preserve_patterns_and_are_shared() {
+        let matchers = default_index_matchers();
+        for path in [
+            "src/index.ts",
+            "src/index.tsx",
+            "src/index.js",
+            "src/index.jsx",
+            "src/main.ts",
+            "src/main.tsx",
+            "src/main.js",
+            "src/main.jsx",
+            "index.ts",
+            "index.tsx",
+            "index.js",
+            "index.jsx",
+            "main.ts",
+            "main.tsx",
+            "main.js",
+            "main.jsx",
+        ] {
+            assert!(
+                matchers.is_match(path),
+                "default index did not match {path}"
+            );
+        }
+        for path in [
+            "src/index.mts",
+            "src/nested/index.ts",
+            "packages/app/src/index.ts",
+            "custom-entry.ts",
+        ] {
+            assert!(!matchers.is_match(path), "non-default index matched {path}");
+        }
+
+        std::thread::scope(|scope| {
+            let handles = std::iter::repeat_with(|| scope.spawn(default_index_matchers))
+                .take(4)
+                .collect::<Vec<_>>();
+            for handle in handles {
+                let from_thread = handle.join().expect("fallback matcher thread");
+                assert!(std::ptr::eq(matchers, from_thread));
+            }
+        });
     }
 
     #[test]
