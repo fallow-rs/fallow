@@ -1049,9 +1049,9 @@ fn sweep_report_dry_run_lists_legacy_registered_without_deregistering() {
     assert!(
         report.entries.iter().any(|entry| {
             paths_equal(&entry.path, &cache_path)
-                && entry.disposition == SweepDisposition::ReclaimedLegacyRegistered
+                && entry.disposition == SweepDisposition::KeptLegacyDeregistered
         }),
-        "dry run must still enumerate and report the legacy registered pass",
+        "dry run must report the still-registered current path as deregistered-but-kept",
     );
     assert!(
         worktree_is_registered_with_git(&repo, &cache_path),
@@ -1066,6 +1066,76 @@ fn sweep_report_dry_run_lists_legacy_registered_without_deregistering() {
         "dry run must not seed a grace sidecar",
     );
     cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+/// Pre-#1815 upgrade edge: a mixed-version registration at the CURRENT cache
+/// path is only deregistered and stays warm on disk, so it must report as
+/// kept (`legacy-deregistered`), while a released SHA-keyed registration is
+/// genuinely removed and stays a `legacy-registered` reclaim.
+#[test]
+fn sweep_report_apply_keeps_deregistered_current_path_and_removes_released_sha() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-report-legacy-apply");
+    let current_path = reusable_audit_worktree_path(&repo);
+    let released_path = legacy_reusable_audit_worktree_path(&repo, TEST_BASE_SHA)
+        .expect("legacy SHA path should resolve");
+    register_reusable_worktree(&repo, &current_path);
+    register_reusable_worktree(&repo, &released_path);
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::Apply,
+        SweepSizes::Measure,
+    );
+
+    // Match by entry NAME: the report echoes the canonical paths git prints,
+    // while a removed entry can no longer be canonicalized for `paths_equal`.
+    let find = |path: &Path| {
+        let name = path.file_name().expect("cache path should have a name");
+        report
+            .entries
+            .iter()
+            .find(|entry| entry.path.file_name() == Some(name))
+            .unwrap_or_else(|| panic!("entry for {} should be reported", path.display()))
+    };
+    let current = find(&current_path);
+    assert_eq!(
+        current.disposition,
+        SweepDisposition::KeptLegacyDeregistered
+    );
+    assert_eq!(current.disposition.decision(), SweepDecision::Kept);
+    assert_eq!(current.disposition.reason(), "legacy-deregistered");
+    assert!(
+        current.size_bytes.is_some_and(|size| size > 0),
+        "the kept-warm entry still reports what it occupies",
+    );
+    let released = find(&released_path);
+    assert_eq!(
+        released.disposition,
+        SweepDisposition::ReclaimedLegacyRegistered
+    );
+    assert_eq!(released.disposition.decision(), SweepDecision::Removed);
+
+    assert!(
+        current_path.is_dir(),
+        "the current-path cache must stay warm on disk",
+    );
+    assert!(
+        !worktree_is_registered_with_git(&repo, &current_path),
+        "the current-path cache must be deregistered from git",
+    );
+    assert!(
+        !released_path.is_dir(),
+        "the released SHA-keyed cache must be removed",
+    );
+    assert_eq!(
+        report.removed, 0,
+        "neither legacy outcome feeds the per-audit stderr summary counter",
+    );
+    cleanup_reusable_worktree(&repo, &current_path);
+    cleanup_reusable_worktree(&repo, &released_path);
 }
 
 #[test]
@@ -3142,6 +3212,26 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
     );
 
     assert_reshaped_demotion_observability(&result);
+}
+
+/// Issue #2220: each demotion diff-source state renders its user-facing
+/// label. `Shared` carries the source label recorded by the shared diff
+/// cache (`shared_diff_source_label()`) verbatim; the base ref only feeds
+/// the worktree fallback.
+#[test]
+fn dupe_demotion_diff_source_labels_cover_every_state() {
+    assert_eq!(
+        DupeDemotionDiffSource::Shared("--diff-file pr.diff".to_string()).label("main"),
+        "--diff-file pr.diff",
+    );
+    assert_eq!(
+        DupeDemotionDiffSource::Worktree.label("origin/main"),
+        "merge-base worktree diff vs origin/main",
+    );
+    assert_eq!(
+        DupeDemotionDiffSource::Skipped.label("main"),
+        "skipped: no diff available",
+    );
 }
 
 /// Issue #2220 assertions for the re-shaped-clone fixture: the demotion is

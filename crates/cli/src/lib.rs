@@ -1816,11 +1816,12 @@ enum AuditCacheCli {
     /// silently: orphaned-sidecar cleanup, age-based reclaim under the
     /// resolved threshold, and cross-repo reclaim of abandoned entries whose
     /// recorded owner root no longer exists. Entries owned by other live
-    /// projects are never touched. `--root` is optional and defaults to the
-    /// current directory. Reported sizes come from a full recursive walk of
-    /// each cache entry, which can take a few seconds on large caches. To
-    /// delete one project's caches unconditionally, use
-    /// `fallow audit-cache remove --root <path> --yes`.
+    /// projects are never touched. Use `--dry-run` to preview every decision
+    /// the policy would take without touching the filesystem. `--root` is
+    /// optional and defaults to the current directory. Reported sizes come
+    /// from a full recursive walk of each cache entry, which can take a few
+    /// seconds on large caches. To delete one project's caches
+    /// unconditionally, use `fallow audit-cache remove --root <path> --yes`.
     Prune {
         /// Preview decisions without touching the filesystem.
         #[arg(long)]

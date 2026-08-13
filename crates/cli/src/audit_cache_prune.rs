@@ -86,6 +86,9 @@ struct PruneCounts {
     failed: usize,
     lock_only: usize,
     owner_live: usize,
+    /// Legacy pre-#1815 registrations cleared while the cache directory stayed
+    /// warm on disk; a subset of `kept`, and never part of `reclaimed_bytes`.
+    deregistered: usize,
     reclaimed_bytes: u64,
 }
 
@@ -99,6 +102,7 @@ impl PruneCounts {
             failed: 0,
             lock_only: 0,
             owner_live: 0,
+            deregistered: 0,
             reclaimed_bytes: 0,
         };
         for entry in entries {
@@ -116,6 +120,7 @@ impl PruneCounts {
             match entry.disposition.reason() {
                 "lock-only" => counts.lock_only += 1,
                 "owner-live" => counts.owner_live += 1,
+                "legacy-deregistered" => counts.deregistered += 1,
                 _ => {}
             }
         }
@@ -163,6 +168,7 @@ fn emit_prune_json(
         "kept": counts.kept,
         "skipped": counts.skipped,
         "failed": counts.failed,
+        "deregistered": counts.deregistered,
         "complete": counts.complete(),
         "reclaimed_bytes": counts.reclaimed_bytes,
     });
@@ -210,6 +216,18 @@ fn print_prune_human(
             counts.owner_live,
         );
     }
+    if counts.deregistered > 0 {
+        let verb = if opts.dry_run {
+            "would deregister"
+        } else {
+            "deregistered"
+        };
+        let s = plural(counts.deregistered);
+        println!(
+            "  {verb} {} legacy git registration{s}; the cache stays warm on disk (not counted as reclaimed)",
+            counts.deregistered,
+        );
+    }
     let verb = if opts.dry_run {
         "would reclaim"
     } else {
@@ -251,12 +269,23 @@ fn header_line(scan_root: &Path, resolved: &ResolvedCacheMaxAge) -> String {
 }
 
 fn entry_row(entry: &SweepEntry, dry_run: bool) -> String {
-    let action = match (entry.disposition.decision(), dry_run) {
-        (SweepDecision::Removed, true) => "would remove",
-        (SweepDecision::Removed, false) => "removed",
-        (SweepDecision::Kept, _) => "kept",
-        (SweepDecision::Skipped, _) => "skipped",
-        (SweepDecision::Failed, _) => "failed",
+    // The legacy current-path case only clears the git registration; "kept"
+    // would hide the mutation and "removed" would claim one that never
+    // happens, so the action names the deregistration itself.
+    let action = if entry.disposition.reason() == "legacy-deregistered" {
+        if dry_run {
+            "would deregister"
+        } else {
+            "deregistered"
+        }
+    } else {
+        match (entry.disposition.decision(), dry_run) {
+            (SweepDecision::Removed, true) => "would remove",
+            (SweepDecision::Removed, false) => "removed",
+            (SweepDecision::Kept, _) => "kept",
+            (SweepDecision::Skipped, _) => "skipped",
+            (SweepDecision::Failed, _) => "failed",
+        }
     };
     let name = entry.path.file_name().map_or_else(
         || entry.path.display().to_string(),
@@ -277,6 +306,9 @@ fn entry_row(entry: &SweepEntry, dry_run: bool) -> String {
         }
         "orphaned-sidecars" => segments.push("orphaned sidecars".to_string()),
         "legacy-registered" => segments.push("legacy git registration".to_string()),
+        "legacy-deregistered" => {
+            segments.push("legacy git registration; cache stays warm on disk".to_string());
+        }
         "fresh" => push_age(&mut segments, entry),
         "owner-live" => push_owner(&mut segments, entry, "owner live"),
         "owner-unverifiable" => push_owner(&mut segments, entry, "owner unverifiable"),
@@ -345,6 +377,7 @@ mod tests {
             entry(SweepDisposition::KeptNotOwned, Some(7)),
             entry(SweepDisposition::KeptLockOnly, None),
             entry(SweepDisposition::KeptOwnerLive, Some(3)),
+            entry(SweepDisposition::KeptLegacyDeregistered, Some(64)),
             entry(SweepDisposition::SkippedLocked, Some(1)),
             entry(SweepDisposition::RemoveFailed, Some(2)),
         ];
@@ -355,12 +388,16 @@ mod tests {
             counts.found,
         );
         assert_eq!(counts.removed, 2);
-        assert_eq!(counts.kept, 4);
+        assert_eq!(counts.kept, 5);
         assert_eq!(counts.skipped, 1);
         assert_eq!(counts.failed, 1);
         assert_eq!(counts.lock_only, 1);
         assert_eq!(counts.owner_live, 1);
-        assert_eq!(counts.reclaimed_bytes, 10);
+        assert_eq!(counts.deregistered, 1);
+        assert_eq!(
+            counts.reclaimed_bytes, 10,
+            "a deregistered-but-kept legacy entry must not add its size to reclaimed bytes",
+        );
         assert!(!counts.complete());
         assert!(PruneCounts::tally(&[entry(SweepDisposition::KeptFresh, None)]).complete());
     }
@@ -381,6 +418,15 @@ mod tests {
         assert_eq!(
             entry_row(&seeded, false),
             "  kept         fallow-audit-base-cache-aa-root-bb  2 KiB  first seen, ages from now",
+        );
+        let deregistered = entry(SweepDisposition::KeptLegacyDeregistered, Some(2048));
+        assert_eq!(
+            entry_row(&deregistered, false),
+            "  deregistered fallow-audit-base-cache-aa-root-bb  2 KiB  legacy git registration; cache stays warm on disk",
+        );
+        assert_eq!(
+            entry_row(&deregistered, true),
+            "  would deregister fallow-audit-base-cache-aa-root-bb  2 KiB  legacy git registration; cache stays warm on disk",
         );
     }
 }

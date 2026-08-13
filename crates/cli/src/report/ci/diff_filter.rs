@@ -680,6 +680,22 @@ mod tests {
         assert_eq!(loaded.index.added_line_count(), 0);
     }
 
+    /// The retained source label is what `shared_diff_source_label()` serves
+    /// to name the diff that decided a filtering or demotion outcome
+    /// (issue #2220).
+    #[test]
+    fn bounded_diff_reader_retains_the_source_label() {
+        let text = "diff --git a/src/a.ts b/src/a.ts\n\
+                    --- a/src/a.ts\n\
+                    +++ b/src/a.ts\n\
+                    @@ -0,0 +1,1 @@\n\
+                    +export const a = 1;\n";
+        let loaded =
+            load_diff_index_from_reader(Cursor::new(text), "--diff-file pr.diff", 1024, true)
+                .unwrap();
+        assert_eq!(loaded.source_label, "--diff-file pr.diff");
+    }
+
     #[test]
     fn filter_issues_from_path_skips_oversize_diff() {
         let dir = tempfile::tempdir().expect("tempdir");

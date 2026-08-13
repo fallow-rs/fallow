@@ -599,6 +599,151 @@ fn audit_cache_prune_zero_max_age_reclaims_orphans_only() {
     );
 }
 
+/// Register pre-#1815-style git worktrees at both the CURRENT cache path and
+/// a released SHA-keyed path for `root` under `scan_root`, returning
+/// `(current_path, released_path)`.
+fn register_legacy_cache_worktrees(
+    root: &Path,
+    scan_root: &Path,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (current_path, released_path) = audit_cache_paths_in(root, base_sha, scan_root);
+    for path in [&current_path, &released_path] {
+        git(
+            root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                path.to_str().expect("cache path should be utf-8"),
+                "HEAD",
+            ],
+        );
+    }
+    (current_path, released_path)
+}
+
+/// Pre-#1815 upgrade edge (issue #2255 follow-up), dry-run half: the row and
+/// summary must announce the pending deregistration without claiming removal,
+/// and preview mode must not touch either registered entry.
+#[test]
+fn audit_cache_prune_dry_run_previews_legacy_deregistration() {
+    let fixture = create_audit_fixture("cache-prune-legacy-dry-run");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+    let (current_path, released_path) = register_legacy_cache_worktrees(root, scan.path());
+
+    let dry_run = run_prune_with_scan_root(
+        &[
+            "audit-cache",
+            "prune",
+            "--dry-run",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+        ],
+        scan.path(),
+    );
+
+    assert_eq!(
+        dry_run.code, 0,
+        "prune dry-run should succeed: {}{}",
+        dry_run.stdout, dry_run.stderr
+    );
+    assert!(
+        dry_run.stdout.contains("would deregister")
+            && dry_run
+                .stdout
+                .contains("legacy git registration; cache stays warm on disk"),
+        "the dry-run row must announce deregistration without claiming removal: {}",
+        dry_run.stdout
+    );
+    assert!(
+        dry_run.stdout.contains(
+            "would deregister 1 legacy git registration; the cache stays warm on disk (not counted as reclaimed)"
+        ),
+        "the dry-run summary must carry the deregistered count: {}",
+        dry_run.stdout
+    );
+    assert!(
+        current_path.is_dir() && released_path.is_dir(),
+        "dry run must not touch either registered entry",
+    );
+}
+
+/// Pre-#1815 upgrade edge (issue #2255 follow-up): a mixed-version git
+/// registration at the CURRENT cache path is only deregistered and stays warm
+/// on disk, so its measured size must never inflate `reclaimed_bytes`; it
+/// surfaces as its own `deregistered` count instead. A released SHA-keyed
+/// registration is genuinely removed and stays counted.
+#[test]
+fn audit_cache_prune_excludes_deregistered_current_path_from_reclaimed_bytes() {
+    let fixture = create_audit_fixture("cache-prune-legacy-registered");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+    let (current_path, released_path) = register_legacy_cache_worktrees(root, scan.path());
+
+    let output = run_prune_with_scan_root(
+        &[
+            "audit-cache",
+            "prune",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        scan.path(),
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "prune should succeed: {}{}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["deregistered"], serde_json::json!(1));
+    assert_eq!(json["removed"], serde_json::json!(1));
+    let entries = json["entries"]
+        .as_array()
+        .expect("entries should be an array");
+    let by_reason = |reason: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["reason"] == serde_json::json!(reason))
+            .unwrap_or_else(|| panic!("an entry with reason {reason} should be reported"))
+    };
+    let deregistered = by_reason("legacy-deregistered");
+    assert_eq!(deregistered["disposition"], serde_json::json!("kept"));
+    assert_eq!(deregistered["pass"], serde_json::json!("owned"));
+    assert!(
+        deregistered["size_bytes"]
+            .as_u64()
+            .is_some_and(|size| size > 0),
+        "the kept-warm entry still reports what it occupies: {deregistered}"
+    );
+    let removed = by_reason("legacy-registered");
+    assert_eq!(removed["disposition"], serde_json::json!("removed"));
+    assert_eq!(
+        json["reclaimed_bytes"], removed["size_bytes"],
+        "reclaimed_bytes must carry only the genuinely removed entry's size",
+    );
+
+    assert!(
+        current_path.is_dir(),
+        "the deregistered current-path cache must stay warm on disk",
+    );
+    assert_eq!(
+        fs::read_to_string(current_path.join(".git")).expect(".git stub should be readable"),
+        "gitdir: fallow-audit-unregistered\n",
+        "the current-path cache must be deregistered in place",
+    );
+    assert!(
+        !released_path.is_dir(),
+        "the released SHA-keyed cache must be removed",
+    );
+}
+
 #[test]
 fn audit_cache_prune_reports_lock_contention_with_exit_zero() {
     let fixture = create_audit_fixture("cache-prune-contended");
@@ -2077,6 +2222,269 @@ fn audit_new_only_inherits_shifted_duplicate_group() {
         }),
         "expected a clone group spanning fileA.ts and fileB.ts"
     );
+}
+
+const DEMOTION_HELPER: &str = "export function eq(xs: string[], ys: string[]): boolean {\n  if (xs.length !== ys.length) {\n    return false;\n  }\n  for (let index = 0; index < xs.length; index += 1) {\n    if (xs[index] !== ys[index]) {\n      return false;\n    }\n  }\n  return true;\n}\n";
+
+const DEMOTION_SCAFFOLDING: &str = "export function selfTest(): boolean {\n  const alpha = ['alpha', 'beta', 'gamma'];\n  const beta = ['alpha', 'beta', 'gamma'];\n  const gamma = ['delta', 'epsilon', 'zeta'];\n  const first = eq(alpha, beta);\n  const second = eq(alpha, gamma);\n  const third = eq(beta, gamma);\n  const outcomes = [first, !second, !third];\n  const labels = ['same', 'differs', 'differs'];\n  const combined = outcomes.map((outcome, index) => `${labels[index]}:${outcome}`);\n  return combined.length === outcomes.length && outcomes.every((outcome) => outcome === true);\n}\n";
+
+/// Repo whose working tree extracts an identical helper out of two committed
+/// modules (the issue #2164 refactor). The surviving scaffolding clone group
+/// contains no added line, so the new-only gate demotes it to inherited and
+/// the demotion diff source becomes observable (issue #2220).
+fn reshaped_clone_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-demotion-reshape","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { selfTest as a } from './a';\nimport { selfTest as b } from './b';\na();\nb();\n",
+    )
+    .unwrap();
+    let base_module = format!("{DEMOTION_HELPER}{DEMOTION_SCAFFOLDING}");
+    fs::write(dir.join("src/a.ts"), &base_module).unwrap();
+    fs::write(dir.join("src/b.ts"), &base_module).unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    // Pin LF so base-worktree checkouts on Windows keep the head fingerprints.
+    git(dir, &["config", "core.autocrlf", "false"]);
+    commit_all(dir, "initial");
+
+    let refactored = format!("import {{ eq }} from './lib';\n{DEMOTION_SCAFFOLDING}");
+    fs::write(dir.join("src/a.ts"), &refactored).unwrap();
+    fs::write(dir.join("src/b.ts"), &refactored).unwrap();
+    fs::write(dir.join("src/lib.ts"), DEMOTION_HELPER).unwrap();
+    tmp
+}
+
+/// Without an opt-in shared diff the merge-base worktree diff decides the
+/// demotion, and both the demotion note and the `--explain` detail must name
+/// it (issue #2220, `DupeDemotionDiffSource::Worktree`).
+#[test]
+fn audit_demotion_note_names_worktree_diff_source_under_explain() {
+    let fixture = reshaped_clone_fixture();
+    let root = fixture.path().to_str().unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD",
+        "--gate",
+        "new-only",
+        "--no-cache",
+        "--explain",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "the demoted refactor must pass the gate. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        output.stderr.contains(
+            "of which 1 clone group was reclassified as pre-existing: no duplicated line was added by this change (diff source: merge-base worktree diff vs HEAD)"
+        ),
+        "the demotion note must name the worktree diff source: {}",
+        output.stderr
+    );
+    assert!(
+        output.stdout.contains("demoted dup:")
+            && output.stdout.contains(
+                "no instance overlaps an added line (rule: no-added-lines, gate: new-only)"
+            ),
+        "--explain must list the demoted group: {}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stdout
+            .contains("demotion diff source: merge-base worktree diff vs HEAD"),
+        "--explain must name the deciding diff source: {}",
+        output.stdout
+    );
+}
+
+/// An opt-in shared diff (`--diff-file`) must take precedence over the
+/// merge-base worktree diff for the demotion decision (issue #2220,
+/// `DupeDemotionDiffSource::Shared` via `shared_diff_source_label()`): a diff
+/// whose added lines fall inside a clone instance keeps the group gating as
+/// introduced, where the worktree diff alone would have demoted it.
+#[test]
+fn audit_demotion_shared_diff_source_takes_precedence_over_worktree_diff() {
+    let fixture = reshaped_clone_fixture();
+    let root = fixture.path().to_str().unwrap();
+
+    let control = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD",
+        "--gate",
+        "new-only",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        control.code, 0,
+        "control run should pass: {}{}",
+        control.stdout, control.stderr
+    );
+    let control_json = parse_json(&control);
+    assert_eq!(control_json["attribution"]["duplication_demoted"], 1);
+    assert_eq!(control_json["attribution"]["duplication_introduced"], 0);
+
+    // A shared diff claiming an added line INSIDE the scaffolding clone
+    // instance (src/a.ts spans lines 2-12 after the refactor). The worktree
+    // diff sees no added line there, so any behavior change below is the
+    // shared source deciding.
+    let diff_dir = TempDir::new().expect("diff dir should be created");
+    let diff_path = diff_dir.path().join("touch-instance.diff");
+    fs::write(
+        &diff_path,
+        "diff --git a/src/a.ts b/src/a.ts\n\
+         --- a/src/a.ts\n\
+         +++ b/src/a.ts\n\
+         @@ -4,0 +5,1 @@\n\
+         +  const injected = 'x';\n",
+    )
+    .unwrap();
+
+    let shared = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD",
+        "--gate",
+        "new-only",
+        "--no-cache",
+        "--diff-file",
+        diff_path.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        shared.code, 0,
+        "introduced duplication warns without failing by default: {}{}",
+        shared.stdout, shared.stderr
+    );
+    let shared_json = parse_json(&shared);
+    assert_eq!(
+        shared_json["attribution"]["duplication_demoted"], 0,
+        "a shared diff touching an instance must veto the demotion: {shared_json}"
+    );
+    assert_eq!(shared_json["attribution"]["duplication_introduced"], 1);
+    let groups = shared_json["duplication"]["clone_groups"]
+        .as_array()
+        .expect("clone groups array");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0]["introduced"], true);
+    assert!(
+        groups[0].get("demotion_reason").is_none(),
+        "a non-demoted group must not carry the marker: {}",
+        groups[0]
+    );
+}
+
+/// When no diff can be obtained at all the demotion check is skipped, every
+/// introduced clone group keeps gating, and `--explain` says so (issue #2220,
+/// `DupeDemotionDiffSource::Skipped`). An unreadable untracked file makes the
+/// merge-base worktree diff fail while the rest of the audit still runs.
+#[cfg(unix)]
+#[test]
+fn audit_demotion_skipped_diff_source_prints_explain_line() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-demotion-skipped","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"duplicates":{"threshold":1.0}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { selfTest as a } from './a';\na();\n",
+    )
+    .unwrap();
+    let module = format!("{DEMOTION_HELPER}{DEMOTION_SCAFFOLDING}");
+    fs::write(dir.join("src/a.ts"), &module).unwrap();
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["config", "core.autocrlf", "false"]);
+    commit_all(dir, "initial");
+
+    // The paste: the new clone instance is all added lines, so it gates.
+    fs::write(dir.join("src/b.ts"), &module).unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { selfTest as a } from './a';\nimport { selfTest as b } from './b';\na();\nb();\n",
+    )
+    .unwrap();
+    // An unreadable untracked file fails the worktree diff's untracked-file
+    // pass (`git diff --no-index`) without disturbing changed-file discovery.
+    let blocked = dir.join("blocked.txt");
+    fs::write(&blocked, "unreadable").unwrap();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--gate",
+        "new-only",
+        "--no-cache",
+        "--explain",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "the pasted clone must keep gating when the demotion check is skipped. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        output
+            .stdout
+            .contains("demotion check skipped: no diff available"),
+        "--explain must surface the skipped demotion check: {}",
+        output.stdout
+    );
+
+    let json_run = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--gate",
+        "new-only",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(json_run.code, 1);
+    let json = parse_json(&json_run);
+    assert_eq!(json["attribution"]["duplication_demoted"], 0);
+    assert_eq!(json["attribution"]["duplication_introduced"], 1);
 }
 
 #[test]

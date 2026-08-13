@@ -84,7 +84,13 @@ garbage-collects. Two subcommands with distinct semantics:
   of abandoned entries), report every considered entry with sizes, and exit
   0 whenever the command ran, including lock-contention skips and per-entry
   failures. Machine consumers gate on the envelope's `complete` field.
-  Defaults to the current directory as root.
+  Defaults to the current directory as root. A pre-#1815 registration at the
+  current cache path is only deregistered and stays warm on disk: it reports
+  as kept with reason `legacy-deregistered`, counts in the envelope's
+  additive `deregistered` field and the matching human summary line, and
+  never adds its size to `reclaimed_bytes`. Released SHA-keyed registrations
+  are genuinely removed (reason `legacy-registered`) and stay counted as
+  reclaimed.
 
 Shared invariants (`crates/cli/src/base_worktree.rs`):
 
@@ -94,8 +100,8 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
 - `--dry-run` performs zero filesystem mutation: no cache removal, no
   `.lock` sidecar creation (acquiring a lock would create one), no
   `.last-used` grace seeding, and no git worktree deregistration. The legacy
-  registered-cache pass is still enumerated read-only and reported with
-  reason `legacy-registered`.
+  registered-cache pass is still enumerated read-only with the same
+  `legacy-registered` / `legacy-deregistered` split an apply run reports.
 - `.lock` sidecars are permanent lock identities and are never deleted:
   removing an unlinked-but-still-flocked inode while a racer re-creates the
   path would split one lock across two inodes.

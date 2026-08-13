@@ -735,10 +735,15 @@ pub enum SweepDisposition {
     ReclaimedOrphan,
     /// Entry aged past the effective threshold.
     ReclaimedAged,
-    /// Entry was still REGISTERED as a git worktree by pre-#1815 fallow; the
-    /// registration was reclaimed (released SHA-keyed directories are removed,
-    /// the current path stays warm after deregistration).
+    /// A released SHA-keyed directory still REGISTERED as a git worktree by
+    /// pre-#1815 fallow; the root-owned cache cannot reuse it, so it is
+    /// deregistered AND removed.
     ReclaimedLegacyRegistered,
+    /// The current cache path still REGISTERED as a git worktree by pre-#1815
+    /// fallow (a mixed-version registration); only the git registration is
+    /// reclaimed and the directory stays warm on disk, so its measured size
+    /// never counts as reclaimed bytes.
+    KeptLegacyDeregistered,
     /// Younger than the threshold.
     KeptFresh,
     /// Foreign entry whose recorded owner root still exists; that repo's own
@@ -775,7 +780,8 @@ impl SweepDisposition {
             Self::ReclaimedOrphan | Self::ReclaimedAged | Self::ReclaimedLegacyRegistered => {
                 SweepDecision::Removed
             }
-            Self::KeptFresh
+            Self::KeptLegacyDeregistered
+            | Self::KeptFresh
             | Self::KeptOwnerLive
             | Self::KeptOwnerUnverifiable(_)
             | Self::KeptAgeGcDisabled
@@ -796,6 +802,7 @@ impl SweepDisposition {
             Self::ReclaimedOrphan => "orphaned-sidecars",
             Self::ReclaimedAged => "aged-out",
             Self::ReclaimedLegacyRegistered => "legacy-registered",
+            Self::KeptLegacyDeregistered => "legacy-deregistered",
             Self::KeptFresh => "fresh",
             Self::KeptOwnerLive => "owner-live",
             Self::KeptOwnerUnverifiable(_) => "owner-unverifiable",
@@ -983,9 +990,11 @@ fn entry_probe_metadata(path: &Path, now: SystemTime) -> (Option<u64>, Option<Pa
 }
 
 /// Deregister reusable base-snapshot caches left REGISTERED by fallow versions
-/// before #1815. A mixed-version registration at the current path stays warm;
-/// released SHA-keyed paths are removed because the root-owned cache cannot
-/// reuse them. Under [`SweepMode::DryRun`] only the read-only halves run
+/// before #1815. A mixed-version registration at the current path stays warm
+/// and reports [`SweepDisposition::KeptLegacyDeregistered`] (only the git
+/// registration goes away, so nothing is reclaimed); released SHA-keyed paths
+/// are removed because the root-owned cache cannot reuse them. Under
+/// [`SweepMode::DryRun`] only the read-only halves run
 /// (`list_audit_worktrees`, `audit_worktree_is_registered`): registered
 /// entries are reported without locks, deregistration, removal, or the
 /// trailing `git worktree prune`.
@@ -1014,12 +1023,17 @@ fn legacy_registered_pass(
         };
         let (age_days, owner_root) = entry_probe_metadata(&path, now);
         let size_bytes = size_map.remove(&path).flatten();
+        let is_current_path = pass == SweepPass::Owned;
         let disposition = match mode {
             SweepMode::DryRun => {
                 if !audit_worktree_is_registered(repo_root, &path) {
                     continue;
                 }
-                SweepDisposition::ReclaimedLegacyRegistered
+                if is_current_path {
+                    SweepDisposition::KeptLegacyDeregistered
+                } else {
+                    SweepDisposition::ReclaimedLegacyRegistered
+                }
             }
             SweepMode::Apply => {
                 let Some(_lock) = ReusableWorktreeLock::try_acquire(
@@ -1039,7 +1053,6 @@ fn legacy_registered_pass(
                 if !audit_worktree_is_registered(repo_root, &path) {
                     continue;
                 }
-                let is_current_path = paths_equal(&path, &owned_path);
                 let head = is_current_path
                     .then(|| legacy_reusable_sha(&path))
                     .flatten();
@@ -1058,7 +1071,7 @@ fn legacy_registered_pass(
                     if let Some(head) = head {
                         let _ = write_reusable_sha(&path, &head);
                     }
-                    SweepDisposition::ReclaimedLegacyRegistered
+                    SweepDisposition::KeptLegacyDeregistered
                 } else if let Err(error) = remove_reusable_cache_entry_locked(repo_root, &path) {
                     tracing::warn!(
                         path = %path.display(),
