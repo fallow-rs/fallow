@@ -8,7 +8,7 @@
 //! the Vue/Svelte/Nuxt ecosystems catches this (they emit runtime-only warnings
 //! or have unimplemented eslint proposals).
 //!
-//! The detector is built to never false-flag (degrade by abstaining):
+//! Every gate below degrades by abstaining:
 //! - **Dep-gated** on `vue` / `@vue/runtime-core` / `svelte`.
 //! - **External-abstain**: a key imported from an npm PACKAGE is skipped, because
 //!   the `provide` may live inside that package's own code (in `node_modules`,
@@ -26,6 +26,13 @@
 //! The provided set is built LIBERALLY (the composable `provide(KEY, _)` plus
 //! app-level `*.provide(KEY, _)`): over-crediting a provided key can only
 //! suppress a finding, never create one. The inject side emits conservatively.
+//!
+//! One direction can still create a finding: a key name supplied by two
+//! different `export *` sources of a barrel exports nothing (ECMA-262
+//! ResolveExport), so `resolve_key` cannot walk it to its defining site. A
+//! provide and an inject that reach such a key by different paths (one through
+//! the barrel, one through the origin module) then no longer share an identity,
+//! and the inject is reported as unprovided even though a provide exists.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 

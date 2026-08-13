@@ -16,7 +16,8 @@
 //! WITHOUT referencing it, which is exactly the rot this detector surfaces: a
 //! component refactored out of every template but left re-exported.
 //!
-//! Built to never false-flag (degrade by abstaining):
+//! Every gate below degrades by abstaining, and crediting is deliberately
+//! liberal, so a wrong credit hides a finding instead of inventing one:
 //! - **Dep-gated** on `vue` / `@vue/runtime-core` / `nuxt` (for `.vue`),
 //!   `svelte` / `@sveltejs/kit` (for `.svelte`), and `astro` (for `.astro`).
 //! - The "rendered/used" set is built LIBERALLY (any reference, auto-import,
@@ -31,6 +32,16 @@
 //!   framework, not flagged.
 //! - **Public-API abstain**: a component re-exported from a non-private package
 //!   entry point is rendered by a downstream consumer, not flagged.
+//!
+//! The remaining way this detector can flag a rendered component is
+//! UNDER-crediting on an ambiguous name. When two different `export *` sources
+//! of a barrel supply the same name, that name exports nothing (ECMA-262
+//! ResolveExport) and `resolve_export` answers `Ambiguous`; the crediting walks
+//! abstain there, so a component reached only through the colliding name is
+//! credited by nobody and stays eligible. The finding then names the component
+//! while the fault is in the barrel. The unused-export surface suppresses its
+//! own findings for names lost to such a collision; this detector does not, so
+//! the carve-out is real until the barrel collision is resolved.
 
 use std::path::Path;
 
