@@ -555,12 +555,15 @@ fn analyze_astro_frontmatter(
     let source_type = SourceType::ts();
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
-    let extractor = extract_astro_frontmatter_module_info(script, &parser_return.program);
-    let semantic_usage = crate::parse::compute_semantic_usage(
+    let mut extractor = ModuleInfoExtractor::new();
+    extractor.visit_program(&parser_return.program);
+    let semantic_usage = crate::parse::compute_semantic_usage_for_extractor(
         &parser_return.program,
-        &extractor.imports,
+        &mut extractor,
         template_used,
     );
+    let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+    extractor.remap_spans_with(|span| extraction.remap_span(span));
     let props_harvest = crate::sfc_props::harvest_astro_props(&parser_return.program);
     let complexity = if need_complexity {
         compute_astro_frontmatter_complexity(
@@ -578,17 +581,6 @@ fn analyze_astro_frontmatter(
         props_harvest,
         complexity,
     }
-}
-
-fn extract_astro_frontmatter_module_info(
-    script: &SfcScript,
-    program: &oxc_ast::ast::Program<'_>,
-) -> ModuleInfoExtractor {
-    let mut extractor = ModuleInfoExtractor::new();
-    extractor.visit_program(program);
-    let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
-    extractor.remap_spans_with(|span| extraction.remap_span(span));
-    extractor
 }
 
 fn empty_astro_frontmatter_analysis() -> AstroFrontmatterAnalysis {

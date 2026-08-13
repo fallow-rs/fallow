@@ -910,7 +910,21 @@ use crate::MemberKind;
 ///
 /// Bumped to 266: named structural types retain their required members. Warm
 /// 265 caches can report contract-required implementer members as removable.
-pub(super) const CACHE_VERSION: u32 = 266;
+///
+/// Bumped to 267: contextually typed function expressions now resolve the
+/// nearest lexical function alias. Warm 266 caches can retain receiver facts
+/// from a shadowed outer alias and omit facts from the selected local alias.
+///
+/// Bumped to 268: generic alias substitution and lexical type/value provenance
+/// now change persisted member accesses, signature references, and semantic
+/// facts. Computed enum-key uses also require a proven module binding. Warm 267
+/// caches can therefore retain false receiver/key credits or omit the concrete
+/// generic receiver selected by the current parse.
+///
+/// Bumped to 269: a class's own lexical type binding now retains member accesses
+/// against that class while generic and nested type shadows still fail closed.
+/// Warm 268 caches can omit self-typed class member uses.
+pub(super) const CACHE_VERSION: u32 = 269;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

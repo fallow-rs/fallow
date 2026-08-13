@@ -844,12 +844,19 @@ impl ModuleInfoExtractor {
             self.record_path_relative_binding(id.name.as_str(), None);
             let refs = Self::collect_function_signature_refs(function);
             self.record_local_signature_refs(&id.name, refs);
+            let type_parameter_scope_pushed = function
+                .type_parameters
+                .as_deref()
+                .is_some_and(|params| self.push_function_type_parameter_scope(params));
             self.record_local_structural_function(
                 id.name.as_str(),
                 &function.params,
                 function.body.as_deref(),
                 None,
             );
+            if type_parameter_scope_pushed {
+                self.pop_function_type_alias_scope();
+            }
             self.record_factory_return_function(
                 id.name.as_str(),
                 FactoryReturnFunctionInput {
@@ -1584,7 +1591,7 @@ impl<'a> ModuleInfoExtractor {
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
-            && let Some(type_name) = nullable_asserted_type_name(init)
+            && let Some(type_name) = self.nullable_asserted_type_name(init)
         {
             self.insert_class_binding_target(id.name.to_string(), type_name);
         }
@@ -1636,6 +1643,40 @@ impl<'a> ModuleInfoExtractor {
                     callee_method: member.property.name.to_string(),
                 });
         }
+    }
+
+    fn asserted_receiver_type_name(&self, expr: &Expression<'_>) -> Option<String> {
+        let type_annotation = asserted_receiver_type(expr)?;
+        let root_name = asserted_type_root_name(type_annotation)?;
+        if self
+            .function_type_alias_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(root_name))
+            .is_some_and(|binding| !matches!(binding, super::FunctionTypeAliasBinding::ClassSelf))
+        {
+            return None;
+        }
+        extract_type_reference_name(type_annotation)
+    }
+
+    fn nullable_asserted_type_name(&self, expr: &Expression<'_>) -> Option<String> {
+        let Expression::ConditionalExpression(conditional) = unwrap_static_expr(expr) else {
+            return None;
+        };
+        if matches!(
+            unwrap_static_expr(&conditional.alternate),
+            Expression::NullLiteral(_)
+        ) {
+            return self.asserted_receiver_type_name(&conditional.consequent);
+        }
+        if matches!(
+            unwrap_static_expr(&conditional.consequent),
+            Expression::NullLiteral(_)
+        ) {
+            return self.asserted_receiver_type_name(&conditional.alternate);
+        }
+        None
     }
 
     fn record_route_loader_data_declarator(
@@ -2210,6 +2251,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_block_statement(&mut self, stmt: &BlockStatement<'a>) {
         self.block_depth += 1;
+        let type_alias_scope_pushed =
+            self.namespace_depth == 0 && self.push_function_type_alias_scope(&stmt.body);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
             self.scoped_array_binding_element_types
@@ -2227,6 +2270,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.record_fail_closed_guard_after_statement(statement);
             }
         }
+        if type_alias_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
             self.scoped_array_binding_element_types.pop();
@@ -2237,6 +2283,26 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.path_relative_binding_stack.pop();
         }
         self.block_depth -= 1;
+    }
+
+    fn visit_switch_statement(&mut self, stmt: &SwitchStatement<'a>) {
+        let type_alias_scope_pushed = self.namespace_depth == 0
+            && self.push_function_type_alias_scope(
+                stmt.cases.iter().flat_map(|case| &case.consequent),
+            );
+        walk::walk_switch_statement(self, stmt);
+        if type_alias_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        let type_alias_scope_pushed =
+            self.namespace_depth == 0 && self.push_function_type_alias_scope(&block.body);
+        walk::walk_static_block(self, block);
+        if type_alias_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
     }
 
     fn visit_declaration(&mut self, decl: &Declaration<'a>) {
@@ -2251,6 +2317,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         self.record_next_function_param_sources(func);
+        let type_parameter_scope_pushed = func
+            .type_parameters
+            .as_deref()
+            .is_some_and(|params| self.push_function_type_parameter_scope(params));
         self.record_scoped_typed_parameter_accesses(&func.params, func.body.as_deref());
         self.push_function_declaration_scope(&func.params);
         self.function_depth += 1;
@@ -2258,11 +2328,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_function(self, func, flags);
         self.react_exit_component(component_pushed);
         self.function_depth -= 1;
+        if type_parameter_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
         self.pop_function_declaration_scope();
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
         self.record_next_arrow_param_sources(expr);
+        let type_parameter_scope_pushed = expr
+            .type_parameters
+            .as_deref()
+            .is_some_and(|params| self.push_function_type_parameter_scope(params));
         self.record_scoped_typed_parameter_accesses(&expr.params, Some(expr.body.as_ref()));
         self.push_function_declaration_scope(&expr.params);
         self.function_depth += 1;
@@ -2270,10 +2347,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_arrow_function_expression(self, expr);
         self.react_exit_component(component_pushed);
         self.function_depth -= 1;
+        if type_parameter_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
         self.pop_function_declaration_scope();
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
+        let type_alias_scope_pushed =
+            self.namespace_depth == 0 && self.push_function_type_alias_scope(&body.statements);
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
@@ -2283,6 +2365,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             if self.namespace_depth == 0 {
                 self.record_fail_closed_guard_after_statement(statement);
             }
+        }
+        if type_alias_scope_pushed {
+            self.pop_function_type_alias_scope();
         }
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types.pop();
@@ -2785,7 +2870,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         }
-        if let Some(type_name) = asserted_receiver_type_name(&expr.object) {
+        if let Some(type_name) = self.asserted_receiver_type_name(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: type_name,
                 member: expr.property.name.to_string(),
@@ -2847,11 +2932,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Expression::StaticMemberExpression(key) = &expr.expression
             && let Expression::Identifier(key_object) = &key.object
         {
-            self.semantic_facts
-                .push(SemanticFact::ComputedEnumKeyUse(ComputedEnumKeyUseFact {
-                    key_object: key_object.name.to_string(),
-                    key_member: key.property.name.to_string(),
-                }));
+            self.pending_computed_enum_key_uses
+                .push(super::PendingComputedEnumKeyUse {
+                    fact: ComputedEnumKeyUseFact {
+                        key_object: key_object.name.to_string(),
+                        key_member: key.property.name.to_string(),
+                    },
+                    key_object_span: key_object.span,
+                });
         }
         if let Expression::Identifier(obj) = &expr.object {
             if (self.route_loader_data_bindings.contains(obj.name.as_str())
@@ -2955,6 +3043,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_class(&mut self, class: &Class<'a>) {
         let member_access_start = self.member_accesses.len();
         let whole_object_start = self.whole_object_uses.len();
+        let type_scope_pushed =
+            self.push_class_type_scope(class.id.as_ref(), class.type_parameters.as_deref());
         self.record_lit_custom_element(class);
 
         if let Some(meta) = extract_angular_component_metadata(class) {
@@ -2985,6 +3075,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.class_scope_stack.pop();
         self.class_type_param_constraints.pop();
         self.class_super_stack.pop();
+        if type_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
     }
 
     /// Track asset references inside `` html`...` `` tagged template literals
@@ -3277,38 +3370,55 @@ fn is_html_element_identifier(expr: &Expression<'_>) -> bool {
     )
 }
 
-fn asserted_receiver_type_name(expr: &Expression<'_>) -> Option<String> {
+fn asserted_receiver_type<'ast, 'borrow>(
+    expr: &'borrow Expression<'ast>,
+) -> Option<&'borrow TSType<'ast>> {
     match expr {
         Expression::ParenthesizedExpression(parenthesized) => {
-            asserted_receiver_type_name(&parenthesized.expression)
+            asserted_receiver_type(&parenthesized.expression)
         }
-        Expression::TSAsExpression(assertion) => {
-            extract_type_reference_name(&assertion.type_annotation)
+        Expression::TSAsExpression(assertion) => Some(&assertion.type_annotation),
+        Expression::TSTypeAssertion(assertion) => Some(&assertion.type_annotation),
+        _ => None,
+    }
+}
+
+fn asserted_type_root_name<'borrow>(ty: &'borrow TSType<'_>) -> Option<&'borrow str> {
+    match ty {
+        TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
+            TSTypeName::IdentifierReference(ident) => Some(ident.name.as_str()),
+            TSTypeName::QualifiedName(qualified) => type_name_root_str(&qualified.left),
+            TSTypeName::ThisExpression(_) => None,
+        },
+        TSType::TSParenthesizedType(parenthesized) => {
+            asserted_type_root_name(&parenthesized.type_annotation)
         }
-        Expression::TSTypeAssertion(assertion) => {
-            extract_type_reference_name(&assertion.type_annotation)
+        TSType::TSUnionType(union) => {
+            let mut root = None;
+            for branch in &union.types {
+                if matches!(
+                    branch,
+                    TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_)
+                ) {
+                    continue;
+                }
+                if root.is_some() {
+                    return None;
+                }
+                root = Some(asserted_type_root_name(branch)?);
+            }
+            root
         }
         _ => None,
     }
 }
 
-fn nullable_asserted_type_name(expr: &Expression<'_>) -> Option<String> {
-    let Expression::ConditionalExpression(conditional) = unwrap_static_expr(expr) else {
-        return None;
-    };
-    if matches!(
-        unwrap_static_expr(&conditional.alternate),
-        Expression::NullLiteral(_)
-    ) {
-        return asserted_receiver_type_name(&conditional.consequent);
+fn type_name_root_str<'borrow>(name: &'borrow TSTypeName<'_>) -> Option<&'borrow str> {
+    match name {
+        TSTypeName::IdentifierReference(ident) => Some(ident.name.as_str()),
+        TSTypeName::QualifiedName(qualified) => type_name_root_str(&qualified.left),
+        TSTypeName::ThisExpression(_) => None,
     }
-    if matches!(
-        unwrap_static_expr(&conditional.consequent),
-        Expression::NullLiteral(_)
-    ) {
-        return asserted_receiver_type_name(&conditional.alternate);
-    }
-    None
 }
 
 fn is_string_coercion_sibling(expr: &Expression<'_>) -> bool {

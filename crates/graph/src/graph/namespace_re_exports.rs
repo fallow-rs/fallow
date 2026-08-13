@@ -101,6 +101,10 @@ pub(super) fn propagate_namespace_re_exports(
     }
 
     let mut pending: Vec<PendingCredit> = Vec::new();
+    let has_entry_points = graph
+        .modules
+        .iter()
+        .any(super::types::ModuleNode::is_entry_point);
 
     for (barrel_file_id, source_file_id, exported_name, is_type_only) in &ns_edges {
         let Some(target_module_idx) = module_index_for_file(graph, *source_file_id) else {
@@ -113,6 +117,9 @@ pub(super) fn propagate_namespace_re_exports(
             &[ExportNamespace::Type, ExportNamespace::Value]
         };
         for &namespace in namespaces {
+            if !has_entry_points && !indexes.has_consumers_in(namespace) {
+                continue;
+            }
             let reachable = indexes.enumerate_reachable_barrels(
                 graph,
                 *barrel_file_id,
@@ -190,36 +197,11 @@ fn collect_consumer_credits(
             if consumer.file_id == context.seed_barrel_file {
                 continue;
             }
+            if !indexed.namespaces.contains(context.namespace) {
+                continue;
+            }
             let path = routes.consumer_path(export, indexed, reference_paths);
-
             let consumer_local = import.info.local_name.as_str();
-            if consumer_local.is_empty() {
-                continue;
-            }
-
-            if consumer.unused_import_bindings.contains(consumer_local) {
-                continue;
-            }
-
-            let uses_namespace = if import.info.is_type_only {
-                context.namespace == ExportNamespace::Type
-            } else {
-                let uses_type = consumer
-                    .type_referenced_import_bindings
-                    .iter()
-                    .any(|binding| binding == consumer_local);
-                let uses_value = consumer
-                    .value_referenced_import_bindings
-                    .iter()
-                    .any(|binding| binding == consumer_local);
-                match context.namespace {
-                    ExportNamespace::Type => uses_type,
-                    ExportNamespace::Value => uses_value || !uses_type,
-                }
-            };
-            if !uses_namespace {
-                continue;
-            }
 
             let whole_object = consumer
                 .whole_object_uses

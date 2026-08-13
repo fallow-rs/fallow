@@ -5623,6 +5623,27 @@ fn computed_enum_key_records_static_string_value_and_use() {
 }
 
 #[test]
+fn computed_enum_key_ignores_lexically_shadowed_binding() {
+    let info = parse(
+        r"
+        import { ProtocolKey } from './protocol';
+        export function read(
+            target: object,
+            ProtocolKey: { Protocol: string },
+        ) {
+            return target[ProtocolKey.Protocol]
+        }
+        ",
+    );
+
+    assert!(!info.semantic_facts.iter().any(|fact| matches!(
+        fact,
+        SemanticFact::ComputedEnumKeyUse(usage)
+            if usage.key_object == "ProtocolKey" && usage.key_member == "Protocol"
+    )));
+}
+
+#[test]
 fn import_meta_env_static_member_access_tracked() {
     let info = parse("const secret = import.meta.env.SECRET_KEY;");
     assert!(
@@ -6217,6 +6238,32 @@ fn nullable_asserted_binding_records_member_on_asserted_type() {
 }
 
 #[test]
+fn asserted_generic_receiver_does_not_credit_module_type() {
+    let info = parse(
+        r"
+        import type { Strategy } from './strategy';
+
+        export function useStrategy<Strategy>(value: unknown): void {
+          (value as Strategy).directOnly();
+          const strategy = value ? (value as Strategy) : null;
+          if (strategy) strategy.conditionalOnly();
+        }
+        ",
+    );
+
+    for member in ["directOnly", "conditionalOnly"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Strategy" && access.member == member),
+            "a generic type parameter must not credit an imported same-name type: {member} in {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn scoped_typed_parameter_records_property_chain_accesses() {
     let info = parse(
         r"
@@ -6254,6 +6301,54 @@ fn scoped_typed_parameter_records_property_chain_accesses() {
     assert!(
         facts.contains(&("Context", "strategy", "reset")),
         "{facts:?}"
+    );
+}
+
+#[test]
+fn destructured_receiver_alias_respects_nested_value_shadowing() {
+    let info = parse(
+        r"
+        interface Context {
+          strategy: Strategy;
+        }
+        declare const replacement: Strategy;
+
+        export function useContext(context: Context): void {
+          const { strategy } = context;
+          strategy.outerUsed();
+
+          function nested(strategy: Strategy): void {
+            strategy.parameterOnly();
+          }
+          {
+            const strategy = replacement;
+            strategy.blockOnly();
+          }
+          void nested;
+        }
+        ",
+    );
+
+    let contextual_members = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::TypedPropertyMemberAccess(access)
+                if access.type_name == "Context" && access.property_path == "strategy" =>
+            {
+                Some(access.member.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        contextual_members.contains(&"outerUsed"),
+        "{contextual_members:?}"
+    );
+    assert!(
+        !contextual_members.contains(&"parameterOnly")
+            && !contextual_members.contains(&"blockOnly"),
+        "nearer value bindings must stop destructured receiver alias resolution: {contextual_members:?}"
     );
 }
 
@@ -6316,6 +6411,36 @@ fn function_type_alias_supplies_scoped_parameter_types() {
 }
 
 #[test]
+fn generic_function_type_alias_substitutes_concrete_parameter_types() {
+    let info = parse(
+        r"
+        import type { Context } from './context';
+        type Handler<T> = (value: T) => void;
+
+        export const handle: Handler<Context> = value => {
+          value.run();
+        };
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Context" && access.member == "run"),
+        "the concrete type argument should replace the alias parameter: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "T" && access.member == "run"),
+        "a generic alias parameter must not become a module type: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn function_type_alias_supplies_nested_scoped_parameter_types() {
     let info = parse(
         r"
@@ -6344,6 +6469,213 @@ fn function_type_alias_supplies_nested_scoped_parameter_types() {
         )),
         "nested function alias should provide the contextual parameter type: {:?}",
         info.semantic_facts
+    );
+}
+
+#[test]
+fn nearest_function_type_alias_controls_contextual_parameter_types() {
+    let info = parse(
+        r"
+        class OuterContext {
+          outer(): void {}
+        }
+        class InnerContext {
+          inner(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function createHandler() {
+          const handler: Handler = context => context.inner();
+          type Handler = (context: InnerContext) => void;
+          return handler;
+        }
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "InnerContext" && access.member == "inner"),
+        "the nearest lexical alias should type the parameter: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "OuterContext" && access.member == "inner"),
+        "an outer alias must not leak through a local declaration: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn non_function_type_alias_shadows_outer_contextual_alias() {
+    let info = parse(
+        r"
+        class OuterContext {
+          outer(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function createHandler() {
+          type Handler = string;
+          const handler: Handler = context => context.outer();
+          return handler;
+        }
+        ",
+    );
+
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "OuterContext" && access.member == "outer"),
+        "a non-function alias must still shadow the outer alias: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn all_nearer_type_declarations_shadow_contextual_aliases() {
+    let info = parse(
+        r"
+        class OuterContext {
+          interfaceShadowed(): void {}
+          genericShadowed(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function interfaceHandler() {
+          interface Handler {
+            (context: unknown): void;
+          }
+          const handler: Handler = context => context.interfaceShadowed();
+          return handler;
+        }
+
+        export function genericHandler<Handler>() {
+          const handler: Handler = context => context.genericShadowed();
+          return handler;
+        }
+        ",
+    );
+
+    for member in ["interfaceShadowed", "genericShadowed"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "OuterContext" && access.member == member),
+            "the nearest type-space declaration must shadow the outer alias: {member} in {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn switch_and_static_block_aliases_do_not_leak_outer_context() {
+    let info = parse(
+        r"
+        class OuterContext {
+          switchShadowed(): void {}
+          staticShadowed(): void {}
+        }
+        class InnerContext {
+          switchUsed(): void {}
+          staticUsed(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export function switchHandler(value: string) {
+          switch (value) {
+            default:
+              const handler: Handler = context => context.switchUsed();
+              type Handler = (context: InnerContext) => void;
+              return handler;
+          }
+        }
+
+        export class Registry {
+          static {
+            const handler: Handler = context => context.staticUsed();
+            type Handler = (context: InnerContext) => void;
+            void handler;
+          }
+        }
+        ",
+    );
+
+    for (used, shadowed) in [
+        ("switchUsed", "switchShadowed"),
+        ("staticUsed", "staticShadowed"),
+    ] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "InnerContext" && access.member == used),
+            "the lexical alias should apply inside its raw statement scope: {used} in {:?}",
+            info.member_accesses
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "OuterContext" && access.member == shadowed),
+            "the outer alias must not leak into a raw statement scope: {shadowed} in {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn class_type_bindings_do_not_leak_outer_contextual_aliases() {
+    let info = parse(
+        r"
+        class OuterContext {
+          genericShadowed(): void {}
+          classNameShadowed(): void {}
+        }
+        type Handler = (context: OuterContext) => void;
+
+        export class Registry<Handler> {
+          create() {
+            const handler: Handler = context => context.genericShadowed();
+            return handler;
+          }
+
+          useSelf(target: Registry) {
+            target.required();
+          }
+
+          required(): void {}
+        }
+
+        export const Named = class Handler {
+          create() {
+            const handler: Handler = context => context.classNameShadowed();
+            return handler;
+          }
+        };
+        ",
+    );
+
+    for member in ["genericShadowed", "classNameShadowed"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "OuterContext" && access.member == member),
+            "class type bindings must shadow the outer alias: {member} in {:?}",
+            info.member_accesses
+        );
+    }
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Registry" && access.member == "required"),
+        "the current class binding remains a concrete receiver type: {:?}",
+        info.member_accesses
     );
 }
 
@@ -10136,6 +10468,73 @@ fn type_alias_surface_targets_exclude_nested_property_types() {
         info.member_accesses
             .iter()
             .any(|access| { access.object == "AliasContext" && access.member == "pickedOnly" })
+    );
+}
+
+#[test]
+fn generic_type_alias_parameters_are_not_module_surface_targets() {
+    let info = parse(
+        r"
+        import type { T } from './external';
+        export type Alias<T> = T;
+        ",
+    );
+
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::TypeAliasSurfaceTarget(target)
+                if target.alias_name == "Alias" && target.target_name == "T"
+        )),
+        "a bound alias parameter must not become a surface target: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        !info
+            .public_signature_type_references
+            .iter()
+            .any(|reference| reference.export_name == "Alias" && reference.type_name == "T"),
+        "a bound alias parameter must not resolve to an imported same-name type: {:?}",
+        info.public_signature_type_references
+    );
+}
+
+#[test]
+fn lexical_generic_parameters_shadow_imported_signature_types() {
+    let info = parse(
+        r"
+        import type { Context } from './external';
+
+        export function useContext<Context>(value: Context): Context {
+          value.run();
+          return value;
+        }
+
+        export class ContextBox<Context> {
+          value!: Context;
+          use(value: Context): Context {
+            value.run();
+            return value;
+          }
+        }
+        ",
+    );
+
+    assert!(
+        !info
+            .public_signature_type_references
+            .iter()
+            .any(|reference| reference.type_name == "Context"),
+        "lexical generic parameters must not resolve to imported same-name types: {:?}",
+        info.public_signature_type_references
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Context" && access.member == "run"),
+        "lexical generic parameters must not credit imported same-name members: {:?}",
+        info.member_accesses
     );
 }
 

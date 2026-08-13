@@ -13,13 +13,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::suppress::ParsedSuppressions;
 use crate::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
-    ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, DynamicCustomElementRenderFact,
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
-    FactoryFnMemberAccessFact, FactoryFnWholeObjectFact, FactoryReturnObjectPropertyAccessFact,
-    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
-    InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
+    ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, ComputedEnumKeyUseFact,
+    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
+    ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
+    FactoryReturnObjectPropertyAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    MemberAccess, MemberInfo, MemberKind, ModuleInfo, PlaywrightFixtureAliasFact,
+    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+    ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
     TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use fallow_types::extract::{
@@ -88,6 +89,12 @@ struct PendingLocalExportSpecifier {
 }
 
 #[derive(Debug, Clone)]
+struct PendingComputedEnumKeyUse {
+    fact: ComputedEnumKeyUseFact,
+    key_object_span: Span,
+}
+
+#[derive(Debug, Clone)]
 struct StructuralParameterUse {
     type_name: String,
     members: FxHashSet<String>,
@@ -96,6 +103,17 @@ struct StructuralParameterUse {
 #[derive(Debug, Clone, Default)]
 struct LocalStructuralFunction {
     params: FxHashMap<usize, StructuralParameterUse>,
+}
+
+struct ContextualParameterTypes {
+    parameters: Vec<Option<String>>,
+    type_parameters: Vec<String>,
+}
+
+enum FunctionTypeAliasBinding {
+    Function(ContextualParameterTypes),
+    ClassSelf,
+    NonFunction,
 }
 
 #[derive(Debug, Clone)]
@@ -312,6 +330,7 @@ pub(crate) struct ModuleInfoExtractor {
     package_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
+    pending_computed_enum_key_uses: Vec<PendingComputedEnumKeyUse>,
     pending_vitest_mock_operations: Vec<PendingVitestMockOperation>,
     pub(crate) whole_object_uses: Vec<String>,
     has_cjs_exports: bool,
@@ -365,7 +384,11 @@ pub(crate) struct ModuleInfoExtractor {
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
     /// Parameter types declared by module-local function type aliases, used to
     /// recover contextual types for unannotated arrow/function expressions.
-    function_type_alias_params: FxHashMap<String, Vec<Option<String>>>,
+    function_type_alias_params: FxHashMap<String, ContextualParameterTypes>,
+    /// Nearest lexical type alias declarations for function bodies and blocks.
+    /// A `NonFunction` binding still shadows an outer function alias. Transient
+    /// visitor state; never persisted.
+    function_type_alias_scopes: Vec<FxHashMap<String, FunctionTypeAliasBinding>>,
     /// Local function bodies pre-scanned by `record_local_structural_function`.
     /// Prevents a second AST walk when the ordinary visitor reaches the body.
     scoped_typed_parameter_body_spans: FxHashSet<Span>,
@@ -802,6 +825,25 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn set_route_load_harvest_mode(&mut self, mode: RouteLoadHarvestMode) {
         self.route_load_harvest_mode = mode;
+    }
+
+    pub(crate) fn computed_enum_key_reference_spans(&self) -> FxHashSet<Span> {
+        self.pending_computed_enum_key_uses
+            .iter()
+            .map(|usage| usage.key_object_span)
+            .collect()
+    }
+
+    pub(crate) fn resolve_computed_enum_key_uses(
+        &mut self,
+        module_binding_references: &FxHashSet<Span>,
+    ) {
+        self.semantic_facts.extend(
+            self.pending_computed_enum_key_uses
+                .drain(..)
+                .filter(|usage| module_binding_references.contains(&usage.key_object_span))
+                .map(|usage| SemanticFact::ComputedEnumKeyUse(usage.fact)),
+        );
     }
 
     fn record_local_class_export(&mut self, name: String, info: LocalClassExportInfo) {

@@ -10,6 +10,7 @@ use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
 use crate::resolve::{ResolvedImport, ResolvedModule};
 
 use super::ModuleGraph;
+use super::effective_exports::ExportNamespaces;
 use super::types::{
     ReferencePathId, ReferencePathInterner, ReferenceRouteGraphId, ReferenceRouteGraphSpec,
     ReferenceRouteNodeId, ReferenceRouteNodeSpec,
@@ -26,6 +27,7 @@ struct ReExportTargets {
 pub(super) struct ConsumerImport<'a> {
     pub(super) consumer: &'a ResolvedModule,
     pub(super) import: &'a ResolvedImport,
+    pub(super) namespaces: ExportNamespaces,
 }
 
 /// One namespace export state in the compact transition graph.
@@ -245,6 +247,7 @@ impl ReachableNamespaceExports {
 pub(super) struct NamespacePropagationIndexes<'a> {
     re_exports_by_source: FxHashMap<FileId, ReExportTargets>,
     consumers_by_target: FxHashMap<FileId, FxHashMap<String, Vec<ConsumerImport<'a>>>>,
+    consumer_namespaces: ExportNamespaces,
 }
 
 impl<'a> NamespacePropagationIndexes<'a> {
@@ -288,6 +291,7 @@ impl<'a> NamespacePropagationIndexes<'a> {
 
         let mut consumers_by_target: FxHashMap<FileId, FxHashMap<String, Vec<ConsumerImport<'a>>>> =
             FxHashMap::default();
+        let mut consumer_namespaces = ExportNamespaces::default();
         for consumer in module_by_id.values() {
             for import in &consumer.resolved_imports {
                 let Some(target) = import.target.internal_file_id() else {
@@ -298,12 +302,21 @@ impl<'a> NamespacePropagationIndexes<'a> {
                     ImportedName::Default => "default",
                     _ => continue,
                 };
+                let namespaces = consumer_import_namespaces(consumer, import);
+                if namespaces.is_empty() {
+                    continue;
+                }
+                consumer_namespaces.extend(namespaces);
                 consumers_by_target
                     .entry(target)
                     .or_default()
                     .entry(imported_name.to_string())
                     .or_default()
-                    .push(ConsumerImport { consumer, import });
+                    .push(ConsumerImport {
+                        consumer,
+                        import,
+                        namespaces,
+                    });
             }
         }
         for by_name in consumers_by_target.values_mut() {
@@ -321,7 +334,12 @@ impl<'a> NamespacePropagationIndexes<'a> {
         Self {
             re_exports_by_source,
             consumers_by_target,
+            consumer_namespaces,
         }
+    }
+
+    pub(super) const fn has_consumers_in(&self, namespace: ExportNamespace) -> bool {
+        self.consumer_namespaces.contains(namespace)
     }
 
     pub(super) fn enumerate_reachable_barrels(
@@ -398,6 +416,36 @@ impl<'a> NamespacePropagationIndexes<'a> {
     }
 }
 
+fn consumer_import_namespaces(
+    consumer: &ResolvedModule,
+    import: &ResolvedImport,
+) -> ExportNamespaces {
+    let local_name = import.info.local_name.as_str();
+    if local_name.is_empty() || consumer.unused_import_bindings.contains(local_name) {
+        return ExportNamespaces::default();
+    }
+    let mut namespaces = ExportNamespaces::default();
+    if import.info.is_type_only {
+        namespaces.insert(ExportNamespace::Type);
+        return namespaces;
+    }
+    let uses_type = consumer
+        .type_referenced_import_bindings
+        .iter()
+        .any(|binding| binding == local_name);
+    let uses_value = consumer
+        .value_referenced_import_bindings
+        .iter()
+        .any(|binding| binding == local_name);
+    if uses_type {
+        namespaces.insert(ExportNamespace::Type);
+    }
+    if uses_value || !uses_type {
+        namespaces.insert(ExportNamespace::Value);
+    }
+    namespaces
+}
+
 fn uniquely_forwards_binding(
     graph: &ModuleGraph,
     source_file: FileId,
@@ -426,6 +474,7 @@ mod tests {
         NamespacePropagationIndexes {
             re_exports_by_source: FxHashMap::default(),
             consumers_by_target: FxHashMap::default(),
+            consumer_namespaces: ExportNamespaces::default(),
         }
     }
 

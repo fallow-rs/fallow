@@ -16,7 +16,9 @@ pub struct ExportTrace {
     pub file: PathBuf,
     /// The export name being traced.
     pub export_name: String,
-    /// Namespace selected for this trace.
+    /// Namespace selected for this trace. Producers always emit it; the schema
+    /// permits omission by payloads created before namespaces were exposed.
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub namespace: crate::semantic::SemanticNamespace,
     /// Whether the file is reachable from an entry point.
     pub file_reachable: bool,

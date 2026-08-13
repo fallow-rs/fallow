@@ -236,7 +236,7 @@ fn build_primary_extractor(
     let template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
     let semantic_usage =
-        compute_semantic_usage(program, &extractor.imports, &template_used_imports);
+        compute_semantic_usage_for_extractor(program, &mut extractor, &template_used_imports);
     extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
     (extractor, semantic_usage)
 }
@@ -406,9 +406,9 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
 
     let template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, input.path, input.source);
-    let semantic_usage = compute_semantic_usage(
+    let semantic_usage = compute_semantic_usage_for_extractor(
         &retry_return.program,
-        &extractor.imports,
+        &mut extractor,
         &template_used_imports,
     );
     extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
@@ -1135,12 +1135,43 @@ pub struct SemanticUsage {
     pub auto_import_candidates: Vec<String>,
     pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
     pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
+    pub(crate) module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
 }
 
 pub fn compute_semantic_usage(
     program: &Program<'_>,
     imports: &[ImportInfo],
     template_used: &rustc_hash::FxHashSet<String>,
+) -> SemanticUsage {
+    compute_semantic_usage_with_candidates(
+        program,
+        imports,
+        template_used,
+        &rustc_hash::FxHashSet::default(),
+    )
+}
+
+pub fn compute_semantic_usage_for_extractor(
+    program: &Program<'_>,
+    extractor: &mut ModuleInfoExtractor,
+    template_used: &rustc_hash::FxHashSet<String>,
+) -> SemanticUsage {
+    let computed_enum_key_spans = extractor.computed_enum_key_reference_spans();
+    let semantic_usage = compute_semantic_usage_with_candidates(
+        program,
+        &extractor.imports,
+        template_used,
+        &computed_enum_key_spans,
+    );
+    extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
+    semantic_usage
+}
+
+fn compute_semantic_usage_with_candidates(
+    program: &Program<'_>,
+    imports: &[ImportInfo],
+    template_used: &rustc_hash::FxHashSet<String>,
+    module_binding_candidates: &rustc_hash::FxHashSet<Span>,
 ) -> SemanticUsage {
     use oxc_semantic::SemanticBuilder;
     use rustc_hash::FxHashSet;
@@ -1195,6 +1226,28 @@ pub fn compute_semantic_usage(
     value_referenced_bindings.sort_unstable();
     let mock_api_reference_spans = compute_mock_api_reference_spans(&semantic, imports, root_scope);
     let declaration_merges = declaration_merge_facts(&semantic);
+    let mut module_binding_reference_spans = FxHashSet::default();
+    if !module_binding_candidates.is_empty() {
+        for symbol_id in scoping.symbol_ids() {
+            if scoping.symbol_scope_id(symbol_id) != root_scope {
+                continue;
+            }
+            module_binding_reference_spans.extend(
+                scoping
+                    .get_resolved_references(symbol_id)
+                    .filter_map(|reference| {
+                        let AstKind::IdentifierReference(identifier) =
+                            semantic.nodes().kind(reference.node_id())
+                        else {
+                            return None;
+                        };
+                        module_binding_candidates
+                            .contains(&identifier.span)
+                            .then_some(identifier.span)
+                    }),
+            );
+        }
+    }
 
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
@@ -1205,6 +1258,7 @@ pub fn compute_semantic_usage(
         auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
         declaration_merges,
         mock_api_reference_spans,
+        module_binding_reference_spans,
     }
 }
 

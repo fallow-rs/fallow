@@ -97,8 +97,11 @@ pub use store::GraphCacheStore;
 /// resolver no longer produces.
 ///
 /// Bumped to 32: the effective export index resolves the type namespace in two
-/// lanes (real declarations and value-derived fallbacks) and stores a per-file
-/// name index, so warm 31 payloads no longer describe the same structure.
+/// lanes (real declarations and value-derived fallbacks), stores a per-file
+/// name index, and retains opaque bindings for known external named and
+/// namespace re-export surfaces. Warm 31 payloads neither describe the same
+/// structure nor carry those external bindings, so a consumed barrel export
+/// could be falsely reported as unused.
 pub const GRAPH_CACHE_VERSION: u32 = 32;
 
 /// Cached form of a resolved target.

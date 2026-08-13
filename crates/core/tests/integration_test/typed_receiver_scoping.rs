@@ -47,4 +47,13 @@ fn typed_receivers_with_reused_parameter_names_are_scoped_per_function() {
             && unused.contains(&"NestedContext.nestedDead".to_string()),
         "a nested property type must not inherit direct receiver-member credit: {unused:?}"
     );
+    assert!(
+        !unused.contains(&"InnerHandlerContext.innerUsed".to_string()),
+        "the nearest function alias must type its contextual receiver: {unused:?}"
+    );
+    assert!(
+        unused.contains(&"InnerHandlerContext.innerDead".to_string())
+            && unused.contains(&"OuterHandlerContext.outerDead".to_string()),
+        "lexical alias resolution must not over-credit either class: {unused:?}"
+    );
 }

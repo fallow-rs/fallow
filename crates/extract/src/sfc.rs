@@ -19,7 +19,7 @@ use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::asset_url::normalize_asset_url;
-use crate::parse::{compute_import_binding_usage, compute_semantic_usage};
+use crate::parse::compute_import_binding_usage;
 use crate::sfc_template::{SfcKind, collect_template_usage_with_bound_targets};
 use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
@@ -587,11 +587,17 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     .parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
+    let empty_template_used = FxHashSet::default();
+    let semantic_usage = crate::parse::compute_semantic_usage_for_extractor(
+        &parser_return.program,
+        &mut extractor,
+        &empty_template_used,
+    );
     let extraction = ExtractionResult::contiguous(&input.script.body, input.script.byte_offset);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
 
-    merge_script_binding_usage(input, &allocator, &parser_return, &extractor.imports);
+    merge_script_binding_usage(input, &allocator, &extractor.imports, semantic_usage);
     if input.need_complexity {
         input
             .combined
@@ -644,13 +650,11 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
 fn merge_script_binding_usage(
     input: &mut SfcScriptMergeInput<'_>,
     allocator: &Allocator,
-    parser_return: &oxc_parser::ParserReturn<'_>,
     imports: &[ImportInfo],
+    semantic_usage: crate::parse::SemanticUsage,
 ) {
     let augmented_body = build_generic_attr_probe_source(input.script);
     let empty_template_used = FxHashSet::default();
-    let semantic_usage =
-        compute_semantic_usage(&parser_return.program, imports, &empty_template_used);
     let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
     {
         let augmented_return =
