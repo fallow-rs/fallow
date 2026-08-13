@@ -31,6 +31,9 @@ pub struct HealthDerivedSectionInput<'a> {
     pub(crate) score_output: Option<&'a scoring::FileScoreOutput>,
     pub(crate) loaded_baseline: Option<&'a HealthBaselineData>,
     pub(crate) pre_computed_duplication: Option<DuplicationReport>,
+    /// Flag-resolved global CRAP ceiling (`HealthScope::max_crap`); target
+    /// factors fall back to it on rows without their own effective ceiling.
+    pub(crate) max_crap: f64,
 }
 
 pub struct HealthDerivedSections {
@@ -73,6 +76,7 @@ pub fn prepare_health_derived_sections(
             config: input.config,
             diff_index: input.diff_index,
             dupes_report: dupes_report.as_ref(),
+            max_crap: input.max_crap,
         },
     );
 
@@ -143,6 +147,7 @@ struct HealthTargetSectionInput<'a> {
     config: &'a ResolvedConfig,
     diff_index: Option<&'a fallow_output::DiffIndex>,
     dupes_report: Option<&'a crate::duplicates::DuplicationReport>,
+    max_crap: f64,
 }
 
 fn prepare_health_section_targets(
@@ -162,6 +167,7 @@ fn prepare_health_section_targets(
         config: input.config,
         diff_index: input.diff_index,
         dupes_report: input.dupes_report,
+        max_crap: input.max_crap,
     })
 }
 
@@ -211,6 +217,7 @@ struct FilteredTargetInput<'a> {
     config: &'a ResolvedConfig,
     diff_index: Option<&'a fallow_output::DiffIndex>,
     dupes_report: Option<&'a crate::duplicates::DuplicationReport>,
+    max_crap: f64,
 }
 
 fn compute_filtered_targets(
@@ -443,8 +450,12 @@ fn compute_targets(
             targets::build_clone_sibling_evidence(report)
         });
     let target_aux = TargetAuxData::from_output(output, &clone_siblings);
-    let (mut tgts, thresholds) =
-        compute_refactoring_targets(input.file_scores_slice, &target_aux, input.hotspots);
+    let (mut tgts, thresholds) = compute_refactoring_targets(
+        input.file_scores_slice,
+        &target_aux,
+        input.hotspots,
+        input.max_crap,
+    );
     if let Some(baseline) = input.loaded_baseline {
         tgts = filter_new_health_targets(tgts, baseline, &input.config.root);
     }

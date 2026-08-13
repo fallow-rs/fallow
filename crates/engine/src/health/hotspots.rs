@@ -715,6 +715,8 @@ mod tests {
             lines: 20,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
             rustc_hash::FxHashMap::default();
@@ -736,6 +738,53 @@ mod tests {
         assert!((max_d - 0.75).abs() < f64::EPSILON);
     }
 
+    /// Hotspot ranking is churn times complexity density and consults no CRAP
+    /// thresholds, so an exemption that clears the risk tag and the coverage
+    /// target must leave hotspot inputs untouched (issue #2228).
+    #[test]
+    fn normalization_maxima_ignore_crap_exemption_fields() {
+        let base = FileHealthScore {
+            path: std::path::PathBuf::from("/src/foo.ts"),
+            fan_in: 0,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.75,
+            maintainability_index: 80.0,
+            total_cyclomatic: 15,
+            total_cognitive: 10,
+            function_count: 3,
+            lines: 20,
+            crap_max: 110.0,
+            crap_above_threshold: 2,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
+        };
+        let exempt = FileHealthScore {
+            crap_above_threshold: 0,
+            crap_exempted: 2,
+            crap_effective_threshold: Some(500.0),
+            ..base.clone()
+        };
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+            rustc_hash::FxHashMap::default();
+        churn_files.insert(
+            std::path::PathBuf::from("/src/foo.ts"),
+            crate::churn::FileChurn {
+                path: std::path::PathBuf::from("/src/foo.ts"),
+                commits: 5,
+                weighted_commits: 4.2,
+                lines_added: 100,
+                lines_deleted: 20,
+                trend: crate::churn::ChurnTrend::Stable,
+                authors: rustc_hash::FxHashMap::default(),
+            },
+        );
+
+        let flagged = compute_normalization_maxima(&[base], &churn_files, 3);
+        let exempted = compute_normalization_maxima(&[exempt], &churn_files, 3);
+        assert_eq!(flagged, exempted);
+    }
+
     #[test]
     fn normalization_maxima_below_min_commits() {
         let scores = vec![FileHealthScore {
@@ -751,6 +800,8 @@ mod tests {
             lines: 20,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
             rustc_hash::FxHashMap::default();
@@ -787,6 +838,8 @@ mod tests {
             lines: 10,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
             rustc_hash::FxHashMap::default();
@@ -854,6 +907,8 @@ mod tests {
                 lines: 50,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
             FileHealthScore {
                 path: std::path::PathBuf::from("/src/b.ts"),
@@ -868,6 +923,8 @@ mod tests {
                 lines: 100,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
             FileHealthScore {
                 path: std::path::PathBuf::from("/src/c.ts"),
@@ -882,6 +939,8 @@ mod tests {
                 lines: 80,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
         ];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
@@ -944,6 +1003,8 @@ mod tests {
                 lines: 40,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
             FileHealthScore {
                 path: std::path::PathBuf::from("/src/rare.ts"),
@@ -958,6 +1019,8 @@ mod tests {
                 lines: 200,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
         ];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
@@ -1007,6 +1070,8 @@ mod tests {
             lines: 500,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
             rustc_hash::FxHashMap::default();
@@ -1031,6 +1096,8 @@ mod tests {
             lines: 10,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
             rustc_hash::FxHashMap::default();
@@ -1067,6 +1134,8 @@ mod tests {
             lines: 120,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
             rustc_hash::FxHashMap::default();

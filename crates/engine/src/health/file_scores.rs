@@ -31,6 +31,8 @@ pub struct FileScoresAndChurnInput<'a> {
     pub(crate) ignore_set: &'a globset::GlobSet,
     pub(crate) istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pub(crate) needs_file_scores: bool,
+    pub(crate) threshold_resolver: &'a super::threshold_overrides::ThresholdOverrideResolver,
+    pub(crate) enforce_crap: bool,
 }
 
 pub fn compute_file_scores_and_churn(
@@ -52,6 +54,10 @@ pub fn compute_file_scores_and_churn(
                 ignore_set: input.ignore_set,
                 istanbul_coverage: input.istanbul_coverage,
                 pre_computed: precomputed_for_scores,
+                crap_thresholds: scoring::CrapScoreThresholds {
+                    resolver: input.threshold_resolver,
+                    enforce_crap: input.enforce_crap,
+                },
             })?;
             let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
             let churn = churn_handle
@@ -72,6 +78,10 @@ pub fn compute_file_scores_and_churn(
             ignore_set: input.ignore_set,
             istanbul_coverage: input.istanbul_coverage,
             pre_computed: precomputed_for_scores,
+            crap_thresholds: scoring::CrapScoreThresholds {
+                resolver: input.threshold_resolver,
+                enforce_crap: input.enforce_crap,
+            },
         })?
     } else {
         (None, None, None)
@@ -122,6 +132,7 @@ struct FileScoreInput<'a> {
     ignore_set: &'a globset::GlobSet,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pre_computed: Option<DeadCodeAnalysisArtifacts>,
+    crap_thresholds: scoring::CrapScoreThresholds<'a>,
 }
 
 fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreResult, HealthError> {
@@ -132,12 +143,15 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
             .map_err(|e| HealthError::message(format!("analysis failed: {e}"), 2))?
     };
     match compute_file_scores(
-        input.modules,
-        input.file_paths,
-        input.changed_files,
+        scoring::FileScoreComputeInput {
+            modules: input.modules,
+            file_paths: input.file_paths,
+            changed_files: input.changed_files,
+            istanbul_coverage: input.istanbul_coverage,
+            root: &input.config.root,
+            crap_thresholds: input.crap_thresholds,
+        },
         analysis_output,
-        input.istanbul_coverage,
-        &input.config.root,
     ) {
         Ok(mut output) => {
             if let Some(ws) = input.ws_roots {

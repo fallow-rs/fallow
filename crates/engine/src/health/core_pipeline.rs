@@ -13,6 +13,7 @@ use super::pipeline::HealthScope;
 use super::runtime_sections::{
     HealthRuntimeSections, HealthRuntimeSectionsInput, prepare_health_runtime_sections,
 };
+use super::threshold_overrides::{GlobalHealthThresholds, ThresholdOverrideResolver};
 use super::{
     HealthDerivedSections, HealthError, HealthOptions, HealthSeams, HealthVitalData, scoring,
 };
@@ -35,6 +36,7 @@ struct HealthAnalysisPreludeInput<'a, R> {
     scope: &'a HealthScope<'a, R>,
     pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     seams: &'a HealthSeams<'a>,
+    threshold_resolver: &'a ThresholdOverrideResolver,
 }
 
 struct HealthScopedFindingsInput<'a, R> {
@@ -43,6 +45,7 @@ struct HealthScopedFindingsInput<'a, R> {
     modules: &'a [crate::source::ModuleInfo],
     scope: &'a HealthScope<'a, R>,
     score_output: Option<&'a scoring::FileScoreOutput>,
+    threshold_resolver: &'a ThresholdOverrideResolver,
 }
 
 struct HealthAnalysisPrelude {
@@ -78,6 +81,19 @@ pub(super) fn prepare_health_core_sections<R>(
         seams,
     } = input;
 
+    // Constructed once for the whole run so file scoring, findings, and the
+    // large-function list resolve the same effective ceilings from the same
+    // flag-resolved globals (issue #2228).
+    let threshold_resolver = ThresholdOverrideResolver::new(
+        &config.health.threshold_overrides,
+        GlobalHealthThresholds {
+            cyclomatic: scope.max_cyclomatic,
+            cognitive: scope.max_cognitive,
+            crap: scope.max_crap,
+            unit_size: config.health.max_unit_size,
+        },
+    );
+
     let HealthAnalysisPrelude {
         analysis_data,
         report_coverage_gaps,
@@ -91,6 +107,7 @@ pub(super) fn prepare_health_core_sections<R>(
         scope,
         pre_computed_analysis,
         seams,
+        threshold_resolver: &threshold_resolver,
     })?;
 
     let findings_data = prepare_health_scoped_findings(&HealthScopedFindingsInput {
@@ -99,6 +116,7 @@ pub(super) fn prepare_health_core_sections<R>(
         modules,
         scope,
         score_output: analysis_data.score_output.as_ref(),
+        threshold_resolver: &threshold_resolver,
     })?;
 
     let HealthRuntimeSections {
@@ -122,6 +140,8 @@ pub(super) fn prepare_health_core_sections<R>(
             pre_computed_duplication,
             has_istanbul_coverage,
             needs_file_scores,
+            max_crap: scope.max_crap,
+            threshold_resolver: &threshold_resolver,
         },
     )?;
 
@@ -164,6 +184,8 @@ fn prepare_health_analysis_prelude<R>(
         pre_computed_analysis: input.pre_computed_analysis,
         needs_file_scores,
         seams: input.seams,
+        threshold_resolver: input.threshold_resolver,
+        enforce_crap: input.scope.enforce_crap,
     })?;
 
     Ok(HealthAnalysisPrelude {
@@ -187,10 +209,8 @@ fn prepare_health_scoped_findings<R>(
         changed_files: input.scope.changed_files.as_ref(),
         ws_roots: input.scope.ws_roots.as_deref(),
         diff_index: input.scope.diff_index,
-        max_cyclomatic: input.scope.max_cyclomatic,
-        max_cognitive: input.scope.max_cognitive,
-        max_crap: input.scope.max_crap,
         enforce_crap: input.scope.enforce_crap,
+        threshold_resolver: input.threshold_resolver,
         score_output: input.score_output,
     })
 }

@@ -420,6 +420,502 @@ fn health_threshold_override_reports_stale_for_suppressed_function() {
     assert_eq!(states[0]["function"].as_str(), Some("legacyFlow"));
 }
 
+fn untested_complexity_pair_source() -> &'static str {
+    r"export const legacyA = (v: number): number => {
+  if (v === 1) return 1;
+  if (v === 2) return 2;
+  if (v === 3) return 3;
+  if (v === 4) return 4;
+  if (v === 5) return 5;
+  if (v === 6) return 6;
+  if (v === 7) return 7;
+  if (v === 8) return 8;
+  if (v === 9) return 9;
+  return 0;
+};
+export const legacyB = (v: number): number => {
+  if (v === 1) return 10;
+  if (v === 2) return 20;
+  if (v === 3) return 30;
+  if (v === 4) return 40;
+  if (v === 5) return 50;
+  if (v === 6) return 60;
+  if (v === 7) return 70;
+  if (v === 8) return 80;
+  if (v === 9) return 90;
+  return 0;
+};
+"
+}
+
+fn write_crap_exemption_fixture(root: &Path, config: Option<&str>) {
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"crap-exemption-fixture","type":"module","main":"src/main.ts"}"#,
+    );
+    if let Some(config) = config {
+        write_file(&root.join(".fallowrc.json"), config);
+    }
+    write_file(
+        &root.join("src/legacy.ts"),
+        untested_complexity_pair_source(),
+    );
+    write_file(
+        &root.join("src/main.ts"),
+        "import { legacyA, legacyB } from './legacy';\n\nexport const run = (): number => legacyA(1) + legacyB(2);\n",
+    );
+}
+
+fn legacy_file_score(json: &serde_json::Value) -> &serde_json::Value {
+    json["file_scores"]
+        .as_array()
+        .expect("file_scores array")
+        .iter()
+        .find(|row| {
+            row["path"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("legacy.ts"))
+        })
+        .expect("legacy.ts file score row")
+}
+
+/// An override that exempts every breaching function must reach the scoring
+/// surfaces too: no above-threshold count, no `add_test_coverage` target, and
+/// the exemption disclosed on the row (issue #2228).
+#[test]
+fn health_threshold_override_exempts_file_scores_and_targets() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(
+        dir.path(),
+        Some(
+            r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "maxCyclomatic": 500,
+        "maxCognitive": 500,
+        "maxCrap": 500,
+        "reason": "legacy module, exempt until rewrite"
+      }
+    ]
+  }
+}
+"#,
+        ),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--file-scores", "--targets", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let row = legacy_file_score(&json);
+    assert_eq!(row["crap_above_threshold"].as_u64(), Some(0), "{row:#?}");
+    assert!((row["crap_max"].as_f64().expect("crap_max") - 110.0).abs() < f64::EPSILON);
+    assert_eq!(row["crap_exempted"].as_u64(), Some(2), "{row:#?}");
+    assert!(
+        (row["crap_effective_threshold"]
+            .as_f64()
+            .expect("crap_effective_threshold")
+            - 500.0)
+            .abs()
+            < f64::EPSILON
+    );
+
+    let empty_targets = Vec::new();
+    let targets = json["targets"].as_array().unwrap_or(&empty_targets);
+    assert!(
+        targets
+            .iter()
+            .all(|t| { !t["path"].as_str().is_some_and(|p| p.ends_with("legacy.ts")) }),
+        "exempted file must not surface as a refactoring target: {targets:#?}"
+    );
+    assert!(
+        json["threshold_overrides"]
+            .as_array()
+            .expect("threshold_overrides array")
+            .iter()
+            .any(|state| state["status"].as_str() == Some("active")
+                && state["dimension"].as_str() == Some("crap")),
+        "override rows must still read active"
+    );
+}
+
+/// The same exemption story in the human report: `structure` tag, dimmed
+/// number with an override marker, and no refactoring-target row.
+#[test]
+fn health_threshold_override_exemption_renders_structure_tag_and_marker() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(
+        dir.path(),
+        Some(
+            r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "maxCrap": 500,
+        "reason": "legacy module, exempt until rewrite"
+      }
+    ]
+  }
+}
+"#,
+        ),
+    );
+
+    let output = run_fallow_in_root("health", dir.path(), &["--file-scores", "--targets"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let stdout = &output.stdout;
+    let tag_line = stdout
+        .lines()
+        .find(|l| l.contains("legacy.ts") && !l.contains('#'))
+        .expect("legacy.ts file-score line");
+    assert!(
+        tag_line.trim_end().ends_with("structure"),
+        "expected structure tag on the exempted row, got: {tag_line:?}"
+    );
+    assert!(
+        stdout.contains("exempt (override)"),
+        "expected an override exemption marker: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Refactoring targets"),
+        "exempted file must not produce a targets section: {stdout}"
+    );
+    assert!(
+        output.stderr.contains("0 above threshold"),
+        "run must still end at zero findings: {}",
+        output.stderr
+    );
+}
+
+/// A raised global (`--max-crap`) behaves like an override for scoring
+/// surfaces, but rows do not repeat the run global as their own threshold and
+/// the marker names the global raise (issue #2228).
+#[test]
+fn health_raised_global_max_crap_exempts_scoring_surfaces() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(dir.path(), None);
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--file-scores",
+            "--targets",
+            "--max-crap",
+            "5000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let row = legacy_file_score(&json);
+    assert_eq!(row["crap_above_threshold"].as_u64(), Some(0), "{row:#?}");
+    assert_eq!(row["crap_exempted"].as_u64(), Some(2), "{row:#?}");
+    assert!(
+        row["crap_effective_threshold"].is_null(),
+        "a global raise is summary-level, not a per-row threshold: {row:#?}"
+    );
+    let empty_targets = Vec::new();
+    let targets = json["targets"].as_array().unwrap_or(&empty_targets);
+    assert!(targets.is_empty(), "{targets:#?}");
+
+    let human = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--file-scores", "--max-crap", "5000", "--quiet"],
+    );
+    assert_eq!(human.code, 0, "stderr: {}", human.stderr);
+    assert!(
+        human.stdout.contains("exempt (raised threshold)"),
+        "{}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains("Risk: low <2500, moderate 2500-5000, high >=5000."),
+        "bands must be stated relative to the run global: {}",
+        human.stdout
+    );
+}
+
+/// `--max-crap 0` disables CRAP enforcement entirely; scoring surfaces must
+/// mirror the findings pipeline, which skips the whole CRAP merge in that
+/// state, while still disclosing the canonical-baseline breaches.
+#[test]
+fn health_disabled_crap_enforcement_exempts_scoring_surfaces() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(dir.path(), None);
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--file-scores",
+            "--targets",
+            "--max-crap",
+            "0",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let row = legacy_file_score(&json);
+    assert_eq!(row["crap_above_threshold"].as_u64(), Some(0), "{row:#?}");
+    assert_eq!(row["crap_exempted"].as_u64(), Some(2), "{row:#?}");
+    let empty_targets = Vec::new();
+    let targets = json["targets"].as_array().unwrap_or(&empty_targets);
+    assert!(targets.is_empty(), "{targets:#?}");
+
+    let human = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--file-scores", "--max-crap", "0", "--quiet"],
+    );
+    assert_eq!(human.code, 0, "stderr: {}", human.stderr);
+    assert!(
+        human
+            .stdout
+            .contains("CRAP enforcement is disabled (maxCrap 0)"),
+        "{}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("exempt (crap disabled)"),
+        "{}",
+        human.stdout
+    );
+}
+
+/// A stricter global (`--max-crap 10`) moves the scoring surfaces in the other
+/// direction: the count rises and the coverage-gap target can appear, with the
+/// factor threshold reading the run global, not the canonical 30.
+#[test]
+fn health_stricter_global_max_crap_raises_scoring_surfaces() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(dir.path(), None);
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--file-scores",
+            "--targets",
+            "--max-crap",
+            "10",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let row = legacy_file_score(&json);
+    assert_eq!(row["crap_above_threshold"].as_u64(), Some(2), "{row:#?}");
+    assert!(row["crap_exempted"].is_null(), "{row:#?}");
+    assert!(row["crap_effective_threshold"].is_null(), "{row:#?}");
+
+    let target = json["targets"]
+        .as_array()
+        .expect("targets array")
+        .iter()
+        .find(|t| t["path"].as_str().is_some_and(|p| p.ends_with("legacy.ts")))
+        .expect("add_test_coverage target under the stricter ceiling");
+    assert_eq!(target["category"].as_str(), Some("add_test_coverage"));
+    let factor = target["factors"]
+        .as_array()
+        .expect("factors")
+        .iter()
+        .find(|f| f["metric"].as_str() == Some("crap_max"))
+        .expect("crap_max factor");
+    assert!((factor["threshold"].as_f64().expect("threshold") - 10.0).abs() < f64::EPSILON);
+}
+
+/// A partial override (`functions` list) exempts only the named function: the
+/// count and disclosure stay per-function and the two-function coverage-gap
+/// rule no longer fires.
+#[test]
+fn health_partial_function_override_counts_per_function() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(
+        dir.path(),
+        Some(
+            r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "functions": ["legacyA"],
+        "maxCrap": 500,
+        "reason": "one function exempt"
+      }
+    ]
+  }
+}
+"#,
+        ),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--file-scores", "--targets", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let row = legacy_file_score(&json);
+    assert_eq!(row["crap_above_threshold"].as_u64(), Some(1), "{row:#?}");
+    assert_eq!(row["crap_exempted"].as_u64(), Some(1), "{row:#?}");
+    let empty_targets = Vec::new();
+    let targets = json["targets"].as_array().unwrap_or(&empty_targets);
+    assert!(
+        targets
+            .iter()
+            .all(|t| { !t["path"].as_str().is_some_and(|p| p.ends_with("legacy.ts")) }),
+        "one surviving breach is below the two-function rule: {targets:#?}"
+    );
+}
+
+/// An insufficient override keeps the whole risk story: findings, count, tag,
+/// and target stay, and the factor threshold reads the row's own ceiling.
+#[test]
+fn health_insufficient_override_keeps_scoring_surfaces() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(
+        dir.path(),
+        Some(
+            r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "maxCrap": 50,
+        "reason": "not enough"
+      }
+    ]
+  }
+}
+"#,
+        ),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--file-scores", "--targets", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let row = legacy_file_score(&json);
+    assert_eq!(row["crap_above_threshold"].as_u64(), Some(2), "{row:#?}");
+    assert!(row["crap_exempted"].is_null(), "{row:#?}");
+    assert!(
+        (row["crap_effective_threshold"]
+            .as_f64()
+            .expect("crap_effective_threshold")
+            - 50.0)
+            .abs()
+            < f64::EPSILON
+    );
+    assert!(
+        json["threshold_overrides"]
+            .as_array()
+            .expect("threshold_overrides array")
+            .iter()
+            .any(|state| state["status"].as_str() == Some("insufficient")),
+        "override rows must read insufficient"
+    );
+    let target = json["targets"]
+        .as_array()
+        .expect("targets array")
+        .iter()
+        .find(|t| t["path"].as_str().is_some_and(|p| p.ends_with("legacy.ts")))
+        .expect("target must survive an insufficient override");
+    let factor = target["factors"]
+        .as_array()
+        .expect("factors")
+        .iter()
+        .find(|f| f["metric"].as_str() == Some("crap_max"))
+        .expect("crap_max factor");
+    assert!((factor["threshold"].as_f64().expect("threshold") - 50.0).abs() < f64::EPSILON);
+    assert!(factor["value"].as_f64().expect("value") >= factor["threshold"].as_f64().unwrap());
+}
+
+/// Grouped output recomputes per-group sections from the same file scores and
+/// targets, so the exemption must carry into every group (issue #2228).
+#[test]
+fn health_grouped_output_carries_crap_exemption() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(
+        dir.path(),
+        Some(
+            r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "maxCrap": 500,
+        "reason": "legacy module, exempt until rewrite"
+      }
+    ]
+  }
+}
+"#,
+        ),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--file-scores",
+            "--targets",
+            "--group-by",
+            "directory",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let groups = json["groups"].as_array().expect("groups array");
+    let row = groups
+        .iter()
+        .flat_map(|g| g["file_scores"].as_array().into_iter().flatten())
+        .find(|row| {
+            row["path"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("legacy.ts"))
+        })
+        .expect("legacy.ts group file score row");
+    assert_eq!(row["crap_above_threshold"].as_u64(), Some(0), "{row:#?}");
+    assert_eq!(row["crap_exempted"].as_u64(), Some(2), "{row:#?}");
+    assert!(
+        groups
+            .iter()
+            .flat_map(|g| g["targets"].as_array().into_iter().flatten())
+            .all(|t| { !t["path"].as_str().is_some_and(|p| p.ends_with("legacy.ts")) }),
+        "exempted file must not surface in group targets"
+    );
+}
+
 /// The human section is capped for scanability, but JSON is the machine
 /// surface and must keep every row (issue #2163 follow-up).
 #[test]

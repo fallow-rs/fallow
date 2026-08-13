@@ -365,6 +365,8 @@ export interface FileHealthScore {
   lines: number;
   crap_max: number;
   crap_above_threshold: number;
+  crap_exempted?: number;
+  crap_effective_threshold?: number;
   [key: string]: unknown;
 }
 

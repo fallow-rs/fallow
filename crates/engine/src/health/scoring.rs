@@ -4,6 +4,7 @@ use crate::module_graph::StaticTestCoverage;
 
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
+use super::threshold_overrides::ThresholdOverrideResolver;
 
 /// Output from `compute_file_scores`, including auxiliary data for refactoring targets.
 pub struct FileScoreOutput {
@@ -242,6 +243,70 @@ fn compute_complexity_density(total_cyclomatic: u32, lines: u32) -> f64 {
 /// matching the canonical CRAP threshold from Savoia & Evans (2007).
 pub(super) const CRAP_THRESHOLD: f64 = 30.0;
 
+/// Effective-threshold inputs for the CRAP columns of file scoring: the run
+/// resolver plus the `enforce_crap` bit from the health scope.
+#[derive(Clone, Copy)]
+pub(super) struct CrapScoreThresholds<'a> {
+    pub(super) resolver: &'a ThresholdOverrideResolver,
+    pub(super) enforce_crap: bool,
+}
+
+/// Per-function effective-CRAP-ceiling lookup for one file's scoring loop:
+/// the run resolver bound to the file's project-relative path, so the CRAP
+/// loops can resolve each function's ceiling where the function name is in
+/// hand. `enforce_crap` mirrors `HealthScope::enforce_crap`: a global ceiling
+/// of `0` disables CRAP enforcement, so every function counts as exempt at the
+/// canonical baseline instead of breaching a degenerate `0` ceiling.
+pub(super) struct CrapCeilingLookup<'a> {
+    resolver: &'a ThresholdOverrideResolver,
+    relative: &'a std::path::Path,
+    enforce_crap: bool,
+}
+
+/// Threshold-relative CRAP signals accumulated over one file's functions.
+///
+/// `above` and `exempted` count the ROUNDED per-function CRAP value, the same
+/// value the findings pipeline compares against the effective ceiling, so a
+/// boundary function cannot produce a finding without being counted here, or
+/// be counted here without producing a finding.
+#[derive(Default)]
+struct CrapThresholdSignals {
+    /// Functions whose rounded CRAP meets or exceeds their effective ceiling.
+    above: usize,
+    /// Functions at or above the canonical 30.0 baseline whose effective
+    /// ceiling exempts them (all baseline-breaching functions when CRAP
+    /// enforcement is disabled).
+    exempted: usize,
+    /// Lowest effective ceiling among the observed functions.
+    min_ceiling: Option<f64>,
+}
+
+impl<'a> CrapCeilingLookup<'a> {
+    pub(super) fn new(thresholds: CrapScoreThresholds<'a>, relative: &'a std::path::Path) -> Self {
+        Self {
+            resolver: thresholds.resolver,
+            relative,
+            enforce_crap: thresholds.enforce_crap,
+        }
+    }
+
+    /// Fold one function's rounded CRAP value into the file's
+    /// threshold-relative signals.
+    fn observe(&self, function: &str, crap_rounded: f64, signals: &mut CrapThresholdSignals) {
+        let ceiling = self.resolver.effective_max_crap(self.relative, function);
+        signals.min_ceiling = Some(signals.min_ceiling.map_or(ceiling, |m| m.min(ceiling)));
+        if !self.enforce_crap {
+            if crap_rounded >= CRAP_THRESHOLD {
+                signals.exempted += 1;
+            }
+        } else if crap_rounded >= ceiling {
+            signals.above += 1;
+        } else if crap_rounded >= CRAP_THRESHOLD {
+            signals.exempted += 1;
+        }
+    }
+}
+
 /// Compute per-function CRAP scores using the static binary model.
 ///
 /// Binary model: test-reachable file -> CRAP = CC, untested -> CRAP = CC^2 + CC.
@@ -306,7 +371,8 @@ pub struct PerFunctionCrap {
 /// Istanbul CRAP result: CRAP scores plus match statistics.
 struct IstanbulCrapResult {
     pub max_crap: f64,
-    pub above_threshold: usize,
+    /// Threshold-relative counts and the lowest effective ceiling.
+    pub signals: CrapThresholdSignals,
     /// Functions that found a match in Istanbul data.
     pub matched: usize,
     /// Total functions evaluated.
@@ -329,18 +395,19 @@ fn compute_crap_scores_istanbul(
     complexity: &[fallow_types::extract::FunctionComplexity],
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
+    ceilings: &CrapCeilingLookup<'_>,
 ) -> IstanbulCrapResult {
     if complexity.is_empty() {
         return IstanbulCrapResult {
             max_crap: 0.0,
-            above_threshold: 0,
+            signals: CrapThresholdSignals::default(),
             matched: 0,
             total: 0,
             per_function: Vec::new(),
         };
     }
     let mut max = 0.0_f64;
-    let mut above = 0usize;
+    let mut signals = CrapThresholdSignals::default();
     let mut matched = 0usize;
     let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
@@ -348,9 +415,7 @@ fn compute_crap_scores_istanbul(
             crap_for_function(f, file_coverage, is_test_reachable, &mut matched);
         let crap_rounded = (crap * 10.0).round() / 10.0;
         max = max.max(crap);
-        if crap >= CRAP_THRESHOLD {
-            above += 1;
-        }
+        ceilings.observe(f.name.as_str(), crap_rounded, &mut signals);
         per_function.push(PerFunctionCrap {
             line: f.line,
             col: f.col,
@@ -362,7 +427,7 @@ fn compute_crap_scores_istanbul(
     }
     IstanbulCrapResult {
         max_crap: (max * 10.0).round() / 10.0,
-        above_threshold: above,
+        signals,
         matched,
         total: complexity.len(),
         per_function,
@@ -436,7 +501,8 @@ const MAX_DIRECT_CALLER_EVIDENCE: usize = 5;
 /// Estimated CRAP result: score aggregates plus per-function data.
 struct EstimatedCrapResult {
     pub max_crap: f64,
-    pub above_threshold: usize,
+    /// Threshold-relative counts and the lowest effective ceiling.
+    pub signals: CrapThresholdSignals,
     pub per_function: Vec<PerFunctionCrap>,
 }
 
@@ -445,16 +511,17 @@ fn compute_crap_scores_estimated(
     test_referenced_exports: &rustc_hash::FxHashSet<String>,
     is_test_reachable: bool,
     coverage_source: fallow_output::CoverageSource,
+    ceilings: &CrapCeilingLookup<'_>,
 ) -> EstimatedCrapResult {
     if complexity.is_empty() {
         return EstimatedCrapResult {
             max_crap: 0.0,
-            above_threshold: 0,
+            signals: CrapThresholdSignals::default(),
             per_function: Vec::new(),
         };
     }
     let mut max = 0.0_f64;
-    let mut above = 0usize;
+    let mut signals = CrapThresholdSignals::default();
     let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
         let cc = f64::from(f.cyclomatic);
@@ -468,9 +535,7 @@ fn compute_crap_scores_estimated(
         let crap = crap_formula(cc, estimated_coverage);
         let crap_rounded = (crap * 10.0).round() / 10.0;
         max = max.max(crap);
-        if crap >= CRAP_THRESHOLD {
-            above += 1;
-        }
+        ceilings.observe(f.name.as_str(), crap_rounded, &mut signals);
         per_function.push(PerFunctionCrap {
             line: f.line,
             col: f.col,
@@ -482,7 +547,7 @@ fn compute_crap_scores_estimated(
     }
     EstimatedCrapResult {
         max_crap: (max * 10.0).round() / 10.0,
-        above_threshold: above,
+        signals,
         per_function,
     }
 }
@@ -1090,22 +1155,45 @@ fn file_score_structural_concern(score: &FileHealthScore) -> f64 {
     (100.0 - score.maintainability_index).clamp(0.0, 100.0)
 }
 
-fn file_score_crap_concern(crap_max: f64) -> f64 {
+/// True when the file's CRAP signal is fully covered by configuration: nothing
+/// meets its effective ceiling while something would have been flagged at the
+/// canonical 30.0 baseline, or CRAP enforcement is disabled entirely
+/// (`max_crap_threshold <= 0`). Mirrors the findings pipeline, which emits no
+/// CRAP finding in exactly these states, so the row must not read `risk`.
+#[must_use]
+pub fn file_score_fully_crap_exempt(score: &FileHealthScore, max_crap_threshold: f64) -> bool {
+    max_crap_threshold <= 0.0 || (score.crap_above_threshold == 0 && score.crap_exempted > 0)
+}
+
+/// CRAP concern bands generalized over the row's effective ceiling `t`
+/// (`crap_effective_threshold`, falling back to the run global). At `t = 30`
+/// the breakpoints are the historical (15, 30, 100). A fully exempt file
+/// scores `0.0`: band generalization alone cannot drop an exempted file below
+/// its structural concern, so the tag would keep reading `risk` against a run
+/// with zero findings.
+fn file_score_crap_concern(score: &FileHealthScore, max_crap_threshold: f64) -> f64 {
+    if file_score_fully_crap_exempt(score, max_crap_threshold) {
+        return 0.0;
+    }
+    let crap_max = score.crap_max;
+    let t = score.crap_effective_threshold.unwrap_or(max_crap_threshold);
+    let half = t / 2.0;
+    let saturation = t * 10.0 / 3.0;
     if crap_max <= 0.0 {
         0.0
-    } else if crap_max < 15.0 {
-        (crap_max / 15.0) * 45.0
-    } else if crap_max < CRAP_THRESHOLD {
-        ((crap_max - 15.0) / 15.0).mul_add(30.0, 45.0)
-    } else if crap_max < 100.0 {
-        ((crap_max - CRAP_THRESHOLD) / (100.0 - CRAP_THRESHOLD)).mul_add(25.0, 75.0)
+    } else if crap_max < half {
+        (crap_max / half) * 45.0
+    } else if crap_max < t {
+        ((crap_max - half) / half).mul_add(30.0, 45.0)
+    } else if crap_max < saturation {
+        ((crap_max - t) / (saturation - t)).mul_add(25.0, 75.0)
     } else {
         100.0
     }
 }
 
-fn file_score_triage_concern(score: &FileHealthScore) -> f64 {
-    file_score_structural_concern(score).max(file_score_crap_concern(score.crap_max))
+fn file_score_triage_concern(score: &FileHealthScore, max_crap_threshold: f64) -> f64 {
+    file_score_structural_concern(score).max(file_score_crap_concern(score, max_crap_threshold))
 }
 
 /// Which signal places a file at its triage rank: its structural quality (low
@@ -1131,26 +1219,51 @@ impl FileScoreConcern {
     }
 }
 
-/// Classify which concern drove `score` to its rank. A file with no CRAP risk
-/// is always `Structural`; otherwise the larger concern wins, with ties (and
-/// the boundary where the two are equal) resolving to `Risk` because untested
-/// complexity is the more urgent signal to act on.
-pub fn file_score_concern_axis(score: &FileHealthScore) -> FileScoreConcern {
-    if score.crap_max <= 0.0 {
+/// Classify which concern drove `score` to its rank. A file with no CRAP
+/// concern (no CRAP risk at all, or every breaching function exempted by its
+/// effective ceiling) is always `Structural`; otherwise the larger concern
+/// wins, with ties (and the boundary where the two are equal) resolving to
+/// `Risk` because untested complexity is the more urgent signal to act on.
+///
+/// `max_crap_threshold` is the run global (`summary.max_crap_threshold`), the
+/// fallback ceiling for rows without a `crap_effective_threshold` of their own.
+pub fn file_score_concern_axis(
+    score: &FileHealthScore,
+    max_crap_threshold: f64,
+) -> FileScoreConcern {
+    let crap_concern = file_score_crap_concern(score, max_crap_threshold);
+    if crap_concern <= 0.0 {
         FileScoreConcern::Structural
-    } else if file_score_crap_concern(score.crap_max) >= file_score_structural_concern(score) {
+    } else if crap_concern >= file_score_structural_concern(score) {
         FileScoreConcern::Risk
     } else {
         FileScoreConcern::Structural
     }
 }
 
-fn compare_file_score_triage(a: &FileHealthScore, b: &FileHealthScore) -> std::cmp::Ordering {
-    file_score_triage_concern(b)
-        .total_cmp(&file_score_triage_concern(a))
+fn compare_file_score_triage(
+    a: &FileHealthScore,
+    b: &FileHealthScore,
+    max_crap_threshold: f64,
+) -> std::cmp::Ordering {
+    file_score_triage_concern(b, max_crap_threshold)
+        .total_cmp(&file_score_triage_concern(a, max_crap_threshold))
         .then_with(|| b.crap_max.total_cmp(&a.crap_max))
         .then_with(|| a.maintainability_index.total_cmp(&b.maintainability_index))
         .then_with(|| a.path.cmp(&b.path))
+}
+
+/// Inputs for [`compute_file_scores`], bundled so the analysis artifacts stay
+/// a separate owned argument.
+#[derive(Clone, Copy)]
+pub(super) struct FileScoreComputeInput<'a> {
+    pub(super) modules: &'a [crate::source::ModuleInfo],
+    pub(super) file_paths:
+        &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
+    pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    pub(super) istanbul_coverage: Option<&'a IstanbulCoverage>,
+    pub(super) root: &'a std::path::Path,
+    pub(super) crap_thresholds: CrapScoreThresholds<'a>,
 }
 
 /// Compute per-file health scores using a pre-computed analysis output.
@@ -1159,13 +1272,17 @@ fn compare_file_score_triage(a: &FileHealthScore, b: &FileHealthScore) -> std::c
 /// so this function does not need to re-run the analysis pipeline. Complexity
 /// density is derived from the already-parsed modules.
 pub(super) fn compute_file_scores(
-    modules: &[crate::source::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    input: FileScoreComputeInput<'_>,
     analysis_output: crate::results::DeadCodeAnalysisArtifacts,
-    istanbul_coverage: Option<&IstanbulCoverage>,
-    root: &std::path::Path,
 ) -> Result<FileScoreOutput, String> {
+    let FileScoreComputeInput {
+        modules,
+        file_paths,
+        changed_files,
+        istanbul_coverage,
+        root,
+        crap_thresholds,
+    } = input;
     let retained_graph = analysis_output.graph.ok_or("graph not available")?;
     let test_coverage = retained_graph.static_test_coverage();
     let graph = retained_graph.as_graph();
@@ -1204,9 +1321,15 @@ pub(super) fn compute_file_scores(
             unused_exports_by_path: &unused_exports_by_path,
             template_inherit: &template_inherit,
             istanbul_coverage,
+            root,
+            crap_thresholds,
         },
     );
-    acc.scores = finalize_file_score_list(acc.scores, changed_files);
+    acc.scores = finalize_file_score_list(
+        acc.scores,
+        changed_files,
+        crap_thresholds.resolver.global.crap,
+    );
 
     Ok(build_file_score_output(FileScoreOutputParts {
         graph,
@@ -1238,6 +1361,10 @@ struct FileScoreLoopCtx<'a> {
     unused_exports_by_path: &'a rustc_hash::FxHashMap<&'a std::path::Path, usize>,
     template_inherit: &'a rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext>,
     istanbul_coverage: Option<&'a IstanbulCoverage>,
+    /// Project root used to relativize paths into the override resolver's glob
+    /// space, matching the findings pipeline's `strip_prefix` on the same root.
+    root: &'a std::path::Path,
+    crap_thresholds: CrapScoreThresholds<'a>,
 }
 
 /// Mutable accumulators populated by the per-node file-score loop.
@@ -1292,12 +1419,13 @@ fn accumulate_file_scores(
 fn finalize_file_score_list(
     mut scores: Vec<FileHealthScore>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    max_crap_threshold: f64,
 ) -> Vec<FileHealthScore> {
     if let Some(changed) = changed_files {
         scores.retain(|s| changed.contains(&s.path));
     }
     scores.retain(|s| s.function_count > 0);
-    scores.sort_by(compare_file_score_triage);
+    scores.sort_by(|a, b| compare_file_score_triage(a, b, max_crap_threshold));
     scores
 }
 
@@ -1334,17 +1462,22 @@ fn compute_one_file_score(
     let (dead_code_ratio_rounded, complexity_density_rounded, maintainability_index_rounded) =
         compute_file_score_metrics(node, &path_owned, ctx, total_cyclomatic, lines, fan_out);
 
-    let crap = compute_file_score_crap(
-        node,
-        ctx.module_by_id.get(&node.file_id).copied(),
-        ctx.test_coverage,
-        ctx.template_inherit.get(&node.file_id),
-        ctx.istanbul_coverage,
-        &path_owned,
-    );
+    let relative = path_owned.strip_prefix(ctx.root).unwrap_or(&path_owned);
+    let ceilings = CrapCeilingLookup::new(ctx.crap_thresholds, relative);
+    let crap = compute_file_score_crap(node, ctx, &path_owned, &ceilings);
     acc.istanbul_matched += crap.istanbul_matched;
     acc.istanbul_total += crap.istanbul_total;
     record_per_function_crap(&mut acc.per_function_crap, &path_owned, crap.per_function);
+
+    // `crap_effective_threshold` is the file's lowest effective ceiling, on the
+    // wire only when it differs from the run global. Both sides come from the
+    // same resolved configuration values, so any difference beyond epsilon is a
+    // real override, never rounding noise.
+    let global_crap = ctx.crap_thresholds.resolver.global.crap;
+    let crap_effective_threshold = crap
+        .signals
+        .min_ceiling
+        .filter(|ceiling| (*ceiling - global_crap).abs() > f64::EPSILON);
 
     FileHealthScore {
         path: path_owned,
@@ -1358,7 +1491,9 @@ fn compute_one_file_score(
         function_count,
         lines,
         crap_max: crap.max,
-        crap_above_threshold: crap.above_threshold,
+        crap_above_threshold: crap.signals.above,
+        crap_exempted: crap.signals.exempted,
+        crap_effective_threshold,
     }
 }
 
@@ -1490,7 +1625,7 @@ fn record_unused_file_export_names(
 
 struct FileScoreCrap {
     max: f64,
-    above_threshold: usize,
+    signals: CrapThresholdSignals,
     per_function: Vec<PerFunctionCrap>,
     istanbul_matched: usize,
     istanbul_total: usize,
@@ -1500,7 +1635,7 @@ impl FileScoreCrap {
     fn empty() -> Self {
         Self {
             max: 0.0,
-            above_threshold: 0,
+            signals: CrapThresholdSignals::default(),
             per_function: Vec::new(),
             istanbul_matched: 0,
             istanbul_total: 0,
@@ -1510,7 +1645,7 @@ impl FileScoreCrap {
     fn estimated(result: EstimatedCrapResult) -> Self {
         Self {
             max: result.max_crap,
-            above_threshold: result.above_threshold,
+            signals: result.signals,
             per_function: result.per_function,
             istanbul_matched: 0,
             istanbul_total: 0,
@@ -1520,7 +1655,7 @@ impl FileScoreCrap {
     fn istanbul(result: IstanbulCrapResult) -> Self {
         Self {
             max: result.max_crap,
-            above_threshold: result.above_threshold,
+            signals: result.signals,
             per_function: result.per_function,
             istanbul_matched: result.matched,
             istanbul_total: result.total,
@@ -1530,13 +1665,11 @@ impl FileScoreCrap {
 
 fn compute_file_score_crap(
     node: &fallow_graph::graph::ModuleNode,
-    module: Option<&crate::source::ModuleInfo>,
-    test_coverage: StaticTestCoverage<'_>,
-    template_inherit: Option<&TemplateInheritContext>,
-    istanbul_coverage: Option<&IstanbulCoverage>,
+    ctx: &FileScoreLoopCtx<'_>,
     path: &std::path::Path,
+    ceilings: &CrapCeilingLookup<'_>,
 ) -> FileScoreCrap {
-    let Some(module) = module else {
+    let Some(module) = ctx.module_by_id.get(&node.file_id).copied() else {
         return FileScoreCrap::empty();
     };
 
@@ -1544,30 +1677,40 @@ fn compute_file_score_crap(
         &module.suppressions,
         fallow_types::suppress::IssueKind::CoverageGaps,
     );
-    let is_test_reachable = test_coverage.covers_file(node.file_id) || is_coverage_suppressed;
-    let resolution = resolve_crap_coverage(template_inherit, istanbul_coverage, path);
+    let is_test_reachable = ctx.test_coverage.covers_file(node.file_id) || is_coverage_suppressed;
+    let resolution = resolve_crap_coverage(
+        ctx.template_inherit.get(&node.file_id),
+        ctx.istanbul_coverage,
+        path,
+    );
     match resolution {
         CrapCoverageResolution::TemplateInherited(inherit_ctx) => {
-            compute_template_inherited_crap(module, inherit_ctx)
+            compute_template_inherited_crap(module, inherit_ctx, ceilings)
         }
         CrapCoverageResolution::Istanbul { file_coverage } => {
-            compute_istanbul_file_crap(module, file_coverage, is_test_reachable)
+            compute_istanbul_file_crap(module, file_coverage, is_test_reachable, ceilings)
         }
-        CrapCoverageResolution::StaticEstimated => {
-            compute_static_file_crap(module, &node.exports, test_coverage, is_test_reachable)
-        }
+        CrapCoverageResolution::StaticEstimated => compute_static_file_crap(
+            module,
+            &node.exports,
+            ctx.test_coverage,
+            is_test_reachable,
+            ceilings,
+        ),
     }
 }
 
 fn compute_template_inherited_crap(
     module: &crate::source::ModuleInfo,
     inherit_ctx: &TemplateInheritContext,
+    ceilings: &CrapCeilingLookup<'_>,
 ) -> FileScoreCrap {
     FileScoreCrap::estimated(compute_crap_scores_estimated(
         &module.complexity,
         &inherit_ctx.test_referenced_exports,
         inherit_ctx.is_test_reachable,
         fallow_output::CoverageSource::EstimatedComponentInherited,
+        ceilings,
     ))
 }
 
@@ -1575,11 +1718,13 @@ fn compute_istanbul_file_crap(
     module: &crate::source::ModuleInfo,
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
+    ceilings: &CrapCeilingLookup<'_>,
 ) -> FileScoreCrap {
     FileScoreCrap::istanbul(compute_crap_scores_istanbul(
         &module.complexity,
         file_coverage,
         is_test_reachable,
+        ceilings,
     ))
 }
 
@@ -1588,6 +1733,7 @@ fn compute_static_file_crap(
     exports: &[fallow_graph::graph::ExportSymbol],
     test_coverage: StaticTestCoverage<'_>,
     is_test_reachable: bool,
+    ceilings: &CrapCeilingLookup<'_>,
 ) -> FileScoreCrap {
     let test_refs = build_test_referenced_exports(exports, test_coverage);
     FileScoreCrap::estimated(compute_crap_scores_estimated(
@@ -1595,6 +1741,7 @@ fn compute_static_file_crap(
         &test_refs,
         is_test_reachable,
         fallow_output::CoverageSource::Estimated,
+        ceilings,
     ))
 }
 
@@ -1784,7 +1931,104 @@ fn build_analysis_counts_snapshot(
 
 #[cfg(test)]
 mod tests {
+    use super::super::threshold_overrides::GlobalHealthThresholds;
     use super::*;
+
+    /// Resolver with no override entries and the given global CRAP ceiling,
+    /// the default-configuration shape for scoring tests.
+    fn test_crap_resolver(crap: f64) -> ThresholdOverrideResolver {
+        ThresholdOverrideResolver::new(
+            &[],
+            GlobalHealthThresholds {
+                cyclomatic: 20,
+                cognitive: 15,
+                crap,
+                unit_size: 120,
+            },
+        )
+    }
+
+    /// Resolver with the given override entries over the default global 30.0.
+    fn test_override_resolver(
+        overrides: &[fallow_config::HealthThresholdOverride],
+    ) -> ThresholdOverrideResolver {
+        ThresholdOverrideResolver::new(
+            overrides,
+            GlobalHealthThresholds {
+                cyclomatic: 20,
+                cognitive: 15,
+                crap: CRAP_THRESHOLD,
+                unit_size: 120,
+            },
+        )
+    }
+
+    /// `compute_crap_scores_istanbul` with default-configuration ceilings.
+    fn istanbul_crap_default(
+        complexity: &[fallow_types::extract::FunctionComplexity],
+        file_coverage: Option<&IstanbulFileCoverage>,
+        is_test_reachable: bool,
+    ) -> IstanbulCrapResult {
+        let resolver = test_crap_resolver(CRAP_THRESHOLD);
+        let ceilings = CrapCeilingLookup::new(
+            CrapScoreThresholds {
+                resolver: &resolver,
+                enforce_crap: true,
+            },
+            std::path::Path::new("src/test.ts"),
+        );
+        compute_crap_scores_istanbul(complexity, file_coverage, is_test_reachable, &ceilings)
+    }
+
+    /// `compute_crap_scores_estimated` with default-configuration ceilings.
+    fn estimated_crap_default(
+        complexity: &[fallow_types::extract::FunctionComplexity],
+        test_referenced_exports: &rustc_hash::FxHashSet<String>,
+        is_test_reachable: bool,
+        coverage_source: fallow_output::CoverageSource,
+    ) -> EstimatedCrapResult {
+        let resolver = test_crap_resolver(CRAP_THRESHOLD);
+        let ceilings = CrapCeilingLookup::new(
+            CrapScoreThresholds {
+                resolver: &resolver,
+                enforce_crap: true,
+            },
+            std::path::Path::new("src/test.ts"),
+        );
+        compute_crap_scores_estimated(
+            complexity,
+            test_referenced_exports,
+            is_test_reachable,
+            coverage_source,
+            &ceilings,
+        )
+    }
+
+    /// `compute_file_scores` with default-configuration CRAP thresholds.
+    fn compute_file_scores_default(
+        modules: &[crate::source::ModuleInfo],
+        file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
+        changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+        analysis_output: crate::results::DeadCodeAnalysisArtifacts,
+        istanbul_coverage: Option<&IstanbulCoverage>,
+        root: &std::path::Path,
+    ) -> Result<FileScoreOutput, String> {
+        let resolver = test_crap_resolver(CRAP_THRESHOLD);
+        compute_file_scores(
+            FileScoreComputeInput {
+                modules,
+                file_paths,
+                changed_files,
+                istanbul_coverage,
+                root,
+                crap_thresholds: CrapScoreThresholds {
+                    resolver: &resolver,
+                    enforce_crap: true,
+                },
+            },
+            analysis_output,
+        )
+    }
 
     #[test]
     fn maintainability_perfect_score() {
@@ -2339,40 +2583,113 @@ mod tests {
             lines: 1,
             crap_max,
             crap_above_threshold: usize::from(crap_max >= CRAP_THRESHOLD),
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }
+    }
+
+    fn crap_concern_at_default(crap_max: f64) -> f64 {
+        file_score_crap_concern(
+            &make_file_score("/src/concern.ts", 100.0, crap_max),
+            CRAP_THRESHOLD,
+        )
     }
 
     #[test]
     fn file_score_crap_concern_tracks_crap_risk_bands() {
-        assert!((file_score_crap_concern(0.0) - 0.0).abs() < f64::EPSILON);
-        assert!((file_score_crap_concern(15.0) - 45.0).abs() < f64::EPSILON);
-        assert!((file_score_crap_concern(CRAP_THRESHOLD) - 75.0).abs() < f64::EPSILON);
-        assert!((file_score_crap_concern(100.0) - 100.0).abs() < f64::EPSILON);
-        assert!((file_score_crap_concern(552.0) - 100.0).abs() < f64::EPSILON);
+        assert!((crap_concern_at_default(0.0) - 0.0).abs() < f64::EPSILON);
+        assert!((crap_concern_at_default(15.0) - 45.0).abs() < f64::EPSILON);
+        assert!((crap_concern_at_default(CRAP_THRESHOLD) - 75.0).abs() < f64::EPSILON);
+        assert!((crap_concern_at_default(100.0) - 100.0).abs() < f64::EPSILON);
+        assert!((crap_concern_at_default(552.0) - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn file_score_crap_concern_generalizes_bands_over_effective_ceiling() {
+        // At t = 500 the band edges scale to (250, 500, 1666.7): a breaching
+        // 250 sits at the moderate/high edge and a breaching 500 at high.
+        let mut at_edge = make_file_score("/src/edge.ts", 100.0, 250.0);
+        at_edge.crap_above_threshold = 1;
+        at_edge.crap_effective_threshold = Some(500.0);
+        assert!((file_score_crap_concern(&at_edge, CRAP_THRESHOLD) - 45.0).abs() < f64::EPSILON);
+
+        let mut at_ceiling = make_file_score("/src/ceiling.ts", 100.0, 500.0);
+        at_ceiling.crap_above_threshold = 1;
+        at_ceiling.crap_effective_threshold = Some(500.0);
+        assert!((file_score_crap_concern(&at_ceiling, CRAP_THRESHOLD) - 75.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn file_score_crap_concern_zeroes_fully_exempt_file() {
+        // The issue's own numbers: crap_max 110 under ceiling 500 with both
+        // breaches exempted. Band generalization alone would yield 19.8 and
+        // keep the row above a structural concern of 12; the fully-exempt rule
+        // must zero it (issue #2228).
+        let mut exempt = make_file_score("/src/legacy.ts", 88.0, 110.0);
+        exempt.crap_above_threshold = 0;
+        exempt.crap_exempted = 2;
+        exempt.crap_effective_threshold = Some(500.0);
+        assert!((file_score_crap_concern(&exempt, CRAP_THRESHOLD) - 0.0).abs() < f64::EPSILON);
+        assert!(file_score_fully_crap_exempt(&exempt, CRAP_THRESHOLD));
+        assert_eq!(
+            file_score_concern_axis(&exempt, CRAP_THRESHOLD),
+            FileScoreConcern::Structural
+        );
+    }
+
+    #[test]
+    fn file_score_crap_concern_zeroes_when_enforcement_disabled() {
+        let mut score = make_file_score("/src/any.ts", 88.0, 110.0);
+        score.crap_above_threshold = 0;
+        score.crap_exempted = 2;
+        assert!((file_score_crap_concern(&score, 0.0) - 0.0).abs() < f64::EPSILON);
+        assert!(file_score_fully_crap_exempt(&score, 0.0));
+        assert_eq!(
+            file_score_concern_axis(&score, 0.0),
+            FileScoreConcern::Structural
+        );
+    }
+
+    #[test]
+    fn file_score_partial_exemption_keeps_risk_axis() {
+        // One breaching function survives its ceiling: the row is NOT fully
+        // exempt, so the risk story stays.
+        let mut mixed = make_file_score("/src/mixed.ts", 88.0, 110.0);
+        mixed.crap_above_threshold = 1;
+        mixed.crap_exempted = 1;
+        mixed.crap_effective_threshold = Some(30.0);
+        assert!(!file_score_fully_crap_exempt(&mixed, CRAP_THRESHOLD));
+        assert_eq!(
+            file_score_concern_axis(&mixed, CRAP_THRESHOLD),
+            FileScoreConcern::Risk
+        );
     }
 
     #[test]
     fn file_score_concern_axis_labels_dominant_signal() {
         let risk_driven = make_file_score("/src/risk.ts", 84.8, 552.0);
         assert_eq!(
-            file_score_concern_axis(&risk_driven),
+            file_score_concern_axis(&risk_driven, CRAP_THRESHOLD),
             FileScoreConcern::Risk
         );
-        assert_eq!(file_score_concern_axis(&risk_driven).label(), "risk");
+        assert_eq!(
+            file_score_concern_axis(&risk_driven, CRAP_THRESHOLD).label(),
+            "risk"
+        );
 
         let structure_driven = make_file_score("/src/structure.ts", 30.0, 8.0);
         assert_eq!(
-            file_score_concern_axis(&structure_driven),
+            file_score_concern_axis(&structure_driven, CRAP_THRESHOLD),
             FileScoreConcern::Structural
         );
         assert_eq!(
-            file_score_concern_axis(&structure_driven).label(),
+            file_score_concern_axis(&structure_driven, CRAP_THRESHOLD).label(),
             "structure"
         );
 
         let no_risk = make_file_score("/src/clean.ts", 100.0, 0.0);
         assert_eq!(
-            file_score_concern_axis(&no_risk),
+            file_score_concern_axis(&no_risk, CRAP_THRESHOLD),
             FileScoreConcern::Structural
         );
     }
@@ -2383,7 +2700,7 @@ mod tests {
         let higher_mi_high_risk = make_file_score("/src/higher-mi-high-risk.ts", 84.8, 552.0);
 
         let mut scores = [low_mi_low_risk, higher_mi_high_risk];
-        scores.sort_by(compare_file_score_triage);
+        scores.sort_by(|a, b| compare_file_score_triage(a, b, CRAP_THRESHOLD));
 
         assert_eq!(
             scores[0].path,
@@ -2401,7 +2718,7 @@ mod tests {
         let higher_crap_better_mi = make_file_score("/src/b.ts", 96.7, 552.0);
 
         let mut scores = [lower_crap_worse_mi, higher_crap_better_mi];
-        scores.sort_by(compare_file_score_triage);
+        scores.sort_by(|a, b| compare_file_score_triage(a, b, CRAP_THRESHOLD));
 
         assert_eq!(scores[0].path, std::path::Path::new("/src/b.ts"));
         assert_eq!(scores[1].path, std::path::Path::new("/src/a.ts"));
@@ -2416,7 +2733,7 @@ mod tests {
             make_file_score("/src/lower-concern.ts", 80.0, 1.0),
         ];
 
-        scores.sort_by(compare_file_score_triage);
+        scores.sort_by(|a, b| compare_file_score_triage(a, b, CRAP_THRESHOLD));
 
         let paths: Vec<_> = scores.iter().map(|score| score.path.as_path()).collect();
         assert_eq!(
@@ -2447,7 +2764,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -2479,7 +2796,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -2556,7 +2873,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -2611,7 +2928,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -2713,7 +3030,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             Some(&changed),
@@ -2812,7 +3129,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -2897,7 +3214,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3012,7 +3329,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3136,7 +3453,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3298,7 +3615,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3446,7 +3763,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3508,7 +3825,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3570,7 +3887,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3670,7 +3987,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3732,7 +4049,7 @@ mod tests {
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
-        let result = compute_file_scores(
+        let result = compute_file_scores_default(
             &modules,
             &file_paths,
             None,
@@ -3759,6 +4076,297 @@ mod tests {
             source_hash: None,
             contributions: Vec::new(),
         }
+    }
+
+    fn make_named_fn_complexity(
+        name: &str,
+        line: u32,
+        cyclomatic: u16,
+    ) -> fallow_types::extract::FunctionComplexity {
+        fallow_types::extract::FunctionComplexity {
+            name: name.into(),
+            line,
+            col: 0,
+            cyclomatic,
+            cognitive: 0,
+            line_count: 10,
+            param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            source_hash: None,
+            contributions: Vec::new(),
+        }
+    }
+
+    fn crap_override_entry(
+        files: &[&str],
+        functions: &[&str],
+        max_crap: Option<f64>,
+    ) -> fallow_config::HealthThresholdOverride {
+        fallow_config::HealthThresholdOverride {
+            files: files.iter().map(ToString::to_string).collect(),
+            functions: functions.iter().map(ToString::to_string).collect(),
+            max_cyclomatic: None,
+            max_cognitive: None,
+            max_crap,
+            max_unit_size: None,
+            reason: Some("test override".into()),
+        }
+    }
+
+    fn estimated_signals_with(
+        resolver: &ThresholdOverrideResolver,
+        relative: &str,
+        enforce_crap: bool,
+        complexity: &[fallow_types::extract::FunctionComplexity],
+    ) -> CrapThresholdSignals {
+        let ceilings = CrapCeilingLookup::new(
+            CrapScoreThresholds {
+                resolver,
+                enforce_crap,
+            },
+            std::path::Path::new(relative),
+        );
+        compute_crap_scores_estimated(
+            complexity,
+            &rustc_hash::FxHashSet::default(),
+            false,
+            fallow_output::CoverageSource::Estimated,
+            &ceilings,
+        )
+        .signals
+    }
+
+    #[test]
+    fn crap_counting_exempts_functions_under_override_ceiling() {
+        // The issue's repro: two untested cyclomatic-10 functions (CRAP 110)
+        // under an override raising maxCrap to 500 on the file.
+        let resolver =
+            test_override_resolver(&[crap_override_entry(&["src/legacy.ts"], &[], Some(500.0))]);
+        let fns = vec![
+            make_named_fn_complexity("a", 1, 10),
+            make_named_fn_complexity("b", 12, 10),
+        ];
+
+        let covered = estimated_signals_with(&resolver, "src/legacy.ts", true, &fns);
+        assert_eq!(covered.above, 0);
+        assert_eq!(covered.exempted, 2);
+        assert_eq!(covered.min_ceiling, Some(500.0));
+
+        let elsewhere = estimated_signals_with(&resolver, "src/other.ts", true, &fns);
+        assert_eq!(elsewhere.above, 2);
+        assert_eq!(elsewhere.exempted, 0);
+        assert_eq!(elsewhere.min_ceiling, Some(CRAP_THRESHOLD));
+    }
+
+    #[test]
+    fn crap_counting_insufficient_override_keeps_count() {
+        let resolver =
+            test_override_resolver(&[crap_override_entry(&["src/legacy.ts"], &[], Some(50.0))]);
+        let fns = vec![
+            make_named_fn_complexity("a", 1, 10),
+            make_named_fn_complexity("b", 12, 10),
+        ];
+
+        let signals = estimated_signals_with(&resolver, "src/legacy.ts", true, &fns);
+        assert_eq!(signals.above, 2);
+        assert_eq!(signals.exempted, 0);
+        assert_eq!(signals.min_ceiling, Some(50.0));
+    }
+
+    #[test]
+    fn crap_counting_partial_function_override() {
+        // Only `a` is exempted; `b` keeps the global ceiling, which is also
+        // the file's lowest effective ceiling.
+        let resolver =
+            test_override_resolver(&[crap_override_entry(&["src/legacy.ts"], &["a"], Some(500.0))]);
+        let fns = vec![
+            make_named_fn_complexity("a", 1, 10),
+            make_named_fn_complexity("b", 12, 10),
+        ];
+
+        let signals = estimated_signals_with(&resolver, "src/legacy.ts", true, &fns);
+        assert_eq!(signals.above, 1);
+        assert_eq!(signals.exempted, 1);
+        assert_eq!(signals.min_ceiling, Some(CRAP_THRESHOLD));
+    }
+
+    #[test]
+    fn crap_counting_disabled_enforcement_counts_baseline_exemptions() {
+        // Global maxCrap 0 disables enforcement: nothing is above threshold
+        // and every canonical-baseline breach is disclosed as exempt.
+        let resolver = test_crap_resolver(0.0);
+        let fns = vec![
+            make_named_fn_complexity("a", 1, 10),
+            make_named_fn_complexity("b", 12, 10),
+            make_named_fn_complexity("tiny", 24, 1),
+        ];
+
+        let signals = estimated_signals_with(&resolver, "src/any.ts", false, &fns);
+        assert_eq!(signals.above, 0);
+        assert_eq!(signals.exempted, 2);
+    }
+
+    #[test]
+    fn crap_counting_stricter_ceiling_never_counts_exempt() {
+        // A ceiling below the canonical baseline flags the band between it and
+        // 30 as above-threshold, never as exempt.
+        let resolver = test_crap_resolver(10.0);
+        let fns = vec![make_named_fn_complexity("a", 1, 4)]; // untested CRAP 20
+
+        let signals = estimated_signals_with(&resolver, "src/any.ts", true, &fns);
+        assert_eq!(signals.above, 1);
+        assert_eq!(signals.exempted, 0);
+    }
+
+    #[test]
+    fn crap_counting_uses_rounded_value_at_boundary() {
+        // Istanbul coverage tuned so unrounded CRAP is 29.96, which rounds to
+        // the stored per-function 30.0. The findings pipeline compares the
+        // ROUNDED value against the ceiling and emits a finding; the count
+        // must agree at the same boundary (issue #2228).
+        let funcs = vec![make_fn_complexity(10)];
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("test_fn".to_string(), 1, 0), 41.56);
+        let file_cov = IstanbulFileCoverage { functions };
+
+        let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
+        assert!((result.per_function[0].crap - 30.0).abs() < f64::EPSILON);
+        assert_eq!(result.signals.above, 1);
+        assert_eq!(result.signals.exempted, 0);
+    }
+
+    #[test]
+    fn compute_file_scores_discloses_override_exemption_on_row() {
+        let path_a = std::path::PathBuf::from("/project/src/legacy.ts");
+        let files = vec![crate::discover::DiscoveredFile {
+            id: crate::discover::FileId(0),
+            path: path_a.clone(),
+            size_bytes: 100,
+        }];
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+            file_id: crate::discover::FileId(0),
+            path: path_a.clone(),
+            ..Default::default()
+        }];
+        let graph = build_test_graph(&files, std::slice::from_ref(&path_a), &resolved_modules);
+        let modules = vec![make_module_info(
+            0,
+            26,
+            vec![
+                make_named_fn_complexity("a", 1, 10),
+                make_named_fn_complexity("b", 12, 10),
+            ],
+        )];
+        let mut file_paths: rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf> =
+            rustc_hash::FxHashMap::default();
+        file_paths.insert(crate::discover::FileId(0), &files[0].path);
+        let output = crate::results::DeadCodeAnalysisArtifacts {
+            results: fallow_types::results::AnalysisResults::default(),
+            timings: None,
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
+            modules: None,
+            files: None,
+            script_used_packages: rustc_hash::FxHashSet::default(),
+            file_hashes: rustc_hash::FxHashMap::default(),
+        };
+
+        let resolver =
+            test_override_resolver(&[crap_override_entry(&["src/legacy.ts"], &[], Some(500.0))]);
+        let result = compute_file_scores(
+            FileScoreComputeInput {
+                modules: &modules,
+                file_paths: &file_paths,
+                changed_files: None,
+                istanbul_coverage: None,
+                root: std::path::Path::new("/project"),
+                crap_thresholds: CrapScoreThresholds {
+                    resolver: &resolver,
+                    enforce_crap: true,
+                },
+            },
+            output,
+        )
+        .unwrap();
+
+        assert_eq!(result.scores.len(), 1);
+        let score = &result.scores[0];
+        assert!((score.crap_max - 110.0).abs() < f64::EPSILON);
+        assert_eq!(score.crap_above_threshold, 0);
+        assert_eq!(score.crap_exempted, 2);
+        assert_eq!(score.crap_effective_threshold, Some(500.0));
+        assert!(file_score_fully_crap_exempt(score, CRAP_THRESHOLD));
+        assert_eq!(
+            file_score_concern_axis(score, CRAP_THRESHOLD),
+            FileScoreConcern::Structural
+        );
+    }
+
+    #[test]
+    fn compute_file_scores_raised_global_omits_row_threshold() {
+        let path_a = std::path::PathBuf::from("/project/src/legacy.ts");
+        let files = vec![crate::discover::DiscoveredFile {
+            id: crate::discover::FileId(0),
+            path: path_a.clone(),
+            size_bytes: 100,
+        }];
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+            file_id: crate::discover::FileId(0),
+            path: path_a.clone(),
+            ..Default::default()
+        }];
+        let graph = build_test_graph(&files, std::slice::from_ref(&path_a), &resolved_modules);
+        let modules = vec![make_module_info(
+            0,
+            26,
+            vec![
+                make_named_fn_complexity("a", 1, 10),
+                make_named_fn_complexity("b", 12, 10),
+            ],
+        )];
+        let mut file_paths: rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf> =
+            rustc_hash::FxHashMap::default();
+        file_paths.insert(crate::discover::FileId(0), &files[0].path);
+        let output = crate::results::DeadCodeAnalysisArtifacts {
+            results: fallow_types::results::AnalysisResults::default(),
+            timings: None,
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
+            modules: None,
+            files: None,
+            script_used_packages: rustc_hash::FxHashSet::default(),
+            file_hashes: rustc_hash::FxHashMap::default(),
+        };
+
+        // Raised via the global (`--max-crap 5000`), not an override: the row
+        // must not repeat the run global as its own effective threshold.
+        let resolver = test_crap_resolver(5000.0);
+        let result = compute_file_scores(
+            FileScoreComputeInput {
+                modules: &modules,
+                file_paths: &file_paths,
+                changed_files: None,
+                istanbul_coverage: None,
+                root: std::path::Path::new("/project"),
+                crap_thresholds: CrapScoreThresholds {
+                    resolver: &resolver,
+                    enforce_crap: true,
+                },
+            },
+            output,
+        )
+        .unwrap();
+
+        assert_eq!(result.scores.len(), 1);
+        let score = &result.scores[0];
+        assert_eq!(score.crap_above_threshold, 0);
+        assert_eq!(score.crap_exempted, 2);
+        assert_eq!(score.crap_effective_threshold, None);
+        assert!(file_score_fully_crap_exempt(score, 5000.0));
+        assert_eq!(
+            file_score_concern_axis(score, 5000.0),
+            FileScoreConcern::Structural
+        );
     }
 
     #[test]
@@ -3842,9 +4450,9 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("test_fn".to_string(), 1, 0), 80.0);
         let file_cov = IstanbulFileCoverage { functions };
-        let result = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
+        let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
         assert!((result.max_crap - 10.8).abs() < 0.1);
-        assert_eq!(result.above_threshold, 0);
+        assert_eq!(result.signals.above, 0);
     }
 
     #[test]
@@ -3853,17 +4461,17 @@ mod tests {
         let file_cov = IstanbulFileCoverage {
             functions: rustc_hash::FxHashMap::default(),
         };
-        let result = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
+        let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
         assert!((result.max_crap - 42.0).abs() < f64::EPSILON);
-        assert_eq!(result.above_threshold, 1);
+        assert_eq!(result.signals.above, 1);
     }
 
     #[test]
     fn istanbul_crap_falls_back_to_binary_when_no_file_coverage() {
         let funcs = vec![make_fn_complexity(5)];
-        let result = compute_crap_scores_istanbul(&funcs, None, true);
+        let result = istanbul_crap_default(&funcs, None, true);
         assert!((result.max_crap - 5.0).abs() < f64::EPSILON);
-        assert_eq!(result.above_threshold, 0);
+        assert_eq!(result.signals.above, 0);
     }
 
     #[test]
@@ -3872,9 +4480,9 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("test_fn".to_string(), 1, 0), 0.0);
         let file_cov = IstanbulFileCoverage { functions };
-        let result = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
+        let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
         assert!((result.max_crap - 30.0).abs() < f64::EPSILON);
-        assert_eq!(result.above_threshold, 1);
+        assert_eq!(result.signals.above, 1);
     }
 
     #[test]
@@ -3882,13 +4490,13 @@ mod tests {
         let funcs = vec![make_fn_complexity(10)];
         let mut refs = rustc_hash::FxHashSet::default();
         refs.insert("test_fn".to_string());
-        let result = compute_crap_scores_estimated(
+        let result = estimated_crap_default(
             &funcs,
             &refs,
             true,
             fallow_output::CoverageSource::Estimated,
         );
-        let (max, above) = (result.max_crap, result.above_threshold);
+        let (max, above) = (result.max_crap, result.signals.above);
         assert!((max - 10.3).abs() < 0.1);
         assert_eq!(above, 0);
     }
@@ -3897,13 +4505,13 @@ mod tests {
     fn estimated_crap_indirect_test_reachable() {
         let funcs = vec![make_fn_complexity(10)];
         let refs = rustc_hash::FxHashSet::default();
-        let result = compute_crap_scores_estimated(
+        let result = estimated_crap_default(
             &funcs,
             &refs,
             true,
             fallow_output::CoverageSource::Estimated,
         );
-        let (max, above) = (result.max_crap, result.above_threshold);
+        let (max, above) = (result.max_crap, result.signals.above);
         assert!((max - 31.6).abs() < 0.1);
         assert_eq!(above, 1);
     }
@@ -3912,13 +4520,13 @@ mod tests {
     fn estimated_crap_untested_file() {
         let funcs = vec![make_fn_complexity(5)];
         let refs = rustc_hash::FxHashSet::default();
-        let result = compute_crap_scores_estimated(
+        let result = estimated_crap_default(
             &funcs,
             &refs,
             false,
             fallow_output::CoverageSource::Estimated,
         );
-        let (max, above) = (result.max_crap, result.above_threshold);
+        let (max, above) = (result.max_crap, result.signals.above);
         assert!((max - 30.0).abs() < f64::EPSILON);
         assert_eq!(above, 1);
     }
@@ -3928,13 +4536,13 @@ mod tests {
         let funcs = vec![make_fn_complexity(2)];
         let mut refs = rustc_hash::FxHashSet::default();
         refs.insert("test_fn".to_string());
-        let result = compute_crap_scores_estimated(
+        let result = estimated_crap_default(
             &funcs,
             &refs,
             true,
             fallow_output::CoverageSource::Estimated,
         );
-        let (max, above) = (result.max_crap, result.above_threshold);
+        let (max, above) = (result.max_crap, result.signals.above);
         assert!(max < 3.0);
         assert_eq!(above, 0);
     }
@@ -3942,13 +4550,9 @@ mod tests {
     #[test]
     fn estimated_crap_empty() {
         let refs = rustc_hash::FxHashSet::default();
-        let result = compute_crap_scores_estimated(
-            &[],
-            &refs,
-            true,
-            fallow_output::CoverageSource::Estimated,
-        );
-        let (max, above) = (result.max_crap, result.above_threshold);
+        let result =
+            estimated_crap_default(&[], &refs, true, fallow_output::CoverageSource::Estimated);
+        let (max, above) = (result.max_crap, result.signals.above);
         assert!((max).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
@@ -4384,9 +4988,9 @@ mod tests {
 
     #[test]
     fn istanbul_crap_empty_complexity() {
-        let result = compute_crap_scores_istanbul(&[], None, false);
+        let result = istanbul_crap_default(&[], None, false);
         assert!((result.max_crap).abs() < f64::EPSILON);
-        assert_eq!(result.above_threshold, 0);
+        assert_eq!(result.signals.above, 0);
         assert_eq!(result.matched, 0);
         assert_eq!(result.total, 0);
     }
@@ -4402,7 +5006,7 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("test_fn".to_string(), 1, 0), 80.0);
         let file_cov = IstanbulFileCoverage { functions };
-        let result = compute_crap_scores_istanbul(&funcs, Some(&file_cov), true);
+        let result = istanbul_crap_default(&funcs, Some(&file_cov), true);
         assert_eq!(result.matched, 1);
         assert_eq!(result.total, 2);
     }
@@ -4420,13 +5024,13 @@ mod tests {
         ];
         let mut refs = rustc_hash::FxHashSet::default();
         refs.insert("test_fn".to_string());
-        let result = compute_crap_scores_estimated(
+        let result = estimated_crap_default(
             &funcs,
             &refs,
             true,
             fallow_output::CoverageSource::Estimated,
         );
-        let (max, above) = (result.max_crap, result.above_threshold);
+        let (max, above) = (result.max_crap, result.signals.above);
         assert!(max > 10.0);
         assert_eq!(above, 0);
     }

@@ -43,6 +43,10 @@ pub struct HealthVitalDataInput<'a> {
     pub(crate) hotspot_summary: Option<&'a HotspotSummary>,
     pub(crate) has_istanbul_coverage: bool,
     pub(crate) needs_file_scores: bool,
+    /// Run-wide override resolver from `prepare_health_core_sections`, reused
+    /// for the large-function list so it shares the same ceilings as findings
+    /// and file scoring instead of re-deriving them from raw config values.
+    pub(crate) threshold_resolver: &'a super::threshold_overrides::ThresholdOverrideResolver,
 }
 
 /// Assign the prop-drilling chain count / max depth onto the vital signs. Prop
@@ -197,6 +201,7 @@ pub fn prepare_health_vital_data(
         changed_files: input.changed_files,
         ws_roots: input.ws_roots,
         diff_index: input.diff_index,
+        threshold_resolver: input.threshold_resolver,
     });
     maybe_save_health_snapshot(input, &vital_signs, &counts, health_score.as_ref())?;
     let health_trend =
@@ -236,20 +241,12 @@ struct FilteredLargeFunctionInput<'a> {
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     diff_index: Option<&'a fallow_output::DiffIndex>,
+    threshold_resolver: &'a super::threshold_overrides::ThresholdOverrideResolver,
 }
 
 fn collect_filtered_large_functions(
     input: FilteredLargeFunctionInput<'_>,
 ) -> Vec<fallow_output::LargeFunctionEntry> {
-    let threshold_resolver = super::threshold_overrides::ThresholdOverrideResolver::new(
-        &input.config.health.threshold_overrides,
-        super::threshold_overrides::GlobalHealthThresholds {
-            cyclomatic: input.config.health.max_cyclomatic,
-            cognitive: input.config.health.max_cognitive,
-            crap: input.config.health.max_crap,
-            unit_size: input.config.health.max_unit_size,
-        },
-    );
     let large_input = LargeFunctionInput {
         vital_signs: input.vital_signs,
         modules: input.modules,
@@ -258,7 +255,7 @@ fn collect_filtered_large_functions(
         ignore_set: input.ignore_set,
         changed_files: input.changed_files,
         ws_roots: input.ws_roots,
-        thresholds: &threshold_resolver,
+        thresholds: input.threshold_resolver,
     };
     let mut large_functions = collect_large_functions(&large_input);
     if let Some(diff_index) = input.diff_index {

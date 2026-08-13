@@ -137,7 +137,13 @@ pub struct HealthConfig {
     /// score. Functions meeting or exceeding this threshold are reported.
     /// Use `--coverage` with Istanbul data for accurate per-function CRAP;
     /// otherwise fallow estimates coverage from the module graph. Governs
-    /// findings only, never the health score.
+    /// findings and the threshold-relative file-score signals
+    /// (`crap_above_threshold`, the `risk` triage tag, and the
+    /// `add_test_coverage` refactoring target); measured values such as
+    /// `crap_max` and the overall health score never move with it. Set to
+    /// `0` to disable CRAP enforcement entirely: no findings, nothing counts
+    /// above threshold, and file-score rows disclose baseline breaches as
+    /// exempt instead.
     #[serde(default = "default_max_crap")]
     pub max_crap: f64,
 

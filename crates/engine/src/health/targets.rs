@@ -145,6 +145,7 @@ pub(super) fn compute_refactoring_targets(
     file_scores: &[FileHealthScore],
     aux: &TargetAuxData,
     hotspots: &[HotspotEntry],
+    max_crap: f64,
 ) -> (Vec<RefactoringTarget>, TargetThresholds) {
     let thresholds = compute_thresholds(file_scores);
 
@@ -155,7 +156,7 @@ pub(super) fn compute_refactoring_targets(
 
     for score in file_scores {
         let hotspot = hotspot_map.get(score.path.as_path()).copied();
-        if let Some(target) = build_target_for_score(score, hotspot, aux, &thresholds) {
+        if let Some(target) = build_target_for_score(score, hotspot, aux, &thresholds, max_crap) {
             targets.push(target);
         }
     }
@@ -173,6 +174,7 @@ fn build_target_for_score(
     hotspot: Option<&HotspotEntry>,
     aux: &TargetAuxData<'_>,
     thresholds: &DistributionThresholds,
+    max_crap: f64,
 ) -> Option<RefactoringTarget> {
     let hotspot_score = hotspot.map(|h| h.score);
     let is_circular = aux.circular_files.contains(&score.path);
@@ -187,7 +189,13 @@ fn build_target_for_score(
     let mut factors = Vec::new();
 
     push_structural_target_factors(&mut factors, score, value_exports, is_circular, thresholds);
-    push_runtime_target_factors(&mut factors, score, hotspot, top_fns.map(Vec::as_slice));
+    push_runtime_target_factors(
+        &mut factors,
+        score,
+        hotspot,
+        top_fns.map(Vec::as_slice),
+        max_crap,
+    );
 
     if factors.is_empty() {
         return None;
@@ -300,6 +308,7 @@ fn push_runtime_target_factors(
     score: &FileHealthScore,
     hotspot: Option<&HotspotEntry>,
     top_fns: Option<&[(String, u32, u16)]>,
+    max_crap: f64,
 ) {
     if let Some(h) = hotspot
         && h.score >= 30.0
@@ -331,11 +340,16 @@ fn push_runtime_target_factors(
             detail: format!("{name} has cognitive complexity {cog}"),
         });
     }
-    if score.crap_above_threshold >= 2 && score.crap_max >= super::scoring::CRAP_THRESHOLD {
+    // Gated on the effective-aware count alone: `crap_above_threshold >= 2`
+    // already implies at least one function meets its ceiling, and a raw
+    // `crap_max >= 30` conjunct is wrong on mixed-ceiling files. The emitted
+    // threshold is the row's lowest effective ceiling (falling back to the run
+    // global), so `value >= threshold` holds in every case (issue #2228).
+    if score.crap_above_threshold >= 2 {
         factors.push(ContributingFactor {
             metric: "crap_max",
             value: score.crap_max,
-            threshold: super::scoring::CRAP_THRESHOLD,
+            threshold: score.crap_effective_threshold.unwrap_or(max_crap),
             detail: format!(
                 "{} functions with untested complexity risk",
                 score.crap_above_threshold,
@@ -747,6 +761,8 @@ mod tests {
             lines: 100,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         };
         overrides(&mut s);
         s
@@ -981,7 +997,7 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _thresholds) = compute_refactoring_targets(&scores, &aux, &[]);
+        let (targets, _thresholds) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(targets.len() >= 2, "expected at least 2 targets");
         assert!(
             targets[0].efficiency >= targets[1].efficiency,
@@ -1688,7 +1704,7 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _) = compute_refactoring_targets(&scores, &aux, &hotspots);
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &hotspots, 30.0);
         assert!(!targets.is_empty());
         let target = &targets[0];
         assert!(target.factors.iter().any(|f| f.metric == "hotspot_score"));
@@ -1713,10 +1729,133 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
         let target = &targets[0];
         assert!(target.factors.iter().any(|f| f.metric == "crap_max"));
+    }
+
+    /// Owned empty auxiliary collections for tests that need no evidence data.
+    #[derive(Default)]
+    struct EmptyAuxData {
+        circular_files: rustc_hash::FxHashSet<std::path::PathBuf>,
+        top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>>,
+        entry_points: rustc_hash::FxHashSet<std::path::PathBuf>,
+        value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+        unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
+        cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+        direct_callers: rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+        clone_siblings: rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+    }
+
+    impl EmptyAuxData {
+        fn aux(&self) -> TargetAuxData<'_> {
+            TargetAuxData {
+                circular_files: &self.circular_files,
+                top_complex_fns: &self.top_complex_fns,
+                entry_points: &self.entry_points,
+                value_export_counts: &self.value_export_counts,
+                unused_export_names: &self.unused_export_names,
+                cycle_members: &self.cycle_members,
+                direct_callers: &self.direct_callers,
+                clone_siblings: &self.clone_siblings,
+            }
+        }
+    }
+
+    #[test]
+    fn coverage_gap_rule_skips_fully_exempted_file() {
+        // The issue's repro: both breaching functions exempted by an override,
+        // so the effective-aware count is 0 and no `add_test_coverage` target
+        // (or crap factor) may surface (issue #2228).
+        let scores = vec![make_score(|s| {
+            s.complexity_density = 0.77;
+            s.crap_max = 110.0;
+            s.crap_above_threshold = 0;
+            s.crap_exempted = 2;
+            s.crap_effective_threshold = Some(500.0);
+        })];
+        let empty = EmptyAuxData::default();
+        let aux = empty.aux();
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
+        assert!(
+            targets
+                .iter()
+                .all(|t| !matches!(t.category, RecommendationCategory::AddTestCoverage))
+        );
+        assert!(
+            targets
+                .iter()
+                .all(|t| t.factors.iter().all(|f| f.metric != "crap_max"))
+        );
+    }
+
+    #[test]
+    fn contributing_factor_crap_uses_effective_ceiling() {
+        let scores = vec![make_score(|s| {
+            s.complexity_density = 0.5;
+            s.crap_max = 110.0;
+            s.crap_above_threshold = 2;
+            s.crap_effective_threshold = Some(50.0);
+        })];
+        let empty = EmptyAuxData::default();
+        let aux = empty.aux();
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
+        let factor = targets
+            .iter()
+            .flat_map(|t| t.factors.iter())
+            .find(|f| f.metric == "crap_max")
+            .expect("crap factor expected for a still-breaching file");
+        assert!((factor.threshold - 50.0).abs() < f64::EPSILON);
+        assert!(factor.value >= factor.threshold);
+    }
+
+    #[test]
+    fn contributing_factor_crap_stricter_ceiling_emits_factor() {
+        // Two functions breach an override ceiling of 10 while staying below
+        // the canonical 30: the old `crap_max >= 30` conjunct would silently
+        // drop the factor for exactly the configuration that created the
+        // findings (issue #2228).
+        let scores = vec![make_score(|s| {
+            s.complexity_density = 0.5;
+            s.crap_max = 20.0;
+            s.crap_above_threshold = 2;
+            s.crap_effective_threshold = Some(10.0);
+        })];
+        let empty = EmptyAuxData::default();
+        let aux = empty.aux();
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
+        let factor = targets
+            .iter()
+            .flat_map(|t| t.factors.iter())
+            .find(|f| f.metric == "crap_max")
+            .expect("crap factor expected below canonical 30 under stricter ceiling");
+        assert!((factor.threshold - 10.0).abs() < f64::EPSILON);
+        assert!(factor.value >= factor.threshold);
+    }
+
+    #[test]
+    fn contributing_factor_crap_mixed_ceiling_falls_back_to_global() {
+        // One function exempted at a raised ceiling, two still breaching at
+        // the global: the lowest effective ceiling IS the global, so the row
+        // carries no threshold of its own and the factor uses the run global.
+        let scores = vec![make_score(|s| {
+            s.complexity_density = 0.5;
+            s.crap_max = 110.0;
+            s.crap_above_threshold = 2;
+            s.crap_exempted = 1;
+            s.crap_effective_threshold = None;
+        })];
+        let empty = EmptyAuxData::default();
+        let aux = empty.aux();
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
+        let factor = targets
+            .iter()
+            .flat_map(|t| t.factors.iter())
+            .find(|f| f.metric == "crap_max")
+            .expect("crap factor expected for a still-breaching mixed file");
+        assert!((factor.threshold - 30.0).abs() < f64::EPSILON);
+        assert!(factor.value >= factor.threshold);
     }
 
     #[test]
@@ -1736,7 +1875,7 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
         let target = &targets[0];
         assert!(
@@ -1762,7 +1901,7 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
         let target = &targets[0];
         assert!(target.factors.iter().any(|f| f.metric == "dead_code_ratio"));
@@ -1786,7 +1925,7 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
         let target = &targets[0];
         assert!(target.factors.iter().any(|f| f.metric == "fan_out"));
@@ -1812,7 +1951,7 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
         let target = &targets[0];
         assert!(
@@ -1844,7 +1983,7 @@ mod tests {
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
         };
-        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
+        let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(targets.is_empty());
     }
 

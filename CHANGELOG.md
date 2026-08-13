@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`thresholdOverrides` and `maxCrap` now reach file scores and refactoring
+  targets** (Closes [#2228](https://github.com/fallow-rs/fallow/issues/2228)).
+  File scoring and the target rules previously compared CRAP against a fixed
+  30.0, so a file whose findings were fully exempted by an active override (or
+  a raised global `maxCrap` / `--max-crap`) still counted
+  `crap_above_threshold`, was tagged `risk` at the top of triage ordering, and
+  surfaced as an `add_test_coverage` target suggesting a suppression for a
+  finding that no longer exists. Threshold-relative signals now honor the same
+  effective per-function ceilings the findings honor, in both directions: a
+  raised ceiling removes the tag, count, and target, while a lowered ceiling
+  (for example `--max-crap 10`) raises the count and can add the target. The
+  count also uses the rounded per-function CRAP value, so boundary functions
+  agree exactly with the findings list. Measured values (`crap_max`) stay raw,
+  and affected rows disclose the exemption: `file_scores[]` gains additive
+  optional `crap_exempted` (breaches at the canonical 30 baseline let through
+  by configuration) and `crap_effective_threshold` (the file's lowest
+  effective ceiling, present only when it differs from
+  `summary.max_crap_threshold`), the human report marks exempt rows with a
+  dimmed `exempt (override)` / `exempt (raised threshold)` token and states
+  the risk bands relative to the configured ceiling, and the `crap_max` target
+  factor reports the effective ceiling instead of a hardcoded 30.0. Global
+  `maxCrap: 0` (CRAP enforcement disabled) now also clears the scoring
+  surfaces and is called out in the section note. Default-configuration output
+  is unchanged apart from the rounded boundary alignment; hotspots and the
+  overall health score are unaffected.
 - **GitLab inline-review jobs now warn when posting only partially succeeds.**
   The shell wrapper's jq condition previously failed on every valid error-array
   payload, silently hiding both reconciliation and comment-posting failures.
