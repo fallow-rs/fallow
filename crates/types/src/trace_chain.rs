@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::semantic::SemanticNamespace;
 use crate::serde_path;
 
 /// Default chain depth when `--depth` is unset.
@@ -49,8 +50,29 @@ pub struct SymbolChainTrace {
     /// Present only when `--callees` was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unresolved_callees: Option<Vec<UnresolvedCallee>>,
+    /// Set when the name is unresolvable because two different `export *`
+    /// sources of this file supply it. `symbol_found` is `false` in that case
+    /// for the same reason it is false for an unknown name (the file exports
+    /// nothing under it per ECMA-262 ResolveExport), so this field is the only
+    /// thing that separates a barrel mistake from a typo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub star_export_ambiguity: Option<StarExportAmbiguity>,
     /// A human-readable summary of the trace outcome.
     pub reason: String,
+}
+
+/// The `export *` collision that keeps a name from being exported.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct StarExportAmbiguity {
+    /// Files that each declare a colliding declaration under the traced name
+    /// (project-root-relative), sorted. These are the origins to fix: keep one,
+    /// rename or explicitly re-export the rest.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub sources: Vec<PathBuf>,
+    /// The namespaces the collision occurs in, type before value. A name can
+    /// collide in type space, value space, or both.
+    pub namespaces: Vec<SemanticNamespace>,
 }
 
 /// One hop in a caller / callee chain.

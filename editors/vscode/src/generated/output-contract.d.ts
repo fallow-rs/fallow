@@ -9367,6 +9367,14 @@ callees?: (ChainHop[] | null)
  */
 unresolved_callees?: (UnresolvedCallee[] | null)
 /**
+ * Set when the name is unresolvable because two different `export *`
+ * sources of this file supply it. `symbol_found` is `false` in that case
+ * for the same reason it is false for an unknown name (the file exports
+ * nothing under it per ECMA-262 ResolveExport), so this field is the only
+ * thing that separates a barrel mistake from a typo.
+ */
+star_export_ambiguity?: (StarExportAmbiguity | null)
+/**
  * A human-readable summary of the trace outcome.
  */
 reason: string
@@ -9409,6 +9417,22 @@ export interface UnresolvedCallee {
  */
 callee: string
 reason: UnresolvedReason
+}
+/**
+ * The `export *` collision that keeps a name from being exported.
+ */
+export interface StarExportAmbiguity {
+/**
+ * Files that each declare a colliding declaration under the traced name
+ * (project-root-relative), sorted. These are the origins to fix: keep one,
+ * rename or explicitly re-export the rest.
+ */
+sources: string[]
+/**
+ * The namespaces the collision occurs in, type before value. A name can
+ * collide in type space, value space, or both.
+ */
+namespaces: SemanticNamespace[]
 }
 /**
  * Envelope emitted by `fallow --format review-github` / `review-gitlab`.

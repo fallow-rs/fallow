@@ -30,14 +30,15 @@
 use std::path::{Path, PathBuf};
 
 use fallow_types::extract::{ImportedName, ModuleInfo};
+use fallow_types::semantic::SemanticNamespace;
 pub use fallow_types::trace_chain::{
-    ChainHop, DEFAULT_TRACE_DEPTH, SymbolChainQuery, SymbolChainTrace, TraceDirections,
-    UnresolvedCallee, UnresolvedReason,
+    ChainHop, DEFAULT_TRACE_DEPTH, StarExportAmbiguity, SymbolChainQuery, SymbolChainTrace,
+    TraceDirections, UnresolvedCallee, UnresolvedReason,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ExportNamespace, ModuleGraph};
 
 /// Trace the symbol-level call chain for `query.symbol` in `query.file`.
 ///
@@ -64,6 +65,12 @@ pub fn trace_symbol_chain(
     let rel_file = relativize(&module.path, root);
 
     let symbol_found = module.exports.iter().any(|e| e.name.to_string() == *symbol);
+    // A barrel whose star sources collide on this name exports nothing under
+    // it, so it looks exactly like an unknown name unless the collision is
+    // reported alongside.
+    let star_export_ambiguity = (!symbol_found)
+        .then(|| star_export_ambiguity(graph, root, module.file_id, symbol))
+        .flatten();
 
     let module_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
@@ -81,6 +88,7 @@ pub fn trace_symbol_chain(
 
     let reason = build_reason(
         symbol_found,
+        star_export_ambiguity.as_ref(),
         callers.as_deref(),
         callees.as_deref(),
         unresolved_callees.as_deref(),
@@ -95,8 +103,59 @@ pub fn trace_symbol_chain(
         callers,
         callees,
         unresolved_callees,
+        star_export_ambiguity,
         reason,
     })
+}
+
+/// The `export *` collision on `module_id` that swallows `symbol`, if any.
+fn star_export_ambiguity(
+    graph: &ModuleGraph,
+    root: &Path,
+    module_id: FileId,
+    symbol: &str,
+) -> Option<StarExportAmbiguity> {
+    let collisions: Vec<_> = graph
+        .ambiguous_star_exports_on(module_id)
+        .into_iter()
+        .filter(|collision| collision.name.as_ref() == symbol)
+        .collect();
+    if collisions.is_empty() {
+        return None;
+    }
+
+    let mut sources: Vec<PathBuf> = collisions
+        .iter()
+        .flat_map(|collision| collision.contributors.iter())
+        .filter_map(|contributor| graph.modules.get(contributor.0 as usize))
+        .map(|module| relativize(&module.path, root))
+        .collect();
+    sources.sort();
+    sources.dedup();
+
+    let mut namespaces: Vec<SemanticNamespace> = collisions
+        .iter()
+        .map(|collision| match collision.namespace {
+            ExportNamespace::Type => SemanticNamespace::Type,
+            ExportNamespace::Value => SemanticNamespace::Value,
+        })
+        .collect();
+    namespaces.sort_unstable_by_key(|namespace| namespace_order(*namespace));
+    namespaces.dedup();
+
+    Some(StarExportAmbiguity {
+        sources,
+        namespaces,
+    })
+}
+
+/// Report type space before value space, matching the collision order the
+/// graph reports so both surfaces read the same way.
+const fn namespace_order(namespace: SemanticNamespace) -> u8 {
+    match namespace {
+        SemanticNamespace::Type => 0,
+        SemanticNamespace::Value => 1,
+    }
 }
 
 /// Shared walk state, so the recursive helpers stay under the argument cap.
@@ -288,10 +347,22 @@ fn collect_unresolved_callees(info: &ModuleInfo) -> Vec<UnresolvedCallee> {
 
 fn build_reason(
     symbol_found: bool,
+    ambiguity: Option<&StarExportAmbiguity>,
     callers: Option<&[ChainHop]>,
     callees: Option<&[ChainHop]>,
     unresolved: Option<&[UnresolvedCallee]>,
 ) -> String {
+    if let Some(ambiguity) = ambiguity {
+        let sources = ambiguity
+            .sources
+            .iter()
+            .map(|source| source.to_string_lossy().replace('\\', "/"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "two or more `export *` sources of this file declare this name, so it resolves as ambiguous and the file exports nothing under it (ECMA-262 ResolveExport); colliding origins: {sources}"
+        );
+    }
     if !symbol_found {
         return "symbol not found as an export of this file; chains are file-scoped best-effort and may be empty".to_string();
     }

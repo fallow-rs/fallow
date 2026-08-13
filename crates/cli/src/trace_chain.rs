@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ProductionAnalysis};
-use fallow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace, TraceDirections};
+use fallow_types::semantic::SemanticNamespace;
+use fallow_types::trace_chain::{
+    StarExportAmbiguity, SymbolChainQuery, SymbolChainTrace, TraceDirections,
+};
 
 use crate::error::emit_error;
 use crate::report;
@@ -150,6 +153,14 @@ fn print_human(trace: &SymbolChainTrace, quiet: bool) {
     outln!("  found:  {}", trace.symbol_found);
     outln!("  depth:  {}", trace.depth);
     outln!();
+    // Prose, like `trace.reason` below: `--quiet` drops the explanation from
+    // human output. Both stay in the JSON payload either way.
+    if let Some(ambiguity) = trace.star_export_ambiguity.as_ref().filter(|_| !quiet) {
+        for line in ambiguity_lines(ambiguity) {
+            outln!("{line}");
+        }
+        outln!();
+    }
     if let Some(callers) = trace.callers.as_ref() {
         outln!("Callers (up): {}", callers.len());
         for hop in callers {
@@ -193,6 +204,36 @@ fn print_human(trace: &SymbolChainTrace, quiet: bool) {
     }
 }
 
+/// Render an `export *` collision: what it means, which origins collide, and
+/// what to do about it. Without this the human output shows only `found: false`,
+/// which reads as a typo rather than a barrel mistake.
+fn ambiguity_lines(ambiguity: &StarExportAmbiguity) -> Vec<String> {
+    let mut lines = vec![format!(
+        "Ambiguous `export *` ({}): this file exports nothing under this name",
+        namespace_label(&ambiguity.namespaces)
+    )];
+    lines.extend(
+        ambiguity
+            .sources
+            .iter()
+            .map(|source| format!("  declared in {}", source.display())),
+    );
+    lines.push("  fix: keep one declaration, or re-export the intended one by name".to_string());
+    lines
+}
+
+/// Render the collision's namespaces as the space a reader recognizes.
+fn namespace_label(namespaces: &[SemanticNamespace]) -> String {
+    namespaces
+        .iter()
+        .map(|namespace| match namespace {
+            SemanticNamespace::Type => "type space",
+            SemanticNamespace::Value => "value space",
+        })
+        .collect::<Vec<_>>()
+        .join(" and ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +249,45 @@ mod tests {
             parse_target("C:/proj/src/a.ts:foo"),
             Some(("C:/proj/src/a.ts".to_string(), "foo".to_string()))
         );
+    }
+
+    #[test]
+    fn ambiguity_lines_name_the_colliding_origins_and_the_fix() {
+        let lines = ambiguity_lines(&StarExportAmbiguity {
+            sources: vec![PathBuf::from("src/left.ts"), PathBuf::from("src/right.ts")],
+            namespaces: vec![SemanticNamespace::Value],
+        });
+
+        assert!(lines[0].contains("value space"));
+        assert!(lines[0].contains("exports nothing under this name"));
+        assert!(lines.iter().any(|line| line.contains("src/left.ts")));
+        assert!(lines.iter().any(|line| line.contains("src/right.ts")));
+        assert!(lines.last().is_some_and(|line| line.contains("fix:")));
+    }
+
+    #[test]
+    fn ambiguity_lines_report_a_collision_in_both_namespaces() {
+        let lines = ambiguity_lines(&StarExportAmbiguity {
+            sources: vec![PathBuf::from("src/left.ts")],
+            namespaces: vec![SemanticNamespace::Type, SemanticNamespace::Value],
+        });
+
+        assert!(
+            lines[0].contains("type space and value space"),
+            "{}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn ambiguity_lines_report_a_type_space_only_collision() {
+        let lines = ambiguity_lines(&StarExportAmbiguity {
+            sources: vec![PathBuf::from("src/left.ts"), PathBuf::from("src/right.ts")],
+            namespaces: vec![SemanticNamespace::Type],
+        });
+
+        assert!(lines[0].contains("type space"), "{}", lines[0]);
+        assert!(!lines[0].contains("value space"), "{}", lines[0]);
     }
 
     #[test]

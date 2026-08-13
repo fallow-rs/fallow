@@ -921,6 +921,121 @@ mod tests {
         );
     }
 
+    /// A star collision, a real export, and a name nobody declares must be
+    /// three distinguishable outcomes: before this, the first two of those
+    /// three collapsed into one byte-identical "not found" answer.
+    #[test]
+    fn trace_symbol_chain_separates_ambiguous_from_unique_and_absent() {
+        let both_directions = fallow_types::trace_chain::TraceDirections {
+            callers: true,
+            callees: true,
+        };
+
+        let ambiguous = trace_symbol_chain_fixture(
+            "effective-export-ambiguous-star",
+            "src/barrel.ts",
+            "foo",
+            both_directions,
+            1,
+        );
+        assert!(
+            !ambiguous.symbol_found,
+            "an ambiguous name is genuinely not exported by the barrel"
+        );
+        let collision = ambiguous
+            .star_export_ambiguity
+            .expect("the barrel's star sources collide on foo");
+        let sources: Vec<String> = collision
+            .sources
+            .iter()
+            .map(|source| source.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(sources, vec!["src/left.ts", "src/right.ts"]);
+        assert_eq!(
+            collision.namespaces,
+            vec![fallow_types::semantic::SemanticNamespace::Value]
+        );
+        assert!(
+            ambiguous.reason.contains("src/left.ts")
+                && ambiguous.reason.contains("src/right.ts")
+                && ambiguous.reason.contains("ambiguous"),
+            "the reason must name the colliding origins, got {}",
+            ambiguous.reason
+        );
+
+        let unique = trace_symbol_chain_fixture(
+            "effective-export-ambiguous-star",
+            "src/left.ts",
+            "foo",
+            both_directions,
+            1,
+        );
+        assert!(unique.symbol_found, "left.ts really exports foo");
+        assert!(
+            unique.star_export_ambiguity.is_none(),
+            "a declaring module is not itself ambiguous"
+        );
+
+        let absent = trace_symbol_chain_fixture(
+            "effective-export-ambiguous-star",
+            "src/barrel.ts",
+            "nonExistent",
+            both_directions,
+            1,
+        );
+        assert!(!absent.symbol_found);
+        assert!(
+            absent.star_export_ambiguity.is_none(),
+            "an unknown name has no collision to report"
+        );
+        assert!(
+            absent.reason.starts_with("symbol not found as an export"),
+            "the unknown-name reason is unchanged, got {}",
+            absent.reason
+        );
+        assert_ne!(
+            absent.reason, ambiguous.reason,
+            "ambiguous and absent must not report the same reason"
+        );
+    }
+
+    /// `export type *` sources colliding over value declarations produce a
+    /// collision that exists only in type space, and the trace must report it
+    /// in that namespace rather than staying silent.
+    #[test]
+    fn trace_symbol_chain_reports_a_type_only_star_collision() {
+        let ambiguous = trace_symbol_chain_fixture(
+            "effective-export-ambiguous-type-only-star",
+            "src/barrel.ts",
+            "Foo",
+            fallow_types::trace_chain::TraceDirections {
+                callers: true,
+                callees: true,
+            },
+            1,
+        );
+
+        assert!(!ambiguous.symbol_found);
+        let collision = ambiguous
+            .star_export_ambiguity
+            .expect("the barrel's type-only star sources collide on Foo");
+        let sources: Vec<String> = collision
+            .sources
+            .iter()
+            .map(|source| source.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(sources, vec!["src/left.ts", "src/right.ts"]);
+        assert_eq!(
+            collision.namespaces,
+            vec![fallow_types::semantic::SemanticNamespace::Type]
+        );
+        assert!(
+            ambiguous.reason.contains("src/left.ts") && ambiguous.reason.contains("ambiguous"),
+            "the reason must name the colliding origins, got {}",
+            ambiguous.reason
+        );
+    }
+
     #[test]
     fn trace_export_uses_retained_engine_analysis_for_star_reexport() {
         let temp = tempfile::tempdir().expect("tempdir");

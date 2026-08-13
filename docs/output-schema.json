@@ -18637,6 +18637,17 @@
           },
           "description": "Callees referenced at a call site in the symbol's module that the\nsyntactic walk could NOT resolve to an import-symbol edge (locals,\nglobals, dynamic dispatch, re-bound callees). Reported, never dropped.\nPresent only when `--callees` was requested."
         },
+        "star_export_ambiguity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StarExportAmbiguity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the name is unresolvable because two different `export *`\nsources of this file supply it. `symbol_found` is `false` in that case\nfor the same reason it is false for an unknown name (the file exports\nnothing under it per ECMA-262 ResolveExport), so this field is the only\nthing that separates a barrel mistake from a typo."
+        },
         "reason": {
           "type": "string",
           "description": "A human-readable summary of the trace outcome."
@@ -22583,6 +22594,30 @@
         }
       ],
       "description": "Why the audit new-only gate demoted an introduced clone group to\ninherited. Serializes as a kebab-case string on the wire (for example\n`\"no-added-lines\"`).\n\nFurther variants may be added in later releases; consumers should treat an\nunknown value as \"some demotion reason\" rather than failing."
+    },
+    "StarExportAmbiguity": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files that each declare a colliding declaration under the traced name\n(project-root-relative), sorted. These are the origins to fix: keep one,\nrename or explicitly re-export the rest."
+        },
+        "namespaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SemanticNamespace"
+          },
+          "description": "The namespaces the collision occurs in, type before value. A name can\ncollide in type space, value space, or both."
+        }
+      },
+      "required": [
+        "sources",
+        "namespaces"
+      ],
+      "description": "The `export *` collision that keeps a name from being exported."
     }
   }
 }
