@@ -1233,10 +1233,16 @@ fn declaration_merge_facts(
             continue;
         }
         let mut selected = Vec::new();
-        for (kind, span) in &declarations {
+        for (index, (kind, span)) in declarations.iter().enumerate() {
+            // Self-compatible kinds (interface, enum, namespace) would otherwise
+            // always select themselves, grouping declarations that cannot merge
+            // with each other (`interface Foo` plus `enum Foo`).
             if declarations
                 .iter()
-                .any(|(other, _)| compatible_merge(*kind, *other))
+                .enumerate()
+                .any(|(other_index, (other, _))| {
+                    other_index != index && compatible_merge(*kind, *other)
+                })
             {
                 selected.push((span.start, span.end));
             }

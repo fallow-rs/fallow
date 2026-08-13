@@ -73,6 +73,23 @@ fn declaration_merge_facts_distinguish_namespace_merges_from_dual_space_names() 
 }
 
 #[test]
+fn incompatible_same_name_declarations_do_not_merge() {
+    // Invalid TypeScript (duplicate identifier) but parseable, and oxc binds both
+    // declarations to one symbol: an interface and an enum cannot merge, so no
+    // usage of one spelling may credit the other.
+    let info = parse_ts("export interface Foo {}\nexport enum Foo { A }\n");
+
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            fallow_types::extract::SemanticFact::DeclarationMerge(_)
+        )),
+        "interface plus enum is not a declaration merge: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn parses_glimmer_typescript_as_typescript() {
     let info = parse_source_to_module(
         FileId(0),

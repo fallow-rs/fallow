@@ -320,6 +320,16 @@ pub(crate) struct ModuleInfoExtractor {
     handled_import_spans: FxHashSet<Span>,
     namespace_binding_names: Vec<String>,
     binding_target_names: FxHashMap<String, BindingTarget>,
+    /// The class each binding name most recently named at this point in the walk,
+    /// never poisoned to `Ambiguous`. `binding_target_names` is module-flat, so a
+    /// name bound to two classes in sibling scopes abstains there; this map keeps
+    /// the walk-order answer, which is the correct one for the scope the access
+    /// was written in.
+    walk_order_class_bindings: FxHashMap<String, String>,
+    /// `(binding, class, member)` for member accesses read off a binding that named
+    /// a class at that point in the walk. Only the ones whose binding ends up
+    /// `Ambiguous` are credited, so an unambiguous binding is never double-counted.
+    walk_order_member_accesses: Vec<(String, String, String)>,
     interface_property_types: FxHashMap<String, FxHashMap<String, String>>,
     pending_typed_destructures: Vec<(String, String, String)>,
     iterable_element_types: FxHashMap<String, String>,
@@ -950,6 +960,8 @@ impl ModuleInfoExtractor {
     }
 
     fn insert_class_binding_target(&mut self, binding: String, target: String) {
+        self.walk_order_class_bindings
+            .insert(binding.clone(), target.clone());
         let target = BindingTarget::Class(target);
         self.binding_target_names
             .entry(binding)
@@ -962,9 +974,45 @@ impl ModuleInfoExtractor {
     }
 
     fn insert_class_binding_target_if_absent(&mut self, binding: String, target: String) {
+        if !self.binding_target_names.contains_key(&binding) {
+            self.walk_order_class_bindings
+                .insert(binding.clone(), target.clone());
+        }
         self.binding_target_names
             .entry(binding)
             .or_insert(BindingTarget::Class(target));
+    }
+
+    /// Remember the class a receiver named at this point in the walk, so an
+    /// access written in one scope survives the same name being rebound to a
+    /// different class in a sibling scope.
+    fn record_walk_order_member_access(&mut self, object: &str, member: &str) {
+        if let Some(class) = self.walk_order_class_bindings.get(object) {
+            self.walk_order_member_accesses.push((
+                object.to_string(),
+                class.clone(),
+                member.to_string(),
+            ));
+        }
+    }
+
+    /// Credit the walk-order resolution for receivers whose module-flat binding
+    /// ended up `Ambiguous`. Without this, two sibling scopes binding the same
+    /// local name to different classes credit neither, reporting genuinely used
+    /// members as unused.
+    fn resolve_ambiguous_walk_order_member_accesses(&mut self) {
+        let pending = std::mem::take(&mut self.walk_order_member_accesses);
+        let additional: Vec<MemberAccess> = pending
+            .into_iter()
+            .filter(|(binding, _, _)| {
+                matches!(
+                    self.binding_target_names.get(binding),
+                    Some(BindingTarget::Ambiguous)
+                )
+            })
+            .map(|(_, object, member)| MemberAccess { object, member })
+            .collect();
+        self.member_accesses.extend(additional);
     }
 
     fn record_angular_template_member_fact(&mut self, member: String) {
@@ -2509,6 +2557,9 @@ impl ModuleInfoExtractor {
         self.resolve_factory_call_candidates();
         self.resolve_playwright_factory_call_definitions();
         self.resolve_structural_class_calls();
+        // Before `resolve_bound_member_accesses` so the re-emitted accesses reach
+        // the same typed-property expansion as unambiguous ones.
+        self.resolve_ambiguous_walk_order_member_accesses();
         self.resolve_bound_member_accesses();
         // AFTER `resolve_bound_member_accesses`, which is what materializes the
         // class-qualified accesses for `const s = new Sub(); s.member`. Running

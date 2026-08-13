@@ -2825,8 +2825,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // it resolves against the same class's binding key (issue #1821);
             // stripped back to `this.` before emission. A bare `this` object and
             // any non-`this` receiver pass through unchanged.
+            let object = self.qualify_this_scope(&object_name);
+            self.record_walk_order_member_access(&object, expr.property.name.as_str());
             self.member_accesses.push(MemberAccess {
-                object: self.qualify_this_scope(&object_name),
+                object,
                 member: expr.property.name.to_string(),
             });
         }

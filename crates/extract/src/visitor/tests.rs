@@ -10198,3 +10198,81 @@ fn playwright_fixture_reassigned_to_sibling_fixture_credits_sibling() {
         info.semantic_facts
     );
 }
+
+#[test]
+fn sibling_scope_new_expression_locals_credit_both_classes() {
+    // Two scopes binding the same local name to different classes make the
+    // module-flat binding `Ambiguous`; the walk-order resolution keeps each
+    // scope's own receiver so neither member is reported unused.
+    let info = parse(
+        r"
+        import { Alpha } from './alpha';
+        import { Beta } from './beta';
+
+        function first() {
+            const service = new Alpha();
+            service.alphaOnly();
+        }
+
+        function second() {
+            const service = new Beta();
+            service.betaOnly();
+        }
+        ",
+    );
+
+    assert!(
+        has_member_access(&info, "Alpha", "alphaOnly"),
+        "first scope's receiver must credit Alpha: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        has_member_access(&info, "Beta", "betaOnly"),
+        "second scope's receiver must credit Beta: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn shadowed_destructured_alias_does_not_credit_typed_property_member() {
+    let info = parse(
+        r"
+        interface Context {
+          strategy: Strategy;
+        }
+
+        export function useContext(context: Context): void {
+            const { strategy } = context;
+            strategy.inspect();
+            {
+                const strategy = makeOther();
+                strategy.reset();
+            }
+        }
+        ",
+    );
+
+    let facts = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::TypedPropertyMemberAccess(access) = fact {
+                Some((
+                    access.type_name.as_str(),
+                    access.property_path.as_str(),
+                    access.member.as_str(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        facts.contains(&("Context", "strategy", "inspect")),
+        "the unshadowed alias must still be credited: {facts:?}"
+    );
+    assert!(
+        !facts.contains(&("Context", "strategy", "reset")),
+        "a redeclared alias name must not credit the typed property: {facts:?}"
+    );
+}
