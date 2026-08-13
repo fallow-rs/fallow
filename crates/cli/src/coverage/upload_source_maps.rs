@@ -21,6 +21,7 @@ use crate::api::{
     try_api_agent_with_timeout,
 };
 use crate::coverage::upload_common::{self, take_last_two_segments, url_encode_path_segment};
+use crate::report::format_bytes;
 
 const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
 const DEFAULT_ENDPOINT: &str = "https://api.fallow.cloud";
@@ -1085,25 +1086,6 @@ fn print_dry_run(
     println!("{LOG_PREFIX}: dry run, no uploads performed");
 }
 
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "source map byte sizes are well under f64 precision loss range"
-)]
-fn format_bytes(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    const GIB: u64 = MIB * 1024;
-    if bytes >= GIB {
-        format!("{:.1} GiB", bytes as f64 / GIB as f64)
-    } else if bytes >= MIB {
-        format!("{:.1} MiB", bytes as f64 / MIB as f64)
-    } else if bytes >= KIB {
-        format!("{:.0} KiB", bytes as f64 / KIB as f64)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1636,14 +1618,6 @@ mod tests {
             display_endpoint_url(Some("http://localhost:3000/"), "owner/repo"),
             "http://localhost:3000/v1/coverage/owner%2Frepo/source-maps"
         );
-    }
-
-    #[test]
-    fn format_bytes_scales_through_units() {
-        assert_eq!(format_bytes(512), "512 B");
-        assert_eq!(format_bytes(2 * 1024), "2 KiB");
-        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MiB");
-        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB");
     }
 
     #[test]

@@ -23,6 +23,7 @@ mod api;
 mod architecture_boundaries;
 mod audit;
 mod audit_brief;
+mod audit_cache_prune;
 mod audit_decision_surface;
 mod audit_focus;
 mod audit_walkthrough;
@@ -1795,6 +1796,10 @@ enum SecuritySubcommand {
 #[derive(clap::Subcommand)]
 enum AuditCacheCli {
     /// Remove reusable audit caches owned by an explicit project root.
+    ///
+    /// Deletes this project's cache entries unconditionally, warm or not. To
+    /// apply the age-based GC policy across every cache entry instead, use
+    /// `fallow audit-cache prune`.
     Remove {
         /// Print what would be removed without touching the filesystem.
         #[arg(long)]
@@ -1803,6 +1808,32 @@ enum AuditCacheCli {
         /// Confirm removal in non-interactive environments.
         #[arg(long, alias = "force")]
         yes: bool,
+    },
+
+    /// Apply the audit cache GC policy now and report every entry.
+    ///
+    /// Runs the same reclaim policy every `fallow audit` run already applies
+    /// silently: orphaned-sidecar cleanup, age-based reclaim under the
+    /// resolved threshold, and cross-repo reclaim of abandoned entries whose
+    /// recorded owner root no longer exists. Entries owned by other live
+    /// projects are never touched. `--root` is optional and defaults to the
+    /// current directory. Reported sizes come from a full recursive walk of
+    /// each cache entry, which can take a few seconds on large caches. To
+    /// delete one project's caches unconditionally, use
+    /// `fallow audit-cache remove --root <path> --yes`.
+    Prune {
+        /// Preview decisions without touching the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Age threshold in days for this invocation. Overrides
+        /// FALLOW_AUDIT_CACHE_MAX_AGE_DAYS and the `audit.cacheMaxAgeDays`
+        /// config field (default 30). `0` disables age-based reclaim but
+        /// still reclaims orphaned sidecars and entries whose recorded owner
+        /// root is gone; unconditional deletion of one project's caches is
+        /// `fallow audit-cache remove --root <path> --yes`.
+        #[arg(long, value_name = "N")]
+        max_age_days: Option<u32>,
     },
 }
 
@@ -4169,6 +4200,19 @@ fn dispatch_audit_cache_command(
                 ),
             }
         }
+        AuditCacheCli::Prune {
+            dry_run,
+            max_age_days,
+        } => audit_cache_prune::run_audit_cache_prune(&audit_cache_prune::AuditCachePruneOptions {
+            root: dispatch.root,
+            config_path: dispatch.cli.config.as_ref(),
+            allow_remote_extends: dispatch.cli.allow_remote_extends,
+            dry_run: *dry_run,
+            max_age_days: *max_age_days,
+            output: dispatch.output,
+            json_style: dispatch.json_style,
+            quiet: dispatch.quiet,
+        }),
     }
 }
 

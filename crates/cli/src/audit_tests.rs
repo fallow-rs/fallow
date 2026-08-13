@@ -23,8 +23,10 @@ fn completeness_gate_uses_effective_metadata_requirement() {
     assert!(type_aware_meta_completeness_failed(Some(&meta)));
 }
 use crate::base_worktree::{
-    canonical_root_hash, legacy_reusable_audit_worktree_path, remove_reusable_audit_caches,
-    sweep_old_reusable_caches_in,
+    CacheMaxAgeSource, SweepDecision, SweepDisposition, SweepMode, SweepPass, SweepSizes,
+    canonical_root_hash, legacy_reusable_audit_worktree_path, reclaim_orphan_cache_entry,
+    remove_reusable_audit_caches, resolve_cache_max_age_with_source, sweep_old_reusable_caches_in,
+    sweep_reusable_caches_with_report,
 };
 use std::{fs, process::Command};
 
@@ -700,7 +702,7 @@ fn reusable_cache_gc_skips_locked_entry() {
     // Lock BEFORE aging the sidecar: the fixture lives in the shared temp
     // dir, and an aged ownerless entry is fair game for any concurrent
     // process's cross-repo GC pass in the window before the lock is held.
-    let lock = ReusableWorktreeLock::try_acquire(&worktree_path)
+    let lock = ReusableWorktreeLock::try_acquire(&worktree_path, "test")
         .expect("test should acquire the lock first");
     write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
 
@@ -823,7 +825,10 @@ fn reusable_cache_gc_preserves_lock_file_after_removal() {
     let worktree_path = create_unregistered_reusable_cache(&repo);
     write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
     let lock_path = reusable_worktree_lock_path(&worktree_path);
-    drop(ReusableWorktreeLock::try_acquire(&worktree_path).expect("test should acquire the lock"));
+    drop(
+        ReusableWorktreeLock::try_acquire(&worktree_path, "test")
+            .expect("test should acquire the lock"),
+    );
     assert!(
         lock_path.exists(),
         "test pre-condition: lock file should exist before sweep",
@@ -937,6 +942,284 @@ fn reusable_cache_gc_grace_seeds_foreign_entry_without_sidecar() {
         "the cross-repo pass must seed a sidecar so the entry can age from now on",
     );
     cleanup_reusable_worktree(&other_repo, &other_path);
+}
+
+#[test]
+fn sweep_report_classifies_aged_owned_entry() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-report-aged");
+    let worktree_path = create_unregistered_reusable_cache(&repo);
+    // Recording the owner keeps a concurrent external cross-repo sweep away
+    // from this aged shared-temp fixture while the test runs.
+    record_last_used(&worktree_path, &repo);
+    write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::Apply,
+        SweepSizes::Skip,
+    );
+
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.path == worktree_path)
+        .expect("sweep report should list the aged entry");
+    assert_eq!(entry.disposition, SweepDisposition::ReclaimedAged);
+    assert_eq!(entry.pass, SweepPass::Owned);
+    assert_eq!(entry.disposition.decision(), SweepDecision::Removed);
+    assert_eq!(entry.disposition.reason(), "aged-out");
+    assert_eq!(entry.age_days, Some(31));
+    assert_eq!(
+        entry.size_bytes, None,
+        "the per-audit sweep must never measure sizes",
+    );
+    assert_eq!(report.removed, 1);
+    assert!(!worktree_path.exists());
+    cleanup_reusable_worktree(&repo, &worktree_path);
+}
+
+#[test]
+fn sweep_report_dry_run_previews_aged_entry_without_mutation() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-report-dryrun");
+    let worktree_path = create_unregistered_reusable_cache(&repo);
+    record_last_used(&worktree_path, &repo);
+    write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
+    let lock_path = reusable_worktree_lock_path(&worktree_path);
+    let _ = fs::remove_file(&lock_path);
+    let sidecar = reusable_worktree_last_used_path(&worktree_path);
+    let sidecar_mtime_before = fs::metadata(&sidecar)
+        .and_then(|metadata| metadata.modified())
+        .expect("sidecar mtime should be readable");
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::DryRun,
+        SweepSizes::Measure,
+    );
+
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.path == worktree_path)
+        .expect("dry-run report should list the aged entry");
+    assert_eq!(entry.disposition, SweepDisposition::ReclaimedAged);
+    assert!(
+        entry.size_bytes.is_some_and(|size| size > 0),
+        "prune-style dry run should measure the entry size",
+    );
+    assert!(
+        worktree_path.is_dir(),
+        "dry run must not remove the entry directory",
+    );
+    assert!(
+        !lock_path.exists(),
+        "dry run must not create a `.lock` sidecar",
+    );
+    let sidecar_mtime_after = fs::metadata(&sidecar)
+        .and_then(|metadata| metadata.modified())
+        .expect("sidecar mtime should stay readable");
+    assert_eq!(
+        sidecar_mtime_before, sidecar_mtime_after,
+        "dry run must not touch the `.last-used` sidecar",
+    );
+    cleanup_reusable_worktree(&repo, &worktree_path);
+}
+
+#[test]
+fn sweep_report_dry_run_lists_legacy_registered_without_deregistering() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-report-legacy-dryrun");
+    let cache_path = reusable_audit_worktree_path(&repo);
+    register_reusable_worktree(&repo, &cache_path);
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::DryRun,
+        SweepSizes::Skip,
+    );
+
+    assert!(
+        report.entries.iter().any(|entry| {
+            paths_equal(&entry.path, &cache_path)
+                && entry.disposition == SweepDisposition::ReclaimedLegacyRegistered
+        }),
+        "dry run must still enumerate and report the legacy registered pass",
+    );
+    assert!(
+        worktree_is_registered_with_git(&repo, &cache_path),
+        "dry run must not deregister the legacy entry",
+    );
+    assert!(
+        !reusable_worktree_lock_path(&cache_path).exists(),
+        "dry run must not create a `.lock` sidecar for the legacy pass",
+    );
+    assert!(
+        !reusable_worktree_last_used_path(&cache_path).exists(),
+        "dry run must not seed a grace sidecar",
+    );
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+#[test]
+fn sweep_report_counts_bare_lock_sidecar_as_lock_only() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-report-lock-only");
+    let cache_path = tmp
+        .path()
+        .join("fallow-audit-base-cache-0123456789abcdef-root-fedcba9876543210");
+    let lock_path = reusable_worktree_lock_path(&cache_path);
+    fs::write(&lock_path, "").expect("bare lock sidecar should be written");
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::Apply,
+        SweepSizes::Skip,
+    );
+
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.path == cache_path)
+        .expect("a bare lock sidecar must fold back into a reported candidate");
+    assert_eq!(entry.disposition, SweepDisposition::KeptLockOnly);
+    assert_eq!(entry.pass, SweepPass::Foreign);
+    assert_eq!(entry.disposition.reason(), "lock-only");
+    assert_eq!(report.removed, 0);
+    assert!(
+        lock_path.exists(),
+        "the `.lock` sidecar must never be deleted",
+    );
+}
+
+#[test]
+fn reclaim_orphan_entry_reports_recreated_directory_under_lock() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-report-recreated");
+    // The caller observed `!path.exists()`; the directory existing again at
+    // the lock-guarded re-check is exactly the concurrent-rebuild race.
+    let worktree_path = create_unregistered_reusable_cache(&repo);
+
+    assert_eq!(
+        reclaim_orphan_cache_entry(&repo, &worktree_path),
+        SweepDisposition::KeptRecreated,
+    );
+    assert!(
+        worktree_path.is_dir(),
+        "a recreated directory must be preserved",
+    );
+    cleanup_reusable_worktree(&repo, &worktree_path);
+}
+
+#[cfg(unix)]
+#[test]
+fn foreign_owner_behind_dangling_symlink_is_dead() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-owner-dangling-self");
+    let other_repo = init_throwaway_repo(tmp.path(), "repo-owner-dangling-other");
+    let other_path = create_unregistered_foreign_cache(&other_repo, tmp.path());
+    let dangling_owner = tmp.path().join("dangling-owner");
+    std::os::unix::fs::symlink(tmp.path().join("missing-target"), &dangling_owner)
+        .expect("dangling symlink should be created");
+    record_last_used(&other_path, &dangling_owner);
+    write_sidecar_with_age(&other_path, Duration::from_hours(31 * 24));
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::Apply,
+        SweepSizes::Skip,
+    );
+
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.path == other_path)
+        .expect("report should list the foreign entry");
+    assert_eq!(
+        entry.disposition,
+        SweepDisposition::ReclaimedAged,
+        "a dangling-symlink owner root must classify dead, matching Path::exists()",
+    );
+    assert!(!other_path.exists());
+    cleanup_reusable_worktree(&other_repo, &other_path);
+}
+
+#[cfg(unix)]
+#[test]
+fn foreign_owner_with_unprobeable_root_is_kept_unverifiable() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    if rustix::process::geteuid().as_raw() == 0 {
+        // chmod 000 does not stop root from probing; the scenario cannot be
+        // reproduced.
+        return;
+    }
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-owner-unverifiable-self");
+    let other_repo = init_throwaway_repo(tmp.path(), "repo-owner-unverifiable-other");
+    let other_path = create_unregistered_foreign_cache(&other_repo, tmp.path());
+    let guarded_parent = tmp.path().join("guarded");
+    let owner = guarded_parent.join("repo");
+    fs::create_dir_all(&owner).expect("guarded owner root should be created");
+    record_last_used(&other_path, &owner);
+    write_sidecar_with_age(&other_path, Duration::from_hours(31 * 24));
+    fs::set_permissions(&guarded_parent, fs::Permissions::from_mode(0o000))
+        .expect("guarded parent should become unreadable");
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::Apply,
+        SweepSizes::Skip,
+    );
+
+    fs::set_permissions(&guarded_parent, fs::Permissions::from_mode(0o755))
+        .expect("guarded parent should be restored");
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.path == other_path)
+        .expect("report should list the foreign entry");
+    assert_eq!(
+        entry.disposition,
+        SweepDisposition::KeptOwnerUnverifiable(std::io::ErrorKind::PermissionDenied),
+        "a probe error must keep the entry instead of reading as a dead owner",
+    );
+    assert!(
+        other_path.is_dir(),
+        "an unverifiable owner must never lose its cache entry",
+    );
+    cleanup_reusable_worktree(&other_repo, &other_path);
+}
+
+#[test]
+fn cache_max_age_flag_wins_and_reports_source() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+
+    let flagged = resolve_cache_max_age_with_source(tmp.path(), None, false, Some(0));
+    assert_eq!(flagged.max_age, None);
+    assert_eq!(flagged.days, 0);
+    assert_eq!(flagged.source, CacheMaxAgeSource::Flag);
+    assert_eq!(flagged.source.as_str(), "flag");
+
+    if std::env::var("FALLOW_AUDIT_CACHE_MAX_AGE_DAYS").is_err() {
+        let defaulted = resolve_cache_max_age_with_source(tmp.path(), None, false, None);
+        assert_eq!(defaulted.days, 30);
+        assert_eq!(defaulted.source, CacheMaxAgeSource::Default);
+        assert!(defaulted.max_age.is_some());
+    }
 }
 
 #[test]
@@ -1382,7 +1665,8 @@ fn root_removal_reclaims_legacy_sha_siblings_without_touching_unrelated_root() {
         .expect("legacy readiness should be written");
         fs::write(reusable_worktree_last_used_path(path), "").expect("last-used should be written");
     }
-    let held_lock = ReusableWorktreeLock::try_acquire(&first).expect("first legacy lock acquired");
+    let held_lock =
+        ReusableWorktreeLock::try_acquire(&first, "test").expect("first legacy lock acquired");
     let first_lock_path = reusable_worktree_lock_path(&first);
     let second_lock_path = reusable_worktree_lock_path(&second);
 
@@ -1686,10 +1970,10 @@ fn reusable_worktree_lock_excludes_concurrent_acquires() {
     let reusable = tmp.path().join("fallow-audit-base-cache-deadbeef-0000");
     let lock_path = reusable_worktree_lock_path(&reusable);
 
-    let first = ReusableWorktreeLock::try_acquire(&reusable)
+    let first = ReusableWorktreeLock::try_acquire(&reusable, "test")
         .expect("first acquire on a fresh path should succeed");
     assert!(
-        ReusableWorktreeLock::try_acquire(&reusable).is_none(),
+        ReusableWorktreeLock::try_acquire(&reusable, "test").is_none(),
         "second acquire must fail while the first is held",
     );
     drop(first);
