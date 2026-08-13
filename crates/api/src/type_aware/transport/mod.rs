@@ -580,9 +580,13 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary sidecar root");
         let sidecar = root.path().join("blocking-sidecar.sh");
         let ready = root.path().join("sidecar-ready");
+        // The transport writes the request only after its post-spawn
+        // termination-epoch re-check passed, so signaling readiness after
+        // consuming stdin guarantees termination lands past the start window
+        // and surfaces the exit status instead of start cancellation (#2231).
         fs::write(
             &sidecar,
-            "#!/bin/sh\nprintf ready > sidecar-ready\nexec sleep 30\n",
+            "#!/bin/sh\nread request\nprintf ready > sidecar-ready\nexec sleep 30\n",
         )
         .expect("write sidecar");
         let mut permissions = fs::metadata(&sidecar)
