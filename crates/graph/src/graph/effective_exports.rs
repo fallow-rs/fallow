@@ -162,6 +162,12 @@ impl ExportKey {
 /// dual-space declarations (`class`, `enum`) keep resolving as types. A real
 /// type declaration therefore wins over a synthesized one instead of colliding
 /// with it, while two real declarations still collide into `Ambiguous`.
+///
+/// `TypeFallback` is only seeded where it can differ from `Value`, which is
+/// along re-export paths that reach a type-only re-export; see
+/// [`modules_needing_type_fallback`]. Everywhere else a type query reads the
+/// value lane directly, because both lanes carry the same seeds over the same
+/// edges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ResolutionLane {
     Type,
@@ -202,6 +208,12 @@ impl ExportLookup {
 struct SeededLanes(u8);
 
 impl SeededLanes {
+    /// A value declaration owns its module's type surface without declaring a
+    /// type. Its reservation lives in its own bit so that a same-module type
+    /// declaration can still claim the type lane whichever order they are
+    /// seeded in.
+    const VALUE_TYPE_RESERVATION: u8 = 1 << 6;
+
     const fn bit(lane: ResolutionLane) -> u8 {
         match lane {
             ResolutionLane::Type => 1,
@@ -210,8 +222,19 @@ impl SeededLanes {
         }
     }
 
+    const fn direct_mask(lane: ResolutionLane) -> u8 {
+        match lane {
+            ResolutionLane::Type => Self::bit(lane) | Self::VALUE_TYPE_RESERVATION,
+            ResolutionLane::TypeFallback | ResolutionLane::Value => Self::bit(lane),
+        }
+    }
+
     const fn is_direct(self, lane: ResolutionLane) -> bool {
-        self.0 & Self::bit(lane) != 0
+        self.0 & Self::direct_mask(lane) != 0
+    }
+
+    const fn reserve_type_for_value_declaration(&mut self) {
+        self.0 |= Self::VALUE_TYPE_RESERVATION;
     }
 
     /// Claim `lane` as locally declared, reporting whether it was unclaimed.
@@ -223,7 +246,7 @@ impl SeededLanes {
     }
 
     const fn is_explicit(self, lane: ResolutionLane) -> bool {
-        self.0 & (Self::bit(lane) | (Self::bit(lane) << 3)) != 0
+        self.0 & (Self::direct_mask(lane) | (Self::bit(lane) << 3)) != 0
     }
 
     const fn claim_explicit(&mut self, lane: ResolutionLane) {
@@ -268,12 +291,32 @@ impl NamespaceResolutions {
         }
     }
 
-    const fn effective(self, namespace: ExportNamespace) -> EffectiveExportResolution {
+    /// Whether this name collides in type space.
+    ///
+    /// The type meaning synthesized for a colliding value export collides with
+    /// it by construction, so reading the fallback lane unconditionally would
+    /// report one collision twice. A fallback collision only stands on its own
+    /// where the value lane never collided, which is how `export type *`
+    /// sources colliding over value declarations land: the type-only star drops
+    /// the value lane, so the collision exists solely in the fallback lane.
+    const fn collides_in_type_space(self) -> bool {
+        matches!(self.r#type, EffectiveExportResolution::Ambiguous)
+            || (matches!(self.type_fallback, EffectiveExportResolution::Ambiguous)
+                && !matches!(self.value, EffectiveExportResolution::Ambiguous))
+    }
+
+    fn effective(self, namespace: ExportNamespace) -> EffectiveExportResolution {
         match namespace {
             ExportNamespace::Value => self.value,
-            ExportNamespace::Type => match self.r#type {
-                EffectiveExportResolution::Missing => self.type_fallback,
-                resolution => resolution,
+            // Where the fallback lane is not seeded it is also not needed: the
+            // value lane then carries the same seeds over the same edges, so
+            // it answers the type query unchanged.
+            ExportNamespace::Type => match (self.r#type, self.type_fallback) {
+                (EffectiveExportResolution::Missing, EffectiveExportResolution::Missing) => {
+                    self.value
+                }
+                (EffectiveExportResolution::Missing, fallback) => fallback,
+                (resolution, _) => resolution,
             },
         }
     }
@@ -295,19 +338,22 @@ struct ProjectExportSizes {
 }
 
 impl ProjectExportSizes {
-    fn measure(modules: &[ResolvedModule]) -> Self {
+    fn measure(modules: &[ResolvedModule], type_fallback_modules: &FxHashSet<FileId>) -> Self {
         let mut keys = 0;
         let mut lane_keys = 0;
         let mut names = 0;
         for module in modules {
-            let value_exports = module
-                .exports
-                .iter()
-                .filter(|export| !export.is_type_only)
-                .count();
+            let fallback_exports = if type_fallback_modules.contains(&module.file_id) {
+                module
+                    .exports
+                    .iter()
+                    .filter(|export| !export.is_type_only)
+                    .count()
+            } else {
+                0
+            };
             keys += module.exports.len() + module.re_exports.len();
-            // Value exports also reserve the type lane and seed the fallback lane.
-            lane_keys += module.exports.len() + value_exports * 2 + module.re_exports.len() * 3;
+            lane_keys += module.exports.len() + fallback_exports + module.re_exports.len() * 3;
             names += module.exports.len() + module.re_exports.len() * 2;
         }
         Self {
@@ -352,6 +398,8 @@ impl ExportNameInterner {
 struct StarObserver {
     barrel: FileId,
     type_only: bool,
+    /// Whether the barrel takes part in the type-fallback lane at all.
+    type_fallback: bool,
 }
 
 /// Destinations fed by one source lane.
@@ -386,6 +434,7 @@ struct PropagationObservers {
 }
 
 struct ObserverBuildState<'a> {
+    type_fallback: bool,
     interner: &'a mut ExportNameInterner,
     resolutions: &'a mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &'a mut VecDeque<ExportLookup>,
@@ -415,12 +464,25 @@ struct DeclarationMergeGroups {
 
 impl EffectiveExportIndex {
     pub(super) fn build(modules: &[ResolvedModule]) -> Self {
-        let sizes = ProjectExportSizes::measure(modules);
+        let type_fallback_modules = modules_needing_type_fallback(modules);
+        let sizes = ProjectExportSizes::measure(modules, &type_fallback_modules);
         let mut interner = ExportNameInterner::with_capacity(sizes.names);
         let mut resolutions = FxHashMap::with_capacity_and_hasher(sizes.keys, FxBuildHasher);
         let mut queue = VecDeque::with_capacity(sizes.lane_keys);
-        seed_direct_bindings(modules, &mut interner, &mut resolutions, &mut queue);
-        let observers = collect_observers(modules, &mut interner, &mut resolutions, &mut queue);
+        seed_direct_bindings(
+            modules,
+            &type_fallback_modules,
+            &mut interner,
+            &mut resolutions,
+            &mut queue,
+        );
+        let observers = collect_observers(
+            modules,
+            &type_fallback_modules,
+            &mut interner,
+            &mut resolutions,
+            &mut queue,
+        );
         propagate_bindings(&mut resolutions, &mut queue, &observers);
 
         Self {
@@ -489,6 +551,89 @@ impl EffectiveExportIndex {
             ) => true,
             _ => false,
         }
+    }
+
+    /// Exported names that resolve to a star-export collision.
+    ///
+    /// Every consumer of an `Ambiguous` resolution abstains, so the collision
+    /// itself never reaches a reporting surface even though it is the only
+    /// fact that explains the abstention.
+    pub(super) fn ambiguous_names(&self) -> Vec<(FileId, &str, ExportNamespace)> {
+        let mut ambiguous = Vec::new();
+        for (file_id, names) in &self.names_by_file {
+            self.collect_ambiguous_ids(*file_id, names, &mut ambiguous);
+        }
+        self.name_texts(ambiguous)
+    }
+
+    /// Exported names that collide on one module, for single-symbol queries.
+    pub(super) fn ambiguous_names_on(
+        &self,
+        file_id: FileId,
+    ) -> Vec<(FileId, &str, ExportNamespace)> {
+        let Some(names) = self.names_by_file.get(&file_id) else {
+            return Vec::new();
+        };
+        let mut ambiguous = Vec::new();
+        self.collect_ambiguous_ids(file_id, names, &mut ambiguous);
+        self.name_texts(ambiguous)
+    }
+
+    fn collect_ambiguous_ids(
+        &self,
+        file_id: FileId,
+        names: &[ExportNameId],
+        ambiguous: &mut Vec<(FileId, ExportNameId, ExportNamespace)>,
+    ) {
+        for name in names {
+            let Some(resolutions) = self.resolutions.get(&ExportKey::new(file_id, *name)) else {
+                continue;
+            };
+            for (namespace, collides) in [
+                (ExportNamespace::Type, resolutions.collides_in_type_space()),
+                (
+                    ExportNamespace::Value,
+                    matches!(resolutions.value, EffectiveExportResolution::Ambiguous),
+                ),
+            ] {
+                if collides {
+                    ambiguous.push((file_id, *name, namespace));
+                }
+            }
+        }
+    }
+
+    /// Resolve interned ids back to text, building the reverse table only when
+    /// a collision was actually found: on a project without one the table is a
+    /// pure allocation over every name in the project.
+    fn name_texts(
+        &self,
+        ambiguous: Vec<(FileId, ExportNameId, ExportNamespace)>,
+    ) -> Vec<(FileId, &str, ExportNamespace)> {
+        if ambiguous.is_empty() {
+            return Vec::new();
+        }
+        let table = self.name_table();
+        ambiguous
+            .into_iter()
+            .filter_map(|(file_id, name, namespace)| {
+                table
+                    .get(name.0)
+                    .copied()
+                    .map(|text| (file_id, text, namespace))
+            })
+            .collect()
+    }
+
+    /// Interned names indexed by their id, for reporting an id back as text.
+    fn name_table(&self) -> Vec<&str> {
+        let mut table = vec![""; self.name_ids.len()];
+        for (name, id) in &self.name_ids {
+            if let Some(slot) = table.get_mut(id.0) {
+                *slot = name.as_ref();
+            }
+        }
+        table
     }
 
     pub(super) fn unique_bindings(
@@ -686,14 +831,103 @@ fn collect_declaration_merge_groups(modules: &[ResolvedModule]) -> DeclarationMe
     collected
 }
 
+/// Modules whose value declarations must also travel the type-fallback lane.
+///
+/// The lane only earns its cost where it can diverge from the value lane, and
+/// the sole divergence is a type-only re-export: it drops the value lane while
+/// still carrying a type meaning. So the lane must reach every module a
+/// type-only re-export feeds, and every module those in turn re-export from,
+/// because a lane that carries one path of a name has to carry all of them or
+/// a collision would resolve as unique.
+fn modules_needing_type_fallback(modules: &[ResolvedModule]) -> FxHashSet<FileId> {
+    let mut needing = FxHashSet::default();
+    let mut pending: Vec<FileId> = modules
+        .iter()
+        .filter(|module| {
+            module
+                .re_exports
+                .iter()
+                .any(|re_export| re_export.info.is_type_only && reads_source_lanes(&re_export.info))
+        })
+        .map(|module| module.file_id)
+        .collect();
+    if pending.is_empty() {
+        return needing;
+    }
+
+    let mut edges = ReExportEdges::collect(modules);
+    let mut fed_by_type_only = FxHashSet::default();
+    while let Some(file_id) = pending.pop() {
+        if !fed_by_type_only.insert(file_id) {
+            continue;
+        }
+        pending.extend(edges.barrels_by_source.remove(&file_id).unwrap_or_default());
+    }
+
+    let mut pending: Vec<FileId> = fed_by_type_only.into_iter().collect();
+    while let Some(file_id) = pending.pop() {
+        if !needing.insert(file_id) {
+            continue;
+        }
+        if let Some(sources) = edges.sources_by_barrel.get(&file_id) {
+            pending.extend(sources.iter().copied());
+        }
+    }
+    needing
+}
+
+/// Internal re-export edges that read a source module's resolution lanes.
+struct ReExportEdges {
+    sources_by_barrel: FxHashMap<FileId, Vec<FileId>>,
+    barrels_by_source: FxHashMap<FileId, Vec<FileId>>,
+}
+
+impl ReExportEdges {
+    fn collect(modules: &[ResolvedModule]) -> Self {
+        let mut edges = Self {
+            sources_by_barrel: FxHashMap::default(),
+            barrels_by_source: FxHashMap::default(),
+        };
+        for module in modules {
+            for re_export in &module.re_exports {
+                if !reads_source_lanes(&re_export.info) {
+                    continue;
+                }
+                let Some(source) = re_export.target.internal_file_id() else {
+                    continue;
+                };
+                edges
+                    .sources_by_barrel
+                    .entry(module.file_id)
+                    .or_default()
+                    .push(source);
+                edges
+                    .barrels_by_source
+                    .entry(source)
+                    .or_default()
+                    .push(module.file_id);
+            }
+        }
+        edges
+    }
+}
+
+/// Whether a re-export resolves through the source module's own lanes. A
+/// namespace re-export synthesizes its binding instead, so it neither reads
+/// nor needs the source's fallback lane.
+fn reads_source_lanes(info: &fallow_types::extract::ReExportInfo) -> bool {
+    info.imported_name != "*" || info.exported_name == "*"
+}
+
 fn seed_direct_bindings(
     modules: &[ResolvedModule],
+    type_fallback_modules: &FxHashSet<FileId>,
     interner: &mut ExportNameInterner,
     resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &mut VecDeque<ExportLookup>,
 ) {
-    let mut value_type_fallbacks = Vec::new();
     for module in modules {
+        let seed_type_fallback = type_fallback_modules.contains(&module.file_id);
         for (slot, export) in module.exports.iter().enumerate() {
             let lane = if export.is_type_only {
                 ResolutionLane::Type
@@ -715,39 +949,23 @@ fn seed_direct_bindings(
                 queue.push_back(key);
             }
             if lane == ResolutionLane::Value {
-                value_type_fallbacks.push((module.file_id, name, slot));
+                // A locally declared name owns its module's type surface even
+                // when the declaration only occupies value space, so the type
+                // lane stays reserved and star sources cannot propagate into it.
+                entry.seeded.reserve_type_for_value_declaration();
+                if seed_type_fallback
+                    && entry.seeded.claim_direct(ResolutionLane::TypeFallback)
+                    && entry.merge(ResolutionLane::TypeFallback, binding)
+                {
+                    queue.push_back(ExportLookup::new(
+                        module.file_id,
+                        name,
+                        ResolutionLane::TypeFallback,
+                    ));
+                }
             }
         }
         seed_implicit_sfc_default(module, interner, resolutions, queue);
-    }
-    seed_value_type_fallbacks(value_type_fallbacks, resolutions, queue);
-}
-
-fn seed_value_type_fallbacks(
-    fallbacks: Vec<(FileId, ExportNameId, usize)>,
-    resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
-    queue: &mut VecDeque<ExportLookup>,
-) {
-    for (file_id, name, slot) in fallbacks {
-        let key = ExportKey::new(file_id, name);
-        let binding = EffectiveExportResolution::Unique(EffectiveExportBinding {
-            file_id,
-            kind: EffectiveExportBindingKind::Declaration(slot),
-        });
-        let entry = resolutions.entry(key).or_default();
-        // A locally declared name owns its module's type surface even when the
-        // declaration only occupies value space, so the real type lane stays
-        // reserved here and star sources cannot propagate into it.
-        entry.seeded.claim_direct(ResolutionLane::Type);
-        if entry.seeded.claim_direct(ResolutionLane::TypeFallback)
-            && entry.merge(ResolutionLane::TypeFallback, binding)
-        {
-            queue.push_back(ExportLookup::new(
-                file_id,
-                name,
-                ResolutionLane::TypeFallback,
-            ));
-        }
     }
 }
 
@@ -787,6 +1005,7 @@ fn is_sfc_path(path: &std::path::Path) -> bool {
 
 fn collect_observers(
     modules: &[ResolvedModule],
+    type_fallback_modules: &FxHashSet<FileId>,
     interner: &mut ExportNameInterner,
     resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &mut VecDeque<ExportLookup>,
@@ -796,6 +1015,7 @@ fn collect_observers(
         star: FxHashMap::default(),
     };
     for module in modules {
+        let type_fallback = type_fallback_modules.contains(&module.file_id);
         for (re_export_index, re_export) in module.re_exports.iter().enumerate() {
             let Some(source) = re_export.target.internal_file_id() else {
                 if re_export.info.exported_name != "*"
@@ -820,6 +1040,7 @@ fn collect_observers(
                     .push(StarObserver {
                         barrel: module.file_id,
                         type_only: re_export.info.is_type_only,
+                        type_fallback,
                     });
                 continue;
             }
@@ -828,6 +1049,7 @@ fn collect_observers(
                 source,
                 &re_export.info,
                 ObserverBuildState {
+                    type_fallback,
                     interner,
                     resolutions,
                     queue,
@@ -890,6 +1112,7 @@ fn register_named_observer(
     state: ObserverBuildState<'_>,
 ) {
     let ObserverBuildState {
+        type_fallback,
         interner,
         resolutions,
         queue,
@@ -921,14 +1144,14 @@ fn register_named_observer(
     }
 
     let imported_name = interner.intern(&info.imported_name);
-    let lanes: &[ResolutionLane] = if info.is_type_only {
-        &[ResolutionLane::Type, ResolutionLane::TypeFallback]
-    } else {
-        &[
+    let lanes: &[ResolutionLane] = match (info.is_type_only, type_fallback) {
+        (true, _) => &[ResolutionLane::Type, ResolutionLane::TypeFallback],
+        (false, true) => &[
             ResolutionLane::Type,
             ResolutionLane::TypeFallback,
             ResolutionLane::Value,
-        ]
+        ],
+        (false, false) => &[ResolutionLane::Type, ResolutionLane::Value],
     };
     for &lane in lanes {
         let destination = ExportLookup::new(barrel, exported_name, lane);
@@ -987,6 +1210,9 @@ fn propagate_star_binding(
     };
     for observer in star_observers {
         if observer.type_only && source_key.lane == ResolutionLane::Value {
+            continue;
+        }
+        if !observer.type_fallback && source_key.lane == ResolutionLane::TypeFallback {
             continue;
         }
         let destination = source_key.with_file(observer.barrel);
@@ -1346,6 +1572,32 @@ mod tests {
             index.resolve(FileId(0), "User", ExportNamespace::Type),
             EffectiveExportResolution::Ambiguous
         );
+        assert_eq!(
+            index.ambiguous_names_on(FileId(0)),
+            vec![(FileId(0), "User", ExportNamespace::Type)]
+        );
+    }
+
+    #[test]
+    fn a_colliding_value_export_reports_one_collision_in_the_value_namespace() {
+        let modules = vec![
+            module(
+                0,
+                Vec::new(),
+                vec![
+                    re_export(FileId(1), "*", "*"),
+                    re_export(FileId(2), "*", "*"),
+                ],
+            ),
+            module(1, vec![value_export("foo")], Vec::new()),
+            module(2, vec![value_export("foo")], Vec::new()),
+        ];
+        let index = EffectiveExportIndex::build(&modules);
+
+        assert_eq!(
+            index.ambiguous_names(),
+            vec![(FileId(0), "foo", ExportNamespace::Value)]
+        );
     }
 
     #[test]
@@ -1363,6 +1615,114 @@ mod tests {
             "Widget",
             ExportNamespace::Type
         ));
+    }
+
+    #[test]
+    fn a_type_only_re_export_carries_a_value_declaration_as_a_type_only() {
+        let mut type_only = re_export(FileId(1), "Widget", "Widget");
+        type_only.info.is_type_only = true;
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![type_only]),
+            module(1, vec![value_export("Widget")], Vec::new()),
+        ]);
+
+        assert!(matches!(
+            index.resolve(FileId(0), "Widget", ExportNamespace::Type),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(1)
+        ));
+        assert_eq!(
+            index.resolve(FileId(0), "Widget", ExportNamespace::Value),
+            EffectiveExportResolution::Missing
+        );
+    }
+
+    #[test]
+    fn a_type_only_re_export_reaches_a_value_declaration_behind_a_barrel() {
+        let mut type_only = re_export(FileId(1), "Widget", "Widget");
+        type_only.info.is_type_only = true;
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![type_only]),
+            module(1, Vec::new(), vec![re_export(FileId(2), "*", "*")]),
+            module(2, vec![value_export("Widget")], Vec::new()),
+        ]);
+
+        assert!(matches!(
+            index.resolve(FileId(0), "Widget", ExportNamespace::Type),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(2)
+        ));
+    }
+
+    #[test]
+    fn a_type_only_re_export_shadows_a_star_binding_in_the_type_namespace() {
+        let mut type_only = re_export(FileId(1), "foo", "foo");
+        type_only.info.is_type_only = true;
+        let index = EffectiveExportIndex::build(&[
+            module(
+                0,
+                Vec::new(),
+                vec![type_only, re_export(FileId(2), "*", "*")],
+            ),
+            module(1, vec![value_export("foo")], Vec::new()),
+            module(2, vec![value_export("foo")], Vec::new()),
+        ]);
+
+        assert!(matches!(
+            index.resolve(FileId(0), "foo", ExportNamespace::Type),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(1)
+        ));
+        assert!(matches!(
+            index.resolve(FileId(0), "foo", ExportNamespace::Value),
+            EffectiveExportResolution::Unique(binding) if binding.origin_file() == FileId(2)
+        ));
+    }
+
+    #[test]
+    fn a_type_only_barrel_still_sees_a_star_collision_as_ambiguous() {
+        let mut type_only = re_export(FileId(1), "foo", "foo");
+        type_only.info.is_type_only = true;
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![type_only]),
+            module(
+                1,
+                Vec::new(),
+                vec![
+                    re_export(FileId(2), "*", "*"),
+                    re_export(FileId(3), "*", "*"),
+                ],
+            ),
+            module(2, vec![value_export("foo")], Vec::new()),
+            module(3, vec![value_export("foo")], Vec::new()),
+        ]);
+
+        assert_eq!(
+            index.resolve(FileId(0), "foo", ExportNamespace::Type),
+            EffectiveExportResolution::Ambiguous
+        );
+    }
+
+    #[test]
+    fn a_star_collision_stays_ambiguous_beside_an_unrelated_type_only_barrel() {
+        let mut type_only = re_export(FileId(1), "foo", "foo");
+        type_only.info.is_type_only = true;
+        let index = EffectiveExportIndex::build(&[
+            module(0, Vec::new(), vec![type_only]),
+            module(1, Vec::new(), vec![re_export(FileId(2), "*", "*")]),
+            module(2, vec![value_export("foo")], Vec::new()),
+            module(
+                3,
+                Vec::new(),
+                vec![
+                    re_export(FileId(2), "*", "*"),
+                    re_export(FileId(4), "*", "*"),
+                ],
+            ),
+            module(4, vec![value_export("foo")], Vec::new()),
+        ]);
+
+        assert_eq!(
+            index.resolve(FileId(3), "foo", ExportNamespace::Type),
+            EffectiveExportResolution::Ambiguous
+        );
     }
 
     #[test]

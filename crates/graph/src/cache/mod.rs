@@ -107,7 +107,12 @@ pub use store::GraphCacheStore;
 /// candidates from factory-less bare-specifier mocks now resolve to project
 /// files. Warm 32 caches lack those edges, so root manual mocks would stay
 /// reported as unused files.
-pub const GRAPH_CACHE_VERSION: u32 = 33;
+/// Bumped to 34: the effective export index only seeds the value-derived type
+/// fallback lane along re-export paths that reach a type-only re-export, and a
+/// type query reads the value lane where that lane is absent. A warm 33 payload
+/// is still read correctly, but a 33 reader would take an absent fallback lane
+/// for an absent type meaning and report consumed exports as unused.
+pub const GRAPH_CACHE_VERSION: u32 = 34;
 
 /// Cached form of a resolved target.
 ///

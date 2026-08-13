@@ -3,6 +3,7 @@
 //! The graph is built from resolved modules and entry points, then used to determine
 //! which files are reachable and which exports are referenced.
 
+mod ambiguity;
 mod build;
 mod cycles;
 mod effective_exports;
@@ -29,6 +30,7 @@ use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
 use types::{ReferencePathInterner, ReferencePathNode, ReferenceRouteNodeId, ReferenceRoutes};
 
+pub use ambiguity::{AmbiguityParticipants, AmbiguousStarExport};
 pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
 pub use effective_re_exports::EffectiveReExportRoute;
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};

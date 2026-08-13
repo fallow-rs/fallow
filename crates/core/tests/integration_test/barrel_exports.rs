@@ -206,35 +206,91 @@ fn shadowed_star_export_does_not_form_a_duplicate_export_group() {
     );
 }
 
+fn unused_export_paths(
+    results: &fallow_types::results::AnalysisResults,
+    name: &str,
+) -> Vec<String> {
+    results
+        .unused_exports
+        .iter()
+        .filter(|finding| finding.export.export_name == name)
+        .map(|finding| finding.export.path.to_string_lossy().replace('\\', "/"))
+        .collect()
+}
+
 #[test]
-fn conflicting_star_exports_do_not_resolve_an_effective_binding() {
+fn conflicting_star_exports_suppress_unused_findings_for_contributors() {
     let root = fixture_path("effective-export-ambiguous-star");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
-    let unused_foo_paths: Vec<_> = results
-        .unused_exports
-        .iter()
-        .filter(|finding| finding.export.export_name == "foo")
-        .map(|finding| finding.export.path.to_string_lossy().replace('\\', "/"))
-        .collect();
+    let unused_foo_paths = unused_export_paths(&results, "foo");
 
+    assert!(
+        unused_foo_paths.is_empty(),
+        "a barrel collision must not be reported as dead code in its sources: {unused_foo_paths:?}"
+    );
+}
+
+#[test]
+fn conflicting_star_exports_suppress_only_the_colliding_name() {
+    let root = fixture_path("effective-export-ambiguous-star-partial");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        unused_export_paths(&results, "foo").is_empty(),
+        "the colliding name stays unreported: {:?}",
+        results.unused_exports
+    );
+    let unused_bar_paths = unused_export_paths(&results, "bar");
     assert_eq!(
-        unused_foo_paths.len(),
-        2,
-        "an ambiguous barrel import must credit neither foo binding: {unused_foo_paths:?}"
+        unused_bar_paths.len(),
+        1,
+        "an untouched sibling export in the same module is still reported: {unused_bar_paths:?}"
     );
     assert!(
-        unused_foo_paths
-            .iter()
-            .any(|path| path.ends_with("src/left.ts")),
-        "left.foo must remain unused: {unused_foo_paths:?}"
+        unused_bar_paths[0].ends_with("src/right.ts"),
+        "the sibling finding stays on its own module: {unused_bar_paths:?}"
+    );
+}
+
+#[test]
+fn nested_star_barrels_suppress_findings_for_transitive_contributors() {
+    let root = fixture_path("effective-export-ambiguous-star-nested");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        unused_export_paths(&results, "foo").is_empty(),
+        "a collision one barrel hop away still suppresses its contributors: {:?}",
+        results.unused_exports
+    );
+}
+
+/// A collision that only exists in type space: `export type *` drops the value
+/// namespace, so two value declarations collide as types while the value
+/// namespace of the barrel stays empty.
+#[test]
+fn conflicting_type_only_star_exports_suppress_unused_findings_for_contributors() {
+    let root = fixture_path("effective-export-ambiguous-type-only-star");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        unused_export_paths(&results, "Foo").is_empty(),
+        "a type-space barrel collision must not be reported as dead code in its sources: {:?}",
+        results.unused_exports
+    );
+    let unused_bar_paths = unused_export_paths(&results, "Bar");
+    assert_eq!(
+        unused_bar_paths.len(),
+        1,
+        "an untouched sibling export in the same module is still reported: {unused_bar_paths:?}"
     );
     assert!(
-        unused_foo_paths
-            .iter()
-            .any(|path| path.ends_with("src/right.ts")),
-        "right.foo must remain unused: {unused_foo_paths:?}"
+        unused_bar_paths[0].ends_with("src/left.ts"),
+        "the sibling finding stays on its own module: {unused_bar_paths:?}"
     );
 }
 

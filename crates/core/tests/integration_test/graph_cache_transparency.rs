@@ -114,6 +114,8 @@ fn barrel_exports_cold_vs_warm_identical() {
 fn effective_export_resolution_cold_vs_warm_identical() {
     assert_cold_warm_identical("effective-export-explicit-shadow");
     assert_cold_warm_identical("effective-export-ambiguous-star");
+    assert_cold_warm_identical("effective-export-ambiguous-star-partial");
+    assert_cold_warm_identical("effective-export-ambiguous-star-nested");
     assert_cold_warm_identical("effective-export-convergent-star");
     assert_cold_warm_identical("declaration-merge");
     assert_cold_warm_identical("renamed-star-surface");

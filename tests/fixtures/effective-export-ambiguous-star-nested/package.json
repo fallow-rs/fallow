@@ -1,0 +1,6 @@
+{
+  "name": "effective-export-ambiguous-star-nested",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts"
+}

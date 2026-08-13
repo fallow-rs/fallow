@@ -8,7 +8,8 @@ use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::{
-    EffectiveExportResolution, ExportNamespace, ExportSymbol, ModuleGraph, ModuleNode,
+    AmbiguityParticipants, EffectiveExportResolution, ExportNamespace, ExportSymbol, ModuleGraph,
+    ModuleNode,
 };
 use crate::results::{
     DuplicateExport, DuplicateLocation, ExportUsage, PrivateTypeLeak, ReferenceLocation,
@@ -33,6 +34,8 @@ struct UnusedExportModuleContext<'a> {
     module_info_by_id: Option<&'a FxHashMap<FileId, &'a ModuleInfo>>,
     suppressions: &'a SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    /// Declarations whose export credit is lost to a star-export collision.
+    ambiguity: &'a AmbiguityParticipants,
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
@@ -378,6 +381,7 @@ pub fn find_unused_exports(
             None
         };
 
+    let ambiguity = graph.ambiguity_participants();
     let module_context = UnusedExportModuleContext {
         graph,
         config,
@@ -386,6 +390,7 @@ pub fn find_unused_exports(
         module_info_by_id: module_info_by_id.as_ref(),
         suppressions,
         line_offsets_by_file,
+        ambiguity: &ambiguity,
     };
 
     let module_results: Vec<UnusedExportModuleResult> = graph
@@ -560,6 +565,17 @@ fn unused_export_candidate_is_skipped(
     }
 
     if export.visibility.suppresses_unused() || is_referenced {
+        return true;
+    }
+
+    // A declaration that lost its credit to a star-export collision is unknown,
+    // not dead: the barrel exports nothing under that name, so no importer can
+    // credit it. Reporting it would attribute a barrel mistake to a source file
+    // that contains none. See issue #2263.
+    if ctx
+        .ambiguity
+        .contains_declaration(module.file_id, export_str, export.is_type_only)
+    {
         return true;
     }
 

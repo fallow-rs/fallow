@@ -66,6 +66,16 @@ error by suppressing a downstream detector.
   framework conventions, and suppression behavior through the full pipeline.
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
+- A name supplied by two different `export *` sources is not exported by the
+  barrel at all (ECMA-262 ResolveExport returns `ambiguous`). The contributing
+  declarations are therefore unknown rather than dead, so the unused-export and
+  unused-type surfaces abstain from reporting them instead of attributing the
+  barrel mistake to the source files. `export type *` collides the same way: it
+  drops the value namespace, so two value declarations behind it collide in type
+  space alone and abstention applies there too. Other cleanup detectors, notably
+  unrendered components, do not yet carry the same abstention.
+  `ModuleGraph::ambiguous_star_exports` exposes the collision and its
+  contributors for reporting surfaces.
 - Styling and CSS-in-JS extraction must preserve source line mapping.
 - Duplication token or normalization changes require the duplication cache
   version to move with the changed semantics.

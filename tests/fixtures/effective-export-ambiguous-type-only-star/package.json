@@ -1,0 +1,6 @@
+{
+  "name": "effective-export-ambiguous-type-only-star",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts"
+}
