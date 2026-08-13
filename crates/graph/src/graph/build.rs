@@ -434,12 +434,20 @@ impl ModuleGraph {
         let mut export_indices: FxHashMap<usize, ExportNameIndex> = FxHashMap::default();
         for edge_idx in 0..self.edges.len() {
             let source_id = self.edges[edge_idx].source;
-            let target_idx = self.edges[edge_idx].target.0 as usize;
+            let target_id = self.edges[edge_idx].target;
+            let target_idx = target_id.0 as usize;
             if target_idx >= self.modules.len() {
                 continue;
             }
             for sym_idx in 0..self.edges[edge_idx].symbols.len() {
                 let sym = &self.edges[edge_idx].symbols[sym_idx];
+                if matches!(sym.imported_name, ImportedName::SideEffect) {
+                    // Preserve the direct path interned by `attach_symbol_reference`.
+                    // Side-effect imports affect reachability but never reference an
+                    // export, so building the target's name index cannot change output.
+                    let _ = reference_paths.direct(target_id, sym.mechanism);
+                    continue;
+                }
                 let module = &mut self.modules[target_idx];
                 let export_index = export_indices
                     .entry(target_idx)

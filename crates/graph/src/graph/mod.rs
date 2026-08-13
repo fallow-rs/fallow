@@ -2287,11 +2287,18 @@ mod tests {
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         assert_eq!(graph.edge_count(), 1);
         let styles = &graph.modules[1];
+        assert!(styles.is_reachable());
         let export = &styles.exports[0];
         assert!(
             export.references.is_empty(),
             "side-effect import should not reference named exports"
         );
+
+        let encoded = postcard::to_allocvec(&graph).expect("encode graph");
+        let decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
+        assert_eq!(decoded.edge_count(), 1);
+        assert!(decoded.modules[1].is_reachable());
+        assert!(decoded.modules[1].exports[0].references.is_empty());
     }
 
     #[test]
