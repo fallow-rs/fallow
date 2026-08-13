@@ -578,11 +578,10 @@ fn has_source_extension(path: &Path) -> bool {
 )]
 fn build_walk_types(capture_config: bool) -> ignore::types::Types {
     let mut types_builder = ignore::types::TypesBuilder::new();
-    for ext in SOURCE_EXTENSIONS {
-        types_builder
-            .add("source", &format!("*.{ext}"))
-            .expect("valid glob");
-    }
+    let source_glob = format!("*.{{{}}}", SOURCE_EXTENSIONS.join(","));
+    types_builder
+        .add("source", &source_glob)
+        .expect("valid glob");
     types_builder.select("source");
     if capture_config {
         for glob in config_candidate_basename_globs() {
@@ -861,6 +860,70 @@ mod tests {
     fn non_hidden_dirs_not_in_allowlist() {
         assert!(!is_allowed_hidden_dir(OsStr::new("src")));
         assert!(!is_allowed_hidden_dir(OsStr::new("node_modules")));
+    }
+
+    #[test]
+    fn walk_types_match_every_supported_source_extension() {
+        for capture_config in [false, true] {
+            let types = build_walk_types(capture_config);
+            for extension in SOURCE_EXTENSIONS {
+                let path = format!("packages/ui/src/nested/component.{extension}");
+                assert!(
+                    types.matched(&path, false).is_whitelist(),
+                    "expected source match for {path} with capture_config={capture_config}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn walk_types_match_typescript_declaration_files() {
+        let types = build_walk_types(true);
+        for path in [
+            "src/env.d.ts",
+            "packages/app/types/generated.d.mts",
+            "packages/app/types/compat.d.cts",
+        ] {
+            assert!(
+                types.matched(path, false).is_whitelist(),
+                "expected declaration source match for {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn walk_types_reject_source_extension_near_misses() {
+        for capture_config in [false, true] {
+            let types = build_walk_types(capture_config);
+            for path in [
+                "src/component.tsx.bak",
+                "src/component.tsxmap",
+                "src/component.TS",
+                "src/component.gqlx",
+                "src/component.htm",
+                "src/component",
+                "assets/component.png",
+            ] {
+                assert!(
+                    types.matched(path, false).is_ignore(),
+                    "expected non-source rejection for {path} with capture_config={capture_config}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn walk_types_keep_config_candidate_selection_separate() {
+        assert!(
+            build_walk_types(true)
+                .matched("packages/app/tsconfig.json", false)
+                .is_whitelist()
+        );
+        assert!(
+            build_walk_types(false)
+                .matched("packages/app/tsconfig.json", false)
+                .is_ignore()
+        );
     }
 
     #[test]
@@ -1212,6 +1275,56 @@ mod tests {
             assert!(names.contains(&"src/legacy.cjs".to_string()));
             assert!(names.contains(&"src/types.mts".to_string()));
             assert!(names.contains(&"src/compat.cts".to_string()));
+        }
+
+        #[test]
+        fn compact_source_glob_preserves_discovered_file_inventory() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let nested = dir.path().join("packages/ui/src/nested");
+            std::fs::create_dir_all(&nested).unwrap();
+
+            let mut expected = Vec::new();
+            for (index, extension) in SOURCE_EXTENSIONS.iter().enumerate() {
+                let relative = format!("packages/ui/src/nested/source-{index}.{extension}");
+                std::fs::write(dir.path().join(&relative), "export const value = 1;").unwrap();
+                expected.push(relative);
+            }
+            for relative in [
+                "packages/ui/src/nested/env.d.ts",
+                "packages/ui/src/nested/generated.d.mts",
+                "packages/ui/src/nested/compat.d.cts",
+            ] {
+                std::fs::write(dir.path().join(relative), "export type Value = string;").unwrap();
+                expected.push(relative.to_string());
+            }
+            let rejected = [
+                "packages/ui/src/nested/component.tsx.bak",
+                "packages/ui/src/nested/component.tsxmap",
+                "packages/ui/src/nested/component.TS",
+                "packages/ui/src/nested/component.gqlx",
+                "packages/ui/src/nested/component.htm",
+                "packages/ui/src/nested/component",
+                "packages/ui/src/nested/component.png",
+            ];
+            for relative in rejected {
+                std::fs::write(dir.path().join(relative), "not source").unwrap();
+            }
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let names = file_names(&discover_files(&config), dir.path());
+
+            for relative in expected {
+                assert!(
+                    names.contains(&relative),
+                    "missing supported source {relative}"
+                );
+            }
+            for relative in rejected {
+                assert!(
+                    !names.iter().any(|name| name == relative),
+                    "unexpected near-miss source {relative}"
+                );
+            }
         }
 
         #[test]
