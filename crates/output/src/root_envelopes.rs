@@ -130,12 +130,16 @@ where
 pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str, mode: RootEnvelopeMode) {
     let _ = mode;
     if let serde_json::Value::Object(map) = value {
-        let existing = std::mem::take(map);
-        map.insert(
+        let previous = map.shift_insert(
+            0,
             "kind".to_string(),
             serde_json::Value::String(kind.to_string()),
         );
-        map.extend(existing);
+        if let Some(previous) = previous
+            && let Some(current) = map.get_mut("kind")
+        {
+            *current = previous;
+        }
     }
 }
 
@@ -434,6 +438,39 @@ mod tests {
         apply_root_kind(&mut value, "dead_code", RootEnvelopeMode::Tagged);
 
         assert_eq!(value["kind"], "dead_code");
+    }
+
+    #[test]
+    fn apply_root_kind_prepends_without_reordering_existing_fields() {
+        let mut value = json!({ "schema_version": 1, "summary": { "total": 0 } });
+
+        apply_root_kind(&mut value, "example", RootEnvelopeMode::Tagged);
+
+        assert_eq!(
+            serde_json::to_string(&value).expect("root output should serialize"),
+            r#"{"kind":"example","schema_version":1,"summary":{"total":0}}"#
+        );
+    }
+
+    #[test]
+    fn apply_root_kind_preserves_existing_value_and_moves_it_first() {
+        let mut value = json!({ "before": 1, "kind": "custom", "after": 2 });
+
+        apply_root_kind(&mut value, "replacement", RootEnvelopeMode::Tagged);
+
+        assert_eq!(
+            serde_json::to_string(&value).expect("root output should serialize"),
+            r#"{"kind":"custom","before":1,"after":2}"#
+        );
+    }
+
+    #[test]
+    fn apply_root_kind_preserves_non_object_roots() {
+        let mut value = json!(["not", "an", "object"]);
+
+        apply_root_kind(&mut value, "example", RootEnvelopeMode::Tagged);
+
+        assert_eq!(value, json!(["not", "an", "object"]));
     }
 
     #[test]
