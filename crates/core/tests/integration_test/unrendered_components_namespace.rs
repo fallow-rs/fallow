@@ -28,6 +28,12 @@ fn credits_components_rendered_through_namespace_reexport() {
         !flagged.contains(&"ListItem"),
         "a namespace-rendered component must not be flagged: {flagged:?}"
     );
+    // Options API: the `<script>` block writes `export default {...}` itself, so
+    // the namespace binding is a declaration rather than an implicit default.
+    assert!(
+        !flagged.contains(&"ListOptions"),
+        "a namespace-rendered Options-API component must not be flagged: {flagged:?}"
+    );
     // Rendered via `<Popover.PopoverRoot>` / `<Popover.PopoverContent>` through a
     // second namespace barrel: credited, not flagged.
     assert!(

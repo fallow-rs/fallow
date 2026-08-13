@@ -11,6 +11,7 @@ void typeMarker;
 <template>
   <List.ListRoot>
     <List.ListItem v-for="x in items" :key="x.id">{{ x.name }}</List.ListItem>
+    <List.ListOptions />
   </List.ListRoot>
   <Popover.PopoverRoot>
     <Popover.PopoverContent>hi</Popover.PopoverContent>

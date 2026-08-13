@@ -3,3 +3,7 @@
 export { default as Used } from "./Used.vue";
 export { default as Orphan } from "./Orphan.vue";
 export { default as Lazy } from "./Lazy.vue";
+// Options-API components: an explicit `export default` in the `<script>` block.
+// `UsedOptions` is rendered, `OrphanOptions` is not.
+export { default as UsedOptions } from "./UsedOptions.vue";
+export { default as OrphanOptions } from "./OrphanOptions.vue";

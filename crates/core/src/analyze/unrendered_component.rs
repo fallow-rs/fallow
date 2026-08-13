@@ -316,11 +316,23 @@ fn credit_rendered_sfc_chain(
     else {
         return;
     };
-    if binding.is_implicit_default() {
+    if credits_sfc_origin(graph, &binding) {
         used.insert(binding.origin_file());
     } else if let Some(source) = binding.namespace_source() {
         credit_all_reexported_sfcs(graph, source, used);
     }
+}
+
+/// Whether an effective binding designates an SFC that the chain keeps rendered.
+///
+/// `<script setup>` files have no written default export, so the graph seeds an
+/// implicit one. An Options-API `<script>` block writes `export default {...}`
+/// explicitly and therefore resolves to a plain declaration binding whose origin
+/// file is the SFC itself; both spellings must earn the same render credit.
+fn credits_sfc_origin(graph: &ModuleGraph, binding: &EffectiveExportBinding) -> bool {
+    binding.is_implicit_default()
+        || (binding.namespace_source().is_none()
+            && is_sfc_extension(&graph_path(graph, binding.origin_file())))
 }
 
 /// Credit the unique value bindings exposed by a namespace target.
@@ -343,7 +355,7 @@ fn credit_effective_sfc_bindings(
         if !visited.insert(binding) {
             continue;
         }
-        if binding.is_implicit_default() {
+        if credits_sfc_origin(graph, &binding) {
             used.insert(binding.origin_file());
         } else if let Some(source) = binding.namespace_source() {
             stack.extend(graph.unique_export_bindings(source, ExportNamespace::Value));
