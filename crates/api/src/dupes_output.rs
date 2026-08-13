@@ -157,6 +157,34 @@ pub struct DuplicationGrouping {
     pub groups: Vec<DuplicationGroup>,
 }
 
+/// Why the audit new-only gate demoted an introduced clone group to
+/// inherited. Serializes as a kebab-case string on the wire (for example
+/// `"no-added-lines"`).
+///
+/// Further variants may be added in later releases; consumers should treat an
+/// unknown value as "some demotion reason" rather than failing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum CloneDemotionReason {
+    /// No instance of the group overlaps an added line in the run's diff: the
+    /// group was re-shaped by removals elsewhere in the changeset, not written
+    /// by it (issue #2164).
+    NoAddedLines,
+}
+
+impl CloneDemotionReason {
+    /// The kebab-case wire literal, obtained from the serde representation so
+    /// human output and JSON cannot diverge.
+    #[must_use]
+    pub fn wire_name(self) -> String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(name)) => name,
+            _ => String::new(),
+        }
+    }
+}
+
 /// Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
 /// group via `#[serde(flatten)]` and carries a typed `actions` array plus
 /// the optional audit-mode `introduced` flag. The typed envelope replaced
@@ -191,6 +219,12 @@ pub struct CloneGroupFinding {
     /// to the merge-base. `None` when serialized directly from Rust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Set only by `fallow audit` under `--gate new-only`, on groups whose
+    /// `introduced` flag the gate demoted to `false`: why the demotion
+    /// happened. `None` everywhere else, including `fallow dupes
+    /// --format json` (issue #2220).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demotion_reason: Option<CloneDemotionReason>,
 }
 
 impl CloneGroupFinding {
@@ -218,6 +252,7 @@ impl CloneGroupFinding {
             group,
             actions,
             introduced: None,
+            demotion_reason: None,
         }
     }
 }
@@ -472,6 +507,27 @@ mod tests {
         assert_eq!(finding.actions[0].kind, CloneGroupActionType::ExtractShared);
         assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
         assert!(finding.introduced.is_none());
+        assert!(finding.demotion_reason.is_none());
+    }
+
+    #[test]
+    fn clone_group_finding_omits_audit_only_fields_outside_audit() {
+        // `fallow dupes --format json` serializes findings straight from Rust;
+        // the audit-only `introduced` / `demotion_reason` keys must not appear.
+        let finding = CloneGroupFinding::with_actions(group(2));
+        let value = serde_json::to_value(&finding).expect("finding serializes");
+        assert!(value.get("introduced").is_none());
+        assert!(value.get("demotion_reason").is_none());
+    }
+
+    #[test]
+    fn clone_demotion_reason_wire_name_matches_serde_representation() {
+        let reason = CloneDemotionReason::NoAddedLines;
+        assert_eq!(
+            serde_json::to_value(reason).expect("reason serializes"),
+            serde_json::Value::String(reason.wire_name())
+        );
+        assert_eq!(reason.wire_name(), "no-added-lines");
     }
 
     #[test]

@@ -55,6 +55,20 @@ an exit code.
   epilogue-free. Its trend compares only whole-project scans.
 - New output fields must move schemas, generated TypeScript contracts, MCP,
   LSP, VS Code, GitHub Action, and GitLab consumers together.
+- New-only duplication demotion (issues #2164, #2220): under `--gate new-only`
+  an introduced clone group none of whose instances overlap an added line is
+  demoted to inherited. On the CLI path the opt-in shared diff index
+  (`--diff-file`, `--diff-stdin`, or `$FALLOW_DIFF_FILE`) takes precedence
+  over the merge-base worktree diff for that decision
+  (`crates/cli/src/audit.rs`, `demote_preexisting_dupe_introductions`); the
+  programmatic runtime path (`crates/api/src/runtime/audit.rs`) uses only the
+  merge-base worktree diff. A supplied diff derived from a narrower base than
+  the merge base (for example a last-commit-only diff on a multi-commit
+  branch) can therefore over-demote: duplication the branch genuinely wrote
+  earlier shows no added lines in that diff and passes the gate. Demoted
+  groups stay counted as inherited and additionally surface via
+  `attribution.duplication_demoted` and a per-group `demotion_reason` field;
+  human output names the deciding diff source in the demotion note.
 
 ## Verification
 

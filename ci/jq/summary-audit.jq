@@ -109,6 +109,9 @@ styling_rows as $styling_rows |
 "| Complexity | \($complex) | \($attr.complexity_introduced // 0) | \($attr.complexity_inherited // 0) |\n" +
 "| Duplication | \($dupes) | \($attr.duplication_introduced // 0) | \($attr.duplication_inherited // 0) |\n" +
 "| Styling | \($styling) | \($attr.styling_introduced // 0) | \($attr.styling_inherited // 0) |\n\n" +
+(if ($attr.duplication_demoted // 0) > 0 then
+  "> \(plural($attr.duplication_demoted; "introduced clone group")) demoted to inherited (not written by this changeset)\n\n"
+else "" end) +
 (if ($dead_rows | length) > 0 then
   "### Dead Code\n\n" +
   "| Type | Location | Item | Status |\n|:-----|:---------|:-----|:-------|\n" +

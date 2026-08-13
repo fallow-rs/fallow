@@ -642,7 +642,7 @@ OUT_AUDIT=$(jq -n --slurpfile h "$FIXTURES/health.json" --slurpfile c "$FIXTURES
   changed_files_count: 2,
   elapsed_ms: 42,
   summary: {dead_code_issues: 1, complexity_findings: 3, duplication_clone_groups: 1},
-  attribution: {gate: "new-only", dead_code_introduced: 1, dead_code_inherited: 0, complexity_introduced: 2, complexity_inherited: 1, duplication_introduced: 0, duplication_inherited: 1, styling_introduced: 1, styling_inherited: 1},
+  attribution: {gate: "new-only", dead_code_introduced: 1, dead_code_inherited: 0, complexity_introduced: 2, complexity_inherited: 1, duplication_introduced: 0, duplication_inherited: 1, styling_introduced: 1, styling_inherited: 1, duplication_demoted: 1},
   dead_code: ($c[0] | .unused_exports |= map(. + {introduced: true}) | .unused_dependencies |= map(. + {introduced: false})),
   complexity: ($h[0]
     | .findings |= [.[0] + {coverage_tier: "partial"}, .[1] + {coverage_tier: "high"}, .[2]]
@@ -653,7 +653,7 @@ OUT_AUDIT=$(jq -n --slurpfile h "$FIXTURES/health.json" --slurpfile c "$FIXTURES
         {code: "css-selector-complexity", sub_kind: "high-specificity", path: "src/styles.css", line: 4, value: "#app .card .title", effective_severity: "error", introduced: true},
         {code: "css-important", sub_kind: "important", path: "src/legacy.css", line: 9, value: "!important", effective_severity: "warn", introduced: false}
       ]),
-  duplication: ($d[0] | .clone_groups |= map(. + {introduced: false}))
+  duplication: ($d[0] | .clone_groups |= map(. + {introduced: false, demotion_reason: "no-added-lines"}))
 }' | jq -r -f "$CI_JQ_DIR/summary-audit.jq" 2>&1)
 assert_valid_markdown "$OUT_AUDIT" "produces audit output"
 assert_contains "$OUT_AUDIT" "Fallow Audit" "audit: has title"
@@ -673,6 +673,7 @@ assert_contains "$OUT_AUDIT" "Matched 8/10" "audit: shows istanbul match rate"
 assert_contains "$OUT_AUDIT" "### Styling" "audit: has styling details"
 assert_contains "$OUT_AUDIT" "css-selector-complexity" "audit: lists styling rule"
 assert_contains "$OUT_AUDIT" "src/styles.css:4" "audit: lists styling location"
+assert_contains "$OUT_AUDIT" "1 introduced clone group demoted to inherited" "audit: shows demotion footnote"
 assert_not_contains "$OUT_AUDIT" '!\[WARNING\]' "audit: no GitHub callout warning"
 
 OUT_AUDIT_STYLE_NEW=$(jq -n '{
@@ -683,6 +684,7 @@ OUT_AUDIT_STYLE_NEW=$(jq -n '{
 }' | jq -r -f "$CI_JQ_DIR/summary-audit.jq" 2>&1)
 assert_contains "$OUT_AUDIT_STYLE_NEW" "| Styling | 1 | 1 | 0 |" "audit: styling-only new-only totals are visible"
 assert_contains "$OUT_AUDIT_STYLE_NEW" "| new |" "audit: styling-only new-only status is visible"
+assert_not_contains "$OUT_AUDIT_STYLE_NEW" "demoted to inherited" "audit: no demotion footnote without demotions"
 
 OUT_AUDIT_STYLE_ALL=$(jq -n '{
   command: "audit", verdict: "fail", changed_files_count: 1, elapsed_ms: 4,

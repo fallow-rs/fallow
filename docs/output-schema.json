@@ -217,7 +217,7 @@
     },
     "AuditIntroduced": {
       "type": "boolean",
-      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Duplication findings carry one carve-out: a clone\ngroup whose structural key is new but whose instances contain no added line\nfrom the diff (a group re-shaped by removing duplication elsewhere) is\ndemoted to inherited and serializes `false` (issue #2164).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
+      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Duplication findings carry one carve-out: a clone\ngroup whose structural key is new but whose instances contain no added line\nfrom the diff (a group re-shaped by removing duplication elsewhere) is\ndemoted to inherited and serializes `false` (issue #2164). Such demoted\ngroups additionally carry a `demotion_reason` field naming the rule, and\nare counted in `attribution.duplication_demoted` (issue #2220).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
     },
     "ExplainOutput": {
       "type": "object",
@@ -7855,6 +7855,9 @@
         },
         "styling_inherited": {
           "type": "integer"
+        },
+        "duplication_demoted": {
+          "type": "integer"
         }
       },
       "required": [
@@ -7866,7 +7869,8 @@
         "duplication_introduced",
         "duplication_inherited",
         "styling_introduced",
-        "styling_inherited"
+        "styling_inherited",
+        "duplication_demoted"
       ],
       "description": "New-vs-inherited issue counts for audit."
     },
@@ -11086,6 +11090,17 @@
             }
           ],
           "description": "Set by the audit pass when this clone group is introduced relative\nto the merge-base. `None` when serialized directly from Rust."
+        },
+        "demotion_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CloneDemotionReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set only by `fallow audit` under `--gate new-only`, on groups whose\n`introduced` flag the gate demoted to `false`: why the demotion\nhappened. `None` everywhere else, including `fallow dupes\n--format json` (issue #2220)."
         }
       },
       "required": [
@@ -22547,6 +22562,16 @@
         }
       ],
       "description": "Which threshold dimension a `thresholdOverrides` state row describes.\n\nOne configured override produces one row per dimension it participates in,\nbecause the complexity ceilings and the CRAP ceiling are evaluated\nindependently: raising `maxCyclomatic` says nothing about whether the unit\nstill breaches `maxCrap`."
+    },
+    "CloneDemotionReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "no-added-lines",
+          "description": "No instance of the group overlaps an added line in the run's diff: the\ngroup was re-shaped by removals elsewhere in the changeset, not written\nby it (issue #2164)."
+        }
+      ],
+      "description": "Why the audit new-only gate demoted an introduced clone group to\ninherited. Serializes as a kebab-case string on the wire (for example\n`\"no-added-lines\"`).\n\nFurther variants may be added in later releases; consumers should treat an\nunknown value as \"some demotion reason\" rather than failing."
     }
   }
 }

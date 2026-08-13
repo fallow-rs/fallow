@@ -20,10 +20,11 @@ use crate::report::plural;
 use crate::report::sink::outln;
 
 use super::keys::{
-    annotate_dead_code_json, annotate_domain_json, annotate_dupes_json, annotate_health_json,
-    annotate_stale_suppressions_json, styling_finding_key,
+    annotate_dead_code_json, annotate_domain_demotions_json, annotate_domain_json,
+    annotate_dupes_json, annotate_health_json, annotate_stale_suppressions_json,
+    styling_finding_key,
 };
-use super::{AuditResult, AuditSummary, AuditVerdict};
+use super::{AuditResult, AuditSummary, AuditVerdict, DupeDemotionDiffSource};
 
 /// Print audit results and return the appropriate exit code.
 #[must_use]
@@ -215,6 +216,9 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
         && let Some(ref dupes) = result.dupes
     {
         print_audit_duplication_section(dupes, quiet, explain, show_headers);
+        if explain {
+            print_audit_demoted_groups(result, dupes);
+        }
     }
 
     if result.summary.complexity_findings > 0
@@ -272,6 +276,76 @@ fn print_audit_duplication_section(
         false,
         crate::json_style::JsonStyle::Compact,
     );
+}
+
+/// Per-group demotion detail under `--explain`: one line per introduced clone
+/// group the new-only gate reclassified as inherited, capped like the clone
+/// listing, plus one line naming the diff that decided it (issue #2220).
+fn print_audit_demoted_groups(result: &AuditResult, dupes: &crate::dupes::DupesResult) {
+    let Some(comparison) = result.comparison.as_ref() else {
+        return;
+    };
+    if matches!(
+        result.dupe_demotion_diff_source,
+        Some(DupeDemotionDiffSource::Skipped)
+    ) {
+        outln!("  {}", "demotion check skipped: no diff available".dimmed());
+        return;
+    }
+    if comparison.dupes.demoted_count() == 0 {
+        return;
+    }
+    let root = &dupes.config.root;
+    let fingerprints =
+        fallow_engine::duplicates::CloneFingerprintSet::from_groups(&dupes.report.clone_groups);
+    let rule = fallow_api::CloneDemotionReason::NoAddedLines.wire_name();
+    let gate = serde_json::to_value(result.attribution.gate)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let demoted_groups: Vec<&fallow_types::duplicates::CloneGroup> = dupes
+        .report
+        .clone_groups
+        .iter()
+        .zip(comparison.dupes.demoted())
+        .filter_map(|(group, demoted)| demoted.then_some(group))
+        .collect();
+    let cap = crate::report::MAX_CLONE_GROUPS;
+    for group in demoted_groups.iter().take(cap) {
+        let locations: Vec<String> = group
+            .instances
+            .iter()
+            .map(|instance| {
+                format!(
+                    "{}:{}-{}",
+                    crate::report::format_display_path(&instance.file, root),
+                    instance.start_line,
+                    instance.end_line
+                )
+            })
+            .collect();
+        outln!(
+            "  {}",
+            format!(
+                "demoted {} ({}): no instance overlaps an added line (rule: {rule}, gate: {gate})",
+                fingerprints.fingerprint_for_group(group),
+                locations.join(", ")
+            )
+            .dimmed()
+        );
+    }
+    if demoted_groups.len() > cap {
+        let more = demoted_groups.len() - cap;
+        outln!(
+            "  {}",
+            format!("... and {more} more demoted clone group{}", plural(more)).dimmed()
+        );
+    }
+    let source = result
+        .dupe_demotion_diff_source
+        .as_ref()
+        .map_or_else(|| "unknown".to_string(), |s| s.label(&result.base_ref));
+    outln!("  {}", format!("demotion diff source: {source}").dimmed());
 }
 
 fn print_audit_complexity_section(
@@ -691,6 +765,7 @@ fn print_audit_status_line(result: &AuditResult) {
                 )
                 .dimmed()
             );
+            print_audit_demotion_note(result);
         }
     }
     if result.performance {
@@ -701,6 +776,34 @@ fn print_audit_status_line(result: &AuditResult) {
     }
 }
 
+/// Sub-line under the gate-excluded note naming how many of the inherited
+/// clone groups were demoted from introduced, and which diff decided it
+/// (issue #2220). Prints nothing when no demotion happened. Demoted keys are
+/// counted as inherited, so the parent line is guaranteed to print whenever
+/// this one does.
+fn print_audit_demotion_note(result: &AuditResult) {
+    let demoted = result
+        .comparison
+        .as_ref()
+        .map_or(0, |comparison| comparison.dupes.demoted_count());
+    if demoted == 0 {
+        return;
+    }
+    let source = result
+        .dupe_demotion_diff_source
+        .as_ref()
+        .map_or_else(|| "unknown".to_string(), |s| s.label(&result.base_ref));
+    let verb = if demoted == 1 { "was" } else { "were" };
+    eprintln!(
+        "    {}",
+        format!(
+            "of which {demoted} clone group{} {verb} reclassified as pre-existing: no duplicated line was added by this change (diff source: {source})",
+            plural(demoted)
+        )
+        .dimmed()
+    );
+}
+
 fn print_audit_json(result: &AuditResult, json_style: crate::json_style::JsonStyle) -> ExitCode {
     let output = match build_audit_json_output(result) {
         Ok(output) => output,
@@ -709,7 +812,7 @@ fn print_audit_json(result: &AuditResult, json_style: crate::json_style::JsonSty
     report::emit_report_json(&output, "audit", json_style)
 }
 
-fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
+pub(super) fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
     let mut check_results = result.check.as_ref().map(|check| check.results.clone());
     let mut health_report = result.health.as_ref().map(|health| health.report.clone());
     fallow_output::harmonize_dead_code_health_suppress_line_actions(
@@ -865,6 +968,12 @@ fn build_audit_duplication_json(
             if let Some(ref base) = result.base_snapshot {
                 if let Some(comparison) = result.comparison.as_ref() {
                     annotate_domain_json(&mut json, "clone_groups", comparison.dupes.introduced());
+                    annotate_domain_demotions_json(
+                        &mut json,
+                        "clone_groups",
+                        comparison.dupes.demoted(),
+                        fallow_api::CloneDemotionReason::NoAddedLines,
+                    );
                 } else {
                     annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
                 }
@@ -1001,6 +1110,7 @@ mod tests {
                 gate: AuditGate::NewOnly,
                 ..AuditAttribution::default()
             },
+            dupe_demotion_diff_source: None,
             base_snapshot: None,
             comparison: None,
             base_snapshot_skipped: false,

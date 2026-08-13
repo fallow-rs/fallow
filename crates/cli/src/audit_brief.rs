@@ -491,7 +491,7 @@ fn build_brief_json(
             fallow_config::OutputFormat::Json,
         )
     })?;
-    fallow_api::attach_audit_styling_attribution(&mut output);
+    fallow_api::attach_audit_wire_attribution(&mut output);
     Ok(output)
 }
 
@@ -1101,6 +1101,7 @@ mod tests {
                 gate: AuditGate::NewOnly,
                 ..AuditAttribution::default()
             },
+            dupe_demotion_diff_source: None,
             base_snapshot: None,
             comparison: None,
             base_snapshot_skipped: false,
@@ -1171,6 +1172,7 @@ mod tests {
         assert_eq!(value["schema_version"], REVIEW_BRIEF_SCHEMA_VERSION);
         assert_eq!(value["attribution"]["styling_introduced"], 0);
         assert_eq!(value["attribution"]["styling_inherited"], 0);
+        assert_eq!(value["attribution"]["duplication_demoted"], 0);
     }
 
     #[test]

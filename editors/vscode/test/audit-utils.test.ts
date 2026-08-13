@@ -50,6 +50,7 @@ const passAudit: AuditOutput = {
     duplication_inherited: 0,
     styling_introduced: 0,
     styling_inherited: 0,
+    duplication_demoted: 0,
   },
 };
 
@@ -82,6 +83,7 @@ const failAudit: AuditOutput = {
     duplication_inherited: 0,
     styling_introduced: 0,
     styling_inherited: 0,
+    duplication_demoted: 0,
   },
 };
 
@@ -240,6 +242,7 @@ describe("gatingCount", () => {
         duplication_inherited: 7,
         styling_introduced: 2,
         styling_inherited: 5,
+        duplication_demoted: 0,
       },
     };
     expect(gatingCount(audit)).toBe(6);
@@ -272,6 +275,7 @@ describe("gatingCount", () => {
         duplication_inherited: 1,
         styling_introduced: 0,
         styling_inherited: 3,
+        duplication_demoted: 0,
       },
     };
     expect(gatingCount(audit)).toBe(0);
@@ -337,6 +341,7 @@ describe("auditGatingSuffix", () => {
         duplication_inherited: 0,
         styling_introduced: 0,
         styling_inherited: 0,
+        duplication_demoted: 0,
       },
     };
     expect(auditGatingSuffix(warnAudit)).toBe(" (3)");

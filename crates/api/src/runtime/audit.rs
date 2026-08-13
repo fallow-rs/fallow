@@ -81,15 +81,17 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
             &mut head.dead_code.output.results,
             &mut head.complexity.report,
         );
-        for (group, introduced) in head
+        for ((group, introduced), demoted) in head
             .duplication
             .output
             .report
             .clone_groups
             .iter_mut()
             .zip(comparison.dupes.introduced())
+            .zip(comparison.dupes.demoted())
         {
             group.introduced = Some(AuditIntroduced(introduced));
+            group.demotion_reason = demoted.then_some(crate::CloneDemotionReason::NoAddedLines);
         }
     }
     let next_steps = audit_next_steps(&head.dead_code, &head.complexity);

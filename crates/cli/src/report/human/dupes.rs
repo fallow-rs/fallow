@@ -16,8 +16,10 @@ use super::{
 /// Docs base URL for duplication explanations.
 pub(super) const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
 
-/// Maximum clone groups shown in duplication output.
-const MAX_CLONE_GROUPS: usize = 10;
+/// Maximum clone groups shown in duplication output. Shared with the audit
+/// explain view so its demoted-group block truncates like the listing it
+/// annotates.
+pub const MAX_CLONE_GROUPS: usize = 10;
 
 pub(in crate::report) fn print_duplication_human(
     report: &DuplicationReport,

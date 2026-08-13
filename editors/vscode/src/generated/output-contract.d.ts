@@ -273,7 +273,9 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  * means it was inherited. Duplication findings carry one carve-out: a clone
  * group whose structural key is new but whose instances contain no added line
  * from the diff (a group re-shaped by removing duplication elsewhere) is
- * demoted to inherited and serializes `false` (issue #2164).
+ * demoted to inherited and serializes `false` (issue #2164). Such demoted
+ * groups additionally carry a `demotion_reason` field naming the rule, and
+ * are counted in `attribution.duplication_demoted` (issue #2220).
  *
  * Outside of audit sub-results the field is omitted, so call sites typically
  * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
@@ -445,6 +447,15 @@ kind: "source-read-failure"
  * emitted by the legacy `build_clone_group_actions` walker.
  */
 export type CloneGroupActionType = ("extract-shared" | "suppress-line")
+/**
+ * Why the audit new-only gate demoted an introduced clone group to
+ * inherited. Serializes as a kebab-case string on the wire (for example
+ * `"no-added-lines"`).
+ *
+ * Further variants may be added in later releases; consumers should treat an
+ * unknown value as "some demotion reason" rather than failing.
+ */
+export type CloneDemotionReason = "no-added-lines"
 /**
  * The kind of refactoring suggested for a clone family.
  */
@@ -1157,6 +1168,7 @@ duplication_introduced: number
 duplication_inherited: number
 styling_introduced: number
 styling_inherited: number
+duplication_demoted: number
 }
 /**
  * Metric and rule definitions emitted under `_meta` when `--explain` is
@@ -4891,6 +4903,13 @@ actions: CloneGroupAction[]
  * to the merge-base. `None` when serialized directly from Rust.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Set only by `fallow audit` under `--gate new-only`, on groups whose
+ * `introduced` flag the gate demoted to `false`: why the demotion
+ * happened. `None` everywhere else, including `fallow dupes
+ * --format json` (issue #2220).
+ */
+demotion_reason?: (CloneDemotionReason | null)
 }
 /**
  * A single instance of duplicated code at a specific location.

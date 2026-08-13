@@ -18,11 +18,42 @@ use crate::dupes::{DupesMode, DupesOptions, DupesResult};
 use crate::error::emit_error;
 use crate::health::{HealthOptions, HealthResult};
 
+/// Which diff decided the new-only duplication demotion check, so output can
+/// name the provenance of a demotion (issue #2220). `None` on [`AuditResult`]
+/// when the check never ran (no introduced clone groups, or no duplication
+/// analysis).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DupeDemotionDiffSource {
+    /// The opt-in shared diff index took precedence; carries the user-facing
+    /// source label (`--diff-file <path>`, `--diff-stdin`, or
+    /// `$FALLOW_DIFF_FILE <path>`).
+    Shared(String),
+    /// Fallback: the merge-base worktree diff against the resolved base ref.
+    Worktree,
+    /// No diff could be obtained; the demotion check was skipped and every
+    /// introduced clone group kept gating.
+    Skipped,
+}
+
+impl DupeDemotionDiffSource {
+    /// User-facing label naming the diff that decided the demotion.
+    pub fn label(&self, base_ref: &str) -> String {
+        match self {
+            Self::Shared(label) => label.clone(),
+            Self::Worktree => format!("merge-base worktree diff vs {base_ref}"),
+            Self::Skipped => "skipped: no diff available".to_string(),
+        }
+    }
+}
+
 /// Full audit result containing verdict, summary, and sub-results.
 pub struct AuditResult {
     pub verdict: AuditVerdict,
     pub summary: AuditSummary,
     pub attribution: AuditAttribution,
+    /// Which diff decided the new-only duplication demotion check; `None`
+    /// when the check never ran.
+    pub dupe_demotion_diff_source: Option<DupeDemotionDiffSource>,
     /// Key snapshot of the base ref for new-vs-inherited attribution. `None`
     /// when the base pass was skipped (`--gate all`) or unavailable. Exposed at
     /// crate scope so test fixtures in sibling modules can construct an
@@ -945,6 +976,7 @@ struct AuditResultParts {
     verdict: AuditVerdict,
     summary: AuditSummary,
     attribution: AuditAttribution,
+    dupe_demotion_diff_source: Option<DupeDemotionDiffSource>,
     base_snapshot: Option<AuditKeySnapshot>,
     comparison: Option<keys::AuditComparison>,
     base_snapshot_skipped: bool,
@@ -1361,7 +1393,7 @@ audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
         base_snapshot.as_ref(),
         type_aware_degrade.is_some(),
     );
-    demote_preexisting_dupe_introductions(
+    let dupe_demotion_diff_source = demote_preexisting_dupe_introductions(
         &mut comparison,
         dupes_result.as_ref(),
         opts.root,
@@ -1406,6 +1438,7 @@ audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
         verdict,
         summary,
         attribution,
+        dupe_demotion_diff_source,
         base_snapshot,
         comparison: Some(comparison),
         base_snapshot_skipped,
@@ -2005,21 +2038,23 @@ fn demote_preexisting_dupe_introductions(
     dupes: Option<&DupesResult>,
     root: &Path,
     base_ref: &str,
-) {
+) -> Option<DupeDemotionDiffSource> {
     if comparison.dupes.introduced_count() == 0 {
-        return;
+        return None;
     }
-    let Some(dupes) = dupes else {
-        return;
-    };
+    let dupes = dupes?;
     let fallback_index;
-    let index = if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
-        shared
+    let (index, source) = if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index()
+    {
+        let label = crate::report::ci::diff_filter::shared_diff_source_label()
+            .unwrap_or("shared diff")
+            .to_owned();
+        (shared, DupeDemotionDiffSource::Shared(label))
     } else if let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) {
         fallback_index = fallow_output::DiffIndex::from_unified_diff(&diff);
-        &fallback_index
+        (&fallback_index, DupeDemotionDiffSource::Worktree)
     } else {
-        return;
+        return Some(DupeDemotionDiffSource::Skipped);
     };
     let demote = keys::preexisting_dupe_group_keys(
         dupes.report.clone_groups.iter(),
@@ -2027,6 +2062,7 @@ fn demote_preexisting_dupe_introductions(
         index,
     );
     comparison.dupes.demote_introductions(&demote);
+    Some(source)
 }
 
 fn compute_comparison_audit_outcome(
@@ -2167,6 +2203,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         verdict: parts.verdict,
         summary: parts.summary,
         attribution: parts.attribution,
+        dupe_demotion_diff_source: parts.dupe_demotion_diff_source,
         base_snapshot: parts.base_snapshot,
         comparison: parts.comparison,
         base_snapshot_skipped: parts.base_snapshot_skipped,
@@ -2231,6 +2268,7 @@ fn empty_audit_result(
             gate: opts.gate,
             ..AuditAttribution::default()
         },
+        dupe_demotion_diff_source: None,
         base_snapshot: None,
         comparison: None,
         base_snapshot_skipped: false,

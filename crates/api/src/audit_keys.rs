@@ -265,6 +265,7 @@ pub struct AuditDomainLedger {
     keys: FxHashSet<String>,
     introduced_keys: FxHashSet<String>,
     inherited_keys: FxHashSet<String>,
+    demoted_keys: FxHashSet<String>,
 }
 
 impl AuditDomainLedger {
@@ -295,6 +296,7 @@ impl AuditDomainLedger {
             keys: unique_keys,
             introduced_keys,
             inherited_keys,
+            demoted_keys: FxHashSet::default(),
         }
     }
 
@@ -321,14 +323,40 @@ impl AuditDomainLedger {
         self.records.iter().map(|(_, introduced)| *introduced)
     }
 
+    /// Number of findings demoted from introduced to inherited. Demoted
+    /// findings stay counted as inherited, so
+    /// `demoted_count() <= inherited_count()` holds by construction.
+    #[must_use]
+    pub fn demoted_count(&self) -> usize {
+        self.demoted_keys.len()
+    }
+
+    /// Keys demoted from introduced to inherited by
+    /// [`Self::demote_introductions`].
+    #[must_use]
+    pub const fn demoted_keys(&self) -> &FxHashSet<String> {
+        &self.demoted_keys
+    }
+
+    /// Demoted membership in typed output order, parallel to
+    /// [`Self::introduced`].
+    pub fn demoted(&self) -> impl ExactSizeIterator<Item = bool> + '_ {
+        self.records
+            .iter()
+            .map(|(key, _)| self.demoted_keys.contains(key))
+    }
+
     /// Demote introduced findings whose keys are in `demote` to inherited
-    /// (advisory) status so they no longer fail the new-only gate.
+    /// (advisory) status so they no longer fail the new-only gate. Each key
+    /// actually flipped is recorded so output surfaces can report the
+    /// demotion (issue #2220).
     pub fn demote_introductions(&mut self, demote: &FxHashSet<String>) {
         for (key, introduced) in &mut self.records {
             if *introduced && demote.contains(key) {
                 *introduced = false;
                 self.introduced_keys.remove(key);
                 self.inherited_keys.insert(key.clone());
+                self.demoted_keys.insert(key.clone());
             }
         }
     }
@@ -3188,6 +3216,29 @@ pub fn annotate_domain_json(
     annotate_issue_array(json, collection, introduced);
 }
 
+/// Attach a `demotion_reason` to demoted entries of an audit JSON array,
+/// matching entries to demoted membership by array position. Non-demoted
+/// entries are left untouched so output without demotions stays byte-identical
+/// (issue #2220).
+pub fn annotate_domain_demotions_json(
+    json: &mut serde_json::Value,
+    collection: &str,
+    demoted: impl IntoIterator<Item = bool>,
+    reason: crate::CloneDemotionReason,
+) {
+    let Some(items) = json
+        .get_mut(collection)
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for (item, demoted) in items.iter_mut().zip(demoted) {
+        if demoted && let serde_json::Value::Object(map) = item {
+            map.insert("demotion_reason".to_string(), serde_json::json!(reason));
+        }
+    }
+}
+
 /// Attribution key set for every complexity finding in a health report.
 pub fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
     report
@@ -4408,6 +4459,47 @@ mod tests {
         assert_eq!(ledger.inherited_count(), 1);
         let introduced: Vec<bool> = ledger.introduced().collect();
         assert_eq!(introduced, vec![true, false]);
+        assert_eq!(ledger.demoted_count(), 1);
+        assert!(ledger.demoted_count() <= ledger.inherited_count());
+        assert!(ledger.demoted_keys().contains("dupe:demoted"));
+        let demoted: Vec<bool> = ledger.demoted().collect();
+        assert_eq!(demoted, vec![false, true]);
+    }
+
+    #[test]
+    fn demote_introductions_ignores_keys_that_were_not_introduced() {
+        let base: FxHashSet<String> = std::iter::once("dupe:old".to_string()).collect();
+        let mut ledger = AuditDomainLedger::compare(
+            ["dupe:old".to_string(), "dupe:new".to_string()],
+            Some(&base),
+        );
+
+        let demote: FxHashSet<String> = std::iter::once("dupe:old".to_string()).collect();
+        ledger.demote_introductions(&demote);
+
+        assert_eq!(ledger.demoted_count(), 0);
+        let demoted: Vec<bool> = ledger.demoted().collect();
+        assert_eq!(demoted, vec![false, false]);
+    }
+
+    #[test]
+    fn annotate_domain_demotions_json_marks_only_demoted_entries() {
+        let mut json_val = json!({
+            "clone_groups": [{}, {}],
+        });
+
+        super::annotate_domain_demotions_json(
+            &mut json_val,
+            "clone_groups",
+            [false, true],
+            crate::CloneDemotionReason::NoAddedLines,
+        );
+
+        assert!(json_val["clone_groups"][0].get("demotion_reason").is_none());
+        assert_eq!(
+            json_val["clone_groups"][1]["demotion_reason"],
+            "no-added-lines"
+        );
     }
 
     #[test]

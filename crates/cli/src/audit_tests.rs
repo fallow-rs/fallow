@@ -2856,6 +2856,52 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
         result.attribution.duplication_inherited >= 1,
         "the pre-existing duplication should be reported as inherited"
     );
+
+    assert_reshaped_demotion_observability(&result);
+}
+
+/// Issue #2220 assertions for the re-shaped-clone fixture: the demotion is
+/// recorded and surfaced on the wire, but stays observability-only.
+fn assert_reshaped_demotion_observability(result: &AuditResult) {
+    let comparison = result.comparison.as_ref().expect("comparison retained");
+    assert!(
+        comparison.dupes.demoted_count() >= 1,
+        "the re-shaped group must be recorded as demoted"
+    );
+    assert!(
+        comparison.dupes.demoted_count() <= comparison.dupes.inherited_count(),
+        "demoted groups stay counted as inherited"
+    );
+    assert!(
+        matches!(
+            result.dupe_demotion_diff_source,
+            Some(DupeDemotionDiffSource::Worktree)
+        ),
+        "without an opt-in shared diff the merge-base worktree diff decides"
+    );
+    assert_eq!(
+        result.verdict,
+        AuditVerdict::Pass,
+        "demotion observability must not change the verdict"
+    );
+    assert_eq!(
+        crate::audit::print_audit_result(result, true, false),
+        std::process::ExitCode::SUCCESS,
+        "demotion observability must not change the exit code"
+    );
+
+    let json = super::output::build_audit_json_output(result).expect("audit json should build");
+    assert_eq!(json["attribution"]["duplication_demoted"], 1);
+    let groups = json["duplication"]["clone_groups"]
+        .as_array()
+        .expect("clone groups array");
+    let demoted: Vec<&serde_json::Value> = groups
+        .iter()
+        .filter(|group| group.get("demotion_reason").is_some())
+        .collect();
+    assert_eq!(demoted.len(), 1, "exactly one group carries the marker");
+    assert_eq!(demoted[0]["demotion_reason"], "no-added-lines");
+    assert_eq!(demoted[0]["introduced"], false);
 }
 
 /// Repo whose working tree pastes a whole module into a new file on top of a
@@ -2985,6 +3031,26 @@ fn audit_new_only_still_gates_pasted_clone_as_introduced() {
         result.verdict,
         AuditVerdict::Fail,
         "introduced duplication above the threshold must fail the new-only gate"
+    );
+
+    // Issue #2220: no demotion happened, so nothing may carry the marker and
+    // the verdict/exit code stay exactly as pinned above.
+    let comparison = result.comparison.as_ref().expect("comparison retained");
+    assert_eq!(comparison.dupes.demoted_count(), 0);
+    assert_eq!(
+        crate::audit::print_audit_result(&result, true, false),
+        std::process::ExitCode::from(1),
+        "a genuinely pasted clone must keep failing with exit code 1"
+    );
+    let json = super::output::build_audit_json_output(&result).expect("audit json should build");
+    assert_eq!(json["attribution"]["duplication_demoted"], 0);
+    assert!(
+        json["duplication"]["clone_groups"]
+            .as_array()
+            .expect("clone groups array")
+            .iter()
+            .all(|group| group.get("demotion_reason").is_none()),
+        "non-demoted groups must not carry a demotion_reason key"
     );
 }
 

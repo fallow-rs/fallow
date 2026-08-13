@@ -382,6 +382,7 @@ mod tests {
         assert_eq!(new_only["verdict"], "pass");
         assert_eq!(new_only["attribution"]["styling_introduced"], 0);
         assert_eq!(new_only["attribution"]["styling_inherited"], 1);
+        assert_eq!(new_only["attribution"]["duplication_demoted"], 0);
         assert_eq!(
             new_only["complexity"]["styling_findings"][0]["introduced"],
             false

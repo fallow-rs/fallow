@@ -248,8 +248,50 @@ where
         next_steps: input.next_steps,
     };
     let mut value = fallow_output::serialize_audit_json_output(output, mode, analysis_run_id)?;
-    attach_audit_styling_attribution(&mut value);
+    attach_audit_wire_attribution(&mut value);
     Ok(value)
+}
+
+/// Attach every wire-only audit attribution derivation in one pass: styling
+/// counts and the duplication demotion counter.
+///
+/// The single entry point for audit-family envelopes (audit JSON and the
+/// review brief), so a future envelope cannot wire one derivation and miss
+/// the other.
+pub fn attach_audit_wire_attribution(value: &mut serde_json::Value) {
+    attach_audit_styling_attribution(value);
+    attach_audit_duplication_demotion_attribution(value);
+}
+
+/// Add `attribution.duplication_demoted`, derived from serialized clone
+/// groups.
+///
+/// Counts `duplication.clone_groups[]` entries carrying a `demotion_reason`
+/// (set by the new-only gate when it demotes an introduced group to
+/// inherited, issue #2220). Always inserted when an `attribution` object is
+/// present: an integer, `0` when the duplication section is absent. Wire-only,
+/// mirroring [`attach_audit_styling_attribution`], so the public Rust
+/// attribution struct stays source-compatible.
+pub fn attach_audit_duplication_demotion_attribution(value: &mut serde_json::Value) {
+    let demoted = value
+        .get("duplication")
+        .and_then(|duplication| duplication.get("clone_groups"))
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, |items| {
+            items
+                .iter()
+                .filter(|item| item.get("demotion_reason").is_some())
+                .count()
+        });
+    if let Some(attribution) = value
+        .get_mut("attribution")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        attribution.insert(
+            "duplication_demoted".to_string(),
+            serde_json::json!(demoted),
+        );
+    }
 }
 
 /// Add styling attribution totals derived from annotated styling findings.

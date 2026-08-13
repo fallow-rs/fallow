@@ -995,14 +995,22 @@ fn augment_audit_wire_definitions(definitions: &mut Map<String, Value>) -> Resul
         .get_mut("properties")
         .and_then(Value::as_object_mut)
         .ok_or_else(|| "AuditAttribution schema missing properties".to_string())?;
-    for name in ["styling_introduced", "styling_inherited"] {
+    for name in [
+        "styling_introduced",
+        "styling_inherited",
+        "duplication_demoted",
+    ] {
         properties.insert(name.to_string(), serde_json::json!({"type": "integer"}));
     }
     let required = attribution
         .get_mut("required")
         .and_then(Value::as_array_mut)
         .ok_or_else(|| "AuditAttribution schema missing required list".to_string())?;
-    for name in ["styling_introduced", "styling_inherited"] {
+    for name in [
+        "styling_introduced",
+        "styling_inherited",
+        "duplication_demoted",
+    ] {
         if !required.iter().any(|item| item.as_str() == Some(name)) {
             required.push(Value::String(name.to_string()));
         }

@@ -22,7 +22,8 @@
     "complexity_introduced": 0,
     "complexity_inherited": 0,
     "duplication_introduced": 1,
-    "duplication_inherited": 1
+    "duplication_inherited": 1,
+    "duplication_demoted": 0
   },
   "decisions": {
     "decisions": [],
