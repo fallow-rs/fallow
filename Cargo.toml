@@ -109,7 +109,7 @@ notify = "8"
 open = "5"
 
 # Testing
-criterion2 = { version = "3.0.3", default-features = false }
+criterion = { package = "codspeed-criterion-compat", version = "=4.7.0", default-features = false }
 dhat = "0.3"
 insta = { version = "1", features = ["yaml"] }
 jsonschema = { version = "0.49", default-features = false }

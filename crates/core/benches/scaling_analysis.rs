@@ -3,6 +3,10 @@
     clippy::expect_used,
     reason = "benches use unwrap and expect to keep fixture setup concise"
 )]
+#![allow(
+    clippy::significant_drop_tightening,
+    reason = "the external Criterion macro owns the benchmark lifecycle"
+)]
 #![expect(
     deprecated,
     reason = "Core-internal policy: benchmark exercises the workspace path-dep fallow_core::analyze surface"

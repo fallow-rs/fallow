@@ -38,7 +38,7 @@ name = "component_output"
 harness = false
 
 [dev-dependencies]
-criterion2 = { workspace = true }
+criterion = { workspace = true }
 fallow-api = { workspace = true }
 fallow-config = { workspace = true }
 fallow-engine = { workspace = true }
@@ -51,7 +51,7 @@ serde_json = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
-codspeed = ["criterion2/codspeed"]
+codspeed = []
 
 [lints]
 workspace = true

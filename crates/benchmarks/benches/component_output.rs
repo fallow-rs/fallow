@@ -2,6 +2,10 @@
     clippy::unwrap_used,
     reason = "benches use unwrap and expect to keep fixture setup concise"
 )]
+#![allow(
+    clippy::significant_drop_tightening,
+    reason = "the external Criterion macro owns the benchmark lifecycle"
+)]
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_output::{

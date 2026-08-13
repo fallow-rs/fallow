@@ -44,11 +44,11 @@ tracing = { workspace = true }
 xxhash-rust = { workspace = true }
 
 [features]
-codspeed = ["criterion2/codspeed"]
+codspeed = []
 schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
-criterion2 = { workspace = true }
+criterion = { workspace = true }
 proptest = { workspace = true }
 tracing-subscriber = { workspace = true }
 

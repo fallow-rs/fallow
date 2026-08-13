@@ -3,6 +3,10 @@
     clippy::expect_used,
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
+#![allow(
+    clippy::significant_drop_tightening,
+    reason = "the external Criterion macro owns the benchmark lifecycle"
+)]
 
 use std::fmt::Write as _;
 use std::path::PathBuf;

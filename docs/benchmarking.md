@@ -24,6 +24,10 @@ gh workflow run bench-rust-walltime.yml \
   -f workload=analysis
 ```
 
+The Rust benchmark crates use CodSpeed's official Criterion compatibility
+layer. Keep its major version aligned with `cargo-codspeed` so both simulation
+and walltime result collection remain available.
+
 Use the same workload on the exact base and head refs, then compare those two
 walltime runs in CodSpeed. Do not compare values across workload choices.
 

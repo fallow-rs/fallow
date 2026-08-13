@@ -275,6 +275,7 @@ test("MSRV CI forces Rust 1.92 despite the repository toolchain override", () =>
 
 test("Rust walltime benchmarks use CodSpeed macro runners", () => {
   const workflow = readWorkflow(".github/workflows/bench-rust-walltime.yml");
+  const cargoManifest = readFileSync("Cargo.toml", "utf8");
   const job = indentedBlock(workflow, "benchmark", 2);
 
   assert.match(workflow, /^  workflow_dispatch:/m);
@@ -282,7 +283,14 @@ test("Rust walltime benchmarks use CodSpeed macro runners", () => {
   assert.match(job, /runs-on: codspeed-macro/);
   assert.match(job, /permissions:\n\s+contents: read\n\s+id-token: write/);
   assert.match(job, /cargo codspeed build -m walltime/);
+  assert.match(job, /cargo codspeed run -m walltime/);
   assert.match(job, /mode: walltime/);
+  assert.doesNotMatch(workflow, /--cfg codspeed/);
+  assert.match(
+    cargoManifest,
+    /criterion = \{ package = "codspeed-criterion-compat", version = "=4\.7\.0"/,
+  );
+  assert.match(job, /tool: cargo-codspeed@4\.7\.0/);
   assert.match(job, /case "\$WALLTIME_WORKLOAD" in/);
   assert.doesNotMatch(job, /run:.*\$\{\{ inputs\.workload \}\}/);
 });

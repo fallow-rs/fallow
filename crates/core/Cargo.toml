@@ -58,11 +58,11 @@ indicatif = { workspace = true }
 tracing = { workspace = true }
 
 [features]
-codspeed = ["criterion2/codspeed"]
+codspeed = []
 schema = ["fallow-types/schema"]
 
 [dev-dependencies]
-criterion2 = { workspace = true }
+criterion = { workspace = true }
 proptest = { workspace = true }
 dhat = { workspace = true }
 postcard = { workspace = true }
