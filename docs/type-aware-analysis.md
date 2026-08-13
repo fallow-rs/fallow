@@ -194,7 +194,9 @@ the normal semver review described in
 Type-aware runs default the opt-in `private-type-leaks` rule to `warn` when the
 config leaves it unset, because semantic confirmation makes the findings
 trustworthy. An explicit `"private-type-leaks": "off"` in `rules` always wins
-and disables the findings entirely, type-aware or not.
+and disables the findings entirely, type-aware or not. When the rule is off,
+hosts also skip the API-surface semantic capability request, so the sidecar
+performs no API-surface work for a rule whose findings would be discarded.
 
 Private-type-leak
 reconciliation sends only Fallow's bounded candidate set and receives stable

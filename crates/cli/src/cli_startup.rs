@@ -81,7 +81,15 @@ fn validate_input_flags(
         )
     };
 
-    if matches!(&cli.command, Some(Command::AuditCache { .. })) && cli.root.is_none() {
+    // Only `remove` requires an explicit root (it deletes unconditionally);
+    // `prune` applies the same policy every audit applies and defaults to cwd.
+    if matches!(
+        &cli.command,
+        Some(Command::AuditCache {
+            subcommand: crate::AuditCacheCli::Remove { .. }
+        })
+    ) && cli.root.is_none()
+    {
         return Err(validation_failure(
             "`fallow audit-cache remove` requires an explicit `--root <path>`.",
         ));

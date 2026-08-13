@@ -7,6 +7,24 @@ fn create_private_type_leak_config(root: std::path::PathBuf) -> fallow_config::R
 }
 
 #[test]
+fn rule_off_reports_no_private_type_leaks() {
+    let root = fixture_path("private-type-leaks");
+    let config = create_config(root);
+    assert_eq!(
+        config.rules.private_type_leaks,
+        fallow_config::Severity::Off
+    );
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.private_type_leaks.is_empty(),
+        "private-type-leaks off must suppress all findings, found: {:?}",
+        results.private_type_leaks
+    );
+}
+
+#[test]
 fn exported_signatures_report_same_file_private_types() {
     let root = fixture_path("private-type-leaks");
     let config = create_private_type_leak_config(root);

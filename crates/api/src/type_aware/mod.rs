@@ -44,12 +44,10 @@ pub fn refine_programmatic_dead_code(
         return Ok(None);
     }
 
-    let include_all = !filters.any_active();
-    let include_symbol_use = include_all
-        || filters.unused_exports
-        || filters.unused_types
-        || filters.unused_class_members;
-    let include_api_surface = include_all || filters.private_type_leaks;
+    let DeadCodeCapabilityScope {
+        include_symbol_use,
+        include_api_surface,
+    } = dead_code_capability_scope(filters, &session.config().rules);
     let entry_points = fallow_engine::list_inventory::collect_entry_points(
         session.config(),
         session.files(),
@@ -122,12 +120,10 @@ pub fn refine_programmatic_dead_code_in_session(
     if !options.enabled {
         return Ok(None);
     }
-    let include_all = !filters.any_active();
-    let include_symbol_use = include_all
-        || filters.unused_exports
-        || filters.unused_types
-        || filters.unused_class_members;
-    let include_api_surface = include_all || filters.private_type_leaks;
+    let DeadCodeCapabilityScope {
+        include_symbol_use,
+        include_api_surface,
+    } = dead_code_capability_scope(filters, &session.config().rules);
     let entry_points = fallow_engine::list_inventory::collect_entry_points(
         session.config(),
         session.files(),
@@ -240,4 +236,97 @@ fn programmatic_semantic_error(error: &TypeAwareError) -> ProgrammaticError {
     ProgrammaticError::new(error.to_string(), 2)
         .with_code("FALLOW_TYPE_AWARE_FAILED")
         .with_context("analysis.typeAware")
+}
+
+/// Semantic capability families a programmatic dead-code refinement requests.
+struct DeadCodeCapabilityScope {
+    include_symbol_use: bool,
+    include_api_surface: bool,
+}
+
+/// Derive the capability families a refinement request needs.
+///
+/// With no filters active, `ApiSurface` follows the resolved
+/// `private-type-leaks` severity so a disabled rule never triggers sidecar
+/// API-surface work (issue #2218). With filters active, only the explicitly
+/// requested families are included; an explicit `private_type_leaks` filter
+/// requests `ApiSurface` regardless of severity because hosts activate the
+/// opt-in rule for that filter.
+fn dead_code_capability_scope(
+    filters: &DeadCodeFilters,
+    rules: &fallow_config::RulesConfig,
+) -> DeadCodeCapabilityScope {
+    let include_all = !filters.any_active();
+    DeadCodeCapabilityScope {
+        include_symbol_use: include_all
+            || filters.unused_exports
+            || filters.unused_types
+            || filters.unused_class_members,
+        include_api_surface: filters.private_type_leaks
+            || (include_all && rules.private_type_leaks != fallow_config::Severity::Off),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fallow_config::{RulesConfig, Severity};
+
+    use super::dead_code_capability_scope;
+    use crate::DeadCodeFilters;
+
+    #[test]
+    fn rule_off_without_filters_skips_api_surface() {
+        let filters = DeadCodeFilters::default();
+        let rules = RulesConfig::default();
+        assert_eq!(rules.private_type_leaks, Severity::Off);
+
+        let scope = dead_code_capability_scope(&filters, &rules);
+
+        assert!(scope.include_symbol_use);
+        assert!(!scope.include_api_surface);
+    }
+
+    #[test]
+    fn active_rule_without_filters_requests_api_surface() {
+        let filters = DeadCodeFilters::default();
+        let rules = RulesConfig {
+            private_type_leaks: Severity::Warn,
+            ..RulesConfig::default()
+        };
+
+        let scope = dead_code_capability_scope(&filters, &rules);
+
+        assert!(scope.include_symbol_use);
+        assert!(scope.include_api_surface);
+    }
+
+    #[test]
+    fn explicit_private_type_leaks_filter_requests_api_surface() {
+        let filters = DeadCodeFilters {
+            private_type_leaks: true,
+            ..DeadCodeFilters::default()
+        };
+        let rules = RulesConfig::default();
+
+        let scope = dead_code_capability_scope(&filters, &rules);
+
+        assert!(scope.include_api_surface);
+    }
+
+    #[test]
+    fn unrelated_filter_skips_api_surface_even_with_active_rule() {
+        let filters = DeadCodeFilters {
+            unused_exports: true,
+            ..DeadCodeFilters::default()
+        };
+        let rules = RulesConfig {
+            private_type_leaks: Severity::Warn,
+            ..RulesConfig::default()
+        };
+
+        let scope = dead_code_capability_scope(&filters, &rules);
+
+        assert!(scope.include_symbol_use);
+        assert!(!scope.include_api_surface);
+    }
 }

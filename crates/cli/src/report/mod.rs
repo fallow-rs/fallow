@@ -176,6 +176,28 @@ pub(crate) const fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
+/// Format a byte count in KiB / MiB / GiB for terminal output. Byte-exact
+/// sizes are available in JSON output paths; humans get a readable form.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "reported byte counts are well under the f64 precision loss range"
+)]
+#[must_use]
+pub(crate) fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    const GIB: u64 = MIB * 1024;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.0} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Serialize a spec-defined JSON value with its established pretty formatting.
 ///
 /// On success prints the JSON and returns `ExitCode::SUCCESS`.
@@ -1045,6 +1067,17 @@ pub(crate) use sarif::api_sarif_document;
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn format_bytes_pivots_at_power_of_1024() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1 KiB");
+        assert_eq!(format_bytes(2048), "2 KiB");
+        assert_eq!(format_bytes(1_048_576), "1.0 MiB");
+        assert_eq!(format_bytes(10_485_760), "10.0 MiB");
+        assert_eq!(format_bytes(1_073_741_824), "1.0 GiB");
+    }
 
     fn test_context<'a>(root: &'a Path, rules: &'a RulesConfig) -> ReportContext<'a> {
         ReportContext {

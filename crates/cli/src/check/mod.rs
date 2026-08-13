@@ -1758,6 +1758,46 @@ mod tests {
         assert_eq!(config.rules.private_type_leaks, Severity::Off);
     }
 
+    fn load_and_resolve_config_file(json: &str) -> ResolvedConfig {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(&config_path, json).expect("config file is written");
+        fallow_config::FallowConfig::load(&config_path)
+            .expect("config file loads")
+            .resolve(
+                dir.path().to_path_buf(),
+                OutputFormat::Json,
+                1,
+                true,
+                true,
+                None,
+            )
+    }
+
+    #[test]
+    fn loaded_explicit_private_type_leaks_off_survives_resolve_and_type_aware_default() {
+        let mut config = load_and_resolve_config_file(
+            r#"{"typeAware": {"enabled": true}, "rules": {"private-type-leaks": "off"}}"#,
+        );
+        assert!(config.type_aware.enabled);
+        assert!(config.rules.private_type_leaks_configured);
+
+        apply_type_aware_private_leak_default(&mut config, false);
+
+        assert_eq!(config.rules.private_type_leaks, Severity::Off);
+    }
+
+    #[test]
+    fn loaded_unset_private_type_leaks_defaults_on_after_resolve_under_type_aware() {
+        let mut config = load_and_resolve_config_file(r#"{"typeAware": {"enabled": true}}"#);
+        assert!(config.type_aware.enabled);
+        assert!(!config.rules.private_type_leaks_configured);
+
+        apply_type_aware_private_leak_default(&mut config, false);
+
+        assert_eq!(config.rules.private_type_leaks, Severity::Warn);
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "test fixture; linear setup/assert, length is not a maintainability concern"

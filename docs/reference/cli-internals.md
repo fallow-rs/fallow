@@ -70,6 +70,56 @@ an exit code.
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
 
+## Audit cache maintenance
+
+`fallow audit-cache` maintains the reusable base-snapshot caches
+(`$TMPDIR/fallow-audit-base-cache-*`) that `fallow audit` builds and
+garbage-collects. Two subcommands with distinct semantics:
+
+- `audit-cache remove`: delete every cache owned by an explicit `--root`,
+  warm or not. Requires `--root` and `--yes` (non-interactive), exits 2 on
+  incomplete removal because it promises completeness.
+- `audit-cache prune`: apply the same GC policy every audit run applies
+  silently (orphaned-sidecar cleanup, age-based reclaim, cross-repo reclaim
+  of abandoned entries), report every considered entry with sizes, and exit
+  0 whenever the command ran, including lock-contention skips and per-entry
+  failures. Machine consumers gate on the envelope's `complete` field.
+  Defaults to the current directory as root.
+
+Shared invariants (`crates/cli/src/base_worktree.rs`):
+
+- Both prune modes and the per-audit sweep share one decision code path
+  (`sweep_reusable_caches_with_report`), so prune can never drift from what
+  audits actually reclaim.
+- `--dry-run` performs zero filesystem mutation: no cache removal, no
+  `.lock` sidecar creation (acquiring a lock would create one), no
+  `.last-used` grace seeding, and no git worktree deregistration. The legacy
+  registered-cache pass is still enumerated read-only and reported with
+  reason `legacy-registered`.
+- `.lock` sidecars are permanent lock identities and are never deleted:
+  removing an unlinked-but-still-flocked inode while a racer re-creates the
+  path would split one lock across two inodes.
+- Owner liveness for foreign entries is a NotFound-only probe on
+  `std::fs::metadata`: only a definitive NotFound classifies the recorded
+  owner root as dead. Every other probe error (EACCES, EIO, ENOTDIR) keeps
+  the entry as `owner-unverifiable`, so a transient failure can never
+  reclaim a live repo's cache or defeat its `cacheMaxAgeDays: 0` policy. A
+  path below an unmounted mountpoint still reads NotFound and is not
+  protected. A dangling-symlink owner root resolves NotFound (dead).
+- Threshold precedence: `--max-age-days` flag, then
+  `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS`, then `audit.cacheMaxAgeDays`, then the
+  30-day default. `0` disables age-based reclaim but still reclaims
+  orphaned sidecars and dead-owner entries.
+- Per-entry GC diagnostics are debug-level tracing shared by the audit sweep
+  and prune: `RUST_LOG=fallow=debug fallow audit ...` (or any prune run)
+  emits one `audit cache sweep considered entry` line per candidate with
+  path, pass, mode, decision, reason, age, threshold, and owner fields. With
+  `RUST_LOG` unset, audit stderr is unchanged.
+- Prune entry sizes come from a plain recursive walk that never follows
+  symlinks and deliberately ignores gitignore semantics: a cache entry is a
+  checked-out snapshot whose `.gitignore` would otherwise hide
+  `node_modules`, the bulk of the measurement.
+
 ## Verification
 
 Start with focused CLI tests for the changed command. For output or schema

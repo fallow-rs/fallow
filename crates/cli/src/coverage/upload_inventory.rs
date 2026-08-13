@@ -39,6 +39,7 @@ use crate::api::{
     try_api_agent_with_timeout,
 };
 use crate::coverage::upload_common;
+use crate::report::format_bytes;
 
 /// Log prefix used on every human-facing line from this subcommand.
 /// Matches the pattern `fallow license:` / `fallow coverage setup:` established
@@ -1002,27 +1003,6 @@ fn format_count(n: usize) -> String {
     s
 }
 
-/// Format a byte count in KiB / MiB / GiB for terminal output. Byte-exact
-/// sizes are available in JSON output paths; humans get a readable form.
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "inventory blob sizes are well under f64 precision loss range"
-)]
-fn format_bytes(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    const GIB: u64 = MIB * 1024;
-    if bytes >= GIB {
-        format!("{:.1} GiB", bytes as f64 / GIB as f64)
-    } else if bytes >= MIB {
-        format!("{:.1} MiB", bytes as f64 / MIB as f64)
-    } else if bytes >= KIB {
-        format!("{:.0} KiB", bytes as f64 / KIB as f64)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
 fn print_dry_run_summary(
     project_id: &str,
     git_sha: &str,
@@ -1228,17 +1208,6 @@ mod tests {
         assert_eq!(format_count(1_000), "1,000");
         assert_eq!(format_count(14_280), "14,280");
         assert_eq!(format_count(1_234_567), "1,234,567");
-    }
-
-    #[test]
-    fn format_bytes_pivots_at_power_of_1024() {
-        assert_eq!(format_bytes(0), "0 B");
-        assert_eq!(format_bytes(1023), "1023 B");
-        assert_eq!(format_bytes(1024), "1 KiB");
-        assert_eq!(format_bytes(2048), "2 KiB");
-        assert_eq!(format_bytes(1_048_576), "1.0 MiB");
-        assert_eq!(format_bytes(10_485_760), "10.0 MiB");
-        assert_eq!(format_bytes(1_073_741_824), "1.0 GiB");
     }
 
     #[test]
