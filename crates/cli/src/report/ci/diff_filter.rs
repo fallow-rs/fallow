@@ -82,9 +82,8 @@ impl DiffSource {
 }
 
 /// Result of `load_diff_index_for_findings`. Carries the parsed
-/// `DiffIndex` plus the raw unified-diff text it was parsed from; the source
-/// breadcrumb is consumed by the function during load to compose warning
-/// messages and is not retained beyond that. The raw text is retained so the
+/// `DiffIndex`, the raw unified-diff text it was parsed from, and the
+/// user-facing source label. The raw text is retained so the
 /// walkthrough guide can derive per-hunk `change_anchors` from the SAME diff
 /// source the finding filter used (a `--diff-stdin` staged diff, not the
 /// committed `base...HEAD`), keeping emission and validation anchored to one
