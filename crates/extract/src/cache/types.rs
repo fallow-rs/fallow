@@ -924,7 +924,12 @@ use crate::MemberKind;
 /// Bumped to 269: a class's own lexical type binding now retains member accesses
 /// against that class while generic and nested type shadows still fail closed.
 /// Warm 268 caches can omit self-typed class member uses.
-pub(super) const CACHE_VERSION: u32 = 269;
+///
+/// Bumped to 270 for issue #2225: factory-less `vi.mock` / `jest.mock` calls
+/// with a bare package specifier now synthesize a speculative root-level
+/// `__mocks__/<specifier>` candidate. Warm 269 caches lack the candidate, so a
+/// root manual mock would stay reported as an unused file.
+pub(super) const CACHE_VERSION: u32 = 270;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

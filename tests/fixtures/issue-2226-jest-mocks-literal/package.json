@@ -1,0 +1,7 @@
+{
+  "name": "issue-2226-jest-mocks-literal",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

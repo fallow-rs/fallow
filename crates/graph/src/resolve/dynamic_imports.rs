@@ -47,16 +47,26 @@ pub(super) fn resolve_single_dynamic_import(
 ) -> Vec<ResolvedImport> {
     let target = resolve_specifier(ctx, file_path, &imp.source, false);
 
-    // Speculative candidates (the `__mocks__` sibling synthesized for
-    // factory-less `vi.mock`/`jest.mock` calls) exist solely to discover an
-    // internal manual-mock file. A package-space result means the specifier
-    // stayed bare after alias substitution; `pkg/__mocks__/...` is not a
-    // runner convention, so treating it as a hit would fabricate a phantom
-    // package name (`@scope/__mocks__`, issue #2213) for the
-    // unlisted-dependency analysis.
+    // Speculative candidates (the `__mocks__` sibling and root-level
+    // candidates synthesized for factory-less `vi.mock`/`jest.mock` calls)
+    // exist solely to discover an internal manual-mock file. A package-space
+    // result means the specifier stayed bare after alias substitution;
+    // `pkg/__mocks__/...` is not a runner convention, so treating it as a hit
+    // would fabricate a phantom package name (`@scope/__mocks__`, issue #2213)
+    // for the unlisted-dependency analysis. Before dropping, a root-relative
+    // `__mocks__/<specifier>` candidate gets one last chance against the
+    // runner's root-level manual-mock convention (issue #2225).
     if imp.is_speculative
         && (target.is_bare_package() || matches!(target, ResolveResult::Unresolvable(_)))
     {
+        if let Some(file_id) = resolve_root_manual_mock(ctx, file_path, &imp.source) {
+            return vec![dynamic_import_with(
+                imp,
+                ImportedName::Namespace,
+                imp.local_name.clone().unwrap_or_default(),
+                ResolveResult::SyntheticAutoImport(file_id),
+            )];
+        }
         return Vec::new();
     }
 
@@ -79,6 +89,56 @@ pub(super) fn resolve_single_dynamic_import(
         String::new(),
         target,
     )]
+}
+
+/// Resolve a root-level manual-mock candidate (`__mocks__/<specifier>`) to a
+/// project file.
+///
+/// A factory-less `vi.mock` / `jest.mock` of a bare package specifier loads
+/// its manual mock from the `__mocks__` directory at the runner's project
+/// root: Jest applies node-module manual mocks automatically, Vitest only for
+/// registered `vi.mock` calls (issue #2225). The extractor synthesizes the
+/// candidate with a root-relative `__mocks__/` source that always classifies
+/// as package space, so this probe is its only resolution path. Ancestors of
+/// the importing file are probed up to the analysis root so workspace members
+/// with their own runner root are covered.
+fn resolve_root_manual_mock(
+    ctx: &ResolveContext<'_>,
+    file_path: &Path,
+    source: &str,
+) -> Option<FileId> {
+    let candidate = source.strip_prefix("__mocks__/")?;
+    if candidate.is_empty() {
+        return None;
+    }
+    let mut dir = file_path.parent();
+    while let Some(current) = dir {
+        let base = current.join("__mocks__").join(candidate);
+        for ext in ctx.extensions {
+            let mut with_ext = base.clone().into_os_string();
+            with_ext.push(ext);
+            if let Some(file_id) = project_file_id(ctx, Path::new(&with_ext)) {
+                return Some(file_id);
+            }
+            let index = base.join(format!("index{ext}"));
+            if let Some(file_id) = project_file_id(ctx, &index) {
+                return Some(file_id);
+            }
+        }
+        if current == ctx.root {
+            break;
+        }
+        dir = current.parent();
+    }
+    None
+}
+
+/// Look up a constructed candidate path in the discovered-file indexes.
+fn project_file_id(ctx: &ResolveContext<'_>, path: &Path) -> Option<FileId> {
+    ctx.raw_path_to_id
+        .get(path)
+        .or_else(|| ctx.path_to_id.get(path))
+        .copied()
 }
 
 /// Expand a destructured-await dynamic import into one named/default import per

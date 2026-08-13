@@ -102,7 +102,12 @@ pub use store::GraphCacheStore;
 /// namespace re-export surfaces. Warm 31 payloads neither describe the same
 /// structure nor carry those external bindings, so a consumed barrel export
 /// could be falsely reported as unused.
-pub const GRAPH_CACHE_VERSION: u32 = 32;
+///
+/// Bumped to 33 for issue #2225: speculative root-level `__mocks__/<specifier>`
+/// candidates from factory-less bare-specifier mocks now resolve to project
+/// files. Warm 32 caches lack those edges, so root manual mocks would stay
+/// reported as unused files.
+pub const GRAPH_CACHE_VERSION: u32 = 33;
 
 /// Cached form of a resolved target.
 ///

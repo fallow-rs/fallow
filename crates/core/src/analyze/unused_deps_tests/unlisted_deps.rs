@@ -603,10 +603,12 @@ fn dynamic_import_unlisted_dep_has_import_site() {
     assert_eq!(unlisted[0].imported_from[0].col, 2);
 }
 
+/// The generic suffix mechanism stays available to external plugins even
+/// though no built-in plugin declares `/__mocks__` anymore (issue #2226).
 #[test]
-fn vitest_mocks_package_not_reported_as_unlisted_via_suffix() {
+fn scoped_mocks_package_not_reported_as_unlisted_via_declared_suffix() {
     let (graph, resolved_modules) = build_graph_with_npm_imports(&[("@aws-sdk/__mocks__", false)]);
-    let pkg = make_pkg(&[], &["vitest"], &[]);
+    let pkg = make_pkg(&[], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
 

@@ -1,0 +1,11 @@
+{
+  "name": "issue-2225-jest-root-mocks",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@bacons/apple-targets": "^5.0.0",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
